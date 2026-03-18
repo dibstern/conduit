@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "coding-standards",
+  "owner": "affaan-m",
+  "repo": "everything-claude-code",
+  "path": ".agents/skills/coding-standards",
+  "branch": "main",
+  "sha": "3ade7d7cf759290ba04673d5b00440c78e61d95a",
+  "source": "manual"
+}

@@ -1,0 +1,138 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+	preRenderHistoryMessages,
+	renderMarkdownServer,
+} from "../../../src/lib/relay/markdown-renderer.js";
+import { SessionManager } from "../../../src/lib/session/session-manager.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+
+describe("Server-side markdown rendering", () => {
+	it("should render basic markdown to HTML", () => {
+		const result = renderMarkdownServer("**bold** text");
+		expect(result).toContain("<strong>bold</strong>");
+		expect(result).toContain("text");
+	});
+
+	it("should sanitize dangerous HTML", () => {
+		const result = renderMarkdownServer('<script>alert("xss")</script>');
+		expect(result).not.toContain("<script>");
+	});
+
+	it("should handle code blocks", () => {
+		const result = renderMarkdownServer("```js\nconst x = 1;\n```");
+		expect(result).toContain("<code");
+		expect(result).toContain("const x = 1;");
+	});
+
+	it("should handle empty string", () => {
+		const result = renderMarkdownServer("");
+		expect(result).toBe("");
+	});
+});
+
+describe("preRenderHistoryMessages", () => {
+	it("should add renderedHtml to assistant text parts", () => {
+		const messages: HistoryMessage[] = [
+			{
+				id: "m1",
+				role: "user",
+				parts: [{ id: "p1", type: "text", text: "hello" }],
+			},
+			{
+				id: "m2",
+				role: "assistant",
+				parts: [
+					{ id: "p2", type: "text", text: "**bold**" },
+					{ id: "p3", type: "tool", text: "ignored" },
+				],
+			},
+		];
+
+		preRenderHistoryMessages(messages);
+
+		// User message parts: no renderedHtml
+		expect(messages[0]!.parts![0]!.renderedHtml).toBeUndefined();
+		// Assistant text part: has renderedHtml
+		expect(messages[1]!.parts![0]!.renderedHtml).toContain(
+			"<strong>bold</strong>",
+		);
+		// Assistant tool part: no renderedHtml
+		expect(messages[1]!.parts![1]!.renderedHtml).toBeUndefined();
+	});
+
+	it("should skip parts with no text", () => {
+		const messages: HistoryMessage[] = [
+			{
+				id: "m1",
+				role: "assistant",
+				parts: [{ id: "p1", type: "text" }],
+			},
+		];
+
+		preRenderHistoryMessages(messages);
+		expect(messages[0]!.parts![0]!.renderedHtml).toBeUndefined();
+	});
+});
+
+describe("SessionManager.loadPreRenderedHistory", () => {
+	it("returns messages with renderedHtml on assistant text parts", async () => {
+		const mockMessages = [
+			{
+				id: "m1",
+				role: "user",
+				parts: [{ id: "p1", type: "text", text: "hello" }],
+			},
+			{
+				id: "m2",
+				role: "assistant",
+				parts: [{ id: "p2", type: "text", text: "**bold**" }],
+			},
+		];
+
+		const mockClient = {
+			getMessages: vi.fn().mockResolvedValue(mockMessages),
+		};
+
+		const mgr = new SessionManager({
+			client: mockClient as any,
+		});
+
+		const result = await mgr.loadPreRenderedHistory("test-session");
+
+		// Assistant text part should have renderedHtml with <strong>
+		expect(result.messages[0]!.parts![0]!.renderedHtml).toBeUndefined(); // user part
+		expect(result.messages[1]!.parts![0]!.renderedHtml).toContain(
+			"<strong>bold</strong>",
+		);
+	});
+
+	it("passes offset through to loadHistory", async () => {
+		const mockMessages = Array.from({ length: 100 }, (_, i) => ({
+			id: `m${i}`,
+			role: "assistant",
+			parts: [{ id: `p${i}`, type: "text", text: `msg ${i}` }],
+		}));
+
+		const mockClient = {
+			getMessages: vi.fn().mockResolvedValue(mockMessages),
+		};
+
+		const mgr = new SessionManager({
+			client: mockClient as any,
+			historyPageSize: 50,
+		});
+
+		const page1 = await mgr.loadPreRenderedHistory("test-session");
+		expect(page1.hasMore).toBe(true);
+		expect(page1.messages).toHaveLength(50);
+
+		const page2 = await mgr.loadPreRenderedHistory("test-session", 50);
+		expect(page2.hasMore).toBe(false);
+		expect(page2.messages).toHaveLength(50);
+
+		// Both pages should have renderedHtml
+		for (const msg of [...page1.messages, ...page2.messages]) {
+			expect(msg.parts![0]!.renderedHtml).toBeDefined();
+		}
+	});
+});

@@ -1,0 +1,26 @@
+flowchart LR
+    browser[Browser SPA
+    WS client]
+    ws[WebSocketHandler]
+    handlers[Message handlers
+    src/lib/handlers/*]
+    sessions[SessionManager
+    and session registry]
+    bridges[Permission and
+    question bridges]
+    relayCore[Event pipeline
+    SSEConsumer
+    cache, pollers, PTY wiring]
+    client[OpenCodeClient]
+    opencode[OpenCode server
+    source of truth]
+
+    browser <-->|WebSocket messages| ws
+    ws --> handlers
+    handlers --> sessions
+    handlers --> bridges
+    sessions --> relayCore
+    bridges --> relayCore
+    relayCore --> ws
+    relayCore --> client
+    client <-->|REST, SSE, PTY upstream| opencode

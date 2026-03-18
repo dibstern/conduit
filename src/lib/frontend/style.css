@@ -1,0 +1,979 @@
+@import "tailwindcss";
+@import "./plan-mode.css";
+@import "./highlight-theme.css";
+
+/* ─── Design Tokens ─────────────────────────────────────────────────────────── */
+
+@theme {
+	--color-bg: hsl(0, 20%, 99%);
+	--color-bg-alt: hsl(0, 8%, 97%);
+	--color-bg-surface: hsl(0, 8%, 97%);
+	--color-text: hsl(0, 5%, 12%);
+	--color-text-secondary: hsl(0, 1%, 39%);
+	--color-text-muted: hsl(0, 1%, 60%);
+	--color-text-dimmer: hsl(30, 2%, 81%);
+	--color-accent: hsl(0, 5%, 12%);
+	--color-accent-hover: hsl(0, 5%, 18%);
+	--color-accent-bg: hsla(0, 100%, 17%, 0.06);
+	--color-code-bg: hsl(0, 8%, 94%);
+	--color-border: hsl(30, 2%, 81%);
+	--color-border-subtle: hsla(0, 100%, 3%, 0.12);
+	--color-input-bg: hsl(0, 20%, 99%);
+	--color-user-bubble: hsl(0, 8%, 97%);
+	--color-error: #e5443a;
+	--color-success: #12c905;
+
+	--color-sidebar-bg: hsl(0, 12%, 97%);
+	--color-sidebar-hover: hsl(0, 8%, 94%);
+	--color-sidebar-active: hsl(0, 8%, 91%);
+
+	--color-thinking: hsl(38, 55%, 62%);
+	--color-thinking-bg: hsla(38, 55%, 62%, 0.06);
+	--color-tool: hsl(220, 12%, 64%);
+	--color-tool-bg: hsla(220, 12%, 64%, 0.04);
+	--color-warning: hsl(38, 55%, 62%);
+	--color-warning-bg: hsla(38, 55%, 62%, 0.12);
+
+	--overlay-rgb: 0, 0, 0;
+	--shadow-rgb: 0, 0, 0;
+
+	/* Syntax highlighting defaults (light theme) */
+	--hl-comment: hsl(0, 1%, 60%);
+	--hl-keyword: hsl(332, 65%, 43%);
+	--hl-string: hsl(120, 44%, 34%);
+	--hl-number: hsl(14, 80%, 51%);
+	--hl-function: hsl(221, 87%, 60%);
+	--hl-variable: hsl(0, 68%, 42%);
+	--hl-type: hsl(38, 56%, 52%);
+	--hl-constant: hsl(14, 80%, 51%);
+	--hl-tag: hsl(0, 68%, 42%);
+	--hl-attr: hsl(221, 87%, 60%);
+	--hl-regexp: hsl(180, 55%, 40%);
+	--hl-meta: hsl(33, 50%, 50%);
+	--hl-builtin: hsl(14, 80%, 51%);
+	--hl-symbol: hsl(33, 50%, 50%);
+	--hl-addition: hsl(120, 44%, 34%);
+	--hl-deletion: hsl(0, 68%, 42%);
+
+	--font-mono:
+		"Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+		Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+	--font-sans:
+		"Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+		Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* ─── Base ──────────────────────────────────────────────────────────────────── */
+
+@layer base {
+	*,
+	*::before,
+	*::after {
+		box-sizing: border-box;
+		margin: 0;
+		padding: 0;
+		-webkit-tap-highlight-color: transparent;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(var(--overlay-rgb), 0.15) transparent;
+	}
+
+	::-webkit-scrollbar {
+		width: 6px;
+		height: 6px;
+	}
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	::-webkit-scrollbar-thumb {
+		background: rgba(var(--overlay-rgb), 0.15);
+		border-radius: 3px;
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background: rgba(var(--overlay-rgb), 0.25);
+	}
+
+	html,
+	body {
+		height: 100%;
+		background: var(--color-bg);
+		color: var(--color-text);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		overflow: hidden;
+		font-size: 13px;
+		line-height: 1.5;
+	}
+
+	/* Lucide icons */
+	.lucide {
+		vertical-align: middle;
+		flex-shrink: 0;
+	}
+
+	.icon-spin {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.icon-spin .lucide {
+		animation: spin 1s linear infinite;
+	}
+
+	.icon-spin-inline {
+		animation: spin 1s linear infinite;
+	}
+}
+
+/* ─── Custom Variants ──────────────────────────────────────────────────────── */
+
+@custom-variant touch (@media (hover: none));
+
+/* ─── Custom Animation Utilities ───────────────────────────────────────────── */
+
+@utility animate-pulse-dot {
+	animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@utility animate-shimmer {
+	animation: shimmer 3s ease-in-out infinite;
+}
+
+@utility animate-tool-shimmer {
+	animation: tool-shimmer 3s ease-in-out infinite;
+}
+
+@utility animate-history-spin {
+	animation: history-spin 0.8s linear infinite;
+}
+
+@utility animate-history-fade-in {
+	animation: history-fade-in 0.2s ease-out;
+}
+
+@utility animate-todo-spin {
+	animation: todo-spin 0.8s linear infinite;
+}
+
+@utility animate-fb-slide-in {
+	animation: fb-slide-in 0.2s ease-out;
+}
+
+@utility animate-fb-fade-in {
+	animation: fb-fade-in 0.15s ease-out;
+}
+
+@utility animate-session-slide-in {
+	animation: session-slide-in 0.2s ease-out;
+}
+
+@utility animate-session-fade-in {
+	animation: session-fade-in 0.15s ease-out;
+}
+
+@utility animate-bounce-bar {
+	animation: bounce-bar 1.5s ease-in-out infinite;
+}
+
+/* ─── Connection Overlay (7.5) ────────────────────────────────────────────── */
+
+.connect-overlay.hidden {
+	display: none;
+}
+
+@keyframes shimmer {
+	0% {
+		background-position: 200% center;
+	}
+	100% {
+		background-position: -200% center;
+	}
+}
+
+/* ─── Modal System (7.10) ──────────────────────────────────────────────────── */
+
+.modal-backdrop.hidden {
+	display: none;
+}
+
+/* ─── Sidebar ──────────────────────────────────────────────────────────────── */
+
+/* Sidebar width driven by --sidebar-w custom property (set inline by Sidebar.svelte) */
+#sidebar {
+	width: var(--sidebar-w, 260px);
+	transition: width 0.15s ease;
+}
+
+/* Collapsed: hide border + clip content (width already 0 via --sidebar-w) */
+#layout.sidebar-collapsed #sidebar {
+	border-right: none;
+	overflow: hidden;
+}
+
+/* Hide sidebar resize handle when collapsed */
+#layout.sidebar-collapsed .sidebar-resize-handle {
+	display: none;
+}
+
+/* Overlay hidden state */
+#sidebar-overlay.hidden {
+	display: none;
+}
+
+/* ─── Header ───────────────────────────────────────────────────────────────── */
+
+/* Header icon button component (6+ instances — keep as @apply).
+   MUST be inside @layer components so Tailwind utilities like `hidden`
+   (display:none) properly override the `display:flex` set here. */
+@layer components {
+	.header-icon-btn {
+		@apply flex items-center justify-center rounded-lg bg-transparent cursor-pointer transition-[background,color,border-color] duration-150 shrink-0;
+		border: 1px solid transparent;
+		color: var(--color-text-dimmer);
+		padding: 4px;
+	}
+	.header-icon-btn:hover {
+		color: var(--color-text-secondary);
+		background: rgba(var(--overlay-rgb), 0.04);
+		border-color: var(--color-border);
+	}
+	.header-icon-btn .lucide {
+		@apply w-[15px] h-[15px];
+	}
+	.header-icon-btn.active {
+		background: rgba(var(--overlay-rgb), 0.06);
+		@apply text-accent;
+	}
+}
+
+/* Badge hidden state overrides */
+.client-count-badge.hidden {
+	display: none;
+}
+
+.terminal-badge.hidden {
+	display: none;
+}
+
+/* Parent-state: sidebar expand button only visible when sidebar collapsed */
+#layout.sidebar-collapsed #sidebar-expand-btn {
+	display: flex;
+}
+
+/* ─── Header project-name scroll container — hide scrollbar on mobile ──── */
+
+#header-project-scroll {
+	scrollbar-width: none;
+}
+#header-project-scroll::-webkit-scrollbar {
+	display: none;
+}
+
+/* ─── Mobile responsive ────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+	#sidebar {
+		position: fixed;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 400;
+		transform: translateX(-100%);
+		transition: transform 0.25s ease;
+		/* Mobile sidebar width driven by --sidebar-w custom property */
+		width: var(--sidebar-w, 260px);
+		border-right: 1px solid var(--color-border-subtle);
+		overflow: visible;
+	}
+
+	/* Override collapsed state on mobile — hamburger controls visibility */
+	#layout.sidebar-collapsed #sidebar {
+		width: var(--sidebar-w, 260px);
+		border-right: 1px solid var(--color-border-subtle);
+		overflow: visible;
+	}
+
+	#sidebar.open {
+		transform: translateX(0);
+	}
+
+	/* Hide the layout-level sidebar resize handle on mobile (uses internal handle instead) */
+	.sidebar-resize-handle {
+		display: none;
+	}
+
+	#hamburger-btn {
+		display: flex;
+	}
+
+	#sidebar-toggle-btn,
+	#sidebar-expand-btn,
+	#layout.sidebar-collapsed #sidebar-expand-btn {
+		display: none;
+	}
+}
+
+/* ─── Animations ────────────────────────────────────────────────────────────── */
+
+@keyframes pulse-dot {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes bounce-bar {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	50% {
+		transform: translateX(calc(var(--bounce-track) - var(--bounce-width)));
+	}
+}
+
+/* ─── Markdown content ──────────────────────────────────────────────────────── */
+
+@layer components {
+	.md-content h1,
+	.md-content h2,
+	.md-content h3,
+	.md-content h4,
+	.md-content h5,
+	.md-content h6 {
+		@apply font-semibold mt-[24px] mb-[12px] leading-[1.3];
+	}
+	.md-content h1 {
+		@apply text-[1.35em];
+	}
+	.md-content h2 {
+		@apply text-[1.2em];
+	}
+	.md-content h3 {
+		@apply text-[1.1em];
+	}
+
+	.md-content p {
+		@apply mb-3.5 mt-0;
+	}
+	.md-content p:last-child {
+		@apply mb-0;
+	}
+
+	.md-content a {
+		color: var(--color-accent);
+		@apply no-underline;
+	}
+	.md-content a:hover {
+		@apply underline;
+	}
+
+	.md-content strong {
+		@apply font-semibold;
+	}
+	.md-content em {
+		@apply italic;
+	}
+
+	.md-content ul,
+	.md-content ol {
+		@apply pl-6 my-2.5;
+	}
+	.md-content li {
+		@apply mb-[5px] mt-0;
+	}
+	.md-content li > p {
+		@apply my-0.5;
+	}
+
+	.md-content blockquote {
+		border-left: 3px solid var(--color-border);
+		@apply pl-4 my-3;
+		color: var(--color-text-secondary);
+	}
+
+	.md-content code {
+		@apply font-mono text-[0.87em] rounded-[6px] px-[7px] py-[2px];
+		background: var(--color-code-bg);
+	}
+
+	.md-content pre {
+		@apply relative rounded-xl my-3.5 overflow-hidden;
+		background: var(--color-code-bg);
+		border: 1px solid var(--color-border-subtle);
+	}
+	.md-content pre code {
+		@apply block px-[18px] py-4 text-[13px] leading-[1.55] whitespace-pre overflow-x-auto;
+		background: transparent;
+		border-radius: 0;
+	}
+
+	.md-content table {
+		@apply border-collapse my-3.5 text-[14px] w-full overflow-x-auto block;
+	}
+	.md-content th,
+	.md-content td {
+		border: 1px solid var(--color-border);
+		@apply px-3 py-2 text-left align-top;
+	}
+	.md-content th {
+		background: var(--color-bg-alt);
+		@apply font-semibold;
+	}
+	.md-content hr {
+		@apply border-0 my-5;
+		border-top: 1px solid var(--color-border);
+	}
+	.md-content img {
+		@apply max-w-full rounded-lg;
+	}
+}
+
+/* ─── Session Sidebar (4.3 + 7.3) ─────────────────────────────────────────── */
+
+@keyframes session-slide-in {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(0);
+	}
+}
+
+@keyframes session-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/* Pseudo-element: cannot be expressed as Tailwind utility */
+.model-provider-disabled .model-provider-header::after {
+	content: " (not configured)";
+	font-weight: 400;
+	text-transform: none;
+	letter-spacing: 0;
+}
+
+/* ─── Progressive History Loading (4.8) — keyframes only ───────────────────── */
+
+@keyframes history-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes history-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/* ─── Todo / Progress Overlay (4.7) ────────────────────────────────────────── */
+
+@keyframes todo-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes todo-fade-out {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+/* Fade-out animation class — toggled dynamically */
+.todo-overlay.todo-fade-out {
+	animation: todo-fade-out 0.5s ease-out forwards;
+}
+
+/* Drop zone hidden state */
+.paste-drop-zone.hidden {
+	display: none;
+}
+
+/* ─── File Viewer (split pane beside chat) ────────────────────────────────── */
+
+/* Desktop: flex sibling of #app — width driven by --file-viewer-w */
+@media (min-width: 1024px) {
+	.file-viewer-pane {
+		width: var(--file-viewer-w, 50%);
+		min-width: 280px;
+		border-left: 1px solid var(--color-border);
+		background: var(--color-bg);
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		flex-shrink: 0;
+	}
+}
+
+/* Mobile: full-screen overlay */
+@media (max-width: 1023px) {
+	.file-viewer-pane {
+		position: fixed;
+		inset: 0;
+		background: var(--color-bg);
+		z-index: 300;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+}
+
+/* ─── File Browser (4.4) ──────────────────────────────────────────────────── */
+
+@keyframes fb-slide-in {
+	from {
+		transform: translateX(100%);
+	}
+	to {
+		transform: translateX(0);
+	}
+}
+
+@keyframes fb-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/* Hidden override for modal overlay */
+.fb-modal-overlay.hidden {
+	display: none;
+}
+
+/* ─── Terminal Touch Toolbar (7.14) ────────────────────────────────────────── */
+
+/* Display logic must stay in CSS — hidden class / media query combo */
+.term-touch-toolbar {
+	display: none;
+	align-items: center;
+	gap: 4px;
+	padding: 6px 12px;
+	background: var(--color-bg-surface);
+	border-top: 1px solid var(--color-border);
+	overflow-x: auto;
+	flex-shrink: 0;
+	-webkit-overflow-scrolling: touch;
+}
+
+.term-touch-toolbar.hidden {
+	display: none;
+}
+
+@media (max-width: 768px) {
+	.term-touch-toolbar:not(.hidden) {
+		display: flex;
+	}
+}
+
+/* Sticky Ctrl toggle — active state (toggled via JS) */
+.term-touch-toggle.active {
+	background: var(--color-accent-bg);
+	color: var(--color-accent);
+	border-color: var(--color-accent);
+}
+
+/* ─── Terminal Side Panel ──────────────────────────────────────────────────── */
+
+/* When visible, terminal-container is a flex column */
+#terminal-container:not(.hidden) {
+	display: flex;
+	flex-direction: column;
+}
+
+#terminal-container {
+	position: relative;
+}
+
+/* Drag handle on the left edge of the terminal panel */
+.term-drag-handle {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 4px;
+	cursor: col-resize;
+	z-index: 10;
+	background: transparent;
+	transition: background 0.15s;
+}
+
+.term-drag-handle:hover,
+.term-drag-handle:active {
+	background: var(--color-accent);
+}
+
+/* Mobile: bottom sheet instead of side panel */
+@media (max-width: 768px) {
+	#terminal-container:not(.hidden) {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		top: auto;
+		height: 50vh;
+		max-height: 60vh;
+		border-left: none;
+		border-top: 1px solid var(--color-border);
+		border-radius: 12px 12px 0 0;
+		z-index: 80;
+	}
+
+	.term-drag-handle {
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: auto;
+		width: 100%;
+		height: 4px;
+		cursor: row-resize;
+	}
+}
+
+/* ─── Shimmer Animations ───────────────────────────────────────────────────── */
+
+@keyframes tool-shimmer {
+	0% {
+		background-position: 200% center;
+	}
+	100% {
+		background-position: -200% center;
+	}
+}
+
+/* Hidden overrides */
+#attach-menu.hidden {
+	display: none;
+}
+
+#context-mini.hidden {
+	display: none;
+}
+
+/* Context color thresholds — @utility blocks */
+@utility ctx-green {
+	background: var(--color-success);
+}
+@utility ctx-yellow {
+	background: var(--color-warning);
+}
+@utility ctx-red {
+	background: var(--color-error);
+}
+
+/* Banner hidden state */
+.rewind-banner.hidden {
+	display: none;
+}
+
+/* Rewind point — toggled on arbitrary message elements, @utility block */
+@utility rewind-point {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 2px;
+	border-radius: 8px;
+	cursor: pointer;
+	transition: outline-color 0.15s;
+}
+
+.rewind-point:hover {
+	outline-color: var(--color-accent-hover);
+	background: var(--color-accent-bg);
+}
+
+/* ─── Content Visibility Optimization ──────────────────────────────────────── */
+/* Tells the browser to skip rendering (layout, paint, style) for off-screen
+   message containers. The browser maintains scroll height via the intrinsic
+   size estimate. Unlike JS virtualization, elements remain in the DOM so
+   rewind mode, auto-scroll, and accessibility all work unchanged.
+   
+   The `auto` keyword in contain-intrinsic-size tells the browser: "use 100px
+   as the initial estimate, but once you've rendered this element, remember its
+   actual size." This avoids layout shift after first render.
+   
+   Browser support: Chrome 85+, Edge 85+, Firefox 125+, Safari 18+.
+   Older browsers ignore these properties (progressive enhancement). */
+/* @perf-guard C4-css — removing content-visibility:auto increases rendering cost for long message lists */
+.msg-container {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 100px;
+}
+
+/* Dimmed elements in rewind mode — @utility block */
+@utility rewind-dimmed {
+	opacity: 0.5;
+	pointer-events: none;
+	transition: opacity 0.2s;
+}
+
+/* ─── Rewind Timeline Track (8.21) ─────────────────────────────────────────── */
+
+.rewind-timeline {
+	position: absolute;
+	right: 0;
+	width: 160px;
+	pointer-events: auto;
+	z-index: 20;
+	top: 0;
+	bottom: 0;
+}
+
+.rewind-timeline-track {
+	position: relative;
+	height: 100%;
+	border-left: 2px solid var(--color-border-subtle);
+	margin-left: 12px;
+}
+
+.rewind-timeline-viewport {
+	position: absolute;
+	left: -4px;
+	width: 8px;
+	background: rgba(var(--overlay-rgb), 0.15);
+	border-radius: 4px;
+	pointer-events: none;
+}
+
+.rewind-timeline-marker {
+	position: absolute;
+	left: 12px;
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	padding: 0.125rem 0.5rem;
+	font-size: 0.6875rem;
+	color: var(--color-text-dimmer);
+	cursor: pointer;
+	white-space: nowrap;
+	border-radius: 0.25rem;
+	transition:
+		background 0.15s,
+		color 0.15s;
+	transform: translateY(-50%);
+}
+
+.rewind-timeline-marker:hover {
+	background: rgba(var(--overlay-rgb), 0.04);
+	color: var(--color-text);
+}
+
+.rewind-timeline-marker.in-view {
+	color: var(--color-text-secondary);
+	font-weight: 500;
+}
+
+.marker-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 120px;
+}
+
+/* Responsive: hide timeline on mobile */
+@media (max-width: 768px) {
+	.rewind-timeline {
+		display: none;
+	}
+}
+
+.notif-menu.hidden {
+	display: none;
+}
+
+/* Blocked hint hidden override */
+.notif-blocked-hint.hidden {
+	display: none;
+}
+
+/* ─── Split Diff View (8.20) ───────────────────────────────────────────────── */
+
+.diff-split-view {
+	overflow-x: auto;
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.75rem;
+	line-height: 1.5;
+	background: var(--color-code-bg);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: 0.5rem;
+}
+.diff-table {
+	width: 100%;
+	border-collapse: collapse;
+	table-layout: fixed;
+}
+.diff-table td {
+	padding: 0 0.5rem;
+	white-space: pre;
+}
+.diff-ln {
+	width: 40px;
+	min-width: 40px;
+	text-align: right;
+	color: var(--color-text-dimmer);
+	user-select: none;
+	font-size: 0.6875rem;
+}
+.diff-ln-old {
+	border-right: 1px solid var(--color-border-subtle);
+}
+.diff-marker {
+	width: 20px;
+	min-width: 20px;
+	text-align: center;
+	font-weight: 600;
+	user-select: none;
+}
+.diff-code {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.diff-code-old {
+	border-right: 1px solid var(--color-border-subtle);
+}
+.diff-row.diff-add .diff-code-new {
+	color: var(--color-success);
+}
+.diff-row.diff-add .diff-marker-new {
+	color: var(--color-success);
+}
+.diff-row.diff-add {
+	background: color-mix(in srgb, var(--color-success) 8%, transparent);
+}
+.diff-row.diff-remove .diff-code-old {
+	color: var(--color-error);
+}
+.diff-row.diff-remove .diff-marker-old {
+	color: var(--color-error);
+}
+.diff-row.diff-remove {
+	background: color-mix(in srgb, var(--color-error) 8%, transparent);
+}
+.diff-row.diff-change .diff-code-old {
+	color: var(--color-error);
+}
+.diff-row.diff-change .diff-marker-old {
+	color: var(--color-error);
+}
+.diff-row.diff-change .diff-code-new {
+	color: var(--color-success);
+}
+.diff-row.diff-change .diff-marker-new {
+	color: var(--color-success);
+}
+.diff-row.diff-change {
+	background: rgba(var(--overlay-rgb), 0.05);
+}
+
+/* ─── Diff Toggle (8.20) ──────────────────────────────────────────────────── */
+
+.diff-container {
+	margin: 0.5rem 0;
+}
+.diff-toggle-bar {
+	display: flex;
+	gap: 0.25rem;
+	margin-bottom: 0.5rem;
+}
+.diff-toggle-btn {
+	padding: 0.25rem 0.75rem;
+	font-size: 0.75rem;
+	border: 1px solid var(--color-border-subtle);
+	background: transparent;
+	color: var(--color-text-secondary);
+	border-radius: 0.25rem;
+	cursor: pointer;
+}
+.diff-toggle-btn.active {
+	background: var(--color-accent);
+	color: var(--color-bg);
+	border-color: var(--color-accent);
+}
+.diff-toggle-btn:hover:not(.active) {
+	background: var(--color-bg-alt);
+}
+
+/* ─── File Edit History & Compare (8.23) ──────────────────────────────────── */
+
+.file-history-panel {
+	scrollbar-width: thin;
+	scrollbar-color: rgba(var(--overlay-rgb), 0.15) transparent;
+}
+
+.file-history-entry {
+	border: 1px solid transparent;
+	transition:
+		background 0.15s,
+		border-color 0.15s;
+}
+.file-history-entry:hover {
+	background: rgba(var(--overlay-rgb), 0.04);
+	border-color: var(--color-border-subtle);
+}
+
+.file-history-badge {
+	display: inline-block;
+	font-size: 0.625rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	padding: 0.125rem 0.375rem;
+	border-radius: 3px;
+	line-height: 1.4;
+}
+
+.file-history-compare-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	padding: 0.5rem;
+	background: var(--color-bg-alt);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: 0.375rem;
+}
+
+.file-history-compare-btn {
+	padding: 0.25rem 0.75rem;
+	font-size: 0.75rem;
+	font-weight: 500;
+	border-radius: 0.375rem;
+	background: var(--color-success);
+	color: var(--color-bg);
+	border: none;
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.file-history-compare-btn:hover {
+	opacity: 0.85;
+}
+
+.file-history-view {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	background: var(--color-bg-surface);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: 0.5rem;
+	padding: 0.75rem;
+}

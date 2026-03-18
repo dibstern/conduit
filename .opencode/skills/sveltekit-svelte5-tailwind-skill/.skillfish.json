@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "sveltekit-svelte5-tailwind-skill",
+  "owner": "claude-skills",
+  "repo": "sveltekit-svelte5-tailwind-skill",
+  "path": ".",
+  "branch": "main",
+  "sha": "edcc400d619d6ee77bb229e8639991db380f1d6e",
+  "source": "manual"
+}

@@ -1,0 +1,109 @@
+{
+	"name": "opencode-relay",
+	"version": "0.1.0",
+	"type": "module",
+	"license": "MIT",
+	"description": "Web UI relay for OpenCode. Access your OpenCode sessions from any device.",
+	"bin": {
+		"opencode-relay": "dist/src/bin/cli.js"
+	},
+	"files": [
+		"dist/src/",
+		"dist/frontend/"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"dev": "tsx watch src/bin/cli.ts -- --foreground",
+		"dev:frontend": "vite",
+		"dev:all": "trap 'kill 0' EXIT; tsx watch src/bin/cli.ts -- --foreground & vite & wait",
+		"build": "tsc && pnpm copy:assets && vite build",
+		"build:server": "tsc && pnpm copy:assets",
+		"build:frontend": "vite build",
+		"copy:assets": "cp -r src/lib/themes dist/src/lib/themes",
+		"preview:frontend": "vite preview",
+		"preview:server": "pnpm build && node dist/src/bin/cli.js",
+		"check": "tsc --noEmit && tsc --noEmit --project src/lib/frontend/tsconfig.json",
+		"check:frontend": "tsc --noEmit --project src/lib/frontend/tsconfig.json",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"test": "vitest run",
+		"test:unit": "vitest run test/unit",
+		"test:fixture": "vitest run test/fixture",
+		"test:pbt": "vitest run test/unit --grep 'property|PBT|fc\\.'",
+		"test:watch": "vitest",
+		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"test:contract": "vitest run --config vitest.contract.config.ts",
+		"test:e2e": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts",
+		"test:e2e:ui": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --ui",
+		"test:e2e:headed": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --headed",
+		"test:e2e:debug": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --debug",
+		"test:multi-instance": "npx playwright test --config test/e2e/playwright-multi-instance.config.ts",
+		"test:subagent-e2e": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-subagent.config.ts",
+		"test:daemon": "npx playwright test --config test/e2e/playwright-daemon.config.ts",
+		"test:e2e:live": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-live.config.ts",
+		"test:visual": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-visual.config.ts",
+		"test:visual:update": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-visual.config.ts --update-snapshots",
+		"test:visual:headed": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-visual.config.ts --headed",
+		"storybook": "storybook dev -p 6006",
+		"storybook:build": "storybook build -o dist/storybook",
+		"test:storybook-visual": "pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts",
+		"test:storybook-visual:update": "pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts --update-snapshots",
+		"test:all": "pnpm check && pnpm lint && pnpm build && vitest run && vitest run --config vitest.integration.config.ts && vitest run --config vitest.contract.config.ts && npx playwright test --config test/e2e/playwright-replay.config.ts && npx playwright test --config test/e2e/playwright-daemon.config.ts && npx playwright test --config test/e2e/playwright-multi-instance.config.ts && npx playwright test --config test/e2e/playwright-subagent.config.ts && npx playwright test --config test/e2e/playwright-visual.config.ts && pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts",
+		"test:coverage": "vitest run --coverage",
+		"test:record-snapshots": "tsx test/e2e/scripts/record-snapshots.ts",
+		"prepare": "lefthook install"
+	},
+	"dependencies": {
+		"@castlenine/svelte-qrcode": "^2.3.0",
+		"@lucide/svelte": "^0.575.0",
+		"@xterm/addon-fit": "^0.11.0",
+		"@xterm/xterm": "^6.0.0",
+		"dompurify": "^3.3.1",
+		"highlight.js": "^11.11.1",
+		"jsdom": "^28.1.0",
+		"marked": "^17.0.3",
+		"mermaid": "^11.12.3",
+		"pino": "^10.3.1",
+		"pino-pretty": "^13.1.3",
+		"qrcode-terminal": "^0.12.0",
+		"web-push": "^3.6.7",
+		"ws": "^8.18.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.4",
+		"@evilmartians/lefthook": "^2.1.3",
+		"@playwright/test": "^1.58.2",
+		"@storybook/addon-a11y": "^10.2.13",
+		"@storybook/addon-docs": "^10.2.13",
+		"@storybook/svelte": "^10.2.13",
+		"@storybook/svelte-vite": "^10.2.13",
+		"@sveltejs/vite-plugin-svelte": "^5.1.1",
+		"@tailwindcss/vite": "^4.2.0",
+		"@testing-library/svelte": "^5.3.1",
+		"@types/jsdom": "^28.0.0",
+		"@types/node": "^22.0.0",
+		"@types/pngjs": "^6.0.5",
+		"@types/ws": "^8.5.0",
+		"@vitest/coverage-v8": "^3.2.4",
+		"fast-check": "^4.0.0",
+		"pixelmatch": "^7.1.0",
+		"pngjs": "^7.0.0",
+		"storybook": "^10.2.13",
+		"svelte": "^5.53.3",
+		"tailwindcss": "^4.2.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.8.2",
+		"vite": "^6.0.0",
+		"vitest": "^3.0.0"
+	},
+	"engines": {
+		"node": ">=20.19.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"@evilmartians/lefthook"
+		]
+	}
+}

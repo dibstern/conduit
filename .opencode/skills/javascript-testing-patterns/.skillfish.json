@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "javascript-testing-patterns",
+  "owner": "wshobson",
+  "repo": "agents",
+  "path": "plugins/javascript-typescript/skills/javascript-testing-patterns",
+  "branch": "main",
+  "sha": "7af532a2c0f786c5b536989cff4a2812e483dce3",
+  "source": "manual"
+}

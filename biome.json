@@ -1,0 +1,56 @@
+{
+	"files": {
+		"includes": [
+			"**",
+			"!dist",
+			"!node_modules",
+			"!test-results",
+			"!.claude",
+			"!.worktrees"
+		]
+	},
+	"css": {
+		"parser": {
+			"cssModules": true,
+			"tailwindDirectives": true
+		}
+	},
+	"linter": {
+		"rules": {
+			"complexity": {
+				"noCommaOperator": "off",
+				"useLiteralKeys": "off"
+			},
+			"style": {
+				"noNonNullAssertion": "warn"
+			},
+			"suspicious": {
+				"noAssignInExpressions": "off"
+			},
+			"a11y": {
+				"useButtonType": "off",
+				"noSvgWithoutTitle": "off",
+				"useAnchorContent": "off"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.svelte"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedImports": "off",
+						"noUnusedVariables": "off"
+					}
+				}
+			},
+			"assist": {
+				"enabled": false
+			},
+			"formatter": {
+				"enabled": false
+			}
+		}
+	]
+}

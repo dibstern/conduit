@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="OpenConduit">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#fdfdfc">
+  <title>OpenCode Relay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/file-icons-js@1/css/style.css">
+  <script>
+(()=> {
+  var v,o,root,keys,i,vt,meta;
+  try{
+    v=localStorage.getItem("opencode-relay-theme-vars");
+    if(!v)return;
+    o=JSON.parse(v);root=document.documentElement;keys=Object.keys(o);
+    for(i=0;i<keys.length;i++)root.style.setProperty(keys[i],o[keys[i]]);
+    vt=localStorage.getItem("opencode-relay-theme-variant");
+    if(vt==="light")root.classList.add("light-theme");
+    else if(vt==="dark")root.classList.add("dark-theme");
+    meta=document.querySelector('meta[name="theme-color"]');
+    if(meta&&o["--color-bg"])meta.setAttribute("content",o["--color-bg"]);
+  }catch(_e){}
+})();
+</script>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" href="/static/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/static/favicon-96x96.png" sizes="96x96" type="image/png">
+  <script src="https://cdn.jsdelivr.net/npm/file-icons-js@1/dist/file-icons.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/app-entry.ts"></script>
+</body>
+</html>

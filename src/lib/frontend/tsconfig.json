@@ -1,0 +1,28 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"sourceMap": true,
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"noUncheckedIndexedAccess": true,
+		"noPropertyAccessFromIndexSignature": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"exactOptionalPropertyTypes": true,
+		"isolatedModules": true,
+		"noEmit": true
+	},
+	"include": [
+		"./**/*.ts",
+		"./**/*.d.ts",
+		"./**/*.svelte",
+		"../shared-types.ts",
+		"../handlers/payloads.ts",
+		"../vite-env.d.ts"
+	],
+	"exclude": ["./sw.ts"]
+}

@@ -1,0 +1,33 @@
+{
+	"name": "Opencode Light",
+	"author": "Opencode Relay",
+	"variant": "light",
+	"base00": "FDFCFC",
+	"base01": "F8F7F7",
+	"base02": "D0CFCE",
+	"base03": "D0CFCE",
+	"base04": "9A9898",
+	"base05": "646262",
+	"base06": "201D1D",
+	"base07": "000000",
+	"base08": "E5443A",
+	"base09": "E64D1E",
+	"base0A": "D3AC69",
+	"base0B": "12C905",
+	"base0C": "2E9E9E",
+	"base0D": "4078F2",
+	"base0E": "B52669",
+	"base0F": "BF8640",
+	"overrides": {
+		"--color-accent": "#201d1d",
+		"--color-accent-hover": "#302c2c",
+		"--color-accent-bg": "rgba(87, 0, 0, 0.06)",
+		"--color-tool": "#98a0ae",
+		"--color-tool-bg": "rgba(152, 160, 174, 0.04)",
+		"--hl-comment": "#9a9898",
+		"--hl-string": "#317d31",
+		"--hl-variable": "#b42222",
+		"--hl-type": "#c99740",
+		"--hl-tag": "#b42222"
+	}
+}

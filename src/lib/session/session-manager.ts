@@ -1,0 +1,393 @@
+// ─── Session Management Layer (Ticket 2.3) ───────────────────────────────────
+// Manages the mapping between OpenCode sessions and the relay's representation.
+// OpenCode (SQLite) is always the source of truth — the relay never duplicates
+// storage. This layer proxies session CRUD and maintains in-memory active state.
+
+import { EventEmitter } from "node:events";
+import type {
+	OpenCodeClient,
+	SessionDetail,
+	SessionStatus,
+} from "../instance/opencode-client.js";
+import { createSilentLogger, type Logger } from "../logger.js";
+import { preRenderHistoryMessages } from "../relay/markdown-renderer.js";
+import type { HistoryMessage } from "../shared-types.js";
+import type { RelayMessage, SessionInfo } from "../types.js";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface SessionManagerOptions {
+	client: OpenCodeClient;
+	/** Number of messages to load per page (default 50) */
+	historyPageSize?: number;
+	/** Logger for diagnostics */
+	log?: Logger;
+	/** Project directory (for debug logging) */
+	directory?: string;
+	/** Optional getter for current session statuses (for processing indicators) */
+	getStatuses?: () => Record<string, SessionStatus>;
+}
+
+export interface SessionManagerEvents {
+	/** Broadcast this message to all connected clients */
+	broadcast: [RelayMessage];
+	/** Send to a specific client */
+	send: [{ clientId: string; message: RelayMessage }];
+	/** Session created or deleted (discriminated payload) */
+	session_lifecycle: [
+		| { type: "created"; sessionId: string }
+		| { type: "deleted"; sessionId: string },
+	];
+}
+
+export interface HistoryPage {
+	messages: HistoryMessage[];
+	hasMore: boolean;
+	/** Total messages in the session (if known) */
+	total?: number;
+}
+
+// ─── Session Manager ─────────────────────────────────────────────────────────
+
+export class SessionManager extends EventEmitter<SessionManagerEvents> {
+	private readonly client: OpenCodeClient;
+	private readonly historyPageSize: number;
+	private readonly log: Logger;
+	private readonly directory: string | undefined;
+	private readonly getStatuses: (() => Record<string, SessionStatus>) | null;
+
+	/**
+	 * Cached child→parent map built from the most recent session list fetch.
+	 * Updated every time listSessions() is called. Used by the status poller
+	 * to propagate subagent busy status to parent sessions.
+	 */
+	private cachedParentMap = new Map<string, string>();
+
+	/**
+	 * Tracks the timestamp of the last message received per session.
+	 * Used to sort the session list by most-recently-messaged first.
+	 * Seeded during initialize() and updated incrementally from SSE events.
+	 */
+	private lastMessageAt = new Map<string, number>();
+
+	constructor(options: SessionManagerOptions) {
+		super();
+		this.client = options.client;
+		this.historyPageSize = options.historyPageSize ?? 50;
+		this.log = options.log ?? createSilentLogger();
+		this.directory = options.directory;
+		this.getStatuses = options.getStatuses ?? null;
+	}
+
+	// ─── Queries ──────────────────────────────────────────────────────────
+
+	/**
+	 * Get a child→parent map (sessionId → parentID) for all sessions
+	 * that have a parentID. Built from the most recent listSessions() call.
+	 * Synchronous — returns cached data.
+	 */
+	getSessionParentMap(): Map<string, string> {
+		return this.cachedParentMap;
+	}
+
+	/** List sessions sorted by last message time first (falling back to creation time) */
+	async listSessions(options?: {
+		statuses?: Record<string, SessionStatus> | undefined;
+		roots?: boolean;
+	}): Promise<SessionInfo[]> {
+		const clientOpts =
+			options?.roots !== undefined ? { roots: options.roots } : undefined;
+		const sessions = await this.client.listSessions(clientOpts);
+
+		// Only rebuild the parent map from unfiltered fetches — a roots-only
+		// fetch returns no parentIDs and would wipe the map, breaking
+		// subagent busy propagation in the status poller.
+		if (!options?.roots) {
+			this.cachedParentMap = new Map<string, string>();
+			for (const s of sessions) {
+				if (s.parentID) {
+					this.cachedParentMap.set(s.id, s.parentID);
+				}
+			}
+		}
+
+		// Use explicit statuses if provided, otherwise fall back to injected getter.
+		// This ensures processing flags are always included, even when callers
+		// (e.g. broadcastSessionList, handleListSessions) don't pass statuses.
+		const resolvedStatuses = options?.statuses ?? this.getStatuses?.();
+		this.log.verbose(
+			`listSessions: directory=${this.directory ?? "none"} roots=${options?.roots ?? "all"} returned=${sessions.length} ids=[${sessions
+				.slice(0, 5)
+				.map((s) => s.id.slice(0, 12))
+				.join(",")}${sessions.length > 5 ? "..." : ""}]`,
+		);
+		return toSessionInfoList(sessions, resolvedStatuses, this.lastMessageAt);
+	}
+
+	/**
+	 * Load a page of message history for a session.
+	 *
+	 * Messages are returned in chronological order (oldest first).
+	 * Pagination loads from the END (most recent) backwards:
+	 *   offset=0  → most recent pageSize messages
+	 *   offset=50 → the 50 messages before those
+	 *
+	 * This matches chat UI expectations: show newest messages first,
+	 * lazy-load older messages as the user scrolls up.
+	 */
+	async loadHistory(sessionId: string, offset = 0): Promise<HistoryPage> {
+		const all = await this.client.getMessages(sessionId);
+		const total = all.length;
+
+		// Slice from the end, moving backwards by `offset`
+		const end = Math.max(0, total - offset);
+		const start = Math.max(0, end - this.historyPageSize);
+		const page = all.slice(start, end);
+
+		return {
+			// Message.role is `string` but the API only returns "user" | "assistant"
+			messages: page as unknown as HistoryMessage[],
+			hasMore: start > 0,
+			total,
+		};
+	}
+
+	/**
+	 * Load a page of history and pre-render markdown for assistant text parts.
+	 * This combines loadHistory() + preRenderHistoryMessages() to ensure
+	 * pre-rendering is never accidentally omitted from a call site.
+	 * @perf-guard — removing preRenderHistoryMessages degrades session switch latency
+	 */
+	async loadPreRenderedHistory(
+		sessionId: string,
+		offset?: number,
+	): Promise<HistoryPage> {
+		const page = await this.loadHistory(sessionId, offset);
+		preRenderHistoryMessages(page.messages);
+		return page;
+	}
+
+	// ─── Mutations ────────────────────────────────────────────────────────
+
+	/** Create a new session */
+	async createSession(
+		title?: string,
+		opts?: { silent?: boolean },
+	): Promise<SessionDetail> {
+		const session = await this.client.createSession(title ? { title } : {});
+
+		this.emit("session_lifecycle", { type: "created", sessionId: session.id });
+
+		if (!opts?.silent) {
+			this.emit("broadcast", { type: "session_switched", id: session.id });
+			await this.broadcastSessionList();
+		}
+
+		return session;
+	}
+
+	/** Delete a session. Emits session_lifecycle { type: "deleted" } always. */
+	async deleteSession(
+		sessionId: string,
+		opts?: { silent?: boolean },
+	): Promise<void> {
+		await this.client.deleteSession(sessionId);
+
+		this.emit("session_lifecycle", { type: "deleted", sessionId });
+
+		if (!opts?.silent) {
+			await this.broadcastSessionList();
+		}
+	}
+
+	/** Rename a session */
+	async renameSession(sessionId: string, title: string): Promise<void> {
+		await this.client.updateSession(sessionId, { title });
+		await this.broadcastSessionList();
+	}
+
+	/** Search sessions by query */
+	async searchSessions(
+		query: string,
+		options?: { roots?: boolean },
+	): Promise<SessionInfo[]> {
+		const sessions = await this.client.listSessions(
+			options?.roots !== undefined ? { roots: options.roots } : undefined,
+		);
+		// Client-side filter since OpenCode's list endpoint may not support search directly
+		const q = query.toLowerCase();
+		const matches = sessions.filter((s) => {
+			return (
+				(s.title ?? "").toLowerCase().includes(q) ||
+				s.id.toLowerCase().includes(q)
+			);
+		});
+		return toSessionInfoList(matches, this.getStatuses?.(), this.lastMessageAt);
+	}
+
+	/**
+	 * Initialize: seed the lastMessageAt map from existing sessions.
+	 * Returns the most recent session ID, or creates a new one if none exist.
+	 */
+	async initialize(title?: string): Promise<string> {
+		const existing = await this.client.listSessions();
+		if (existing.length > 0) {
+			// Seed lastMessageAt from actual message timestamps.
+			// Fetch messages for each session in parallel.
+			await Promise.all(
+				existing.map(async (s) => {
+					try {
+						const msgs = await this.client.getMessages(s.id);
+						if (msgs.length > 0) {
+							// Find the latest message timestamp
+							let latest = 0;
+							for (const m of msgs) {
+								const ts = m.time?.completed ?? m.time?.created ?? 0;
+								if (ts > latest) latest = ts;
+							}
+							if (latest > 0) {
+								this.lastMessageAt.set(s.id, latest);
+							}
+						}
+					} catch (err) {
+						this.log.warn(
+							`Failed to fetch messages for ${s.id.slice(0, 12)} during init: ${err instanceof Error ? err.message : err}`,
+						);
+					}
+				}),
+			);
+
+			// Sort by last message time, falling back to creation time
+			const sorted = existing.sort((a, b) => {
+				const aTime = this.lastMessageAt.get(a.id) ?? a.time?.created ?? 0;
+				const bTime = this.lastMessageAt.get(b.id) ?? b.time?.created ?? 0;
+				return bTime - aTime;
+			});
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+			return sorted[0]!.id;
+		}
+		const session = await this.client.createSession(title ? { title } : {});
+		return session.id;
+	}
+
+	/**
+	 * Compute the default session (most recent, or create one).
+	 * Stateless — no global mutation.
+	 */
+	async getDefaultSessionId(title?: string): Promise<string> {
+		const sessions = await this.listSessions();
+		if (sessions.length > 0) {
+			// Prefer a top-level session over a subagent (forked) session so
+			// that fresh loads don't land on a child session.
+			const topLevel = sessions.find((s) => !s.parentID);
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+			return (topLevel ?? sessions[0]!).id;
+		}
+		const created = await this.client.createSession(title ? { title } : {});
+		this.emit("session_lifecycle", { type: "created", sessionId: created.id });
+		return created.id;
+	}
+
+	/**
+	 * Record that a message was received for a session at the given time.
+	 * Called from SSE event handling to keep session ordering up to date.
+	 * If no timestamp is provided, uses Date.now().
+	 */
+	recordMessageActivity(sessionId: string, timestamp?: number): void {
+		const ts = timestamp ?? Date.now();
+		const existing = this.lastMessageAt.get(sessionId);
+		if (!existing || ts > existing) {
+			this.lastMessageAt.set(sessionId, ts);
+		}
+	}
+
+	/** Get the last-message-at map (for passing to toSessionInfoList). */
+	getLastMessageAtMap(): ReadonlyMap<string, number> {
+		return this.lastMessageAt;
+	}
+
+	/**
+	 * Send roots-only session list immediately, then all-sessions in background.
+	 * Used by all broadcast/unicast send points.
+	 */
+	async sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: { statuses?: Record<string, SessionStatus> | undefined },
+	): Promise<void> {
+		const roots = await this.listSessions({
+			roots: true,
+			statuses: options?.statuses,
+		});
+		send({ type: "session_list", sessions: roots, roots: true });
+
+		this.listSessions({ statuses: options?.statuses })
+			.then((all) => {
+				send({ type: "session_list", sessions: all, roots: false });
+			})
+			.catch((err) => {
+				this.log.warn(`Background all-sessions fetch failed: ${err}`);
+			});
+	}
+
+	// ─── Internal ──────────────────────────────────────────────────────────
+
+	private async broadcastSessionList(): Promise<void> {
+		const roots = await this.listSessions({ roots: true });
+		this.emit("broadcast", {
+			type: "session_list",
+			sessions: roots,
+			roots: true,
+		});
+
+		this.listSessions()
+			.then((all) => {
+				this.emit("broadcast", {
+					type: "session_list",
+					sessions: all,
+					roots: false,
+				});
+			})
+			.catch((err) => {
+				this.log.warn(`Background all-sessions broadcast failed: ${err}`);
+			});
+	}
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Convert OpenCode SessionDetail[] → sorted SessionInfo[] for the frontend.
+ *
+ * Sorting priority: last message timestamp (from lastMessageAt map),
+ * falling back to session creation time for sessions with no messages.
+ * This ensures sessions are ordered by actual conversation activity,
+ * not by metadata updates (renames, etc.).
+ */
+function toSessionInfoList(
+	sessions: SessionDetail[],
+	statuses?: Record<string, SessionStatus>,
+	lastMessageAt?: ReadonlyMap<string, number>,
+): SessionInfo[] {
+	return sessions
+		.map((s) => {
+			// For display: use last message time if available, otherwise creation time
+			const lastMsgTime = lastMessageAt?.get(s.id);
+			const displayTime = lastMsgTime ?? s.time?.created ?? 0;
+
+			const info: SessionInfo = {
+				id: s.id,
+				title: s.title ?? "Untitled",
+				updatedAt: displayTime,
+				messageCount: 0, // OpenCode doesn't include this in list; frontend can fetch if needed
+				...(s.parentID != null && { parentID: s.parentID }),
+			};
+			if (statuses) {
+				const status = statuses[s.id];
+				if (status && (status.type === "busy" || status.type === "retry")) {
+					info.processing = true;
+				}
+			}
+			return info;
+		})
+		.sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number));
+}

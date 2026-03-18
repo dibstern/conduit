@@ -1,0 +1,10 @@
+pre-commit:
+  commands:
+    lint:
+      run: pnpm lint
+    typecheck:
+      run: pnpm check
+    test:
+      run: pnpm test
+    build:
+      run: pnpm build

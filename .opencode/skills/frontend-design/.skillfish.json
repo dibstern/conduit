@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "frontend-design",
+  "owner": "anthropics",
+  "repo": "claude-code",
+  "path": "plugins/frontend-design/skills/frontend-design",
+  "branch": "main",
+  "sha": "3bd61bab4d6b858c5d3af8adf14b917ce853e4c5",
+  "source": "manual"
+}

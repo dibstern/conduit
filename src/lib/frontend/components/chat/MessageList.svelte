@@ -1,0 +1,287 @@
+<!-- ─── Message List ────────────────────────────────────────────────────────── -->
+<!-- Scrollable message container with auto-scroll and scroll-to-bottom button. -->
+<!-- Renders history messages, live chat messages, and inline permission/question cards. -->
+<!-- Preserves #messages ID for E2E. -->
+
+<script lang="ts">
+	import { tick } from "svelte";
+	import { chatState, historyState } from "../../stores/chat.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import {
+		uiState,
+		setUserScrolledUp,
+		selectRewindMessage,
+		SCROLL_THRESHOLD,
+	} from "../../stores/ui.svelte.js";
+	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
+	import type {
+		AssistantMessage as AssistantMsg,
+		ThinkingMessage,
+		ToolMessage,
+		UserMessage as UserMsg,
+		ResultMessage,
+		SystemMessage as SystemMsg,
+	} from "../../types.js";
+	import UserMessage from "./UserMessage.svelte";
+	import AssistantMessage from "./AssistantMessage.svelte";
+	import ThinkingBlock from "./ThinkingBlock.svelte";
+	import ToolItem from "./ToolItem.svelte";
+	import SkillItem from "./SkillItem.svelte";
+	import ToolGroupCard from "./ToolGroupCard.svelte";
+	import { groupMessages, type GroupedMessage, type ToolGroup } from "../../utils/group-tools.js";
+	import ResultBar from "./ResultBar.svelte";
+	import SystemMessage from "./SystemMessage.svelte";
+	import PermissionCard from "../features/PermissionCard.svelte";
+	import QuestionCard from "../features/QuestionCard.svelte";
+	import HistoryLoader from "../features/HistoryLoader.svelte";
+
+
+	let messagesEl: HTMLDivElement | undefined = $state();
+	let sentinelEl: HTMLElement | undefined = $state();
+
+	// ─── Auto-scroll ───────────────────────────────────────────────────────────
+
+	function scrollToBottom() {
+		if (!messagesEl || uiState.isUserScrolledUp) return;
+		messagesEl.scrollTop = messagesEl.scrollHeight;
+	}
+
+	function forceScrollToBottom() {
+		if (!messagesEl) return;
+		setUserScrolledUp(false);
+		messagesEl.scrollTop = messagesEl.scrollHeight;
+	}
+
+	// ─── Scroll preservation for history prepend ────────────────────────────
+
+	// Flag to suppress auto-scroll during prepend — MUST be $state for $effect tracking
+	let awaitingPrepend = $state(false);
+	let prevScrollHeight = 0;
+	let prevScrollTop = 0;
+
+	// Track first message UUID, count, and session to detect prepends
+	let prevFirstUuid = "";
+	let prevMessageCount = 0;
+	let prevSessionId = $state("");
+
+	// Capture scroll state BEFORE DOM update using $effect.pre
+	$effect.pre(() => {
+		const currentSessionId = sessionState.currentId ?? "";
+		const msgs = chatState.messages;
+		const currentCount = msgs.length;
+		const firstMsg = currentCount > 0 ? msgs[0] : null;
+		const currentFirstUuid = firstMsg ? firstMsg["uuid"] : "";
+
+		// Session changed — reset tracking, skip prepend detection
+		if (currentSessionId !== prevSessionId) {
+			prevSessionId = currentSessionId;
+			prevFirstUuid = currentFirstUuid;
+			prevMessageCount = currentCount;
+			return;
+		}
+
+		// Prepend detected within same session: first UUID changed AND count increased
+		if (
+			prevFirstUuid &&
+			currentFirstUuid &&
+			currentFirstUuid !== prevFirstUuid &&
+			currentCount > prevMessageCount &&
+			messagesEl
+		) {
+			awaitingPrepend = true;
+			prevScrollHeight = messagesEl.scrollHeight;
+			prevScrollTop = messagesEl.scrollTop;
+		}
+
+		prevFirstUuid = currentFirstUuid;
+		prevMessageCount = currentCount;
+	});
+
+	// Restore scroll position AFTER DOM update
+	$effect(() => {
+		if (awaitingPrepend && messagesEl) {
+			tick().then(() => {
+				if (messagesEl && awaitingPrepend) {
+					const newScrollHeight = messagesEl.scrollHeight;
+					messagesEl.scrollTop =
+						prevScrollTop + (newScrollHeight - prevScrollHeight);
+					awaitingPrepend = false;
+				}
+			});
+		}
+	});
+
+	// Auto-scroll when messages change (only if not scrolled up)
+	// Skip scroll-to-bottom when a prepend is in progress
+	$effect(() => {
+		// Touch messages array to track dependency
+		const _len = chatState.messages.length;
+		// Also track permissions changes to scroll when new permission/question arrives
+		const _permLen = permissionsState.pendingPermissions.length;
+		const _qLen = permissionsState.pendingQuestions.length;
+		if (!awaitingPrepend) {
+			// Scroll after DOM update
+			tick().then(() => {
+				scrollToBottom();
+				// content-visibility: auto means scrollHeight may be underestimated
+				// on first render (100px placeholders vs actual heights). Schedule a
+				// correction after the browser has computed actual heights.
+				requestAnimationFrame(() => {
+					if (!uiState.isUserScrolledUp) {
+						scrollToBottom();
+					}
+				});
+			});
+		}
+	});
+
+	// ─── Scroll detection ──────────────────────────────────────────────────────
+
+	function handleScroll() {
+		if (!messagesEl) return;
+		const distFromBottom =
+			messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+		setUserScrolledUp(distFromBottom > SCROLL_THRESHOLD);
+	}
+
+	// ─── Rewind mode click delegation ──────────────────────────────────────────
+
+	function handleRewindClick(e: MouseEvent) {
+		if (!uiState.rewindActive) return;
+
+		// Find the closest message element with a data-uuid attribute
+		const target = e.target as HTMLElement;
+		const msgEl = target.closest("[data-uuid]") as HTMLElement | null;
+		if (msgEl) {
+			e.preventDefault();
+			e.stopPropagation();
+			const uuid = msgEl.dataset.uuid ?? null;
+			selectRewindMessage(uuid);
+		}
+	}
+
+	// ─── Scroll button text ────────────────────────────────────────────────────
+
+	const scrollButtonText = $derived(
+		chatState.processing ? "↓ New activity" : "↓ Latest",
+	);
+
+	const groupedMessages: GroupedMessage[] = $derived(groupMessages(chatState.messages));
+	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
+
+	/** All pending questions are rendered at the bottom of the message list.
+	 *  Active questions are NOT rendered inline by ToolItem (to prevent them from
+	 *  appearing between text segments when the LLM calls the question tool mid-stream).
+	 *  Once resolved, the read-only summary renders inline at the tool's position. */
+</script>
+
+<div
+	id="messages"
+	class="flex-1 overflow-y-auto pt-5 pb-3 relative"
+	style="-webkit-overflow-scrolling: touch;"
+	bind:this={messagesEl}
+	onscroll={handleScroll}
+>
+	<!-- History sentinel (triggers lazy-loading of older messages) -->
+	<div id="history-sentinel" class="h-1" bind:this={sentinelEl}></div>
+
+	<!-- Headless loader (no visual output) -->
+	<HistoryLoader {sentinelEl} />
+
+	<!-- Beginning of session marker (was in HistoryView) -->
+	{#if !historyState.hasMore && !historyState.loading}
+		<div class="history-beginning flex flex-col items-center py-4 text-text-dimmer text-xs">
+			<div class="w-8 h-px bg-border mb-2"></div>
+			<span>Beginning of session</span>
+		</div>
+	{/if}
+
+	<!-- Loading indicator (was in HistoryView) -->
+	{#if historyState.loading}
+		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
+			<span class="animate-spin">&#x27F3;</span>
+			<span>Loading history...</span>
+		</div>
+	{/if}
+
+	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div onclick={uiState.rewindActive ? handleRewindClick : undefined}>
+	{#each groupedMessages as msg, i (msg.uuid)}
+		{#if msg.type === "user"}
+			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
+				<UserMessage message={msg as UserMsg} />
+			</div>
+		{:else if msg.type === "assistant"}
+			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
+				<AssistantMessage message={msg as AssistantMsg} />
+			</div>
+		{:else if msg.type === "thinking"}
+			<div class="msg-container">
+				<ThinkingBlock message={msg as ThinkingMessage} />
+			</div>
+		{:else if msg.type === "tool-group"}
+			<div class="msg-container">
+				<ToolGroupCard group={msg as ToolGroup} />
+			</div>
+		{:else if msg.type === "tool" && (msg as ToolMessage).name === "Skill"}
+			<div class="msg-container">
+				<SkillItem message={msg as ToolMessage} />
+			</div>
+		{:else if msg.type === "tool"}
+			<div class="msg-container">
+				<ToolItem message={msg as ToolMessage} />
+			</div>
+		{:else if msg.type === "result"}
+			<div class="msg-container">
+				<ResultBar message={msg as ResultMessage} />
+			</div>
+		{:else if msg.type === "system"}
+			<div class="msg-container">
+				<SystemMessage message={msg as SystemMsg} />
+			</div>
+		{/if}
+	{/each}
+	</div>
+
+	<!-- Pending permission requests (only for current session) -->
+	{#each localPermissions as perm (perm.id)}
+		<div class="max-w-[760px] mx-auto mb-3 px-5">
+			<PermissionCard request={perm} />
+		</div>
+	{/each}
+
+	<!-- Pending user questions (always rendered at bottom, not inline) -->
+	{#each permissionsState.pendingQuestions as question (question.toolId)}
+		<div class="max-w-[760px] mx-auto mb-3 px-5">
+			<QuestionCard request={question} />
+		</div>
+	{/each}
+
+	<!-- Processing indicator: bouncing bar (like TUI's blue back-and-forth indicator) -->
+	{#if chatState.processing}
+		<div class="max-w-[760px] mx-auto px-5 pb-3">
+			<div
+				class="h-[3px] rounded-full overflow-hidden"
+				style="--bounce-track: 100%; --bounce-width: 30%;"
+			>
+				<div
+					class="h-full rounded-full bg-accent animate-bounce-bar"
+					style="width: var(--bounce-width);"
+				></div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Scroll-to-bottom button -->
+	<button
+		id="scroll-btn"
+		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary cursor-pointer z-5 font-sans hover:bg-bg-surface"
+		class:hidden={!uiState.isUserScrolledUp}
+		title="Scroll to bottom"
+		onclick={forceScrollToBottom}
+	>
+		{scrollButtonText}
+	</button>
+</div>

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+test-results/.playwright-artifacts-0
+.env
+.worktrees/
+.playwright-cli
+.opencode-relay/sessions
+/test-results
+docs/plans/audits/
