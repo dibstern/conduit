@@ -138,15 +138,15 @@ describe("renderStatus", () => {
 		expect(io.raw()).toContain("\x1b[1m"); // bold
 	});
 
-	it("displays network URLs", () => {
+	it("displays network URLs with Local: prefix", () => {
 		const io = createMockIO();
 		const info = defaultDaemonInfo({
 			networkUrls: ["http://192.168.1.50:2633", "http://10.0.0.5:2633"],
 		});
 		renderStatus(info, io.stdout);
 		const text = io.text();
-		expect(text).toContain("192.168.1.50:2633");
-		expect(text).toContain("10.0.0.5:2633");
+		expect(text).toContain("Local: http://192.168.1.50:2633");
+		expect(text).toContain("Local: http://10.0.0.5:2633");
 	});
 
 	it("displays project and session counts", () => {
@@ -209,6 +209,53 @@ describe("renderStatus", () => {
 		const info = defaultDaemonInfo();
 		renderStatus(info, io.stdout);
 		expect(io.text()).not.toContain("\u2588\u2588");
+	});
+
+	it("displays qrCaption under QR code", () => {
+		const io = createMockIO();
+		const info = defaultDaemonInfo({
+			qrCode: "LINE1\nLINE2",
+			qrCaption: "Scan or visit: http://10.0.0.1:2634/setup",
+		});
+		renderStatus(info, io.stdout);
+		const text = io.text();
+		expect(text).toContain("Scan or visit: http://10.0.0.1:2634/setup");
+	});
+
+	it("does not show qrCaption when no QR code", () => {
+		const io = createMockIO();
+		const info = defaultDaemonInfo({
+			qrCaption: "Scan or visit: http://10.0.0.1:2634/setup",
+		});
+		renderStatus(info, io.stdout);
+		expect(io.text()).not.toContain("Scan or visit");
+	});
+
+	it("shows QR without caption when qrCaption absent (non-TLS)", () => {
+		const io = createMockIO();
+		const info = defaultDaemonInfo({
+			qrCode: "LINE1\nLINE2",
+		});
+		renderStatus(info, io.stdout);
+		const text = io.text();
+		expect(text).toContain("LINE1");
+		expect(text).not.toContain("Scan or visit");
+	});
+
+	it("labels network URLs with Local:", () => {
+		const io = createMockIO();
+		const info = defaultDaemonInfo({
+			networkUrls: ["https://192.168.1.50:2633"],
+		});
+		renderStatus(info, io.stdout);
+		expect(io.text()).toContain("Local: https://192.168.1.50:2633");
+	});
+
+	it("does not show Setup: line (removed field)", () => {
+		const io = createMockIO();
+		const info = defaultDaemonInfo();
+		renderStatus(info, io.stdout);
+		expect(io.text()).not.toContain("Setup:");
 	});
 });
 
@@ -801,7 +848,7 @@ describe("edge cases", () => {
 		);
 		await tick();
 
-		expect(io.text()).toContain("192.168.1.100:2633");
+		expect(io.text()).toContain("Local: http://192.168.1.100:2633");
 
 		// Clean up
 		io.stdin.emit("data", "\x03");

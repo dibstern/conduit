@@ -78,6 +78,7 @@ function createMockCLI(
 		spawnDaemon: async () => ({ pid: 12345, port: 2633 }),
 		generateQR: (url: string) => `[QR:${url}]`,
 		getNetworkAddress: () => "192.168.1.100",
+		getTailscaleIP: () => null,
 		...overrides,
 	};
 

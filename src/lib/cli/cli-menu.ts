@@ -23,8 +23,8 @@ export interface DaemonInfo {
 	version: string;
 	/** QR code art string for the relay URL (optional). */
 	qrCode?: string;
-	/** HTTP onboarding/setup URL shown when TLS is active (optional). */
-	setupUrl?: string;
+	/** Caption shown under the QR code, e.g. "Scan or visit: http://…/setup" (optional). */
+	qrCaption?: string;
 }
 
 /** Options for the main menu loop. */
@@ -73,15 +73,16 @@ export function renderStatus(info: DaemonInfo, stdout: Writable): void {
 		for (const line of lines) {
 			log(line, stdout);
 		}
+		// Show caption directly under QR (e.g. "Scan or visit: http://…/setup")
+		if (info.qrCaption) {
+			log(`  ${a.dim}${info.qrCaption}${a.reset}`, stdout);
+		}
 		log("", stdout);
 	}
 
 	log(`${a.bold}${info.url}${a.reset}`, stdout);
 	for (const url of info.networkUrls) {
-		log(`  ${a.dim}${url}${a.reset}`, stdout);
-	}
-	if (info.setupUrl) {
-		log(`  ${a.dim}Setup: ${info.setupUrl}${a.reset}`, stdout);
+		log(`  ${a.dim}Local: ${url}${a.reset}`, stdout);
 	}
 	log("", stdout);
 
