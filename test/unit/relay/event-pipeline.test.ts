@@ -128,6 +128,10 @@ describe("resolveTimeout", () => {
 		expect(resolveTimeout("done", "ses_abc")).toBe("clear");
 	});
 
+	it("returns clear for ask_user events with sessionId", () => {
+		expect(resolveTimeout("ask_user", "ses_abc")).toBe("clear");
+	});
+
 	it("returns reset for non-done events with sessionId", () => {
 		expect(resolveTimeout("delta", "ses_abc")).toBe("reset");
 		expect(resolveTimeout("tool_result", "ses_abc")).toBe("reset");

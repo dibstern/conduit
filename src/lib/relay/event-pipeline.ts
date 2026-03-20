@@ -114,6 +114,10 @@ export function resolveTimeout(
 ): "clear" | "reset" | "none" {
 	if (!sessionId) return "none";
 	if (msgType === "done") return "clear";
+	// When a question is asked, the model is idle waiting for user input —
+	// clear the processing timeout so it doesn't fire while the user types.
+	// The timeout is restarted when the question is answered/rejected.
+	if (msgType === "ask_user") return "clear";
 	return "reset";
 }
 

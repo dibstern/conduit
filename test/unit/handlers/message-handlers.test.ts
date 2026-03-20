@@ -626,6 +626,19 @@ describe("handleAskUserResponse", () => {
 		});
 	});
 
+	it("restarts processing timeout after successful reply", async () => {
+		const deps = createMockHandlerDeps();
+		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
+		await handleAskUserResponse(deps, "client-1", {
+			toolId: "q-1",
+			answers: { "0": "yes" },
+		});
+		expect(deps.overrides.startProcessingTimeout).toHaveBeenCalledWith(
+			"session-1",
+			expect.any(Function),
+		);
+	});
+
 	it("falls back to listPendingQuestions when replyQuestion fails", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.client.replyQuestion)
@@ -691,6 +704,16 @@ describe("handleQuestionReject", () => {
 			type: "ask_user_resolved",
 			toolId: "q-1",
 		});
+	});
+
+	it("restarts processing timeout after successful reject", async () => {
+		const deps = createMockHandlerDeps();
+		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
+		await handleQuestionReject(deps, "client-1", { toolId: "q-1" });
+		expect(deps.overrides.startProcessingTimeout).toHaveBeenCalledWith(
+			"session-1",
+			expect.any(Function),
+		);
 	});
 
 	it("falls back to listPendingQuestions when rejectQuestion fails", async () => {

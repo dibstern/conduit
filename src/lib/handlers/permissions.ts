@@ -8,7 +8,30 @@
 import { fixupConfigFile } from "./fixup-config-file.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSession, resolveSessionForLog } from "./resolve-session.js";
+import { RelayError } from "../errors.js";
 import type { HandlerDeps } from "./types.js";
+
+/**
+ * After a question is answered or rejected, the model resumes processing.
+ * Restart the inactivity timeout so we detect if the model stalls.
+ * (The timeout was cleared when the question was asked — see event-pipeline.ts.)
+ */
+function restartProcessingTimeout(deps: HandlerDeps, sessionId: string): void {
+	if (!sessionId) return;
+	deps.overrides.startProcessingTimeout(sessionId, () => {
+		deps.log.warn(
+			`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
+		);
+		deps.wsHandler.sendToSession(
+			sessionId,
+			new RelayError(
+				"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+				{ code: "PROCESSING_TIMEOUT" },
+			).toMessage(),
+		);
+		deps.wsHandler.sendToSession(sessionId, { type: "done", code: 1 });
+	});
+}
 
 export async function handlePermissionResponse(
 	deps: HandlerDeps,
@@ -135,6 +158,7 @@ export async function handleAskUserResponse(
 	try {
 		await deps.client.replyQuestion({ id: toolId, answers: formatted });
 		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId });
+		restartProcessingTimeout(deps, sessionId);
 	} catch (err) {
 		deps.log.warn(
 			`client=${clientId} session=${sessionId} replyQuestion failed for ${toolId}: ${err}`,
@@ -152,6 +176,7 @@ export async function handleAskUserResponse(
 				);
 				await deps.client.replyQuestion({ id: queId, answers: formatted });
 				deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId: queId });
+				restartProcessingTimeout(deps, sessionId);
 				return;
 			}
 		} catch (fallbackErr) {
@@ -190,6 +215,7 @@ export async function handleQuestionReject(
 	try {
 		await deps.client.rejectQuestion(toolId);
 		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId });
+		restartProcessingTimeout(deps, sessionId);
 	} catch (err) {
 		deps.log.warn(
 			`client=${clientId} session=${sessionId} rejectQuestion failed for ${toolId}: ${err}`,
@@ -209,6 +235,7 @@ export async function handleQuestionReject(
 					type: "ask_user_resolved",
 					toolId: queId,
 				});
+				restartProcessingTimeout(deps, sessionId);
 				return;
 			}
 		} catch (fallbackErr) {
