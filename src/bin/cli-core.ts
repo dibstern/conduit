@@ -10,6 +10,7 @@ import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCCommand, IPCResponse } from "../lib/types.js";
 
+import { getTailscaleIP } from "../lib/cli/tls.js";
 import { defaultInteractiveMenu } from "./cli-commands.js";
 import {
 	DEFAULT_CONFIG_DIR,
@@ -48,6 +49,7 @@ export interface CLIOptions {
 	) => Promise<{ pid: number; port: number }>;
 	generateQR?: (url: string) => string;
 	getNetworkAddress?: () => string | null;
+	getTailscaleIP?: () => string | null;
 	/** Injectable for testing: override the interactive menu (setup + main menu). */
 	showInteractiveMenu?: (ctx: InteractiveContext) => Promise<void>;
 }
@@ -95,6 +97,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 
 	const qr = options?.generateQR ?? generateQR;
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
+	const getTsIP = options?.getTailscaleIP ?? getTailscaleIP;
 
 	// ─── --daemon (internal: run as background daemon server) ──────────
 	if (args.command === "daemon") {
@@ -652,36 +655,45 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	// 3. Build URL (check daemon TLS status for correct scheme)
 	const statusResponse = await ipcSend({ cmd: "get_status" });
 	const scheme = statusResponse["tlsEnabled"] === true ? "https" : "http";
-	const ip = getAddr() ?? "localhost";
-	const url = `${scheme}://${ip}:${args.port}`;
+	// 3b. Build URLs with Tailscale priority (consistent with interactive path)
+	const tsIP = getTsIP();
+	const lanIP = getAddr();
+	const primaryIP = tsIP ?? lanIP ?? "localhost";
+	const url = `${scheme}://${primaryIP}:${args.port}`;
+	const tlsActive = statusResponse["tlsEnabled"] === true;
 
-	// 4. Display connection info
+	// 4. Show QR code with optional setup caption
+	if (primaryIP !== "localhost") {
+		const qrUrl =
+			tlsActive
+				? `http://${primaryIP}:${args.port + 1}/setup`
+				: url;
+		const qrCode = qr(qrUrl);
+		if (qrCode) {
+			stdout.write("\n");
+			stdout.write(qrCode);
+			if (tlsActive) {
+				stdout.write(
+					`  Scan or visit: http://${primaryIP}:${args.port + 1}/setup\n`,
+				);
+			}
+			stdout.write("\n");
+		}
+	}
+
+	// 5. Display connection info
 	stdout.write("\n");
 	stdout.write("conduit\n");
 	stdout.write(`  URL: ${url}\n`);
+	if (tsIP && lanIP && tsIP !== lanIP) {
+		stdout.write(`  Local: ${scheme}://${lanIP}:${args.port}\n`);
+	}
 
 	if (slug) {
 		stdout.write(`  Project: ${slug} (${cwd})\n`);
 	}
 
-	// 5. Show setup URL when TLS is active
-	const tlsActive = statusResponse["tlsEnabled"] === true;
-	if (tlsActive && ip !== "localhost") {
-		stdout.write(`  Setup: http://${ip}:${args.port + 1}/setup\n`);
-	}
-
-	// 6. Show QR code
-	// When TLS is active, QR should point to the HTTP onboarding server (port+1)
-	// so the phone can install the CA cert before accessing the HTTPS server.
-	const qrUrl = tlsActive ? `http://${ip}:${args.port + 1}/setup` : url;
-	const qrCode = qr(qrUrl);
-	if (qrCode) {
-		stdout.write("\n");
-		stdout.write(qrCode);
-		stdout.write("\n");
-	}
-
-	// 7. Show PIN info
+	// 6. Show PIN info
 	stdout.write("Tip: Set a PIN for security: conduit --pin <4-8 digits>\n");
 	stdout.write("\n");
 }
