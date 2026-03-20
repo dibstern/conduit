@@ -1,6 +1,7 @@
 import type { SessionStatus } from "../instance/opencode-client.js";
 import type {
 	MonitoringEffect,
+	MonitoringState,
 	PollerGatingConfig,
 	SessionEvalContext,
 	SessionMonitorPhase,
@@ -213,4 +214,130 @@ export function evaluateSession(
 			return _exhaustive;
 		}
 	}
+}
+
+// ── Batch evaluation ────────────────────────────────────────────────────
+
+export function initialMonitoringState(): MonitoringState {
+	return { sessions: new Map() };
+}
+
+export function evaluateAll(
+	state: MonitoringState,
+	contexts: ReadonlyMap<string, SessionEvalContext>,
+	config: Readonly<PollerGatingConfig>,
+): {
+	readonly state: MonitoringState;
+	readonly effects: readonly MonitoringEffect[];
+} {
+	const newSessions = new Map<string, SessionMonitorPhase>();
+	const effects: MonitoringEffect[] = [];
+
+	// Evaluate sessions present in contexts
+	for (const [sessionId, evalCtx] of contexts) {
+		const current = state.sessions.get(sessionId) ?? { phase: "idle" as const };
+		const result = evaluateSession(sessionId, current, evalCtx, config);
+		newSessions.set(sessionId, result.phase);
+		effects.push(...result.effects);
+	}
+
+	// Handle deleted sessions (in previous state but not in current contexts)
+	for (const [sessionId, phase] of state.sessions) {
+		if (!contexts.has(sessionId)) {
+			if (phase.phase === "busy-polling") {
+				effects.push({
+					effect: "stop-poller",
+					sessionId,
+					reason: "session-deleted",
+				});
+			}
+			if (phase.phase !== "idle") {
+				effects.push({
+					effect: "notify-idle",
+					sessionId,
+					isSubagent: false,
+				});
+			}
+			// Don't add to newSessions — session is removed
+		}
+	}
+
+	// Apply safety cap on concurrent pollers
+	return applySafetyCap(state, newSessions, effects, config);
+}
+
+/** Enforce maxPollers limit and promote capped sessions when room is available. */
+function applySafetyCap(
+	oldState: MonitoringState,
+	newSessions: Map<string, SessionMonitorPhase>,
+	effects: MonitoringEffect[],
+	config: Readonly<PollerGatingConfig>,
+): {
+	readonly state: MonitoringState;
+	readonly effects: readonly MonitoringEffect[];
+} {
+	// Count continuing pollers: sessions that were busy-polling before and remain busy-polling
+	let continuingPollers = 0;
+	for (const [sessionId, oldPhase] of oldState.sessions) {
+		if (oldPhase.phase === "busy-polling") {
+			const newPhase = newSessions.get(sessionId);
+			if (newPhase && newPhase.phase === "busy-polling") {
+				continuingPollers++;
+			}
+		}
+	}
+
+	const startEffects = effects.filter((e) => e.effect === "start-poller");
+	const totalPollers = continuingPollers + startEffects.length;
+
+	if (totalPollers > config.maxPollers) {
+		// Too many pollers — drop excess start-poller effects and cap those sessions
+		const toKeep = startEffects.length - (totalPollers - config.maxPollers);
+		let kept = 0;
+		const filtered = effects.filter((e) => {
+			if (e.effect !== "start-poller") return true;
+			if (kept < toKeep) {
+				kept++;
+				return true;
+			}
+			// Cap this session instead of starting a poller
+			const phase = newSessions.get(e.sessionId);
+			if (phase && phase.phase === "busy-polling") {
+				newSessions.set(e.sessionId, {
+					phase: "busy-capped",
+					busySince: phase.busySince,
+					cappedAt: phase.pollerStartedAt,
+				});
+			}
+			return false;
+		});
+
+		return { state: { sessions: newSessions }, effects: filtered };
+	}
+
+	// Under cap — promote any busy-capped sessions that have room
+	let currentTotal = totalPollers;
+	const promotionEffects: MonitoringEffect[] = [];
+
+	for (const [sessionId, phase] of newSessions) {
+		if (currentTotal >= config.maxPollers) break;
+		if (phase.phase === "busy-capped") {
+			promotionEffects.push({
+				effect: "start-poller",
+				sessionId,
+				reason: "sse-grace-expired",
+			});
+			newSessions.set(sessionId, {
+				phase: "busy-polling",
+				busySince: phase.busySince,
+				pollerStartedAt: phase.cappedAt,
+			});
+			currentTotal++;
+		}
+	}
+
+	return {
+		state: { sessions: newSessions },
+		effects: [...effects, ...promotionEffects],
+	};
 }

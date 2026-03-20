@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	assembleContext,
+	evaluateAll,
 	evaluateSession,
+	initialMonitoringState,
 } from "../../../src/lib/relay/monitoring-reducer.js";
 import type {
 	MonitoringEffect,
@@ -405,5 +407,158 @@ describe("evaluateSession", () => {
 			cappedAt: 100,
 		});
 		expect(result.effects).toEqual([]);
+	});
+});
+
+describe("evaluateAll", () => {
+	it("new sessions default to idle and evaluate normally", () => {
+		const contexts = new Map([
+			["s1", ctx({ status: { type: "busy" } })],
+		]);
+		const result = evaluateAll(initialMonitoringState(), contexts, DEFAULT_CONFIG);
+		expect(result.state.sessions.get("s1")?.phase).toBe("busy-grace");
+		expect(result.effects).toContainEqual({ effect: "notify-busy", sessionId: "s1" });
+	});
+
+	it("deleted session with active poller emits stop-poller(session-deleted) and notify-idle", () => {
+		const state = {
+			sessions: new Map([
+				["s1", { phase: "busy-polling" as const, busySince: 0, pollerStartedAt: 100 }],
+			]),
+		};
+		const result = evaluateAll(state, new Map(), DEFAULT_CONFIG);
+		expect(result.effects).toContainEqual({
+			effect: "stop-poller",
+			sessionId: "s1",
+			reason: "session-deleted",
+		});
+		expect(result.effects).toContainEqual({
+			effect: "notify-idle",
+			sessionId: "s1",
+			isSubagent: false,
+		});
+		expect(result.state.sessions.has("s1")).toBe(false);
+	});
+
+	it("deleted session in busy-sse-covered emits notify-idle", () => {
+		const state = {
+			sessions: new Map([
+				["s1", { phase: "busy-sse-covered" as const, busySince: 0, lastSSEAt: 500 }],
+			]),
+		};
+		const result = evaluateAll(state, new Map(), DEFAULT_CONFIG);
+		expect(result.effects).toContainEqual({
+			effect: "notify-idle",
+			sessionId: "s1",
+			isSubagent: false,
+		});
+		expect(result.effects.filter((e) => e.effect === "stop-poller")).toEqual([]);
+	});
+
+	it("deleted session in busy-grace emits notify-idle", () => {
+		const state = {
+			sessions: new Map([
+				["s1", { phase: "busy-grace" as const, busySince: 0 }],
+			]),
+		};
+		const result = evaluateAll(state, new Map(), DEFAULT_CONFIG);
+		expect(result.effects).toContainEqual({
+			effect: "notify-idle",
+			sessionId: "s1",
+			isSubagent: false,
+		});
+	});
+
+	it("deleted session in busy-capped emits notify-idle", () => {
+		const state = {
+			sessions: new Map([
+				["s1", { phase: "busy-capped" as const, busySince: 0, cappedAt: 100 }],
+			]),
+		};
+		const result = evaluateAll(state, new Map(), DEFAULT_CONFIG);
+		expect(result.effects).toContainEqual({
+			effect: "notify-idle",
+			sessionId: "s1",
+			isSubagent: false,
+		});
+	});
+
+	it("steady state produces no effects", () => {
+		const state = {
+			sessions: new Map([
+				["s1", { phase: "idle" as const }],
+			]),
+		};
+		const contexts = new Map([
+			["s1", ctx({ status: { type: "idle" } })],
+		]);
+		const result = evaluateAll(state, contexts, DEFAULT_CONFIG);
+		expect(result.effects).toEqual([]);
+		expect(result.state.sessions.get("s1")).toEqual({ phase: "idle" });
+	});
+
+	it("safety cap drops excess start-poller effects and sets busy-capped phase", () => {
+		const config = { ...DEFAULT_CONFIG, maxPollers: 1 };
+		const contexts = new Map([
+			["s1", ctx({ now: 5000, status: { type: "busy" } })],
+			["s2", ctx({ now: 5000, status: { type: "busy" } })],
+		]);
+		const state = {
+			sessions: new Map<string, SessionMonitorPhase>([
+				["s1", { phase: "busy-grace", busySince: 0 }],
+				["s2", { phase: "busy-grace", busySince: 0 }],
+			]),
+		};
+		const result = evaluateAll(state, contexts, config);
+		const starts = result.effects.filter((e) => e.effect === "start-poller");
+		expect(starts).toHaveLength(1);
+		const phases = [...result.state.sessions.values()];
+		const capped = phases.filter((p) => p.phase === "busy-capped");
+		expect(capped).toHaveLength(1);
+		expect(capped[0]).toHaveProperty("busySince", 0);
+		expect(capped[0]).toHaveProperty("cappedAt", 5000);
+	});
+
+	it("safety cap correctly counts continuing pollers (no double-counting)", () => {
+		const config = { ...DEFAULT_CONFIG, maxPollers: 2 };
+		const contexts = new Map([
+			["s1", ctx({ now: 5000, status: { type: "busy" } })],
+			["s2", ctx({ now: 5000, status: { type: "busy" } })],
+			["s3", ctx({ now: 5000, status: { type: "busy" } })],
+		]);
+		const state = {
+			sessions: new Map<string, SessionMonitorPhase>([
+				["s1", { phase: "busy-polling", busySince: 0, pollerStartedAt: 100 }],
+				["s2", { phase: "busy-grace", busySince: 0 }],
+				["s3", { phase: "busy-grace", busySince: 0 }],
+			]),
+		};
+		const result = evaluateAll(state, contexts, config);
+		const starts = result.effects.filter((e) => e.effect === "start-poller");
+		expect(starts).toHaveLength(1);
+		const capped = [...result.state.sessions.values()].filter(
+			(p) => p.phase === "busy-capped",
+		);
+		expect(capped).toHaveLength(1);
+	});
+
+	it("busy-capped sessions are promoted when cap has room", () => {
+		const config = { ...DEFAULT_CONFIG, maxPollers: 2 };
+		const contexts = new Map([
+			["s1", ctx({ now: 5000, status: { type: "busy" } })],
+			["s2", ctx({ now: 5000, status: { type: "busy" } })],
+		]);
+		const state = {
+			sessions: new Map<string, SessionMonitorPhase>([
+				["s1", { phase: "busy-polling", busySince: 0, pollerStartedAt: 100 }],
+				["s2", { phase: "busy-capped", busySince: 0, cappedAt: 4000 }],
+			]),
+		};
+		const result = evaluateAll(state, contexts, config);
+		expect(result.state.sessions.get("s2")?.phase).toBe("busy-polling");
+		const starts = result.effects.filter((e) => e.effect === "start-poller");
+		expect(starts).toContainEqual(
+			expect.objectContaining({ sessionId: "s2" }),
+		);
 	});
 });
