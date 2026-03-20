@@ -195,6 +195,16 @@
 			</div>
 		{/if}
 
+		<!-- Settings -->
+		<button
+			id="header-settings-btn"
+			class="header-icon-btn"
+			title="Settings"
+			onclick={() => window.dispatchEvent(new CustomEvent("settings:open"))}
+		>
+			<Icon name="settings" size={15} />
+		</button>
+
 		<!-- QR share button -->
 		<button
 			id="qr-btn"

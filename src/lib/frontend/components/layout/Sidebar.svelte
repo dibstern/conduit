@@ -8,9 +8,7 @@
 	import SessionList from "../features/SessionList.svelte";
 	import ProjectSwitcher from "../features/ProjectSwitcher.svelte";
 	import SidebarFilePanel from "../features/SidebarFilePanel.svelte";
-	import ThemePicker from "../overlays/ThemePicker.svelte";
-	import NotifSettings from "../overlays/NotifSettings.svelte";
-	import { toggleThemePicker, closeThemePicker, themeState } from "../../stores/theme.svelte.js";
+	import { versionState } from "../../stores/version.svelte.js";
 	import {
 		uiState,
 		collapseSidebar,
@@ -28,30 +26,14 @@
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
-	let notifMenuOpen = $state(false);
-
 	// ─── Handlers ──────────────────────────────────────────────────────────────
 
 	function handleCloseSidebar() {
-		closeThemePicker();
 		collapseSidebar();
 	}
 
 	function handleOverlayClick() {
-		closeThemePicker();
 		closeMobileSidebar();
-	}
-
-	function handleOpenSettings() {
-		window.dispatchEvent(new CustomEvent("settings:open"));
-	}
-
-	function handleToggleNotifMenu() {
-		notifMenuOpen = !notifMenuOpen;
-	}
-
-	function handleCloseNotifMenu() {
-		notifMenuOpen = false;
 	}
 
 	function handleNewSession() {
@@ -251,44 +233,28 @@
 		{/if}
 	</nav>
 
-	<!-- Sidebar footer -->
+	<!-- Sidebar footer: version info -->
 	<div
 		id="sidebar-footer"
-		class="px-3.5 py-3 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+12px)] border-t border-border-subtle shrink-0 flex items-center justify-between"
+		class="px-3.5 py-2.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+12px)] border-t border-border-subtle shrink-0"
 	>
-		<div class="flex items-center gap-1">
-			<!-- Settings -->
-			<button
-				id="settings-btn"
-				onclick={handleOpenSettings}
-				class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-surface text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
-				title="Settings"
+		{#if versionState.latest}
+			<a
+				href="https://www.npmjs.com/package/conduit-code"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="flex items-center gap-2 px-2 py-1.5 mb-1.5 rounded-md bg-brand-a/10 text-brand-a text-[11px] font-medium no-underline hover:bg-brand-a/15 transition-colors"
+				style="font-family: var(--font-brand);"
 			>
-				<Icon name="settings" size={14} />
-			</button>
-			<!-- Notification settings -->
-			<div id="notif-settings-wrap">
-				<button
-					id="notif-settings-btn"
-					onclick={handleToggleNotifMenu}
-					class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-surface text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
-					title="Notification settings"
-				>
-					<Icon name="sliders-horizontal" size={14} />
-				</button>
-				<NotifSettings visible={notifMenuOpen} onClose={handleCloseNotifMenu} />
+				<Icon name="arrow-up-circle" size={13} />
+				<span>Update available: v{versionState.latest}</span>
+			</a>
+		{/if}
+		{#if versionState.current}
+			<div class="text-[10px] text-text-dimmer px-2" style="font-family: var(--font-brand);">
+				conduit v{versionState.current}
 			</div>
-			<!-- Theme picker -->
-			<button
-				onclick={toggleThemePicker}
-				class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-surface text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
-				title="Change theme"
-				aria-expanded={themeState.pickerOpen}
-				aria-haspopup="listbox"
-			>
-				<Icon name="palette" size={14} />
-			</button>
-		</div>
+		{/if}
 	</div>
 
 	<!-- Mobile resize handle (right edge, only visible on mobile when open) -->
@@ -303,4 +269,3 @@
 		</div>
 	{/if}
 </div>
-<ThemePicker />

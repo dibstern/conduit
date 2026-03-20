@@ -83,6 +83,7 @@ import {
 	showToast,
 	updateContextPercent,
 } from "./ui.svelte.js";
+import { setLatestVersion } from "./version.svelte.js";
 import {
 	fileBrowserListeners,
 	fileHistoryListeners,
@@ -588,16 +589,22 @@ function handleConnectionStatus(
 /** Banner messages: update_available, skip_permissions, custom banners. */
 function handleBannerMessage(msg: RelayMessage): void {
 	switch (msg.type) {
-		case "update_available":
+		case "update_available": {
+			const ver = msg.version ?? "new version";
 			showBanner({
 				id: "update-available",
 				variant: "update",
 				icon: "arrow-up-circle",
-				text: `Update available: ${msg.version ?? "new version"}`,
+				text: `Update available: ${ver}`,
 				dismissible: true,
 				...(msg.version != null && { version: msg.version }),
 			});
+			// Also track in version store for sidebar footer
+			if (msg.version) {
+				setLatestVersion(msg.version);
+			}
 			break;
+		}
 		case "skip_permissions":
 			showBanner({
 				id: "skip-permissions",

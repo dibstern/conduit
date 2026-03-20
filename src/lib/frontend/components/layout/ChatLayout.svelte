@@ -53,6 +53,7 @@
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
+	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 
 	// ─── Layout classes ────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@
 
 	let qrVisible = $state(false);
 	let settingsVisible = $state(false);
-	let settingsInitialTab = $state("instances");
+	let settingsInitialTab = $state("notifications");
 	let debugPanelVisible = $state(false);
 	let planModeData = $state<{
 		mode: "enter" | "exit" | "content" | "approval" | null;
@@ -256,6 +257,8 @@
 			planModeData = { mode: null, content: "" };
 
 			onConnect(() => {
+				// Fetch current version for sidebar footer
+				fetchCurrentVersion();
 				// Request initial state from server
 				wsSend({ type: "list_sessions" });
 				wsSend({ type: "get_agents" });
