@@ -5,10 +5,10 @@
 // answer. The handler calls the OpenCode REST API directly — no in-memory
 // bridge state is needed, so questions survive relay restarts.
 
+import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "./fixup-config-file.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSession, resolveSessionForLog } from "./resolve-session.js";
-import { RelayError } from "../errors.js";
 import type { HandlerDeps } from "./types.js";
 
 /**

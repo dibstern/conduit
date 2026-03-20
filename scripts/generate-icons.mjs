@@ -21,9 +21,7 @@ const CYAN = { r: 0, g: 229, b: 255 };
 const BG_COLOR = "#18181B"; // matches connect overlay / app background
 
 // Favicons: transparent background, tight padding (browser tabs, bookmarks)
-const FAVICON_OUTPUTS = [
-	{ name: "favicon-96x96.png", size: 96 },
-];
+const FAVICON_OUTPUTS = [{ name: "favicon-96x96.png", size: 96 }];
 
 // App icons: dark background, generous padding (iOS home screen, PWA install)
 const APP_ICON_OUTPUTS = [
@@ -89,7 +87,9 @@ function generateSVG(size, { bg = null, padding: padFrac = 0.08 } = {}) {
 		}
 	}
 
-	const bgRect = bg ? `<rect width="${size}" height="${size}" fill="${bg}"/>` : "";
+	const bgRect = bg
+		? `<rect width="${size}" height="${size}" fill="${bg}"/>`
+		: "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${bgRect}${rects.join("")}</svg>`;
 }
 

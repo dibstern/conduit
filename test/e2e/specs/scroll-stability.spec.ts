@@ -14,10 +14,10 @@
 // from content-visibility:auto. Scrolling far up into these placeholder
 // regions is where the snap-back bug manifests.
 
-import { test, expect } from "../helpers/replay-fixture.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
-import type { MockMessage } from "../fixtures/mockup-state.js";
 import type { Page } from "@playwright/test";
+import type { MockMessage } from "../fixtures/mockup-state.js";
+import { expect, test } from "../helpers/replay-fixture.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
