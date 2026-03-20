@@ -116,7 +116,7 @@
 		>
 			{#each filtered as cmd, i}
 				<div
-					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 hover:bg-bg-alt max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'cmd-item-active bg-accent-bg hover:bg-accent-bg' : ''}"
+					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'cmd-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
 					data-cmd-index={i}
 					role="option"
 					tabindex="-1"

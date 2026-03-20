@@ -122,7 +122,7 @@
 				{#each entries as entry, i}
 					{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
 					<div
-						class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 hover:bg-bg-alt max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : ''}"
+						class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
 						data-file-index={i}
 						role="option"
 						tabindex="-1"
