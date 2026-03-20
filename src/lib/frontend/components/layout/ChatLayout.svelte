@@ -92,6 +92,8 @@
 	);
 	let isResizing = $state(false);
 	let mobileMaximized = $state(false);
+	/** Visual viewport height — tracks keyboard show/hide on mobile. */
+	let vvHeight = $state<number | null>(null);
 	let appEl: HTMLDivElement | undefined = $state(undefined);
 
 	// ─── Sidebar resize state ─────────────────────────────────────────────
@@ -409,6 +411,27 @@
 		}
 	});
 
+	// ─── Visual viewport tracking (keyboard avoidance in maximized mode) ──────
+	// CSS dvh does NOT account for the virtual keyboard. We listen to the
+	// visualViewport API and constrain #app height so the terminal stays above
+	// the keyboard and xterm.js refits via its ResizeObserver.
+	$effect(() => {
+		if (!mobileMaximized) {
+			vvHeight = null;
+			return;
+		}
+		const vv = window.visualViewport;
+		if (!vv) return;
+
+		function onViewportResize() {
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded above
+			vvHeight = Math.round(vv!.height);
+		}
+		onViewportResize(); // capture initial height
+		vv.addEventListener("resize", onViewportResize);
+		return () => vv.removeEventListener("resize", onViewportResize);
+	});
+
 	// ─── QR modal event bridge (Header dispatches "qr:show") ─────────────────
 
 	$effect(() => {
@@ -485,8 +508,10 @@
 	<div
 		bind:this={appEl}
 		id="app"
-		class="flex-1 flex flex-col h-full min-w-0 relative pt-[env(safe-area-inset-top,0px)]"
+		class="flex-1 flex flex-col min-w-0 relative pt-[env(safe-area-inset-top,0px)]"
+		class:h-full={!vvHeight}
 		class:select-none={isResizing || isSidebarResizing || isFileViewerResizing}
+		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
 		<!-- Header -->
 		<Header />
