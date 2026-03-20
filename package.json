@@ -21,7 +21,7 @@
 		"build": "tsgo && pnpm copy:assets && vite build",
 		"build:server": "tsgo && pnpm copy:assets",
 		"build:frontend": "vite build",
-		"copy:assets": "cp -r src/lib/themes dist/src/lib/themes",
+		"copy:assets": "rm -rf dist/src/lib/themes && cp -r src/lib/themes dist/src/lib/themes",
 		"preview:frontend": "vite preview",
 		"preview:server": "pnpm build && node dist/src/bin/cli.js",
 		"check": "tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json",

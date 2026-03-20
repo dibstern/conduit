@@ -575,7 +575,7 @@ export class Daemon {
 			...(this.tlsCerts?.caCertDer != null && {
 				caCertDer: this.tlsCerts.caCertDer,
 			}),
-			authExemptPaths: ["/setup", "/health", "/api/status", "/api/setup-info"],
+			authExemptPaths: ["/setup", "/health", "/api/status", "/api/setup-info", "/api/themes"],
 			getHealthResponse: () => this.getStatus(),
 		});
 
