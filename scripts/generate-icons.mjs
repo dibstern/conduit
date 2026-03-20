@@ -18,9 +18,15 @@ import sharp from "sharp";
 
 const PINK = { r: 255, g: 45, b: 123 };
 const CYAN = { r: 0, g: 229, b: 255 };
+const BG_COLOR = "#18181B"; // matches connect overlay / app background
 
-const OUTPUTS = [
+// Favicons: transparent background, tight padding (browser tabs, bookmarks)
+const FAVICON_OUTPUTS = [
 	{ name: "favicon-96x96.png", size: 96 },
+];
+
+// App icons: dark background, generous padding (iOS home screen, PWA install)
+const APP_ICON_OUTPUTS = [
 	{ name: "apple-touch-icon.png", size: 180 },
 	{ name: "web-app-manifest-192x192.png", size: 192 },
 	{ name: "web-app-manifest-512x512.png", size: 512 },
@@ -35,7 +41,13 @@ const STATIC_DIR = join(
 	"static",
 );
 
-function generateSVG(size) {
+/**
+ * @param {number} size  Canvas width/height in px
+ * @param {object} [opts]
+ * @param {string|null} [opts.bg]       Background fill colour, or null for transparent
+ * @param {number}      [opts.padding]  Padding fraction (0–1) of size. Default 0.08
+ */
+function generateSVG(size, { bg = null, padding: padFrac = 0.08 } = {}) {
 	const hRows = 4;
 	const fullTop = 1;
 	const fullBottom = 1;
@@ -43,7 +55,7 @@ function generateSVG(size) {
 	const vBars = 10;
 	const barFill = 0.5;
 
-	const padding = size * 0.08;
+	const padding = size * padFrac;
 	const hGap = Math.max(0.5, size * 0.025);
 	const totalHGap = hGap * (hRows - 1);
 	const availH = size - padding * 2 - totalHGap;
@@ -77,28 +89,31 @@ function generateSVG(size) {
 		}
 	}
 
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${rects.join("")}</svg>`;
+	const bgRect = bg ? `<rect width="${size}" height="${size}" fill="${bg}"/>` : "";
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${bgRect}${rects.join("")}</svg>`;
 }
+
+// App icons get extra padding so the C mark is smaller with a nice border
+const APP_ICON_PADDING = 0.18;
 
 async function main() {
 	console.log("Generating Conduit icons...\n");
 
-	// Generate SVG favicon (for modern browsers)
-	const svgFavicon = generateSVG(32);
+	// ── Favicons (transparent background, tight padding) ──────────────────
+
+	const svgFavicon = generateSVG(32); // transparent, default padding
 	const svgPath = join(STATIC_DIR, "favicon.svg");
 	writeFileSync(svgPath, svgFavicon);
-	console.log(`  ✓ favicon.svg`);
+	console.log(`  ✓ favicon.svg (transparent)`);
 
-	// Generate PNGs at each size
-	for (const { name, size } of OUTPUTS) {
-		const svg = generateSVG(size);
+	for (const { name, size } of FAVICON_OUTPUTS) {
+		const svg = generateSVG(size); // transparent, default padding
 		const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
 		writeFileSync(join(STATIC_DIR, name), pngBuffer);
-		console.log(`  ✓ ${name} (${size}×${size})`);
+		console.log(`  ✓ ${name} (${size}×${size}, transparent)`);
 	}
 
-	// Generate ICO (contains 16, 32, 48)
-	// ICO format: header + entries + PNG data
+	// ICO (contains 16, 32, 48) — transparent, default padding
 	const icoSizes = [16, 32, 48];
 	const pngBuffers = [];
 	for (const s of icoSizes) {
@@ -106,10 +121,18 @@ async function main() {
 		const png = await sharp(Buffer.from(svg)).png().toBuffer();
 		pngBuffers.push(png);
 	}
-
 	const icoBuffer = createICO(pngBuffers, icoSizes);
 	writeFileSync(join(STATIC_DIR, "favicon.ico"), icoBuffer);
-	console.log(`  ✓ favicon.ico (${icoSizes.join(", ")}px)`);
+	console.log(`  ✓ favicon.ico (${icoSizes.join(", ")}px, transparent)`);
+
+	// ── App icons (dark background, generous padding) ─────────────────────
+
+	for (const { name, size } of APP_ICON_OUTPUTS) {
+		const svg = generateSVG(size, { bg: BG_COLOR, padding: APP_ICON_PADDING });
+		const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+		writeFileSync(join(STATIC_DIR, name), pngBuffer);
+		console.log(`  ✓ ${name} (${size}×${size}, dark bg)`);
+	}
 
 	console.log("\nDone! All icons written to src/lib/frontend/static/");
 }
