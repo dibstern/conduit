@@ -8,3 +8,4 @@ test-results/.playwright-artifacts-0
 .conduit/sessions
 /test-results
 docs/plans/audits/
+/test-debug/*
