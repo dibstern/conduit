@@ -6,8 +6,34 @@
 	import { wsState } from "../../stores/ws.svelte.js";
 	import { wsDebugState, getDebugEvents, clearDebugLog } from "../../stores/ws-debug.svelte.js";
 
+	let copyFlash = $state(false);
+
 	function toggleVerbose() {
 		wsDebugState.verboseMessages = !wsDebugState.verboseMessages;
+	}
+
+	async function copyLog() {
+		const lines = getDebugEvents().map((e) => {
+			const t = fmtTime(e.time);
+			return e.detail ? `${t} ${e.event} ${e.detail}` : `${t} ${e.event}`;
+		});
+		try {
+			await navigator.clipboard.writeText(lines.join("\n"));
+			copyFlash = true;
+			setTimeout(() => { copyFlash = false; }, 1200);
+		} catch {
+			// Fallback for contexts without clipboard API
+			const ta = document.createElement("textarea");
+			ta.value = lines.join("\n");
+			ta.style.position = "fixed";
+			ta.style.opacity = "0";
+			document.body.appendChild(ta);
+			ta.select();
+			document.execCommand("copy");
+			document.body.removeChild(ta);
+			copyFlash = true;
+			setTimeout(() => { copyFlash = false; }, 1200);
+		}
 	}
 
 	// ─── Props ──────────────────────────────────────────────────────────────
@@ -20,10 +46,14 @@
 	// Touch eventCount and verboseMessages to trigger reactivity.
 	const eventCount = $derived(wsDebugState.eventCount);
 	const verboseMessages = $derived(wsDebugState.verboseMessages);
-	const events = $derived.by(() => {
+	// Force re-derivation by embedding the revision counter directly.
+	// getDebugEvents() reads from a non-reactive module array, so Svelte
+	// can't track it — we must explicitly depend on eventCount.
+	let events = $state<readonly import("../../stores/ws-debug.svelte.js").WsDebugEvent[]>([]);
+	$effect(() => {
 		void eventCount;
 		void verboseMessages;
-		return getDebugEvents();
+		events = getDebugEvents();
 	});
 
 	// ─── Live "time in state" counter ───────────────────────────────────────
@@ -208,7 +238,7 @@
 {#if visible}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-[11px] leading-relaxed select-none overflow-hidden"
+		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-[11px] leading-relaxed overflow-hidden"
 		style={panelPos.x === -1
 			? `bottom: 1rem; right: 1rem; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`
 			: `left: ${panelPos.x}px; top: ${panelPos.y}px; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`}
@@ -216,7 +246,7 @@
 		<!-- Resize handle (top-left) -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="absolute top-0 left-0 w-4 h-4 cursor-nw-resize z-10 flex items-start justify-start p-0.5"
+			class="absolute top-0 left-0 w-4 h-4 cursor-nw-resize z-10 flex items-start justify-start p-0.5 select-none"
 			onmousedown={handleResizeStart}
 			ontouchstart={handleResizeStart}
 		>
@@ -228,7 +258,7 @@
 
 		<!-- Header (draggable) -->
 		<div
-			class="flex items-center justify-between px-3 py-1.5 border-b border-green-900/30 cursor-move"
+			class="flex items-center justify-between px-3 py-1.5 border-b border-green-900/30 cursor-move select-none"
 			onmousedown={handleDragStart}
 			ontouchstart={handleDragStart}
 		>
@@ -240,6 +270,13 @@
 					title={wsDebugState.verboseMessages ? "Showing all messages — click to throttle" : "Showing 1 per 100 messages — click for all"}
 				>
 					{wsDebugState.verboseMessages ? "msgs:all" : "msgs:100"}
+				</button>
+				<button
+					class="cursor-pointer text-[10px] {copyFlash ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}"
+					onclick={copyLog}
+					title="Copy log to clipboard"
+				>
+					{copyFlash ? "copied!" : "copy"}
 				</button>
 				<button
 					class="text-gray-500 hover:text-gray-300 cursor-pointer text-[10px]"
@@ -259,7 +296,7 @@
 		</div>
 
 		<!-- Status summary -->
-		<div class="px-3 py-1.5 border-b border-green-900/30 text-gray-300 space-y-0.5">
+		<div class="px-3 py-1.5 border-b border-green-900/30 text-gray-300 space-y-0.5 select-none">
 			<div class="flex items-center gap-2">
 				<span class={statusColor(wsState.status)}>&#9679;</span>
 				<span class="text-white">{wsState.status || "(none)"}</span>
@@ -279,7 +316,7 @@
 		<!-- Event log -->
 		<div
 			bind:this={logEl}
-			class="overflow-y-auto px-3 py-1 flex-1 min-h-0"
+			class="overflow-y-auto px-3 py-1 flex-1 min-h-0 select-text"
 		>
 			{#if events.length === 0}
 				<div class="text-gray-600 py-2 text-center">No events yet</div>

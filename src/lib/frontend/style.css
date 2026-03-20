@@ -873,11 +873,12 @@
    
    Browser support: Chrome 85+, Edge 85+, Firefox 125+, Safari 18+.
    Older browsers ignore these properties (progressive enhancement). */
-/* @perf-guard C4-css — removing content-visibility:auto increases rendering cost for long message lists */
-.msg-container {
-	content-visibility: auto;
-	contain-intrinsic-size: auto 100px;
-}
+/* content-visibility:auto was removed because Safari doesn't honor
+   contain-intrinsic-size:auto — elements collapse back to the 100px fallback
+   when they leave the viewport, shrinking scrollHeight during upward scrolling
+   and causing scroll snap-back. The rendering cost without it is negligible
+   for typical message lists (hundreds of messages). If very long sessions
+   become a performance concern, use DOM virtualization instead. */
 
 /* Dimmed elements in rewind mode — @utility block */
 @utility rewind-dimmed {

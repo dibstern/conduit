@@ -21,6 +21,7 @@ export default defineConfig({
 		"dashboard.spec.ts",
 		"pin-page.spec.ts",
 		"unified-rendering.spec.ts",
+		"scroll-stability.spec.ts",
 	],
 	fullyParallel: false,
 	forbidOnly: !!process.env["CI"],

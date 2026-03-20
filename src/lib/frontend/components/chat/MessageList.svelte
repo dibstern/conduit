@@ -53,6 +53,32 @@
 		messagesEl.scrollTop = messagesEl.scrollHeight;
 	}
 
+	// ─── Scroll to bottom on session change ───────────────────────────────
+	// When switching sessions, scroll to bottom once after messages load.
+	// This is separate from the live auto-scroll $effect so that inactive
+	// sessions (processing=false, streaming=false) still show their latest
+	// messages on initial load without continuously fighting the user's
+	// scroll position afterward.
+	let lastScrolledSessionId = "";
+
+	$effect(() => {
+		const sid = sessionState.currentId ?? "";
+		const msgCount = chatState.messages.length;
+		if (sid && sid !== lastScrolledSessionId && msgCount > 0) {
+			lastScrolledSessionId = sid;
+			tick().then(() => {
+				if (!messagesEl) return;
+				messagesEl.scrollTop = messagesEl.scrollHeight;
+				setUserScrolledUp(false);
+				requestAnimationFrame(() => {
+					if (messagesEl) {
+						messagesEl.scrollTop = messagesEl.scrollHeight;
+					}
+				});
+			});
+		}
+	});
+
 	// ─── Scroll preservation for history prepend ────────────────────────────
 
 	// Flag to suppress auto-scroll during prepend — MUST be $state for $effect tracking
@@ -113,20 +139,27 @@
 	});
 
 	// Auto-scroll when messages change (only if not scrolled up)
-	// Skip scroll-to-bottom when a prepend is in progress
+	// Skip scroll-to-bottom when a prepend is in progress.
+	// IMPORTANT: Only auto-scroll when the session is actively producing content
+	// (processing or streaming). On inactive sessions the message list is static —
+	// spurious $effect triggers (e.g. permission state changes, message cache
+	// reassignments, user_message from another tab) must NOT snap the user back
+	// to the bottom while they are browsing history. The initial scroll-to-bottom
+	// after session switch is handled by the dedicated session-change $effect above.
 	$effect(() => {
 		// Touch messages array to track dependency
 		const _len = chatState.messages.length;
 		// Also track permissions changes to scroll when new permission/question arrives
 		const _permLen = permissionsState.pendingPermissions.length;
 		const _qLen = permissionsState.pendingQuestions.length;
-		if (!awaitingPrepend) {
+		// Only auto-scroll when the session is actively producing content
+		const isActive = chatState.processing || chatState.streaming;
+		if (!awaitingPrepend && isActive) {
 			// Scroll after DOM update
 			tick().then(() => {
 				scrollToBottom();
-				// content-visibility: auto means scrollHeight may be underestimated
-				// on first render (100px placeholders vs actual heights). Schedule a
-				// correction after the browser has computed actual heights.
+				// Schedule a second scroll after the browser has finalized layout
+				// (deferred images, syntax highlighting, etc. may change heights).
 				requestAnimationFrame(() => {
 					if (!uiState.isUserScrolledUp) {
 						scrollToBottom();

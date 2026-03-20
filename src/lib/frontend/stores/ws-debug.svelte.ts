@@ -12,6 +12,8 @@ export interface WsDebugEvent {
 	event: string;
 	detail?: string | undefined;
 	state: string; // ConnectionStatus at time of event
+	/** When true, this event is only shown in verbose mode (non-sampled ws:message). */
+	verbose?: boolean | undefined;
 }
 
 export interface WsDebugSnapshot {
@@ -22,7 +24,7 @@ export interface WsDebugSnapshot {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const MAX_EVENTS = 50;
+const MAX_EVENTS = 200;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -31,7 +33,8 @@ let _lastTransitionTime = Date.now();
 let _messageCount = 0;
 
 export const wsDebugState = $state({
-	/** Number of events in the buffer — triggers reactivity for the panel. */
+	/** Monotonic revision counter — triggers reactivity for the panel.
+	 *  Increments on every push (unlike array length which plateaus at MAX_EVENTS). */
 	eventCount: 0,
 	/** Timestamp of last state transition. */
 	lastTransitionTime: Date.now(),
@@ -77,7 +80,7 @@ export function wsDebugLog(
 		_events = _events.slice(-MAX_EVENTS);
 	}
 
-	wsDebugState.eventCount = _events.length;
+	wsDebugState.eventCount++;
 
 	// Track state transitions for time-in-state calculation
 	if (TRANSITION_EVENTS.has(event)) {
@@ -97,23 +100,39 @@ export function wsDebugLog(
 }
 
 /**
- * Log ws:message events with throttling (first + every 100th).
- * Avoids flooding the ring buffer with message events.
+ * Log ws:message events. All messages are always recorded in the ring buffer;
+ * non-sampled messages are tagged `verbose: true` so that getDebugEvents()
+ * can filter them out when the user hasn't enabled verbose mode.
+ *
+ * Sampled messages: the first message and every 100th thereafter.
  *
  * @param state - Current ConnectionStatus value
  * @param msgType - The parsed message type (e.g. "event", "session.list", "messages")
  */
 export function wsDebugLogMessage(state: string, msgType?: string): void {
 	_messageCount++;
-	const shouldLog =
-		wsDebugState.verboseMessages ||
-		_messageCount === 1 ||
-		_messageCount % 100 === 0;
-	if (shouldLog) {
-		const detail = msgType
-			? `#${_messageCount} ${msgType}`
-			: `#${_messageCount}`;
-		wsDebugLog("ws:message", state, detail);
+	const isSampled = _messageCount === 1 || _messageCount % 100 === 0;
+	const detail = msgType ? `#${_messageCount} ${msgType}` : `#${_messageCount}`;
+
+	const entry: WsDebugEvent = {
+		time: Date.now(),
+		event: "ws:message",
+		detail,
+		state,
+		...(isSampled ? {} : { verbose: true }),
+	};
+
+	_events.push(entry);
+	if (_events.length > MAX_EVENTS) {
+		_events = _events.slice(-MAX_EVENTS);
+	}
+
+	wsDebugState.eventCount++;
+
+	// Console output when debug is enabled (respect verbose setting for console)
+	if (featureFlags.debug && (wsDebugState.verboseMessages || isSampled)) {
+		const prefix = "[ws] ws:message";
+		console.debug(prefix, detail);
 	}
 }
 
@@ -131,9 +150,15 @@ export function getDebugSnapshot(): WsDebugSnapshot {
 	};
 }
 
-/** Get the raw events array (for the debug panel — read-only view). */
+/**
+ * Get the events array for display. When verboseMessages is off, non-sampled
+ * ws:message events (tagged verbose) are filtered out.
+ */
 export function getDebugEvents(): readonly WsDebugEvent[] {
-	return _events;
+	if (wsDebugState.verboseMessages) {
+		return _events;
+	}
+	return _events.filter((e) => !e.verbose);
 }
 
 /** Clear the event buffer. */
