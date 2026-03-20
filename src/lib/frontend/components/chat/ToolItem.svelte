@@ -11,6 +11,7 @@
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from '../shared/BlockGrid.svelte';
 	import QuestionCard from "../features/QuestionCard.svelte";
 
 	let { message, isFirstInGroup = true, isLastInGroup = true }: { 
@@ -264,7 +265,7 @@
 
 	const statusIconClass = $derived.by(() => {
 		if (message.status === "running" || message.status === "pending")
-			return "text-text-muted icon-spin";
+			return "text-text-muted";
 		if (message.status === "error") return "text-error";
 		return "text-text-dimmer";
 	});
@@ -284,16 +285,14 @@
 		}
 	});
 
+	const isStandalone = $derived(isFirstInGroup && isLastInGroup);
+
 	const groupRadius = $derived.by(() => {
-		if (isFirstInGroup && isLastInGroup) return "rounded-r-lg";
-		if (isFirstInGroup) return "rounded-tr-lg";
-		if (isLastInGroup) return "rounded-br-lg";
+		if (isFirstInGroup && isLastInGroup) return "rounded-[10px]";
+		if (isFirstInGroup) return "rounded-t-[10px]";
+		if (isLastInGroup) return "rounded-b-[10px]";
 		return "";
 	});
-
-	const borderColor = $derived(
-		message.isError ? "border-error" : "border-tool"
-	);
 
 	const resultErrorClass = $derived(
 		message.isError ? "border-error/30 text-error" : "",
@@ -351,14 +350,25 @@
 		<QuestionCard request={questionRequest} inline synthetic />
 	{:else}
 		<!-- Completed/historical question: show read-only summary -->
-		<div class="border-l-3 {borderColor} bg-tool-bg {groupRadius}">
+		<div class="bg-bg-surface {groupRadius} relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-tool-completed' : message.status === 'running' ? 'glow-tool-running' : ''}">
+			{#if message.status === 'running'}
+				<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
+			{/if}
 			<!-- Header row -->
 			<div
 				class="question-tool-header flex items-center gap-2.5 w-full py-2 px-3 text-[13px] text-text-secondary"
-				class:rounded-tr-lg={isFirstInGroup}
 			>
-				<!-- Status bullet -->
-				<span class="tool-bullet w-2 h-2 rounded-full shrink-0 {bulletClass}"></span>
+			<!-- Status bullet -->
+			<span class="tool-bullet w-2 h-2 rounded-full shrink-0 {bulletClass}"></span>
+
+				<!-- Status icon -->
+				{#if message.status === 'running'}
+					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
+				{:else}
+					<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
+						<Icon name={statusIconName} size={14} />
+					</span>
+				{/if}
 
 				<!-- Question icon -->
 				<span class="text-accent [&_.lucide]:w-4 [&_.lucide]:h-4">
@@ -369,13 +379,6 @@
 				<span class="font-medium text-accent text-xs">Input Required</span>
 
 				<span class="flex-1"></span>
-
-				<!-- Status icon -->
-				<span
-					class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}"
-				>
-					<Icon name={statusIconName} size={14} />
-				</span>
 			</div>
 
 			<!-- Question content (read-only) -->
@@ -437,16 +440,27 @@
 	{/if}
 {:else if isSubagent}
 	<!-- ─── Subagent / Task Tool Card ──────────────────────────────────────── -->
-	<div class="border-l-3 {borderColor} bg-tool-bg {groupRadius}">
+	<div class="bg-bg-surface {groupRadius} relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-tool-completed' : message.status === 'running' ? 'glow-tool-running' : ''}">
+		{#if message.status === 'running'}
+			<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
+		{/if}
 		<button
 			class="subagent-header flex items-center gap-2.5 w-full py-2.5 px-3 text-[13px] text-text-secondary transition-colors duration-150 border-none text-left select-none bg-transparent disabled:opacity-100 disabled:cursor-default {subagentSessionId ? 'cursor-pointer hover:bg-black/[0.03]' : ''}"
-			class:rounded-tr-lg={isFirstInGroup}
 			onclick={navigateToSubagent}
 			disabled={!subagentSessionId}
 			title={subagentSessionId ? "Open subagent session" : undefined}
 		>
 			<!-- Status bullet -->
 			<span class="tool-bullet w-2 h-2 rounded-full shrink-0 {bulletClass}"></span>
+
+			<!-- Status icon -->
+			{#if message.status === 'running'}
+				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
+			{:else}
+				<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
+					<Icon name={statusIconName} size={14} />
+				</span>
+			{/if}
 
 			<!-- Agent icon -->
 			<span class="text-accent [&_.lucide]:w-4 [&_.lucide]:h-4">
@@ -469,13 +483,6 @@
 				{/if}
 			</div>
 
-			<!-- Status icon -->
-			<span
-				class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}"
-			>
-				<Icon name={statusIconName} size={14} />
-			</span>
-
 			<!-- Navigate arrow (only when session is available) -->
 			{#if subagentSessionId}
 				<span class="shrink-0 text-text-dimmer">
@@ -494,10 +501,12 @@
 	</div>
 {:else}
 	<!-- ─── Generic Tool Card ──────────────────────────────────────────────── -->
-	<div class="border-l-3 {borderColor} bg-tool-bg {groupRadius}">
+	<div class="{isStandalone && message.status === 'completed' ? '' : 'bg-bg-surface'} {groupRadius} relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' && !isStandalone ? 'glow-tool-completed' : message.status === 'running' ? 'glow-tool-running' : ''}">
+		{#if message.status === 'running'}
+			<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
+		{/if}
 		<button
 			class="tool-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-[13px] text-text-secondary hover:bg-[rgba(var(--overlay-rgb),0.03)] transition-colors duration-150 border-none text-left"
-			class:rounded-tr-lg={isFirstInGroup}
 			onclick={handleToggle}
 		>
 		<span
@@ -510,7 +519,15 @@
 		<span class="tool-bullet w-2 h-2 rounded-full shrink-0 {bulletClass}"
 		></span>
 
-		<span class="tool-name font-medium text-text-secondary">
+		{#if message.status === 'running'}
+			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
+		{:else}
+			<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
+				<Icon name={statusIconName} size={14} />
+			</span>
+		{/if}
+
+		<span class="tool-name font-medium font-mono text-text">
 			{message.name}
 		</span>
 
@@ -527,24 +544,20 @@
 				</span>
 			{/each}
 		{/if}
-
-		<span
-			class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}"
-		>
-			<Icon name={statusIconName} size={14} />
-		</span>
 		</button>
 
+		{#if !(isStandalone && message.status === 'completed')}
 		<div
 			class="tool-subtitle flex items-center gap-1.5 py-0.5 px-3 pl-4 text-xs italic text-text-dimmer"
 		>
 			<span class="tool-connector font-mono not-italic text-border">└</span>
 			<span class="tool-subtitle-text">{subtitleText}</span>
 		</div>
+		{/if}
 
 		{#if expanded && (message.result || bashCommand)}
 			<div
-				class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[300px] overflow-y-auto {resultErrorClass}"
+				class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-3 px-4 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto {resultErrorClass}"
 				class:is-error={message.isError}
 			>
 				{#if bashCommand}<span class="text-text-muted">$ {bashCommand}</span>{#if message.result}{"\n\n"}{/if}{/if}{#if message.result}{message.result}{/if}

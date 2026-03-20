@@ -11,8 +11,8 @@
 
 	const containerClasses = $derived(
 		isError
-			? "border-l-3 border-error text-error bg-error/[0.04]"
-			: "border-l-2 border-border text-text-muted",
+			? "glow-tool-error text-error bg-bg-surface"
+			: "bg-bg-surface text-text-muted",
 	);
 </script>
 

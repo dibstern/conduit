@@ -106,9 +106,9 @@
 	const showContextMini = $derived(uiState.contextPercent > 0);
 
 	const contextFillColor = $derived.by(() => {
-		if (uiState.contextPercent >= 95) return "bg-error";
-		if (uiState.contextPercent >= 80) return "bg-warning";
-		return "bg-success";
+		if (uiState.contextPercent >= 80) return "bg-brand-a";
+		if (uiState.contextPercent >= 50) return "bg-warning";
+		return "bg-brand-b";
 	});
 
 	// ─── Auto-resize textarea ──────────────────────────────────────────────────
@@ -437,19 +437,21 @@
 	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)]"
 >
 	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
-		<div
-			id="input-row"
-			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
-		>
-			<!-- Subagent context bar (above all other input chrome) -->
-			<SubagentBackBar bind:this={subagentBackBarRef} />
+		<!-- Subagent context bar (above input area) -->
+		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-			<!-- Context usage mini-bar -->
+		<!-- Context usage bar (above input) -->
+		{#if showContextMini}
 			<div
 				id="context-mini"
-				class="flex items-center gap-2 pt-1.5 pb-0.5 px-3.5 cursor-pointer select-none"
-				class:hidden={!showContextMini}
+				class="flex items-center gap-2 pb-1.5 px-2"
 			>
+				<span
+					class="context-mini-label font-mono text-[10px] font-semibold whitespace-nowrap min-w-6 {contextFillColor === 'bg-brand-a' ? 'text-brand-a' : contextFillColor === 'bg-warning' ? 'text-warning' : 'text-brand-b'}"
+					id="context-mini-label"
+				>
+					{uiState.contextPercent}%
+				</span>
 				<div
 					class="context-mini-bar flex-1 h-1 rounded-[2px] bg-border overflow-hidden"
 				>
@@ -459,13 +461,12 @@
 						style="width: {uiState.contextPercent}%"
 					></div>
 				</div>
-				<span
-					class="context-mini-label font-mono text-[10px] font-semibold text-text-dimmer whitespace-nowrap min-w-6 text-right"
-					id="context-mini-label"
-				>
-					{uiState.contextPercent}%
-				</span>
 			</div>
+		{/if}
+		<div
+			id="input-row"
+			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
+		>
 
 			<!-- Textarea row -->
 			<div class="flex items-start">
@@ -497,18 +498,18 @@
 							id="attach-btn"
 							type="button"
 							aria-label="Attach"
-							class="w-9 h-9 rounded-full border-none bg-transparent text-text-muted cursor-pointer flex items-center justify-center transition-[background,color] duration-150 hover:bg-bg-alt hover:text-text"
+							class="w-7 h-7 rounded-md border border-border bg-bg-alt text-text-muted cursor-pointer flex items-center justify-center transition-[background,color] duration-150 hover:bg-bg-surface hover:text-text"
 							onclick={toggleAttachMenu}
 						>
 							<Icon name="plus" size={18} />
 						</button>
 						<div
 					id="attach-menu"
-					class="absolute bottom-[calc(100%+8px)] left-0 min-w-[170px] bg-bg-alt border border-border rounded-[14px] shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] z-10 overflow-hidden"
+					class="absolute bottom-[calc(100%+8px)] left-0 min-w-[170px] bg-bg-surface border border-border rounded-[10px] p-1 shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] z-10 overflow-hidden"
 							class:hidden={!attachMenuOpen}
 						>
 							<button
-							class="attach-menu-item flex items-center gap-2.5 w-full py-3 px-4 border-none bg-none text-text-secondary font-sans text-sm cursor-pointer transition-[background,color] duration-150 not-last:border-b not-last:border-border-subtle hover:bg-bg-alt hover:text-text"
+							class="attach-menu-item flex items-center gap-2.5 w-full py-3 px-4 border-none bg-none text-text-secondary font-mono text-sm cursor-pointer transition-[background,color] duration-150 not-last:border-b not-last:border-border-subtle hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 							id="attach-camera"
 							type="button"
 							onclick={handleAttachCamera}
@@ -517,7 +518,7 @@
 							<span>Take Photo</span>
 						</button>
 						<button
-							class="attach-menu-item flex items-center gap-2.5 w-full py-3 px-4 border-none bg-none text-text-secondary font-sans text-sm cursor-pointer transition-[background,color] duration-150 not-last:border-b not-last:border-border-subtle hover:bg-bg-alt hover:text-text"
+							class="attach-menu-item flex items-center gap-2.5 w-full py-3 px-4 border-none bg-none text-text-secondary font-mono text-sm cursor-pointer transition-[background,color] duration-150 not-last:border-b not-last:border-border-subtle hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 								id="attach-photos"
 								type="button"
 								onclick={handleAttachPhotos}
@@ -545,7 +546,7 @@
 					<!-- Send / Stop buttons -->
 					<button
 						id="send"
-						class="send-btn shrink-0 w-9 h-9 rounded-full border-none bg-accent text-bg cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:bg-accent-hover disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
+						class="send-btn shrink-0 w-8 h-8 rounded-[10px] border-none bg-brand-a text-white cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:opacity-90 disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
 						disabled={!canSend}
 						title={isProcessing ? "Queue message" : "Send message"}
 						onclick={handleSendClick}
@@ -555,7 +556,7 @@
 					{#if isProcessing}
 						<button
 							id="stop"
-							class="shrink-0 w-9 h-9 rounded-full bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
+							class="shrink-0 w-8 h-8 rounded-[10px] bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
 							title="Stop generating"
 							onclick={handleStop}
 						>

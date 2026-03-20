@@ -34,9 +34,9 @@
 	});
 
 	const contextBarColor = $derived.by(() => {
-		if (contextPercent >= 80) return "bg-error";
+		if (contextPercent >= 80) return "bg-brand-a";
 		if (contextPercent >= 50) return "bg-warning";
-		return "bg-success";
+		return "bg-brand-b";
 	});
 
 	// ─── Formatting helpers ─────────────────────────────────────────────────────

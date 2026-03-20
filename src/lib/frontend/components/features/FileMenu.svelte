@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from "../shared/BlockGrid.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@
 				<div
 					class="flex items-center gap-2 py-3 px-3.5 text-text-muted text-[13px]"
 				>
-					<Icon name="loader" size={14} class="animate-spin" />
+					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 					<span>Loading files…</span>
 				</div>
 			{:else if entries.length === 0}

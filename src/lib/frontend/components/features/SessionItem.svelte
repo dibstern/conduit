@@ -79,7 +79,7 @@
 	const itemClass = $derived(
 		"session-item group flex items-center gap-1 py-[7px] px-3 rounded-[10px] cursor-pointer relative text-[13px] transition-colors duration-100" +
 			(active
-				? " active bg-accent text-bg hover:bg-accent-hover"
+				? " active bg-bg-surface text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
 	);
 
@@ -163,6 +163,7 @@
 <a
 	href={href || undefined}
 	class="{itemClass} no-underline"
+	style={active ? "box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);" : ""}
 	data-session-id={session.id}
 	onclick={handleClick}
 >
@@ -170,7 +171,7 @@
 	{#if cleanupMode}
 		<button
 			type="button"
-			class="shrink-0 w-6 h-6 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-100 {active ? (selected ? 'text-bg' : 'text-bg/40') : (selected ? 'text-accent' : 'text-text-dimmer')}"
+			class="shrink-0 w-6 h-6 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-100 {active ? (selected ? 'text-brand-a' : 'text-text-muted') : (selected ? 'text-accent' : 'text-text-dimmer')}"
 			onclick={handleSelectionToggle}
 		>
 			<Icon name={selected ? "circle-check" : "circle"} size={16} />
@@ -180,7 +181,7 @@
 	<!-- Processing indicator (pulsing dot) -->
 	{#if isProcessing}
 		<span
-			class="session-processing-dot w-[7px] h-[7px] rounded-full shrink-0 animate-pulse-dot {active ? 'bg-bg' : 'bg-accent'}"
+			class="session-processing-dot w-[7px] h-[7px] rounded-full shrink-0 animate-pulse-dot {active ? 'bg-brand-a' : 'bg-accent'}"
 		></span>
 	{/if}
 
@@ -229,9 +230,9 @@
 		<button
 			bind:this={moreBtnEl}
 			class="session-more-btn shrink-0 w-[22px] h-[22px] border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center transition-[opacity,color] duration-100
-				{active
-					? 'text-bg/40 group-hover:text-bg/70 hover:text-bg hover:bg-bg/10'
-					: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
+			{active
+				? 'text-text-muted group-hover:text-text-secondary hover:text-text hover:bg-bg-alt'
+				: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
 			title="More options"
 			onclick={handleMoreClick}
 		>

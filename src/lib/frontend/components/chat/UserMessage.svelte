@@ -1,6 +1,6 @@
 <!-- ─── User Message ────────────────────────────────────────────────────────── -->
-<!-- Right-aligned user chat bubble with text. Preserves .msg-user class.
-     When queued, the bubble is dimmed and shows a shimmering "Queued" label. -->
+<!-- Left-aligned user message card with pink glow. Preserves .msg-user class.
+     When queued, the card is dimmed and shows a shimmering "Queued" label. -->
 
 <script lang="ts">
 	import type { UserMessage } from "../../types.js";
@@ -10,22 +10,23 @@
 </script>
 
 <div
-	class="msg-user flex justify-end max-w-[760px] mx-auto mb-4 px-5"
+	class="msg-user max-w-[760px] mx-auto mb-3 px-5"
 	class:opacity-50={message.queued}
 	data-uuid={message.uuid}
 >
-	<div class="relative max-w-[85%] max-md:max-w-[90%]">
-		<div
-			class="bubble bg-user-bubble rounded-[20px_20px_4px_20px] py-3 px-[18px] text-[14px] leading-[1.55] break-words whitespace-pre-wrap text-text"
-			class:border={message.queued}
-			class:border-dashed={message.queued}
-			class:border-border={message.queued}
-		>
+	<div
+		class="bg-bg-surface rounded-[10px] py-4 px-5 relative glow-brand-a"
+		class:border={message.queued}
+		class:border-dashed={message.queued}
+		class:border-border={message.queued}
+	>
+		<div class="text-[11px] font-mono font-semibold uppercase tracking-[1.5px] text-brand-a mb-2">You</div>
+		<div class="text-[13px] leading-[1.7] break-words whitespace-pre-wrap text-text">
 			{@html escapeHtml(extractDisplayText(message.text))}
 		</div>
 		{#if message.queued}
-			<div class="flex items-center justify-end mt-1 pr-1">
-				<span class="queued-shimmer text-text-muted text-xs font-sans">Queued</span>
+			<div class="flex items-center mt-2">
+				<span class="queued-shimmer text-text-muted text-xs font-mono">Queued</span>
 			</div>
 		{/if}
 	</div>

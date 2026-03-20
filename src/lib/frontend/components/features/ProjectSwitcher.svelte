@@ -230,7 +230,7 @@
 	<!-- Dropdown menu -->
 	{#if open}
 		<div
-			class="absolute top-full left-0 right-0 z-[120] mt-0.5 min-w-[240px] max-w-[320px] bg-bg-alt border border-border rounded-[10px] shadow-[0_4px_16px_rgba(var(--shadow-rgb),0.4)] overflow-hidden"
+			class="absolute top-full left-0 right-0 z-[120] mt-0.5 min-w-[240px] max-w-[320px] bg-bg-surface border border-border rounded-[10px] shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-1 overflow-hidden"
 			data-testid="project-switcher-dropdown"
 		>
 			<!-- Header -->
@@ -263,48 +263,50 @@
 							href="/p/{project.slug}/"
 							data-testid="project-item"
 							data-slug={project.slug}
-							class={"flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-black/[0.04] border-l-[3px] no-underline text-inherit visited:text-inherit" +
+					class={"flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] rounded-md no-underline text-inherit visited:text-inherit" +
+							(isActive
+								? " bg-bg-surface"
+								: "")}
+						style={isActive ? "box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);" : ""}
+						onclick={(e) => selectProject(e, project.slug)}
+					>
+						<!-- Indicator dot -->
+						<span
+							class={"w-1.5 h-1.5 rounded-full shrink-0" +
+								(isActive ? " bg-accent" : " bg-text-dimmer/40")}
+						></span>
+						<!-- Name -->
+						<span
+							class={"flex-1 text-[13px] truncate" +
 								(isActive
-									? " border-l-accent bg-accent/[0.06]"
-									: " border-l-transparent")}
-							onclick={(e) => selectProject(e, project.slug)}
+									? " font-semibold text-text"
+									: " text-text-secondary")}
 						>
-							<!-- Indicator dot -->
+							{project.title}
+						</span>
+						<!-- Client count -->
+						{#if project.clientCount && project.clientCount > 0}
 							<span
-								class={"w-1.5 h-1.5 rounded-full shrink-0" +
-									(isActive ? " bg-accent" : " bg-text-dimmer/40")}
-							></span>
-							<!-- Name -->
-							<span
-								class={"flex-1 text-[13px] truncate" +
-									(isActive
-										? " font-semibold text-text"
-										: " text-text-secondary")}
+								class="shrink-0 text-xs text-text-dimmer tabular-nums"
 							>
-								{project.title}
+								{project.clientCount}
 							</span>
-							<!-- Client count -->
-							{#if project.clientCount && project.clientCount > 0}
-								<span
-									class="shrink-0 text-xs text-text-dimmer tabular-nums"
-								>
-									{project.clientCount}
-								</span>
-							{/if}
-						</a>
-					{/each}
-					{/each}
-				{:else}
+						{/if}
+					</a>
+				{/each}
+				{/each}
+			{:else}
 				{#each projects as project (project.slug)}
 					{@const isActive = project.slug === currentSlug}
 					<a
 						href="/p/{project.slug}/"
 						data-testid="project-item"
 						data-slug={project.slug}
-						class={"flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-black/[0.04] border-l-[3px] no-underline text-inherit visited:text-inherit" +
-							(isActive
-								? " border-l-accent bg-accent/[0.06]"
-								: " border-l-transparent")}
+					class={"flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] rounded-md no-underline text-inherit visited:text-inherit" +
+						(isActive
+							? " bg-bg-surface"
+							: "")}
+						style={isActive ? "box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);" : ""}
 						onclick={(e) => selectProject(e, project.slug)}
 					>
 						<!-- Indicator dot -->

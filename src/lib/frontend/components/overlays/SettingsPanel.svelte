@@ -206,7 +206,7 @@
 			<div
 				class="flex items-center justify-between px-5 py-3 border-b border-border"
 			>
-				<h2 class="text-text font-semibold text-base">Settings</h2>
+				<h2 class="text-text font-semibold text-base" style="font-family: var(--font-brand);">Settings</h2>
 				<button
 					class="text-text-muted hover:text-text p-1 cursor-pointer"
 					onclick={() => onClose?.()}
@@ -218,18 +218,18 @@
 			<!-- Tabs -->
 			<div class="flex border-b border-border px-5">
 				<button
-					class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer {activeTab ===
-					'instances'
-						? 'border-accent text-text'
+				class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer {activeTab ===
+				'instances'
+					? 'border-brand-a text-text'
 						: 'border-transparent text-text-muted hover:text-text'}"
 					onclick={() => (activeTab = "instances")}
 				>
 					Instances
 				</button>
 				<button
-					class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer {activeTab ===
-					'debug'
-						? 'border-accent text-text'
+				class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer {activeTab ===
+				'debug'
+					? 'border-brand-a text-text'
 						: 'border-transparent text-text-muted hover:text-text'}"
 					onclick={() => (activeTab = "debug")}
 				>
@@ -488,7 +488,8 @@
 							role="switch"
 							aria-checked={featureFlags.debug}
 							aria-label="Toggle debug panel"
-							class="relative w-9 h-5 rounded-full transition-colors cursor-pointer {featureFlags.debug ? 'bg-accent' : 'bg-border'}"
+							class="relative w-9 h-5 rounded-full transition-[background,box-shadow] cursor-pointer {featureFlags.debug ? 'bg-brand-a' : 'bg-text-dimmer'}"
+						style={featureFlags.debug ? "box-shadow: 0 0 8px rgba(255,45,123,0.4);" : ""}
 							onclick={() => toggleFeature("debug")}
 						>
 							<span

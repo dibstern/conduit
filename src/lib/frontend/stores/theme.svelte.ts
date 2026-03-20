@@ -8,7 +8,7 @@ import {
 export { computeTerminalTheme, computeMermaidVars };
 export type { Base16Theme };
 
-export const DEFAULT_THEME_ID = "opencode-light";
+export const DEFAULT_THEME_ID = "conduit";
 
 const STORAGE_KEY_THEME = "conduit-theme";
 const STORAGE_KEY_VARS = "conduit-theme-vars";
@@ -190,7 +190,7 @@ export async function initTheme(): Promise<void> {
 		// localStorage unavailable (sandboxed iframe, disabled storage)
 	}
 
-	// Migrate legacy "default" → "opencode-light"
+	// Migrate legacy "default" → conduit default
 	if (saved === "default") {
 		saved = DEFAULT_THEME_ID;
 	}
@@ -243,8 +243,8 @@ export function getThemeLists(): {
 		const idx = list.findIndex((e) => e.id === pinnedId);
 		if (idx > 0) list.unshift(...list.splice(idx, 1));
 	};
-	pinFirst(dark, "claude");
-	pinFirst(light, DEFAULT_THEME_ID);
+	pinFirst(dark, "conduit");
+	pinFirst(light, "opencode-light");
 
 	return { dark, light, custom };
 }

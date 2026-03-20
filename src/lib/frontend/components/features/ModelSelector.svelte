@@ -94,7 +94,7 @@
 
 	function modelItemClass(model: ModelInfo): string {
 		const base =
-			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text font-sans text-[13px] text-left cursor-pointer transition-colors duration-100 leading-[1.4] hover:bg-bg-alt";
+			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text font-mono text-[13px] text-left cursor-pointer transition-colors duration-100 leading-[1.4] hover:bg-bg-alt";
 		if (isActiveModel(model)) {
 			return `${base} model-item-active text-accent`;
 		}
@@ -196,7 +196,7 @@
 <div id="model-display" class="relative inline-flex items-center">
 	<!-- Model button -->
 	<button
-		class="model-btn inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted font-sans text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[180px] max-sm:max-w-[120px] hover:bg-bg-alt hover:text-text-secondary {hasModel ? '' : 'opacity-50'}"
+		class="model-btn inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted font-mono text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[180px] max-sm:max-w-[120px] hover:bg-bg-alt hover:text-text-secondary {hasModel ? '' : 'opacity-50'}"
 		title="Switch model"
 		onclick={toggleDropdown}
 	>
@@ -211,7 +211,7 @@
 		<div class="relative">
 			<button
 				data-testid="variant-badge"
-				class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted font-sans text-[10px] font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary"
+				class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted font-mono text-[10px] font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary"
 				title="Thinking level ({variantLabel}) — Ctrl+T to cycle"
 				onclick={toggleVariantDropdown}
 			>
@@ -228,7 +228,7 @@
 					<!-- Default option (clears variant) -->
 					<button
 						data-testid="variant-option-default"
-						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text font-sans text-[12px] text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === '' ? 'text-accent' : ''}"
+						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text font-mono text-[12px] text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === '' ? 'text-accent' : ''}"
 						onclick={(e) => selectVariant("", e)}
 					>
 						{#if currentVariant === ""}
@@ -243,7 +243,7 @@
 					{#each variants as v (v)}
 						<button
 							data-testid="variant-option-{v}"
-							class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text font-sans text-[12px] text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === v ? 'text-accent' : ''}"
+							class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text font-mono text-[12px] text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === v ? 'text-accent' : ''}"
 							onclick={(e) => selectVariant(v, e)}
 						>
 							{#if currentVariant === v}

@@ -141,7 +141,7 @@
 					? `<span style="display:block;font-size:10px;color:var(--color-text-dimmer);line-height:1.3;margin-top:2px">${escapeHtml(agent.description)}</span>`
 					: "";
 				const activeStyle = active ? "color:var(--color-accent);" : "";
-				return `<button data-agent-id="${escapeAttr(agent.id)}" style="display:flex;align-items:baseline;gap:8px;width:100%;padding:6px 14px;margin:0;border:none;background:transparent;color:var(--color-text);font-family:var(--font-sans);font-size:13px;text-align:left;cursor:pointer;line-height:1.4;${activeStyle}" onmouseenter="this.style.background='var(--color-bg-alt)'" onmouseleave="this.style.background='transparent'">
+				return `<button data-agent-id="${escapeAttr(agent.id)}" style="display:flex;align-items:baseline;gap:8px;width:100%;padding:6px 14px;margin:0;border:none;background:transparent;color:var(--color-text);font-family:var(--font-mono);font-size:13px;text-align:left;cursor:pointer;line-height:1.4;${activeStyle}" onmouseenter="this.style.background='var(--color-bg-alt)'" onmouseleave="this.style.background='transparent'">
 					<span style="flex:1;min-width:0">
 						<span style="display:flex;align-items:center;gap:4px">${check}${escapeHtml(displayLabel(agent))}</span>
 						${desc}
@@ -180,7 +180,7 @@
 <div id="agent-selector" class:hidden={shouldHide}>
 	<button
 		bind:this={triggerEl}
-		class="inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted font-sans text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[160px] hover:bg-bg-alt hover:text-text-secondary"
+		class="inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted font-mono text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[160px] hover:bg-bg-alt hover:text-text-secondary"
 		title="Switch agent"
 		onclick={toggleDropdown}
 	>

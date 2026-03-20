@@ -117,9 +117,9 @@
 		</button>
 		<div id="header-project-scroll" class="min-w-0 flex-1 overflow-x-auto max-md:flex max-md:items-center">
 			<div class="flex items-center gap-2 whitespace-nowrap">
-				<h1 id="project-name" class="text-[15px] font-semibold">
-					{getCurrentSlug() ?? "Conduit"}
-				</h1>
+			<h1 id="project-name" class="text-[15px] font-semibold tracking-[0.08em]" style="font-family: var(--font-brand);">
+				{getCurrentSlug() ?? "conduit"}
+			</h1>
 				{#if currentInstance}
 					<div class="relative">
 						<button

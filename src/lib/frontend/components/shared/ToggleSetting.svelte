@@ -31,7 +31,8 @@
 	</span>
 	<span class="flex-1 text-sm text-text">{label}</span>
 	<button
-		class="relative inline-flex items-center w-[34px] h-[20px] rounded-full cursor-pointer border-none transition-colors duration-200 {checked ? 'bg-accent' : 'bg-bg-surface'} {dimmed ? 'opacity-40' : ''}"
+		class="relative inline-flex items-center w-[34px] h-[20px] rounded-full cursor-pointer border-none transition-[background,box-shadow] duration-200 {checked ? 'bg-brand-a' : 'bg-text-dimmer'} {dimmed ? 'opacity-40' : ''}"
+		style={checked ? "box-shadow: 0 0 8px rgba(255,45,123,0.4);" : ""}
 		role="switch"
 		aria-checked={checked}
 		aria-label={ariaLabel ?? `Toggle ${label.toLowerCase()}`}
@@ -39,7 +40,7 @@
 		onclick={onchange}
 	>
 		<span
-			class="absolute rounded-full bg-bg shadow-sm"
+			class="absolute rounded-full bg-white shadow-sm"
 			style="top: 2px; width: 16px; height: 16px; left: {checked ? '16px' : '2px'}; transition: left 0.2s ease-in-out;"
 		></span>
 	</button>

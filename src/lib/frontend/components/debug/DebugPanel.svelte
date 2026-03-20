@@ -17,10 +17,12 @@
 	}: { visible: boolean; onClose?: () => void } = $props();
 
 	// ─── Reactive event list ────────────────────────────────────────────────
-	// Touch eventCount to trigger reactivity when events are added.
+	// Touch eventCount and verboseMessages to trigger reactivity.
 	const eventCount = $derived(wsDebugState.eventCount);
+	const verboseMessages = $derived(wsDebugState.verboseMessages);
 	const events = $derived.by(() => {
 		void eventCount;
+		void verboseMessages;
 		return getDebugEvents();
 	});
 
@@ -139,16 +141,91 @@
 			window.removeEventListener("touchend", handleDragEnd);
 		};
 	});
+
+	// ─── Resize support (top-left handle) ──────────────────────────────────
+	let panelSize = $state({ width: 460, height: 320 });
+	let isResizing = $state(false);
+	let resizeStart = $state({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
+
+	function handleResizeStart(e: MouseEvent | TouchEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		isResizing = true;
+		const { x, y } = touchXY(e);
+		const panel = (e.target as HTMLElement).closest(".debug-panel") as HTMLElement;
+		if (!panel) return;
+		const rect = panel.getBoundingClientRect();
+		resizeStart = {
+			x,
+			y,
+			width: rect.width,
+			height: rect.height,
+			posX: panelPos.x === -1 ? rect.left : panelPos.x,
+			posY: panelPos.x === -1 ? rect.top : panelPos.y,
+		};
+		// Switch from CSS bottom/right positioning to explicit top/left
+		if (panelPos.x === -1) {
+			panelPos = { x: rect.left, y: rect.top };
+		}
+	}
+
+	function handleResizeMove(e: MouseEvent | TouchEvent) {
+		if (!isResizing) return;
+		e.preventDefault();
+		const { x, y } = touchXY(e);
+		// Dragging left/up = increase size (top-left handle)
+		const dx = resizeStart.x - x;
+		const dy = resizeStart.y - y;
+		const newWidth = Math.max(300, Math.min(window.innerWidth * 0.9, resizeStart.width + dx));
+		const newHeight = Math.max(160, Math.min(window.innerHeight * 0.8, resizeStart.height + dy));
+		panelSize = { width: newWidth, height: newHeight };
+		panelPos = {
+			x: Math.max(0, resizeStart.posX - (newWidth - resizeStart.width)),
+			y: Math.max(0, resizeStart.posY - (newHeight - resizeStart.height)),
+		};
+	}
+
+	function handleResizeEnd() {
+		isResizing = false;
+	}
+
+	// Register global mouse/touch listeners for resizing
+	$effect(() => {
+		if (!isResizing) return;
+		window.addEventListener("mousemove", handleResizeMove);
+		window.addEventListener("mouseup", handleResizeEnd);
+		window.addEventListener("touchmove", handleResizeMove, { passive: false });
+		window.addEventListener("touchend", handleResizeEnd);
+		return () => {
+			window.removeEventListener("mousemove", handleResizeMove);
+			window.removeEventListener("mouseup", handleResizeEnd);
+			window.removeEventListener("touchmove", handleResizeMove);
+			window.removeEventListener("touchend", handleResizeEnd);
+		};
+	});
 </script>
 
 {#if visible}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-[11px] leading-relaxed select-none overflow-hidden resize"
+		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-[11px] leading-relaxed select-none overflow-hidden"
 		style={panelPos.x === -1
-			? "bottom: 1rem; right: 1rem; width: 460px; height: 320px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;"
-			: `left: ${panelPos.x}px; top: ${panelPos.y}px; width: 460px; height: 320px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`}
+			? `bottom: 1rem; right: 1rem; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`
+			: `left: ${panelPos.x}px; top: ${panelPos.y}px; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`}
 	>
+		<!-- Resize handle (top-left) -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="absolute top-0 left-0 w-4 h-4 cursor-nw-resize z-10 flex items-start justify-start p-0.5"
+			onmousedown={handleResizeStart}
+			ontouchstart={handleResizeStart}
+		>
+		<svg class="w-2.5 h-2.5 text-green-700/60 hover:text-green-500/80 transition-colors" viewBox="0 0 10 10" fill="none">
+			<line x1="1" y1="3" x2="3" y2="1" stroke="currentColor" stroke-width="1.5" />
+			<line x1="1" y1="7" x2="7" y2="1" stroke="currentColor" stroke-width="1.5" />
+		</svg>
+		</div>
+
 		<!-- Header (draggable) -->
 		<div
 			class="flex items-center justify-between px-3 py-1.5 border-b border-green-900/30 cursor-move"

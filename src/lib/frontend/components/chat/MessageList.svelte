@@ -34,6 +34,7 @@
 	import PermissionCard from "../features/PermissionCard.svelte";
 	import QuestionCard from "../features/QuestionCard.svelte";
 	import HistoryLoader from "../features/HistoryLoader.svelte";
+	import BlockGrid from "../shared/BlockGrid.svelte";
 
 
 	let messagesEl: HTMLDivElement | undefined = $state();
@@ -199,7 +200,7 @@
 	<!-- Loading indicator (was in HistoryView) -->
 	{#if historyState.loading}
 		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
-			<span class="animate-spin">&#x27F3;</span>
+			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
 			<span>Loading history...</span>
 		</div>
 	{/if}
@@ -263,7 +264,7 @@
 	{#if chatState.processing}
 		<div class="max-w-[760px] mx-auto px-5 pb-3">
 			<div
-				class="h-[3px] rounded-full overflow-hidden"
+				class="h-[3px] rounded-full overflow-hidden bg-bg-alt"
 				style="--bounce-track: 100%; --bounce-width: 30%;"
 			>
 				<div

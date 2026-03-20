@@ -5,6 +5,7 @@
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from '../shared/BlockGrid.svelte';
 
 	let { message }: { message: ToolMessage } = $props();
 	let expanded = $state(false);
@@ -56,7 +57,7 @@
 
 	const statusIconClass = $derived.by(() => {
 		if (message.status === "running" || message.status === "pending")
-			return "text-text-muted icon-spin";
+			return "text-text-muted";
 		if (message.status === "error") return "text-error";
 		return "text-text-dimmer";
 	});
@@ -76,10 +77,6 @@
 		}
 	});
 
-	const borderColor = $derived(
-		message.isError ? "border-error" : "border-tool"
-	);
-
 	function handleToggle() {
 		expanded = !expanded;
 	}
@@ -89,13 +86,22 @@
 	class="skill-item max-w-[760px] mx-auto px-5 my-1.5"
 	data-tool-id={message.id}
 >
-	<div class="border-l-3 {borderColor} bg-tool-bg rounded-r-lg">
+	<div class="bg-bg-surface rounded-r-lg {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-tool-completed' : message.status === 'running' ? 'glow-tool-running' : ''}">
 		<button
 			class="skill-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-[13px] text-text-secondary hover:bg-black/[0.03] transition-colors duration-150 border-none text-left rounded-tr-lg"
 			onclick={handleToggle}
 		>
 			<!-- Status bullet -->
 			<span class="tool-bullet w-2 h-2 rounded-full shrink-0 {bulletClass}"></span>
+
+			<!-- Status icon -->
+			{#if message.status === 'running'}
+				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
+			{:else}
+				<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
+					<Icon name={statusIconName} size={14} />
+				</span>
+			{/if}
 
 			<!-- Skill icon -->
 			<span class="text-accent [&_.lucide]:w-4 [&_.lucide]:h-4">
@@ -113,13 +119,6 @@
 					</span>
 				{/if}
 			</div>
-
-			<!-- Status icon -->
-			<span
-				class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}"
-			>
-				<Icon name={statusIconName} size={14} />
-			</span>
 		</button>
 
 		<!-- Subtitle row -->

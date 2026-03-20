@@ -6,6 +6,7 @@
 <script lang="ts">
 	import type { ThinkingMessage } from "../../types.js";
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from '../shared/BlockGrid.svelte';
 
 	let { message }: { message: ThinkingMessage } = $props();
 	let expanded = $state(false);
@@ -53,15 +54,13 @@
 >
 	{#if !message.done}
 		<!-- Streaming: inline thinking display -->
-		<div class="border-l-3 border-thinking bg-thinking-bg rounded-r-lg py-2 px-3.5">
+		<div class="glow-brand-b bg-bg-surface/80 rounded-[10px] py-2 px-3">
 			<div class="flex items-center gap-1.5 mb-1.5">
-				<span class="text-text-muted [&_.lucide]:w-3.5 [&_.lucide]:h-3.5">
-					<Icon name="loader" size={14} class="icon-spin" />
-				</span>
-				<span class="text-xs text-text-muted font-medium">{label}…</span>
+				<BlockGrid cols={5} mode="fast" blockSize={2} gap={0.75} class="self-center" />
+				<span class="text-xs text-brand-b font-medium">{label}…</span>
 			</div>
 			{#if message.text}
-				<div class="font-mono text-[13px] leading-[1.55] text-text-muted italic whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
+				<div class="font-mono text-[13px] leading-[1.55] text-text-secondary whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
 					{message.text}
 				</div>
 			{/if}
@@ -69,7 +68,7 @@
 	{:else}
 		<!-- Done: compact collapsible bar -->
 		<button
-			class="thinking-header flex items-center gap-1.5 cursor-pointer py-2 px-3 select-none border-l-3 border-thinking rounded-r-lg text-xs text-text-dimmer hover:bg-thinking-bg transition-colors duration-150 border-t-0 border-r-0 border-b-0 w-full text-left"
+			class="thinking-header flex items-center gap-1.5 cursor-pointer py-2 px-3 select-none glow-brand-b rounded-[10px] text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 w-full text-left"
 			onclick={handleToggle}
 		>
 			<span
@@ -89,7 +88,7 @@
 
 		{#if expanded && message.text}
 			<div
-				class="thinking-content border-l-3 border-thinking py-2 px-3.5 font-mono text-[13px] leading-[1.55] text-text-muted italic whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto"
+				class="thinking-content glow-brand-b rounded-[10px] py-2 px-3 font-mono text-[13px] leading-[1.7] text-text-secondary whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto"
 			>
 				{message.text}
 			</div>

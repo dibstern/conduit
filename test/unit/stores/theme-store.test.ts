@@ -163,6 +163,27 @@ const opencodeLight = {
 	},
 };
 
+const conduitTheme = {
+	name: "Conduit",
+	variant: "dark" as const,
+	base00: "18181B",
+	base01: "27272A",
+	base02: "3F3F46",
+	base03: "52525B",
+	base04: "71717A",
+	base05: "A1A1AA",
+	base06: "E4E4E7",
+	base07: "FAFAFA",
+	base08: "FF4444",
+	base09: "FF2D7B",
+	base0A: "EAB308",
+	base0B: "22C55E",
+	base0C: "00E5FF",
+	base0D: "00E5FF",
+	base0E: "FF2D7B",
+	base0F: "EAB308",
+};
+
 function mockFetchSuccess(
 	bundled: Record<string, unknown>,
 	custom: Record<string, unknown> = {},
@@ -192,8 +213,8 @@ beforeEach(() => {
 });
 
 describe("DEFAULT_THEME_ID", () => {
-	it("is 'opencode-light'", () => {
-		expect(DEFAULT_THEME_ID).toBe("opencode-light");
+	it("is 'conduit'", () => {
+		expect(DEFAULT_THEME_ID).toBe("conduit");
 	});
 });
 
@@ -361,35 +382,35 @@ describe("initTheme", () => {
 		expect(themeState.currentThemeId).toBe("dark1");
 	});
 
-	it("falls back to opencode-light when saved theme not found", async () => {
+	it("falls back to conduit when saved theme not found", async () => {
 		localStorageMock.setItem("conduit-theme", "deleted-theme");
 		mockFetchSuccess({
 			dark1: sampleTheme,
-			"opencode-light": opencodeLight,
+			conduit: conduitTheme,
 		});
 		await initTheme();
-		expect(themeState.currentThemeId).toBe("opencode-light");
+		expect(themeState.currentThemeId).toBe("conduit");
 		// Should have cleaned up stale storage
 		expect(localStorageMock.removeItem).toHaveBeenCalledWith("conduit-theme");
 	});
 
-	it("applies opencode-light when no saved theme", async () => {
+	it("applies conduit when no saved theme", async () => {
 		mockFetchSuccess({
 			dark1: sampleTheme,
-			"opencode-light": opencodeLight,
+			conduit: conduitTheme,
 		});
 		await initTheme();
-		expect(themeState.currentThemeId).toBe("opencode-light");
+		expect(themeState.currentThemeId).toBe("conduit");
 	});
 
-	it("migrates legacy 'default' to opencode-light", async () => {
+	it("migrates legacy 'default' to conduit", async () => {
 		localStorageMock.setItem("conduit-theme", "default");
 		mockFetchSuccess({
 			dark1: sampleTheme,
-			"opencode-light": opencodeLight,
+			conduit: conduitTheme,
 		});
 		await initTheme();
-		expect(themeState.currentThemeId).toBe("opencode-light");
+		expect(themeState.currentThemeId).toBe("conduit");
 	});
 });
 
@@ -441,14 +462,14 @@ describe("getThemeLists", () => {
 		expect(lists.custom[0]!.id).toBe("myCustom");
 	});
 
-	it("pins claude to top of dark list", () => {
+	it("pins conduit to top of dark list", () => {
 		themeState.themes = {
 			dracula: { ...sampleTheme, name: "Dracula" },
-			claude: { ...sampleTheme, name: "Claude Dark" },
+			conduit: { ...conduitTheme },
 		};
 		const lists = getThemeLists();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(lists.dark[0]!.id).toBe("claude");
+		expect(lists.dark[0]!.id).toBe("conduit");
 	});
 
 	it("pins opencode-light to top of light list", () => {

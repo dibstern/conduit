@@ -356,34 +356,45 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
 	bind:this={containerEl}
-	class="msg-assistant group max-w-[760px] mx-auto mb-3 px-5 py-1 rounded-xl transition-colors duration-150 relative {containerCopyClass}"
+	class="msg-assistant group max-w-[760px] mx-auto mb-3 px-5 {containerCopyClass}"
 	data-uuid={message.uuid}
 	onclick={handleClick}
 	onkeydown={handleKeydown}
 	role="article"
 >
-	<div class="md-content text-[14px] leading-[1.7]">
-		{@html message.html}
-	</div>
+	<div class="bg-bg-surface rounded-[10px] py-4 px-5 relative glow-brand-b transition-colors duration-150">
+		<!-- Action buttons (hover) — top-right icon row -->
+		{#if message.finalized}
+			<div
+				class="msg-actions absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity duration-150 z-10"
+				class:opacity-100={copyState !== "idle"}
+			>
+				<button
+					class="flex items-center justify-center w-7 h-7 rounded-md border cursor-pointer transition-colors duration-150 backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
+					title={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
+					onclick={handleClick}
+				>
+					{#if copyState === 'done'}
+						<Icon name="check" size={14} />
+					{:else}
+						<Icon name="copy" size={14} />
+					{/if}
+				</button>
+				{#if message.messageId}
+					<button
+						class="flex items-center justify-center w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary cursor-pointer transition-colors duration-150 backdrop-blur-sm"
+						title="Fork from here"
+						onclick={handleFork}
+					>
+						<Icon name="git-fork" size={14} />
+					</button>
+				{/if}
+			</div>
+		{/if}
 
-	<!-- Fork button (hover) — only for finalized messages with a messageId -->
-	{#if message.finalized && message.messageId}
-		<button
-			class="msg-fork-btn absolute top-1.5 right-2 opacity-0 group-hover:opacity-70 hover:!opacity-100 flex items-center justify-center w-7 h-7 rounded-md bg-bg-surface/80 border border-border-subtle/50 text-text-muted cursor-pointer transition-opacity duration-150 z-10 backdrop-blur-sm"
-			title="Fork from here"
-			onclick={handleFork}
-		>
-			<Icon name="git-fork" size={14} />
-		</button>
-	{/if}
-
-	<!-- Copy hint (only for finalized messages) — below content, right-aligned -->
-	{#if message.finalized}
-		<div
-			class="msg-copy-hint text-right text-[11px] mt-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity duration-200 select-none {hintColor}"
-			class:opacity-100={copyState !== "idle"}
-		>
-			{hintText}
+		<div class="text-[11px] font-mono font-semibold uppercase tracking-[1.5px] text-brand-b mb-2">Assistant</div>
+		<div class="md-content text-[13px] leading-[1.7]">
+			{@html message.html}
 		</div>
-	{/if}
+	</div>
 </div>

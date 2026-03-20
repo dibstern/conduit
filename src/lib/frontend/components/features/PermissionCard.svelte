@@ -173,7 +173,7 @@
 				</div>
 			{/if}
 		{:else}
-			<div class="perm-resolved text-sm py-2">
+			<div class="perm-resolved text-sm py-2 opacity-60">
 				<span class={resolvedClass}>{resolvedText}</span>
 			</div>
 		{/if}

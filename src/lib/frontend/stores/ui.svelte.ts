@@ -93,8 +93,8 @@ export const uiState = $state({
 
 /** Get the context bar color class based on usage percentage. */
 export function getContextColor(): string {
-	if (uiState.contextPercent >= 95) return "ctx-red";
-	if (uiState.contextPercent >= 80) return "ctx-yellow";
+	if (uiState.contextPercent >= 80) return "ctx-red";
+	if (uiState.contextPercent >= 50) return "ctx-yellow";
 	if (uiState.contextPercent > 0) return "ctx-green";
 	return "";
 }

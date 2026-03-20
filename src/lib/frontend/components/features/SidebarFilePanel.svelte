@@ -8,6 +8,7 @@
 	import { openFileViewer, closeMobileSidebar, setSidebarPanel } from "../../stores/ui.svelte.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from "../shared/BlockGrid.svelte";
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@
 	<!-- Breadcrumbs -->
 	<div class="fb-breadcrumbs flex items-center gap-0.5 px-4 py-1.5 text-xs text-text-muted overflow-x-auto shrink-0">
 		{#each breadcrumbs as crumb, i (crumb.path)}
-			{#if i > 0}
+			{#if i > 1}
 				<span class="text-text-dimmer">/</span>
 			{/if}
 			{#if i === breadcrumbs.length - 1}
@@ -168,7 +169,7 @@
 	<div id="file-tree" class="flex-1 overflow-y-auto px-1">
 		{#if loading}
 			<div class="flex items-center justify-center py-8 text-text-dimmer text-sm">
-				<Icon name="loader" size={16} class="icon-spin" />
+				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 				<span class="ml-2">Loading...</span>
 			</div>
 		{:else if entries.length === 0}

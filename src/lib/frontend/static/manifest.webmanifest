@@ -1,18 +1,30 @@
 {
 	"name": "Conduit",
-	"short_name": "OC Relay",
+	"short_name": "Conduit",
 	"description": "Access your OpenCode sessions from any device",
 	"start_url": "/",
 	"display": "standalone",
 	"orientation": "portrait",
-	"theme_color": "#0a0a0a",
-	"background_color": "#0a0a0a",
+	"theme_color": "#18181B",
+	"background_color": "#18181B",
 	"icons": [
 		{
-			"src": "/apple-touch-icon.png",
+			"src": "/static/apple-touch-icon.png",
 			"sizes": "180x180",
 			"type": "image/png",
 			"purpose": "any"
+		},
+		{
+			"src": "/static/web-app-manifest-192x192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any maskable"
+		},
+		{
+			"src": "/static/web-app-manifest-512x512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any maskable"
 		}
 	]
 }

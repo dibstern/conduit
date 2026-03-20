@@ -5,62 +5,153 @@
 /* ─── Design Tokens ─────────────────────────────────────────────────────────── */
 
 @theme {
-	--color-bg: hsl(0, 20%, 99%);
-	--color-bg-alt: hsl(0, 8%, 97%);
-	--color-bg-surface: hsl(0, 8%, 97%);
-	--color-text: hsl(0, 5%, 12%);
-	--color-text-secondary: hsl(0, 1%, 39%);
-	--color-text-muted: hsl(0, 1%, 60%);
-	--color-text-dimmer: hsl(30, 2%, 81%);
-	--color-accent: hsl(0, 5%, 12%);
-	--color-accent-hover: hsl(0, 5%, 18%);
-	--color-accent-bg: hsla(0, 100%, 17%, 0.06);
-	--color-code-bg: hsl(0, 8%, 94%);
-	--color-border: hsl(30, 2%, 81%);
-	--color-border-subtle: hsla(0, 100%, 3%, 0.12);
-	--color-input-bg: hsl(0, 20%, 99%);
-	--color-user-bubble: hsl(0, 8%, 97%);
-	--color-error: #e5443a;
-	--color-success: #12c905;
+	/* === BRAND COLORS ===
+	   Change these two values to rebrand the entire app.
+	   They are constant across all user-selected themes. */
+	--color-brand-a: #ff2d7b; /* pink */
+	--color-brand-b: #00e5ff; /* cyan */
+	--color-brand-a-glow: rgba(255, 45, 123, 0.15);
+	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
 
-	--color-sidebar-bg: hsl(0, 12%, 97%);
-	--color-sidebar-hover: hsl(0, 8%, 94%);
-	--color-sidebar-active: hsl(0, 8%, 91%);
+	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
+	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
+	--animate-cascade-a-fast: pixel-cascade-a 1.4s ease-in-out infinite;
+	--animate-cascade-b-fast: pixel-cascade-b 1.4s ease-in-out infinite;
 
-	--color-thinking: hsl(38, 55%, 62%);
-	--color-thinking-bg: hsla(38, 55%, 62%, 0.06);
-	--color-tool: hsl(220, 12%, 64%);
-	--color-tool-bg: hsla(220, 12%, 64%, 0.04);
-	--color-warning: hsl(38, 55%, 62%);
-	--color-warning-bg: hsla(38, 55%, 62%, 0.12);
+	--font-brand: "Chakra Petch", sans-serif;
 
-	--overlay-rgb: 0, 0, 0;
+	--color-bg: #18181b;
+	--color-bg-alt: #27272a;
+	--color-bg-surface: #27272a;
+	--color-text: #e4e4e7;
+	--color-text-secondary: #a1a1aa;
+	--color-text-muted: #71717a;
+	--color-text-dimmer: #52525b;
+	--color-accent: #ff2d7b;
+	--color-accent-hover: #ff4d91;
+	--color-accent-bg: rgba(255, 45, 123, 0.12);
+	--color-code-bg: #131315;
+	--color-border: #3f3f46;
+	--color-border-subtle: rgba(255, 255, 255, 0.06);
+	--color-input-bg: #333338;
+	--color-user-bubble: #2c2c30;
+	--color-error: #ff4444;
+	--color-success: #22c55e;
+
+	--color-sidebar-bg: #141416;
+	--color-sidebar-hover: #202023;
+	--color-sidebar-active: #2a2a2e;
+
+	--color-thinking: #eab308;
+	--color-thinking-bg: rgba(234, 179, 8, 0.06);
+	--color-tool: #00e5ff;
+	--color-tool-bg: rgba(0, 229, 255, 0.04);
+	--color-warning: #eab308;
+	--color-warning-bg: rgba(234, 179, 8, 0.12);
+
+	--overlay-rgb: 255, 255, 255;
 	--shadow-rgb: 0, 0, 0;
 
-	/* Syntax highlighting defaults (light theme) */
-	--hl-comment: hsl(0, 1%, 60%);
-	--hl-keyword: hsl(332, 65%, 43%);
-	--hl-string: hsl(120, 44%, 34%);
-	--hl-number: hsl(14, 80%, 51%);
-	--hl-function: hsl(221, 87%, 60%);
-	--hl-variable: hsl(0, 68%, 42%);
-	--hl-type: hsl(38, 56%, 52%);
-	--hl-constant: hsl(14, 80%, 51%);
-	--hl-tag: hsl(0, 68%, 42%);
-	--hl-attr: hsl(221, 87%, 60%);
-	--hl-regexp: hsl(180, 55%, 40%);
-	--hl-meta: hsl(33, 50%, 50%);
-	--hl-builtin: hsl(14, 80%, 51%);
-	--hl-symbol: hsl(33, 50%, 50%);
-	--hl-addition: hsl(120, 44%, 34%);
-	--hl-deletion: hsl(0, 68%, 42%);
+	/* Syntax highlighting defaults (conduit dark theme) */
+	--hl-comment: #52525b;
+	--hl-keyword: #ff2d7b;
+	--hl-string: #22c55e;
+	--hl-number: #ff2d7b;
+	--hl-function: #00e5ff;
+	--hl-variable: #ff4444;
+	--hl-type: #eab308;
+	--hl-constant: #ff2d7b;
+	--hl-tag: #ff4444;
+	--hl-attr: #00e5ff;
+	--hl-regexp: #00e5ff;
+	--hl-meta: #eab308;
+	--hl-builtin: #ff2d7b;
+	--hl-symbol: #eab308;
+	--hl-addition: #22c55e;
+	--hl-deletion: #ff4444;
 
 	--font-mono:
-		"Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
-		Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
+		SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+		monospace;
 	--font-sans:
-		"Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
-		Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
+		SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+		monospace;
+}
+
+@utility glow-brand-a {
+	box-shadow:
+		-4px 0 16px var(--color-brand-a-glow),
+		-3px 0 0 var(--color-brand-a);
+}
+@utility glow-brand-b {
+	box-shadow:
+		-4px 0 16px var(--color-brand-b-glow),
+		-3px 0 0 var(--color-brand-b);
+}
+@utility glow-brand-a-strong {
+	box-shadow:
+		0 0 8px rgba(255, 45, 123, 0.4),
+		0 0 24px rgba(255, 45, 123, 0.15);
+}
+@utility glow-brand-b-strong {
+	box-shadow:
+		0 0 8px rgba(0, 229, 255, 0.4),
+		0 0 24px rgba(0, 229, 255, 0.15);
+}
+@utility glow-tool-running {
+	box-shadow:
+		-4px 0 16px rgba(234, 179, 8, 0.15),
+		-3px 0 0 var(--color-warning);
+}
+@utility glow-tool-completed {
+	box-shadow:
+		-4px 0 16px rgba(0, 229, 255, 0.12),
+		-3px 0 0 var(--color-brand-b);
+}
+@utility glow-tool-error {
+	box-shadow:
+		-4px 0 16px rgba(255, 68, 68, 0.15),
+		-3px 0 0 var(--color-error);
+}
+
+@keyframes pixel-cascade-a {
+	0% {
+		opacity: 0.15;
+	}
+	20% {
+		opacity: 1;
+	}
+	40% {
+		opacity: 0.3;
+	}
+	60% {
+		opacity: 0.8;
+	}
+	80% {
+		opacity: 0.15;
+	}
+	100% {
+		opacity: 0.5;
+	}
+}
+@keyframes pixel-cascade-b {
+	0% {
+		opacity: 0.5;
+	}
+	25% {
+		opacity: 0.15;
+	}
+	50% {
+		opacity: 1;
+	}
+	75% {
+		opacity: 0.3;
+	}
+	100% {
+		opacity: 0.15;
+	}
 }
 
 /* ─── Base ──────────────────────────────────────────────────────────────────── */
@@ -385,12 +476,31 @@
 		@apply italic;
 	}
 
-	.md-content ul,
+	.md-content ul {
+		list-style-type: disc;
+		@apply pl-7 my-2.5;
+	}
 	.md-content ol {
-		@apply pl-6 my-2.5;
+		list-style-type: decimal;
+		@apply pl-7 my-2.5;
 	}
 	.md-content li {
-		@apply mb-[5px] mt-0;
+		@apply mb-1.5 mt-0 pl-1;
+	}
+	.md-content li::marker {
+		color: var(--color-brand-b);
+	}
+	.md-content ol li::marker {
+		color: var(--color-text-muted);
+		font-family: var(--font-mono);
+		font-variant-numeric: tabular-nums;
+	}
+	.md-content ul ul {
+		list-style-type: circle;
+		@apply my-1;
+	}
+	.md-content ul ul li::marker {
+		color: var(--color-text-dimmer);
 	}
 	.md-content li > p {
 		@apply my-0.5;
@@ -419,16 +529,35 @@
 	}
 
 	.md-content table {
-		@apply border-collapse my-3.5 text-[14px] w-full overflow-x-auto block;
-	}
-	.md-content th,
-	.md-content td {
+		@apply my-3.5 text-[13px] w-full;
+		border-collapse: separate;
+		border-spacing: 0;
 		border: 1px solid var(--color-border);
-		@apply px-3 py-2 text-left align-top;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+	.md-content .table-wrap {
+		@apply overflow-x-auto my-3.5;
+	}
+	.md-content .table-wrap table {
+		@apply my-0;
 	}
 	.md-content th {
-		background: var(--color-bg-alt);
-		@apply font-semibold;
+		@apply px-3.5 py-2 text-left align-top font-semibold;
+		color: var(--color-text);
+		background: rgba(0, 229, 255, 0.04);
+		border-bottom: 2px solid var(--color-brand-b);
+	}
+	.md-content td {
+		@apply px-3.5 py-[7px] text-left align-top;
+		color: var(--color-text-secondary);
+		border-bottom: 1px solid var(--color-border-subtle);
+	}
+	.md-content tbody tr:nth-child(odd) {
+		background: rgba(255, 255, 255, 0.012);
+	}
+	.md-content tr:last-child td {
+		border-bottom: none;
 	}
 	.md-content hr {
 		@apply border-0 my-5;
@@ -665,6 +794,15 @@
 	}
 }
 
+@keyframes tool-shimmer-slide {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(100%);
+	}
+}
+
 /* Hidden overrides */
 #attach-menu.hidden {
 	display: none;
@@ -676,13 +814,13 @@
 
 /* Context color thresholds — @utility blocks */
 @utility ctx-green {
-	background: var(--color-success);
+	background: var(--color-brand-b);
 }
 @utility ctx-yellow {
 	background: var(--color-warning);
 }
 @utility ctx-red {
-	background: var(--color-error);
+	background: var(--color-brand-a);
 }
 
 /* Banner hidden state */

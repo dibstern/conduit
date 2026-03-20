@@ -20,6 +20,7 @@
 	import SessionItem from "./SessionItem.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from "../shared/BlockGrid.svelte";
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 
@@ -295,7 +296,7 @@
 					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer disabled:cursor-default transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 					>
 						{#if sessionCreation.value.phase === "creating"}
-							<Icon name="loader-2" size={14} class="animate-spin" />
+							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 						{:else}
 							<Icon name="plus" size={14} />
 						{/if}

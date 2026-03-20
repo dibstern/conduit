@@ -6,6 +6,7 @@
 	import type { ToolGroup } from "../../utils/group-tools.js";
 	import ToolGroupItem from "./ToolGroupItem.svelte";
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from '../shared/BlockGrid.svelte';
 
 	let { group }: { group: ToolGroup } = $props();
 	let expanded = $state(false);
@@ -43,14 +44,10 @@
 
 	const statusIconClass = $derived.by(() => {
 		if (group.status === "running" || group.status === "pending")
-			return "text-text-muted icon-spin";
+			return "text-text-muted";
 		if (group.status === "error") return "text-error";
 		return "text-text-dimmer";
 	});
-
-	const borderColor = $derived(
-		group.status === "error" ? "border-error" : "border-tool",
-	);
 
 	function handleToggle() {
 		expanded = !expanded;
@@ -58,10 +55,13 @@
 </script>
 
 <div class="max-w-[760px] mx-auto px-5 my-1.5">
-	<div class="border-l-3 {borderColor} bg-tool-bg rounded-r-lg">
+	<div class="bg-bg-surface rounded-[10px] relative overflow-hidden {group.status === 'error' ? 'glow-tool-error' : group.status === 'completed' ? 'glow-tool-completed' : group.status === 'running' ? 'glow-tool-running' : ''}">
+		{#if group.status === 'running'}
+			<div class="absolute inset-0 pointer-events-none rounded-[10px]" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
+		{/if}
 		<!-- Header button -->
 		<button
-			class="flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-[13px] text-text-secondary hover:bg-[rgba(var(--overlay-rgb),0.03)] transition-colors duration-150 border-none text-left rounded-tr-lg"
+			class="flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-[13px] text-text-secondary hover:bg-[rgba(var(--overlay-rgb),0.03)] transition-colors duration-150 border-none text-left"
 			onclick={handleToggle}
 		>
 			<span
@@ -73,7 +73,15 @@
 
 			<span class="w-2 h-2 rounded-full shrink-0 {bulletClass}"></span>
 
-			<span class="font-medium text-text-secondary">
+		{#if group.status === 'running'}
+			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
+		{:else}
+			<span class="shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
+				<Icon name={statusIconName} size={14} />
+			</span>
+		{/if}
+
+			<span class="font-medium font-mono text-text-secondary">
 				{group.label}
 			</span>
 
@@ -82,12 +90,6 @@
 			</span>
 
 			<span class="flex-1"></span>
-
-			<span
-				class="shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}"
-			>
-				<Icon name={statusIconName} size={14} />
-			</span>
 		</button>
 
 		<!-- Expanded tool list -->

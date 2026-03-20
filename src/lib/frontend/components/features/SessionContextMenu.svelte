@@ -101,7 +101,7 @@
 	>
 		<!-- Rename -->
 		<button
-		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-sans cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
+		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 		onclick={handleRename}
 		>
 			<Icon name="pencil" size={14} />
@@ -110,7 +110,7 @@
 
 		<!-- Fork -->
 		<button
-		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-sans cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
+		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 		onclick={(e) => {
 				e.stopPropagation();
 				onfork(session.id);
@@ -123,7 +123,7 @@
 
 		<!-- Copy resume command -->
 		<button
-		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-sans cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
+		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 		onclick={handleCopyResume}
 		>
 			<Icon name="copy" size={14} />
@@ -132,7 +132,7 @@
 
 		<!-- Delete -->
 		<button
-			class="session-ctx-item session-ctx-delete flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-[13px] font-sans cursor-pointer text-left transition-colors duration-100 text-error hover:bg-error/10 hover:text-error"
+			class="session-ctx-item session-ctx-delete flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 text-error hover:bg-error/10 hover:text-error"
 			onclick={handleDelete}
 		>
 			<Icon name="trash-2" size={14} />

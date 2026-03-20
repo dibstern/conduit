@@ -1,7 +1,5 @@
 <!-- ─── Connect Overlay ───────────────────────────────────────────────────── -->
 <!-- OpenCode "O" mark animation overlay shown during WebSocket connection.    -->
-<!-- The inner fill sweeps up and down with smooth easing while random         -->
-<!-- thinking verbs cycle with a shimmer gradient text effect.                 -->
 
 <script lang="ts">
 	import { fade } from "svelte/transition";
@@ -10,30 +8,11 @@
 	import { getInstanceById, getCachedInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { navigate } from "../../stores/router.svelte.js";
 	import type { InstanceStatus } from "../../types.js";
-	import { VERB_FADE_MS, VERB_CYCLE_MS, CONNECT_FADEOUT_MS } from "../../ui-constants.js";
-
-	// ─── Thinking Verbs ─────────────────────────────────────────────────────────
-
-	const THINKING_VERBS = [
-		"Thinking",
-		"Pondering",
-		"Reflecting",
-		"Musing",
-		"Deliberating",
-		"Considering",
-		"Contemplating",
-		"Wondering",
-		"Analyzing",
-		"Processing",
-	];
-
-	function randomThinkingVerb(): string {
-		return THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)] ?? "Thinking";
-	}
+	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
+	import ConduitLogo from '../shared/ConduitLogo.svelte';
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
-	let verb = $state(randomThinkingVerb());
 	let fadeOut = $state(false);
 	let displayNone = $state(false);
 
@@ -147,23 +126,6 @@
 		}
 	});
 
-	// ─── Verb cycling ───────────────────────────────────────────────────────────
-	// Uses a {#key} block in the template so Svelte destroys the old element and
-	// creates a new one on each cycle. Each element only ever renders one verb,
-	// which completely sidesteps WebKit's GPU compositor caching stale
-	// background-clip:text layers — there is no "old text" to leak through.
-
-	$effect(() => {
-		if (connected) return;
-		if (relayStatus === "registering" || relayStatus === "error") return;
-		const interval = setInterval(() => {
-			let next: string;
-			do { next = randomThinkingVerb(); } while (next === verb);
-			verb = next;
-		}, VERB_CYCLE_MS);
-		return () => clearInterval(interval);
-	});
-
 	// ─── Hide animation when connected ──────────────────────────────────────────
 
 	$effect(() => {
@@ -197,95 +159,44 @@
 {#if !isHidden}
 	<div
 		id="connect-overlay"
-		class="connect-overlay fixed inset-0 z-50 flex items-center justify-center bg-bg/95"
+		class="connect-overlay fixed inset-0 z-50 flex items-center justify-center bg-bg"
 		style="opacity: {fadeOut ? '0' : '1'}; transition: opacity 600ms ease; pointer-events: {fadeOut ? 'none' : 'auto'};"
 	>
-		<div class="flex flex-col items-center gap-6">
-			<!-- OpenCode "O" Mark with animated fill -->
-			<svg
-				viewBox="0 0 16 20"
-				fill="none"
-				xmlns="http://www.w3.org/2000/svg"
-				width="80"
-				height="100"
-				aria-hidden="true"
-			>
-				<defs>
-					<clipPath id="o-hole-clip">
-						<rect x="4" y="4" width="8" height="12" />
-					</clipPath>
-				</defs>
+		<!-- Radial glow orb -->
+		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgba(255,45,123,0.08) 0%, rgba(0,229,255,0.05) 40%, transparent 70%);"></div>
 
-				<!-- Animated fill that sweeps through the "O" hole -->
-				<g clip-path="url(#o-hole-clip)">
-					<rect x="4" y="16" width="8" height="12" fill="currentColor" opacity="0.45" class="text-text-muted">
-						<animate
-							attributeName="y"
-							values="16;-8;16"
-							dur="2.5s"
-							repeatCount="indefinite"
-							calcMode="spline"
-							keySplines="0.4 0 0.6 1;0.4 0 0.6 1"
-						/>
-					</rect>
-				</g>
+		<div class="flex flex-col items-center gap-3 relative z-10">
+			<!-- Conduit logo with animated block grid -->
+			<ConduitLogo size="loading" animated={true} showText={true} />
 
-				<!-- Outer "O" frame (drawn on top to mask fill edges) -->
-				<path
-					d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z"
-					fill="currentColor"
-					class="text-text"
-				/>
-			</svg>
-
-		<!-- Thinking verb / relay status display -->
-		<div class="relative flex flex-col items-center justify-center" style="min-height: 1.75rem;">
-			{#if relayStatus === "registering"}
-				<div class="text-lg font-medium text-text-muted">
-					Starting relay...
-				</div>
-			{:else if relayStatus === "error"}
-				<div class="text-lg font-medium text-red-400">
+		<!-- Status text — only one of these renders at a time, no empty wrapper -->
+		{#if relayStatus === "registering"}
+			<div class="text-sm font-medium text-text-muted" style="font-family: var(--font-brand);">
+				Starting relay...
+			</div>
+		{:else if relayStatus === "error"}
+			<div class="flex flex-col items-center gap-2">
+				<div class="text-sm font-medium text-red-400" style="font-family: var(--font-brand);">
 					Relay failed to start
 				</div>
 				{#if relayError}
-					<div class="text-xs text-text-dimmer mt-1 max-w-xs text-center truncate" title={relayError}>
+					<div class="text-xs text-text-dimmer max-w-xs text-center truncate" title={relayError}>
 						{relayError}
 					</div>
 				{/if}
-				<div class="flex gap-3 mt-3">
-					<a
-						href="/"
-						class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-black/[0.05] font-medium"
-						onclick={handleEscape}
-					>
-						Back to dashboard
-					</a>
-				</div>
-			{:else}
-				{#key verb}
-					<div
-						class="connect-verb text-lg font-medium absolute"
-						in:fade={{ duration: VERB_FADE_MS, delay: VERB_FADE_MS }}
-						out:fade={{ duration: VERB_FADE_MS }}
-						style="
-							background: linear-gradient(90deg, var(--color-accent), var(--color-text), var(--color-accent));
-							background-size: 200%;
-							animation: shimmer 2s linear infinite;
-							-webkit-background-clip: text;
-							background-clip: text;
-							-webkit-text-fill-color: transparent;
-						"
-					>
-						{verb}...
-					</div>
-				{/key}
-			{/if}
-		</div>
-
-		<!-- Status text (hidden during relay registration/error — those states have their own messaging) -->
-		{#if relayStatus !== "registering" && relayStatus !== "error"}
-			<div class="text-sm text-text-muted">
+				<a
+					href="/"
+					class="mt-1 px-4 py-1.5 text-sm rounded-lg bg-bg-surface border border-border text-text hover:bg-bg-alt font-medium"
+					onclick={handleEscape}
+				>
+					Back to dashboard
+				</a>
+			</div>
+		{:else}
+			<div
+				class="text-sm font-medium"
+				style="font-family: var(--font-brand); background: linear-gradient(90deg, var(--color-brand-b), var(--color-brand-a)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;"
+			>
 				{displayStatusText}
 			</div>
 		{/if}
@@ -294,13 +205,13 @@
 		{#if showInstanceActions}
 			<div class="flex gap-3 mt-2">
 				<button
-					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-black/[0.05] font-medium"
+					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-bg-alt font-medium"
 					onclick={handleStartInstance}
 				>
 					Start Instance
 				</button>
 				<button
-					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-black/[0.05] font-medium"
+					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-bg-alt font-medium"
 					onclick={handleSwitchInstance}
 				>
 					Switch Instance

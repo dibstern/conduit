@@ -10,6 +10,7 @@
 	import { showToast, openMobileSidebar, setSidebarPanel, uiState } from "../../stores/ui.svelte.js";
 	import hljs from "highlight.js";
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from "../shared/BlockGrid.svelte";
 
 	let {
 		visible = false,
@@ -233,7 +234,7 @@
 		<div class="flex-1 overflow-auto">
 			{#if loading}
 				<div class="flex items-center justify-center py-12 text-text-dimmer text-sm">
-					<Icon name="loader" size={16} class="icon-spin" />
+					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 					<span class="ml-2">Loading…</span>
 				</div>
 			{:else if binary}

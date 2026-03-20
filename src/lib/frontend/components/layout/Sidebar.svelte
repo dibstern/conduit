@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
+	import BlockGrid from "../shared/BlockGrid.svelte";
 	import SessionList from "../features/SessionList.svelte";
 	import ProjectSwitcher from "../features/ProjectSwitcher.svelte";
 	import SidebarFilePanel from "../features/SidebarFilePanel.svelte";
@@ -154,13 +155,11 @@
 	>
 		<a
 			href="/"
-			class="sidebar-logo flex items-center no-underline"
+			class="sidebar-logo flex items-center gap-2 no-underline"
 			onclick={handleLogoClick}
 		>
-			<!-- OpenCode "O" Mark -->
-			<svg class="footer-mascot" viewBox="0 0 16 20" width="13" height="16" fill="none" aria-hidden="true"
-				><path d="M12 16H4V8H12V16Z" fill="currentColor" opacity="0.45" /><path d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z" fill="currentColor" /></svg
-			>
+			<span style="font-family: var(--font-brand);" class="text-sm font-medium tracking-[0.14em] text-text">conduit</span>
+			<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
 		</a>
 		<button
 			id="sidebar-toggle-btn"
@@ -191,7 +190,7 @@
 				disabled={sessionCreation.value.phase === "creating"}
 			>
 				{#if sessionCreation.value.phase === "creating"}
-					<Icon name="loader-2" size={16} class="shrink-0 animate-spin" />
+					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 				{:else}
 					<Icon name="plus" size={16} class="shrink-0" />
 				{/if}
@@ -253,13 +252,12 @@
 		id="sidebar-footer"
 		class="px-3.5 py-3 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+12px)] border-t border-border-subtle shrink-0 flex items-center justify-between"
 	>
-		<span class="sidebar-footer-text text-xs text-text-dimmer">Conduit</span>
-		<div class="flex items-center gap-0.5">
+		<div class="flex items-center gap-1">
 			<!-- Settings -->
 			<button
 				id="settings-btn"
 				onclick={handleOpenSettings}
-				class="p-1 rounded hover:bg-bg-alt text-text-dimmer hover:text-text-secondary transition-colors"
+				class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-surface text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
 				title="Settings"
 			>
 				<Icon name="settings" size={14} />
@@ -269,7 +267,7 @@
 				<button
 					id="notif-settings-btn"
 					onclick={handleToggleNotifMenu}
-					class="p-1 rounded hover:bg-bg-alt text-text-dimmer hover:text-text-secondary transition-colors"
+					class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-surface text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
 					title="Notification settings"
 				>
 					<Icon name="sliders-horizontal" size={14} />
@@ -279,7 +277,7 @@
 			<!-- Theme picker -->
 			<button
 				onclick={toggleThemePicker}
-				class="p-1 rounded hover:bg-bg-alt text-text-dimmer hover:text-text-secondary transition-colors"
+				class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-surface text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
 				title="Change theme"
 				aria-expanded={themeState.pickerOpen}
 				aria-haspopup="listbox"
@@ -288,7 +286,6 @@
 			</button>
 		</div>
 	</div>
-	<ThemePicker />
 
 	<!-- Mobile resize handle (right edge, only visible on mobile when open) -->
 	{#if uiState.mobileSidebarOpen}
@@ -302,3 +299,4 @@
 		</div>
 	{/if}
 </div>
+<ThemePicker />
