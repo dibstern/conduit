@@ -411,12 +411,14 @@
 		}
 	});
 
-	// ─── Visual viewport tracking (keyboard avoidance in maximized mode) ──────
+	// ─── Visual viewport tracking (keyboard avoidance when terminal is open) ──
 	// CSS dvh does NOT account for the virtual keyboard. We listen to the
 	// visualViewport API and constrain #app height so the terminal stays above
 	// the keyboard and xterm.js refits via its ResizeObserver.
+	// Active whenever the terminal panel is open on a mobile-width viewport.
 	$effect(() => {
-		if (!mobileMaximized) {
+		const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
+		if (!terminalState.panelOpen || !isMobile) {
 			vvHeight = null;
 			return;
 		}
