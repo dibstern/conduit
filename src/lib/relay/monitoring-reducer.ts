@@ -7,8 +7,8 @@ import type {
 	SessionMonitorPhase,
 	SSECoverage,
 } from "./monitoring-types.js";
-import { deriveSSECoverage } from "./session-sse-tracker.js";
 import type { SessionSSETracker } from "./session-sse-tracker.js";
+import { deriveSSECoverage } from "./session-sse-tracker.js";
 
 export function assembleContext(
 	sessionId: string,
@@ -86,7 +86,8 @@ export function evaluateSession(
 					effects: [],
 				};
 			}
-			const graceExpired = ctx.now - current.busySince > config.sseGracePeriodMs;
+			const graceExpired =
+				ctx.now - current.busySince > config.sseGracePeriodMs;
 			if (graceExpired) {
 				const reason =
 					sse.kind === "disconnected"
@@ -150,7 +151,8 @@ export function evaluateSession(
 				phase: {
 					phase: "busy-sse-covered",
 					busySince: current.busySince,
-					lastSSEAt: sse.kind === "active" ? sse.lastEventAt : current.lastSSEAt,
+					lastSSEAt:
+						sse.kind === "active" ? sse.lastEventAt : current.lastSSEAt,
 				},
 				effects: [],
 			};

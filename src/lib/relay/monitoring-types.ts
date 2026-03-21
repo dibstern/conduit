@@ -10,17 +10,17 @@ export type SessionMonitorPhase =
 			readonly phase: "busy-sse-covered";
 			readonly busySince: number;
 			readonly lastSSEAt: number;
-		}
+	  }
 	| {
 			readonly phase: "busy-polling";
 			readonly busySince: number;
 			readonly pollerStartedAt: number;
-		}
+	  }
 	| {
 			readonly phase: "busy-capped";
 			readonly busySince: number;
 			readonly cappedAt: number;
-		};
+	  };
 
 // ── SSE coverage ────────────────────────────────────────────────────────
 
@@ -66,18 +66,18 @@ export type MonitoringEffect =
 			readonly effect: "start-poller";
 			readonly sessionId: string;
 			readonly reason: PollerStartReason;
-		}
+	  }
 	| {
 			readonly effect: "stop-poller";
 			readonly sessionId: string;
 			readonly reason: PollerStopReason;
-		}
+	  }
 	| { readonly effect: "notify-busy"; readonly sessionId: string }
 	| {
 			readonly effect: "notify-idle";
 			readonly sessionId: string;
 			readonly isSubagent: boolean;
-		};
+	  };
 
 // ── Global state ────────────────────────────────────────────────────────
 

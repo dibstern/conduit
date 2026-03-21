@@ -6,7 +6,6 @@ import {
 	initialMonitoringState,
 } from "../../../src/lib/relay/monitoring-reducer.js";
 import type {
-	MonitoringEffect,
 	PollerGatingConfig,
 	SessionEvalContext,
 	SessionMonitorPhase,
@@ -84,7 +83,12 @@ describe("evaluateSession", () => {
 	// ── from idle ────────────────────────────────────────────────────────
 
 	it("idle + idle status → idle, no effects", () => {
-		const result = evaluateSession("s1", { phase: "idle" }, ctx(), DEFAULT_CONFIG);
+		const result = evaluateSession(
+			"s1",
+			{ phase: "idle" },
+			ctx(),
+			DEFAULT_CONFIG,
+		);
 		expect(result.phase).toEqual({ phase: "idle" });
 		expect(result.effects).toEqual([]);
 	});
@@ -101,7 +105,9 @@ describe("evaluateSession", () => {
 			busySince: 1000,
 			lastSSEAt: 900,
 		});
-		expect(result.effects).toEqual([{ effect: "notify-busy", sessionId: "s1" }]);
+		expect(result.effects).toEqual([
+			{ effect: "notify-busy", sessionId: "s1" },
+		]);
 	});
 
 	it("idle + busy + no SSE → busy-grace + notify-busy", () => {
@@ -112,18 +118,25 @@ describe("evaluateSession", () => {
 			DEFAULT_CONFIG,
 		);
 		expect(result.phase).toEqual({ phase: "busy-grace", busySince: 1000 });
-		expect(result.effects).toEqual([{ effect: "notify-busy", sessionId: "s1" }]);
+		expect(result.effects).toEqual([
+			{ effect: "notify-busy", sessionId: "s1" },
+		]);
 	});
 
 	it("idle + retry status → treated as busy", () => {
 		const result = evaluateSession(
 			"s1",
 			{ phase: "idle" },
-			ctx({ status: { type: "retry", attempt: 1, message: "err", next: 2000 } }),
+			ctx({
+				status: { type: "retry", attempt: 1, message: "err", next: 2000 },
+			}),
 			DEFAULT_CONFIG,
 		);
 		expect(result.phase.phase).toBe("busy-grace");
-		expect(result.effects).toContainEqual({ effect: "notify-busy", sessionId: "s1" });
+		expect(result.effects).toContainEqual({
+			effect: "notify-busy",
+			sessionId: "s1",
+		});
 	});
 
 	// ── from busy-grace ──────────────────────────────────────────────────
@@ -412,18 +425,30 @@ describe("evaluateSession", () => {
 
 describe("evaluateAll", () => {
 	it("new sessions default to idle and evaluate normally", () => {
-		const contexts = new Map([
-			["s1", ctx({ status: { type: "busy" } })],
-		]);
-		const result = evaluateAll(initialMonitoringState(), contexts, DEFAULT_CONFIG);
+		const contexts = new Map([["s1", ctx({ status: { type: "busy" } })]]);
+		const result = evaluateAll(
+			initialMonitoringState(),
+			contexts,
+			DEFAULT_CONFIG,
+		);
 		expect(result.state.sessions.get("s1")?.phase).toBe("busy-grace");
-		expect(result.effects).toContainEqual({ effect: "notify-busy", sessionId: "s1" });
+		expect(result.effects).toContainEqual({
+			effect: "notify-busy",
+			sessionId: "s1",
+		});
 	});
 
 	it("deleted session with active poller emits stop-poller(session-deleted) and notify-idle", () => {
 		const state = {
 			sessions: new Map([
-				["s1", { phase: "busy-polling" as const, busySince: 0, pollerStartedAt: 100 }],
+				[
+					"s1",
+					{
+						phase: "busy-polling" as const,
+						busySince: 0,
+						pollerStartedAt: 100,
+					},
+				],
 			]),
 		};
 		const result = evaluateAll(state, new Map(), DEFAULT_CONFIG);
@@ -443,7 +468,10 @@ describe("evaluateAll", () => {
 	it("deleted session in busy-sse-covered emits notify-idle", () => {
 		const state = {
 			sessions: new Map([
-				["s1", { phase: "busy-sse-covered" as const, busySince: 0, lastSSEAt: 500 }],
+				[
+					"s1",
+					{ phase: "busy-sse-covered" as const, busySince: 0, lastSSEAt: 500 },
+				],
 			]),
 		};
 		const result = evaluateAll(state, new Map(), DEFAULT_CONFIG);
@@ -452,7 +480,9 @@ describe("evaluateAll", () => {
 			sessionId: "s1",
 			isSubagent: false,
 		});
-		expect(result.effects.filter((e) => e.effect === "stop-poller")).toEqual([]);
+		expect(result.effects.filter((e) => e.effect === "stop-poller")).toEqual(
+			[],
+		);
 	});
 
 	it("deleted session in busy-grace emits notify-idle", () => {
@@ -485,13 +515,9 @@ describe("evaluateAll", () => {
 
 	it("steady state produces no effects", () => {
 		const state = {
-			sessions: new Map([
-				["s1", { phase: "idle" as const }],
-			]),
+			sessions: new Map([["s1", { phase: "idle" as const }]]),
 		};
-		const contexts = new Map([
-			["s1", ctx({ status: { type: "idle" } })],
-		]);
+		const contexts = new Map([["s1", ctx({ status: { type: "idle" } })]]);
 		const result = evaluateAll(state, contexts, DEFAULT_CONFIG);
 		expect(result.effects).toEqual([]);
 		expect(result.state.sessions.get("s1")).toEqual({ phase: "idle" });
@@ -557,8 +583,6 @@ describe("evaluateAll", () => {
 		const result = evaluateAll(state, contexts, config);
 		expect(result.state.sessions.get("s2")?.phase).toBe("busy-polling");
 		const starts = result.effects.filter((e) => e.effect === "start-poller");
-		expect(starts).toContainEqual(
-			expect.objectContaining({ sessionId: "s2" }),
-		);
+		expect(starts).toContainEqual(expect.objectContaining({ sessionId: "s2" }));
 	});
 });
