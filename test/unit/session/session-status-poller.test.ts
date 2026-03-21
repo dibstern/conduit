@@ -21,7 +21,7 @@ describe("SessionStatusPoller", () => {
 		vi.useRealTimers();
 	});
 
-	it("emits 'changed' when a session transitions from idle to busy", async () => {
+	it("emits 'changed' with statusesChanged=true on idle→busy transition", async () => {
 		const client = createMockClient({ sess_1: { type: "idle" } });
 		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
@@ -33,23 +33,25 @@ describe("SessionStatusPoller", () => {
 		poller.on("changed", changed);
 		poller.start();
 
-		// First poll: establishes baseline
+		// start() fires immediate init poll (no emit), then timer poll emits steady-state
 		await vi.advanceTimersByTimeAsync(500);
-		expect(changed).not.toHaveBeenCalled();
+		changed.mockClear();
 
 		// Session becomes busy
 		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "busy" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
 		const statuses = changed.mock.calls[0]![0] as Record<string, SessionStatus>;
 		expect(statuses["sess_1"]).toEqual({ type: "busy" });
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[0]![1]).toBe(true);
 
 		poller.stop();
 	});
 
-	it("emits 'changed' when a session transitions from busy to idle", async () => {
+	it("emits 'changed' with statusesChanged=true on busy→idle transition", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
 		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
@@ -61,19 +63,21 @@ describe("SessionStatusPoller", () => {
 		poller.on("changed", changed);
 		poller.start();
 
-		// First poll: baseline
+		// start() fires immediate init poll, then timer poll emits steady-state
 		await vi.advanceTimersByTimeAsync(500);
-		expect(changed).not.toHaveBeenCalled();
+		changed.mockClear();
 
 		// Session becomes idle
 		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[0]![1]).toBe(true);
 		poller.stop();
 	});
 
-	it("does NOT emit 'changed' when statuses are unchanged", async () => {
+	it("emits 'changed' on every poll cycle with statusesChanged flag", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
 		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
@@ -85,18 +89,32 @@ describe("SessionStatusPoller", () => {
 		poller.on("changed", changed);
 		poller.start();
 
-		// First poll
+		// start() fires immediate init (no emit), then first timer fires
 		await vi.advanceTimersByTimeAsync(500);
-		// Second poll, same state
-		await vi.advanceTimersByTimeAsync(500);
-		// Third poll, same state
-		await vi.advanceTimersByTimeAsync(500);
+		// Timer poll emits with statusesChanged=false (same state as init)
+		expect(changed).toHaveBeenCalledTimes(1);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[0]![1]).toBe(false);
 
-		expect(changed).not.toHaveBeenCalled();
+		// Next poll — same state, emits again
+		await vi.advanceTimersByTimeAsync(500);
+		expect(changed).toHaveBeenCalledTimes(2);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[1]![1]).toBe(false);
+
+		// Status changes, emits with statusesChanged=true
+		client.getSessionStatuses.mockResolvedValue({
+			sess_1: { type: "idle" },
+		});
+		await vi.advanceTimersByTimeAsync(500);
+		expect(changed).toHaveBeenCalledTimes(3);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[2]![1]).toBe(true);
+
 		poller.stop();
 	});
 
-	it("emits 'changed' when a new session appears", async () => {
+	it("emits with statusesChanged=true when a new session appears", async () => {
 		const client = createMockClient({ sess_1: { type: "idle" } });
 		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
@@ -107,9 +125,8 @@ describe("SessionStatusPoller", () => {
 		const changed = vi.fn();
 		poller.on("changed", changed);
 		poller.start();
-
-		// Baseline
 		await vi.advanceTimersByTimeAsync(500);
+		changed.mockClear();
 
 		// New session appears
 		client.getSessionStatuses.mockResolvedValue({
@@ -119,10 +136,12 @@ describe("SessionStatusPoller", () => {
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[0]![1]).toBe(true);
 		poller.stop();
 	});
 
-	it("emits 'changed' when a session disappears", async () => {
+	it("emits with statusesChanged=true when a session disappears", async () => {
 		const client = createMockClient({
 			sess_1: { type: "idle" },
 			sess_2: { type: "busy" },
@@ -136,15 +155,16 @@ describe("SessionStatusPoller", () => {
 		const changed = vi.fn();
 		poller.on("changed", changed);
 		poller.start();
-
-		// Baseline
 		await vi.advanceTimersByTimeAsync(500);
+		changed.mockClear();
 
 		// sess_2 disappears
 		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[0]![1]).toBe(true);
 		poller.stop();
 	});
 
@@ -162,14 +182,15 @@ describe("SessionStatusPoller", () => {
 		poller.on("changed", changed);
 		poller.start();
 
-		// Baseline
+		// Baseline (init + first timer)
 		await vi.advanceTimersByTimeAsync(500);
+		changed.mockClear();
 
 		// API fails
 		client.getSessionStatuses.mockRejectedValue(new Error("network error"));
 		await vi.advanceTimersByTimeAsync(500);
 
-		// Should NOT emit changed (stale state preserved)
+		// Should NOT emit changed on failure (stale state preserved)
 		expect(changed).not.toHaveBeenCalled();
 		// Should still have old state
 		expect(poller.getCurrentStatuses()).toEqual({ sess_1: { type: "busy" } });
@@ -267,15 +288,16 @@ describe("SessionStatusPoller", () => {
 		const changed = vi.fn();
 		poller.on("changed", changed);
 		poller.start();
-
-		// Baseline
 		await vi.advanceTimersByTimeAsync(500);
+		changed.mockClear();
 
 		// retry → busy (still processing but status type changed)
 		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "busy" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
+		// biome-ignore lint/style/noNonNullAssertion: length-checked
+		expect(changed.mock.calls[0]![1]).toBe(true);
 		poller.stop();
 	});
 

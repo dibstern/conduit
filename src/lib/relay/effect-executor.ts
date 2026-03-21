@@ -5,11 +5,8 @@ import type { MonitoringEffect } from "./monitoring-types.js";
 export interface EffectDeps {
 	startPoller: (sessionId: string) => void;
 	stopPoller: (sessionId: string) => void;
-	emitDone: (sessionId: string) => void;
 	sendStatusToSession: (sessionId: string, msg: RelayMessage) => void;
 	processAndApplyDone: (sessionId: string, isSubagent: boolean) => void;
-	sendPush: (msg: RelayMessage) => void;
-	broadcastNotification: (payload: RelayMessage) => void;
 	clearProcessingTimeout: (sessionId: string) => void;
 	clearMessageActivity: (sessionId: string) => void;
 	log: Pick<Logger, "info" | "warn" | "error">;
@@ -26,7 +23,6 @@ export function executeEffects(
 				break;
 
 			case "stop-poller":
-				deps.emitDone(effect.sessionId);
 				deps.stopPoller(effect.sessionId);
 				deps.clearProcessingTimeout(effect.sessionId);
 				deps.clearMessageActivity(effect.sessionId);
@@ -41,6 +37,8 @@ export function executeEffects(
 
 			case "notify-idle":
 				deps.processAndApplyDone(effect.sessionId, effect.isSubagent);
+				deps.clearProcessingTimeout(effect.sessionId);
+				deps.clearMessageActivity(effect.sessionId);
 				break;
 
 			default: {

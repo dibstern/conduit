@@ -3,6 +3,7 @@ import type {
 	MonitoringEffect,
 	MonitoringState,
 	PollerGatingConfig,
+	PollerStartReason,
 	SessionEvalContext,
 	SessionMonitorPhase,
 	SSECoverage,
@@ -265,7 +266,7 @@ export function evaluateAll(
 	}
 
 	// Apply safety cap on concurrent pollers
-	return applySafetyCap(state, newSessions, effects, config);
+	return applySafetyCap(state, newSessions, effects, config, contexts);
 }
 
 /** Enforce maxPollers limit and promote capped sessions when room is available. */
@@ -274,6 +275,7 @@ function applySafetyCap(
 	newSessions: Map<string, SessionMonitorPhase>,
 	effects: MonitoringEffect[],
 	config: Readonly<PollerGatingConfig>,
+	contexts: ReadonlyMap<string, SessionEvalContext>,
 ): {
 	readonly state: MonitoringState;
 	readonly effects: readonly MonitoringEffect[];
@@ -304,11 +306,13 @@ function applySafetyCap(
 			}
 			// Cap this session instead of starting a poller
 			const phase = newSessions.get(e.sessionId);
+			const ctx = contexts.get(e.sessionId);
+			const now = ctx?.now ?? Date.now();
 			if (phase && phase.phase === "busy-polling") {
 				newSessions.set(e.sessionId, {
 					phase: "busy-capped",
 					busySince: phase.busySince,
-					cappedAt: phase.pollerStartedAt,
+					cappedAt: now,
 				});
 			}
 			return false;
@@ -324,15 +328,24 @@ function applySafetyCap(
 	for (const [sessionId, phase] of newSessions) {
 		if (currentTotal >= config.maxPollers) break;
 		if (phase.phase === "busy-capped") {
+			const ctx = contexts.get(sessionId);
+			const now = ctx?.now ?? Date.now();
+			const reason: PollerStartReason = ctx
+				? !ctx.sseConnected
+					? "sse-disconnected"
+					: ctx.lastSSEEventAt === undefined
+						? "no-sse-history"
+						: "sse-grace-expired"
+				: "sse-grace-expired";
 			promotionEffects.push({
 				effect: "start-poller",
 				sessionId,
-				reason: "sse-grace-expired",
+				reason,
 			});
 			newSessions.set(sessionId, {
 				phase: "busy-polling",
 				busySince: phase.busySince,
-				pollerStartedAt: phase.cappedAt,
+				pollerStartedAt: now,
 			});
 			currentTotal++;
 		}

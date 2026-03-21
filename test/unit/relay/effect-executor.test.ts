@@ -21,17 +21,12 @@ function createMockDeps(): EffectDeps & {
 		calls,
 		startPoller: track("startPoller") as EffectDeps["startPoller"],
 		stopPoller: track("stopPoller") as EffectDeps["stopPoller"],
-		emitDone: track("emitDone") as EffectDeps["emitDone"],
 		sendStatusToSession: track(
 			"sendStatusToSession",
 		) as EffectDeps["sendStatusToSession"],
 		processAndApplyDone: track(
 			"processAndApplyDone",
 		) as EffectDeps["processAndApplyDone"],
-		sendPush: track("sendPush") as EffectDeps["sendPush"],
-		broadcastNotification: track(
-			"broadcastNotification",
-		) as EffectDeps["broadcastNotification"],
 		clearProcessingTimeout: track(
 			"clearProcessingTimeout",
 		) as EffectDeps["clearProcessingTimeout"],
@@ -56,13 +51,12 @@ describe("executeEffects", () => {
 		expect(deps.calls["startPoller"]).toEqual([["s1"]]);
 	});
 
-	it("stop-poller calls emitDone + stopPoller + clearProcessingTimeout + clearMessageActivity", () => {
+	it("stop-poller calls stopPoller + clearProcessingTimeout + clearMessageActivity (no emitDone)", () => {
 		const deps = createMockDeps();
 		const effects: MonitoringEffect[] = [
 			{ effect: "stop-poller", sessionId: "s1", reason: "idle-no-viewers" },
 		];
 		executeEffects(effects, deps);
-		expect(deps.calls["emitDone"]).toEqual([["s1"]]);
 		expect(deps.calls["stopPoller"]).toEqual([["s1"]]);
 		expect(deps.calls["clearProcessingTimeout"]).toEqual([["s1"]]);
 		expect(deps.calls["clearMessageActivity"]).toEqual([["s1"]]);
@@ -79,13 +73,15 @@ describe("executeEffects", () => {
 		]);
 	});
 
-	it("notify-idle processes done event through pipeline", () => {
+	it("notify-idle processes done + clears processing timeout + clears message activity", () => {
 		const deps = createMockDeps();
 		const effects: MonitoringEffect[] = [
 			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
 		];
 		executeEffects(effects, deps);
 		expect(deps.calls["processAndApplyDone"]).toEqual([["s1", false]]);
+		expect(deps.calls["clearProcessingTimeout"]).toEqual([["s1"]]);
+		expect(deps.calls["clearMessageActivity"]).toEqual([["s1"]]);
 	});
 
 	it("notify-idle with isSubagent=true passes isSubagent through", () => {
@@ -104,8 +100,6 @@ describe("executeEffects", () => {
 			order.push(`start:${sid}`)) as EffectDeps["startPoller"];
 		deps.stopPoller = ((sid: string) =>
 			order.push(`stop:${sid}`)) as EffectDeps["stopPoller"];
-		deps.emitDone = ((sid: string) =>
-			order.push(`done:${sid}`)) as EffectDeps["emitDone"];
 		deps.clearProcessingTimeout =
 			(() => {}) as EffectDeps["clearProcessingTimeout"];
 		deps.clearMessageActivity =
@@ -116,7 +110,7 @@ describe("executeEffects", () => {
 			{ effect: "stop-poller", sessionId: "s2", reason: "sse-now-covering" },
 		];
 		executeEffects(effects, deps);
-		expect(order).toEqual(["start:s1", "done:s2", "stop:s2"]);
+		expect(order).toEqual(["start:s1", "stop:s2"]);
 	});
 
 	it("empty effects array is a no-op", () => {

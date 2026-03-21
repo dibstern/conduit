@@ -56,6 +56,7 @@ import type {
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { PendingUserMessages } from "./pending-user-messages.js";
+import { classifyPollerBatch } from "./poller-pre-filter.js";
 import { PtyManager } from "./pty-manager.js";
 import {
 	connectPtyUpstream as connectPtyUpstreamImpl,
@@ -399,9 +400,16 @@ export async function createProjectRelay(
 				);
 			}
 		} else {
-			// deleted
+			// deleted — clean up poller, activity, SSE tracker, and monitoring state
 			pollerManager.stopPolling(sid);
 			statusPoller.clearMessageActivity(sid);
+			sseTracker.remove(sid);
+
+			// Remove from monitoring state to prevent the reducer from
+			// generating spurious notify-idle effects for already-deleted sessions
+			const sessions = new Map(monitoringState.sessions);
+			sessions.delete(sid);
+			monitoringState = { sessions };
 		}
 	});
 
@@ -527,7 +535,6 @@ export async function createProjectRelay(
 				);
 		},
 		stopPoller: (sessionId) => pollerManager.stopPolling(sessionId),
-		emitDone: (sessionId) => pollerManager.emitDone(sessionId),
 		sendStatusToSession: (sessionId, msg) =>
 			wsHandler.sendToSession(sessionId, msg),
 		processAndApplyDone: (sessionId, isSubagent) => {
@@ -558,12 +565,6 @@ export async function createProjectRelay(
 				);
 			}
 		},
-		sendPush: (msg) => {
-			if (config.pushManager) {
-				sendPushForEvent(config.pushManager, msg, sseLog);
-			}
-		},
-		broadcastNotification: (payload) => wsHandler.broadcast(payload),
 		clearProcessingTimeout: (sessionId) =>
 			overrides.clearProcessingTimeout(sessionId),
 		clearMessageActivity: (sessionId) =>
@@ -573,16 +574,19 @@ export async function createProjectRelay(
 
 	// ── Session status poller wiring ────────────────────────────────────────
 
-	statusPoller.on("changed", async (statuses) => {
-		// ── Session list broadcast (unchanged) ──────────────────────────────
-		try {
-			await sessionMgr.sendDualSessionLists((msg) => wsHandler.broadcast(msg), {
-				statuses,
-			});
-		} catch (err) {
-			statusLog.warn(
-				`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
-			);
+	statusPoller.on("changed", async (statuses, statusesChanged) => {
+		// ── Session list broadcast (only when statuses actually changed) ────
+		if (statusesChanged) {
+			try {
+				await sessionMgr.sendDualSessionLists(
+					(msg) => wsHandler.broadcast(msg),
+					{ statuses },
+				);
+			} catch (err) {
+				statusLog.warn(
+					`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
+				);
+			}
 		}
 
 		// ── Monitoring reducer: evaluate all sessions ──────────────────────
@@ -605,8 +609,9 @@ export async function createProjectRelay(
 			);
 		}
 
+		const prevState = monitoringState;
 		const result = evaluateAll(
-			monitoringState,
+			prevState,
 			contexts,
 			DEFAULT_POLLER_GATING_CONFIG,
 		);
@@ -614,6 +619,18 @@ export async function createProjectRelay(
 
 		if (result.effects.length > 0) {
 			executeEffects(result.effects, effectDeps);
+		}
+
+		// Log sessions that newly hit the safety cap
+		for (const [sessionId, phase] of result.state.sessions) {
+			if (
+				phase.phase === "busy-capped" &&
+				prevState.sessions.get(sessionId)?.phase !== "busy-capped"
+			) {
+				statusLog.warn(
+					`Session ${sessionId.slice(0, 12)} capped — max ${DEFAULT_POLLER_GATING_CONFIG.maxPollers} concurrent pollers reached`,
+				);
+			}
 		}
 	});
 
@@ -634,10 +651,7 @@ export async function createProjectRelay(
 		// from emitDone() — marking activity on it would create a circular
 		// dependency where emitDone → markActivity → busy → emitDone…
 		if (events.length > 0 && polledSessionId) {
-			const hasContentActivity = events.some(
-				(e) => e.type !== "result" && e.type !== "done",
-			);
-			if (hasContentActivity) {
+			if (classifyPollerBatch(events).hasContentActivity) {
 				statusPoller.markMessageActivity(polledSessionId);
 			}
 		}

@@ -14,6 +14,7 @@ import type {
 	SessionStatus,
 } from "../instance/opencode-client.js";
 import { createSilentLogger, type Logger } from "../logger.js";
+import { computeAugmentedStatuses } from "./status-augmentation.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -48,8 +49,8 @@ export interface SessionStatusPollerOptions {
 }
 
 export interface SessionStatusPollerEvents {
-	/** Emitted when any session's status has changed since the last poll */
-	changed: [statuses: Record<string, SessionStatus>];
+	/** Emitted every poll cycle. statusesChanged indicates if status types actually differ from last poll. */
+	changed: [statuses: Record<string, SessionStatus>, statusesChanged: boolean];
 }
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
@@ -218,21 +219,21 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 				return;
 			}
 
-			const changed = this.hasChanged(this.previous, current);
+			const statusesChanged = this.hasChanged(this.previous, current);
 
-			if (changed) {
+			if (statusesChanged) {
 				const busySessions = Object.entries(current)
 					.filter(([, s]) => s.type === "busy" || s.type === "retry")
 					.map(([id, s]) => `${id.slice(0, 12)}:${s.type}`);
 				this.log.info(
 					`CHANGED busy=[${busySessions.join(", ")}] total=${Object.keys(current).length}`,
 				);
-				this.previous = current;
-				this.emit("changed", current);
-			} else {
-				// Even if no status type changed, keep internal state fresh
-				this.previous = current;
 			}
+
+			// Always emit — the monitoring reducer needs periodic evaluation
+			// for time-based transitions (grace period expiry, SSE staleness).
+			this.previous = current;
+			this.emit("changed", current, statusesChanged);
 		} catch (err) {
 			// Keep last known state (stale > empty). Log and retry next tick.
 			const msg = err instanceof Error ? err.message : String(err);
@@ -258,73 +259,54 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 	private async augmentStatuses(
 		raw: Record<string, SessionStatus>,
 	): Promise<Record<string, SessionStatus>> {
-		const augmented = { ...raw };
-
-		// ── Step 1: Subagent propagation ──────────────────────────────────────
-		// Get the child→parent map from the session list (fast path)
+		// ── Pre-pass: resolve unknown parents via API ─────────────────────────
 		const parentMap = this.getSessionParentMap?.() ?? new Map<string, string>();
-
-		// Find busy sessions and propagate to parents
 		const busyIds = Object.entries(raw)
 			.filter(([, s]) => s.type === "busy" || s.type === "retry")
 			.map(([id]) => id);
 
-		// Clear SSE idle overrides for sessions that are busy again (new prompt).
 		for (const busyId of busyIds) {
-			this.sseIdleSessions.delete(busyId);
-		}
-
-		for (const busyId of busyIds) {
-			// Fast path: child is in the session list with parentID
-			let parentId = parentMap.get(busyId);
-
-			if (parentId === undefined) {
-				// Slow path: look up in cache or via API
-				if (this.childToParentCache.has(busyId)) {
-					parentId = this.childToParentCache.get(busyId);
-				} else {
-					// API lookup (non-blocking — if it fails, we skip)
-					try {
-						const session = await this.client.getSession(busyId);
-						const pid = session.parentID;
-						this.childToParentCache.set(busyId, pid);
-						parentId = pid;
-						if (pid) {
-							this.log.info(
-								`discovered child→parent: ${busyId.slice(0, 12)}→${pid.slice(0, 12)}`,
-							);
-						}
-					} catch {
-						// Session might not exist anymore — cache as no-parent
-						this.childToParentCache.set(busyId, undefined);
-					}
+			// Skip if already known via parentMap or cache
+			if (parentMap.has(busyId) || this.childToParentCache.has(busyId))
+				continue;
+			// API lookup (non-blocking — if it fails, we skip)
+			try {
+				const session = await this.client.getSession(busyId);
+				const pid = session.parentID;
+				this.childToParentCache.set(busyId, pid);
+				if (pid) {
+					this.log.info(
+						`discovered child→parent: ${busyId.slice(0, 12)}→${pid.slice(0, 12)}`,
+					);
 				}
-			}
-
-			if (parentId && !augmented[parentId]) {
-				// Parent isn't in raw statuses (or is idle) — mark it busy
-				augmented[parentId] = { type: "busy" };
+			} catch {
+				this.childToParentCache.set(busyId, undefined);
 			}
 		}
 
-		// ── Step 2: Message activity injection (time-decay) ─────────────────
-		// Only inject busy for sessions where activity was detected recently.
-		// Stale entries (older than MESSAGE_ACTIVITY_TTL_MS) are auto-cleared,
-		// which naturally transitions the session from busy → idle.
-		const now = Date.now();
-		for (const [sessionId, timestamp] of this.messageActivityTimestamps) {
-			if (now - timestamp > MESSAGE_ACTIVITY_TTL_MS) {
-				// Activity timed out — session is no longer busy
-				this.messageActivityTimestamps.delete(sessionId);
-				this.log.info(
-					`message-activity EXPIRED session=${sessionId.slice(0, 12)}`,
-				);
-			} else if (!augmented[sessionId]) {
-				augmented[sessionId] = { type: "busy" };
-			}
+		// ── Pure computation ──────────────────────────────────────────────────
+		const result = computeAugmentedStatuses({
+			raw,
+			parentMap,
+			childToParentResolved: this.childToParentCache,
+			messageActivityTimestamps: this.messageActivityTimestamps,
+			sseIdleSessions: this.sseIdleSessions,
+			now: Date.now(),
+			messageActivityTtlMs: MESSAGE_ACTIVITY_TTL_MS,
+		});
+
+		// ── Apply side effects ───────────────────────────────────────────────
+		for (const sessionId of result.sseIdleToRemove) {
+			this.sseIdleSessions.delete(sessionId);
+		}
+		for (const sessionId of result.expiredActivitySessions) {
+			this.messageActivityTimestamps.delete(sessionId);
+			this.log.info(
+				`message-activity EXPIRED session=${sessionId.slice(0, 12)}`,
+			);
 		}
 
-		return augmented;
+		return result.augmented;
 	}
 
 	/** Check if any session's status type has changed, or sessions added/removed. */
