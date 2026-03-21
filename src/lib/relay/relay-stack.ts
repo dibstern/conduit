@@ -697,17 +697,6 @@ export async function createProjectRelay(
 		}
 	});
 
-	pollerManager.on("capacity_exceeded", ({ sessionId, max }) => {
-		wsHandler.broadcast({
-			type: "error",
-			code: "POLLER_CAPACITY",
-			message: `Cannot monitor more than ${max} active sessions simultaneously. Session ${sessionId.slice(0, 8)}… is not being monitored.`,
-		});
-		pollerMgrLog.warn(
-			`Capacity exceeded: ${sessionId.slice(0, 12)} rejected (${max} max)`,
-		);
-	});
-
 	// ── Notify poller manager of SSE events (to suppress REST polling) ────
 	sseConsumer.on("event", (event: OpenCodeEvent) => {
 		const sid = extractSessionId(event);

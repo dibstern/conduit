@@ -56,22 +56,15 @@ describe("MessagePollerManager", () => {
 		mgr.stopAll();
 	});
 
-	it("enforces max concurrent pollers (10)", () => {
-		const warnSpy = vi.fn();
-		const log = { ...createSilentLogger(), warn: warnSpy };
+	it("allows unlimited concurrent pollers (capacity gated by reducer)", () => {
 		const mgr = new MessagePollerManager({
 			client: makeMockClient(),
-			log,
+			log: createSilentLogger(),
 			interval: 60_000,
 		});
 		for (let i = 0; i < 11; i++) mgr.startPolling(`sess-${i}`);
-		// 11th should be rejected (logged warning, not started)
-		expect(mgr.isPolling("sess-10")).toBe(false);
-		expect(mgr.size).toBe(10);
-		// Should have logged a warning
-		expect(warnSpy).toHaveBeenCalledWith(
-			expect.stringContaining("MAX POLLERS reached"),
-		);
+		expect(mgr.isPolling("sess-10")).toBe(true);
+		expect(mgr.size).toBe(11);
 		mgr.stopAll();
 	});
 
@@ -88,32 +81,16 @@ describe("MessagePollerManager", () => {
 		mgr.stopAll();
 	});
 
-	it("rejects 11th poller with capacity_exceeded event", () => {
+	it("allows more than 10 concurrent pollers (capacity gated upstream)", () => {
 		const mgr = new MessagePollerManager({
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
 		});
-		const exceeded: Array<{
-			sessionId: string;
-			current: number;
-			max: number;
-		}> = [];
-		mgr.on("capacity_exceeded", (ev) => exceeded.push(ev));
-
-		for (let i = 1; i <= 10; i++) {
+		for (let i = 1; i <= 15; i++) {
 			mgr.startPolling(`session-${i}`);
 		}
-		mgr.startPolling("session-11");
-
-		expect(mgr.size).toBe(10);
-		expect(exceeded).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: length-checked
-		expect(exceeded[0]!).toEqual({
-			sessionId: "session-11",
-			current: 10,
-			max: 10,
-		});
+		expect(mgr.size).toBe(15);
 		mgr.stopAll();
 	});
 

@@ -1,7 +1,7 @@
 // ─── Message Poller Manager (Multi-Session Polling) ──────────────────────────
 // Wraps MessagePoller to support polling multiple sessions concurrently.
-// Each session gets its own independent MessagePoller instance, up to a
-// configurable maximum to prevent resource exhaustion.
+// Each session gets its own independent MessagePoller instance.
+// Capacity gating is handled upstream by the monitoring reducer (evaluateAll).
 //
 // Viewer tracking is delegated to an external hasViewers function
 // (typically backed by SessionRegistry). Pollers for viewed sessions
@@ -15,18 +15,11 @@ import { createSilentLogger, type Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
 import { MessagePoller } from "./message-poller.js";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-/** Maximum number of concurrent pollers to prevent resource exhaustion. */
-const MAX_CONCURRENT_POLLERS = 10;
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface MessagePollerManagerEvents {
 	/** Emitted with synthesized events + sessionId from REST diff */
 	events: [messages: RelayMessage[], sessionId: string];
-	/** Emitted when a new poller is rejected because the cap is reached */
-	capacity_exceeded: [{ sessionId: string; current: number; max: number }];
 }
 
 export interface MessagePollerManagerOptions {
@@ -68,21 +61,10 @@ export class MessagePollerManager extends EventEmitter<MessagePollerManagerEvent
 	/**
 	 * Start polling messages for a session.
 	 * No-op if already polling that session.
-	 * Rejected (with a log warning) if max concurrent pollers reached.
+	 * Capacity gating is handled upstream by the monitoring reducer.
 	 */
 	startPolling(sessionId: string, seedMessages?: Message[]): void {
 		if (this.pollers.has(sessionId)) return;
-		if (this.pollers.size >= MAX_CONCURRENT_POLLERS) {
-			this.log.warn(
-				`MAX POLLERS reached (${MAX_CONCURRENT_POLLERS}), skipping ${sessionId.slice(0, 12)}`,
-			);
-			this.emit("capacity_exceeded", {
-				sessionId,
-				current: this.pollers.size,
-				max: MAX_CONCURRENT_POLLERS,
-			});
-			return;
-		}
 
 		const poller = new MessagePoller({
 			client: this.client,
