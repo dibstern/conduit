@@ -921,7 +921,7 @@ section { margin-bottom: var(--space-2xl); }
 
   // Upper-left edge path: Top vertex → Left vertex
   // Following the outer+inner edge cells of the upper-left side
-  const pathPinkIn = [
+  const _pathPinkIn = [
     // Top vertex
     [0,5],
     // Row 1 — upper-left side
@@ -937,7 +937,7 @@ section { margin-bottom: var(--space-2xl); }
   ];
 
   // Lower-left edge path: Bottom vertex → Left vertex
-  const pathCyanIn = [
+  const _pathCyanIn = [
     // Bottom vertex
     [10,5],
     // Row 9 — lower-left side
@@ -954,7 +954,7 @@ section { margin-bottom: var(--space-2xl); }
 
   // Upper-right edge path: Left vertex → Top vertex (via upper-right)
   // Actually we want: Left vertex → Right vertex going via upper-right
-  const pathExitUpRight = [
+  const _pathExitUpRight = [
     // Left vertex
     [5,0],[5,1],
     // Row 4 — upper-left going back (but we want upper-RIGHT exit)
@@ -975,7 +975,7 @@ section { margin-bottom: var(--space-2xl); }
   ];
 
   // Lower-right edge path: Left vertex → Bottom → Right
-  const pathExitDownRight = [
+  const _pathExitDownRight = [
     // Left vertex
     [5,0],[5,1],
     [6,1],[6,2],
@@ -1085,20 +1085,20 @@ section { margin-bottom: var(--space-2xl); }
   ];
 
   // Pink's entry path: Top → Left (follows upper-left edge)
-  const pinkEntry = [...upperLeftEdge]; // [0,5] → [5,0]
+  const _pinkEntry = [...upperLeftEdge]; // [0,5] → [5,0]
 
   // Cyan's entry path: Bottom → Left (follows lower-left edge reversed)
-  const cyanEntry = [...lowerLeftEdge].reverse(); // [10,5] → [5,0]
+  const _cyanEntry = [...lowerLeftEdge].reverse(); // [10,5] → [5,0]
 
   // Pink's exit path (now cyan): Left → Bottom → Right (lower-left + lower-right)
-  const pinkExit = [...lowerLeftEdge, ...lowerRightEdge.slice(1)]; // [5,0] → [5,10]
+  const _pinkExit = [...lowerLeftEdge, ...lowerRightEdge.slice(1)]; // [5,0] → [5,10]
 
   // Cyan's exit path (now pink): Left → Top → Right (upper-left reversed + upper-right)
-  const cyanExit = [...upperLeftEdge.reverse(), ...upperRightEdge.slice(1)]; // [5,0] → [5,10]
+  const _cyanExit = [...upperLeftEdge.reverse(), ...upperRightEdge.slice(1)]; // [5,0] → [5,10]
   // Fix: upperLeftEdge was reversed in place! Let's redo this properly.
 
   // ─── Clean path definitions (no mutation) ───
-  function reversed(arr) { return [...arr].reverse(); }
+  function _reversed(arr) { return [...arr].reverse(); }
 
   // Pink entry: top(0,5) → left(5,0) along upper-left edge
   const PINK_ENTRY = [
@@ -1381,7 +1381,7 @@ section { margin-bottom: var(--space-2xl); }
   // paints the cursor and its fading trail into the map.
   function paintTrail(path, cursorPos, color, trailMap, trailLen, forward) {
     const len = path.length;
-    const headIdx = Math.round(clamp(cursorPos, 0, len - 1));
+    const _headIdx = Math.round(clamp(cursorPos, 0, len - 1));
 
     for (let i = 0; i < len; i++) {
       let dist;
@@ -1580,7 +1580,7 @@ section { margin-bottom: var(--space-2xl); }
     const mode = grid.dataset.mode || 'static';
     const theme = grid.dataset.theme || 'dark';
     const speed = grid.dataset.speed || 'normal';
-    const phase = grid.dataset.phase ? parseInt(grid.dataset.phase) : null;
+    const phase = grid.dataset.phase ? parseInt(grid.dataset.phase, 10) : null;
     const isLight = theme === 'light';
 
     const cells = buildGrid(grid);

@@ -237,10 +237,10 @@ OPTIONS.forEach(opt => {
 
     ['dark', 'light'].forEach(theme => {
       const frame = document.createElement('div');
-      frame.className = 'icon-frame ' + theme;
+      frame.className = `icon-frame ${theme}`;
       const canvas = document.createElement('canvas');
       canvas.width = size; canvas.height = size;
-      canvas.style.width = size + 'px'; canvas.style.height = size + 'px';
+      canvas.style.width = `${size}px`; canvas.style.height = `${size}px`;
       canvas.style.display = 'block';
       frame.appendChild(canvas);
       contextRow.appendChild(frame);
@@ -249,7 +249,7 @@ OPTIONS.forEach(opt => {
 
     const label = document.createElement('div');
     label.className = 'size-label';
-    label.textContent = size + 'px';
+    label.textContent = `${size}px`;
     item.appendChild(contextRow);
     item.appendChild(label);
     sizeRow.appendChild(item);

@@ -962,12 +962,12 @@ section { margin-bottom: var(--space-2xl); }
       for (let i = 0; i < blockCount; i++) {
         const block = document.createElement('div');
         block.className = `px-block px-block--${i % 2 === 0 ? 'a' : 'b'}`;
-        block.style.width = blockSize + 'px';
-        block.style.height = blockSize + 'px';
-        block.style.borderRadius = (blockSize > 3 ? 1 : 0.5) + 'px';
+        block.style.width = `${blockSize}px`;
+        block.style.height = `${blockSize}px`;
+        block.style.borderRadius = `${blockSize > 3 ? 1 : 0.5}px`;
         if (animated) {
-          block.style.animationDelay = (i * 0.22) + 's';
-          block.style.animationDuration = (1.8 + Math.random() * 0.8) + 's';
+          block.style.animationDelay = `${i * 0.22}s`;
+          block.style.animationDuration = `${1.8 + Math.random() * 0.8}s`;
         }
         flowDiv.appendChild(block);
       }

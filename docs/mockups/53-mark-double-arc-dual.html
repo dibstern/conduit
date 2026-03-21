@@ -796,7 +796,7 @@ section { margin-bottom: var(--space-2xl); }
     const cyanMidR = (r3 + r4) / 2;
 
     // Unique ID prefix for this SVG instance
-    const uid = 'qa' + Math.random().toString(36).slice(2, 8);
+    const uid = `qa${Math.random().toString(36).slice(2, 8)}`;
 
     if (simplified) {
       // Tiny mode: just one pink arc and one cyan arc
@@ -832,9 +832,9 @@ section { margin-bottom: var(--space-2xl); }
         const dur = 2.2;
 
         // One CW block (pink-tinted)
-        addFlowBlock(svg, uid + 'sc', cwPath, 0, dur, blockSize, BLOCK_COLOR, 0.85);
+        addFlowBlock(svg, `${uid}sc`, cwPath, 0, dur, blockSize, BLOCK_COLOR, 0.85);
         // One CCW block (cyan-tinted)
-        addFlowBlock(svg, uid + 'scc', ccwPath, dur * 0.5, dur, blockSize, BLOCK_COLOR, 0.85);
+        addFlowBlock(svg, `${uid}scc`, ccwPath, dur * 0.5, dur, blockSize, BLOCK_COLOR, 0.85);
       }
 
       return svg;
@@ -876,12 +876,12 @@ section { margin-bottom: var(--space-2xl); }
       for (let i = 0; i < pinkBlocks; i++) {
         const delay = i * (pinkDur / pinkBlocks);
         const color = i % 3 === 0 ? BLOCK_COLOR_DIM : BLOCK_COLOR;
-        addFlowBlock(svg, uid + 'p' + i, cwPath, delay, pinkDur, blockSize, color, 0.88);
+        addFlowBlock(svg, `${uid}p${i}`, cwPath, delay, pinkDur, blockSize, color, 0.88);
       }
       for (let i = 0; i < cyanBlocks; i++) {
         const delay = i * (cyanDur / cyanBlocks);
         const color = i % 3 === 0 ? BLOCK_COLOR_DIM : BLOCK_COLOR;
-        addFlowBlock(svg, uid + 'c' + i, ccwPath, delay, cyanDur, blockSize, color, 0.88);
+        addFlowBlock(svg, `${uid}c${i}`, ccwPath, delay, cyanDur, blockSize, color, 0.88);
       }
     }
 
@@ -898,7 +898,7 @@ section { margin-bottom: var(--space-2xl); }
       defs = document.createElementNS(ns, 'defs');
       svg.insertBefore(defs, svg.firstChild);
     }
-    const pathId = 'mp_' + id;
+    const pathId = `mp_${id}`;
     const mPathEl = document.createElementNS(ns, 'path');
     mPathEl.setAttribute('id', pathId);
     mPathEl.setAttribute('d', pathD);
@@ -914,13 +914,13 @@ section { margin-bottom: var(--space-2xl); }
     block.setAttribute('opacity', '0');
 
     const motion = document.createElementNS(ns, 'animateMotion');
-    motion.setAttribute('dur', dur + 's');
+    motion.setAttribute('dur', `${dur}s`);
     motion.setAttribute('repeatCount', 'indefinite');
-    motion.setAttribute('begin', delay.toFixed(2) + 's');
+    motion.setAttribute('begin', `${delay.toFixed(2)}s`);
     motion.setAttribute('rotate', 'auto');
     const mpathRef = document.createElementNS(ns, 'mpath');
-    mpathRef.setAttributeNS('http://www.w3.org/1999/xlink', 'href', '#' + pathId);
-    mpathRef.setAttribute('href', '#' + pathId);
+    mpathRef.setAttributeNS('http://www.w3.org/1999/xlink', 'href', `#${pathId}`);
+    mpathRef.setAttribute('href', `#${pathId}`);
     motion.appendChild(mpathRef);
     block.appendChild(motion);
 
@@ -929,9 +929,9 @@ section { margin-bottom: var(--space-2xl); }
     opAnim.setAttribute('attributeName', 'opacity');
     opAnim.setAttribute('values', `0;${peakOpacity};${peakOpacity};0`);
     opAnim.setAttribute('keyTimes', '0;0.08;0.88;1');
-    opAnim.setAttribute('dur', dur + 's');
+    opAnim.setAttribute('dur', `${dur}s`);
     opAnim.setAttribute('repeatCount', 'indefinite');
-    opAnim.setAttribute('begin', delay.toFixed(2) + 's');
+    opAnim.setAttribute('begin', `${delay.toFixed(2)}s`);
     block.appendChild(opAnim);
 
     svg.appendChild(block);

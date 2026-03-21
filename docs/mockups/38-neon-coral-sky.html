@@ -324,6 +324,13 @@ section { margin-bottom: var(--space-2xl); }
   color: var(--text-secondary);
 }
 
+/* Tools inside chat — stripe continuation */
+.chat-tools {
+  padding: 12px 24px;
+  background: rgba(56,189,248,0.03);
+  border-left: 4px solid var(--accent-b);
+}
+
 /* 1px separator between messages — no gaps */
 .msg + .msg,
 .msg + .chat-tools,
@@ -490,13 +497,6 @@ section { margin-bottom: var(--space-2xl); }
   color: var(--text-secondary);
   letter-spacing: 0.04em;
   animation: breathe 2.5s ease-in-out infinite;
-}
-
-/* Tools inside chat — stripe continuation */
-.chat-tools {
-  padding: 12px 24px;
-  background: rgba(56,189,248,0.03);
-  border-left: 4px solid var(--accent-b);
 }
 
 /* ── Session info ── */

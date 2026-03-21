@@ -814,7 +814,7 @@ section { margin-bottom: var(--space-2xl); }
     svg.setAttribute('xmlns', ns);
 
     // Unique ID for gradients
-    const uid = 'pb' + Math.random().toString(36).slice(2, 8);
+    const uid = `pb${Math.random().toString(36).slice(2, 8)}`;
 
     // Padding from edges
     const pad = wallThickness / 2 + 1;
@@ -861,7 +861,7 @@ section { margin-bottom: var(--space-2xl); }
      * @param {number} top - y-coordinate of start (top)
      * @param {number} right - x-coordinate of end (right)
      */
-    function lPath(x, y, r, top, right) {
+    function lPath(_x, _y, r, top, right) {
       // Vertical segment: from (x, top) down to (x, elbowCY - r) — wait,
       // the arc starts where the vertical meets the bend.
       // Arc center is at (elbowCX, elbowCY).
@@ -885,7 +885,7 @@ section { margin-bottom: var(--space-2xl); }
     if (colorMode === 'gradient') {
       // Outer wall gradient (vertical pink -> bend -> horizontal cyan)
       const gradOuter = document.createElementNS(ns, 'linearGradient');
-      gradOuter.setAttribute('id', uid + '-grad-outer');
+      gradOuter.setAttribute('id', `${uid}-grad-outer`);
       gradOuter.setAttribute('gradientUnits', 'userSpaceOnUse');
       gradOuter.setAttribute('x1', (elbowCX - ro).toString());
       gradOuter.setAttribute('y1', topY.toString());
@@ -901,7 +901,7 @@ section { margin-bottom: var(--space-2xl); }
 
       // Inner wall gradient
       const gradInner = document.createElementNS(ns, 'linearGradient');
-      gradInner.setAttribute('id', uid + '-grad-inner');
+      gradInner.setAttribute('id', `${uid}-grad-inner`);
       gradInner.setAttribute('gradientUnits', 'userSpaceOnUse');
       gradInner.setAttribute('x1', (elbowCX - ri).toString());
       gradInner.setAttribute('y1', topY.toString());
@@ -918,7 +918,7 @@ section { margin-bottom: var(--space-2xl); }
 
       // Channel flow path gradient (for blocks)
       const gradFlow = document.createElementNS(ns, 'linearGradient');
-      gradFlow.setAttribute('id', uid + '-grad-flow');
+      gradFlow.setAttribute('id', `${uid}-grad-flow`);
       gradFlow.setAttribute('gradientUnits', 'userSpaceOnUse');
       const midR = (ro + ri) / 2;
       gradFlow.setAttribute('x1', (elbowCX - midR).toString());
@@ -996,9 +996,9 @@ section { margin-bottom: var(--space-2xl); }
 
         const motion = document.createElementNS(ns, 'animateMotion');
         motion.setAttribute('path', mPath);
-        motion.setAttribute('dur', duration + 's');
+        motion.setAttribute('dur', `${duration}s`);
         motion.setAttribute('repeatCount', 'indefinite');
-        motion.setAttribute('begin', (i * (duration / blockCount)).toFixed(2) + 's');
+        motion.setAttribute('begin', `${(i * (duration / blockCount)).toFixed(2)}s`);
         motion.setAttribute('rotate', 'auto');
         block.appendChild(motion);
 
@@ -1007,9 +1007,9 @@ section { margin-bottom: var(--space-2xl); }
         opAnim.setAttribute('attributeName', 'opacity');
         opAnim.setAttribute('values', '0;0.95;0.95;0');
         opAnim.setAttribute('keyTimes', '0;0.06;0.90;1');
-        opAnim.setAttribute('dur', duration + 's');
+        opAnim.setAttribute('dur', `${duration}s`);
         opAnim.setAttribute('repeatCount', 'indefinite');
-        opAnim.setAttribute('begin', (i * (duration / blockCount)).toFixed(2) + 's');
+        opAnim.setAttribute('begin', `${(i * (duration / blockCount)).toFixed(2)}s`);
         block.appendChild(opAnim);
 
         svg.appendChild(block);

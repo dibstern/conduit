@@ -141,6 +141,14 @@
     position: relative;
   }
 
+  /* Each layer (bar) */
+  .stack-layer {
+    position: relative;
+    overflow: hidden;
+    opacity: 0.2;
+    transition: opacity 0.15s ease;
+  }
+
   /* ── Sizes ── */
   .stack-mark--sm .stack-layer { width: 60px; height: 4px; border-radius: 2px; }
   .stack-mark--sm { gap: 4px; }
@@ -153,14 +161,6 @@
 
   .stack-mark--xl .stack-layer { width: 180px; height: 10px; border-radius: 5px; }
   .stack-mark--xl { gap: 12px; }
-
-  /* Each layer (bar) */
-  .stack-layer {
-    position: relative;
-    overflow: hidden;
-    opacity: 0.2;
-    transition: opacity 0.15s ease;
-  }
 
   /* Bar background colors — gradient from pink (top) to cyan (bottom) */
   .stack-layer:nth-child(1) { background: var(--accent-pink); }
@@ -1845,7 +1845,7 @@
     indicators.forEach((ind, i) => {
       if (!ind) return;
       const bars = ind.querySelectorAll('.layer-indicator-bar');
-      bars.forEach((bar, j) => {
+      bars.forEach((bar, _j) => {
         // Active indicator glows its active bars more intensely
         if (i === activeInd && bar.classList.contains('active')) {
           bar.style.filter = 'brightness(1.3)';

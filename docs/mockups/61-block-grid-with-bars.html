@@ -1135,26 +1135,26 @@ section { margin-bottom: var(--space-2xl); }
     // Row A (pink) — cascade left -> right
     const rowA = document.createElement('div');
     rowA.className = 'pixel-row pixel-row--a';
-    rowA.style.gap = gap + 'px';
+    rowA.style.gap = `${gap}px`;
     for (let i = 0; i < PIXEL_COUNT; i++) {
       const px = document.createElement('div');
       px.className = 'pixel';
-      px.style.width = size + 'px';
-      px.style.height = size + 'px';
-      px.style.animationDelay = (i * 0.18) + 's';
+      px.style.width = `${size}px`;
+      px.style.height = `${size}px`;
+      px.style.animationDelay = `${i * 0.18}s`;
       rowA.appendChild(px);
     }
 
     // Row B (cyan) — cascade right -> left (reverse stagger)
     const rowB = document.createElement('div');
     rowB.className = 'pixel-row pixel-row--b';
-    rowB.style.gap = gap + 'px';
+    rowB.style.gap = `${gap}px`;
     for (let i = 0; i < PIXEL_COUNT; i++) {
       const px = document.createElement('div');
       px.className = 'pixel';
-      px.style.width = size + 'px';
-      px.style.height = size + 'px';
-      px.style.animationDelay = ((PIXEL_COUNT - 1 - i) * 0.18) + 's';
+      px.style.width = `${size}px`;
+      px.style.height = `${size}px`;
+      px.style.animationDelay = `${(PIXEL_COUNT - 1 - i) * 0.18}s`;
       rowB.appendChild(px);
     }
 

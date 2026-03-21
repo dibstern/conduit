@@ -4,13 +4,11 @@
 // cli-commands.ts and cli-utils.ts respectively.
 
 import { resolve } from "node:path";
-
+import { getTailscaleIP } from "../lib/cli/tls.js";
 import { Daemon, type DaemonOptions } from "../lib/daemon/daemon.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCCommand, IPCResponse } from "../lib/types.js";
-
-import { getTailscaleIP } from "../lib/cli/tls.js";
 import { defaultInteractiveMenu } from "./cli-commands.js";
 import {
 	DEFAULT_CONFIG_DIR,
@@ -664,10 +662,9 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 
 	// 4. Show QR code with optional setup caption
 	if (primaryIP !== "localhost") {
-		const qrUrl =
-			tlsActive
-				? `http://${primaryIP}:${args.port + 1}/setup`
-				: url;
+		const qrUrl = tlsActive
+			? `http://${primaryIP}:${args.port + 1}/setup`
+			: url;
 		const qrCode = qr(qrUrl);
 		if (qrCode) {
 			stdout.write("\n");

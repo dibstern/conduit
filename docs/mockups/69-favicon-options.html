@@ -293,7 +293,7 @@ h1 .cyan { color: var(--accent-b); }
 const PINK = '#FF2D7B';
 const CYAN = '#00E5FF';
 const DARK_BG = '#18181B';
-const LIGHT_BG = '#F4F4F5';
+const _LIGHT_BG = '#F4F4F5';
 const SIZES = [16, 32, 96, 192, 512];
 
 function createSizeRow(containerId, drawFn) {
@@ -308,8 +308,8 @@ function createSizeRow(containerId, drawFn) {
     const darkCanvas = document.createElement('canvas');
     darkCanvas.width = size;
     darkCanvas.height = size;
-    darkCanvas.style.width = size + 'px';
-    darkCanvas.style.height = size + 'px';
+    darkCanvas.style.width = `${size}px`;
+    darkCanvas.style.height = `${size}px`;
     darkCanvas.style.display = 'block';
     darkFrame.appendChild(darkCanvas);
 
@@ -319,8 +319,8 @@ function createSizeRow(containerId, drawFn) {
     const lightCanvas = document.createElement('canvas');
     lightCanvas.width = size;
     lightCanvas.height = size;
-    lightCanvas.style.width = size + 'px';
-    lightCanvas.style.height = size + 'px';
+    lightCanvas.style.width = `${size}px`;
+    lightCanvas.style.height = `${size}px`;
     lightCanvas.style.display = 'block';
     lightFrame.appendChild(lightCanvas);
 
@@ -331,7 +331,7 @@ function createSizeRow(containerId, drawFn) {
 
     const label = document.createElement('div');
     label.className = 'size-label';
-    label.textContent = size + 'px';
+    label.textContent = `${size}px`;
 
     item.appendChild(contextRow);
     item.appendChild(label);
@@ -358,7 +358,7 @@ function roundRect(ctx, x, y, w, h, r) {
 
 // ─── OPTION A: 2×5 Block Grid ──────────────────────────────────────────────
 
-function drawOptionA(ctx, size, theme) {
+function drawOptionA(ctx, size, _theme) {
   const cols = 5;
   const rows = 2;
   const padding = size * 0.12;
@@ -391,7 +391,7 @@ drawOptionA(document.getElementById('optA-tab').getContext('2d'), 16, 'dark');
 
 // ─── OPTION B: 2×3 Minimal Grid ────────────────────────────────────────────
 
-function drawOptionB(ctx, size, theme) {
+function drawOptionB(ctx, size, _theme) {
   const cols = 3;
   const rows = 2;
   const padding = size * 0.14;
@@ -423,7 +423,7 @@ drawOptionB(document.getElementById('optB-tab').getContext('2d'), 16, 'dark');
 
 // ─── OPTION C: Stacked Bars ────────────────────────────────────────────────
 
-function drawOptionC(ctx, size, theme) {
+function drawOptionC(ctx, size, _theme) {
   const padding = size * 0.15;
   const gap = Math.max(1, size * 0.1);
   const barH = (size - padding * 2 - gap) / 2;
@@ -444,7 +444,7 @@ drawOptionC(document.getElementById('optC-tab').getContext('2d'), 16, 'dark');
 
 // ─── OPTION D: Gradient Bars ───────────────────────────────────────────────
 
-function drawOptionD(ctx, size, theme) {
+function drawOptionD(ctx, size, _theme) {
   const padding = size * 0.15;
   const gap = Math.max(1, size * 0.1);
   const barH = (size - padding * 2 - gap) / 2;
@@ -517,7 +517,7 @@ drawOptionE(document.getElementById('optE-tab').getContext('2d'), 16, 'dark');
 
 // ─── OPTION F: Diagonal Split ──────────────────────────────────────────────
 
-function drawOptionF(ctx, size, theme) {
+function drawOptionF(ctx, size, _theme) {
   const r = size * 0.15;
 
   // Clip to rounded rect
@@ -551,7 +551,7 @@ drawOptionF(document.getElementById('optF-tab').getContext('2d'), 16, 'dark');
 
 // ─── OPTION G: 2×5 Grid on Dark Pad ────────────────────────────────────────
 
-function drawOptionG(ctx, size, theme) {
+function drawOptionG(ctx, size, _theme) {
   const r = size * 0.12;
 
   // Dark background pad

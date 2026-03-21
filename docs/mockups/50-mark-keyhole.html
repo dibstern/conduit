@@ -819,14 +819,14 @@ section { margin-bottom: var(--space-2xl); }
     svg.setAttribute('xmlns', ns);
 
     // Unique ID for gradient and clip paths
-    const uid = 'kh-' + Math.random().toString(36).slice(2, 8);
+    const uid = `kh-${Math.random().toString(36).slice(2, 8)}`;
 
     // ── Defs: gradient + clip ──
     const defs = document.createElementNS(ns, 'defs');
 
     // Gradient for the capsule stroke (pink top → cyan bottom)
     const grad = document.createElementNS(ns, 'linearGradient');
-    grad.setAttribute('id', uid + '-grad');
+    grad.setAttribute('id', `${uid}-grad`);
     grad.setAttribute('x1', '0');
     grad.setAttribute('y1', '0');
     grad.setAttribute('x2', '0');
@@ -843,7 +843,7 @@ section { margin-bottom: var(--space-2xl); }
 
     // Clip path for the slot area (where blocks are visible)
     const clipSlot = document.createElementNS(ns, 'clipPath');
-    clipSlot.setAttribute('id', uid + '-slot-clip');
+    clipSlot.setAttribute('id', `${uid}-slot-clip`);
     const slotHalf = slotWidth / 2;
     const slotTop = strokeWidth + 6;
     const slotBottom = H - strokeWidth - 6;
@@ -931,7 +931,7 @@ section { margin-bottom: var(--space-2xl); }
       const g = document.createElementNS(ns, 'g');
       g.setAttribute('clip-path', `url(#${uid}-slot-clip)`);
 
-      const travelDist = slotBottom - slotTop + blockSize * 2;
+      const _travelDist = slotBottom - slotTop + blockSize * 2;
       const duration = 2.4;
       const colors = [PINK, CYAN, PINK, CYAN, '#E4E4E7', PINK, CYAN];
 
@@ -951,9 +951,9 @@ section { margin-bottom: var(--space-2xl); }
         animY.setAttribute('attributeName', 'y');
         animY.setAttribute('from', startY);
         animY.setAttribute('to', slotTop - blockSize * 2);
-        animY.setAttribute('dur', duration + 's');
+        animY.setAttribute('dur', `${duration}s`);
         animY.setAttribute('repeatCount', 'indefinite');
-        animY.setAttribute('begin', (i * (duration / blockCount)).toFixed(2) + 's');
+        animY.setAttribute('begin', `${(i * (duration / blockCount)).toFixed(2)}s`);
         block.appendChild(animY);
 
         // Opacity: fade in at bottom, fade out at top
@@ -961,9 +961,9 @@ section { margin-bottom: var(--space-2xl); }
         animOp.setAttribute('attributeName', 'opacity');
         animOp.setAttribute('values', '0;0.9;0.9;0');
         animOp.setAttribute('keyTimes', '0;0.1;0.85;1');
-        animOp.setAttribute('dur', duration + 's');
+        animOp.setAttribute('dur', `${duration}s`);
         animOp.setAttribute('repeatCount', 'indefinite');
-        animOp.setAttribute('begin', (i * (duration / blockCount)).toFixed(2) + 's');
+        animOp.setAttribute('begin', `${(i * (duration / blockCount)).toFixed(2)}s`);
         block.appendChild(animOp);
 
         g.appendChild(block);

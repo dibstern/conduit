@@ -1043,7 +1043,7 @@ section { margin-bottom: var(--space-2xl); }
     }
 
     // Paint trail for upward-moving cursor
-    function paintTrailUp(path, cursorPos, color, trailLength) {
+    function _paintTrailUp(path, cursorPos, color, trailLength) {
       const len = path.length;
       for (let i = len - 1; i >= 0; i--) {
         const dist = Math.abs(cursorPos - i);

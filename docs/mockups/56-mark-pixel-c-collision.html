@@ -918,7 +918,7 @@ section { margin-bottom: var(--space-2xl); }
   ];
 
   // Get coordinates for any position index (including virtual)
-  function getCoord(idx) {
+  function _getCoord(idx) {
     if (idx < 0) {
       const vi = idx + 2; // -2 → 0, -1 → 1
       return vi >= 0 && vi < VIRTUAL_BEFORE.length ? VIRTUAL_BEFORE[vi] : VIRTUAL_BEFORE[0];
@@ -1237,7 +1237,7 @@ section { margin-bottom: var(--space-2xl); }
         // Positions 0..pinkIdx: cursor re-lights these as it passes through on the way back
 
         const pinkFloor = Math.max(0, Math.round(pinkIdx));
-        const cyanCeil = Math.min(PATHLEN - 1, Math.round(cyanIdx));
+        const _cyanCeil = Math.min(PATHLEN - 1, Math.round(cyanIdx));
 
         // Pink re-lighting: positions from pinkFloor to MIDPOINT
         // The cursor is at pinkIdx, moving toward 0.

@@ -779,7 +779,7 @@ section { margin-bottom: var(--space-2xl); }
   const ns = 'http://www.w3.org/2000/svg';
 
   let idCounter = 0;
-  function uid(prefix) { return prefix + '-' + (++idCounter); }
+  function uid(prefix) { return `${prefix}-${++idCounter}`; }
 
   /**
    * Create a diamond conduit SVG mark.
@@ -974,7 +974,7 @@ section { margin-bottom: var(--space-2xl); }
       // Blocks flow upward: from bottom of channel to top
       const channelTop = cy - diamondR + halfCh + strokeWidth;
       const channelBottom = cy + diamondR - halfCh - strokeWidth;
-      const channelHeight = channelBottom - channelTop;
+      const _channelHeight = channelBottom - channelTop;
       const duration = 2.4;
       const colors = [PINK, CYAN, PINK, CYAN, '#E4E4E7', PINK, CYAN];
 
@@ -999,9 +999,9 @@ section { margin-bottom: var(--space-2xl); }
         moveAnim.setAttribute('attributeName', 'y');
         moveAnim.setAttribute('from', channelBottom);
         moveAnim.setAttribute('to', channelTop - bh);
-        moveAnim.setAttribute('dur', duration + 's');
+        moveAnim.setAttribute('dur', `${duration}s`);
         moveAnim.setAttribute('repeatCount', 'indefinite');
-        moveAnim.setAttribute('begin', (i * (duration / blockCount)).toFixed(2) + 's');
+        moveAnim.setAttribute('begin', `${(i * (duration / blockCount)).toFixed(2)}s`);
         block.appendChild(moveAnim);
 
         // Opacity: fade in near start, fade out near end
@@ -1009,9 +1009,9 @@ section { margin-bottom: var(--space-2xl); }
         opAnim.setAttribute('attributeName', 'opacity');
         opAnim.setAttribute('values', '0;0.9;0.9;0');
         opAnim.setAttribute('keyTimes', '0;0.1;0.85;1');
-        opAnim.setAttribute('dur', duration + 's');
+        opAnim.setAttribute('dur', `${duration}s`);
         opAnim.setAttribute('repeatCount', 'indefinite');
-        opAnim.setAttribute('begin', (i * (duration / blockCount)).toFixed(2) + 's');
+        opAnim.setAttribute('begin', `${(i * (duration / blockCount)).toFixed(2)}s`);
         block.appendChild(opAnim);
 
         blockGroup.appendChild(block);

@@ -164,7 +164,7 @@ export function printLogo(stdout: Writable): void {
 			const g = Math.round(45 - t * 35);
 			const b = Math.round(123 - t * 90);
 			const cw = baseCellWidth + (i < remainder ? 1 : 0);
-			pinkRow += `\x1b[38;2;${r};${g};${b}m` + "\u2584".repeat(cw);
+			pinkRow += `\x1b[38;2;${r};${g};${b}m${"\u2584".repeat(cw)}`;
 		}
 		pinkRow += a.reset;
 		stdout.write(`${pinkRow}\n`);
@@ -177,7 +177,7 @@ export function printLogo(stdout: Writable): void {
 			const g = Math.round(60 + t * 169);
 			const b = Math.round(70 + t * 185);
 			const cw = baseCellWidth + (i < remainder ? 1 : 0);
-			cyanRow += `\x1b[38;2;${r};${g};${b}m` + "\u2580".repeat(cw);
+			cyanRow += `\x1b[38;2;${r};${g};${b}m${"\u2580".repeat(cw)}`;
 		}
 		cyanRow += a.reset;
 		stdout.write(`${cyanRow}\n`);

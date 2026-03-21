@@ -12,8 +12,8 @@
  * Usage: node scripts/generate-icons.mjs
  */
 
-import { writeFileSync } from "fs";
-import { join } from "path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import sharp from "sharp";
 
 const PINK = { r: 255, g: 45, b: 123 };

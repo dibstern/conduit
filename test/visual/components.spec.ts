@@ -50,7 +50,7 @@ async function freezeAnimations(
 }
 
 /** Wait for the story to fully render (fonts, Storybook root, async content). */
-async function waitForStoryRender(
+async function _waitForStoryRender(
 	page: import("@playwright/test").Page,
 ): Promise<void> {
 	// Wait for Storybook root element

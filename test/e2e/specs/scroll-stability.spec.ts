@@ -106,7 +106,7 @@ function generateConversationEvents(turnCount: number): MockMessage[] {
 	for (let i = 0; i < turnCount; i++) {
 		evts.push({
 			type: "user_message",
-			text: USER_TEMPLATES[i % USER_TEMPLATES.length]!,
+			text: USER_TEMPLATES[i % USER_TEMPLATES.length] ?? "",
 		});
 
 		if (i % 4 === 2) {
@@ -143,7 +143,7 @@ function generateConversationEvents(turnCount: number): MockMessage[] {
 
 		evts.push({
 			type: "delta",
-			text: RESPONSE_TEMPLATES[i % RESPONSE_TEMPLATES.length]!,
+			text: RESPONSE_TEMPLATES[i % RESPONSE_TEMPLATES.length] ?? "",
 		});
 		evts.push({ type: "done", code: 0 });
 	}

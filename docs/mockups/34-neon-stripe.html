@@ -1828,7 +1828,7 @@ section { margin-bottom: var(--space-2xl); }
   if (!container) return;
 
   const totalDuration = 3; // seconds per verb
-  verbs.forEach((v, i) => {
+  verbs.forEach((v, _i) => {
     const span = document.createElement('span');
     span.textContent = v;
     container.appendChild(span);

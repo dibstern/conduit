@@ -887,14 +887,14 @@ section { margin-bottom: var(--space-2xl); }
     svg.setAttribute('fill', 'none');
     svg.setAttribute('xmlns', ns);
 
-    const uid = 'kd-' + Math.random().toString(36).slice(2, 8);
+    const uid = `kd-${Math.random().toString(36).slice(2, 8)}`;
 
     // ── Defs ──
     const defs = document.createElementNS(ns, 'defs');
 
     // Gradient: pink top → cyan bottom
     const grad = document.createElementNS(ns, 'linearGradient');
-    grad.setAttribute('id', uid + '-grad');
+    grad.setAttribute('id', `${uid}-grad`);
     grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
     grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
     const stop1 = document.createElementNS(ns, 'stop');
