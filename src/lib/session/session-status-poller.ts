@@ -14,7 +14,6 @@ import type {
 	SessionStatus,
 } from "../instance/opencode-client.js";
 import { createSilentLogger, type Logger } from "../logger.js";
-import { computeStatusTransitions } from "../relay/status-transitions.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -51,10 +50,6 @@ export interface SessionStatusPollerOptions {
 export interface SessionStatusPollerEvents {
 	/** Emitted when any session's status has changed since the last poll */
 	changed: [statuses: Record<string, SessionStatus>];
-	/** Sessions that just transitioned from idle to busy */
-	became_busy: [sessionIds: string[]];
-	/** Sessions that just transitioned from busy to idle */
-	became_idle: [sessionIds: string[]];
 }
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
@@ -69,7 +64,6 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 	private readonly getSessionParentMap: (() => Map<string, string>) | undefined;
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private previous: Record<string, SessionStatus> = {};
-	private previousBusy = new Set<string>();
 	private polling = false;
 	private initialized = false;
 
@@ -215,12 +209,6 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 				// First poll establishes the baseline — no event emitted
 				this.previous = current;
 				this.initialized = true;
-				// Set initial previousBusy baseline (no transition events on first poll)
-				const initTransitions = computeStatusTransitions(
-					this.previousBusy,
-					current,
-				);
-				this.previousBusy = initTransitions.currentBusy;
 				const busySessions = Object.entries(current)
 					.filter(([, s]) => s.type === "busy" || s.type === "retry")
 					.map(([id, s]) => `${id.slice(0, 12)}:${s.type}`);
@@ -245,16 +233,6 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 				// Even if no status type changed, keep internal state fresh
 				this.previous = current;
 			}
-
-			// Compute busy/idle transitions (runs every poll, not just on "changed")
-			const transitions = computeStatusTransitions(this.previousBusy, current);
-			if (transitions.becameBusy.length > 0) {
-				this.emit("became_busy", transitions.becameBusy);
-			}
-			if (transitions.becameIdle.length > 0) {
-				this.emit("became_idle", transitions.becameIdle);
-			}
-			this.previousBusy = transitions.currentBusy;
 		} catch (err) {
 			// Keep last known state (stale > empty). Log and retry next tick.
 			const msg = err instanceof Error ? err.message : String(err);

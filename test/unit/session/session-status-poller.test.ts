@@ -279,84 +279,6 @@ describe("SessionStatusPoller", () => {
 		poller.stop();
 	});
 
-	// ─── Transition events (became_busy / became_idle) ──────────────────────
-
-	it("emits 'became_busy' when a session transitions from idle to busy", async () => {
-		const client = createMockClient({ sess_1: { type: "idle" } });
-		const poller = new SessionStatusPoller({
-			client: client as unknown as SessionStatusPollerOptions["client"],
-			interval: 500,
-			log: createSilentLogger(),
-		});
-
-		const becameBusy = vi.fn();
-		poller.on("became_busy", becameBusy);
-		poller.start();
-
-		// First poll: establishes baseline — no transition events
-		await vi.advanceTimersByTimeAsync(500);
-		expect(becameBusy).not.toHaveBeenCalled();
-
-		// Session becomes busy
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "busy" } });
-		await vi.advanceTimersByTimeAsync(500);
-
-		expect(becameBusy).toHaveBeenCalledTimes(1);
-		expect(becameBusy).toHaveBeenCalledWith(["sess_1"]);
-
-		poller.stop();
-	});
-
-	it("emits 'became_idle' when a session transitions from busy to idle", async () => {
-		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller({
-			client: client as unknown as SessionStatusPollerOptions["client"],
-			interval: 500,
-			log: createSilentLogger(),
-		});
-
-		const becameIdle = vi.fn();
-		poller.on("became_idle", becameIdle);
-		poller.start();
-
-		// First poll: baseline (busy) — no transition events
-		await vi.advanceTimersByTimeAsync(500);
-		expect(becameIdle).not.toHaveBeenCalled();
-
-		// Session becomes idle
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
-		await vi.advanceTimersByTimeAsync(500);
-
-		expect(becameIdle).toHaveBeenCalledTimes(1);
-		expect(becameIdle).toHaveBeenCalledWith(["sess_1"]);
-
-		poller.stop();
-	});
-
-	it("does NOT emit transition events on first poll (baseline)", async () => {
-		// Start with a busy session — should NOT emit became_busy on init
-		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller({
-			client: client as unknown as SessionStatusPollerOptions["client"],
-			interval: 500,
-			log: createSilentLogger(),
-		});
-
-		const becameBusy = vi.fn();
-		const becameIdle = vi.fn();
-		poller.on("became_busy", becameBusy);
-		poller.on("became_idle", becameIdle);
-		poller.start();
-
-		// First poll establishes baseline
-		await vi.advanceTimersByTimeAsync(500);
-
-		expect(becameBusy).not.toHaveBeenCalled();
-		expect(becameIdle).not.toHaveBeenCalled();
-
-		poller.stop();
-	});
-
 	it("notifySSEIdle triggers an immediate poll", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
 		const poller = new SessionStatusPoller({
@@ -374,9 +296,6 @@ describe("SessionStatusPoller", () => {
 		// Update mock to return idle, then notify SSE idle
 		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
 
-		const becameIdle = vi.fn();
-		poller.on("became_idle", becameIdle);
-
 		poller.notifySSEIdle("sess_1");
 
 		// Let the immediate poll resolve (microtask)
@@ -386,49 +305,6 @@ describe("SessionStatusPoller", () => {
 		expect(client.getSessionStatuses.mock.calls.length).toBeGreaterThan(
 			callsBefore,
 		);
-		// And detected the idle transition
-		expect(becameIdle).toHaveBeenCalledWith(["sess_1"]);
-
-		poller.stop();
-	});
-
-	it("handles multiple sessions transitioning simultaneously", async () => {
-		const client = createMockClient({
-			sess_1: { type: "idle" },
-			sess_2: { type: "idle" },
-			sess_3: { type: "busy" },
-		});
-		const poller = new SessionStatusPoller({
-			client: client as unknown as SessionStatusPollerOptions["client"],
-			interval: 500,
-			log: createSilentLogger(),
-		});
-
-		const becameBusy = vi.fn();
-		const becameIdle = vi.fn();
-		poller.on("became_busy", becameBusy);
-		poller.on("became_idle", becameIdle);
-		poller.start();
-
-		// First poll: baseline
-		await vi.advanceTimersByTimeAsync(500);
-
-		// sess_1 & sess_2 become busy, sess_3 becomes idle
-		client.getSessionStatuses.mockResolvedValue({
-			sess_1: { type: "busy" },
-			sess_2: { type: "busy" },
-			sess_3: { type: "idle" },
-		});
-		await vi.advanceTimersByTimeAsync(500);
-
-		expect(becameBusy).toHaveBeenCalledTimes(1);
-		const busyIds = becameBusy.mock.calls[0]?.[0] as string[];
-		expect(busyIds).toContain("sess_1");
-		expect(busyIds).toContain("sess_2");
-		expect(busyIds).toHaveLength(2);
-
-		expect(becameIdle).toHaveBeenCalledTimes(1);
-		expect(becameIdle).toHaveBeenCalledWith(["sess_3"]);
 
 		poller.stop();
 	});
