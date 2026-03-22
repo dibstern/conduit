@@ -1,8 +1,12 @@
 // ─── SSE-Aware Poller Gating Integration Test ───────────────────────────────
-// Verifies the core monitoring reducer behavior end-to-end:
-// 1. Session busy + SSE active → NO poller started (SSE covers it)
-// 2. Session busy + SSE stops → grace period → poller starts
-// 3. SSE resumes → poller stops
+// Comprehensive verification of the monitoring reducer end-to-end (18 scenarios):
+//
+// Group 1 (1-4): SSE coverage and grace period
+// Group 2 (5-6): SSE dynamics (staleness, resume)
+// Group 3 (7-9): Idle transitions (grace, SSE-covered, polling)
+// Group 4 (10-11): Cross-session and lifecycle
+// Group 5 (12-15): Notifications (subagent, cross-session broadcast)
+// Group 6 (16-18): Retry status and cycling
 //
 // Observes poller behavior indirectly via /session/{id}/message request counts
 // on the mock OpenCode server.
@@ -23,11 +27,22 @@ import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
 // ── Mock OpenCode Server with request counting ──────────────────────────────
 
+interface SessionDef {
+	id: string;
+	title: string;
+	parentID?: string;
+}
+
+interface MockOpenCodeConfig {
+	sessions?: SessionDef[];
+}
+
 interface MockOpenCode {
 	server: Server;
 	port: number;
 	sseClients: Set<ServerResponse>;
-	sessionStatuses: Record<string, { type: string }>;
+	sessionStatuses: Record<string, { type: string; [key: string]: unknown }>;
+	sessionList: SessionDef[];
 	messageRequestCounts: Record<string, number>;
 	injectSSE(event: { type: string; properties: Record<string, unknown> }): void;
 	getMessageRequestCount(sessionId: string): number;
@@ -35,21 +50,24 @@ interface MockOpenCode {
 	close(): Promise<void>;
 }
 
-async function createMockOpenCode(): Promise<MockOpenCode> {
+async function createMockOpenCode(
+	config?: MockOpenCodeConfig,
+): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
-	const sessionStatuses: Record<string, { type: string }> = {
-		"sess-1": { type: "idle" },
-	};
-	const messageRequestCounts: Record<string, number> = {};
 
-	const sessions = {
-		"sess-1": {
-			id: "sess-1",
-			title: "Session 1",
-			modelID: "gpt-4",
-			providerID: "openai",
-		},
-	};
+	const sessionList: SessionDef[] = config?.sessions ?? [
+		{ id: "sess-1", title: "Session 1" },
+	];
+
+	const sessionStatuses: Record<
+		string,
+		{ type: string; [key: string]: unknown }
+	> = {};
+	for (const s of sessionList) {
+		sessionStatuses[s.id] = { type: "idle" };
+	}
+
+	const messageRequestCounts: Record<string, number> = {};
 
 	function handler(req: IncomingMessage, res: ServerResponse) {
 		const url = new URL(req.url ?? "/", "http://localhost");
@@ -74,7 +92,14 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		}
 
 		if (url.pathname === "/session" && req.method === "GET") {
-			res.end(JSON.stringify(Object.values(sessions)));
+			const result = sessionList.map((s) => ({
+				id: s.id,
+				title: s.title,
+				modelID: "gpt-4",
+				providerID: "openai",
+				...(s.parentID != null && { parentID: s.parentID }),
+			}));
+			res.end(JSON.stringify(result));
 			return;
 		}
 
@@ -99,12 +124,16 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		if (sessionMatch && req.method === "GET") {
 			// biome-ignore lint/style/noNonNullAssertion: regex guarantees capture
 			const id = sessionMatch[1]!;
-			const session = sessions[id as keyof typeof sessions] ?? {
-				id,
-				title: "Unknown",
-				modelID: "gpt-4",
-				providerID: "openai",
-			};
+			const found = sessionList.find((s) => s.id === id);
+			const session = found
+				? {
+						id: found.id,
+						title: found.title,
+						modelID: "gpt-4",
+						providerID: "openai",
+						...(found.parentID != null && { parentID: found.parentID }),
+					}
+				: { id, title: "Unknown", modelID: "gpt-4", providerID: "openai" };
 			res.end(JSON.stringify(session));
 			return;
 		}
@@ -144,6 +173,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		port,
 		sseClients,
 		sessionStatuses,
+		sessionList,
 		messageRequestCounts,
 		injectSSE(event) {
 			const data = JSON.stringify(event);
@@ -179,8 +209,10 @@ interface TestHarness {
 	stop(): Promise<void>;
 }
 
-async function createTestHarness(): Promise<TestHarness> {
-	const mock = await createMockOpenCode();
+async function createTestHarness(
+	mockConfig?: MockOpenCodeConfig,
+): Promise<TestHarness> {
+	const mock = await createMockOpenCode(mockConfig);
 
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
@@ -190,7 +222,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
-		slug: "test-sse-gating",
+		slug: `test-sse-gating-${relayPort}`,
 		log: createSilentLogger(),
 	});
 
@@ -214,9 +246,43 @@ async function createTestHarness(): Promise<TestHarness> {
 	};
 }
 
+/** Helper: wait for a specified duration */
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Helper: connect client and switch to a session */
+async function connectAndView(
+	harness: TestHarness,
+	sessionId: string,
+): Promise<TestWsClient> {
+	const client = await harness.connectClient();
+	await client.waitForInitialState();
+	client.send({ type: "view_session", sessionId });
+	await client.waitFor("session_switched", {
+		timeout: 3000,
+		predicate: (m) => m["id"] === sessionId,
+	});
+	client.clearReceived();
+	return client;
+}
+
+/** Helper: reset harness state for the next test within a shared describe */
+async function resetForNextTest(
+	harness: TestHarness,
+	sessions: string[],
+): Promise<void> {
+	for (const sid of sessions) {
+		harness.mock.sessionStatuses[sid] = { type: "idle" };
+	}
+	harness.mock.resetMessageRequestCounts();
+	// Let the reducer process the idle transition
+	await wait(1500);
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-describe("SSE-aware poller gating", () => {
+// ─── Group 1: SSE coverage and grace period ────────────────────────────────
+
+describe("Group 1: SSE coverage and grace period", () => {
 	let harness: TestHarness;
 
 	beforeAll(async () => {
@@ -227,79 +293,9 @@ describe("SSE-aware poller gating", () => {
 		if (harness) await harness.stop();
 	}, 10_000);
 
-	it("SSE-covered busy session has fewer message requests than non-covered", async () => {
-		// This test compares two scenarios to verify SSE gating:
-		// 1. Session busy WITH SSE events → fewer message polls
-		// 2. Session busy WITHOUT SSE events → more message polls (poller starts)
-
-		const client = await harness.connectClient();
-		await client.waitForInitialState();
-		client.send({ type: "view_session", sessionId: "sess-1" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-1",
-		});
-
-		// ── Scenario A: Busy WITH SSE coverage ──────────────────────────────
+	it("Scenario 1: Busy + continuous SSE → no poller starts", async () => {
+		const client = await connectAndView(harness, "sess-1");
 		harness.mock.resetMessageRequestCounts();
-		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-
-		const sseInterval = setInterval(() => {
-			harness.mock.injectSSE({
-				type: "message.delta",
-				properties: { sessionID: "sess-1", text: "..." },
-			});
-		}, 400);
-
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
-
-		// Wait past grace period + polling window
-		await new Promise((r) => setTimeout(r, 5_000));
-		clearInterval(sseInterval);
-		const countWithSSE = harness.mock.getMessageRequestCount("sess-1");
-
-		// Go idle to reset state
-		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
-		await new Promise((r) => setTimeout(r, 1000));
-
-		// ── Scenario B: Busy WITHOUT SSE coverage ───────────────────────────
-		harness.mock.resetMessageRequestCounts();
-		client.clearReceived();
-		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
-
-		// Same wait window — but no SSE events this time
-		await new Promise((r) => setTimeout(r, 5_000));
-		const countWithoutSSE = harness.mock.getMessageRequestCount("sess-1");
-
-		// The scenario without SSE should have more message requests
-		// because the reducer starts a poller after the grace period
-		expect(countWithoutSSE).toBeGreaterThan(countWithSSE);
-
-		// Cleanup
-		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
-		await client.close();
-	}, 25_000);
-
-	it("sends done to viewers when a busy session becomes idle", async () => {
-		const client = await harness.connectClient();
-		await client.waitForInitialState();
-
-		client.send({ type: "view_session", sessionId: "sess-1" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-1",
-		});
-		client.clearReceived();
 
 		// Session goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
@@ -307,13 +303,631 @@ describe("SSE-aware poller gating", () => {
 			timeout: 3000,
 			predicate: (m) => m["status"] === "processing",
 		});
-		client.clearReceived();
 
-		// Session goes idle — should trigger notify-idle → done to viewers
+		// Inject SSE events for sess-1 every 400ms for 6s
+		const sseInterval = setInterval(() => {
+			harness.mock.injectSSE({
+				type: "message.delta",
+				properties: { sessionID: "sess-1", text: "..." },
+			});
+		}, 400);
+
+		await wait(6_000);
+		clearInterval(sseInterval);
+
+		const count = harness.mock.getMessageRequestCount("sess-1");
+		// With SSE covering, poller should NOT have started → few/no message requests
+		expect(count).toBeLessThan(5);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 2: SSE events for wrong session don't count as coverage", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session sess-1 goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// Inject SSE events only for sess-2 (wrong session)
+		const sseInterval = setInterval(() => {
+			harness.mock.injectSSE({
+				type: "message.delta",
+				properties: { sessionID: "sess-2", text: "..." },
+			});
+		}, 400);
+
+		// Wait past grace period (3s) + some buffer
+		await wait(5_000);
+		clearInterval(sseInterval);
+
+		const count = harness.mock.getMessageRequestCount("sess-1");
+		// sess-1 had no SSE coverage → poller should have started after grace
+		expect(count).toBeGreaterThan(0);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 3: Busy + no SSE, before grace expires → fewer requests than after grace", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// Reset counts AFTER busy is confirmed to exclude init requests
+		harness.mock.resetMessageRequestCounts();
+
+		// Only wait 2s — grace period is 3s, so no poller yet
+		await wait(2_000);
+
+		const countDuringGrace = harness.mock.getMessageRequestCount("sess-1");
+
+		// Now wait past grace period for poller to start (3s more)
+		harness.mock.resetMessageRequestCounts();
+		await wait(3_000);
+
+		const countAfterGrace = harness.mock.getMessageRequestCount("sess-1");
+
+		// After grace expires, poller starts → significantly more message requests
+		// During grace: only seeding/init requests (a few at most)
+		// After grace: active polling every ~500ms → many requests
+		expect(countAfterGrace).toBeGreaterThan(countDuringGrace);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 4: Busy + no SSE, after grace expires → poller starts", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// Wait past grace period (3s) + extra time for poller to poll
+		await wait(5_000);
+
+		const count = harness.mock.getMessageRequestCount("sess-1");
+		// Grace expired + no SSE → poller should have started and polled
+		expect(count).toBeGreaterThan(0);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await client.close();
+	}, 15_000);
+});
+
+// ─── Group 2: SSE dynamics ─────────────────────────────────────────────────
+
+describe("Group 2: SSE dynamics", () => {
+	let harness: TestHarness;
+
+	beforeAll(async () => {
+		harness = await createTestHarness();
+	}, 15_000);
+
+	afterAll(async () => {
+		if (harness) await harness.stop();
+	}, 10_000);
+
+	it("Scenario 5: SSE active then stops → poller starts after staleness", async () => {
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// SSE events flow for 2s
+		const sseInterval = setInterval(() => {
+			harness.mock.injectSSE({
+				type: "message.delta",
+				properties: { sessionID: "sess-1", text: "..." },
+			});
+		}, 400);
+
+		await wait(2_000);
+		clearInterval(sseInterval);
+
+		// SSE stops — wait for staleness threshold (5s) + grace (3s) + buffer
+		// Total: 2s SSE + ~9s wait = enough for stale + grace
+		await wait(9_000);
+
+		const count = harness.mock.getMessageRequestCount("sess-1");
+		// After SSE went stale + grace, poller should have started
+		expect(count).toBeGreaterThan(0);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await client.close();
+	}, 25_000);
+
+	it("Scenario 6: Poller running + SSE resumes → polling rate drops", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy, no SSE → wait for poller to start
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// Wait past grace for poller to start
+		await wait(5_000);
+
+		// Measure baseline rate (polling without SSE) over 2s
+		harness.mock.resetMessageRequestCounts();
+		await wait(2_000);
+		const rateWithoutSSE = harness.mock.getMessageRequestCount("sess-1");
+
+		// Start SSE injection
+		const sseInterval = setInterval(() => {
+			harness.mock.injectSSE({
+				type: "message.delta",
+				properties: { sessionID: "sess-1", text: "..." },
+			});
+		}, 400);
+
+		// Let reducer detect SSE coverage and stop poller
+		await wait(1_500);
+
+		// Measure rate with SSE over 2s
+		harness.mock.resetMessageRequestCounts();
+		await wait(2_000);
+		const rateWithSSE = harness.mock.getMessageRequestCount("sess-1");
+
+		clearInterval(sseInterval);
+
+		// Rate after SSE resumes should be lower (poller stopped or reduced)
+		expect(rateWithSSE).toBeLessThan(rateWithoutSSE);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 5000 });
+		await client.close();
+	}, 25_000);
+});
+
+// ─── Group 3: Idle transitions ─────────────────────────────────────────────
+
+describe("Group 3: Idle transitions", () => {
+	let harness: TestHarness;
+
+	beforeAll(async () => {
+		harness = await createTestHarness();
+	}, 15_000);
+
+	afterAll(async () => {
+		if (harness) await harness.stop();
+	}, 10_000);
+
+	it("Scenario 7: Busy-grace → idle → done sent, no poller to stop", async () => {
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// Reset counts AFTER busy is confirmed to exclude init/seeding requests
+		harness.mock.resetMessageRequestCounts();
+
+		// Only busy for 1s (still within 3s grace period), then go idle
+		await wait(1_000);
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+
+		// Client should receive done
+		const done = await client.waitFor("done", { timeout: 3000 });
+		expect(done["type"]).toBe("done");
+
+		// Message request count should be at baseline (no poller was started)
+		const count = harness.mock.getMessageRequestCount("sess-1");
+		expect(count).toBeLessThan(3);
+
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 8: Busy-sse-covered → idle → done sent, no poller to stop", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy with SSE events flowing
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// SSE events flowing
+		const sseInterval = setInterval(() => {
+			harness.mock.injectSSE({
+				type: "message.delta",
+				properties: { sessionID: "sess-1", text: "..." },
+			});
+		}, 400);
+
+		// Go idle before grace matters
+		await wait(1_500);
+		clearInterval(sseInterval);
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+
+		// Client should receive done
+		const done = await client.waitFor("done", { timeout: 3000 });
+		expect(done["type"]).toBe("done");
+
+		// No poller was started → baseline message request count
+		const count = harness.mock.getMessageRequestCount("sess-1");
+		expect(count).toBeLessThan(3);
+
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 9: Busy-polling → idle → poller stops + done sent", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Session goes busy, no SSE → wait for poller to start
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// Wait past grace for poller to start
+		await wait(5_000);
+
+		// Verify poller is running
+		const countBefore = harness.mock.getMessageRequestCount("sess-1");
+		expect(countBefore).toBeGreaterThan(0);
+
+		// Go idle
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		const done = await client.waitFor("done", { timeout: 3000 });
 		expect(done["type"]).toBe("done");
 
+		// Reset counts after idle, wait 2s → poller should have stopped
+		harness.mock.resetMessageRequestCounts();
+		await wait(2_000);
+		const countAfter = harness.mock.getMessageRequestCount("sess-1");
+		// Poller stopped → no new message requests
+		expect(countAfter).toBe(0);
+
 		await client.close();
-	});
+	}, 15_000);
+});
+
+// ─── Group 4: Cross-session and lifecycle ──────────────────────────────────
+
+describe("Group 4: Cross-session and lifecycle", () => {
+	let harness: TestHarness;
+
+	beforeAll(async () => {
+		harness = await createTestHarness({
+			sessions: [
+				{ id: "sess-1", title: "Session 1" },
+				{ id: "sess-2", title: "Session 2" },
+			],
+		});
+	}, 15_000);
+
+	afterAll(async () => {
+		if (harness) await harness.stop();
+	}, 10_000);
+
+	it("Scenario 10: Two sessions — A polling, B SSE-covered → independent", async () => {
+		const client = await connectAndView(harness, "sess-1");
+		harness.mock.resetMessageRequestCounts();
+
+		// Both sessions go busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
+
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		// SSE events for sess-2 only (every 400ms)
+		const sseInterval = setInterval(() => {
+			harness.mock.injectSSE({
+				type: "message.delta",
+				properties: { sessionID: "sess-2", text: "..." },
+			});
+		}, 400);
+
+		// Wait past grace period for pollers to start
+		await wait(5_000);
+
+		clearInterval(sseInterval);
+
+		const countSess1 = harness.mock.getMessageRequestCount("sess-1");
+		const countSess2 = harness.mock.getMessageRequestCount("sess-2");
+
+		// sess-1 has no SSE → should have high message requests (poller running)
+		expect(countSess1).toBeGreaterThan(0);
+		// sess-2 has SSE coverage → should have low message requests
+		expect(countSess2).toBeLessThan(countSess1);
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
+		await wait(2000);
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 11: Session deleted while busy → no phantom effects", async () => {
+		await resetForNextTest(harness, ["sess-1", "sess-2"]);
+
+		// sess-2 goes busy
+		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
+		await wait(2_000);
+
+		// Remove sess-2 from session list and status map
+		const idx = harness.mock.sessionList.findIndex((s) => s.id === "sess-2");
+		if (idx >= 0) harness.mock.sessionList.splice(idx, 1);
+		delete harness.mock.sessionStatuses["sess-2"];
+
+		// Wait — should not crash
+		await wait(2_000);
+
+		// Connect a client and verify relay still works with sess-1
+		const client = await harness.connectClient();
+		await client.waitForInitialState();
+		client.send({ type: "view_session", sessionId: "sess-1" });
+		const switched = await client.waitFor("session_switched", {
+			timeout: 3000,
+			predicate: (m) => m["id"] === "sess-1",
+		});
+		expect(switched["id"]).toBe("sess-1");
+
+		await client.close();
+
+		// Restore sess-2 for any further tests
+		harness.mock.sessionList.push({ id: "sess-2", title: "Session 2" });
+		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
+	}, 15_000);
+});
+
+// ─── Group 5: Notifications ────────────────────────────────────────────────
+
+describe("Group 5: Notifications", () => {
+	let harness: TestHarness;
+
+	beforeAll(async () => {
+		harness = await createTestHarness({
+			sessions: [
+				{ id: "sess-1", title: "Session 1" },
+				{ id: "sess-2", title: "Session 2 (subagent)", parentID: "sess-1" },
+			],
+		});
+	}, 15_000);
+
+	afterAll(async () => {
+		if (harness) await harness.stop();
+	}, 10_000);
+
+	it("Scenario 12: Subagent done → no cross-session broadcast", async () => {
+		const client = await connectAndView(harness, "sess-1");
+
+		// sess-2 (subagent of sess-1) goes busy then idle
+		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
+		await wait(2_000);
+		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
+		await wait(2_000);
+
+		// Client viewing sess-1 should NOT receive notification_event for subagent done
+		const notifications = client.getReceivedOfType("notification_event");
+		expect(notifications.length).toBe(0);
+
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 13: Non-subagent done → cross-session broadcast fires", async () => {
+		await resetForNextTest(harness, ["sess-1", "sess-2"]);
+
+		// Client viewing sess-2 (no one viewing sess-1)
+		const client = await connectAndView(harness, "sess-2");
+
+		// sess-1 (NOT a subagent) goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await wait(2_000);
+
+		client.clearReceived();
+
+		// sess-1 goes idle → should trigger cross-session broadcast
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+
+		// Client on sess-2 should receive notification_event with eventType: "done"
+		const notification = await client.waitFor("notification_event", {
+			timeout: 5000,
+			predicate: (m) => m["eventType"] === "done",
+		});
+		expect(notification["type"]).toBe("notification_event");
+		expect(notification["eventType"]).toBe("done");
+
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 14: Done with active viewer → sent to session, no cross-session broadcast", async () => {
+		await resetForNextTest(harness, ["sess-1", "sess-2"]);
+
+		// Client viewing sess-1 (the session that will go busy/idle)
+		const client = await connectAndView(harness, "sess-1");
+
+		// sess-1 goes busy
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+
+		client.clearReceived();
+
+		// sess-1 goes idle → done should be sent directly to session viewer
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		const done = await client.waitFor("done", { timeout: 3000 });
+		expect(done["type"]).toBe("done");
+
+		// Should NOT receive notification_event (done was delivered to viewer directly)
+		await wait(1_000);
+		const notifications = client.getReceivedOfType("notification_event");
+		expect(notifications.length).toBe(0);
+
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 15: Done without viewer → cross-session broadcast", async () => {
+		await resetForNextTest(harness, ["sess-1", "sess-2"]);
+
+		// Client viewing sess-2 (no one viewing sess-1)
+		const client = await connectAndView(harness, "sess-2");
+
+		// sess-1 goes busy (no viewer)
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await wait(2_000);
+
+		client.clearReceived();
+
+		// sess-1 goes idle → cross-session broadcast should fire
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+
+		const notification = await client.waitFor("notification_event", {
+			timeout: 5000,
+			predicate: (m) => m["eventType"] === "done",
+		});
+		expect(notification["type"]).toBe("notification_event");
+
+		await client.close();
+	}, 15_000);
+});
+
+// ─── Group 6: Retry status and cycling ─────────────────────────────────────
+
+describe("Group 6: Retry status and cycling", () => {
+	let harness: TestHarness;
+
+	beforeAll(async () => {
+		harness = await createTestHarness();
+	}, 15_000);
+
+	afterAll(async () => {
+		if (harness) await harness.stop();
+	}, 10_000);
+
+	it("Scenario 16: Retry status treated as busy", async () => {
+		const client = await connectAndView(harness, "sess-1");
+
+		// Set session status to retry
+		harness.mock.sessionStatuses["sess-1"] = {
+			type: "retry",
+			attempt: 1,
+			message: "rate limited",
+			next: Date.now() + 5000,
+		};
+
+		// Client should receive status:processing (retry is treated as busy)
+		const status = await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+		expect(status["status"]).toBe("processing");
+
+		// Cleanup
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 17: Rapid busy→idle→busy cycling → correct status/done sequence", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+
+		// First busy cycle
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+		await wait(1_500);
+
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+		await wait(1_500);
+
+		client.clearReceived();
+
+		// Second busy cycle
+		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
+		await client.waitFor("status", {
+			timeout: 3000,
+			predicate: (m) => m["status"] === "processing",
+		});
+		await wait(1_500);
+
+		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
+		await client.waitFor("done", { timeout: 3000 });
+
+		// Verify the sequence: status:processing, done, status:processing, done
+		// (We cleared after the first done, so only the second cycle is in received)
+		const statuses = client.getReceivedOfType("status");
+		const dones = client.getReceivedOfType("done");
+		expect(statuses.length).toBeGreaterThanOrEqual(1);
+		expect(dones.length).toBeGreaterThanOrEqual(1);
+
+		await client.close();
+	}, 15_000);
+
+	it("Scenario 18: Steady-state (no status changes) → no session_list spam", async () => {
+		await resetForNextTest(harness, ["sess-1"]);
+		const client = await connectAndView(harness, "sess-1");
+
+		// Session stays idle — clear received after initial setup
+		client.clearReceived();
+
+		// Wait 3s in steady state
+		await wait(3_000);
+
+		// Count session_list messages — should be 0 or very few
+		const sessionListMsgs = client.getReceivedOfType("session_list");
+		// The statusesChanged flag gates broadcast: no status changes → no session_list spam
+		expect(sessionListMsgs.length).toBeLessThanOrEqual(2);
+
+		await client.close();
+	}, 15_000);
 });
