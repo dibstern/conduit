@@ -3,7 +3,12 @@
 // Pure dispatch table: routes incoming RelayMessage to the appropriate store.
 
 import { notificationContent } from "../../notification-content.js";
-import type { RelayMessage, ToolMessage } from "../types.js";
+import type {
+	ChatMessage,
+	HistoryMessage,
+	RelayMessage,
+	ToolMessage,
+} from "../types.js";
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import {
@@ -135,6 +140,39 @@ registerClearMessagesHook(() => {
 	replayGeneration++;
 });
 
+// ─── Async history conversion ───────────────────────────────────────────────
+
+/**
+ * Convert history messages in yielding chunks.
+ * historyToChatMessages stays synchronous (pure, well-tested).
+ * This wrapper yields between chunks to avoid blocking the main thread.
+ *
+ * Uses replayGeneration for abort detection. Safe because:
+ * - historyState.loading prevents concurrent history_page loads
+ * - Session switches bump generation via clearMessages → abortReplay()
+ */
+async function convertHistoryAsync(
+	messages: HistoryMessage[],
+	render: (text: string) => string,
+): Promise<ChatMessage[] | null> {
+	const CHUNK = 50;
+	const gen = replayGeneration; // snapshot
+	const result: ChatMessage[] = [];
+
+	for (let i = 0; i < messages.length; i += CHUNK) {
+		const slice = messages.slice(i, i + CHUNK);
+		const converted = historyToChatMessages(slice, render);
+		result.push(...converted);
+
+		if (i + CHUNK < messages.length) {
+			await yieldToEventLoop();
+			if (gen !== replayGeneration) return null; // aborted
+		}
+	}
+
+	return result;
+}
+
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
 /**
@@ -242,14 +280,22 @@ export function handleMessage(msg: RelayMessage): void {
 				// historyState.hasMore stays false (set by clearMessages above),
 				// so the IntersectionObserver can never fire spuriously.
 			} else if (msg.history) {
-				// REST API fallback: convert to ChatMessages and prepend
-				const chatMsgs = historyToChatMessages(
-					msg.history.messages,
-					renderMarkdown,
-				);
-				prependMessages(chatMsgs);
-				historyState.hasMore = msg.history.hasMore;
-				historyState.messageCount = msg.history.messages.length;
+				// REST API fallback: convert to ChatMessages and prepend.
+				// Fire-and-forget — handleMessage stays synchronous.
+				const historyMsgs = msg.history.messages;
+				const hasMore = msg.history.hasMore;
+				const msgCount = historyMsgs.length;
+				convertHistoryAsync(historyMsgs, renderMarkdown)
+					.then((chatMsgs) => {
+						if (chatMsgs) {
+							prependMessages(chatMsgs);
+							historyState.hasMore = hasMore;
+							historyState.messageCount = msgCount;
+						}
+					})
+					.catch((err) => {
+						console.warn("[ws] History conversion error:", err);
+					});
 			} else {
 				// Empty session (neither events nor history) — hasMore stays false
 				// so "Beginning of session" marker shows immediately.
@@ -339,14 +385,24 @@ export function handleMessage(msg: RelayMessage): void {
 
 		// ─── History ─────────────────────────────────────────────────────
 		case "history_page": {
-			// Convert and prepend older messages into chatState.messages
+			// Convert and prepend older messages into chatState.messages.
+			// Fire-and-forget — handleMessage stays synchronous.
 			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
 			const rawMessages = historyMsg.messages ?? [];
-			const chatMsgs = historyToChatMessages(rawMessages, renderMarkdown);
-			prependMessages(chatMsgs);
-			historyState.hasMore = historyMsg.hasMore ?? false;
-			historyState.loading = false;
-			historyState.messageCount += rawMessages.length;
+			const hasMore = historyMsg.hasMore ?? false;
+			convertHistoryAsync(rawMessages, renderMarkdown)
+				.then((chatMsgs) => {
+					if (chatMsgs) {
+						prependMessages(chatMsgs);
+						historyState.hasMore = hasMore;
+						historyState.messageCount += rawMessages.length;
+					}
+					historyState.loading = false; // ALWAYS reset, even on abort
+				})
+				.catch((err) => {
+					console.warn("[ws] History page conversion error:", err);
+					historyState.loading = false;
+				});
 			break;
 		}
 

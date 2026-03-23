@@ -112,13 +112,14 @@ describe("Regression: no dual-render duplication", () => {
 			],
 			hasMore: false,
 		});
+		await vi.runAllTimersAsync();
 
 		// The KEY protection is historyState.hasMore = false, which
 		// prevents the observer from firing. Verify that:
 		expect(historyState.hasMore).toBe(false);
 	});
 
-	it("REST fallback sets historyState.hasMore from server", () => {
+	it("REST fallback sets historyState.hasMore from server", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -133,6 +134,7 @@ describe("Regression: no dual-render duplication", () => {
 				hasMore: true,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		expect(historyState.hasMore).toBe(true);
 		expect(chatState.messages.filter((m) => m.type === "user")).toHaveLength(1);
@@ -163,7 +165,7 @@ describe("Regression: no dual-render duplication", () => {
 // ─── messageCount accumulation and offset correctness ───────────────────────
 
 describe("messageCount tracking for pagination offset", () => {
-	it("REST fallback sets messageCount to initial page size", () => {
+	it("REST fallback sets messageCount to initial page size", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
@@ -188,12 +190,13 @@ describe("messageCount tracking for pagination offset", () => {
 				hasMore: true,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		expect(historyState.messageCount).toBe(3);
 		expect(historyState.hasMore).toBe(true);
 	});
 
-	it("history_page increments messageCount (not resets)", () => {
+	it("history_page increments messageCount (not resets)", async () => {
 		// Initial page: 3 messages
 		handleMessage({
 			type: "session_switched",
@@ -219,6 +222,7 @@ describe("messageCount tracking for pagination offset", () => {
 				hasMore: true,
 			},
 		});
+		await vi.runAllTimersAsync();
 		expect(historyState.messageCount).toBe(3);
 
 		// Second page: 2 more messages
@@ -239,6 +243,7 @@ describe("messageCount tracking for pagination offset", () => {
 			],
 			hasMore: true,
 		});
+		await vi.runAllTimersAsync();
 
 		// Should accumulate: 3 + 2 = 5
 		expect(historyState.messageCount).toBe(5);
@@ -257,13 +262,14 @@ describe("messageCount tracking for pagination offset", () => {
 			],
 			hasMore: false,
 		});
+		await vi.runAllTimersAsync();
 
 		// Should accumulate: 5 + 1 = 6
 		expect(historyState.messageCount).toBe(6);
 		expect(historyState.hasMore).toBe(false);
 	});
 
-	it("session switch resets messageCount to 0", () => {
+	it("session switch resets messageCount to 0", async () => {
 		// Load with history
 		handleMessage({
 			type: "session_switched",
@@ -279,9 +285,10 @@ describe("messageCount tracking for pagination offset", () => {
 				hasMore: true,
 			},
 		});
+		await vi.runAllTimersAsync();
 		expect(historyState.messageCount).toBe(1);
 
-		// Switch away — must reset
+		// Switch away — must reset (clearMessages resets synchronously)
 		handleMessage({ type: "session_switched", id: "s4" });
 		expect(historyState.messageCount).toBe(0);
 		expect(historyState.hasMore).toBe(false);
@@ -305,7 +312,7 @@ describe("messageCount tracking for pagination offset", () => {
 		expect(historyState.hasMore).toBe(false);
 	});
 
-	it("history_page sets loading to false", () => {
+	it("history_page sets loading to false", async () => {
 		// Simulate loading state
 		historyState.loading = true;
 		historyState.hasMore = true;
@@ -322,11 +329,12 @@ describe("messageCount tracking for pagination offset", () => {
 			],
 			hasMore: false,
 		});
+		await vi.runAllTimersAsync();
 
 		expect(historyState.loading).toBe(false);
 	});
 
-	it("messages prepend in correct order across pages", () => {
+	it("messages prepend in correct order across pages", async () => {
 		// Page 1: newest messages
 		handleMessage({
 			type: "session_switched",
@@ -342,6 +350,7 @@ describe("messageCount tracking for pagination offset", () => {
 				hasMore: true,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		const afterFirst = chatState.messages.filter((m) => m.type === "user");
 		expect(afterFirst).toHaveLength(1);
@@ -365,6 +374,7 @@ describe("messageCount tracking for pagination offset", () => {
 			],
 			hasMore: false,
 		});
+		await vi.runAllTimersAsync();
 
 		const allUsers = chatState.messages.filter((m) => m.type === "user");
 		expect(allUsers).toHaveLength(3);

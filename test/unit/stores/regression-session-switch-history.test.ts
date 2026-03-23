@@ -349,7 +349,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 // ─── REST API fallback: session_switched with history ────────────────────────
 
 describe("Combined protocol: REST API fallback (history in session_switched)", () => {
-	it("converts REST history into chatState.messages", () => {
+	it("converts REST history into chatState.messages", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-x",
@@ -370,6 +370,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 				total: 2,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		// Messages should be in chatState.messages, not dispatched to listeners
 		expect(chatState.messages.length).toBeGreaterThan(0);
@@ -383,7 +384,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		expect(assistantMsgs).toHaveLength(1);
 	});
 
-	it("REST fallback populates chatState.messages (not empty)", () => {
+	it("REST fallback populates chatState.messages (not empty)", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-y",
@@ -398,6 +399,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 				hasMore: false,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		// REST path now puts messages in chatState.messages
 		const userMsgs = chatState.messages.filter((m) => m.type === "user");
@@ -419,7 +421,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		expect(historyState.hasMore).toBe(false);
 	});
 
-	it("REST fallback sets historyState.hasMore from server response", () => {
+	it("REST fallback sets historyState.hasMore from server response", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-w",
@@ -434,6 +436,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 				hasMore: true,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		expect(historyState.hasMore).toBe(true);
 	});
@@ -442,7 +445,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 // ─── history_page handling (load_more_history) ──────────────────────────────
 
 describe("history_page for load_more_history pagination", () => {
-	it("history_page converts and prepends to chatState.messages", () => {
+	it("history_page converts and prepends to chatState.messages", async () => {
 		// Seed with a live message so we can verify prepend ordering
 		addUserMessage("live message");
 
@@ -458,6 +461,7 @@ describe("history_page for load_more_history pagination", () => {
 			],
 			hasMore: false,
 		});
+		await vi.runAllTimersAsync();
 
 		// Older message should be prepended before live message
 		const userMsgs = chatState.messages.filter((m) => m.type === "user");
@@ -466,7 +470,7 @@ describe("history_page for load_more_history pagination", () => {
 		expect((userMsgs[1] as { text: string }).text).toBe("live message");
 	});
 
-	it("multiple rapid session switches only keep last session's state", () => {
+	it("multiple rapid session switches only keep last session's state", async () => {
 		// Rapid switches: A → B → C
 		handleMessage({ type: "session_switched", id: "session-a" });
 		handleMessage({ type: "session_switched", id: "session-b" });
@@ -489,6 +493,7 @@ describe("history_page for load_more_history pagination", () => {
 			],
 			hasMore: false,
 		});
+		await vi.runAllTimersAsync();
 
 		// Should have the history page message in chatState.messages
 		const userMsgs = chatState.messages.filter((m) => m.type === "user");
@@ -500,7 +505,7 @@ describe("history_page for load_more_history pagination", () => {
 // ─── Queued flag timing (Task 5) ────────────────────────────────────────────
 
 describe("Queued flag timing with REST history", () => {
-	it("applies queued flag when status:processing arrives after REST history prepend", () => {
+	it("applies queued flag when status:processing arrives after REST history prepend", async () => {
 		// Load session with an unresponded user message via REST fallback
 		handleMessage({
 			type: "session_switched",
@@ -516,6 +521,7 @@ describe("Queued flag timing with REST history", () => {
 				hasMore: false,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		// At this point, processing is false (clearMessages reset it), no queued flag
 		const usersBefore = chatState.messages.filter((m) => m.type === "user");
@@ -531,7 +537,7 @@ describe("Queued flag timing with REST history", () => {
 		).toBe(true);
 	});
 
-	it("queued flag is cleared when LLM starts responding", () => {
+	it("queued flag is cleared when LLM starts responding", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
@@ -546,6 +552,7 @@ describe("Queued flag timing with REST history", () => {
 				hasMore: false,
 			},
 		});
+		await vi.runAllTimersAsync();
 
 		handleMessage({ type: "status", status: "processing" });
 		// Queued flag should be set
