@@ -1,0 +1,217 @@
+// ─── Tool Registry ──────────────────────────────────────────────────────────
+// Centralized state machine for tool lifecycle transitions.
+// Pure TypeScript — no Svelte dependencies.
+
+import type { ToolStatus } from "../../shared-types.js";
+import type { ChatMessage, ToolMessage } from "../types.js";
+import { generateUuid } from "../utils/format.js";
+
+// ─── Public Types ───────────────────────────────────────────────────────────
+
+export interface TruncationExtras {
+	isTruncated?: boolean;
+	fullContentLength?: number;
+}
+
+export type ToolTransitionResult =
+	| { action: "create"; tool: ToolMessage }
+	| { action: "update"; uuid: string; tool: ToolMessage }
+	| { action: "reject"; reason: string }
+	| { action: "duplicate" };
+
+export type FinalizationResult =
+	| { action: "finalized"; indices: number[] }
+	| { action: "none" };
+
+type LogFn = (level: "info" | "warn", message: string) => void;
+
+export interface ToolRegistryOptions {
+	log?: LogFn;
+	uuidFn?: () => string;
+}
+
+export interface ToolRegistry {
+	start(id: string, name: string, messageId?: string): ToolTransitionResult;
+	executing(
+		id: string,
+		input?: unknown,
+		metadata?: Record<string, unknown>,
+	): ToolTransitionResult;
+	complete(
+		id: string,
+		content: string,
+		isError: boolean,
+		extras?: TruncationExtras,
+	): ToolTransitionResult;
+	finalizeAll(messages: readonly ChatMessage[]): FinalizationResult;
+	clear(): void;
+	remove(id: string): void;
+	getUuid(callId: string): string | undefined;
+}
+
+// ─── Transition Table ───────────────────────────────────────────────────────
+
+const VALID_TRANSITIONS: Record<ToolStatus, ReadonlySet<ToolStatus>> = {
+	pending: new Set(["running", "completed", "error"]),
+	running: new Set(["completed", "error"]),
+	completed: new Set(), // terminal
+	error: new Set(), // terminal
+};
+
+function canTransition(from: ToolStatus, to: ToolStatus): boolean {
+	return VALID_TRANSITIONS[from].has(to);
+}
+
+// ─── Internal Entry ─────────────────────────────────────────────────────────
+
+interface ToolEntry {
+	uuid: string;
+	status: ToolStatus;
+	tool: ToolMessage;
+}
+
+// ─── Factory ────────────────────────────────────────────────────────────────
+
+export function createToolRegistry(
+	options?: ToolRegistryOptions,
+): ToolRegistry {
+	const log = options?.log;
+	const makeUuid = options?.uuidFn ?? generateUuid;
+	const entries = new Map<string, ToolEntry>();
+
+	function start(
+		id: string,
+		name: string,
+		messageId?: string,
+	): ToolTransitionResult {
+		if (entries.has(id)) {
+			log?.(
+				"info",
+				`Duplicate tool_start for "${name}" (${id}), existing entry retained.`,
+			);
+			return { action: "duplicate" };
+		}
+
+		const uuid = makeUuid();
+		const tool: ToolMessage = {
+			type: "tool",
+			uuid,
+			id,
+			name,
+			status: "pending",
+			...(messageId !== undefined && { messageId }),
+		};
+		entries.set(id, { uuid, status: "pending", tool });
+		return { action: "create", tool };
+	}
+
+	function executing(
+		id: string,
+		input?: unknown,
+		metadata?: Record<string, unknown>,
+	): ToolTransitionResult {
+		const tracked = entries.get(id);
+		if (!tracked) {
+			log?.("warn", `executing() called for unknown tool "${id}"`);
+			return { action: "reject", reason: `Unknown tool ID: ${id}` };
+		}
+
+		if (!canTransition(tracked.status, "running")) {
+			log?.(
+				"warn",
+				`Invalid transition ${tracked.status} -> running for tool "${id}"`,
+			);
+			return {
+				action: "reject",
+				reason: `Cannot transition from ${tracked.status} to running`,
+			};
+		}
+
+		tracked.status = "running";
+		tracked.tool = {
+			...tracked.tool,
+			status: "running",
+			...(input !== undefined && { input }),
+			...(metadata !== undefined && { metadata }),
+		};
+		return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
+	}
+
+	function complete(
+		id: string,
+		content: string,
+		isError: boolean,
+		extras?: TruncationExtras,
+	): ToolTransitionResult {
+		const tracked = entries.get(id);
+		if (!tracked) {
+			log?.("warn", `complete() called for unknown tool "${id}"`);
+			return { action: "reject", reason: `Unknown tool ID: ${id}` };
+		}
+
+		const targetStatus: ToolStatus = isError ? "error" : "completed";
+
+		// Special case: allow override when already completed
+		// (handles late SSE results after handleDone force-finalization —
+		// accepts BOTH late success AND late error results)
+		if (tracked.status === "completed") {
+			// Allow the override
+		} else if (tracked.status === "error") {
+			log?.(
+				"warn",
+				`Invalid transition ${tracked.status} -> ${targetStatus} for tool "${id}"`,
+			);
+			return {
+				action: "reject",
+				reason: `Cannot transition from ${tracked.status} to ${targetStatus}`,
+			};
+		}
+
+		tracked.status = targetStatus;
+		tracked.tool = {
+			...tracked.tool,
+			status: targetStatus,
+			result: content,
+			isError,
+			...extras,
+		};
+		return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
+	}
+
+	function finalizeAll(messages: readonly ChatMessage[]): FinalizationResult {
+		const indices: number[] = [];
+
+		for (let i = 0; i < messages.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
+			const msg = messages[i]!;
+			if (msg.type !== "tool") continue;
+			if (msg.status !== "pending" && msg.status !== "running") continue;
+
+			indices.push(i);
+
+			// Update internal tracking if this tool is in the registry
+			const tracked = entries.get(msg.id);
+			if (tracked) {
+				tracked.status = "completed";
+				tracked.tool = { ...tracked.tool, status: "completed" };
+			}
+		}
+
+		if (indices.length === 0) return { action: "none" };
+		return { action: "finalized", indices };
+	}
+
+	function clear(): void {
+		entries.clear();
+	}
+
+	function remove(id: string): void {
+		entries.delete(id);
+	}
+
+	function getUuid(callId: string): string | undefined {
+		return entries.get(callId)?.uuid;
+	}
+
+	return { start, executing, complete, finalizeAll, clear, remove, getUuid };
+}
