@@ -82,7 +82,7 @@ describe("Integration: Session Switch History", () => {
 		}
 
 		await client.close();
-	}, 120_000);
+	}, 30_000);
 
 	// ── Mid-stream switch: partial response preserved in history ─────────
 
@@ -127,9 +127,10 @@ describe("Integration: Session Switch History", () => {
 		});
 		expect(switchedToB["id"]).toBeTruthy();
 
-		// Wait long enough for the model to finish processing session A
-		// in the background.
-		await new Promise((r) => setTimeout(r, 30_000));
+		// Wait for session A to finish processing in the background.
+		// The mock completes SSE delivery in <1s; 3s is ample for the relay
+		// to cache all events and finalize the session.
+		await new Promise((r) => setTimeout(r, 3_000));
 
 		// ── Switch back ─────────────────────────────────────────────────
 		client.clearReceived();
@@ -234,7 +235,7 @@ describe("Integration: Session Switch History", () => {
 		}
 
 		await client.close();
-	}, 120_000);
+	}, 30_000);
 
 	// ── Empty session: switching back delivers session_switched ─────────
 
@@ -365,8 +366,11 @@ describe("Integration: Session Switch History", () => {
 		client.send({ type: "switch_session", sessionId: sessionA });
 		client.send({ type: "switch_session", sessionId: sessionC });
 
-		// Wait for all three to complete
-		await new Promise((r) => setTimeout(r, 3_000));
+		// Wait for the final switch to complete (sessionC)
+		await client.waitFor("session_switched", {
+			timeout: 5_000,
+			predicate: (m) => m["id"] === sessionC,
+		});
 
 		const sessionSwitches = client.getReceivedOfType("session_switched");
 		expect(sessionSwitches.length).toBeGreaterThanOrEqual(1);

@@ -113,6 +113,15 @@ export interface RelayStackConfig {
 	pushManager?: PushNotificationManager;
 	/** Config directory for cache storage (default: projectDir/.conduit) */
 	configDir?: string;
+	/**
+	 * Override the default poller gating config (SSE grace period, staleness
+	 * threshold, max concurrent pollers). Forwarded to createProjectRelay.
+	 */
+	pollerGatingConfig?: import("./monitoring-types.js").PollerGatingConfig;
+	/** Override the session-status polling interval in milliseconds (default: 500). */
+	statusPollerInterval?: number;
+	/** Override the message polling interval in milliseconds (default: 750). */
+	messagePollerInterval?: number;
 }
 
 // ─── Stack ───────────────────────────────────────────────────────────────────
@@ -956,6 +965,15 @@ export async function createRelayStack(
 		addProject: addProjectRelay,
 		...(pushMgr != null && { pushManager: pushMgr }),
 		...(config.configDir != null && { configDir: config.configDir }),
+		...(config.pollerGatingConfig != null && {
+			pollerGatingConfig: config.pollerGatingConfig,
+		}),
+		...(config.statusPollerInterval != null && {
+			statusPollerInterval: config.statusPollerInterval,
+		}),
+		...(config.messagePollerInterval != null && {
+			messagePollerInterval: config.messagePollerInterval,
+		}),
 	});
 	relays.set(config.slug, relay);
 
