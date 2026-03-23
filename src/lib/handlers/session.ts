@@ -381,6 +381,27 @@ export async function handleForkSession(
 
 	deps.overrides.clearSession(sessionId);
 
+	// Determine the fork-point messageId
+	let forkMessageId: string | undefined = messageId;
+	if (!forkMessageId) {
+		// Whole-session fork: get all messages in the forked session and use the last one.
+		// At this point the fork just happened, so all messages are inherited.
+		try {
+			const msgs = await deps.client.getMessages(forked.id);
+			if (msgs.length > 0) {
+				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+				forkMessageId = msgs[msgs.length - 1]!.id;
+			}
+		} catch {
+			deps.log.warn(`Could not determine fork-point for ${forked.id}`);
+		}
+	}
+
+	// Persist fork-point metadata
+	if (forkMessageId && deps.forkMeta) {
+		deps.forkMeta.setForkMessageId(forked.id, forkMessageId);
+	}
+
 	// Find the parent title for the notification
 	const sessions = await deps.sessionMgr.listSessions();
 	const parent = sessions.find((s) => s.id === sessionId);
@@ -393,6 +414,7 @@ export async function handleForkSession(
 			title: forked.title ?? "Forked Session",
 			updatedAt: forked.time?.updated ?? forked.time?.created ?? 0,
 			parentID: sessionId,
+			...(forkMessageId && { forkMessageId }),
 		},
 		parentId: sessionId,
 		parentTitle: parent?.title ?? "Unknown",

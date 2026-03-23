@@ -181,6 +181,7 @@ export async function createProjectRelay(
 			string,
 			import("../instance/opencode-client.js").SessionStatus
 		> => statusPoller.getCurrentStatuses(),
+		...(config.configDir != null && { configDir: config.configDir }),
 	});
 
 	// ── Per-session event cache ──
@@ -436,6 +437,10 @@ export async function createProjectRelay(
 		statusPoller,
 		registry,
 		pollerManager,
+		forkMeta: {
+			setForkMessageId: (sid: string, mid: string) =>
+				sessionMgr.setForkMessageId(sid, mid),
+		},
 		...(config.getInstances != null && { getInstances: config.getInstances }),
 		...(config.addInstance != null && { addInstance: config.addInstance }),
 		...(config.removeInstance != null && {

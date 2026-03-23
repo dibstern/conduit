@@ -4,6 +4,7 @@
 // storage. This layer proxies session CRUD and maintains in-memory active state.
 
 import { EventEmitter } from "node:events";
+import { loadForkMetadata, saveForkMetadata } from "../daemon/fork-metadata.js";
 import type {
 	OpenCodeClient,
 	SessionDetail,
@@ -26,6 +27,8 @@ export interface SessionManagerOptions {
 	directory?: string;
 	/** Optional getter for current session statuses (for processing indicators) */
 	getStatuses?: () => Record<string, SessionStatus>;
+	/** Config directory for fork metadata persistence */
+	configDir?: string;
 }
 
 export interface SessionManagerEvents {
@@ -55,6 +58,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly log: Logger;
 	private readonly directory: string | undefined;
 	private readonly getStatuses: (() => Record<string, SessionStatus>) | null;
+	private readonly configDir: string | undefined;
 
 	/**
 	 * Cached child→parent map built from the most recent session list fetch.
@@ -70,6 +74,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 */
 	private lastMessageAt = new Map<string, number>();
 
+	/**
+	 * Fork-point metadata: maps forked sessionId → messageId at the fork point.
+	 * Loaded from disk on construction, updated on fork, saved on mutation.
+	 */
+	private forkMeta: Map<string, string>;
+
 	constructor(options: SessionManagerOptions) {
 		super();
 		this.client = options.client;
@@ -77,6 +87,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.log = options.log ?? createSilentLogger();
 		this.directory = options.directory;
 		this.getStatuses = options.getStatuses ?? null;
+		this.configDir = options.configDir;
+		this.forkMeta = loadForkMetadata(options.configDir);
 	}
 
 	// ─── Queries ──────────────────────────────────────────────────────────
@@ -121,7 +133,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				.map((s) => s.id.slice(0, 12))
 				.join(",")}${sessions.length > 5 ? "..." : ""}]`,
 		);
-		return toSessionInfoList(sessions, resolvedStatuses, this.lastMessageAt);
+		return toSessionInfoList(
+			sessions,
+			resolvedStatuses,
+			this.lastMessageAt,
+			this.forkMeta,
+		);
 	}
 
 	/**
@@ -222,7 +239,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				s.id.toLowerCase().includes(q)
 			);
 		});
-		return toSessionInfoList(matches, this.getStatuses?.(), this.lastMessageAt);
+		return toSessionInfoList(
+			matches,
+			this.getStatuses?.(),
+			this.lastMessageAt,
+			this.forkMeta,
+		);
 	}
 
 	/**
@@ -306,6 +328,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		return this.lastMessageAt;
 	}
 
+	/** Record the fork-point messageId for a forked session and persist to disk. */
+	setForkMessageId(sessionId: string, messageId: string): void {
+		this.forkMeta.set(sessionId, messageId);
+		saveForkMetadata(this.forkMeta, this.configDir);
+	}
+
 	/**
 	 * Send roots-only session list immediately, then all-sessions in background.
 	 * Used by all broadcast/unicast send points.
@@ -367,6 +395,7 @@ function toSessionInfoList(
 	sessions: SessionDetail[],
 	statuses?: Record<string, SessionStatus>,
 	lastMessageAt?: ReadonlyMap<string, number>,
+	forkMeta?: ReadonlyMap<string, string>,
 ): SessionInfo[] {
 	return sessions
 		.map((s) => {
@@ -374,12 +403,15 @@ function toSessionInfoList(
 			const lastMsgTime = lastMessageAt?.get(s.id);
 			const displayTime = lastMsgTime ?? s.time?.created ?? 0;
 
+			const forkMessageId = forkMeta?.get(s.id);
+
 			const info: SessionInfo = {
 				id: s.id,
 				title: s.title ?? "Untitled",
 				updatedAt: displayTime,
 				messageCount: 0, // OpenCode doesn't include this in list; frontend can fetch if needed
 				...(s.parentID != null && { parentID: s.parentID }),
+				...(forkMessageId != null && { forkMessageId }),
 			};
 			if (statuses) {
 				const status = statuses[s.id];

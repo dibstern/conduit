@@ -182,6 +182,70 @@ describe("handleForkSession (ticket 5.3)", () => {
 		expect(deps.client.forkSession).toHaveBeenCalledWith("ses_explicit", {});
 	});
 
+	it("stores forkMessageId from messageId payload", async () => {
+		let storedSessionId: string | undefined;
+		let storedMessageId: string | undefined;
+		const forkMeta = {
+			setForkMessageId: (sid: string, mid: string) => {
+				storedSessionId = sid;
+				storedMessageId = mid;
+			},
+		};
+		const depsWithMeta = { ...deps, forkMeta };
+		await handleForkSession(depsWithMeta, "client-1", {
+			sessionId: "ses_original",
+			messageId: "msg_42",
+		});
+		expect(storedSessionId).toBe("ses_forked");
+		expect(storedMessageId).toBe("msg_42");
+	});
+
+	it("includes forkMessageId in session_forked broadcast", async () => {
+		const depsWithMeta = {
+			...deps,
+			forkMeta: { setForkMessageId: () => {} },
+		};
+		await handleForkSession(depsWithMeta, "client-1", {
+			sessionId: "ses_original",
+			messageId: "msg_42",
+		});
+		const forkedMsg = broadcastCalls.find(
+			(m) => (m as Record<string, unknown>)["type"] === "session_forked",
+		) as Record<string, unknown> | undefined;
+		expect(
+			(forkedMsg?.["session"] as Record<string, unknown>)?.["forkMessageId"],
+		).toBe("msg_42");
+	});
+
+	it("determines forkMessageId from last message on whole-session fork", async () => {
+		let storedMessageId: string | undefined;
+		const forkMeta = {
+			setForkMessageId: (_sid: string, mid: string) => {
+				storedMessageId = mid;
+			},
+		};
+		// Re-create deps with a client that includes getMessages
+		const getMessagesMock = vi
+			.fn()
+			.mockResolvedValue([
+				{ id: "msg_1" },
+				{ id: "msg_2" },
+				{ id: "msg_last" },
+			]);
+		const depsWithMeta = {
+			...deps,
+			client: {
+				...deps.client,
+				getMessages: getMessagesMock,
+			} as unknown as HandlerDeps["client"],
+			forkMeta,
+		};
+		await handleForkSession(depsWithMeta, "client-1", {
+			sessionId: "ses_original",
+		});
+		expect(storedMessageId).toBe("msg_last");
+	});
+
 	it("calls clearSession on the source session", async () => {
 		deps.overrides = {
 			clearSession: vi.fn(),

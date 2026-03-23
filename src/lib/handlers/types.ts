@@ -71,6 +71,10 @@ export interface HandlerDeps {
 		lost: number[];
 		active: number[];
 	}>;
+	/** Optional fork-point metadata store — used to persist forkMessageId */
+	forkMeta?: {
+		setForkMessageId: (sessionId: string, messageId: string) => void;
+	};
 	/** Return the current project list (for broadcasting after mutations). */
 	getProjects?: () => ReadonlyArray<{
 		slug: string;
