@@ -65,6 +65,7 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 	private readonly getSessionParentMap: (() => Map<string, string>) | undefined;
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private previous: Record<string, SessionStatus> = {};
+	private previousRaw: Record<string, SessionStatus> = {};
 	private polling = false;
 	private initialized = false;
 
@@ -209,6 +210,7 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 			if (!this.initialized) {
 				// First poll establishes the baseline — no event emitted
 				this.previous = current;
+				this.previousRaw = raw;
 				this.initialized = true;
 				const busySessions = Object.entries(current)
 					.filter(([, s]) => s.type === "busy" || s.type === "retry")
@@ -219,7 +221,11 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 				return;
 			}
 
-			const statusesChanged = this.hasChanged(this.previous, current);
+			// Compare RAW statuses (not augmented) for the statusesChanged flag.
+			// Augmented statuses include synthetic entries from message-activity
+			// and subagent propagation that change every cycle, which would cause
+			// unnecessary session list broadcasts and mock queue exhaustion.
+			const statusesChanged = this.hasChanged(this.previousRaw, raw);
 
 			if (statusesChanged) {
 				const busySessions = Object.entries(current)
@@ -233,6 +239,7 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 			// Always emit — the monitoring reducer needs periodic evaluation
 			// for time-based transitions (grace period expiry, SSE staleness).
 			this.previous = current;
+			this.previousRaw = raw;
 			this.emit("changed", current, statusesChanged);
 		} catch (err) {
 			// Keep last known state (stale > empty). Log and retry next tick.

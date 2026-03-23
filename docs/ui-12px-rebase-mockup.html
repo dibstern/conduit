@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conduit UI — 12px Rebase Proposal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-brand: "Chakra Petch", sans-serif;
+    --color-bg: #18181b;
+    --color-bg-alt: #27272a;
+    --color-bg-surface: #27272a;
+    --color-text: #e4e4e7;
+    --color-text-secondary: #a1a1aa;
+    --color-text-muted: #71717a;
+    --color-text-dimmer: #52525b;
+    --color-accent: #ff2d7b;
+    --color-code-bg: #131315;
+    --color-border: #3f3f46;
+    --color-border-subtle: rgba(255, 255, 255, 0.06);
+    --color-input-bg: #333338;
+    --color-user-bubble: #2c2c30;
+    --color-sidebar-bg: #141416;
+    --color-sidebar-hover: #202023;
+    --color-thinking: #eab308;
+    --color-thinking-bg: rgba(234, 179, 8, 0.06);
+    --color-tool: #00e5ff;
+    --color-tool-bg: rgba(0, 229, 255, 0.04);
+    --color-success: #22c55e;
+    --color-error: #ff4444;
+    --color-brand-a: #ff2d7b;
+    --color-brand-b: #00e5ff;
+  }
+
+  html {
+    font-size: 13px; /* page chrome stays at 13 for readability */
+    line-height: 1.5;
+    font-family: var(--font-mono);
+    background: #0e0e10;
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body { padding: 40px 24px 80px; max-width: 1440px; margin: 0 auto; }
+
+  /* ── Page chrome ───────────────────────────────────────── */
+  .page-title {
+    font-family: var(--font-brand);
+    font-size: 28px; font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .page-subtitle {
+    font-size: 13px; color: var(--color-text-muted);
+    margin-bottom: 48px; max-width: 720px; line-height: 1.6;
+  }
+  .page-subtitle code {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    padding: 1px 6px; border-radius: 4px; font-size: 12px;
+  }
+
+  .section { margin-bottom: 64px; }
+  .section-header {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 8px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .section-number {
+    font-family: var(--font-brand);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.5px; text-transform: uppercase;
+    color: var(--color-accent); min-width: 24px;
+  }
+  .section-title {
+    font-family: var(--font-brand);
+    font-size: 17px; font-weight: 600;
+  }
+  .section-desc {
+    font-size: 12px; color: var(--color-text-muted);
+    margin-bottom: 24px; line-height: 1.6; max-width: 720px;
+  }
+
+  /* ── Comparison grid ───────────────────────────────────── */
+  .comparison {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 2px; border-radius: 12px;
+    overflow: hidden; background: var(--color-border);
+  }
+  .comparison-col {
+    background: var(--color-bg); padding: 20px 24px 24px;
+  }
+  .comparison-label {
+    font-family: var(--font-brand);
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .label-before { color: var(--color-text-muted); }
+  .label-after  { color: var(--color-success); }
+  .label-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .label-before .label-dot { background: var(--color-text-muted); }
+  .label-after  .label-dot { background: var(--color-success); }
+
+  /* ── Single-column panel ───────────────────────────────── */
+  .panel {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 20px 24px 24px;
+  }
+  .panel-header {
+    font-family: var(--font-brand);
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; text-transform: uppercase;
+    margin-bottom: 16px; color: var(--color-brand-b);
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* ── Callouts ──────────────────────────────────────────── */
+  .callout {
+    font-size: 10px; line-height: 1.5;
+    color: var(--color-text-dimmer);
+    border-left: 2px solid var(--color-border);
+    padding: 4px 0 4px 10px; margin-top: 12px;
+  }
+  .callout em { color: var(--color-text-muted); font-style: normal; }
+  .callout .val { color: #eab308; font-weight: 500; }
+  .callout .fix { color: var(--color-success); font-weight: 500; }
+  .callout-err { border-left-color: var(--color-error); }
+  .callout-ok  { border-left-color: var(--color-success); }
+
+  .mock-group { display: flex; flex-direction: column; gap: 10px; }
+  .mock-group-label {
+    font-size: 10px; color: var(--color-text-dimmer);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    font-weight: 600; margin-top: 6px;
+  }
+  .mock-divider { height: 1px; background: var(--color-border-subtle); margin: 4px 0; }
+
+  /* ── Code block ────────────────────────────────────────── */
+  .code-block {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px;
+    padding: 16px 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
+    overflow-x: auto;
+    white-space: pre;
+    tab-size: 2;
+  }
+  .code-block .kw  { color: #c678dd; }
+  .code-block .str { color: #98c379; }
+  .code-block .cm  { color: var(--color-text-dimmer); }
+  .code-block .vr  { color: var(--color-brand-b); }
+  .code-block .fn  { color: #61afef; }
+  .code-block .num { color: #d19a66; }
+
+  /* ── Scale row ─────────────────────────────────────────── */
+  .scale-row {
+    display: flex; align-items: baseline; gap: 10px; padding: 6px 0;
+  }
+  .scale-size {
+    min-width: 48px; font-size: 10px;
+    text-align: right; flex-shrink: 0;
+  }
+  .scale-class {
+    min-width: 72px; font-size: 10px;
+    color: var(--color-brand-b); flex-shrink: 0; font-weight: 500;
+  }
+  .scale-sample { color: var(--color-text); }
+  .scale-role {
+    margin-left: auto; font-size: 10px;
+    color: var(--color-text-dimmer); flex-shrink: 0;
+  }
+
+  /* ── Message mocks ─────────────────────────────────────── */
+  .msg-card {
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px;
+  }
+  .msg-card-user { background: var(--color-user-bubble); }
+  .msg-card-assistant { background: transparent; }
+  .msg-body p { margin-bottom: 8px; }
+  .msg-body p:last-child { margin-bottom: 0; }
+  .msg-body code {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 5px;
+  }
+  .msg-body pre {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px;
+    overflow: hidden; margin: 10px 0;
+  }
+  .msg-body pre code {
+    display: block;
+    background: transparent;
+    border: none; border-radius: 0;
+    white-space: pre; overflow-x: auto;
+  }
+
+  /* ── Tool mocks ────────────────────────────────────────── */
+  .tool-header {
+    display: flex; align-items: center; width: 100%;
+    border: none; background: transparent; cursor: pointer;
+    color: var(--color-text-secondary); border-radius: 6px;
+  }
+  .tool-name { color: var(--color-text); }
+  .tool-tag {
+    background: var(--color-tool-bg);
+    border: 1px solid rgba(0, 229, 255, 0.12);
+    color: var(--color-tool); border-radius: 4px; white-space: nowrap;
+  }
+  .tool-result {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 8px; color: var(--color-text-secondary);
+    overflow: hidden; white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* ── Sidebar mock ──────────────────────────────────────── */
+  .sidebar-mock {
+    background: var(--color-sidebar-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px; overflow: hidden; width: 100%;
+  }
+  .sidebar-action {
+    display: flex; align-items: center; width: 100%;
+    border: none; background: transparent; cursor: pointer;
+    color: var(--color-text-secondary); border-radius: 6px;
+    text-align: left; text-decoration: none;
+  }
+  .sidebar-action-icon {
+    flex-shrink: 0; width: 14px; height: 14px;
+    border-radius: 3px; background: var(--color-border-subtle);
+  }
+  .session-item {
+    display: flex; width: 100%; border: none;
+    background: transparent; cursor: pointer; color: var(--color-text);
+    border-radius: 6px; text-align: left; text-decoration: none;
+  }
+  .session-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--color-success); flex-shrink: 0;
+  }
+  .session-meta { color: var(--color-text-dimmer); }
+
+  /* ── Buttons ───────────────────────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; border: none; cursor: pointer;
+    white-space: nowrap; font-family: var(--font-mono);
+  }
+  .btn-primary { background: var(--color-accent); color: #fff; }
+  .btn-secondary {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+  }
+  .btn-inline {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+  }
+
+  /* ── Dropdown mock ─────────────────────────────────────── */
+  .dropdown-mock {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .dropdown-item {
+    display: flex; align-items: center; width: 100%;
+    border: none; background: transparent; cursor: pointer;
+    color: var(--color-text); text-align: left; text-decoration: none;
+  }
+  .dropdown-item:hover { background: rgba(255,255,255,0.04); }
+
+  /* ── Impact table ──────────────────────────────────────── */
+  .impact-table { width: 100%; border-collapse: collapse; font-size: 11px; line-height: 1.5; }
+  .impact-table th {
+    text-align: left; padding: 8px 10px;
+    color: var(--color-text-muted); font-weight: 600;
+    border-bottom: 2px solid var(--color-border);
+    font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .impact-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--color-border-subtle);
+    vertical-align: top;
+  }
+  .impact-table .old { color: var(--color-text-dimmer); text-decoration: line-through; }
+  .impact-table .new { color: var(--color-success); font-weight: 500; }
+  .impact-table .same { color: var(--color-text-muted); }
+  .impact-table .note { color: var(--color-text-dimmer); font-size: 10px; }
+
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  @media (max-width: 900px) { .comparison { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">12px Rebase Proposal</h1>
+<p class="page-subtitle">
+  Shrink body text from 13px to 12px, override Tailwind v4's <code>@theme</code> font-size scale
+  so standard classes (<code>text-xs</code>, <code>text-sm</code>, etc.) map to our custom pixel values.
+  Maintain tool text &lt; message text hierarchy throughout.
+</p>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     1. THE @THEME CONFIGURATION
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">01</span>
+    <span class="section-title">The @theme Override</span>
+  </div>
+  <p class="section-desc">
+    Tailwind v4 lets you redefine what each text utility means via <code>--text-*</code> CSS variables
+    in the <code>@theme {}</code> block. Each size gets a paired default line-height. Components still
+    use explicit <code>leading-*</code> classes when they need prose (1.7) or code (1.55) line-height.
+  </p>
+
+  <div class="code-block"><span class="cm">/* style.css — replace the current root font-size and add to @theme */</span>
+
+<span class="kw">@layer</span> base {
+  html, body {
+    <span class="cm">/* ↓ changed from 13px */</span>
+    font-size: <span class="num">12px</span>;
+    line-height: <span class="num">1.5</span>;
+  }
+}
+
+<span class="kw">@theme</span> {
+  <span class="cm">/* ── Font Size Scale ────────────────────────────────────
+     Override Tailwind defaults so standard classes map to
+     our pixel values. Each size pairs with a default
+     line-height that works for its most common context.
+     ─────────────────────────────────────────────────────── */</span>
+
+  <span class="vr">--text-xs</span>:              <span class="num">10px</span>;
+  <span class="vr">--text-xs--line-height</span>:  <span class="num">1.4</span>;
+
+  <span class="vr">--text-sm</span>:              <span class="num">11px</span>;
+  <span class="vr">--text-sm--line-height</span>:  <span class="num">1.4</span>;
+
+  <span class="vr">--text-base</span>:            <span class="num">12px</span>;
+  <span class="vr">--text-base--line-height</span>: <span class="num">1.5</span>;
+
+  <span class="vr">--text-lg</span>:              <span class="num">15px</span>;
+  <span class="vr">--text-lg--line-height</span>:  <span class="num">1.4</span>;
+
+  <span class="vr">--text-xl</span>:              <span class="num">20px</span>;
+  <span class="vr">--text-xl--line-height</span>:  <span class="num">1.3</span>;
+
+  <span class="vr">--text-2xl</span>:             <span class="num">24px</span>;
+  <span class="vr">--text-2xl--line-height</span>: <span class="num">1.2</span>;
+
+  <span class="cm">/* text-3xl+ left at Tailwind defaults (rem-based),
+     only used for decorative elements like the StepDone checkmark.
+     At 12px root: text-3xl=22.5px, text-4xl=27px, text-5xl=36px */</span>
+
+  <span class="cm">/* ... rest of existing @theme tokens unchanged ... */</span>
+}</div>
+
+  <div class="callout callout-ok">
+    Every <code>text-[Npx]</code> arbitrary value in the codebase gets replaced with a standard class.
+    No more <code>text-[13px]</code>, <code>text-[11px]</code>, <code>text-[10px]</code>, etc.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     2. THE NEW SCALE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">02</span>
+    <span class="section-title">The New Scale</span>
+  </div>
+  <p class="section-desc">
+    7 stops, all standard Tailwind class names. Specimens rendered at actual pixel sizes.
+  </p>
+
+  <div class="comparison">
+    <!-- CURRENT -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Current — 13px base, arbitrary classes</div>
+      <div class="mock-group">
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">9.75px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-xs</span>
+          <span class="scale-sample" style="font-size:9.75px">Tool stats, metadata, hints</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">10px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-[10px]</span>
+          <span class="scale-sample" style="font-size:10px">Badges, version, context %</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">11px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-[11px]</span>
+          <span class="scale-sample" style="font-size:11px">Section headers, gutters, role labels</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">11.375px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-sm</span>
+          <span class="scale-sample" style="font-size:11.375px">Buttons, instructions, tabs</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">13px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-[13px]</span>
+          <span class="scale-sample" style="font-size:13px">Body text, menus, sidebar actions</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">13px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-base</span>
+          <span class="scale-sample" style="font-size:13px">Textarea (duplicate!)</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">15px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-[15px]</span>
+          <span class="scale-sample" style="font-size:15px">Project name header</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">19.5px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-2xl</span>
+          <span class="scale-sample" style="font-size:19.5px">Page title (dashboard)</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-text-dimmer)">22px</span>
+          <span class="scale-class" style="color:var(--color-text-dimmer)">text-[22px]</span>
+          <span class="scale-sample" style="font-size:22px">Page title (setup/pin)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- NEW -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> Proposed — 12px base, standard classes</div>
+      <div class="mock-group">
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-success)">10px</span>
+          <span class="scale-class">text-xs</span>
+          <span class="scale-sample" style="font-size:10px">Badges, tool output, tiny labels</span>
+          <span class="scale-role">default lh 1.4</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-success)">11px</span>
+          <span class="scale-class">text-sm</span>
+          <span class="scale-sample" style="font-size:11px">Metadata, section headers, tool labels</span>
+          <span class="scale-role">default lh 1.4</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-success)">12px</span>
+          <span class="scale-class">text-base</span>
+          <span class="scale-sample" style="font-size:12px">Body text, menus, sidebar, buttons, textarea</span>
+          <span class="scale-role">default lh 1.5</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-success)">15px</span>
+          <span class="scale-class">text-lg</span>
+          <span class="scale-sample" style="font-size:15px">Section headings, project name</span>
+          <span class="scale-role">default lh 1.4</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-success)">20px</span>
+          <span class="scale-class">text-xl</span>
+          <span class="scale-sample" style="font-size:20px">Page titles (secondary)</span>
+          <span class="scale-role">default lh 1.3</span>
+        </div>
+        <div class="scale-row">
+          <span class="scale-size" style="color:var(--color-success)">24px</span>
+          <span class="scale-class">text-2xl</span>
+          <span class="scale-sample" style="font-size:24px">Page titles (primary)</span>
+          <span class="scale-role">default lh 1.2</span>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        Zero arbitrary values. Every component uses a standard Tailwind class.<br>
+        <code>text-3xl</code>+ left at Tailwind defaults for rare decorative use.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     3. TOOL TEXT vs MESSAGE TEXT HIERARCHY
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">03</span>
+    <span class="section-title">Tool vs Message Text Hierarchy</span>
+  </div>
+  <p class="section-desc">
+    The key design requirement: tool text and code inside tool calls should be visibly smaller
+    than text and code inside assistant messages. The new scale creates a cleaner 3-tier cascade
+    with 1px steps instead of the current jagged jump from 13px to 9.75px.
+  </p>
+
+  <div class="comparison">
+    <!-- CURRENT -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Current — 3.25px jump</div>
+      <div class="mock-group" style="gap:14px">
+        <!-- Assistant message -->
+        <div>
+          <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:6px">Assistant</div>
+          <div class="msg-card msg-card-assistant" style="padding:16px 20px">
+            <div class="msg-body" style="font-size:13px; line-height:1.7; color:var(--color-text)">
+              <p>I'll update the config file. Here's the change:</p>
+              <pre style="margin:10px 0"><code style="display:block; padding:14px 18px; font-size:13px; line-height:1.55; background:transparent; border:none; border-radius:0">const config = {
+  port: 3000,
+  host: "localhost"
+};</code></pre>
+              <p>This sets the default port to 3000.</p>
+            </div>
+          </div>
+          <div class="callout">
+            Prose: <span class="val">13px / 1.7</span> &middot;
+            Code block: <span class="val">13px / 1.55</span> &middot;
+            Inline code: <span class="val">0.87em = 11.3px</span>
+          </div>
+        </div>
+
+        <!-- Tool item -->
+        <div>
+          <div class="tool-header" style="font-size:9.75px; padding:8px 12px; gap:10px">
+            <span style="color:var(--color-tool)">&#9881;</span>
+            <span class="tool-name" style="font-weight:500">Write</span>
+            <span style="color:var(--color-text-muted); font-style:italic">src/config.ts</span>
+            <span class="tool-tag" style="font-size:9.75px; padding:2px 6px">3 lines</span>
+          </div>
+          <div class="tool-result" style="font-size:9.75px; padding:8px 10px; margin:2px 10px; line-height:1.5; max-height:140px; overflow-y:auto">const config = {
+  port: 3000,
+  host: "localhost"
+};</div>
+          <div class="callout">
+            Tool label: <span class="val">text-xs (9.75px)</span> &middot;
+            Tool result: <span class="val">text-xs (9.75px)</span> &middot;
+            Jump from message: <span class="val">-3.25px</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROPOSED -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> Proposed — 1px steps</div>
+      <div class="mock-group" style="gap:14px">
+        <!-- Assistant message -->
+        <div>
+          <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:6px">Assistant</div>
+          <div class="msg-card msg-card-assistant" style="padding:16px 20px">
+            <div class="msg-body" style="font-size:12px; line-height:1.7; color:var(--color-text)">
+              <p>I'll update the config file. Here's the change:</p>
+              <pre style="margin:10px 0"><code style="display:block; padding:14px 18px; font-size:12px; line-height:1.55; background:transparent; border:none; border-radius:0">const config = {
+  port: 3000,
+  host: "localhost"
+};</code></pre>
+              <p>This sets the default port to 3000.</p>
+            </div>
+          </div>
+          <div class="callout callout-ok">
+            Prose: <span class="fix">text-base (12px) / 1.7</span> &middot;
+            Code block: <span class="fix">text-base (12px) / 1.55</span> &middot;
+            Inline code: <span class="fix">same size, just styled</span>
+          </div>
+        </div>
+
+        <!-- Tool item -->
+        <div>
+          <div class="tool-header" style="font-size:11px; padding:8px 12px; gap:10px">
+            <span style="color:var(--color-tool)">&#9881;</span>
+            <span class="tool-name" style="font-weight:500">Write</span>
+            <span style="color:var(--color-text-muted); font-style:italic">src/config.ts</span>
+            <span class="tool-tag" style="font-size:10px; padding:2px 6px">3 lines</span>
+          </div>
+          <div class="tool-result" style="font-size:10px; padding:8px 10px; margin:2px 10px; line-height:1.55; max-height:140px; overflow-y:auto">const config = {
+  port: 3000,
+  host: "localhost"
+};</div>
+          <div class="callout callout-ok">
+            Tool label: <span class="fix">text-sm (11px)</span> &middot;
+            Tool result: <span class="fix">text-xs (10px) / 1.55</span> &middot;
+            Tags: <span class="fix">text-xs (10px)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-ok" style="margin-top:16px">
+        <strong style="color:var(--color-text-secondary)">The cascade:</strong><br>
+        Message prose <span class="fix">12px</span> &rarr; Tool header <span class="fix">11px</span> (-1px) &rarr; Tool output <span class="fix">10px</span> (-1px).<br>
+        Clean 1px steps vs the current jagged 13px &rarr; 9.75px (-3.25px) drop.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     4. MARKDOWN CONTENT (em-based auto-scaling)
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">04</span>
+    <span class="section-title">Markdown Content (em-based cascade)</span>
+  </div>
+  <p class="section-desc">
+    The <code>.md-content</code> headings use <code>em</code> units (1.35em, 1.2em, 1.1em), so they
+    automatically scale down with the body. Inline code used <code>0.87em</code> which at 12px yields
+    10.4px — too close to tool output. Recommendation: bump inline code to <code>1em</code> and
+    differentiate purely via background/border styling.
+  </p>
+
+  <div class="comparison">
+    <!-- CURRENT at 13px -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Current — 13px base</div>
+      <div style="font-size:13px; line-height:1.7; color:var(--color-text); padding:4px 0">
+        <div style="font-size:calc(13px * 1.35); font-weight:600; line-height:1.3; margin:16px 0 8px">Heading 1 <span style="font-size:10px; color:var(--color-text-dimmer); font-weight:400">&larr; 17.6px</span></div>
+        <div style="font-size:calc(13px * 1.2); font-weight:600; line-height:1.3; margin:16px 0 8px">Heading 2 <span style="font-size:10px; color:var(--color-text-dimmer); font-weight:400">&larr; 15.6px</span></div>
+        <div style="font-size:calc(13px * 1.1); font-weight:600; line-height:1.3; margin:16px 0 8px">Heading 3 <span style="font-size:10px; color:var(--color-text-dimmer); font-weight:400">&larr; 14.3px</span></div>
+        <p style="margin-bottom:8px">Body text with <code style="font-size:calc(13px * 0.87); background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:5px; padding:1px 6px">inline code</code> at 0.87em <span style="font-size:10px; color:var(--color-text-dimmer)">&larr; 11.3px</span></p>
+        <div style="background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:10px; padding:12px 18px; font-size:13px; line-height:1.55; margin:10px 0; overflow-x:auto; white-space:pre">pre code block <span style="font-size:10px; color:var(--color-text-dimmer)">&larr; 13px (explicit)</span></div>
+      </div>
+    </div>
+
+    <!-- PROPOSED at 12px -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> Proposed — 12px base</div>
+      <div style="font-size:12px; line-height:1.7; color:var(--color-text); padding:4px 0">
+        <div style="font-size:calc(12px * 1.35); font-weight:600; line-height:1.3; margin:16px 0 8px">Heading 1 <span style="font-size:10px; color:var(--color-success); font-weight:400">&larr; 16.2px</span></div>
+        <div style="font-size:calc(12px * 1.2); font-weight:600; line-height:1.3; margin:16px 0 8px">Heading 2 <span style="font-size:10px; color:var(--color-success); font-weight:400">&larr; 14.4px</span></div>
+        <div style="font-size:calc(12px * 1.1); font-weight:600; line-height:1.3; margin:16px 0 8px">Heading 3 <span style="font-size:10px; color:var(--color-success); font-weight:400">&larr; 13.2px</span></div>
+        <p style="margin-bottom:8px">Body text with <code style="font-size:12px; background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:5px; padding:1px 6px">inline code</code> at 1em <span style="font-size:10px; color:var(--color-success)">&larr; 12px (matches body)</span></p>
+        <div style="background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:10px; padding:12px 18px; font-size:12px; line-height:1.55; margin:10px 0; overflow-x:auto; white-space:pre">pre code block <span style="font-size:10px; color:var(--color-success)">&larr; text-base (12px)</span></div>
+      </div>
+      <div class="callout callout-ok">
+        Headings scale automatically via <code>em</code>. No changes needed.<br>
+        Inline code: change <span class="fix">0.87em &rarr; 1em</span> — differentiate with bg/border only.<br>
+        Pre code: change <span class="fix">text-[13px] &rarr; text-base</span>.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     5. SIDEBAR AT 12px
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">05</span>
+    <span class="section-title">Sidebar at 12px</span>
+  </div>
+  <p class="section-desc">
+    Sidebar action buttons and session items move from <code>text-[13px]</code> to <code>text-base</code> (12px).
+    Session metadata moves from <code>text-[11px]</code> to <code>text-sm</code> (11px — same px, standard class).
+  </p>
+
+  <div class="comparison">
+    <!-- CURRENT -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Current — 13px</div>
+      <div class="sidebar-mock">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px 8px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <div style="width:18px; height:18px; border-radius:4px; background:var(--color-accent); opacity:0.8"></div>
+            <span style="font-size:11.375px; font-weight:500; letter-spacing:0.14em; font-family:var(--font-brand)">conduit</span>
+          </div>
+        </div>
+        <div style="padding:8px 10px; display:flex; flex-direction:column; gap:1px">
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div><span>New session</span>
+          </div>
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div><span>File browser</span>
+          </div>
+        </div>
+        <div style="padding:4px 10px">
+          <span style="font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:var(--color-text-muted); font-family:var(--font-brand); padding:0 10px">SESSIONS</span>
+        </div>
+        <div style="padding:0 10px 4px">
+          <div class="session-item" style="padding:6px 10px; gap:4px; font-size:13px; flex-direction:column; align-items:stretch; font-family:var(--font-brand)">
+            <div style="display:flex; align-items:center; gap:6px">
+              <span class="session-dot"></span>
+              <span class="truncate" style="flex:1">Refactor auth module</span>
+            </div>
+            <span class="session-meta" style="font-size:11px; padding-left:13px; font-family:var(--font-brand)">2 minutes ago</span>
+          </div>
+        </div>
+        <div style="padding:10px 10px; border-top:1px solid var(--color-border-subtle)">
+          <div style="font-size:10px; color:var(--color-text-dimmer); padding:0 10px; font-family:var(--font-brand)">conduit v0.8.2</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROPOSED -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> Proposed — 12px</div>
+      <div class="sidebar-mock">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px 8px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <div style="width:18px; height:18px; border-radius:4px; background:var(--color-accent); opacity:0.8"></div>
+            <span style="font-size:11px; font-weight:500; letter-spacing:0.14em; font-family:var(--font-brand)">conduit</span>
+          </div>
+        </div>
+        <div style="padding:8px 10px; display:flex; flex-direction:column; gap:1px">
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:12px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div><span>New session</span>
+          </div>
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:12px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div><span>File browser</span>
+          </div>
+        </div>
+        <div style="padding:4px 10px">
+          <span style="font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:var(--color-text-muted); font-family:var(--font-brand); padding:0 10px">SESSIONS</span>
+        </div>
+        <div style="padding:0 10px 4px">
+          <div class="session-item" style="padding:6px 10px; gap:4px; font-size:12px; flex-direction:column; align-items:stretch; font-family:var(--font-brand)">
+            <div style="display:flex; align-items:center; gap:6px">
+              <span class="session-dot"></span>
+              <span class="truncate" style="flex:1">Refactor auth module</span>
+            </div>
+            <span class="session-meta" style="font-size:11px; padding-left:13px; font-family:var(--font-brand)">2 minutes ago</span>
+          </div>
+        </div>
+        <div style="padding:10px 10px; border-top:1px solid var(--color-border-subtle)">
+          <div style="font-size:10px; color:var(--color-text-dimmer); padding:0 10px; font-family:var(--font-brand)">conduit v0.8.2</div>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        Actions/sessions: <span class="fix">text-base (12px)</span>.
+        Brand name: <span class="fix">text-sm (11px)</span>.
+        Section header: <span class="fix">text-sm (11px)</span>.
+        Meta: <span class="fix">text-sm (11px)</span> — same px, now standard class.
+        Version: <span class="fix">text-xs (10px)</span>.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     6. BUTTONS & DROPDOWNS AT 12px
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">06</span>
+    <span class="section-title">Buttons &amp; Dropdowns at 12px</span>
+  </div>
+  <p class="section-desc">
+    All button tiers and dropdown items shift to the new scale. Padding stays the same — the slightly
+    smaller text creates a touch more breathing room without looking sparse.
+  </p>
+
+  <div class="comparison">
+    <!-- CURRENT -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Current</div>
+      <div class="mock-group" style="gap:16px">
+        <div>
+          <div class="mock-group-label">CTA buttons (setup)</div>
+          <button class="btn btn-primary" style="font-size:11.375px; font-weight:600; padding:12px 24px; border-radius:10px">Enable Push</button>
+          <div class="callout">text-sm (11.375px)</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Modal buttons</div>
+          <button class="btn btn-secondary" style="font-size:13px; padding:6px 16px; border-radius:6px">Cancel</button>
+          <button class="btn btn-primary" style="font-size:13px; font-weight:500; padding:6px 16px; border-radius:6px">Confirm</button>
+          <div class="callout">text-[13px]</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Inline buttons</div>
+          <button class="btn btn-inline" style="font-size:9.75px; padding:4px 12px; border-radius:6px">Start</button>
+          <button class="btn btn-inline" style="font-size:9.75px; padding:4px 12px; border-radius:6px">Remove</button>
+          <div class="callout">text-xs (9.75px)</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Dropdown items</div>
+          <div class="dropdown-mock" style="width:260px">
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-mono)">
+              <span style="font-weight:500">/compact</span>
+              <span style="color:var(--color-text-muted)">Toggle compact mode</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:6px 14px; gap:8px; font-family:var(--font-brand)">
+              claude-sonnet-4-20250514
+            </div>
+          </div>
+          <div class="callout">text-[13px], mixed padding</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROPOSED -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> Proposed</div>
+      <div class="mock-group" style="gap:16px">
+        <div>
+          <div class="mock-group-label">Tier 1 — CTA</div>
+          <button class="btn btn-primary" style="font-size:12px; font-weight:600; padding:12px 24px; border-radius:10px">Enable Push</button>
+          <div class="callout callout-ok"><span class="fix">text-base</span> &middot; font-semibold &middot; px-6 py-3</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Tier 2 — Secondary / Modal</div>
+          <button class="btn btn-secondary" style="font-size:12px; font-weight:500; padding:8px 16px; border-radius:6px">Cancel</button>
+          <button class="btn btn-primary" style="font-size:12px; font-weight:500; padding:8px 16px; border-radius:6px">Confirm</button>
+          <div class="callout callout-ok"><span class="fix">text-base</span> &middot; font-medium &middot; px-4 py-2</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Tier 3 — Inline / Small</div>
+          <button class="btn btn-inline" style="font-size:11px; font-weight:500; padding:6px 12px; border-radius:6px">Start</button>
+          <button class="btn btn-inline" style="font-size:11px; font-weight:500; padding:6px 12px; border-radius:6px">Remove</button>
+          <div class="callout callout-ok"><span class="fix">text-sm</span> &middot; font-medium &middot; px-3 py-1.5</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Dropdown items (unified)</div>
+          <div class="dropdown-mock" style="width:260px">
+            <div class="dropdown-item" style="font-size:12px; padding:8px 14px; gap:8px; font-family:var(--font-mono)">
+              <span style="font-weight:500">/compact</span>
+              <span style="color:var(--color-text-muted)">Toggle compact mode</span>
+            </div>
+            <div class="dropdown-item" style="font-size:12px; padding:8px 14px; gap:8px; font-family:var(--font-brand)">
+              claude-sonnet-4-20250514
+            </div>
+          </div>
+          <div class="callout callout-ok"><span class="fix">text-base</span> &middot; py-2 px-3.5 &middot; unified padding</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     7. FULL-WIDTH MESSAGE COMPARISON
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">07</span>
+    <span class="section-title">Full Message Conversation at 12px</span>
+  </div>
+  <p class="section-desc">
+    A realistic conversation showing the complete hierarchy: user message (12px) &rarr; assistant prose (12px) &rarr;
+    thinking block (12px / 1.55 code lh) &rarr; tool header (11px) &rarr; tool result (10px) &rarr; assistant continuation (12px).
+  </p>
+
+  <div class="panel" style="max-width:820px">
+    <div class="panel-header"><span class="label-dot" style="background:var(--color-brand-b)"></span> Proposed — 12px base, full conversation</div>
+
+    <!-- User -->
+    <div style="max-width:760px; margin:0 auto 12px; padding:0 20px">
+      <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:6px">You</div>
+      <div class="msg-card msg-card-user" style="padding:14px 20px">
+        <div style="font-size:12px; line-height:1.7; color:var(--color-text)">
+          Can you check what port the server is running on and update it to 8080?
+        </div>
+      </div>
+    </div>
+
+    <!-- Assistant -->
+    <div style="max-width:760px; margin:0 auto 12px; padding:0 20px">
+      <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:6px">Assistant</div>
+      <div class="msg-card msg-card-assistant" style="padding:14px 20px">
+        <div style="font-size:12px; line-height:1.7; color:var(--color-text)">
+          <p style="margin-bottom:8px">I'll check the current server configuration and update the port.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thinking -->
+    <div style="max-width:760px; margin:0 auto 6px; padding:0 20px">
+      <div style="padding:8px 12px; border-radius:6px; border:1px solid var(--color-border-subtle); background:var(--color-thinking-bg)">
+        <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">
+          <span style="font-size:11px; font-weight:500; color:var(--color-thinking)">Thinking</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); font-weight:400">1.2s</span>
+        </div>
+        <div style="font-size:12px; line-height:1.55; color:var(--color-text-secondary); font-family:var(--font-mono)">
+          I need to find the server config file. It's likely in src/config.ts or a similar location...
+        </div>
+      </div>
+    </div>
+
+    <!-- Tool: Read -->
+    <div style="max-width:760px; margin:0 auto 6px; padding:0 20px">
+      <div class="tool-header" style="font-size:11px; padding:8px 12px; gap:10px">
+        <span style="color:var(--color-tool)">&#128269;</span>
+        <span class="tool-name" style="font-weight:500">Read</span>
+        <span style="color:var(--color-text-muted); font-style:italic; flex:1">src/config.ts</span>
+        <span class="tool-tag" style="font-size:10px; padding:1px 6px">12 lines</span>
+      </div>
+      <div class="tool-result" style="font-size:10px; padding:8px 10px; margin:2px 10px; line-height:1.55; max-height:120px; overflow-y:auto">export const config = {
+  port: 3000,
+  host: "0.0.0.0",
+  cors: true,
+  logLevel: "info",
+};</div>
+    </div>
+
+    <!-- Tool: Write -->
+    <div style="max-width:760px; margin:0 auto 6px; padding:0 20px">
+      <div class="tool-header" style="font-size:11px; padding:8px 12px; gap:10px">
+        <span style="color:var(--color-tool)">&#9998;</span>
+        <span class="tool-name" style="font-weight:500">Edit</span>
+        <span style="color:var(--color-text-muted); font-style:italic; flex:1">src/config.ts</span>
+        <span class="tool-tag" style="font-size:10px; padding:1px 6px">1 change</span>
+      </div>
+      <div class="tool-result" style="font-size:10px; padding:8px 10px; margin:2px 10px; line-height:1.55">
+<span style="color:var(--color-error)">-  port: 3000,</span>
+<span style="color:var(--color-success)">+  port: 8080,</span></div>
+    </div>
+
+    <!-- Assistant continuation -->
+    <div style="max-width:760px; margin:0 auto 12px; padding:0 20px">
+      <div class="msg-card msg-card-assistant" style="padding:14px 20px">
+        <div style="font-size:12px; line-height:1.7; color:var(--color-text)">
+          <p style="margin-bottom:8px">Done. The server was running on port <code style="font-size:12px; background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:5px; padding:1px 6px">3000</code> and I've updated it to <code style="font-size:12px; background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:5px; padding:1px 6px">8080</code> in <code style="font-size:12px; background:var(--color-code-bg); border:1px solid var(--color-border-subtle); border-radius:5px; padding:1px 6px">src/config.ts</code>.</p>
+          <p>You'll need to restart the server for the change to take effect.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout-ok" style="max-width:760px; margin:8px auto 0; padding-left:30px">
+      Hierarchy clearly visible: <span class="fix">12px</span> prose &rarr; <span class="fix">11px</span> tool headers &rarr; <span class="fix">10px</span> tool output.<br>
+      All using standard classes: <span class="fix">text-base</span>, <span class="fix">text-sm</span>, <span class="fix">text-xs</span>.
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     8. COMPLETE IMPACT TABLE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">08</span>
+    <span class="section-title">Complete Cascading Impact</span>
+  </div>
+  <p class="section-desc">
+    Every element that changes, organized by component area. "Same" means the pixel value doesn't change,
+    just the class name becomes standard.
+  </p>
+
+  <div style="overflow-x:auto">
+    <table class="impact-table">
+      <thead>
+        <tr>
+          <th style="min-width:180px">Element</th>
+          <th style="min-width:140px">Current</th>
+          <th style="min-width:140px">Proposed</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- ROOT -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Root</td></tr>
+        <tr>
+          <td>html, body font-size</td>
+          <td><span class="old">13px</span></td>
+          <td><span class="new">12px</span></td>
+          <td class="note">Root change. All inherited sizes shift.</td>
+        </tr>
+
+        <!-- MESSAGES -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Chat Messages</td></tr>
+        <tr>
+          <td>Role labels (You / Assistant)</td>
+          <td><span class="old">text-[11px]</span></td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+        <tr>
+          <td>Message body prose</td>
+          <td><span class="old">text-[13px] leading-[1.7]</span></td>
+          <td><span class="new">text-base leading-[1.7]</span></td>
+          <td class="note">13px &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Message body code blocks</td>
+          <td><span class="old">text-[13px] leading-[1.55]</span></td>
+          <td><span class="new">text-base leading-[1.55]</span></td>
+          <td class="note">13px &rarr; 12px, matches surrounding prose</td>
+        </tr>
+        <tr>
+          <td>Inline code (md-content)</td>
+          <td><span class="old">text-[0.87em]</span> (11.3px)</td>
+          <td><span class="new">text-[1em]</span> (12px)</td>
+          <td class="note">Matches body. Differentiate via bg/border only.</td>
+        </tr>
+        <tr>
+          <td>md-content headings (h1/h2/h3)</td>
+          <td><span class="same">1.35em / 1.2em / 1.1em</span></td>
+          <td><span class="same">unchanged (auto-scales)</span></td>
+          <td class="note">16.2 / 14.4 / 13.2px (was 17.6 / 15.6 / 14.3)</td>
+        </tr>
+        <tr>
+          <td>md-content table</td>
+          <td><span class="old">text-[13px]</span></td>
+          <td><span class="new">text-base</span></td>
+          <td class="note">13px &rarr; 12px</td>
+        </tr>
+
+        <!-- THINKING -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Thinking Blocks</td></tr>
+        <tr>
+          <td>Label ("Thinking...")</td>
+          <td><span class="old">text-xs</span> (9.75px)</td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">Bumped for readability at new scale</td>
+        </tr>
+        <tr>
+          <td>Thinking text (streaming + expanded)</td>
+          <td><span class="old">text-[13px]</span> leading-[1.55] / [1.7]</td>
+          <td><span class="new">text-base leading-[1.55]</span></td>
+          <td class="note">Unified to code line-height in both states</td>
+        </tr>
+        <tr>
+          <td>Duration text</td>
+          <td><span class="old">text-[11px]</span></td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">De-emphasized, 11 &rarr; 10px</td>
+        </tr>
+
+        <!-- TOOLS -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Tool / Skill Items</td></tr>
+        <tr>
+          <td>Tool header (name, description)</td>
+          <td><span class="old">text-xs</span> (9.75px)</td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">Bigger but still smaller than messages</td>
+        </tr>
+        <tr>
+          <td>Tool name (font-medium)</td>
+          <td><span class="same">font-medium</span></td>
+          <td><span class="same">unchanged</span></td>
+          <td></td>
+        </tr>
+        <tr>
+          <td>Tool tags</td>
+          <td><span class="old">text-[11px]</span></td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">11 &rarr; 10px</td>
+        </tr>
+        <tr>
+          <td>Tool subtitle row</td>
+          <td><span class="old">text-xs</span> (9.75px)</td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">Same class, new meaning: 9.75 &rarr; 10px</td>
+        </tr>
+        <tr>
+          <td>Tool result content</td>
+          <td><span class="old">text-xs</span> (9.75px) + mixed padding</td>
+          <td><span class="new">text-xs leading-[1.55]</span> (10px)</td>
+          <td class="note">Unified: py-2 px-2.5 max-h-[300px]</td>
+        </tr>
+
+        <!-- SIDEBAR -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Sidebar</td></tr>
+        <tr>
+          <td>Brand name ("conduit")</td>
+          <td><span class="old">text-sm</span> (11.375px)</td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">11.375 &rarr; 11px, negligible visual change</td>
+        </tr>
+        <tr>
+          <td>Action buttons</td>
+          <td><span class="old">text-[13px]</span></td>
+          <td><span class="new">text-base</span></td>
+          <td class="note">13 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Session items</td>
+          <td><span class="old">text-[13px]</span></td>
+          <td><span class="new">text-base</span></td>
+          <td class="note">13 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Session metadata</td>
+          <td><span class="old">text-[11px]</span></td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+        <tr>
+          <td>Section headers (SESSIONS, etc.)</td>
+          <td><span class="old">text-[11px]</span></td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+        <tr>
+          <td>Version text</td>
+          <td><span class="old">text-[10px]</span></td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+
+        <!-- HEADER -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Header</td></tr>
+        <tr>
+          <td>Project name</td>
+          <td><span class="old">text-[15px]</span></td>
+          <td><span class="new">text-lg</span> (15px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+        <tr>
+          <td>Instance badge</td>
+          <td><span class="old">text-[10px]</span></td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+        <tr>
+          <td>Right section (status)</td>
+          <td><span class="old">text-xs</span> (9.75px)</td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">Slight bump: 9.75 &rarr; 10px</td>
+        </tr>
+
+        <!-- INPUT -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Input Area</td></tr>
+        <tr>
+          <td>Textarea</td>
+          <td><span class="old">text-base</span> (13px)</td>
+          <td><span class="new">text-base</span> (12px)</td>
+          <td class="note">Same class, new size: 13 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Context % label</td>
+          <td><span class="old">text-[10px]</span></td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+        <tr>
+          <td>Attach menu items</td>
+          <td><span class="old">text-sm</span> (11.375px)</td>
+          <td><span class="new">text-base</span> (12px)</td>
+          <td class="note">Bumped to body tier: 11.375 &rarr; 12px</td>
+        </tr>
+
+        <!-- DROPDOWNS -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Dropdowns</td></tr>
+        <tr>
+          <td>All dropdown items</td>
+          <td><span class="old">text-[13px]</span> (mixed padding)</td>
+          <td><span class="new">text-base</span> py-2 px-3.5</td>
+          <td class="note">13 &rarr; 12px, unified padding</td>
+        </tr>
+        <tr>
+          <td>Provider / section headers in dropdowns</td>
+          <td><span class="old">text-[11px]</span></td>
+          <td><span class="new">text-sm</span> (11px)</td>
+          <td class="note">Same px, standard class</td>
+        </tr>
+
+        <!-- BUTTONS -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Buttons</td></tr>
+        <tr>
+          <td>Tier 1 — CTA / Primary</td>
+          <td><span class="old">text-sm</span> (11.375px)</td>
+          <td><span class="new">text-base</span> font-semibold px-6 py-3</td>
+          <td class="note">11.375 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Tier 2 — Secondary / Modal</td>
+          <td><span class="old">text-[13px]</span></td>
+          <td><span class="new">text-base</span> font-medium px-4 py-2</td>
+          <td class="note">13 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Tier 3 — Inline / Small</td>
+          <td><span class="old">text-xs</span> (9.75px)</td>
+          <td><span class="new">text-sm</span> font-medium px-3 py-1.5</td>
+          <td class="note">9.75 &rarr; 11px</td>
+        </tr>
+
+        <!-- PAGES -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Pages</td></tr>
+        <tr>
+          <td>Dashboard title</td>
+          <td><span class="old">text-2xl</span> (19.5px)</td>
+          <td><span class="new">text-2xl</span> (24px)</td>
+          <td class="note">19.5 &rarr; 24px (more prominent)</td>
+        </tr>
+        <tr>
+          <td>Setup / Pin titles</td>
+          <td><span class="old">text-[22px]</span></td>
+          <td><span class="new">text-2xl</span> (24px)</td>
+          <td class="note">22 &rarr; 24px, standard class</td>
+        </tr>
+        <tr>
+          <td>Settings panel title</td>
+          <td><span class="old">text-lg</span> (14.625px)</td>
+          <td><span class="new">text-lg</span> (15px)</td>
+          <td class="note">14.625 &rarr; 15px</td>
+        </tr>
+        <tr>
+          <td>Step titles</td>
+          <td><span class="old">text-lg</span> (14.625px)</td>
+          <td><span class="new">text-lg</span> (15px)</td>
+          <td class="note">14.625 &rarr; 15px</td>
+        </tr>
+        <tr>
+          <td>Dashboard project name</td>
+          <td><span class="old">text-[16px]</span></td>
+          <td><span class="new">text-lg</span> (15px)</td>
+          <td class="note">16 &rarr; 15px, standard class</td>
+        </tr>
+
+        <!-- DIFF VIEW -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Diff View / File Viewer</td></tr>
+        <tr>
+          <td>Diff body text</td>
+          <td><span class="old">0.75rem</span> (9.75px at 13px root)</td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">9.75 &rarr; 10px</td>
+        </tr>
+        <tr>
+          <td>Diff gutters</td>
+          <td><span class="old">text-[11px]</span> / <span class="old">0.6875rem</span></td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">Mixed 11px/8.94px &rarr; unified 10px</td>
+        </tr>
+        <tr>
+          <td>File viewer code</td>
+          <td><span class="same">dynamic {fontSize}px</span></td>
+          <td><span class="same">unchanged (user-adjustable)</span></td>
+          <td class="note">Default 13 &rarr; 12, but user can override</td>
+        </tr>
+
+        <!-- MODALS -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Modals / Overlays</td></tr>
+        <tr>
+          <td>Modal body text</td>
+          <td><span class="old">text-sm</span> (11.375px)</td>
+          <td><span class="new">text-base</span> (12px)</td>
+          <td class="note">11.375 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Modal title</td>
+          <td><span class="old">text-base</span> (13px)</td>
+          <td><span class="new">text-lg</span> (15px)</td>
+          <td class="note">Clearer hierarchy: title vs body</td>
+        </tr>
+        <tr>
+          <td>Modal buttons</td>
+          <td><span class="old">text-[13px]</span></td>
+          <td><span class="new">text-base</span> (Tier 2)</td>
+          <td class="note">13 &rarr; 12px</td>
+        </tr>
+        <tr>
+          <td>Info panel data rows</td>
+          <td><span class="old">text-xs</span> (9.75px)</td>
+          <td><span class="new">text-xs</span> (10px)</td>
+          <td class="note">9.75 &rarr; 10px</td>
+        </tr>
+        <tr>
+          <td>Toast notifications</td>
+          <td><span class="old">text-sm</span> (11.375px)</td>
+          <td><span class="new">text-base</span> (12px)</td>
+          <td class="note">11.375 &rarr; 12px</td>
+        </tr>
+
+        <!-- PLAN MODE -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Plan Mode (CSS)</td></tr>
+        <tr>
+          <td>Plan banner / card title / buttons</td>
+          <td><span class="old">0.875rem</span> (14px at 13px root; 11.375px at 13px root... wait — rem is root-relative)</td>
+          <td><span class="new">text-base</span> or rem auto-adjusts</td>
+          <td class="note">0.875rem at 12px root = 10.5px. Needs explicit override to text-base (12px).</td>
+        </tr>
+
+        <!-- INLINE STYLES -->
+        <tr><td colspan="4" style="padding:10px 10px 4px; font-weight:600; color:var(--color-brand-b); font-size:10px; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--color-border)">Inline Style Cleanup</td></tr>
+        <tr>
+          <td>font-family: var(--font-brand)</td>
+          <td><span class="old">30+ inline style= attrs</span></td>
+          <td><span class="new">font-brand</span> class</td>
+          <td class="note">Use Tailwind utility everywhere</td>
+        </tr>
+        <tr>
+          <td>AgentSelector portal (innerHTML)</td>
+          <td><span class="old">inline font-size:13px etc</span></td>
+          <td><span class="new">Tailwind classes</span></td>
+          <td class="note">Migrate to Svelte component</td>
+        </tr>
+        <tr>
+          <td>ThemePicker scoped CSS</td>
+          <td><span class="old">scoped font-size:10/12/14px</span></td>
+          <td><span class="new">text-xs / text-base / text-lg</span></td>
+          <td class="note">Migrate to Tailwind utilities</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout-ok" style="margin-top:16px; max-width:720px">
+    <strong style="color:var(--color-text-secondary)">Watch out — plan-mode.css:</strong>
+    The plan mode styles use <code>0.875rem</code> which is root-relative.
+    At 12px root this becomes 10.5px (was 11.375px at 13px root).
+    These should be migrated from rem to explicit <code>text-base</code> (12px) or <code>text-sm</code> (11px) classes.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     9. SUMMARY
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">09</span>
+    <span class="section-title">Summary</span>
+  </div>
+
+  <div style="overflow-x:auto">
+    <table class="impact-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Current</th>
+          <th>Proposed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Root font-size</td>
+          <td>13px</td>
+          <td><span class="new">12px</span></td>
+        </tr>
+        <tr>
+          <td>Distinct font sizes</td>
+          <td>18 values (6 arbitrary)</td>
+          <td><span class="new">7 values (0 arbitrary)</span></td>
+        </tr>
+        <tr>
+          <td>Arbitrary text-[Npx] classes</td>
+          <td>~80 instances across codebase</td>
+          <td><span class="new">0</span></td>
+        </tr>
+        <tr>
+          <td>Message &rarr; tool size gap</td>
+          <td>13px &rarr; 9.75px (-3.25px jump)</td>
+          <td><span class="new">12 &rarr; 11 &rarr; 10px (1px steps)</span></td>
+        </tr>
+        <tr>
+          <td>Inline font-family styles</td>
+          <td>30+ instances</td>
+          <td><span class="new">0 (font-brand class)</span></td>
+        </tr>
+        <tr>
+          <td>Plan mode rem breakage risk</td>
+          <td>n/a</td>
+          <td class="note">plan-mode.css rem values need migration to Tailwind classes</td>
+        </tr>
+        <tr>
+          <td>md-content em-based headings</td>
+          <td>Auto-scaled (no change needed)</td>
+          <td class="note">Auto-scales: h1=16.2, h2=14.4, h3=13.2</td>
+        </tr>
+        <tr>
+          <td>md-content inline code</td>
+          <td>0.87em (11.3px)</td>
+          <td><span class="new">1em (12px) — style-only differentiation</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+</body>
+</html>

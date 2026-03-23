@@ -121,8 +121,9 @@
 	);
 
 	/** Whether this active question is deferred to the bottom of MessageList
-	 *  (i.e. not synthetic and has a pending question in the permissions store). */
-	export const isDeferredQuestion = $derived(
+	 *  (i.e. not synthetic and has a pending question in the permissions store).
+	 *  Note: ToolItem computes this independently to avoid circular mount deps. */
+	const isDeferredQuestion = $derived(
 		isQuestionActive && questionRequest !== null && !isSyntheticQuestion
 	);
 
