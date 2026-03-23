@@ -282,6 +282,23 @@ describe("handleSessionForked (ticket 5.3)", () => {
 
 		expect(sessionState.allSessions).toHaveLength(1);
 	});
+
+	it("preserves forkMessageId on forked session", () => {
+		handleSessionForked({
+			type: "session_forked",
+			session: {
+				id: "fork-1",
+				title: "Forked",
+				updatedAt: Date.now(),
+				parentID: "parent-1",
+				forkMessageId: "msg_42",
+			},
+			parentId: "parent-1",
+			parentTitle: "Parent",
+		});
+		const found = sessionState.allSessions.find((s) => s.id === "fork-1");
+		expect(found?.forkMessageId).toBe("msg_42");
+	});
 });
 
 // ─── getFilteredSessions — subagent toggle ──────────────────────────────────

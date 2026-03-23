@@ -6,7 +6,10 @@
 <script lang="ts">
 	import { tick } from "svelte";
 	import { chatState, historyState } from "../../stores/chat.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { splitAtForkPoint } from "../../utils/fork-split.js";
+	import ForkContextBlock from "./ForkContextBlock.svelte";
+	import ForkDivider from "./ForkDivider.svelte";
 	import {
 		uiState,
 		setUserScrolledUp,
@@ -203,6 +206,25 @@
 	const groupedMessages: GroupedMessage[] = $derived(groupMessages(chatState.messages));
 	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
 
+	// Fork context: detect if current session is a user fork
+	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
+	const isFork = $derived(!!activeSession?.forkMessageId);
+	const forkSplit = $derived(
+		isFork && activeSession?.forkMessageId
+			? splitAtForkPoint(chatState.messages, activeSession.forkMessageId)
+			: null,
+	);
+	const parentSession = $derived(
+		activeSession?.parentID ? findSession(activeSession.parentID) : null,
+	);
+	// Memoize grouped messages for fork rendering
+	const inheritedGrouped = $derived(
+		forkSplit ? groupMessages(forkSplit.inherited) : [],
+	);
+	const currentGrouped = $derived(
+		forkSplit ? groupMessages(forkSplit.current) : [],
+	);
+
 	/** All pending questions are rendered at the bottom of the message list.
 	 *  Active questions are NOT rendered inline by ToolItem (to prevent them from
 	 *  appearing between text segments when the LLM calls the question tool mid-stream).
@@ -223,7 +245,7 @@
 	<HistoryLoader {sentinelEl} />
 
 	<!-- Beginning of session marker (was in HistoryView) -->
-	{#if !historyState.hasMore && !historyState.loading}
+	{#if !historyState.hasMore && !historyState.loading && !isFork}
 		<div class="history-beginning flex flex-col items-center py-4 text-text-dimmer text-xs">
 			<div class="w-8 h-px bg-border mb-2"></div>
 			<span>Beginning of session</span>
@@ -238,11 +260,8 @@
 		</div>
 	{/if}
 
-	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div onclick={uiState.rewindActive ? handleRewindClick : undefined}>
-	{#each groupedMessages as msg, i (msg.uuid)}
+	<!-- Message rendering snippet (shared between fork and normal paths) -->
+	{#snippet messageItem(msg: GroupedMessage)}
 		{#if msg.type === "user"}
 			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
 				<UserMessage message={msg as UserMsg} />
@@ -276,7 +295,32 @@
 				<SystemMessage message={msg as SystemMsg} />
 			</div>
 		{/if}
-	{/each}
+	{/snippet}
+
+	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div onclick={uiState.rewindActive ? handleRewindClick : undefined}>
+	{#if forkSplit && forkSplit.inherited.length > 0}
+		<ForkContextBlock>
+			{#each inheritedGrouped as msg (msg.uuid)}
+				{@render messageItem(msg)}
+			{/each}
+		</ForkContextBlock>
+
+		<ForkDivider
+			parentTitle={parentSession?.title ?? "parent session"}
+			parentId={activeSession?.parentID ?? ""}
+		/>
+
+		{#each currentGrouped as msg, i (msg.uuid)}
+			{@render messageItem(msg)}
+		{/each}
+	{:else}
+		{#each groupedMessages as msg, i (msg.uuid)}
+			{@render messageItem(msg)}
+		{/each}
+	{/if}
 	</div>
 
 	<!-- Pending permission requests (only for current session) -->

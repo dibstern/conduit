@@ -17,7 +17,9 @@
 		parentSession?.title ?? "parent session"
 	);
 
-	const visible = $derived(!!parentId);
+	// Show for subagent sessions (parentID but no forkMessageId).
+	// Hide for user forks (parentID + forkMessageId) — they get the fork divider instead.
+	const visible = $derived(!!parentId && !activeSession?.forkMessageId);
 
 	function navigateBack() {
 		if (parentId) {
