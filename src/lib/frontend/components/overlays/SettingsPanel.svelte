@@ -215,11 +215,12 @@
 {/snippet}
 
 <!-- ─── Toggle switch snippet ────────────────────────────────────────────── -->
-{#snippet toggleSwitch(checked: boolean, onclick: () => void, disabled?: boolean, dimmed?: boolean)}
+{#snippet toggleSwitch(checked: boolean, onclick: () => void, disabled?: boolean, dimmed?: boolean, label?: string)}
 	<button
 		type="button"
 		role="switch"
 		aria-checked={checked}
+		aria-label={label}
 		class="relative w-9 h-5 rounded-full transition-[background,box-shadow] cursor-pointer border-none shrink-0 {checked ? 'bg-brand-a' : 'bg-text-dimmer'} {dimmed ? 'opacity-40' : ''}"
 		style={checked ? "box-shadow: 0 0 8px rgba(255,45,123,0.4);" : ""}
 		{disabled}
@@ -271,21 +272,21 @@
 								<Icon name="smartphone" size={16} class="text-text-muted shrink-0" />
 								<div><div class="text-sm font-medium text-text">Push notifications</div><div class="text-xs text-text-muted mt-0.5">Receive push notifications even when the tab is closed</div></div>
 							</div>
-							{@render toggleSwitch(notifSettings.push, togglePush, pushBusy || pushUnavailable, pushUnavailable)}
+							{@render toggleSwitch(notifSettings.push, togglePush, pushBusy || pushUnavailable, pushUnavailable, "Push notifications")}
 						</div>
 						<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4" style="font-family: var(--font-brand);">
 							<div class="flex items-center gap-3 flex-1 min-w-0">
 								<Icon name="bell" size={16} class="text-text-muted shrink-0" />
 								<div><div class="text-sm font-medium text-text">Browser alerts</div><div class="text-xs text-text-muted mt-0.5">Show desktop notifications when tasks complete</div></div>
 							</div>
-							{@render toggleSwitch(notifSettings.browser, toggleBrowser)}
+							{@render toggleSwitch(notifSettings.browser, toggleBrowser, undefined, undefined, "Browser alerts")}
 						</div>
 						<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4" style="font-family: var(--font-brand);">
 							<div class="flex items-center gap-3 flex-1 min-w-0">
 								<Icon name="volume-2" size={16} class="text-text-muted shrink-0" />
 								<div><div class="text-sm font-medium text-text">Sound</div><div class="text-xs text-text-muted mt-0.5">Play a sound when notifications are triggered</div></div>
 							</div>
-							{@render toggleSwitch(notifSettings.sound, toggleSound)}
+							{@render toggleSwitch(notifSettings.sound, toggleSound, undefined, undefined, "Sound")}
 						</div>
 						{#if pushUnavailable}
 							<div class="px-2 py-1.5 text-xs text-text-muted">Push notifications require HTTPS. Enable a certificate in the CLI settings.</div>
@@ -469,7 +470,7 @@
 								<div class="text-sm font-medium text-text">Connection debug panel</div>
 								<div class="text-xs text-text-muted mt-0.5">Shows WebSocket state transitions, timing, and lifecycle events.</div>
 							</div>
-							{@render toggleSwitch(featureFlags.debug, () => toggleFeature("debug"))}
+							{@render toggleSwitch(featureFlags.debug, () => toggleFeature("debug"), undefined, undefined, "Connection debug panel")}
 						</div>
 						<div class="text-xs text-text-dimmer space-y-1.5 px-1" style="font-family: var(--font-brand);">
 							<div>URL param: <code class="px-1 py-0.5 bg-white/[0.08] rounded text-text-muted">?feats=debug</code></div>
