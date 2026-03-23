@@ -47,6 +47,15 @@ export interface ToolRegistry {
 	clear(): void;
 	remove(id: string): void;
 	getUuid(callId: string): string | undefined;
+	/** Seed registry from history-loaded tool messages so SSE events can find them. */
+	seedFromHistory(
+		tools: ReadonlyArray<{
+			id: string;
+			name: string;
+			status: import("../../shared-types.js").ToolStatus;
+			uuid: string;
+		}>,
+	): void;
 }
 
 // ─── Transition Table ───────────────────────────────────────────────────────
@@ -118,13 +127,30 @@ export function createToolRegistry(
 			return { action: "reject", reason: `Unknown tool ID: ${id}` };
 		}
 
-		// Allow running→running: OpenCode sends multiple tool_executing events
+		// running→running: OpenCode sends multiple tool_executing events
 		// as the tool part state evolves (e.g. metadata with sessionId arrives
 		// after the initial running event for subagent/Task tools).
-		if (
-			tracked.status !== "running" &&
-			!canTransition(tracked.status, "running")
-		) {
+		if (tracked.status === "running") {
+			// Merge updated input/metadata without changing status
+			tracked.tool = {
+				...tracked.tool,
+				...(input !== undefined && { input }),
+				...(metadata !== undefined && { metadata }),
+			};
+			return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
+		}
+
+		// completed→running: Expected during history + SSE overlap.
+		// Tool was loaded from REST as completed, SSE replays stale running event.
+		// Silently ignore — the tool is already in a terminal state.
+		if (tracked.status === "completed") {
+			return {
+				action: "reject",
+				reason: "Tool already completed (stale executing event)",
+			};
+		}
+
+		if (!canTransition(tracked.status, "running")) {
 			const msg = `Invalid transition ${tracked.status} -> running for tool "${id}"`;
 			log?.("error", msg);
 			return {
@@ -157,12 +183,20 @@ export function createToolRegistry(
 
 		const targetStatus: ToolStatus = isError ? "error" : "completed";
 
-		// Special case: allow override when already completed
-		// (handles late SSE results after handleDone force-finalization —
-		// accepts BOTH late success AND late error results)
+		// completed→completed/error: Allow override — handles late SSE results
+		// after handleDone force-finalization. The late result carries the actual
+		// output content, so we accept it.
 		if (tracked.status === "completed") {
-			// Allow the override
+			// Allow the override — fall through to apply the update
 		} else if (tracked.status === "error") {
+			// error→error: Idempotent re-delivery, silently ignore
+			if (targetStatus === "error") {
+				return {
+					action: "reject",
+					reason: "Tool already in error state (idempotent)",
+				};
+			}
+			// error→completed: Truly unexpected backward transition
 			const msg = `Invalid transition ${tracked.status} -> ${targetStatus} for tool "${id}"`;
 			log?.("error", msg);
 			return {
@@ -217,5 +251,38 @@ export function createToolRegistry(
 		return entries.get(callId)?.uuid;
 	}
 
-	return { start, executing, complete, finalizeAll, clear, remove, getUuid };
+	function seedFromHistory(
+		tools: ReadonlyArray<{
+			id: string;
+			name: string;
+			status: ToolStatus;
+			uuid: string;
+		}>,
+	): void {
+		for (const t of tools) {
+			if (entries.has(t.id)) continue; // already tracked
+			entries.set(t.id, {
+				uuid: t.uuid,
+				status: t.status,
+				tool: {
+					type: "tool",
+					uuid: t.uuid,
+					id: t.id,
+					name: t.name,
+					status: t.status,
+				},
+			});
+		}
+	}
+
+	return {
+		start,
+		executing,
+		complete,
+		finalizeAll,
+		clear,
+		remove,
+		getUuid,
+		seedFromHistory,
+	};
 }

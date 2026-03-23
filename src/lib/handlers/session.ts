@@ -424,7 +424,13 @@ export async function handleForkSession(
 	// handleViewSession loads messages from the cache or OpenCode API and
 	// sends session_switched WITH events/history so the client can render
 	// inherited messages and the fork divider immediately.
+	deps.log.info(
+		`client=${clientId} Fork: calling handleViewSession for ${forked.id}`,
+	);
 	await handleViewSession(deps, clientId, { sessionId: forked.id });
+	deps.log.info(
+		`client=${clientId} Fork: handleViewSession returned for ${forked.id}`,
+	);
 
 	// Broadcast updated session list (now includes the fork)
 	await deps.sessionMgr.sendDualSessionLists((msg) =>

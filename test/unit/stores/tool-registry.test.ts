@@ -90,28 +90,50 @@ describe("forward transitions", () => {
 // ─── Backward Transitions Rejected ──────────────────────────────────────────
 
 describe("backward transitions rejected", () => {
-	it("rejects completed -> running", () => {
+	it("silently rejects completed -> running (expected history+SSE overlap)", () => {
 		registry.start("call-1", "Read");
 		registry.complete("call-1", "done", false);
 		const result = registry.executing("call-1");
 		expect(result.action).toBe("reject");
+		// Should NOT log an error — this is an expected overlap condition
+		expect(log).not.toHaveBeenCalledWith("error", expect.anything());
 	});
 
-	it("rejects error -> running", () => {
+	it("errors on error -> running (truly invalid)", () => {
 		registry.start("call-1", "Bash");
 		registry.executing("call-1");
 		registry.complete("call-1", "fail", true);
 		const result = registry.executing("call-1");
 		expect(result.action).toBe("reject");
+		expect(log).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("Invalid transition"),
+		);
 	});
 
-	it("rejects error -> completed", () => {
+	it("errors on error -> completed (truly invalid)", () => {
 		const reg = createToolRegistry({ log, uuidFn: testUuid });
 		reg.start("t1", "Bash");
 		reg.executing("t1");
 		reg.complete("t1", "fail", true);
 		const result = reg.complete("t1", "late success", false);
 		expect(result.action).toBe("reject");
+		expect(log).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("Invalid transition"),
+		);
+	});
+
+	it("silently rejects error -> error (idempotent re-delivery)", () => {
+		const reg = createToolRegistry({ log, uuidFn: testUuid });
+		reg.start("t1", "Bash");
+		reg.executing("t1");
+		reg.complete("t1", "fail", true);
+		log.mockClear();
+		const result = reg.complete("t1", "fail again", true);
+		expect(result.action).toBe("reject");
+		// Should NOT log an error — idempotent
+		expect(log).not.toHaveBeenCalledWith("error", expect.anything());
 	});
 
 	it("allows running -> running for metadata/input updates", () => {
@@ -342,15 +364,13 @@ describe("getUuid", () => {
 // ─── Diagnostics ────────────────────────────────────────────────────────────
 
 describe("diagnostics", () => {
-	it("logs error on backward rejection", () => {
+	it("does not error on completed -> running (expected overlap)", () => {
 		registry.start("call-1", "Read");
 		registry.complete("call-1", "done", false);
 		registry.executing("call-1");
 
-		expect(log).toHaveBeenCalledWith(
-			"error",
-			expect.stringContaining("call-1"),
-		);
+		// completed -> running is expected overlap, not an error
+		expect(log).not.toHaveBeenCalledWith("error", expect.anything());
 	});
 
 	it("logs error on orphan event", () => {
@@ -411,5 +431,53 @@ describe("uuidFn", () => {
 			throw new Error("unreachable");
 		expect(r1.tool.uuid).toBe("custom-101");
 		expect(r2.tool.uuid).toBe("custom-102");
+	});
+
+	describe("seedFromHistory", () => {
+		it("seeds registry from history-loaded tools", () => {
+			registry.seedFromHistory([
+				{ id: "t1", name: "Read", status: "completed", uuid: "uuid-hist-1" },
+				{ id: "t2", name: "Bash", status: "running", uuid: "uuid-hist-2" },
+			]);
+
+			// Can now complete t2 without "unknown tool" error
+			const result = registry.complete("t2", "done", false);
+			expect(result.action).toBe("update");
+		});
+
+		it("does not overwrite existing entries", () => {
+			registry.start("t1", "Read");
+			const originalUuid = registry.getUuid("t1");
+
+			registry.seedFromHistory([
+				{ id: "t1", name: "Read", status: "completed", uuid: "uuid-different" },
+			]);
+
+			// Original entry is preserved
+			expect(registry.getUuid("t1")).toBe(originalUuid);
+		});
+
+		it("seeded completed tools silently reject executing() (expected overlap)", () => {
+			registry.seedFromHistory([
+				{ id: "t1", name: "Read", status: "completed", uuid: "uuid-hist-1" },
+			]);
+
+			const result = registry.executing("t1", { path: "/foo" });
+			expect(result.action).toBe("reject");
+			// Not an error — expected overlap
+			expect(log).not.toHaveBeenCalledWith("error", expect.anything());
+		});
+
+		it("seeded completed tools accept late complete() override", () => {
+			registry.seedFromHistory([
+				{ id: "t1", name: "Read", status: "completed", uuid: "uuid-hist-1" },
+			]);
+
+			const result = registry.complete("t1", "actual output", false);
+			expect(result.action).toBe("update");
+			if (result.action === "update") {
+				expect(result.tool.result).toBe("actual output");
+			}
+		});
 	});
 });

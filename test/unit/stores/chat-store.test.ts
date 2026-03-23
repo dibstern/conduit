@@ -333,15 +333,13 @@ describe("tool lifecycle", () => {
 		});
 		expect(chatState.messages).toHaveLength(1);
 
-		// Executing is rejected — tool is already in terminal state (throws in DEV)
-		expect(() =>
-			handleToolExecuting({
-				type: "tool_executing",
-				id: "toolu_abc",
-				name: "AskUserQuestion",
-				input: { question: "Approve?" },
-			}),
-		).toThrow(/Invalid transition/i);
+		// Executing is silently rejected — tool already completed (expected overlap)
+		handleToolExecuting({
+			type: "tool_executing",
+			id: "toolu_abc",
+			name: "AskUserQuestion",
+			input: { question: "Approve?" },
+		});
 		const tool = chatState.messages[0] as ToolMessage;
 		// Tool stays completed — registry blocks completed -> running
 		expect(tool.status).toBe("completed");

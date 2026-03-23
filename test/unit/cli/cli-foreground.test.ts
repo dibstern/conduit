@@ -24,7 +24,9 @@ const { mockStart, mockAddProject, MockDaemonClass, mockEnv } = vi.hoisted(
 				stop: mockStop,
 				addProject: mockAddProject,
 				discoverProjects: mockDiscoverProjects,
-				getStatus: vi.fn().mockReturnValue({ tlsEnabled: false }),
+				getStatus: vi
+					.fn()
+					.mockReturnValue({ tlsEnabled: true, host: "0.0.0.0" }),
 				port: opts?.port ?? 2633,
 			})),
 			{
@@ -120,7 +122,7 @@ describe("--foreground handler", () => {
 
 		// Verify banner output
 		expect(joined).toContain("Conduit (foreground)");
-		expect(joined).toContain("http://localhost:19876");
+		expect(joined).toContain("https://0.0.0.0:19876");
 		expect(joined).toContain("/test/project");
 		expect(joined).toContain("Ready.");
 	});
@@ -135,6 +137,7 @@ describe("--foreground handler", () => {
 		expect(Daemon).toHaveBeenCalledWith({
 			port: 3000,
 			opencodeUrl: "http://localhost:5000",
+			tlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});
@@ -150,6 +153,7 @@ describe("--foreground handler", () => {
 		expect(Daemon).toHaveBeenCalledWith({
 			port: 3000,
 			opencodeUrl: "http://opencode:4096",
+			tlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});
@@ -183,7 +187,7 @@ describe("--foreground handler", () => {
 
 		const joined = io.output.join("");
 		expect(joined).toContain("OpenCode: http://localhost:4096");
-		expect(joined).toContain("Relay:    http://localhost:2633");
+		expect(joined).toContain("Relay:    https://0.0.0.0:2633");
 		expect(joined).toContain("Project:  /home/user/app");
 	});
 
@@ -196,7 +200,7 @@ describe("--foreground handler", () => {
 		expect(io.exit).not.toHaveBeenCalled();
 	});
 
-	it("uses default ports when none specified", async () => {
+	it("uses default ports when none specified and enables TLS", async () => {
 		const io = createMockIO("/test");
 
 		await run(["--foreground"], io);
@@ -206,6 +210,7 @@ describe("--foreground handler", () => {
 		expect(Daemon).toHaveBeenCalledWith({
 			port: 2633,
 			opencodeUrl: "http://localhost:4096",
+			tlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});

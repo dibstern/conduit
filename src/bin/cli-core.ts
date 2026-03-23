@@ -153,6 +153,9 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			port: args.port,
 			...(args.host ? { host: args.host } : {}),
 			opencodeUrl,
+			// Always enable TLS in foreground (matches daemon spawn behavior).
+			// Gracefully falls back to HTTP if mkcert is not available.
+			tlsEnabled: !args.noHttps,
 			logLevel: args.logLevel,
 			logFormat: args.logFormat ?? "pretty",
 		});
@@ -165,7 +168,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 
 		const fgStatus = daemon.getStatus();
 		const fgScheme = fgStatus.tlsEnabled ? "https" : "http";
-		stdout.write(`  Relay:    ${fgScheme}://localhost:${daemon.port}\n`);
+		const fgHost = fgStatus.host ?? "localhost";
+		stdout.write(`  Relay:    ${fgScheme}://${fgHost}:${daemon.port}\n`);
 		stdout.write(`  Project:  ${cwd}\n`);
 		stdout.write(`  Ready.\n\n`);
 		return;

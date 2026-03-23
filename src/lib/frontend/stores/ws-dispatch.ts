@@ -40,6 +40,7 @@ import {
 	prependMessages,
 	registerClearMessagesHook,
 	renderDeferredMarkdown,
+	seedRegistryFromMessages,
 } from "./chat.svelte.js";
 import {
 	handleAgentList,
@@ -289,6 +290,7 @@ export function handleMessage(msg: RelayMessage): void {
 					.then((chatMsgs) => {
 						if (chatMsgs) {
 							prependMessages(chatMsgs);
+							seedRegistryFromMessages(chatMsgs);
 							historyState.hasMore = hasMore;
 							historyState.messageCount = msgCount;
 						}

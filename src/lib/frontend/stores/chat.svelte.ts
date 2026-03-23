@@ -631,6 +631,21 @@ export function flushPendingRender(): void {
  *  IMPORTANT: Do NOT read reactive $state (e.g. sessionState.currentId)
  *  inside this function — it is called from $effect contexts and reading
  *  reactive state here creates infinite effect loops. */
+/**
+ * Seed the ToolRegistry from chat messages loaded via REST history.
+ * Without this, SSE events arriving for history-loaded tools would be
+ * rejected as "unknown tool" since the registry only knows about tools
+ * registered via handleToolStart (the live event path).
+ */
+export function seedRegistryFromMessages(
+	messages: readonly ChatMessage[],
+): void {
+	const tools = messages.filter((m): m is ToolMessage => m.type === "tool");
+	if (tools.length > 0) {
+		registry.seedFromHistory(tools);
+	}
+}
+
 export function clearMessages(): void {
 	replayBatch = null;
 	chatState.replaying = false; // safety: clear stale flag on session switch
