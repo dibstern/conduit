@@ -106,6 +106,10 @@ interface ScenarioDefinition {
 	multiTurn?: boolean;
 	/** If true, the scenario involves tool calls that require permission approval. */
 	needsPermissionApproval?: boolean;
+	/** If true, fork the session after all prompts, then send forkPrompt in the fork. */
+	forkAfterPrompts?: boolean;
+	/** Prompt to send in the forked session (requires forkAfterPrompts). */
+	forkPrompt?: string;
 }
 
 const SCENARIOS: ScenarioDefinition[] = [
@@ -187,6 +191,17 @@ const SCENARIOS: ScenarioDefinition[] = [
 			(_, i) => `Reply with just the number ${i + 1}. Nothing else.`,
 		),
 		multiTurn: true,
+	},
+	{
+		name: "fork-session",
+		prompts: [
+			"Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"Now remember 'beta' too. Reply with only: ok, remembered.",
+		],
+		multiTurn: true,
+		forkAfterPrompts: true,
+		forkPrompt:
+			"What words did I ask you to remember? Reply with just the words.",
 	},
 ];
 
@@ -363,6 +378,42 @@ function requestNewSession(ws: WebSocket): Promise<void> {
 	});
 }
 
+/**
+ * Fork the current session via WS and wait for session_forked + session_switched.
+ * Returns the forked session's ID.
+ */
+function requestForkSession(ws: WebSocket): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ws.off("message", handler);
+			reject(new Error("Timeout waiting for fork"));
+		}, 15_000);
+
+		let forkedId: string | undefined;
+
+		const handler = (data: WebSocket.RawData) => {
+			try {
+				const msg = JSON.parse(String(data)) as MockMessage;
+				if (msg.type === "session_forked") {
+					const session = msg["session"] as { id?: string } | undefined;
+					forkedId = session?.id;
+				}
+				if (msg.type === "session_switched" && forkedId) {
+					clearTimeout(timer);
+					ws.off("message", handler);
+					resolve(forkedId);
+				}
+			} catch {
+				// Ignore
+			}
+		};
+
+		ws.on("message", handler);
+		// Fork the current session (no messageId = whole-session fork)
+		ws.send(JSON.stringify({ type: "fork_session" }));
+	});
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -382,8 +433,18 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	const scenarioFilter = process.env["SCENARIO"];
+	const scenarios = scenarioFilter
+		? SCENARIOS.filter((s) => s.name === scenarioFilter)
+		: SCENARIOS;
+
+	if (scenarioFilter && scenarios.length === 0) {
+		console.error(`ERROR: No scenario named "${scenarioFilter}" found.`);
+		process.exit(1);
+	}
+
 	console.log("=== Snapshot Recording Script ===");
-	console.log(`Scenarios: ${SCENARIOS.length}`);
+	console.log(`Scenarios: ${scenarios.length}`);
 	console.log(`Model: ${providerId}/${modelId}`);
 	if (providerId === "opencode") {
 		console.log("  (free OpenCode Zen model)");
@@ -428,7 +489,7 @@ async function main(): Promise<void> {
 		mkdirSync(FIXTURES_DIR, { recursive: true });
 
 		// 6. Record each scenario
-		for (const scenario of SCENARIOS) {
+		for (const scenario of scenarios) {
 			console.log(`\nRecording: ${scenario.name}`);
 			console.log(`  Prompts: ${scenario.prompts.length}`);
 
@@ -462,6 +523,27 @@ async function main(): Promise<void> {
 						);
 						console.log(`    Events: ${turn.events.length}`);
 						turns.push(turn);
+					}
+
+					// Handle fork scenario: fork the session and send one more prompt
+					if (scenario.forkAfterPrompts && scenario.forkPrompt) {
+						console.log("  Forking session...");
+						const forkedId = await requestForkSession(ws);
+						console.log(`  Forked to: ${forkedId}`);
+
+						// Wait for fork to settle (session switch, list updates)
+						await collectMessages(ws, 1_500);
+
+						console.log(
+							`  Fork turn: "${scenario.forkPrompt.slice(0, 50)}${scenario.forkPrompt.length > 50 ? "..." : ""}"`,
+						);
+						const forkTurn = await recordTurn(
+							ws,
+							scenario.forkPrompt,
+							scenario.needsPermissionApproval === true,
+						);
+						console.log(`    Events: ${forkTurn.events.length}`);
+						turns.push(forkTurn);
 					}
 				} else {
 					// Single-turn: each prompt gets its own session
@@ -499,7 +581,7 @@ async function main(): Promise<void> {
 				};
 
 				const outPath = path.join(FIXTURES_DIR, `${scenario.name}.json`);
-				writeFileSync(outPath, `${JSON.stringify(recorded, null, 2)}\n`);
+				writeFileSync(outPath, `${JSON.stringify(recorded, null, "\t")}\n`);
 				console.log(`  Saved: ${outPath}`);
 
 				// Save OpenCode HTTP-level recording
