@@ -8,11 +8,15 @@ import { historyToChatMessages } from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import {
 	addUserMessage,
+	beginReplayBatch,
 	chatState,
 	clearMessages,
 	clearQueuedFlags,
+	commitReplayBatch,
+	discardReplayBatch,
 	findMessage,
 	flushPendingRender,
+	getMessages,
 	handleDelta,
 	handleDone,
 	handleError,
@@ -29,6 +33,7 @@ import {
 	handleToolStart,
 	historyState,
 	prependMessages,
+	registerClearMessagesHook,
 } from "./chat.svelte.js";
 import {
 	handleAgentList,
@@ -114,6 +119,20 @@ const LLM_CONTENT_START_TYPES: ReadonlySet<RelayMessage["type"]> = new Set([
 function isLlmContentStart(type: string): boolean {
 	return LLM_CONTENT_START_TYPES.has(type as RelayMessage["type"]);
 }
+
+// ─── Async replay infrastructure ────────────────────────────────────────────
+
+let replayGeneration = 0;
+const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
+
+function yieldToEventLoop(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+// Register abort hook: clearMessages bumps generation to cancel in-flight replays
+registerClearMessagesHook(() => {
+	replayGeneration++;
+});
 
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
@@ -214,7 +233,10 @@ export function handleMessage(msg: RelayMessage): void {
 			if (msg.events) {
 				// Cache hit: replay raw events through existing chat handlers
 				// (full fidelity — same code paths as live streaming).
-				replayEvents(msg.events);
+				// Fire-and-forget — handleMessage stays synchronous.
+				replayEvents(msg.events).catch((err) => {
+					console.warn("[ws] Replay error:", err);
+				});
 				// Events cache covers the full session — suppress history loading.
 				// historyState.hasMore stays false (set by clearMessages above),
 				// so the IntersectionObserver can never fire spuriously.
@@ -446,15 +468,27 @@ export function handleMessage(msg: RelayMessage): void {
 // llmActive=true; done and non-retry errors set it false. A user_message
 // that appears while llmActive is true was queued behind an in-progress turn.
 
-export function replayEvents(events: RelayMessage[]): void {
+export async function replayEvents(events: RelayMessage[]): Promise<void> {
 	chatState.replaying = true;
+	const generation = ++replayGeneration;
+
+	beginReplayBatch();
 
 	// Local tracker: true when the LLM is producing content for the current
 	// turn. Inferred from event structure, NOT from status events (which
 	// aren't cached). Used to set the `queued` flag on user_message events.
 	let llmActive = false;
 
-	for (const event of events) {
+	for (let i = 0; i < events.length; i++) {
+		// Abort: a newer replay or clearMessages happened
+		if (generation !== replayGeneration) {
+			discardReplayBatch();
+			return; // don't set replaying=false — clearMessages already did, or new replay set it true
+		}
+
+		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
+		const event = events[i]!;
+
 		// ── LLM activity tracking (before handler, so user_message reads it) ──
 		if (isLlmContentStart(event.type)) llmActive = true;
 		else if (event.type === "done") llmActive = false;
@@ -481,7 +515,8 @@ export function replayEvents(events: RelayMessage[]): void {
 				handleToolResult(event);
 				// Also update todo store if this was a TodoWrite result
 				{
-					const toolMsg = chatState.messages.find(
+					const msgs = getMessages(); // reads from batch during replay
+					const toolMsg = msgs.find(
 						(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
 					);
 					if (
@@ -518,10 +553,20 @@ export function replayEvents(events: RelayMessage[]): void {
 		// ── Queued-flag clearing (single source of truth) ────────────────
 		// Same LLM_CONTENT_START_TYPES constant as handleMessage().
 		if (isLlmContentStart(event.type)) clearQueuedFlags();
+
+		// Yield between chunks to keep the main thread responsive
+		if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
+			commitReplayBatch();
+			await yieldToEventLoop();
+			if (generation !== replayGeneration) return; // aborted during yield
+			beginReplayBatch();
+		}
 	}
+
 	// Flush any pending debounced render (for mid-stream sessions
 	// where no "done" event has been received yet)
 	flushPendingRender();
+	commitReplayBatch();
 	chatState.replaying = false;
 }
 

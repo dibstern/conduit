@@ -134,6 +134,16 @@ function applyToolUpdate(uuid: string, tool: ToolMessage): void {
  */
 const doneMessageIds = new Set<string>();
 
+// ─── Abort hook ─────────────────────────────────────────────────────────────
+// Used by ws-dispatch.ts to abort in-flight async replays when clearMessages
+// is called. Avoids circular imports (ws-dispatch → chat.svelte, not vice versa).
+
+let onClearMessages: (() => void) | null = null;
+
+export function registerClearMessagesHook(fn: () => void): void {
+	onClearMessages = fn;
+}
+
 // ─── Replay Batch ───────────────────────────────────────────────────────────
 let replayBatch: ChatMessage[] | null = null;
 
@@ -621,6 +631,7 @@ export function flushPendingRender(): void {
 export function clearMessages(): void {
 	replayBatch = null;
 	chatState.replaying = false; // safety: clear stale flag on session switch
+	onClearMessages?.(); // abort in-flight async replays
 	chatState.messages = [];
 	chatState.currentAssistantText = "";
 	chatState.streaming = false;

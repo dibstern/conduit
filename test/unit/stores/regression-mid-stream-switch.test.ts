@@ -78,7 +78,7 @@ afterEach(() => {
 // ─── Core regression: mid-stream switch back restores messages ───────────────
 
 describe("Regression: mid-stream session switch preserves messages", () => {
-	it("switching away mid-stream then back with cached events restores full conversation", () => {
+	it("switching away mid-stream then back with cached events restores full conversation", async () => {
 		// ── Phase 1: Live streaming on session A ──
 		sessionState.currentId = "session-a";
 		addUserMessage("What is TypeScript?");
@@ -116,6 +116,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// ── Verify: ALL messages should be present ──
 		expect(sessionState.currentId).toBe("session-a");
@@ -140,7 +141,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect(chatState.processing).toBe(false);
 	});
 
-	it("switching away mid-stream then back WITHOUT done preserves partial stream", () => {
+	it("switching away mid-stream then back WITHOUT done preserves partial stream", async () => {
 		// Session A active, partial response
 		sessionState.currentId = "session-a";
 
@@ -159,6 +160,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				// Agent is still working — no done event
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// User message should be present
 		const userMsgs = chatState.messages.filter((m) => m.type === "user");
@@ -179,7 +181,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect(chatState.processing).toBe(true);
 	});
 
-	it("switching away during tool execution then back preserves tool state", () => {
+	it("switching away during tool execution then back preserves tool state", async () => {
 		sessionState.currentId = "session-a";
 
 		// Switch to B, then back to A with tool events
@@ -208,6 +210,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// User message
 		const userMsgs = chatState.messages.filter((m) => m.type === "user");
@@ -236,7 +239,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect((toolMsgs[0] as ToolMessage).status).toBe("completed");
 	});
 
-	it("switching away during thinking then back preserves thinking block", () => {
+	it("switching away during thinking then back preserves thinking block", async () => {
 		sessionState.currentId = "session-a";
 
 		handleMessage({ type: "session_switched", id: "session-b" });
@@ -253,6 +256,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Thinking message
 		const thinkingMsgs = chatState.messages.filter(
@@ -274,7 +278,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		);
 	});
 
-	it("multi-turn conversation: switch away then back preserves all turns", () => {
+	it("multi-turn conversation: switch away then back preserves all turns", async () => {
 		sessionState.currentId = "session-a";
 
 		handleMessage({ type: "session_switched", id: "session-b" });
@@ -294,6 +298,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Should have 2 user messages and 2 assistant messages
 		const userMsgs = chatState.messages.filter((m) => m.type === "user");
@@ -313,7 +318,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect((assistantMsgs[1] as AssistantMessage).finalized).toBe(true);
 	});
 
-	it("rapid switch: A→B→A with events — only final A's events are displayed", () => {
+	it("rapid switch: A→B→A with events — only final A's events are displayed", async () => {
 		sessionState.currentId = "session-a";
 		addUserMessage("message in A");
 		handleDelta({ type: "delta", text: "response in A" });
@@ -333,6 +338,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Should show the replayed events, not the stale live messages
 		expect(sessionState.currentId).toBe("session-a");
@@ -367,7 +373,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect(sessionState.currentId).toBe("session-a");
 	});
 
-	it("events from session A continue arriving live after switching back mid-stream", () => {
+	it("events from session A continue arriving live after switching back mid-stream", async () => {
 		// Switch to session A with mid-stream events (no done)
 		handleMessage({
 			type: "session_switched",
@@ -378,6 +384,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 				{ type: "delta", text: "Working on " },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Should be mid-stream
 		expect(chatState.streaming).toBe(true);

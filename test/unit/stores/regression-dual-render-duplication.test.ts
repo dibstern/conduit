@@ -61,7 +61,7 @@ afterEach(() => {
 });
 
 describe("Regression: no dual-render duplication", () => {
-	it("events cache path sets historyState.hasMore to false", () => {
+	it("events cache path sets historyState.hasMore to false", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -71,12 +71,13 @@ describe("Regression: no dual-render duplication", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		expect(historyState.hasMore).toBe(false);
 		expect(chatState.messages.filter((m) => m.type === "user")).toHaveLength(1);
 	});
 
-	it("history_page after events replay does not duplicate messages", () => {
+	it("history_page after events replay does not duplicate messages", async () => {
 		// Step 1: Load session via events cache
 		handleMessage({
 			type: "session_switched",
@@ -87,6 +88,7 @@ describe("Regression: no dual-render duplication", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		const countAfterReplay = chatState.messages.length;
 		expect(countAfterReplay).toBeGreaterThan(0);
@@ -136,7 +138,7 @@ describe("Regression: no dual-render duplication", () => {
 		expect(chatState.messages.filter((m) => m.type === "user")).toHaveLength(1);
 	});
 
-	it("session switch clears historyState and messages", () => {
+	it("session switch clears historyState and messages", async () => {
 		// Load session A
 		handleMessage({
 			type: "session_switched",
@@ -146,6 +148,7 @@ describe("Regression: no dual-render duplication", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 		expect(chatState.messages.length).toBeGreaterThan(0);
 		expect(historyState.hasMore).toBe(false);
 
@@ -285,7 +288,7 @@ describe("messageCount tracking for pagination offset", () => {
 		expect(historyState.loading).toBe(false);
 	});
 
-	it("events cache path leaves messageCount at 0", () => {
+	it("events cache path leaves messageCount at 0", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s5",
@@ -295,6 +298,7 @@ describe("messageCount tracking for pagination offset", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Events path doesn't use REST-level message counting
 		expect(historyState.messageCount).toBe(0);

@@ -168,7 +168,7 @@ describe("Regression: handleMessage session_switched dispatch", () => {
 // ─── Combined protocol: session_switched with events ─────────────────────────
 
 describe("Combined protocol: session_switched with inline events", () => {
-	it("replays raw events through chat handlers (full fidelity)", () => {
+	it("replays raw events through chat handlers (full fidelity)", async () => {
 		sessionState.currentId = "session-a";
 		addUserMessage("message in A");
 
@@ -182,6 +182,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		expect(sessionState.currentId).toBe("session-b");
 		// Should have replayed events: user message + assistant message + result
@@ -202,7 +203,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 		);
 	});
 
-	it("replays mid-stream events (no done in events)", () => {
+	it("replays mid-stream events (no done in events)", async () => {
 		// Switch to session B that was mid-stream when we switched away
 		handleMessage({
 			type: "session_switched",
@@ -213,6 +214,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 				{ type: "delta", text: "Partial respon" },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Should show partial assistant message
 		const assistantMsgs = chatState.messages.filter(
@@ -227,7 +229,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 		expect(chatState.processing).toBe(true);
 	});
 
-	it("replays tool events correctly", () => {
+	it("replays tool events correctly", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-c",
@@ -250,6 +252,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		const toolMsgs = chatState.messages.filter((m) => m.type === "tool");
 		expect(toolMsgs).toHaveLength(1);
@@ -257,7 +260,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 		expect((toolMsgs[0] as { status: string }).status).toBe("completed");
 	});
 
-	it("replays thinking events correctly", () => {
+	it("replays thinking events correctly", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-d",
@@ -270,6 +273,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		const thinkingMsgs = chatState.messages.filter(
 			(m) => m.type === "thinking",
@@ -281,12 +285,12 @@ describe("Combined protocol: session_switched with inline events", () => {
 		expect((thinkingMsgs[0] as { done: boolean }).done).toBe(true);
 	});
 
-	it("replaying flag is set during replay and cleared after", () => {
+	it("replaying flag is set during replay and cleared after", async () => {
 		// Before replay
 		expect(chatState.replaying).toBe(false);
 
-		// We can't easily test the mid-replay state since it's synchronous,
-		// but we can verify it's cleared after
+		// Replay is async but with small event arrays (< REPLAY_CHUNK_SIZE)
+		// the entire replay completes synchronously (no yield point hit).
 		handleMessage({
 			type: "session_switched",
 			id: "session-e",
@@ -296,11 +300,12 @@ describe("Combined protocol: session_switched with inline events", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		expect(chatState.replaying).toBe(false);
 	});
 
-	it("rapid session switches: only last session's events are displayed", () => {
+	it("rapid session switches: only last session's events are displayed", async () => {
 		// Simulate rapid switches
 		handleMessage({
 			type: "session_switched",
@@ -321,6 +326,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		// Only session B's events should be present
 		expect(sessionState.currentId).toBe("session-b");
@@ -398,7 +404,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		expect(userMsgs).toHaveLength(1);
 	});
 
-	it("events cache path sets historyState.hasMore to false", () => {
+	it("events cache path sets historyState.hasMore to false", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-z",
@@ -408,6 +414,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 				{ type: "done", code: 0 },
 			],
 		});
+		await vi.runAllTimersAsync();
 
 		expect(historyState.hasMore).toBe(false);
 	});

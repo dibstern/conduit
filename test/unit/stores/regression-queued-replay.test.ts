@@ -86,17 +86,19 @@ function userMessages(): UserMessage[] {
 }
 
 /** Replay events with cache-realism validation.
- *  Fails the test if any event has a type that wouldn't exist in the real cache. */
-function replayValidated(events: RelayMessage[]): void {
+ *  Fails the test if any event has a type that wouldn't exist in the real cache.
+ *  Async: drains the event loop so chunked replay completes before assertions. */
+async function replayValidated(events: RelayMessage[]): Promise<void> {
 	assertCacheRealisticEvents(events);
 	replayEvents(events);
+	await vi.runAllTimersAsync();
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 // NOTE: No status events in any event array — they're never in the real cache.
 
 describe("Regression: queued flag preserved during replayEvents", () => {
-	it("marks user message as queued when replayed mid-stream", () => {
+	it("marks user message as queued when replayed mid-stream", async () => {
 		// Real cache contents: user_message is recorded by prompt.ts,
 		// delta comes from SSE pipeline. No status events are recorded.
 		const events: RelayMessage[] = [
@@ -105,7 +107,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "user_message", text: "second" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100); // flush debounced render
 
 		const users = userMessages();
@@ -114,7 +116,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		expect(users[1]?.queued).toBe(true);
 	});
 
-	it("clears queued flag when assistant content follows during replay", () => {
+	it("clears queued flag when assistant content follows during replay", async () => {
 		// LLM finished "first", then started responding to "second"
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -125,7 +127,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "delta", text: "Response to second" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
@@ -134,7 +136,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		expect(users[1]?.queued).toBeFalsy();
 	});
 
-	it("clears queued flag on thinking_start during replay", () => {
+	it("clears queued flag on thinking_start during replay", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Response" },
@@ -144,14 +146,14 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "thinking_start" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
 		expect(users[1]?.queued).toBeFalsy();
 	});
 
-	it("clears queued flag on tool_start during replay", () => {
+	it("clears queued flag on tool_start during replay", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Response" },
@@ -161,14 +163,14 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "tool_start", id: "t1", name: "Read" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
 		expect(users[1]?.queued).toBeFalsy();
 	});
 
-	it("preserves queued flag across session switch round-trip", () => {
+	it("preserves queued flag across session switch round-trip", async () => {
 		// Real cache: no status events, just user_message + delta
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -177,7 +179,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		];
 
 		// First replay (initial load)
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 		expect(userMessages()[1]?.queued).toBe(true);
 
@@ -186,7 +188,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		expect(chatState.messages).toHaveLength(0);
 
 		// Switch back (replay same events)
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
@@ -195,18 +197,18 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		expect(users[1]?.queued).toBe(true);
 	});
 
-	it("does not mark user message as queued when no prior content", () => {
+	it("does not mark user message as queued when no prior content", async () => {
 		// Message sent while idle — no preceding delta/thinking/tool events
 		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
 
-		replayValidated(events);
+		await replayValidated(events);
 
 		const users = userMessages();
 		expect(users).toHaveLength(1);
 		expect(users[0]?.queued).toBeFalsy();
 	});
 
-	it("does not mark user message as queued after done clears llm activity", () => {
+	it("does not mark user message as queued after done clears llm activity", async () => {
 		// A completed (done), then user sent B during idle
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -215,7 +217,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "user_message", text: "second" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
@@ -224,7 +226,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		expect(users[1]?.queued).toBeFalsy();
 	});
 
-	it("marks queued when user_message follows thinking events (no delta)", () => {
+	it("marks queued when user_message follows thinking events (no delta)", async () => {
 		// LLM thinking (not streaming text) when second message arrives
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -233,14 +235,14 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "user_message", text: "second" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
 		expect(users[1]?.queued).toBe(true);
 	});
 
-	it("marks queued when user_message follows tool events (no delta)", () => {
+	it("marks queued when user_message follows tool events (no delta)", async () => {
 		// LLM executing a tool when second message arrives
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -249,14 +251,14 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "user_message", text: "second" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
 		expect(users[1]?.queued).toBe(true);
 	});
 
-	it("resets llm activity on non-retry error", () => {
+	it("resets llm activity on non-retry error", async () => {
 		// LLM was active, then errored out — next message should NOT be queued
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -265,7 +267,7 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 			{ type: "user_message", text: "second" },
 		];
 
-		replayValidated(events);
+		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();

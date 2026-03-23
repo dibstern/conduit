@@ -118,7 +118,13 @@ export function createToolRegistry(
 			return { action: "reject", reason: `Unknown tool ID: ${id}` };
 		}
 
-		if (!canTransition(tracked.status, "running")) {
+		// Allow running→running: OpenCode sends multiple tool_executing events
+		// as the tool part state evolves (e.g. metadata with sessionId arrives
+		// after the initial running event for subagent/Task tools).
+		if (
+			tracked.status !== "running" &&
+			!canTransition(tracked.status, "running")
+		) {
 			log?.(
 				"warn",
 				`Invalid transition ${tracked.status} -> running for tool "${id}"`,

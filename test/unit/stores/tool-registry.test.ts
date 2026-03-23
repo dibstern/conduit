@@ -114,6 +114,29 @@ describe("backward transitions rejected", () => {
 		expect(result.action).toBe("reject");
 	});
 
+	it("allows running -> running for metadata/input updates", () => {
+		registry.start("call-1", "Task");
+		const first = registry.executing("call-1", { prompt: "do stuff" });
+		expect(first.action).toBe("update");
+		expect(
+			(first as { tool: { metadata?: unknown } }).tool.metadata,
+		).toBeUndefined();
+
+		// Second executing with metadata (subagent session spawned)
+		const second = registry.executing("call-1", undefined, {
+			sessionId: "ses_child001",
+		});
+		expect(second.action).toBe("update");
+		const tool = (
+			second as {
+				tool: { metadata?: Record<string, unknown>; input?: unknown };
+			}
+		).tool;
+		expect(tool.metadata).toEqual({ sessionId: "ses_child001" });
+		// Input from first call is preserved
+		expect(tool.input).toEqual({ prompt: "do stuff" });
+	});
+
 	it("duplicate start after complete returns duplicate", () => {
 		registry.start("call-1", "Read");
 		registry.complete("call-1", "done", false);
