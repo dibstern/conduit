@@ -1463,9 +1463,7 @@ describe("Ticket 3.1 — Daemon Process", () => {
 
 			// The dismissedPaths should still be persisted
 			const config = loadDaemonConfig(tmpDir);
-			expect(config?.dismissedPaths).toContain(
-				"/home/user/removed-survives",
-			);
+			expect(config?.dismissedPaths).toContain("/home/user/removed-survives");
 
 			await d2.stop();
 		});

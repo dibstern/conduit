@@ -6,7 +6,8 @@
 			"!node_modules",
 			"!test-results",
 			"!.claude",
-			"!.worktrees"
+			"!.worktrees",
+			"!docs/**/*.html"
 		]
 	},
 	"css": {

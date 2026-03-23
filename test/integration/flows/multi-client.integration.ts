@@ -76,13 +76,26 @@ describe("Integration: Multi-Client", () => {
 		const switched1 = await client1.waitFor("session_switched", {
 			timeout: 5000,
 		});
-		expect(switched1["id"]).toBeTruthy();
+		const newSessionId = switched1["id"] as string;
+		expect(newSessionId).toBeTruthy();
 
-		// The other client should also get session_switched (broadcast)
-		const switched2 = await client2.waitFor("session_switched", {
+		// The other client receives session_list broadcast (not session_switched)
+		// since new_session only switches the requesting client's tab.
+		// sendDualSessionLists sends roots then all — use a predicate to wait
+		// for the list that actually contains the new session ID.
+		const list2 = await client2.waitFor("session_list", {
 			timeout: 5000,
+			predicate: (m) => {
+				const sessions = m["sessions"] as Array<{ id?: string }> | undefined;
+				return (
+					Array.isArray(sessions) && sessions.some((s) => s.id === newSessionId)
+				);
+			},
 		});
-		expect(switched2["id"]).toBeTruthy();
+		expect(Array.isArray(list2["sessions"])).toBe(true);
+		const sessions = list2["sessions"] as Array<{ id?: string }>;
+		const newSession = sessions.find((s) => s.id === newSessionId);
+		expect(newSession).toBeTruthy();
 
 		await client1.close();
 		await client2.close();

@@ -170,6 +170,27 @@ export class MockOpenCodeServer {
 		this.buildQueues();
 	}
 
+	/**
+	 * Reset response queues without disconnecting SSE clients.
+	 * For multi-test reuse within a shared relay.
+	 *
+	 * Preserves `statusOverride` so that background status pollers
+	 * continue to see the correct idle/busy state between tests.
+	 * The override is cleared naturally when the next prompt_async fires.
+	 */
+	resetQueues(): void {
+		this.exactQueues.clear();
+		this.normalizedQueues.clear();
+		this.ptyQueues.clear();
+		// Keep promptFired=true if SSE clients are connected — the relay is
+		// already viewing a session, so SSE batches should emit immediately.
+		if (this.sseClients.size === 0) {
+			this.promptFired = false;
+		}
+		this.pendingSseBatches = [];
+		this.buildQueues();
+	}
+
 	// ─── Queue building ──────────────────────────────────────────────────────
 
 	private buildQueues(): void {

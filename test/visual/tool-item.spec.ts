@@ -127,7 +127,9 @@ test.describe("ToolGenericCard", () => {
 // ─── ToolQuestionCard ───────────────────────────────────────────────────────
 
 test.describe("ToolQuestionCard", () => {
-	test("renders interactive question card for running question", async ({ page }) => {
+	test("renders interactive question card for running question", async ({
+		page,
+	}) => {
 		await page.goto(storyUrl("chat-toolitem--question-running"), {
 			waitUntil: "domcontentloaded",
 		});

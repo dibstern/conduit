@@ -6,8 +6,7 @@ import { expect, test } from "@playwright/test";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const STORY_URL = (id: string) =>
-	`/iframe.html?id=${id}&viewMode=story`;
+const STORY_URL = (id: string) => `/iframe.html?id=${id}&viewMode=story`;
 
 async function navigateToStory(
 	page: import("@playwright/test").Page,
@@ -24,10 +23,7 @@ test.describe("InputArea", () => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const textarea = page.locator("#input");
 		await expect(textarea).toBeVisible();
-		await expect(textarea).toHaveAttribute(
-			"placeholder",
-			/Message OpenCode/,
-		);
+		await expect(textarea).toHaveAttribute("placeholder", /Message OpenCode/);
 	});
 
 	test("shows send button", async ({ page }) => {

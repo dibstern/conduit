@@ -3,7 +3,7 @@
 // Verifies the complete message flow:
 //   send → status:processing → delta(s) → done(code:0) → idle
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -18,6 +18,10 @@ describe("Integration: Message Lifecycle", () => {
 
 	afterAll(async () => {
 		if (harness) await harness.stop();
+	});
+
+	beforeEach(() => {
+		harness.mock.resetQueues();
 	});
 
 	it("complete lifecycle: send → processing → delta → done", async () => {
@@ -68,8 +72,10 @@ describe("Integration: Message Lifecycle", () => {
 		const done1 = await client.waitFor("done", { timeout: 5_000 });
 		expect(done1["code"]).toBe(0);
 
-		// Clear messages between turns
+		// Clear messages between turns and reset mock queues so the second
+		// prompt_async has fresh SSE events (deltas + idle) to replay.
 		client.clearReceived();
+		harness.mock.resetQueues();
 
 		// --- Second message ---
 		client.send({

@@ -3,7 +3,7 @@
 // WebSocket clients. Sends prompts and observes the full event pipeline:
 // SSE -> translator -> WebSocket broadcast.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -18,6 +18,10 @@ describe("Integration: SSE to WS Pipeline", () => {
 
 	afterAll(async () => {
 		if (harness) await harness.stop();
+	});
+
+	beforeEach(() => {
+		harness.mock.resetQueues();
 	});
 
 	it("SSE consumer is running after relay startup", async () => {

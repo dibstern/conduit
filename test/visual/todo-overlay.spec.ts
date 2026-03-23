@@ -6,8 +6,7 @@ import { expect, test } from "@playwright/test";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const STORY_URL = (id: string) =>
-	`/iframe.html?id=${id}&viewMode=story`;
+const STORY_URL = (id: string) => `/iframe.html?id=${id}&viewMode=story`;
 
 async function navigateToStory(
 	page: import("@playwright/test").Page,
@@ -137,9 +136,7 @@ test.describe("TodoItemRow", () => {
 
 		const subjects = page.locator(".todo-subject");
 		await expect(subjects.nth(0)).toHaveText("Set up project scaffolding");
-		await expect(subjects.nth(1)).toHaveText(
-			"Implement authentication module",
-		);
+		await expect(subjects.nth(1)).toHaveText("Implement authentication module");
 		await expect(subjects.nth(2)).toHaveText("Write unit tests for auth");
 		await expect(subjects.nth(3)).toHaveText("Deploy to staging");
 	});

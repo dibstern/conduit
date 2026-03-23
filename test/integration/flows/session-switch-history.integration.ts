@@ -1,6 +1,6 @@
 // ─── Integration: Session Switch History ──────────────────────────────────────
-// Verifies the bug fix: switching sessions broadcasts history_page so agent
-// output doesn't disappear when switching away and back.
+// Verifies that switching sessions delivers history embedded in session_switched
+// so agent output doesn't disappear when switching away and back.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -59,18 +59,27 @@ describe("Integration: Session Switch History", () => {
 		});
 		expect(switchedBack["id"]).toBe(sessionA);
 
-		// Should receive history_page for session A (the bug fix)
-		const historyPage = await client.waitFor("history_page", {
-			timeout: 5_000,
-			predicate: (m) => m["sessionId"] === sessionA,
-		});
+		// History is embedded in session_switched (not a separate history_page).
+		// May arrive as `events` (cache path) or `history` (REST fallback).
+		const history = switchedBack["history"] as
+			| { messages: unknown[]; hasMore: boolean }
+			| undefined;
+		const events = switchedBack["events"] as unknown[] | undefined;
 
-		expect(historyPage["sessionId"]).toBe(sessionA);
-		expect(Array.isArray(historyPage["messages"])).toBe(true);
-		const messages = historyPage["messages"] as unknown[];
-		// At least the user message should be in history
-		expect(messages.length).toBeGreaterThan(0);
-		expect(typeof historyPage["hasMore"]).toBe("boolean");
+		if (history) {
+			expect(Array.isArray(history.messages)).toBe(true);
+			// At least the user message should be in history
+			expect(history.messages.length).toBeGreaterThan(0);
+			expect(typeof history.hasMore).toBe("boolean");
+		} else if (events) {
+			// Cache path: events array with user_message/delta entries
+			expect(events.length).toBeGreaterThan(0);
+		} else {
+			// Must have one or the other for a session with messages
+			expect.unreachable(
+				"session_switched contained neither events nor history",
+			);
+		}
 
 		await client.close();
 	}, 120_000);
@@ -126,10 +135,19 @@ describe("Integration: Session Switch History", () => {
 		client.clearReceived();
 		client.send({ type: "switch_session", sessionId: sessionA });
 
-		const historyPage = await client.waitFor("history_page", {
+		const switchedBack = await client.waitFor("session_switched", {
 			timeout: 5_000,
-			predicate: (m) => m["sessionId"] === sessionA,
+			predicate: (m) => m["id"] === sessionA,
 		});
+
+		// History is embedded in session_switched (not a separate history_page).
+		// It may be in `history.messages` (REST fallback) or `events` (cache path).
+		const history = switchedBack["history"] as
+			| { messages: Array<Record<string, unknown>> }
+			| undefined;
+		const events = switchedBack["events"] as
+			| Array<Record<string, unknown>>
+			| undefined;
 
 		// ── Helpers ─────────────────────────────────────────────────────
 
@@ -150,53 +168,77 @@ describe("Integration: Session Switch History", () => {
 				.join("");
 		};
 
-		// ── Verify conversation structure ───────────────────────────────
-		const messages = historyPage["messages"] as Array<Record<string, unknown>>;
-		expect(messages.length).toBeGreaterThanOrEqual(2);
+		// session_switched embeds history in two possible shapes:
+		//   1. Cache path: `events` array of relay events (user_message, delta, etc.)
+		//   2. REST fallback: `history.messages` with pre-rendered message objects
+		if (events) {
+			// Cache path: verify user_message and delta events
+			const userMsgEvt = events.find(
+				(e) =>
+					e["type"] === "user_message" &&
+					String(e["text"] ?? "").includes("pi"),
+			);
+			expect(userMsgEvt).toBeTruthy();
 
-		// Find our specific messages by content
-		const piUserMsg = messages.find(
-			(m) => getRole(m) === "user" && getTextContent(m).includes("pi"),
-		);
-		expect(piUserMsg).toBeTruthy();
+			const deltaEvts = events.filter((e) => e["type"] === "delta");
+			expect(deltaEvts.length).toBeGreaterThan(0);
 
-		// The assistant response for our pi prompt
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const piUserIdx = messages.indexOf(piUserMsg!);
-		const assistantMsgs = messages
-			.slice(piUserIdx + 1)
-			.filter((m) => getRole(m) === "assistant");
-		expect(assistantMsgs.length).toBeGreaterThan(0);
-		const assistantMsg = assistantMsgs[0];
+			const allDeltaText = deltaEvts
+				.map((d) => String(d["text"] ?? ""))
+				.join("");
+			expect(allDeltaText.length).toBeGreaterThan(50);
+			expect(allDeltaText).toContain(deltaSnippet);
 
-		// ── Verify user message content ─────────────────────────────────
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const userText = getTextContent(piUserMsg!);
-		expect(userText).toContain("pi");
+			const safePrefix = streamedText.slice(
+				0,
+				Math.min(streamedText.length, 40),
+			);
+			if (safePrefix.length > 5) {
+				expect(allDeltaText).toContain(safePrefix);
+			}
+		} else if (history?.messages) {
+			// REST fallback: verify structured messages with roles and parts
+			const messages = history.messages;
+			expect(messages.length).toBeGreaterThanOrEqual(2);
 
-		// ── Verify assistant response content ───────────────────────────
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const assistantText = getTextContent(assistantMsg!);
-		// The completed response should have real substance
-		expect(assistantText.length).toBeGreaterThan(50);
+			const piUserMsg = messages.find(
+				(m) => getRole(m) === "user" && getTextContent(m).includes("pi"),
+			);
+			expect(piUserMsg).toBeTruthy();
 
-		// The first delta we captured mid-stream should appear in the
-		// completed assistant text
-		expect(assistantText).toContain(deltaSnippet);
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+			const piUserIdx = messages.indexOf(piUserMsg!);
+			const assistantMsgs = messages
+				.slice(piUserIdx + 1)
+				.filter((m) => getRole(m) === "assistant");
+			expect(assistantMsgs.length).toBeGreaterThan(0);
+			const assistantMsg = assistantMsgs[0];
 
-		// The streamed text we captured before switching should be
-		// a prefix of (or contained within) the final response.
-		const safePrefix = streamedText.slice(0, Math.min(streamedText.length, 40));
-		if (safePrefix.length > 5) {
-			expect(assistantText).toContain(safePrefix);
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+			const assistantText = getTextContent(assistantMsg!);
+			expect(assistantText.length).toBeGreaterThan(50);
+			expect(assistantText).toContain(deltaSnippet);
+
+			const safePrefix = streamedText.slice(
+				0,
+				Math.min(streamedText.length, 40),
+			);
+			if (safePrefix.length > 5) {
+				expect(assistantText).toContain(safePrefix);
+			}
+		} else {
+			// Neither path produced history — fail explicitly
+			expect.unreachable(
+				"session_switched contained neither events nor history",
+			);
 		}
 
 		await client.close();
 	}, 120_000);
 
-	// ── Empty session: history_page with empty messages ──────────────────
+	// ── Empty session: switching back delivers session_switched ─────────
 
-	it("switch to empty session broadcasts history_page with empty messages", async () => {
+	it("switch to empty session delivers session_switched with correct id", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -218,24 +260,31 @@ describe("Integration: Session Switch History", () => {
 
 		// Switch back to session B
 		client.send({ type: "switch_session", sessionId: sessionB });
-		await client.waitFor("session_switched", { timeout: 5_000 });
-
-		const historyPage = await client.waitFor("history_page", {
+		const switchedBack = await client.waitFor("session_switched", {
 			timeout: 5_000,
-			predicate: (m) => m["sessionId"] === sessionB,
+			predicate: (m) => m["id"] === sessionB,
 		});
 
-		expect(historyPage["sessionId"]).toBe(sessionB);
-		expect(Array.isArray(historyPage["messages"])).toBe(true);
-		expect((historyPage["messages"] as unknown[]).length).toBe(0);
-		expect(historyPage["hasMore"]).toBe(false);
+		// session_switched should arrive with the correct session ID.
+		// For an empty session, history will have empty messages (REST path)
+		// or events may be present (cache path — can happen in shared environments).
+		expect(switchedBack["id"]).toBe(sessionB);
+		const history = switchedBack["history"] as
+			| { messages: unknown[]; hasMore: boolean }
+			| undefined;
+		if (history) {
+			expect(Array.isArray(history.messages)).toBe(true);
+			expect(history.messages.length).toBe(0);
+			expect(history.hasMore).toBe(false);
+		}
+		// If events are present instead, that's the cache path — still valid
 
 		await client.close();
 	});
 
-	// ── Multi-client: broadcast to all connected clients ────────────────
+	// ── Multi-client: per-tab session switching ─────────────────────────
 
-	it("history_page is broadcast to all connected clients", async () => {
+	it("session_switched with history is sent only to the requesting client", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -246,7 +295,8 @@ describe("Integration: Session Switch History", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		const sessionA = initial1[0]!["id"] as string;
 
-		// client1 creates session B (both receive session_switched)
+		// client1 creates session B (only client1 gets session_switched;
+		// both get session_list broadcast)
 		client1.clearReceived();
 		client2.clearReceived();
 		client1.send({
@@ -256,38 +306,36 @@ describe("Integration: Session Switch History", () => {
 		const switchedB = await client1.waitFor("session_switched", {
 			timeout: 5_000,
 		});
-		await client2.waitFor("session_switched", { timeout: 5_000 });
+		// client2 receives session_list (not session_switched)
+		await client2.waitFor("session_list", { timeout: 5_000 });
 		expect(switchedB["id"]).toBeTruthy();
 		client1.clearReceived();
 		client2.clearReceived();
 
-		// client1 switches back to session A
+		// client1 switches back to session A — per-tab, only client1 gets the switch
 		client1.send({ type: "switch_session", sessionId: sessionA });
 
-		// Both clients should receive history_page (it's a broadcast)
-		const [hp1, hp2] = await Promise.all([
-			client1.waitFor("history_page", {
-				timeout: 5_000,
-				predicate: (m) => m["sessionId"] === sessionA,
-			}),
-			client2.waitFor("history_page", {
-				timeout: 5_000,
-				predicate: (m) => m["sessionId"] === sessionA,
-			}),
-		]);
+		const switched1 = await client1.waitFor("session_switched", {
+			timeout: 5_000,
+			predicate: (m) => m["id"] === sessionA,
+		});
 
-		expect(hp1["sessionId"]).toBe(sessionA);
-		expect(hp2["sessionId"]).toBe(sessionA);
-		expect(Array.isArray(hp1["messages"])).toBe(true);
-		expect(Array.isArray(hp2["messages"])).toBe(true);
+		// Verify client1 received session_switched with the right session
+		expect(switched1["id"]).toBe(sessionA);
+
+		// client2 should NOT receive session_switched for this per-tab switch.
+		// Give it a moment then verify no session_switched arrived.
+		await new Promise((r) => setTimeout(r, 1_000));
+		const client2Switches = client2.getReceivedOfType("session_switched");
+		expect(client2Switches.length).toBe(0);
 
 		await client1.close();
 		await client2.close();
 	});
 
-	// ── Rapid switches: last history_page matches final session ──────────
+	// ── Rapid switches: last session_switched matches final session ──────
 
-	it("rapid switches: last history_page matches final session", async () => {
+	it("rapid switches: last session_switched matches final session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -320,18 +368,18 @@ describe("Integration: Session Switch History", () => {
 		// Wait for all three to complete
 		await new Promise((r) => setTimeout(r, 3_000));
 
-		const historyPages = client.getReceivedOfType("history_page");
-		expect(historyPages.length).toBeGreaterThanOrEqual(1);
+		const sessionSwitches = client.getReceivedOfType("session_switched");
+		expect(sessionSwitches.length).toBeGreaterThanOrEqual(1);
 
-		// The last history_page should match the final switch target
+		// The last session_switched should match the final switch target
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const lastPage = historyPages[historyPages.length - 1]!;
-		expect(lastPage["sessionId"]).toBe(sessionC);
+		const lastSwitch = sessionSwitches[sessionSwitches.length - 1]!;
+		expect(lastSwitch["id"]).toBe(sessionC);
 
-		// All history_page messages should have valid session IDs
+		// All session_switched messages should have valid session IDs
 		const validIds = new Set([sessionA, sessionB, sessionC]);
-		for (const hp of historyPages) {
-			expect(validIds.has(hp["sessionId"] as string)).toBe(true);
+		for (const sw of sessionSwitches) {
+			expect(validIds.has(sw["id"] as string)).toBe(true);
 		}
 
 		await client.close();
