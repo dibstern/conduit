@@ -70,9 +70,12 @@
 			);
 			if (res.ok) {
 				await fetchProjects();
+			} else {
+				// Optimistic removal failed — project will reappear on next poll
+				projects = projects.filter((p) => p.slug !== slug);
 			}
 		} catch {
-			// Deletion failed — project list will refresh on next poll
+			// Network error — project list will refresh on next poll
 		}
 	}
 

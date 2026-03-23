@@ -31,7 +31,7 @@ const MOCK_PROJECTS = [
 
 /** Set up route mocks for the Dashboard's REST API. */
 async function setupDashboardMocks(page: Page) {
-	let projects = [...MOCK_PROJECTS];
+	const projects = [...MOCK_PROJECTS];
 
 	// Mock GET /api/projects
 	await page.route("**/api/projects", async (route) => {
@@ -50,6 +50,7 @@ async function setupDashboardMocks(page: Page) {
 	await page.route("**/api/projects/*", async (route) => {
 		if (route.request().method() === "DELETE") {
 			const url = new URL(route.request().url());
+			// biome-ignore lint/style/noNonNullAssertion: pathname always has segments
 			const slug = url.pathname.split("/").pop()!;
 			const idx = projects.findIndex((p) => p.slug === slug);
 			if (idx >= 0) {
@@ -83,7 +84,9 @@ test.describe("Dashboard Project Delete", () => {
 		});
 
 		// Each card should have a more-options button
-		const moreButtons = page.locator("[data-testid='project-card'] .dash-more-btn");
+		const moreButtons = page.locator(
+			"[data-testid='project-card'] .dash-more-btn",
+		);
 		await expect(moreButtons).toHaveCount(2);
 	});
 
@@ -129,8 +132,7 @@ test.describe("Dashboard Project Delete", () => {
 		// Track the DELETE request
 		const deletePromise = page.waitForRequest(
 			(req) =>
-				req.method() === "DELETE" &&
-				req.url().includes("/api/projects/mylib"),
+				req.method() === "DELETE" && req.url().includes("/api/projects/mylib"),
 		);
 
 		// Confirm removal
@@ -149,10 +151,7 @@ test.describe("Dashboard Project Delete", () => {
 		).toContainText("myapp");
 	});
 
-	test("cancelling removal does not send DELETE", async ({
-		page,
-		baseURL,
-	}) => {
+	test("cancelling removal does not send DELETE", async ({ page, baseURL }) => {
 		await setupDashboardMocks(page);
 		await page.goto(baseURL + DASHBOARD_URL);
 		await expect(page.locator("[data-testid='project-card']")).toHaveCount(2, {

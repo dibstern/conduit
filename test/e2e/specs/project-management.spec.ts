@@ -409,7 +409,9 @@ test.describe("Directory Autocomplete", () => {
 
 		// The directory name's right edge must be within (or at) the
 		// container's right edge — i.e. not pushed off-screen.
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect(dirBox).not.toBeNull() above
 		const dirRight = dirBox!.x + dirBox!.width;
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect(containerBox).not.toBeNull() above
 		const containerRight = containerBox!.x + containerBox!.width;
 		expect(dirRight).toBeLessThanOrEqual(containerRight + 1);
 	});

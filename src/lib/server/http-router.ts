@@ -328,10 +328,18 @@ export class RequestRouter {
 			{
 				const deleteMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
 				if (deleteMatch && req.method === "DELETE") {
+					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by regex match on line above
 					const slug = decodeURIComponent(deleteMatch[1]!);
 					if (!this.removeProject) {
 						res.writeHead(501, { "Content-Type": "application/json" });
-						res.end(JSON.stringify({ error: "Not supported" }));
+						res.end(
+							JSON.stringify({
+								error: {
+									code: "NOT_SUPPORTED",
+									message: "Removing projects is not supported in this mode",
+								},
+							} satisfies ApiError),
+						);
 						return;
 					}
 					try {
@@ -342,8 +350,14 @@ export class RequestRouter {
 						res.writeHead(404, { "Content-Type": "application/json" });
 						res.end(
 							JSON.stringify({
-								error: err instanceof Error ? err.message : "Unknown error",
-							}),
+								error: {
+									code: "NOT_FOUND",
+									message:
+										err instanceof Error
+											? err.message
+											: "Unknown error",
+								},
+							} satisfies ApiError),
 						);
 					}
 					return;
