@@ -200,8 +200,10 @@ describe("tool lifecycle", () => {
 		expect(tool!.input).toEqual({ filePath: "/repo/src/foo.ts", offset: 10 });
 	});
 
-	it("ignores executing for unknown tool id", () => {
-		handleToolExecuting(msg({ type: "tool_executing", id: "unknown" }));
+	it("throws on executing for unknown tool id", () => {
+		expect(() =>
+			handleToolExecuting(msg({ type: "tool_executing", id: "unknown" })),
+		).toThrow(/unknown/i);
 		expect(chatState.messages).toHaveLength(0);
 	});
 
@@ -331,13 +333,15 @@ describe("tool lifecycle", () => {
 		});
 		expect(chatState.messages).toHaveLength(1);
 
-		// Executing is rejected — tool is already in terminal state
-		handleToolExecuting({
-			type: "tool_executing",
-			id: "toolu_abc",
-			name: "AskUserQuestion",
-			input: { question: "Approve?" },
-		});
+		// Executing is rejected — tool is already in terminal state (throws in DEV)
+		expect(() =>
+			handleToolExecuting({
+				type: "tool_executing",
+				id: "toolu_abc",
+				name: "AskUserQuestion",
+				input: { question: "Approve?" },
+			}),
+		).toThrow(/Invalid transition/i);
 		const tool = chatState.messages[0] as ToolMessage;
 		// Tool stays completed — registry blocks completed -> running
 		expect(tool.status).toBe("completed");

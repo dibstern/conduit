@@ -23,7 +23,7 @@ export type FinalizationResult =
 	| { action: "finalized"; indices: number[] }
 	| { action: "none" };
 
-type LogFn = (level: "info" | "warn", message: string) => void;
+type LogFn = (level: "info" | "warn" | "error", message: string) => void;
 
 export interface ToolRegistryOptions {
 	log?: LogFn;
@@ -114,7 +114,7 @@ export function createToolRegistry(
 	): ToolTransitionResult {
 		const tracked = entries.get(id);
 		if (!tracked) {
-			log?.("warn", `executing() called for unknown tool "${id}"`);
+			log?.("error", `executing() called for unknown tool "${id}"`);
 			return { action: "reject", reason: `Unknown tool ID: ${id}` };
 		}
 
@@ -125,10 +125,8 @@ export function createToolRegistry(
 			tracked.status !== "running" &&
 			!canTransition(tracked.status, "running")
 		) {
-			log?.(
-				"warn",
-				`Invalid transition ${tracked.status} -> running for tool "${id}"`,
-			);
+			const msg = `Invalid transition ${tracked.status} -> running for tool "${id}"`;
+			log?.("error", msg);
 			return {
 				action: "reject",
 				reason: `Cannot transition from ${tracked.status} to running`,
@@ -153,7 +151,7 @@ export function createToolRegistry(
 	): ToolTransitionResult {
 		const tracked = entries.get(id);
 		if (!tracked) {
-			log?.("warn", `complete() called for unknown tool "${id}"`);
+			log?.("error", `complete() called for unknown tool "${id}"`);
 			return { action: "reject", reason: `Unknown tool ID: ${id}` };
 		}
 
@@ -165,10 +163,8 @@ export function createToolRegistry(
 		if (tracked.status === "completed") {
 			// Allow the override
 		} else if (tracked.status === "error") {
-			log?.(
-				"warn",
-				`Invalid transition ${tracked.status} -> ${targetStatus} for tool "${id}"`,
-			);
+			const msg = `Invalid transition ${tracked.status} -> ${targetStatus} for tool "${id}"`;
+			log?.("error", msg);
 			return {
 				action: "reject",
 				reason: `Cannot transition from ${tracked.status} to ${targetStatus}`,

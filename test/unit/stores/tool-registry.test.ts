@@ -342,18 +342,21 @@ describe("getUuid", () => {
 // ─── Diagnostics ────────────────────────────────────────────────────────────
 
 describe("diagnostics", () => {
-	it("logs warn on backward rejection", () => {
+	it("logs error on backward rejection", () => {
 		registry.start("call-1", "Read");
 		registry.complete("call-1", "done", false);
 		registry.executing("call-1");
 
-		expect(log).toHaveBeenCalledWith("warn", expect.stringContaining("call-1"));
+		expect(log).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("call-1"),
+		);
 	});
 
-	it("logs warn on orphan event", () => {
+	it("logs error on orphan event", () => {
 		registry.executing("orphan-1");
 		expect(log).toHaveBeenCalledWith(
-			"warn",
+			"error",
 			expect.stringContaining("orphan-1"),
 		);
 	});

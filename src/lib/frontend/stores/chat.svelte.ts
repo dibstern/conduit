@@ -101,16 +101,19 @@ let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let thinkingStartTime = 0;
 
 /** Centralized tool lifecycle state machine. Enforces forward-only transitions. */
-const registry = createToolRegistry(
-	import.meta.env.DEV
-		? {
-				log: (level, message) => {
-					if (level === "warn") console.warn(`[ToolRegistry] ${message}`);
-					else console.debug(`[ToolRegistry] ${message}`);
-				},
-			}
-		: undefined,
-);
+const registry = createToolRegistry({
+	log: (level, message) => {
+		const tag = `[ToolRegistry] ${message}`;
+		if (level === "error") {
+			console.error(tag);
+			if (import.meta.env.DEV) throw new Error(tag);
+		} else if (level === "warn") {
+			console.warn(tag);
+		} else {
+			console.debug(tag);
+		}
+	},
+});
 
 /** Append a new tool message to chatState.messages. */
 function applyToolCreate(tool: ToolMessage): void {
