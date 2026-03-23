@@ -3,6 +3,7 @@
 <!-- design. Tabs: Notifications, Appearance, Instances, Debug.             -->
 
 <script lang="ts">
+	import { untrack } from "svelte";
 	import Icon from "../shared/Icon.svelte";
 	import type { Base16Theme } from "../../stores/theme-compute.js";
 	import {
@@ -85,7 +86,13 @@
 			expandedInstanceId = null;
 			renamingInstanceId = null;
 			expandedScenario = null;
-			notifSettings = getNotifSettings();
+			// Only refresh notification settings if no toggle operation is
+			// in progress. Reading pushBusy via untrack() avoids adding it
+			// as a dependency (which would re-trigger this effect when the
+			// toggle completes and cause the exact race we're preventing).
+			if (!untrack(() => pushBusy)) {
+				notifSettings = getNotifSettings();
+			}
 			startProxyDetection(wsSend);
 		}
 	});
@@ -144,6 +151,7 @@
 				const { enablePushSubscription } = await import("../../utils/notifications.js");
 				await enablePushSubscription();
 				notifSettings.push = true;
+				saveNotifSettings(notifSettings);
 				setPushActive(true);
 				try {
 					const swReg = await navigator.serviceWorker.ready;
@@ -151,6 +159,7 @@
 				} catch { /* non-fatal */ }
 			} else {
 				notifSettings.push = false;
+				saveNotifSettings(notifSettings);
 				setPushActive(false);
 				const swReg = await navigator.serviceWorker.ready;
 				await swReg.showNotification("Push Disabled", { body: "Browser alerts will be used instead.", tag: "opencode-push-disabled" });

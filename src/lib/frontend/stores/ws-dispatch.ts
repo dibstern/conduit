@@ -2,6 +2,7 @@
 // Extracted from ws.svelte.ts — centralized message routing and event replay.
 // Pure dispatch table: routes incoming RelayMessage to the appropriate store.
 
+import { notificationContent } from "../../notification-content.js";
 import type { RelayMessage, ToolMessage } from "../types.js";
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
@@ -401,13 +402,24 @@ export function handleMessage(msg: RelayMessage): void {
 		// Broadcast by the server when a notification-worthy event (done,
 		// error) is dropped because the user is viewing a different session.
 		// Trigger sound/browser notifications without updating chat state.
-		case "notification_event":
-			triggerNotifications({
+		case "notification_event": {
+			const syntheticMsg = {
 				type: msg.eventType,
 				...(msg.message != null ? { message: msg.message } : {}),
 				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
-			} as RelayMessage);
+			} as RelayMessage;
+			triggerNotifications(syntheticMsg);
+
+			// In-app toast so cross-session events are visible even when
+			// browser Notification permission is missing or push is stale.
+			const content = notificationContent(syntheticMsg);
+			if (content) {
+				showToast(content.title + (content.body ? ` — ${content.body}` : ""), {
+					variant: msg.eventType === "error" ? "warn" : "default",
+				});
+			}
 			break;
+		}
 
 		default:
 			// Unknown message type — log in dev mode only

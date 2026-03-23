@@ -118,8 +118,26 @@ export function triggerNotifications(msg: RelayMessage): void {
 	}
 
 	// Browser alert — fires regardless of tab visibility.
-	// Skip if push is active (the service worker handles it via push).
-	if (settings.browser && !_pushActive) {
+	// When push is active, skip browser alerts ONLY if the service worker
+	// registration is still alive. If the SW was unregistered or the
+	// subscription expired, fall through to browser alerts as a safety net
+	// so the user isn't left in a dead zone where neither path fires.
+	const suppressForPush = _pushActive;
+	if (_pushActive && "serviceWorker" in navigator) {
+		navigator.serviceWorker
+			.getRegistration()
+			.then((reg) => {
+				if (!reg) {
+					// SW gone — push can't deliver. Reset the flag so future
+					// notifications fall through to browser alerts immediately.
+					_pushActive = false;
+				}
+			})
+			.catch(() => {
+				/* non-fatal */
+			});
+	}
+	if (settings.browser && !suppressForPush) {
 		const content = notificationContent(msg);
 		if (
 			content &&

@@ -69,6 +69,7 @@
 				await enablePushSubscription();
 
 				settings.push = true;
+				saveNotifSettings(settings);
 				setPushActive(true);
 
 				// Show a confirmation notification via the SW — validates the
@@ -89,6 +90,7 @@
 				// Flip the flags synchronously FIRST so browser alerts resume
 				// immediately — don't wait for the async cleanup below.
 				settings.push = false;
+				saveNotifSettings(settings);
 				setPushActive(false);
 
 				const swReg =
