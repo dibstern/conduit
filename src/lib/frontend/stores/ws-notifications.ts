@@ -107,6 +107,29 @@ export const NOTIF_TYPES = new Set([
 	"ask_user",
 ]);
 
+/** Fallback: show a browser Notification API alert (no reliable tab switching). */
+function showBrowserNotification(
+	content: { title: string; body: string; tag: string },
+	sessionId: string | undefined,
+): void {
+	try {
+		const n = new Notification(content.title, {
+			body: content.body,
+			tag: content.tag,
+		});
+		n.onclick = () => {
+			window.focus();
+			if (sessionId) {
+				_navigateToSession?.(sessionId);
+			}
+			n.close();
+		};
+		setTimeout(() => n.close(), NOTIFICATION_DISMISS_MS);
+	} catch {
+		// Non-fatal: Notification API may not be available
+	}
+}
+
 export function triggerNotifications(msg: RelayMessage): void {
 	if (!NOTIF_TYPES.has(msg.type)) return;
 
@@ -144,27 +167,39 @@ export function triggerNotifications(msg: RelayMessage): void {
 			typeof Notification !== "undefined" &&
 			Notification.permission === "granted"
 		) {
-			try {
-				// Extract sessionId from the message for click-to-session navigation
-				const sessionId =
-					"sessionId" in msg
-						? (msg as { sessionId?: string }).sessionId
-						: undefined;
+			// Extract sessionId from the message for click-to-session navigation
+			const sessionId =
+				"sessionId" in msg
+					? (msg as { sessionId?: string }).sessionId
+					: undefined;
 
-				const n = new Notification(content.title, {
-					body: content.body,
-					tag: content.tag,
-				});
-				n.onclick = () => {
-					window.focus();
-					if (sessionId) {
-						_navigateToSession?.(sessionId);
-					}
-					n.close();
-				};
-				setTimeout(() => n.close(), NOTIFICATION_DISMISS_MS);
-			} catch {
-				// Non-fatal: Notification API may not be available
+			// Prefer SW showNotification — its notificationclick handler uses
+			// client.focus() which reliably switches Chrome tabs. The browser
+			// Notification API's window.focus() only brings the window to
+			// front without switching tabs, so clicking a notification may
+			// land on the wrong tab (e.g. the OpenCode UI at :4096).
+			if ("serviceWorker" in navigator) {
+				navigator.serviceWorker
+					.getRegistration()
+					.then((reg) => {
+						if (reg) {
+							reg.showNotification(content.title, {
+								body: content.body,
+								tag: content.tag,
+								data: {
+									type: msg.type,
+									...(sessionId != null ? { sessionId } : {}),
+								},
+							});
+						} else {
+							showBrowserNotification(content, sessionId);
+						}
+					})
+					.catch(() => {
+						showBrowserNotification(content, sessionId);
+					});
+			} else {
+				showBrowserNotification(content, sessionId);
 			}
 		}
 	}
