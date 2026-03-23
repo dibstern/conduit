@@ -318,6 +318,34 @@ export const mockToolReadWithOffset: ToolMessage = {
 	isError: false,
 };
 
+export const mockToolSubagent: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-subagent-001",
+	id: "tool-subagent-001",
+	name: "Task",
+	status: "running",
+	input: {
+		description: "Explore test infrastructure",
+		subagent_type: "explore",
+		prompt: "Search for all test files...",
+	},
+};
+
+export const mockToolSubagentCompleted: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-subagent-002",
+	id: "tool-subagent-002",
+	name: "Task",
+	status: "completed",
+	input: {
+		description: "Implement feature X",
+		subagent_type: "general",
+		prompt: "Build the component...",
+	},
+	result: "task_id: ses_abc123\n\nCompleted implementation of feature X.",
+	isError: false,
+};
+
 // ─── Question Tool Messages ──────────────────────────────────────────────────
 
 export const mockQuestionRunning: ToolMessage = {

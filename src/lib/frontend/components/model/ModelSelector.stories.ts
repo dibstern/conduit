@@ -145,6 +145,32 @@ export const WithGroups: Story = {
 	},
 };
 
+/** Model with variant/thinking level badge visible. */
+export const WithVariants: Story = {
+	play: async () => {
+		discoveryState.providers = [
+			{
+				id: "anthropic",
+				name: "Anthropic",
+				configured: true,
+				models: [
+					{
+						id: "claude-sonnet-4-20250514",
+						name: "Claude Sonnet 4",
+						provider: "anthropic",
+						cost: { input: 0.003, output: 0.015 },
+						variants: ["low", "medium", "high"],
+					},
+				],
+			},
+		];
+		discoveryState.currentModelId = "claude-sonnet-4-20250514";
+		discoveryState.currentProviderId = "anthropic";
+		discoveryState.availableVariants = ["low", "medium", "high"];
+		discoveryState.currentVariant = "high";
+	},
+};
+
 /** No models or providers — shows placeholder text. */
 export const NoModels: Story = {
 	play: () => {

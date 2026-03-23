@@ -11,6 +11,8 @@ import {
 	mockToolPending,
 	mockToolReadWithOffset,
 	mockToolRunning,
+	mockToolSubagent,
+	mockToolSubagentCompleted,
 	mockToolWithDiff,
 } from "../../stories/mocks.js";
 import ToolItem from "./ToolItem.svelte";
@@ -94,4 +96,12 @@ export const QuestionSkipped: Story = {
 
 export const QuestionPending: Story = {
 	args: { message: mockQuestionPending },
+};
+
+export const SubagentRunning: Story = {
+	args: { message: mockToolSubagent },
+};
+
+export const SubagentCompleted: Story = {
+	args: { message: mockToolSubagentCompleted },
 };
