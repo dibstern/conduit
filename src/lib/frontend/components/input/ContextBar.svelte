@@ -16,7 +16,7 @@
 	class="flex items-center gap-2 pb-1.5 px-2"
 >
 	<span
-		class="context-mini-label font-mono text-[10px] font-semibold whitespace-nowrap min-w-6 {contextFillColor === 'bg-brand-a' ? 'text-brand-a' : contextFillColor === 'bg-warning' ? 'text-warning' : 'text-brand-b'}"
+		class="context-mini-label font-mono text-xs font-semibold whitespace-nowrap min-w-6 {contextFillColor === 'bg-brand-a' ? 'text-brand-a' : contextFillColor === 'bg-warning' ? 'text-warning' : 'text-brand-b'}"
 		id="context-mini-label"
 	>
 		{percent}%

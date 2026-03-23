@@ -255,7 +255,7 @@
 				<button
 					type="button"
 					title={allSelected ? "Deselect all sessions" : "Select all sessions"}
-				class="flex items-center gap-1.5 border-none bg-transparent text-[11px] font-semibold text-text-dimmer cursor-pointer p-0 hover:text-text transition-colors duration-100"
+				class="flex items-center gap-1.5 border-none bg-transparent text-sm font-semibold text-text-dimmer cursor-pointer p-0 hover:text-text transition-colors duration-100"
 				style="font-family: var(--font-brand);"
 				onclick={handleToggleSelectAll}
 				>
@@ -265,7 +265,7 @@
 				<button
 					type="button"
 					title="Exit cleanup mode"
-				class="border-none bg-transparent text-[11px] font-semibold text-text-dimmer cursor-pointer p-0 hover:text-text transition-colors duration-100"
+				class="border-none bg-transparent text-sm font-semibold text-text-dimmer cursor-pointer p-0 hover:text-text transition-colors duration-100"
 				style="font-family: var(--font-brand);"
 				onclick={handleExitCleanup}
 				>
@@ -289,7 +289,7 @@
 	{:else}
 		<div class="shrink-0 px-2">
 			<div class="session-list-header flex items-center justify-between px-2 py-1">
-				<span class="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-dimmer" style="font-family: var(--font-brand);">Sessions</span>
+				<span class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer" style="font-family: var(--font-brand);">Sessions</span>
 				<div class="session-list-header-actions flex items-center gap-0.5">
 					<button
 						type="button"
@@ -361,7 +361,7 @@
 			</div>
 		{:else}
 			{#if hasToday}
-				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-[9px] font-semibold text-text-dimmer tracking-[0.3px]" style="font-family: var(--font-brand);">
+				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px]" style="font-family: var(--font-brand);">
 					Today
 				</div>
 			{#each groups.today as s (s.id)}
@@ -382,7 +382,7 @@
 			{/if}
 
 			{#if hasYesterday}
-				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-[9px] font-semibold text-text-dimmer tracking-[0.3px]" style="font-family: var(--font-brand);">
+				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px]" style="font-family: var(--font-brand);">
 					Yesterday
 				</div>
 			{#each groups.yesterday as s (s.id)}
@@ -403,7 +403,7 @@
 			{/if}
 
 			{#if hasOlder}
-				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-[9px] font-semibold text-text-dimmer tracking-[0.3px]" style="font-family: var(--font-brand);">
+				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px]" style="font-family: var(--font-brand);">
 					Older
 				</div>
 			{#each groups.older as s (s.id)}

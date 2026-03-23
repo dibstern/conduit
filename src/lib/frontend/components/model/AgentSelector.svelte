@@ -128,7 +128,7 @@
 	function buildDropdownHTML(): string {
 		if (visibleAgents.length === 0) {
 			return `<div style="position:fixed; z-index:9999;" class="w-56 max-w-[90vw] bg-bg-alt border border-border rounded-xl shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] py-1.5">
-				<div class="py-4 px-3.5 text-center text-[13px] text-text-dimmer">No agents available</div>
+				<div class="py-4 px-3.5 text-center text-base text-text-dimmer">No agents available</div>
 			</div>`;
 		}
 		const items = visibleAgents

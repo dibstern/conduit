@@ -309,7 +309,7 @@
 						] as section}
 							{#if section.items.length > 0}
 								<div>
-									<div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted px-1 mb-2" style="font-family: var(--font-brand);">{section.label}</div>
+									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2" style="font-family: var(--font-brand);">{section.label}</div>
 									<div class="space-y-1">
 										{#each section.items as { id, theme }}
 											<button
@@ -321,7 +321,7 @@
 														<span class="w-3 h-3 rounded-sm border border-white/10" style="background: #{theme[key]};"></span>
 													{/each}
 												</div>
-												<span class="flex-1 text-left text-[13px] {themeState.currentThemeId === id ? 'text-text font-medium' : 'text-text-secondary'}" style="font-family: var(--font-brand);">
+												<span class="flex-1 text-left text-base {themeState.currentThemeId === id ? 'text-text font-medium' : 'text-text-secondary'}" style="font-family: var(--font-brand);">
 													{theme.name}
 												</span>
 												{#if themeState.currentThemeId === id}
@@ -382,7 +382,7 @@
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}
 											{#if !inst.managed}
-												<span class="text-[10px] text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
+												<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
 											{/if}
 										</div>
 										<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
@@ -424,7 +424,7 @@
 								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("ccs")}>
 									<Icon name={expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Multi-Provider — Via CCS</span>
-									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-[9px] text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
+									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
 								</button>
 								{#if expandedScenario === "ccs"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">

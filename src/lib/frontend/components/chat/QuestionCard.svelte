@@ -186,7 +186,7 @@
 	data-question-tool-id={request.toolId}
 >
 	<div class="question-card bg-bg-alt border border-border rounded-xl p-3">
-		<div class="question-title text-[13px] font-medium mb-2 text-text">
+		<div class="question-title text-base font-medium mb-2 text-text">
 			Input Required
 		</div>
 

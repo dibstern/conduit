@@ -99,7 +99,7 @@
 
 <div class="bg-bg min-h-dvh flex items-center justify-center p-5">
 	<div class="max-w-[320px] w-full text-center">
-		<h1 class="text-text text-[22px] mb-2 font-semibold">
+		<h1 class="text-text text-2xl mb-2 font-semibold">
 			Conduit
 		</h1>
 		<div class="text-text-muted text-sm mb-8">Enter PIN to continue</div>
@@ -114,7 +114,7 @@
 			{disabled}
 			onkeydown={handleKeydown}
 			oninput={handleInput}
-			class="w-full bg-bg border border-border rounded-xl text-text text-2xl tracking-[12px] text-center py-3.5 outline-none font-sans focus:border-text-muted placeholder:tracking-normal placeholder:text-[15px] placeholder:text-text-dimmer"
+			class="w-full bg-bg border border-border rounded-xl text-text text-2xl tracking-[12px] text-center py-3.5 outline-none font-sans focus:border-text-muted placeholder:tracking-normal placeholder:text-lg placeholder:text-text-dimmer"
 			style="-webkit-text-security: disc"
 		/>
 		<div class="mt-4 grid transition-all duration-200 ease-out" style="grid-template-rows: {showButton ? '1fr' : '0fr'}; opacity: {showButton ? 1 : 0}">
@@ -129,7 +129,7 @@
 				</button>
 			</div>
 		</div>
-		<div class="text-error text-[13px] mt-3 min-h-[1.3em]">
+		<div class="text-error text-base mt-3 min-h-[1.3em]">
 			{error}
 		</div>
 	</div>

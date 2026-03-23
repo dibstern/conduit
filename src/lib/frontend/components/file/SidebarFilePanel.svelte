@@ -123,7 +123,7 @@
 >
 	<!-- Header -->
 	<div class="session-list-header flex items-center justify-between px-4 py-1 shrink-0">
-		<span class="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-dimmer">File Browser</span>
+		<span class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer">File Browser</span>
 		<div class="session-list-header-actions flex items-center gap-0.5">
 			<button
 				id="file-panel-refresh"

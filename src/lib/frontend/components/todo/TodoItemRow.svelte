@@ -24,7 +24,7 @@
 </script>
 
 <div
-	class="todo-item flex items-start gap-2 py-[3px] text-[13px]"
+	class="todo-item flex items-start gap-2 py-[3px] text-base"
 	data-todo-id={item.id}
 >
 	<span
@@ -32,12 +32,12 @@
 	>
 		{#if item.status === "completed"}
 			<span
-				class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] leading-none text-white font-bold"
+				class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xs leading-none text-white font-bold"
 				>&#x2713;</span
 			>
 		{:else if item.status === "cancelled"}
 			<span
-				class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] leading-none text-text-dimmer font-bold"
+				class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xs leading-none text-text-dimmer font-bold"
 				>&#x2715;</span
 			>
 		{/if}

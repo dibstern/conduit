@@ -191,7 +191,7 @@
 	>
 		<div class="flex flex-col min-w-0">
 			<span
-				class="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-dimmer leading-tight"
+				class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer leading-tight"
 				>Projects</span
 			>
 			<div class="flex items-center gap-1.5 min-w-0">
@@ -203,7 +203,7 @@
 				</span>
 				{#if countLabel}
 					<span
-						class="shrink-0 text-[11px] font-bold px-2 py-[1px] rounded-[10px] bg-accent/15 text-accent leading-normal"
+						class="shrink-0 text-sm font-bold px-2 py-[1px] rounded-[10px] bg-accent/15 text-accent leading-normal"
 					>
 						{countLabel}
 					</span>
@@ -227,7 +227,7 @@
 		>
 			<!-- Header -->
 			<div
-				class="px-3 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-text-dimmer"
+				class="px-3 pt-2 pb-1.5 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer"
 			>
 				Projects
 			</div>
@@ -239,7 +239,7 @@
 						{@const instance = instanceId !== "_default" ? getInstanceById(instanceId) : undefined}
 						<!-- Instance group header -->
 						<div
-							class="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.5px] text-text-dimmer"
+							class="flex items-center gap-1.5 px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-[0.5px] text-text-dimmer"
 							data-testid="instance-group-header"
 						>
 							<span
@@ -269,7 +269,7 @@
 						></span>
 						<!-- Name -->
 						<span
-							class={"flex-1 text-[13px] truncate" +
+							class={"flex-1 text-base truncate" +
 								(isActive
 									? " font-semibold text-text"
 									: " text-text-secondary")}
@@ -308,7 +308,7 @@
 						></span>
 						<!-- Name -->
 						<span
-							class={"flex-1 text-[13px] truncate" +
+							class={"flex-1 text-base truncate" +
 								(isActive
 									? " font-semibold text-text"
 									: " text-text-secondary")}
@@ -338,7 +338,7 @@
 							placeholder="/path/to/project"
 							autocomplete="off"
 							spellcheck="false"
-							class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-[12px] text-text font-mono outline-none focus:border-accent placeholder:text-text-dimmer"
+							class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-base text-text font-mono outline-none focus:border-accent placeholder:text-text-dimmer"
 							bind:value={addDirectory}
 							onkeydown={handleAddKeydown}
 						/>
@@ -346,7 +346,7 @@
 							<select
 								name="instance"
 								id="instance-selector"
-								class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-[12px] text-text outline-none focus:border-accent"
+								class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-base text-text outline-none focus:border-accent"
 								bind:value={addInstanceId}
 							>
 								{#each instanceState.instances as inst}
@@ -355,13 +355,13 @@
 							</select>
 						{/if}
 						{#if addError}
-							<span class="text-[11px] text-error">{addError}</span>
+							<span class="text-sm text-error">{addError}</span>
 						{/if}
 						<div class="flex items-center gap-1.5 justify-end">
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<span
-								class="text-[11px] text-text-dimmer cursor-pointer hover:text-text-secondary px-1.5 py-0.5"
+								class="text-sm text-text-dimmer cursor-pointer hover:text-text-secondary px-1.5 py-0.5"
 								onclick={handleCancelAdd}
 							>
 								Cancel
@@ -369,7 +369,7 @@
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<span
-								class="text-[11px] font-medium text-accent cursor-pointer hover:text-accent/80 px-1.5 py-0.5 rounded bg-accent/10 hover:bg-accent/15 transition-colors"
+								class="text-sm font-medium text-accent cursor-pointer hover:text-accent/80 px-1.5 py-0.5 rounded bg-accent/10 hover:bg-accent/15 transition-colors"
 								class:opacity-50={adding}
 								onclick={handleSubmitAdd}
 							>

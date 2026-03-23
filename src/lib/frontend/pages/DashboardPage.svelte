@@ -154,7 +154,7 @@
 	class="bg-bg min-h-screen flex flex-col items-center p-[40px_20px] text-text font-sans"
 >
 	<h1 class="text-2xl font-semibold mb-2">Conduit</h1>
-	<div class="text-[13px] text-text-muted mb-8">Select a project</div>
+	<div class="text-base text-text-muted mb-8">Select a project</div>
 
 	<div class="flex flex-col gap-3 w-full max-w-[480px]">
 		{#if loading}
@@ -163,7 +163,7 @@
 			<div class="text-center text-text-dimmer text-sm py-10 px-5">
 				No projects registered. Run
 				<code
-					class="bg-bg-alt px-1.5 py-0.5 rounded text-[13px] text-text"
+					class="bg-bg-alt px-1.5 py-0.5 rounded text-base text-text"
 					>conduit</code
 				> in a project directory to add one.
 			</div>
@@ -177,7 +177,7 @@
 					onclick={(e) => handleCardClick(e, project.slug)}
 				>
 					<div
-						class="text-[16px] font-semibold flex items-center gap-2"
+						class="text-lg font-semibold flex items-center gap-2"
 					>
 						{displayName(project)}
 						<span class="text-sm">{statusIcon(project)}</span>
@@ -201,6 +201,6 @@
 	</div>
 
 	{#if version}
-		<div class="mt-10 text-[11px] text-text-dimmer">v{version}</div>
+		<div class="mt-10 text-sm text-text-dimmer">v{version}</div>
 	{/if}
 </div>

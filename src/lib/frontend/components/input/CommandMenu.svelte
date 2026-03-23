@@ -130,7 +130,7 @@
 					}}
 				>
 					<span
-						class="cmd-name shrink-0 font-mono text-[13px] font-medium text-accent whitespace-nowrap max-sm:text-xs"
+						class="cmd-name shrink-0 font-mono text-base font-medium text-accent whitespace-nowrap max-sm:text-xs"
 					>
 					/{cmd.name}
 					{#if cmd.args}
@@ -141,7 +141,7 @@
 				</span>
 				{#if cmd.description}
 					<span
-						class="cmd-desc flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-text-muted max-sm:text-xs"
+						class="cmd-desc flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-base text-text-muted max-sm:text-xs"
 					>
 						{cmd.description}
 						</span>

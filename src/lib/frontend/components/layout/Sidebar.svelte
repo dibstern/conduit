@@ -173,7 +173,7 @@
 		>
 			<button
 				id="new-session-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer disabled:cursor-default transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
+				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer disabled:cursor-default transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
 				style="font-family: var(--font-brand);"
 				onclick={handleNewSession}
 				disabled={sessionCreation.value.phase === "creating"}
@@ -189,7 +189,7 @@
 			</button>
 			<button
 				id="resume-session-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
+				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
 				style="font-family: var(--font-brand);"
 				onclick={handleResumeSession}
 			>
@@ -200,7 +200,7 @@
 			</button>
 			<button
 				id="file-browser-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
+				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
 				style="font-family: var(--font-brand);"
 				onclick={handleFileBrowser}
 			>
@@ -211,7 +211,7 @@
 			</button>
 			<button
 				id="terminal-sidebar-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
+				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
 				style="font-family: var(--font-brand);"
 				onclick={handleTerminalSidebar}
 			>
@@ -249,7 +249,7 @@
 				href="https://www.npmjs.com/package/conduit-code"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="flex items-center gap-2 px-2 py-1.5 mb-1.5 rounded-md bg-brand-a/10 text-brand-a text-[11px] font-medium no-underline hover:bg-brand-a/15 transition-colors"
+				class="flex items-center gap-2 px-2 py-1.5 mb-1.5 rounded-md bg-brand-a/10 text-brand-a text-sm font-medium no-underline hover:bg-brand-a/15 transition-colors"
 				style="font-family: var(--font-brand);"
 			>
 				<Icon name="arrow-up-circle" size={13} />
@@ -257,7 +257,7 @@
 			</a>
 		{/if}
 		{#if versionState.current}
-			<div class="text-[10px] text-text-dimmer px-2" style="font-family: var(--font-brand);">
+			<div class="text-xs text-text-dimmer px-2" style="font-family: var(--font-brand);">
 				conduit v{versionState.current}
 			</div>
 		{/if}

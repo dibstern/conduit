@@ -38,7 +38,7 @@
 
 	{#if pushNeedsHttps}
 		<div
-		class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-[13px] my-4 bg-bg-alt text-text border border-border"
+		class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-base my-4 bg-bg-alt text-text border border-border"
 		>
 			Push notifications require HTTPS. Complete the certificate step
 			first.
@@ -69,7 +69,7 @@
 				? "bg-success/10 text-success border-success/15"
 				: "bg-bg-alt text-text border-border"}
 		<div
-			class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-[13px] my-4 {statusClasses}"
+			class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-base my-4 {statusClasses}"
 			style="border-width: 1px;"
 		>
 			{pushMessage}

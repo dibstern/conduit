@@ -45,13 +45,13 @@
       </p>
       <div class="flex gap-2 justify-end">
         <button
-          class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-[13px] cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
+          class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-base cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
           onclick={handleCancel}
         >
           Cancel
         </button>
         <button
-          class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-[13px] font-medium cursor-pointer hover:bg-accent-hover"
+          class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-base font-medium cursor-pointer hover:bg-accent-hover"
           onclick={handleAction}
         >
           {uiState.confirmDialog.actionLabel}

@@ -154,7 +154,7 @@
 			<!-- Tab buttons -->
 			{#each tabs as tab (tab.ptyId)}
 				<div
-					class="term-tab group flex items-center gap-1 py-1.5 px-2.5 text-xs font-sans cursor-pointer whitespace-nowrap border-b-2 transition-[color,background,border-color] duration-100 shrink-0 max-[480px]:py-[5px] max-[480px]:px-2 max-[480px]:text-[11px]
+					class="term-tab group flex items-center gap-1 py-1.5 px-2.5 text-xs font-sans cursor-pointer whitespace-nowrap border-b-2 transition-[color,background,border-color] duration-100 shrink-0 max-[480px]:py-[5px] max-[480px]:px-2 max-[480px]:text-sm
 						{tab.ptyId === activeTabId
 						? 'term-tab-active text-text border-b-accent bg-bg-surface'
 						: 'text-text-muted border-transparent hover:text-text-secondary hover:bg-bg-alt'}
@@ -204,7 +204,7 @@
 			<!-- New Terminal button -->
 			{#if canCreate}
 				<button
-					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 border-none rounded bg-transparent text-accent font-sans text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-100 hover:bg-accent-bg hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-[11px]"
+					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 border-none rounded bg-transparent text-accent font-sans text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-100 hover:bg-accent-bg hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-sm"
 					title="New terminal"
 					onclick={handleNewTab}
 				>
@@ -215,16 +215,16 @@
 			<!-- Font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
 				<button
-					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-[11px] cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Decrease font size"
 					disabled={termFontSize <= FONT_SIZE_MIN}
 					onclick={decreaseFontSize}
 				>
 					&#8722;
 				</button>
-				<span class="text-[10px] text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{termFontSize}</span>
+				<span class="text-xs text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{termFontSize}</span>
 				<button
-					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-[11px] cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Increase font size"
 					disabled={termFontSize >= FONT_SIZE_MAX}
 					onclick={increaseFontSize}

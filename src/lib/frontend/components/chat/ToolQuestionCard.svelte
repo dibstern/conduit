@@ -216,7 +216,7 @@
 									<div class="flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-xs bg-bg-surface border border-border-subtle">
 										<span class="text-text-dimmer mt-0.5 shrink-0">○</span>
 										<span class="flex flex-col gap-0.5">
-											<span class="text-text font-medium text-[13px]">{opt.label}</span>
+											<span class="text-text font-medium text-base">{opt.label}</span>
 											{#if opt.description}
 												<span class="text-text-muted text-xs">{opt.description}</span>
 											{/if}

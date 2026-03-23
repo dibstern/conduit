@@ -286,10 +286,10 @@
 	>
 		<div class="max-w-[480px] w-full pt-10">
 			<!-- Header -->
-			<h1 class="text-text text-[22px] font-semibold text-center mb-1">
+			<h1 class="text-text text-2xl font-semibold text-center mb-1">
 				Conduit
 			</h1>
-			<p class="text-center text-text-muted text-[13px] mb-7">
+			<p class="text-center text-text-muted text-base mb-7">
 				Setup your device for the best experience
 			</p>
 

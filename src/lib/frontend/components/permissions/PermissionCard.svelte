@@ -115,7 +115,7 @@
 	<div
 		class="permission-card bg-bg-alt border border-border rounded-xl p-3"
 	>
-		<div class="text-[13px] font-medium mb-2 text-text">
+		<div class="text-base font-medium mb-2 text-text">
 			Permission Required
 		</div>
 
