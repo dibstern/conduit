@@ -145,6 +145,8 @@ export interface SessionInfo {
 	processing?: boolean;
 	/** Parent session ID — set when this session was forked from another. */
 	parentID?: string;
+	/** The message ID at the fork point — messages up to this ID are inherited context. */
+	forkMessageId?: string;
 }
 
 // ─── Ask User / Questions ───────────────────────────────────────────────────
