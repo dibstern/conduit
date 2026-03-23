@@ -22,6 +22,7 @@ export default defineConfig({
 		"pin-page.spec.ts",
 		"unified-rendering.spec.ts",
 		"scroll-stability.spec.ts",
+		"fork-session.spec.ts",
 	],
 	fullyParallel: false,
 	forbidOnly: !!process.env["CI"],
