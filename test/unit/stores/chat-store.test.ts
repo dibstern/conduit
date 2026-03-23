@@ -310,18 +310,7 @@ describe("tool lifecycle", () => {
 		expect(chatState.messages).toHaveLength(1);
 	});
 
-	it("re-registers uuid in toolUuidMap after duplicate tool_start so tool_executing still works", () => {
-		// First tool_start
-		handleToolStart({
-			type: "tool_start",
-			id: "toolu_abc",
-			name: "AskUserQuestion",
-		});
-
-		// Simulate handleDone clearing the toolUuidMap
-		handleDone({ type: "done", code: 0 });
-
-		// Second tool_start re-registers the UUID mapping
+	it("after handleDone, duplicate tool_start is ignored and tool stays completed", () => {
 		handleToolStart({
 			type: "tool_start",
 			id: "toolu_abc",
@@ -329,16 +318,29 @@ describe("tool lifecycle", () => {
 		});
 		expect(chatState.messages).toHaveLength(1);
 
-		// tool_executing should still find the existing message
+		// handleDone force-finalizes the pending tool to completed
+		handleDone({ type: "done", code: 0 });
+		const afterDone = chatState.messages[0] as ToolMessage;
+		expect(afterDone.status).toBe("completed");
+
+		// Second tool_start for the same ID is a duplicate — ignored by registry
+		handleToolStart({
+			type: "tool_start",
+			id: "toolu_abc",
+			name: "AskUserQuestion",
+		});
+		expect(chatState.messages).toHaveLength(1);
+
+		// Executing is rejected — tool is already in terminal state
 		handleToolExecuting({
 			type: "tool_executing",
 			id: "toolu_abc",
 			name: "AskUserQuestion",
-			input: { questions: [{ question: "Pick one", header: "Choice" }] },
+			input: { question: "Approve?" },
 		});
 		const tool = chatState.messages[0] as ToolMessage;
-		expect(tool.status).toBe("running");
-		expect(tool.input).toBeDefined();
+		// Tool stays completed — registry blocks completed -> running
+		expect(tool.status).toBe("completed");
 	});
 });
 

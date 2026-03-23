@@ -15,6 +15,7 @@ import type {
 import { generateUuid } from "../utils/format.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import { discoveryState } from "./discovery.svelte.js";
+import { createToolRegistry } from "./tool-registry.js";
 import { uiState, updateContextPercent } from "./ui.svelte.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -99,8 +100,32 @@ export function getMessageCount(): number {
 let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let thinkingStartTime = 0;
 
-/** Map tool IDs to their message UUIDs for updates. */
-const toolUuidMap = new Map<string, string>();
+/** Centralized tool lifecycle state machine. Enforces forward-only transitions. */
+const registry = createToolRegistry(
+	import.meta.env.DEV
+		? {
+				log: (level, message) => {
+					if (level === "warn") console.warn(`[ToolRegistry] ${message}`);
+					else console.debug(`[ToolRegistry] ${message}`);
+				},
+			}
+		: undefined,
+);
+
+/** Append a new tool message to chatState.messages. */
+function applyToolCreate(tool: ToolMessage): void {
+	chatState.messages = [...chatState.messages, tool];
+}
+
+/** Replace a tool message in chatState.messages by UUID. */
+function applyToolUpdate(uuid: string, tool: ToolMessage): void {
+	const messages = [...chatState.messages];
+	const found = findMessage(messages, "tool", (m) => m.uuid === uuid);
+	if (found) {
+		messages[found.index] = tool;
+		chatState.messages = messages;
+	}
+}
 
 /**
  * Track messageIds that have been finalized by handleDone() (not by tool_start).
@@ -212,38 +237,24 @@ export function handleToolStart(
 ): void {
 	const { id, name, messageId } = msg;
 
-	// ── Deduplicate: skip if a ToolMessage with this callID already exists ──
-	// This can happen when SSE events and the message poller both see the same
-	// tool part, or during event replay + live SSE overlap. Without this guard,
-	// two ToolMessages with the same id appear in the message list, causing
-	// duplicate question cards and other rendering artifacts.
-	const existing = chatState.messages.find(
-		(m): m is ToolMessage => m.type === "tool" && m.id === id,
-	);
-	if (existing) {
-		// Re-register in toolUuidMap so subsequent tool_executing/tool_result
-		// events can find the existing message (the map may have been cleared
-		// by handleDone between the first and second tool_start).
-		toolUuidMap.set(id, existing.uuid);
+	const result = registry.start(id, name || "unknown", messageId);
+
+	if (result.action === "duplicate") {
 		return;
 	}
 
-	const uuid = generateUuid();
+	if (result.action !== "create") {
+		return;
+	}
 
 	// ── Finalize current assistant text before inserting tool ──────────
-	// If we're mid-stream with accumulated text, finalize that assistant
-	// message so post-tool deltas create a new AssistantMessage block.
-	// This matches the history rendering path (convertAssistantParts)
-	// which creates separate AssistantMessage per text part.
 	if (chatState.streaming && chatState.currentAssistantText) {
-		// Flush any pending debounced render
 		if (renderTimer !== null) {
 			clearTimeout(renderTimer);
 			renderTimer = null;
 		}
 		flushAssistantRender();
 
-		// Finalize the current assistant message
 		const messages = [...chatState.messages];
 		for (let i = messages.length - 1; i >= 0; i--) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
@@ -258,65 +269,33 @@ export function handleToolStart(
 			}
 		}
 
-		// Reset streaming state so next handleDelta creates a new message
 		chatState.streaming = false;
 		chatState.currentAssistantText = "";
 	}
 
-	toolUuidMap.set(id, uuid);
-
-	const toolMsg: ToolMessage = {
-		type: "tool",
-		uuid,
-		id,
-		name: name || "unknown",
-		status: "pending",
-		...(messageId != null && { messageId }),
-	};
-	chatState.messages = [...chatState.messages, toolMsg];
+	applyToolCreate(result.tool);
 }
 
 export function handleToolExecuting(
 	msg: Extract<RelayMessage, { type: "tool_executing" }>,
 ): void {
-	const { id, input, metadata } = msg;
-	const uuid = toolUuidMap.get(id);
-	if (!uuid) return;
-
-	const messages = [...chatState.messages];
-	const found = findMessage(messages, "tool", (m) => m.uuid === uuid);
-	if (found) {
-		messages[found.index] = {
-			...found.message,
-			status: "running",
-			input: input,
-			...(metadata != null && { metadata }),
-		};
-		chatState.messages = messages;
+	const result = registry.executing(msg.id, msg.input, msg.metadata);
+	if (result.action === "update") {
+		applyToolUpdate(result.uuid, result.tool);
 	}
 }
 
 export function handleToolResult(
 	msg: Extract<RelayMessage, { type: "tool_result" }>,
 ): void {
-	const { id, content, is_error } = msg;
-	const uuid = toolUuidMap.get(id);
-	if (!uuid) return;
-
-	const messages = [...chatState.messages];
-	const found = findMessage(messages, "tool", (m) => m.uuid === uuid);
-	if (found) {
-		messages[found.index] = {
-			...found.message,
-			status: is_error ? "error" : "completed",
-			result: content,
-			isError: is_error ?? false,
-			...(msg.isTruncated != null && { isTruncated: msg.isTruncated }),
-			...(msg.fullContentLength != null && {
-				fullContentLength: msg.fullContentLength,
-			}),
-		};
-		chatState.messages = messages;
+	const result = registry.complete(msg.id, msg.content, msg.is_error, {
+		...(msg.isTruncated != null && { isTruncated: msg.isTruncated }),
+		...(msg.fullContentLength != null && {
+			fullContentLength: msg.fullContentLength,
+		}),
+	});
+	if (result.action === "update") {
+		applyToolUpdate(result.uuid, result.tool);
 	}
 }
 
@@ -431,31 +410,22 @@ export function handleDone(
 	}
 
 	// Finalize any tools still in non-terminal states (pending/running).
-	// A race between the status-poller "done" and late SSE tool_result events
-	// can leave tool cards stuck if we clear the UUID map too early.
-	let toolsFinalized = false;
-	const finalizedMessages = [...chatState.messages];
-	for (let i = 0; i < finalizedMessages.length; i++) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const m = finalizedMessages[i]!;
-		if (
-			m.type === "tool" &&
-			(m.status === "pending" || m.status === "running")
-		) {
-			finalizedMessages[i] = { ...m, status: "completed" };
-			toolsFinalized = true;
+	const finResult = registry.finalizeAll(chatState.messages);
+	if (finResult.action === "finalized") {
+		const messages = [...chatState.messages];
+		for (const idx of finResult.indices) {
+			// biome-ignore lint/style/noNonNullAssertion: safe — index from finalizeAll
+			const m = messages[idx]!;
+			if (m.type === "tool") {
+				messages[idx] = { ...m, status: "completed" };
+			}
 		}
-	}
-	if (toolsFinalized) {
-		chatState.messages = finalizedMessages;
+		chatState.messages = messages;
 	}
 
 	chatState.streaming = false;
 	chatState.processing = false;
 	chatState.currentAssistantText = "";
-	// Do NOT clear toolUuidMap here — late-arriving SSE tool_result events
-	// need the map to update tool cards. The map is cleared in clearMessages()
-	// on session switch, which is the correct lifecycle boundary.
 }
 
 export function handleStatus(
@@ -623,7 +593,7 @@ export function clearMessages(): void {
 	chatState.streaming = false;
 	chatState.processing = false;
 	chatState.queuedFlagsCleared = false;
-	toolUuidMap.clear();
+	registry.clear();
 	doneMessageIds.clear();
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
@@ -702,6 +672,7 @@ export function handlePartRemoved(
 	chatState.messages = chatState.messages.filter(
 		(m) => m.type !== "tool" || m.id !== partId,
 	);
+	registry.remove(partId);
 }
 
 export function handleMessageRemoved(
