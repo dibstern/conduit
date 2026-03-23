@@ -19,10 +19,62 @@ function serviceWorkerPlugin(): Plugin {
 	};
 }
 
+/**
+ * Strip `/static/` prefix from icon paths inside `.webmanifest` assets.
+ *
+ * Vite's `publicDir` copies `static/` contents to the build root without the
+ * prefix, but treats `.webmanifest` files as opaque — so internal icon `src`
+ * values like `/static/foo.png` end up as 404s.  This plugin rewrites them
+ * at bundle-emit time.
+ */
+function manifestIconPlugin(): Plugin {
+	return {
+		name: "manifest-icon-paths",
+		generateBundle(_options, bundle) {
+			for (const asset of Object.values(bundle)) {
+				if (asset.type !== "asset" || !asset.fileName.endsWith(".webmanifest"))
+					continue;
+
+				try {
+					const json = JSON.parse(
+						typeof asset.source === "string"
+							? asset.source
+							: new TextDecoder().decode(asset.source),
+					);
+
+					if (!Array.isArray(json.icons)) continue;
+
+					let changed = false;
+					for (const icon of json.icons) {
+						if (
+							typeof icon.src === "string" &&
+							icon.src.startsWith("/static/")
+						) {
+							icon.src = icon.src.replace(/^\/static\//, "/");
+							changed = true;
+						}
+					}
+
+					if (changed) {
+						asset.source = JSON.stringify(json, null, "\t");
+					}
+				} catch {
+					// Silently skip malformed JSON
+				}
+			}
+		},
+	};
+}
+
 export default defineConfig({
 	root: "src/lib/frontend",
 	publicDir: "static",
-	plugins: [svelte(), tailwindcss(), serviceWorkerPlugin()],
+	plugins: [
+		svelte(),
+		tailwindcss(),
+		serviceWorkerPlugin(),
+		manifestIconPlugin(),
+	],
 	build: {
 		outDir: "../../../dist/frontend",
 		emptyOutDir: true,

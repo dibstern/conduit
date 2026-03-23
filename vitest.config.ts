@@ -32,6 +32,15 @@ export default defineConfig({
 					hookTimeout: 10_000,
 				},
 			},
+			{
+				extends: true,
+				test: {
+					name: "build",
+					include: ["test/build/**/*.test.ts"],
+					testTimeout: 10_000,
+					hookTimeout: 10_000,
+				},
+			},
 		],
 		coverage: {
 			provider: "v8",
