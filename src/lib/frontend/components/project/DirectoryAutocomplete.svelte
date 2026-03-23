@@ -199,10 +199,10 @@
 						class="shrink-0 text-warning"
 					/>
 					<span
-						class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+						class="flex-1 min-w-0 flex items-baseline"
 					>
-						<span class="text-text-muted">{parentPath}</span
-						><span class="text-text">{displayName}</span>
+						<span class="text-text-muted overflow-hidden text-ellipsis whitespace-nowrap min-w-0" style="flex-shrink:100;direction:rtl;text-align:left;">{parentPath}</span
+						><span class="text-text overflow-hidden text-ellipsis whitespace-nowrap min-w-0 shrink">{displayName}</span>
 					</span>
 				</div>
 			{/each}

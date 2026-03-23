@@ -149,6 +149,13 @@ function getMockDirectories(path: string): string[] {
 	if (path === "/src/personal/opencode-relay/") {
 		return ["/src/personal/opencode-relay/conduit/"];
 	}
+	// Very long paths for truncation testing
+	if (path === "/Users/dstern/src/personal/") {
+		return [
+			"/Users/dstern/src/personal/very-long-deeply-nested-project-directory-name/",
+			"/Users/dstern/src/personal/opencode-relay/",
+		];
+	}
 	// Empty for unknown paths
 	return [];
 }
@@ -368,6 +375,43 @@ test.describe("Directory Autocomplete", () => {
 
 		// Input should have the selected path
 		await expect(input).toHaveValue("/src/work/");
+	});
+
+	test("long paths truncate the prefix, not the directory name", async ({
+		page,
+		baseURL,
+	}) => {
+		await setupWithProjectManagement(page, baseURL);
+		await openProjectSwitcher(page);
+		await page.getByText("Add project").click();
+
+		const input = page.locator(
+			"[data-testid='project-switcher-dropdown'] input[type='text']",
+		);
+		await input.fill("/Users/dstern/src/personal/");
+
+		const autocomplete = page.locator(".dir-autocomplete-list");
+		await expect(autocomplete).toBeVisible({ timeout: 5_000 });
+
+		// The first entry has a long path. The directory name at the end
+		// ("very-long-deeply-nested-project-directory-name/") must remain
+		// fully visible — the parent path prefix should be what gets clipped.
+		const firstItem = autocomplete.locator(".dir-item").first();
+		const dirName = firstItem.locator("span.text-text");
+		const container = firstItem.locator("span.flex-1");
+
+		// Get bounding boxes to verify the directory name is not clipped
+		const dirBox = await dirName.boundingBox();
+		const containerBox = await container.boundingBox();
+
+		expect(dirBox).not.toBeNull();
+		expect(containerBox).not.toBeNull();
+
+		// The directory name's right edge must be within (or at) the
+		// container's right edge — i.e. not pushed off-screen.
+		const dirRight = dirBox!.x + dirBox!.width;
+		const containerRight = containerBox!.x + containerBox!.width;
+		expect(dirRight).toBeLessThanOrEqual(containerRight + 1);
 	});
 });
 
