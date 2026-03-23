@@ -119,6 +119,9 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		}),
 		disconnect: vi.fn(),
 		onConnect: vi.fn(),
+		onNavigateToSession: vi.fn(),
+		clearNavigateToSession: vi.fn(),
+		initSWNavigationListener: vi.fn(),
 		onPlanMode: vi.fn(() => () => {}),
 		onRewind: vi.fn(() => () => {}),
 		wsSend: vi.fn(),
@@ -139,6 +142,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 		hasMore: false,
 	},
 	clearSessionState: vi.fn(),
+	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },
 }));
 

@@ -669,6 +669,8 @@ describe("handleSSEEvent", () => {
 			title: "Permission Needed",
 			body: "Bash needs approval",
 			tag: "perm-perm-1",
+			slug: "test-project",
+			sessionId: "",
 		});
 	});
 
@@ -690,6 +692,7 @@ describe("handleSSEEvent", () => {
 			title: "Question from Agent",
 			body: "Agent has a question for you.",
 			tag: "opencode-ask",
+			slug: "test-project",
 		});
 	});
 
@@ -1176,6 +1179,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
 			eventType: "done",
+			sessionId: "other-session",
 		});
 	});
 
@@ -1202,6 +1206,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "notification_event",
 			eventType: "error",
 			message: "Something broke",
+			sessionId: "other-session",
 		});
 	});
 

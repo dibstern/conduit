@@ -529,6 +529,7 @@ export async function createProjectRelay(
 			listPendingQuestions: () => client.listPendingQuestions(),
 			listPendingPermissions: () => client.listPendingPermissions(),
 			statusPoller,
+			slug: config.slug,
 		},
 		sseConsumer,
 	);
@@ -575,9 +576,13 @@ export async function createProjectRelay(
 				doneMsg,
 				doneResult.route,
 				isSubagent,
+				sessionId,
 			);
 			if (notification.sendPush && config.pushManager) {
-				sendPushForEvent(config.pushManager, doneMsg, sseLog);
+				sendPushForEvent(config.pushManager, doneMsg, sseLog, {
+					slug: config.slug,
+					sessionId,
+				});
 			}
 			if (
 				notification.broadcastCrossSession &&
@@ -707,7 +712,10 @@ export async function createProjectRelay(
 				sessionMgr.getSessionParentMap().has(polledSessionId);
 
 			if (config.pushManager && !isSubagentPoller) {
-				sendPushForEvent(config.pushManager, msg, pollerLog);
+				sendPushForEvent(config.pushManager, msg, pollerLog, {
+					slug: config.slug,
+					sessionId: polledSessionId ?? undefined,
+				});
 			}
 
 			// Cross-session browser notification for dropped notification-worthy events
@@ -725,6 +733,7 @@ export async function createProjectRelay(
 									(msg as { message?: string }).message ?? "An error occurred",
 							}
 						: {}),
+					...(polledSessionId != null ? { sessionId: polledSessionId } : {}),
 				});
 			}
 		}

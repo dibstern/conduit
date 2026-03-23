@@ -23,6 +23,7 @@ export default defineConfig({
 		"unified-rendering.spec.ts",
 		"scroll-stability.spec.ts",
 		"terminal.spec.ts",
+		"notification-session-nav-replay.spec.ts",
 	],
 	fullyParallel: false,
 	forbidOnly: !!process.env["CI"],

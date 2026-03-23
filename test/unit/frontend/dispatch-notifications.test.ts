@@ -156,6 +156,17 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 		);
 	});
 
+	it("threads sessionId from notification_event to triggerNotifications", () => {
+		handleMessage({
+			type: "notification_event",
+			eventType: "done",
+			sessionId: "sess-xyz",
+		});
+		expect(triggerNotificationsMock).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "done", sessionId: "sess-xyz" }),
+		);
+	});
+
 	it("does NOT update chat state for notification_event (only triggers notification)", () => {
 		chatState.processing = true;
 		chatState.streaming = true;

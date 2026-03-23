@@ -7,6 +7,7 @@ import type { RelayMessage } from "../types.js";
 import { NOTIFICATION_DISMISS_MS } from "../ui-constants.js";
 import { getNotifSettings } from "../utils/notif-settings.js";
 import { playDoneSound } from "../utils/sound.js";
+import { getCurrentSlug, navigate } from "./router.svelte.js";
 
 // ─── Push-active tracking ────────────────────────────────────────────────────
 // When push notifications are active, browser alerts are suppressed (the SW
@@ -30,6 +31,68 @@ export function setPushActive(active: boolean): void {
 /** Check if push notifications are currently active. */
 export function isPushActive(): boolean {
 	return _pushActive;
+}
+
+// ─── Session navigation callback ─────────────────────────────────────────────
+// Registered by ChatLayout so notification clicks can switch to the correct
+// session without a circular dependency on session/router modules.
+
+let _navigateToSession: ((sessionId: string) => void) | null = null;
+
+/**
+ * Register a callback to navigate to a session when a notification is clicked.
+ * Called by ChatLayout during initialization.
+ */
+export function onNavigateToSession(fn: (sessionId: string) => void): void {
+	_navigateToSession = fn;
+}
+
+/**
+ * Clear the navigation callback (for cleanup on unmount).
+ */
+export function clearNavigateToSession(): void {
+	_navigateToSession = null;
+}
+
+// ─── Service worker message listener ─────────────────────────────────────────
+// The SW posts a `navigate_to_session` message when a push notification is
+// clicked. This listener routes it to the registered callback.
+
+let _swListenerRegistered = false;
+
+/**
+ * Register the service worker message listener for push notification clicks.
+ * Safe to call multiple times — only registers once.
+ */
+export function initSWNavigationListener(): void {
+	if (
+		_swListenerRegistered ||
+		typeof navigator === "undefined" ||
+		!("serviceWorker" in navigator)
+	)
+		return;
+
+	_swListenerRegistered = true;
+	navigator.serviceWorker.addEventListener("message", (event) => {
+		if (event.data?.type === "navigate_to_session" && event.data.sessionId) {
+			const { sessionId, slug, url } = event.data as {
+				sessionId: string;
+				slug?: string;
+				url?: string;
+			};
+
+			// If the notification is for a different project than the one
+			// currently viewed, navigate via URL instead of switchToSession
+			// (which would send view_session on the wrong WS connection).
+			const currentSlug = getCurrentSlug();
+			if (slug && currentSlug && slug !== currentSlug) {
+				if (url) navigate(url);
+				return;
+			}
+
+			_navigateToSession?.(sessionId);
+		}
+	});
 }
 
 // ─── Notification triggers ───────────────────────────────────────────────────
@@ -64,12 +127,21 @@ export function triggerNotifications(msg: RelayMessage): void {
 			Notification.permission === "granted"
 		) {
 			try {
+				// Extract sessionId from the message for click-to-session navigation
+				const sessionId =
+					"sessionId" in msg
+						? (msg as { sessionId?: string }).sessionId
+						: undefined;
+
 				const n = new Notification(content.title, {
 					body: content.body,
 					tag: content.tag,
 				});
 				n.onclick = () => {
 					window.focus();
+					if (sessionId) {
+						_navigateToSession?.(sessionId);
+					}
 					n.close();
 				};
 				setTimeout(() => n.close(), NOTIFICATION_DISMISS_MS);

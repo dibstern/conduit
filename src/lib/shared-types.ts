@@ -437,6 +437,8 @@ export type RelayMessage =
 			eventType: string;
 			/** Error message (for error events) */
 			message?: string;
+			/** Session that triggered the event (for notification click routing) */
+			sessionId?: string;
 	  };
 
 // ─── Instance Types ─────────────────────────────────────────────────────────

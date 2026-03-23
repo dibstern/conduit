@@ -241,6 +241,7 @@ export function createMockSSEWiringDeps(
 		},
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
+		slug: "test-project",
 		...overrides,
 	};
 }

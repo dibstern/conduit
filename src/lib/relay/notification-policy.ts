@@ -19,6 +19,7 @@ export interface NotificationResolution {
 		readonly type: "notification_event";
 		readonly eventType: string;
 		readonly message?: string;
+		readonly sessionId?: string;
 	};
 }
 
@@ -33,6 +34,7 @@ export function resolveNotifications(
 	msg: RelayMessage,
 	route: RouteDecision,
 	isSubagent: boolean,
+	sessionId?: string,
 ): NotificationResolution {
 	const isNotifiable = NOTIFICATION_TYPES.has(msg.type);
 	if (!isNotifiable) {
@@ -54,6 +56,7 @@ export function resolveNotifications(
 			type: "notification_event",
 			eventType: msg.type,
 			...(errorMessage !== undefined ? { message: errorMessage } : {}),
+			...(sessionId != null ? { sessionId } : {}),
 		};
 		return { sendPush, broadcastCrossSession, crossSessionPayload: payload };
 	}

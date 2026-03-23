@@ -852,6 +852,22 @@ export class MockOpenCodeServer {
 		});
 	}
 
+	/**
+	 * Inject SSE events directly into all connected SSE clients.
+	 * For use in tests that need to trigger relay behavior (e.g., done events)
+	 * without going through the recorded queue system.
+	 */
+	public injectSSEEvents(
+		events: Array<{ type: string; properties: Record<string, unknown> }>,
+	): void {
+		const batch: SseEvent[] = events.map((e) => ({
+			type: e.type,
+			properties: e.properties,
+			delayMs: 0,
+		}));
+		this.emitSseBatch(batch);
+	}
+
 	private emitSseBatch(batch: SseEvent[]): void {
 		// Check if this batch contains a session.idle event. If so, override
 		// the status queue to return idle (empty object) for all subsequent

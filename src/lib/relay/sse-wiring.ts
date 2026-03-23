@@ -87,6 +87,8 @@ export interface SSEWiringDeps {
 	>;
 	/** Optional: notify status poller of SSE idle events for fast transition detection */
 	statusPoller?: { notifySSEIdle(sessionId: string): void };
+	/** Project slug for push notification routing */
+	slug?: string;
 }
 
 // ─── Push notification helper ────────────────────────────────────────────────
@@ -103,23 +105,51 @@ interface PushSender {
 		title: string;
 		body: string;
 		tag: string;
+		[key: string]: unknown;
 	}): Promise<void>;
+}
+
+/** Session routing context for push notifications. */
+export interface PushEventContext {
+	slug?: string;
+	sessionId?: string;
+}
+
+/**
+ * Build a PushEventContext from optional values.
+ * Avoids setting keys to `undefined` (required by exactOptionalPropertyTypes).
+ */
+function buildPushContext(slug?: string, sessionId?: string): PushEventContext {
+	const ctx: PushEventContext = {};
+	if (slug != null) ctx.slug = slug;
+	if (sessionId != null) ctx.sessionId = sessionId;
+	return ctx;
 }
 
 /**
  * Send a push notification for notable relay messages (done, error, etc.).
  * No-op for message types that don't warrant a notification.
  * Safe to call with any RelayMessage.
+ *
+ * When `context` is provided, `slug` and `sessionId` are included in the
+ * payload so the service worker click handler can navigate directly to the
+ * originating session.
  */
 export function sendPushForEvent(
 	pushManager: PushSender,
 	msg: RelayMessage,
 	log: Logger,
+	context?: PushEventContext,
 ): void {
 	const content = notificationContent(msg);
 	if (!content) return;
 	pushManager
-		.sendToAll({ type: msg.type, ...content })
+		.sendToAll({
+			type: msg.type,
+			...content,
+			...(context?.slug != null && { slug: context.slug }),
+			...(context?.sessionId != null && { sessionId: context.sessionId }),
+		})
 		.catch((err: unknown) =>
 			log.warn(`Push send failed (${msg.type}): ${err}`),
 		);
@@ -170,7 +200,12 @@ export function handleSSEEvent(
 			};
 			wsHandler.broadcast(permMsg);
 			if (pushManager) {
-				sendPushForEvent(pushManager, permMsg, log);
+				sendPushForEvent(
+					pushManager,
+					permMsg,
+					log,
+					buildPushContext(deps.slug, pending.sessionId),
+				);
 			}
 		} else if (pushManager) {
 			// Bridge rejected (missing id/permission) — still attempt push
@@ -190,6 +225,7 @@ export function handleSSEEvent(
 					toolInput: {},
 				},
 				log,
+				buildPushContext(deps.slug, eventSessionId),
 			);
 		}
 	}
@@ -204,6 +240,7 @@ export function handleSSEEvent(
 				pushManager,
 				{ type: "ask_user", toolId: "", questions: [] },
 				log,
+				buildPushContext(deps.slug, eventSessionId),
 			);
 		}
 	}
@@ -322,7 +359,12 @@ export function handleSSEEvent(
 
 		// Push notifications for done/error events (fire regardless of viewers)
 		if (pushManager) {
-			sendPushForEvent(pushManager, msg, log);
+			sendPushForEvent(
+				pushManager,
+				msg,
+				log,
+				buildPushContext(deps.slug, targetSessionId),
+			);
 		}
 
 		// Cross-session browser notifications: if the pipeline dropped a
@@ -333,6 +375,7 @@ export function handleSSEEvent(
 				type: "notification_event",
 				eventType: msg.type,
 				...(msg.type === "error" ? { message: msg.message } : {}),
+				...(targetSessionId != null ? { sessionId: targetSessionId } : {}),
 			});
 		}
 	}
