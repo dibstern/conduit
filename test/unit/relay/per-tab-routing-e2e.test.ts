@@ -196,10 +196,16 @@ async function createTestHarness(): Promise<TestHarness> {
 		projectDir: process.cwd(),
 		slug: "test-project",
 		log: createSilentLogger(), // silence logs
+		statusPollerInterval: 100,
+		messagePollerInterval: 150,
+		pollerGatingConfig: {
+			sseGracePeriodMs: 300,
+			sseActiveThresholdMs: 500,
+		},
 	});
 
 	// Wait for SSE to connect
-	await new Promise((r) => setTimeout(r, 500));
+	await new Promise((r) => setTimeout(r, 200));
 
 	return {
 		relay,
@@ -289,7 +295,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		expect(delta["text"]).toBe("hello from session A");
 
 		// Client2 (viewing sess-B) should NOT receive it
-		await new Promise((r) => setTimeout(r, 200));
+		await new Promise((r) => setTimeout(r, 100));
 		const client2Deltas = client2.getReceivedOfType("delta");
 		expect(client2Deltas).toHaveLength(0);
 
@@ -336,7 +342,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		expect(delta["text"]).toBe("hello from session B");
 
 		// Client1 (viewing sess-A) should NOT receive it
-		await new Promise((r) => setTimeout(r, 200));
+		await new Promise((r) => setTimeout(r, 100));
 		const client1Deltas = client1.getReceivedOfType("delta");
 		expect(client1Deltas).toHaveLength(0);
 
@@ -488,7 +494,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		});
 
 		// Client shouldn't receive it (wrong session)
-		await new Promise((r) => setTimeout(r, 200));
+		await new Promise((r) => setTimeout(r, 100));
 		expect(client.getReceivedOfType("delta")).toHaveLength(0);
 
 		// Now switch to session B — should get cached history

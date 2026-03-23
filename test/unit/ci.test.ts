@@ -140,7 +140,7 @@ describe("Ticket 0.6 — CI/CD Pipeline", () => {
 		it("package.json has prepare script for lefthook", () => {
 			const content = readFile("package.json");
 			const pkg = JSON.parse(content);
-			expect(pkg.scripts.prepare).toBe("lefthook install");
+			expect(pkg.scripts.prepare).toBe("lefthook install || true");
 		});
 
 		it("package.json has @evilmartians/lefthook in devDependencies", () => {

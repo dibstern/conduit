@@ -94,9 +94,9 @@ if (stories.length > 0) {
 
 	// Stories that intentionally render nothing (hidden/empty/closed states)
 	const SKIP_STORIES = new Set([
-		"features-agentselector--single-agent",
-		"features-agentselector--no-agents",
-		"features-pastepreview--empty",
+		"model-agentselector--single-agent",
+		"model-agentselector--no-agents",
+		"chat-pastepreview--empty",
 		"overlays-confirmmodal--hidden",
 		"overlays-imagelightbox--hidden",
 		"overlays-qrmodal--hidden",

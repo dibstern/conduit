@@ -99,7 +99,7 @@ export class TestWsClient {
 			this.waitFor("session_list", { timeout }),
 		]);
 		// Give agents/models a moment to arrive (they're async)
-		await new Promise((r) => setTimeout(r, 200));
+		await new Promise((r) => setTimeout(r, 50));
 	}
 
 	/**

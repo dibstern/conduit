@@ -74,33 +74,35 @@ const PAIRS: FidelityPair[] = [
 	{ name: "ResultBar Full", storyId: "chat-resultbar--full" },
 
 	// ─── Session items ───────────────────────────────────────────
-	{ name: "SessionItem Active", storyId: "features-sessionitem--active" },
-	{ name: "SessionItem Inactive", storyId: "features-sessionitem--inactive" },
+	{ name: "SessionItem Active", storyId: "session-sessionitem--active" },
+	{ name: "SessionItem Inactive", storyId: "session-sessionitem--inactive" },
 	{
 		name: "SessionItem Processing",
-		storyId: "features-sessionitem--processing",
+		storyId: "session-sessionitem--processing",
 	},
 
-	// ─── Features ────────────────────────────────────────────────
+	// ─── Permissions ────────────────────────────────────────────
 	{
 		name: "PermissionCard Pending",
-		storyId: "features-permissioncard--pending",
+		storyId: "permissions-permissioncard--pending",
 	},
 
 	// ─── Layout ──────────────────────────────────────────────────
 	{ name: "Header Connected", storyId: "layout-header--connected" },
 	{ name: "Header Disconnected", storyId: "layout-header--disconnected" },
 	{ name: "Header Processing", storyId: "layout-header--processing" },
-	{ name: "InputArea Empty", storyId: "layout-inputarea--empty" },
-	{ name: "InputArea Processing", storyId: "layout-inputarea--processing" },
+
+	// ─── Input ───────────────────────────────────────────────────
+	{ name: "InputArea Empty", storyId: "input-inputarea--empty" },
+	{ name: "InputArea Processing", storyId: "input-inputarea--processing" },
 	{
 		name: "InputArea Context Bar",
-		storyId: "layout-inputarea--with-context-bar",
+		storyId: "input-inputarea--with-context-bar",
 	},
-	{ name: "InputArea High Context", storyId: "layout-inputarea--high-context" },
+	{ name: "InputArea High Context", storyId: "input-inputarea--high-context" },
 	{
 		name: "InputArea Critical Context",
-		storyId: "layout-inputarea--critical-context",
+		storyId: "input-inputarea--critical-context",
 	},
 
 	// ─── Overlays ────────────────────────────────────────────────

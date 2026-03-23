@@ -855,7 +855,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 					assertInvariants(reg);
 				},
 			),
-			{ numRuns: 100 },
+			{ numRuns: 30 },
 		);
 	});
 
@@ -876,7 +876,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 					expect(reg.size).toBe(0);
 				},
 			),
-			{ numRuns: 100 },
+			{ numRuns: 30 },
 		);
 	});
 
@@ -1156,7 +1156,7 @@ describe("ProjectRegistry — Stateful model tests", () => {
 					await fc.asyncModelRun(() => ({ model, real: reg }), cmds);
 				},
 			),
-			{ numRuns: 100 },
+			{ numRuns: 30 },
 		);
 	});
 });

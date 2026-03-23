@@ -251,7 +251,7 @@ interface. You end up checking manually instead of getting notified.
 ## Requirements
 
 - [OpenCode](https://opencode.ai) — `opencode serve` running (port 4096)
-- Node.js 18+
+- Node.js 20.19+
 - [mkcert](https://github.com/FiloSottile/mkcert) — push notifications (optional)
 - [Tailscale](https://tailscale.com) — remote access beyond LAN (optional)
 

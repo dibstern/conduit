@@ -18,6 +18,7 @@
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
 	import Icon from "../shared/Icon.svelte";
+	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,6 @@
 	let addError = $state("");
 	let adding = $state(false);
 	let addInstanceId = $state("");
-	let containerEl: HTMLDivElement | undefined = $state(undefined);
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -154,21 +154,12 @@
 		}
 	}
 
-	function handleOutsideClick(e: MouseEvent) {
-		if (open && containerEl && !containerEl.contains(e.target as Node)) {
-			open = false;
-			showAddForm = false;
-			addError = "";
-		}
-	}
-
 	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 	let unsubProject: (() => void) | undefined;
 
 	onMount(() => {
 		document.addEventListener("keydown", handleKeydown);
-		document.addEventListener("click", handleOutsideClick, true);
 
 		// Listen for project_list responses to reset add form state.
 		// Navigation is handled by the project store (addedSlug → navigate).
@@ -184,12 +175,11 @@
 
 	onDestroy(() => {
 		document.removeEventListener("keydown", handleKeydown);
-		document.removeEventListener("click", handleOutsideClick, true);
 		unsubProject?.();
 	});
 </script>
 
-<div class="proj-switcher relative" bind:this={containerEl}>
+<div class="proj-switcher relative" use:clickOutside={() => { open = false; showAddForm = false; addError = ""; }}>
 	<!-- Main button — always rendered -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->

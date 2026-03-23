@@ -259,6 +259,34 @@ export class MockOpenCodeServer {
 			directory: process.cwd(),
 		});
 
+		// Commands and file-listing endpoints are used by discovery tests but
+		// are rarely present in recordings.  Provide sensible defaults so the
+		// relay can serve command_list / file_list without a 404.
+		this.ensureFallback("GET /command", 200, [
+			{ name: "help", description: "Show available commands" },
+			{ name: "compact", description: "Compact conversation history" },
+		]);
+		this.ensureFallback("GET /file", 200, [
+			{ name: "package.json", type: "file" },
+			{ name: "src", type: "directory" },
+			{ name: "test", type: "directory" },
+		]);
+
+		// Session search endpoint returns empty matches by default.
+		this.ensureFallback("GET /session/search", 200, []);
+
+		// Ensure normalized fallbacks exist for endpoints that tests exercise
+		// but recordings don't always capture (session CRUD, PTY lifecycle).
+		this.ensureNormalizedFallback("DELETE /session/:param", 204, null);
+		this.ensureNormalizedFallback("PATCH /session/:param", 200, {
+			id: "mock-session",
+			title: "mock-title",
+		});
+		this.ensureFallback("POST /pty", 200, { id: "pty_mock001" });
+		this.ensureFallback("GET /pty", 200, [{ id: "pty_mock001" }]);
+		this.ensureNormalizedFallback("DELETE /pty/:param", 204, null);
+		this.ensureNormalizedFallback("PUT /pty/:param", 204, null);
+
 		// Ensure the relay selects the recording's target session at init
 		this.promoteTargetSession();
 
@@ -295,6 +323,16 @@ export class MockOpenCodeServer {
 	): void {
 		if (this.exactQueues.has(key) || this.normalizedQueues.has(key)) return;
 		this.exactQueues.set(key, [{ status, responseBody, sseBatch: [] }]);
+	}
+
+	/** Add a normalized fallback (e.g. "DELETE /session/:param") if not already present. */
+	private ensureNormalizedFallback(
+		key: string,
+		status: number,
+		responseBody: unknown,
+	): void {
+		if (this.normalizedQueues.has(key)) return;
+		this.normalizedQueues.set(key, [{ status, responseBody, sseBatch: [] }]);
 	}
 
 	/** Return a queue from a map that has at least one response, or undefined. */

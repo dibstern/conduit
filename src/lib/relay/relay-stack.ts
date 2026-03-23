@@ -51,6 +51,7 @@ import {
 } from "./monitoring-reducer.js";
 import type {
 	MonitoringState,
+	PollerGatingConfig,
 	SessionEvalContext,
 } from "./monitoring-types.js";
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
@@ -219,7 +220,7 @@ export async function createProjectRelay(
 	// ── Session status poller (polls GET /session/status for processing indicators) ──
 	const statusPoller: SessionStatusPoller = new SessionStatusPoller({
 		client,
-		interval: 500,
+		interval: config.statusPollerInterval ?? 500,
 		log: statusLog,
 		getSessionParentMap: (): Map<string, string> =>
 			sessionMgr.getSessionParentMap(),
@@ -234,6 +235,9 @@ export async function createProjectRelay(
 		client,
 		log: pollerMgrLog,
 		hasViewers: (sid) => registry.hasViewers(sid),
+		...(config.messagePollerInterval != null && {
+			interval: config.messagePollerInterval,
+		}),
 	});
 
 	// ── PTY sessions with server-side scrollback (claude-relay architecture) ──
@@ -250,6 +254,10 @@ export async function createProjectRelay(
 	// ── Monitoring reducer state ──────────────────────────────────────────────
 	const sseTracker = createSessionSSETracker();
 	let monitoringState: MonitoringState = initialMonitoringState();
+	const pollerGatingCfg: PollerGatingConfig = {
+		...DEFAULT_POLLER_GATING_CONFIG,
+		...config.pollerGatingConfig,
+	};
 
 	// ── Health check ────────────────────────────────────────────────────────
 
@@ -610,11 +618,7 @@ export async function createProjectRelay(
 		}
 
 		const prevState = monitoringState;
-		const result = evaluateAll(
-			prevState,
-			contexts,
-			DEFAULT_POLLER_GATING_CONFIG,
-		);
+		const result = evaluateAll(prevState, contexts, pollerGatingCfg);
 		monitoringState = result.state;
 
 		if (result.effects.length > 0) {

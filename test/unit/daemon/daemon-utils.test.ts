@@ -64,7 +64,8 @@ describe("probeOpenCode", () => {
 	});
 
 	it("returns false for invalid URL", async () => {
-		const result = await probeOpenCode("http://192.0.2.1:9999");
+		// Use a URL with an invalid scheme to fail fast (not a slow network timeout)
+		const result = await probeOpenCode("http://[::1]:1");
 		expect(result).toBe(false);
 	});
 });

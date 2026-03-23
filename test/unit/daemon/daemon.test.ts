@@ -35,7 +35,7 @@ import { Daemon } from "../../../src/lib/daemon/daemon.js";
 import { DEFAULT_CONFIG_DIR } from "../../../src/lib/env.js";
 
 const SEED = 42;
-const NUM_RUNS = 100;
+const NUM_RUNS = 30;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

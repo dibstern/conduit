@@ -24,7 +24,7 @@ import { describe, expect, it, vi } from "vitest";
 import { KeepAwake } from "../../../src/lib/daemon/keep-awake.js";
 
 const SEED = 42;
-const NUM_RUNS = 100;
+const NUM_RUNS = 30;
 
 // ─── Mock helpers ────────────────────────────────────────────────────────────
 

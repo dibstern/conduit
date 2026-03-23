@@ -1,0 +1,1820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conduit UI — Before / After Audit Mockup</title>
+
+<!-- Fonts matching conduit's actual stacks -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ── Reset ─────────────────────────────────────────────── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Conduit Design Tokens (dark theme defaults) ───────── */
+  :root {
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-brand: "Chakra Petch", sans-serif;
+
+    --color-bg: #18181b;
+    --color-bg-alt: #27272a;
+    --color-bg-surface: #27272a;
+    --color-text: #e4e4e7;
+    --color-text-secondary: #a1a1aa;
+    --color-text-muted: #71717a;
+    --color-text-dimmer: #52525b;
+    --color-accent: #ff2d7b;
+    --color-accent-hover: #ff4d91;
+    --color-accent-bg: rgba(255, 45, 123, 0.12);
+    --color-code-bg: #131315;
+    --color-border: #3f3f46;
+    --color-border-subtle: rgba(255, 255, 255, 0.06);
+    --color-input-bg: #333338;
+    --color-user-bubble: #2c2c30;
+    --color-sidebar-bg: #141416;
+    --color-sidebar-hover: #202023;
+    --color-sidebar-active: #2a2a2e;
+    --color-thinking: #eab308;
+    --color-thinking-bg: rgba(234, 179, 8, 0.06);
+    --color-tool: #00e5ff;
+    --color-tool-bg: rgba(0, 229, 255, 0.04);
+    --color-success: #22c55e;
+    --color-error: #ff4444;
+    --color-warning: #eab308;
+    --color-brand-a: #ff2d7b;
+    --color-brand-b: #00e5ff;
+  }
+
+  html {
+    font-size: 13px;
+    line-height: 1.5;
+    font-family: var(--font-mono);
+    background: #0e0e10;
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    padding: 40px 24px 80px;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* ── Page Structure ────────────────────────────────────── */
+  .page-title {
+    font-family: var(--font-brand);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--color-text);
+    margin-bottom: 6px;
+  }
+
+  .page-subtitle {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-bottom: 48px;
+    max-width: 680px;
+    line-height: 1.6;
+  }
+
+  .page-subtitle code {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  /* ── Section ───────────────────────────────────────────── */
+  .section {
+    margin-bottom: 64px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .section-number {
+    font-family: var(--font-brand);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    min-width: 24px;
+  }
+
+  .section-title {
+    font-family: var(--font-brand);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .section-desc {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-bottom: 24px;
+    line-height: 1.6;
+    max-width: 720px;
+  }
+
+  /* ── Before / After Grid ───────────────────────────────── */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--color-border);
+  }
+
+  .comparison-col {
+    background: var(--color-bg);
+    padding: 20px 24px 24px;
+  }
+
+  .comparison-label {
+    font-family: var(--font-brand);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .label-before { color: var(--color-error); }
+  .label-after  { color: var(--color-success); }
+
+  .label-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .label-before .label-dot { background: var(--color-error); }
+  .label-after  .label-dot { background: var(--color-success); }
+
+  /* ── Annotation callouts ───────────────────────────────── */
+  .callout {
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--color-text-dimmer);
+    border-left: 2px solid var(--color-border);
+    padding: 4px 0 4px 10px;
+    margin-top: 12px;
+  }
+
+  .callout em {
+    color: var(--color-text-muted);
+    font-style: normal;
+  }
+
+  .callout .val {
+    color: var(--color-warning);
+    font-weight: 500;
+  }
+
+  .callout .fix {
+    color: var(--color-success);
+    font-weight: 500;
+  }
+
+  .callout-err {
+    border-left-color: var(--color-error);
+  }
+
+  .callout-ok {
+    border-left-color: var(--color-success);
+  }
+
+  /* ── Spacing between mockup items ──────────────────────── */
+  .mock-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .mock-group-label {
+    font-size: 10px;
+    color: var(--color-text-dimmer);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+
+  .mock-divider {
+    height: 1px;
+    background: var(--color-border-subtle);
+    margin: 4px 0;
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     COMPONENT MOCKUPS — actual conduit patterns reproduced
+     ═══════════════════════════════════════════════════════════ */
+
+  /* ── Chat Message ──────────────────────────────────────── */
+  .msg-container {
+    max-width: 100%;
+  }
+
+  .msg-card {
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px;
+  }
+
+  .msg-card-user {
+    background: var(--color-user-bubble);
+  }
+
+  .msg-card-assistant {
+    background: transparent;
+    border-color: var(--color-border-subtle);
+  }
+
+  .msg-body {
+    color: var(--color-text);
+  }
+
+  .msg-body p {
+    margin-bottom: 10px;
+  }
+
+  .msg-body p:last-child {
+    margin-bottom: 0;
+  }
+
+  .msg-body code {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 6px;
+  }
+
+  /* ── Tool Item ─────────────────────────────────────────── */
+  .tool-header {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .tool-header:hover {
+    background: rgba(255,255,255,0.03);
+  }
+
+  .tool-icon {
+    color: var(--color-tool);
+    flex-shrink: 0;
+  }
+
+  .tool-name {
+    color: var(--color-text);
+  }
+
+  .tool-desc {
+    color: var(--color-text-muted);
+  }
+
+  .tool-tag {
+    background: var(--color-tool-bg);
+    border: 1px solid rgba(0, 229, 255, 0.12);
+    color: var(--color-tool);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .tool-result {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 8px;
+    color: var(--color-text-secondary);
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* ── Section Headers (uppercase pattern) ───────────────── */
+  .section-hdr {
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  /* ── Sidebar ───────────────────────────────────────────── */
+  .sidebar-mock {
+    background: var(--color-sidebar-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .sidebar-action {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    border-radius: 6px;
+    transition: background 0.1s, color 0.1s;
+    text-align: left;
+    text-decoration: none;
+  }
+
+  .sidebar-action:hover {
+    background: var(--color-sidebar-hover);
+    color: var(--color-text);
+  }
+
+  .sidebar-action-icon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    background: var(--color-border-subtle);
+  }
+
+  .session-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-text);
+    border-radius: 6px;
+    transition: background 0.1s;
+    text-align: left;
+    text-decoration: none;
+  }
+
+  .session-item:hover {
+    background: var(--color-sidebar-hover);
+  }
+
+  .session-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-success);
+    flex-shrink: 0;
+  }
+
+  .session-meta {
+    color: var(--color-text-dimmer);
+  }
+
+  /* ── Buttons ───────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: #fff;
+  }
+
+  .btn-primary:hover { opacity: 0.9; }
+
+  .btn-secondary {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-bg-alt);
+    color: var(--color-text);
+  }
+
+  .btn-inline {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+  }
+
+  .btn-inline:hover {
+    background: rgba(255,255,255,0.04);
+    color: var(--color-text-secondary);
+  }
+
+  /* ── Dropdown ──────────────────────────────────────────── */
+  .dropdown-mock {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-text);
+    transition: background 0.1s;
+    text-align: left;
+    text-decoration: none;
+  }
+
+  .dropdown-item:hover {
+    background: rgba(255,255,255,0.04);
+  }
+
+  .dropdown-item-desc {
+    color: var(--color-text-muted);
+  }
+
+  .dropdown-check {
+    color: var(--color-accent);
+  }
+
+  /* ── Modal ─────────────────────────────────────────────── */
+  .modal-mock {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+    width: 100%;
+    max-width: 380px;
+  }
+
+  /* ── Info Panel ────────────────────────────────────────── */
+  .info-panel {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    width: 100%;
+    max-width: 240px;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .info-label { color: var(--color-text-muted); }
+  .info-value { color: var(--color-text); }
+
+  /* ── Line-Height Specimen ──────────────────────────────── */
+  .lh-specimen {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 8px;
+    padding: 12px 16px;
+    position: relative;
+  }
+
+  .lh-specimen::before {
+    content: attr(data-lh);
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-size: 9px;
+    color: var(--color-text-dimmer);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Tracking Specimen ─────────────────────────────────── */
+  .tracking-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .tracking-label {
+    font-size: 9px;
+    color: var(--color-text-dimmer);
+    min-width: 80px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  /* ── Font Scale Ruler ──────────────────────────────────── */
+  .scale-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 0;
+  }
+
+  .scale-size {
+    min-width: 40px;
+    font-size: 10px;
+    color: var(--color-text-dimmer);
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .scale-sample {
+    color: var(--color-text);
+  }
+
+  .scale-role {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--color-text-dimmer);
+    flex-shrink: 0;
+  }
+
+  /* ── Utility ───────────────────────────────────────────── */
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .flex-1 { flex: 1; min-width: 0; }
+
+  @media (max-width: 900px) {
+    .comparison {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">Conduit UI — Before / After</h1>
+<p class="page-subtitle">
+  Component mockups showing current inconsistencies alongside the proposed standardized versions from <code>docs/ui-font-spacing-audit.md</code>. Each section isolates a specific problem area.
+</p>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     1. FONT SIZE SCALE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">01</span>
+    <span class="section-title">Font Size Scale</span>
+  </div>
+  <p class="section-desc">
+    The current UI uses 18 distinct font sizes. The proposed scale reduces this to 7 well-defined stops.
+    Sizes shown at actual rendered pixels (root = 13px).
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — 18 sizes</div>
+      <div class="mock-group">
+        <div class="scale-row"><span class="scale-size">8px</span>  <span class="scale-sample" style="font-size:8px">Thumbnail name</span>  <span class="scale-role">PastePreview</span></div>
+        <div class="scale-row"><span class="scale-size">9px</span>  <span class="scale-sample" style="font-size:9px">ESC &middot; date groups</span>  <span class="scale-role">SubagentBackBar, SessionList</span></div>
+        <div class="scale-row"><span class="scale-size">9.75px</span>  <span class="scale-sample" style="font-size:9.75px">text-xs — metadata, stats, hints</span>  <span class="scale-role">~30 components</span></div>
+        <div class="scale-row"><span class="scale-size">10px</span>  <span class="scale-sample" style="font-size:10px">Instance badge, context %, version</span>  <span class="scale-role">~12 components</span></div>
+        <div class="scale-row"><span class="scale-size">11px</span>  <span class="scale-sample" style="font-size:11px">Code headers, gutters, provider headers</span>  <span class="scale-role">~17 components</span></div>
+        <div class="scale-row"><span class="scale-size">11.375px</span>  <span class="scale-sample" style="font-size:11.375px">text-sm — buttons, instructions</span>  <span class="scale-role">~25 components</span></div>
+        <div class="scale-row"><span class="scale-size">12px</span>  <span class="scale-sample" style="font-size:12px">Variant options, add input</span>  <span class="scale-role">ModelSelector, ProjectSwitcher</span></div>
+        <div class="scale-row"><span class="scale-size">13px</span>  <span class="scale-sample" style="font-size:13px">text-[13px] — body text, menu items</span>  <span class="scale-role">~30 components</span></div>
+        <div class="scale-row"><span class="scale-size">13px</span>  <span class="scale-sample" style="font-size:13px">text-base — textarea (same px!)</span>  <span class="scale-role">InputArea</span></div>
+        <div class="scale-row"><span class="scale-size">14px</span>  <span class="scale-sample" style="font-size:14px">plan-mode.css plan banners</span>  <span class="scale-role">PlanMode</span></div>
+        <div class="scale-row"><span class="scale-size">14.6px</span>  <span class="scale-sample" style="font-size:14.625px">text-lg — settings title, step title</span>  <span class="scale-role">SettingsPanel, StepHeader</span></div>
+        <div class="scale-row"><span class="scale-size">15px</span>  <span class="scale-sample" style="font-size:15px">Project name in header</span>  <span class="scale-role">Header</span></div>
+        <div class="scale-row"><span class="scale-size">16px</span>  <span class="scale-sample" style="font-size:16px">Dashboard project card name</span>  <span class="scale-role">DashboardPage</span></div>
+        <div class="scale-row"><span class="scale-size">16.25px</span>  <span class="scale-sample" style="font-size:16.25px">text-xl — "All set!" heading</span>  <span class="scale-role">StepDone</span></div>
+        <div class="scale-row"><span class="scale-size">19.5px</span>  <span class="scale-sample" style="font-size:19.5px">text-2xl — dashboard title</span>  <span class="scale-role">DashboardPage</span></div>
+        <div class="scale-row"><span class="scale-size">22px</span>  <span class="scale-sample" style="font-size:22px">Setup / Pin page title</span>  <span class="scale-role">SetupPage, PinPage</span></div>
+      </div>
+      <div class="callout callout-err">
+        <em>3 sizes</em> compete for "small text" (<span class="val">9.75</span>, <span class="val">10</span>, <span class="val">11</span>px).<br>
+        <em>text-[13px]</em> and <em>text-base</em> are identical but used separately.<br>
+        <em>4 sizes</em> for page headings (<span class="val">16</span>, <span class="val">16.25</span>, <span class="val">19.5</span>, <span class="val">22</span>px).
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — 7 stops</div>
+      <div class="mock-group">
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">10px</span>  <span class="scale-sample" style="font-size:10px">Badges, thumbnails, tiny labels</span>  <span class="scale-role">text-[10px]</span></div>
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">11px</span>  <span class="scale-sample" style="font-size:11px">Metadata, section headers, gutters</span>  <span class="scale-role">text-[11px]</span></div>
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">13px</span>  <span class="scale-sample" style="font-size:13px">Body text, menu items, UI text</span>  <span class="scale-role">text-[13px]</span></div>
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">15px</span>  <span class="scale-sample" style="font-size:15px">Section headings, project name</span>  <span class="scale-role">text-[15px]</span></div>
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">20px</span>  <span class="scale-sample" style="font-size:20px">Page titles (secondary)</span>  <span class="scale-role">text-xl</span></div>
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">24px</span>  <span class="scale-sample" style="font-size:24px">Page titles (primary)</span>  <span class="scale-role">text-2xl</span></div>
+        <div class="scale-row"><span class="scale-size" style="color:var(--color-success)">39px</span>  <span class="scale-sample" style="font-size:39px">Display / decorative</span>  <span class="scale-role">text-5xl</span></div>
+      </div>
+      <div class="callout callout-ok">
+        Consolidates <span class="fix">8px, 9px, 9.75px → 10px</span>.<br>
+        Consolidates <span class="fix">text-xs, text-[10px], text-[11px] → text-[10px] + text-[11px]</span> with clear roles.<br>
+        Consolidates <span class="fix">text-sm, text-[13px], text-base → text-[13px]</span> as the single body size.<br>
+        Consolidates <span class="fix">text-lg, text-[15px], text-[16px] → text-[15px]</span>.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     2. CHAT MESSAGES
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">02</span>
+    <span class="section-title">Chat Messages</span>
+  </div>
+  <p class="section-desc">
+    Messages are mostly consistent already. The main issue is <code>leading-[1.7]</code> vs <code>leading-[1.55]</code> for thinking blocks, and the body text using <code>text-[13px]</code> while the textarea uses <code>text-base</code>.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before</div>
+
+      <div class="mock-group">
+        <div class="msg-container">
+          <!-- User Message -->
+          <div style="margin-bottom:12px">
+            <div style="font-size:11px; font-family:var(--font-mono); font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:8px">You</div>
+            <div class="msg-card msg-card-user" style="padding:16px 20px">
+              <div class="msg-body" style="font-size:13px; line-height:1.7">
+                <p>Can you refactor the authentication module to use JWT tokens instead of session cookies?</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Assistant Message -->
+          <div style="margin-bottom:12px">
+            <div style="font-size:11px; font-family:var(--font-mono); font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:8px">Assistant</div>
+            <div class="msg-card msg-card-assistant" style="padding:16px 20px">
+              <div class="msg-body" style="font-size:13px; line-height:1.7">
+                <p>I'll refactor the auth module. Let me start by examining the current implementation.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Thinking (streaming) — note different line-height -->
+          <div style="padding:8px 12px; border-radius:6px; border:1px solid var(--color-border-subtle); background:var(--color-thinking-bg)">
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
+              <span style="font-size:9.75px; font-weight:500; color:var(--color-thinking)">Thinking...</span>
+            </div>
+            <div style="font-size:13px; line-height:1.55; color:var(--color-text-secondary); font-family:var(--font-mono)">
+              I need to check if there are any existing JWT utilities in the codebase and understand the session cookie implementation...
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-err">
+        Thinking streaming uses <span class="val">leading-[1.55]</span> but expanded thinking uses <span class="val">leading-[1.7]</span>.<br>
+        Body text is <span class="val">text-[13px]</span> but InputArea textarea is <span class="val">text-base</span> (same px, different class).
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After</div>
+
+      <div class="mock-group">
+        <div class="msg-container">
+          <!-- User Message -->
+          <div style="margin-bottom:12px">
+            <div style="font-size:11px; font-family:var(--font-mono); font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:8px">You</div>
+            <div class="msg-card msg-card-user" style="padding:16px 20px">
+              <div class="msg-body" style="font-size:13px; line-height:1.7">
+                <p>Can you refactor the authentication module to use JWT tokens instead of session cookies?</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Assistant Message -->
+          <div style="margin-bottom:12px">
+            <div style="font-size:11px; font-family:var(--font-mono); font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted); margin-bottom:8px">Assistant</div>
+            <div class="msg-card msg-card-assistant" style="padding:16px 20px">
+              <div class="msg-body" style="font-size:13px; line-height:1.7">
+                <p>I'll refactor the auth module. Let me start by examining the current implementation.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Thinking (streaming) — UNIFIED line-height -->
+          <div style="padding:8px 12px; border-radius:6px; border:1px solid var(--color-border-subtle); background:var(--color-thinking-bg)">
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
+              <span style="font-size:11px; font-weight:500; color:var(--color-thinking)">Thinking...</span>
+            </div>
+            <div style="font-size:13px; line-height:1.7; color:var(--color-text-secondary); font-family:var(--font-mono)">
+              I need to check if there are any existing JWT utilities in the codebase and understand the session cookie implementation...
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-ok">
+        Thinking uses <span class="fix">leading-[1.7]</span> in both streaming and expanded states.<br>
+        All body text uses <span class="fix">text-[13px]</span> exclusively (drop text-base alias).
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     3. UPPERCASE SECTION HEADERS
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">03</span>
+    <span class="section-title">Uppercase Section Headers</span>
+  </div>
+  <p class="section-desc">
+    The "uppercase semibold" section header is a core pattern used across the sidebar, dropdowns, and settings. Currently 5+ variations exist with different font sizes and tracking values.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — 5+ variations</div>
+      <div class="mock-group">
+        <div class="mock-group-label">SessionList "Sessions"</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px">SESSIONS</div>
+
+        <div class="mock-group-label">SessionList date groups</div>
+        <div class="section-hdr" style="font-size:9px; font-weight:600; letter-spacing:0.3px">TODAY</div>
+
+        <div class="mock-group-label">ProjectSwitcher instance headers</div>
+        <div class="section-hdr" style="font-size:10px; font-weight:600; letter-spacing:0.5px">LOCALHOST:4096</div>
+
+        <div class="mock-group-label">SettingsPanel appearance</div>
+        <div class="section-hdr" style="font-size:10px; font-weight:600; letter-spacing:0.1em">DARK</div>
+
+        <div class="mock-group-label">SettingsPanel instances</div>
+        <div class="section-hdr" style="font-size:9.75px; font-weight:500; letter-spacing:0.05em">2 INSTANCES</div>
+
+        <div class="mock-group-label">StepHeader counter</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:1px">STEP 1 OF 4</div>
+
+        <div class="mock-group-label">ModelSelector providers</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px">ANTHROPIC</div>
+
+        <div class="mock-group-label">SidebarFilePanel</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px">FILE BROWSER</div>
+      </div>
+      <div class="callout callout-err">
+        Sizes: <span class="val">9px</span>, <span class="val">9.75px</span>, <span class="val">10px</span>, <span class="val">11px</span>.<br>
+        Tracking: <span class="val">0.3px</span>, <span class="val">0.5px</span>, <span class="val">0.05em</span>, <span class="val">0.1em</span>, <span class="val">1px</span>.<br>
+        Weights: <span class="val">500</span> vs <span class="val">600</span>.
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — 2 tiers</div>
+      <div class="mock-group">
+        <div class="mock-group-label">Primary headers (sections, panels, providers)</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">SESSIONS</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">ANTHROPIC</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">FILE BROWSER</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">DARK</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">2 INSTANCES</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">STEP 1 OF 4</div>
+        <div class="section-hdr" style="font-size:11px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">LOCALHOST:4096</div>
+
+        <div class="mock-divider" style="margin: 8px 0"></div>
+
+        <div class="mock-group-label">Secondary headers (date groups, sub-sections)</div>
+        <div class="section-hdr" style="font-size:10px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">TODAY</div>
+        <div class="section-hdr" style="font-size:10px; font-weight:600; letter-spacing:0.5px; margin-bottom:3px">YESTERDAY</div>
+      </div>
+      <div class="callout callout-ok">
+        Primary: <span class="fix">11px / 600 / 0.5px</span> — used for all panel/section/provider headers.<br>
+        Secondary: <span class="fix">10px / 600 / 0.5px</span> — used only for date groups and sub-categories.<br>
+        All use <span class="fix">font-semibold</span> (never font-medium for headers).
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     4. BUTTON TIERS
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">04</span>
+    <span class="section-title">Button Tiers</span>
+  </div>
+  <p class="section-desc">
+    Currently, buttons use 4+ different size/weight/padding combinations for similar roles. The proposal standardizes to 3 tiers.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — inconsistent sizing</div>
+      <div class="mock-group" style="gap:16px">
+        <div>
+          <div class="mock-group-label">Setup CTA buttons</div>
+          <button class="btn btn-primary" style="font-size:11.375px; font-weight:600; padding:12px 24px; border-radius:10px; font-family:var(--font-mono)">Enable Push Notifications</button>
+          <div class="callout" style="margin-top:6px"><span class="val">text-sm (11.375px)</span> &middot; font-semibold &middot; px-6 py-3</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Permission/Question action buttons</div>
+          <button class="btn btn-primary" style="font-size:11.375px; font-weight:500; padding:8px 16px; border-radius:6px; min-height:48px; font-family:var(--font-mono)">Allow</button>
+          <button class="btn btn-secondary" style="font-size:11.375px; font-weight:500; padding:8px 16px; border-radius:6px; min-height:48px; font-family:var(--font-mono)">Deny</button>
+          <div class="callout" style="margin-top:6px"><span class="val">text-sm</span> &middot; font-medium &middot; px-4 py-2 min-h-[48px]</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Modal action buttons</div>
+          <button class="btn btn-secondary" style="font-size:13px; font-weight:400; padding:6px 16px; border-radius:6px; font-family:var(--font-mono)">Cancel</button>
+          <button class="btn btn-primary" style="font-size:13px; font-weight:500; padding:6px 16px; border-radius:6px; font-family:var(--font-mono)">Rewind</button>
+          <div class="callout" style="margin-top:6px"><span class="val">text-[13px]</span> &middot; font-medium &middot; py-1.5 px-4</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Plan approval buttons (CSS, not Tailwind)</div>
+          <button class="btn btn-primary" style="font-size:14px; font-weight:600; padding:8px 24px; border-radius:6px; font-family:var(--font-mono)">Approve</button>
+          <div class="callout" style="margin-top:6px"><span class="val">0.875rem (14px)</span> &middot; 600 &middot; 0.5rem 1.5rem</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Instance/small action buttons</div>
+          <button class="btn btn-inline" style="font-size:9.75px; font-weight:400; padding:4px 12px; border-radius:6px; font-family:var(--font-mono)">Start</button>
+          <button class="btn btn-inline" style="font-size:9.75px; font-weight:400; padding:4px 12px; border-radius:6px; font-family:var(--font-mono)">Remove</button>
+          <div class="callout" style="margin-top:6px"><span class="val">text-xs (9.75px)</span> &middot; normal &middot; px-3 py-1</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — 3 standardized tiers</div>
+      <div class="mock-group" style="gap:16px">
+        <div>
+          <div class="mock-group-label">Tier 1 — CTA / Primary</div>
+          <button class="btn btn-primary" style="font-size:13px; font-weight:600; padding:12px 24px; border-radius:10px; font-family:var(--font-mono)">Enable Push Notifications</button>
+          <button class="btn btn-primary" style="font-size:13px; font-weight:600; padding:12px 24px; border-radius:10px; font-family:var(--font-mono); margin-top:6px">Approve</button>
+          <div class="callout callout-ok" style="margin-top:6px"><span class="fix">text-[13px]</span> &middot; font-semibold &middot; px-6 py-3 &middot; rounded-[10px]</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Tier 2 — Secondary / Modal</div>
+          <button class="btn btn-primary" style="font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; font-family:var(--font-mono)">Allow</button>
+          <button class="btn btn-secondary" style="font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; font-family:var(--font-mono)">Deny</button>
+          <button class="btn btn-secondary" style="font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; font-family:var(--font-mono)">Cancel</button>
+          <button class="btn btn-primary" style="font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; font-family:var(--font-mono)">Rewind</button>
+          <div class="callout callout-ok" style="margin-top:6px"><span class="fix">text-[13px]</span> &middot; font-medium &middot; px-4 py-2 &middot; rounded-md</div>
+        </div>
+        <div>
+          <div class="mock-group-label">Tier 3 — Inline / Small</div>
+          <button class="btn btn-inline" style="font-size:11px; font-weight:500; padding:6px 12px; border-radius:6px; font-family:var(--font-mono)">Start</button>
+          <button class="btn btn-inline" style="font-size:11px; font-weight:500; padding:6px 12px; border-radius:6px; font-family:var(--font-mono)">Remove</button>
+          <button class="btn btn-inline" style="font-size:11px; font-weight:500; padding:6px 12px; border-radius:6px; font-family:var(--font-mono)">Scan Now</button>
+          <div class="callout callout-ok" style="margin-top:6px"><span class="fix">text-[11px]</span> &middot; font-medium &middot; px-3 py-1.5 &middot; rounded-md</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     5. DROPDOWN MENUS
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">05</span>
+    <span class="section-title">Dropdown Menu Items</span>
+  </div>
+  <p class="section-desc">
+    Dropdown items vary in font size and padding across CommandMenu, FileMenu, ModelSelector, ProjectSwitcher, SessionContextMenu, and Header dropdowns.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — 6 variations</div>
+      <div class="mock-group" style="gap:14px">
+
+        <div>
+          <div class="mock-group-label">CommandMenu / FileMenu</div>
+          <div class="dropdown-mock" style="width:280px">
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-mono)">
+              <span style="font-weight:500">/compact</span>
+              <span class="dropdown-item-desc" style="font-size:13px">Toggle compact mode</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-mono)">
+              <span style="font-weight:500">/theme</span>
+              <span class="dropdown-item-desc" style="font-size:13px">Change theme</span>
+            </div>
+          </div>
+          <div class="callout" style="margin-top:4px"><span class="val">py-2 px-3.5</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">ModelSelector</div>
+          <div class="dropdown-mock" style="width:280px">
+            <div class="dropdown-item" style="font-size:13px; padding:6px 14px; gap:8px; line-height:1.4; font-family:var(--font-brand)">
+              <span>claude-sonnet-4-20250514</span>
+              <span class="dropdown-check" style="margin-left:auto; font-weight:700; font-size:10px">✓</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:6px 14px; gap:8px; line-height:1.4; font-family:var(--font-brand)">
+              <span>gpt-4o</span>
+            </div>
+          </div>
+          <div class="callout" style="margin-top:4px"><span class="val">py-1.5 px-3.5</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">ProjectSwitcher</div>
+          <div class="dropdown-mock" style="width:280px">
+            <div class="dropdown-item" style="font-size:13px; padding:10px 12px; gap:10px; font-family:var(--font-brand)">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--color-success);flex-shrink:0"></span>
+              <span style="font-weight:600">conduit</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:10px 12px; gap:10px; font-family:var(--font-brand)">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--color-text-dimmer);flex-shrink:0"></span>
+              <span>my-app</span>
+            </div>
+          </div>
+          <div class="callout" style="margin-top:4px"><span class="val">px-3 py-2.5</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">Header instance dropdown</div>
+          <div class="dropdown-mock" style="width:200px">
+            <div class="dropdown-item" style="font-size:9.75px; padding:6px 12px; gap:8px">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--color-success);flex-shrink:0"></span>
+              <span>localhost:4096</span>
+            </div>
+          </div>
+          <div class="callout" style="margin-top:4px"><span class="val">text-xs &middot; px-3 py-1.5</span> (different size!)</div>
+        </div>
+      </div>
+      <div class="callout callout-err">
+        Vertical padding ranges from <span class="val">py-1.5</span> to <span class="val">py-2.5</span>.<br>
+        Horizontal padding: <span class="val">px-3</span> vs <span class="val">px-3.5</span>.<br>
+        Header dropdown uses <span class="val">text-xs</span> while all others use <span class="val">text-[13px]</span>.
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — unified item pattern</div>
+      <div class="mock-group" style="gap:14px">
+
+        <div>
+          <div class="mock-group-label">CommandMenu / FileMenu</div>
+          <div class="dropdown-mock" style="width:280px">
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-mono)">
+              <span style="font-weight:500">/compact</span>
+              <span class="dropdown-item-desc" style="font-size:13px">Toggle compact mode</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-mono)">
+              <span style="font-weight:500">/theme</span>
+              <span class="dropdown-item-desc" style="font-size:13px">Change theme</span>
+            </div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px"><span class="fix">py-2 px-3.5 text-[13px]</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">ModelSelector</div>
+          <div class="dropdown-mock" style="width:280px">
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; line-height:1.4; font-family:var(--font-brand)">
+              <span>claude-sonnet-4-20250514</span>
+              <span class="dropdown-check" style="margin-left:auto; font-weight:700; font-size:10px">✓</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; line-height:1.4; font-family:var(--font-brand)">
+              <span>gpt-4o</span>
+            </div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px"><span class="fix">py-2 px-3.5 text-[13px]</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">ProjectSwitcher</div>
+          <div class="dropdown-mock" style="width:280px">
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-brand)">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--color-success);flex-shrink:0"></span>
+              <span style="font-weight:600">conduit</span>
+            </div>
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px; font-family:var(--font-brand)">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--color-text-dimmer);flex-shrink:0"></span>
+              <span>my-app</span>
+            </div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px"><span class="fix">py-2 px-3.5 text-[13px]</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">Header instance dropdown</div>
+          <div class="dropdown-mock" style="width:200px">
+            <div class="dropdown-item" style="font-size:13px; padding:8px 14px; gap:8px">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--color-success);flex-shrink:0"></span>
+              <span>localhost:4096</span>
+            </div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px"><span class="fix">py-2 px-3.5 text-[13px]</span> — matches all others</div>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        Every dropdown item: <span class="fix">py-2 px-3.5 text-[13px] gap-2</span>.<br>
+        Font family varies by context (mono for code, brand for UI) — that's intentional, not a bug.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     6. SIDEBAR
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">06</span>
+    <span class="section-title">Sidebar Components</span>
+  </div>
+  <p class="section-desc">
+    Sidebar horizontal padding varies (<code>px-1</code> through <code>px-3.5</code>) across different sections. Brand font is applied via inline style everywhere.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before</div>
+      <div class="sidebar-mock">
+        <!-- Header: px-3 pt-2.5 pb-2 -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px 8px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <div style="width:20px; height:20px; border-radius:4px; background:var(--color-accent); opacity:0.8"></div>
+            <span style="font-size:11.375px; font-weight:500; letter-spacing:0.14em; font-family:var(--font-brand); color:var(--color-text)">conduit</span>
+          </div>
+          <div style="width:20px; height:20px; border-radius:4px; background:var(--color-border-subtle)"></div>
+        </div>
+
+        <!-- ProjectSwitcher: px-1 -->
+        <div style="padding:0 4px">
+          <div style="padding:6px 8px; display:flex; align-items:center; gap:8px; border-radius:6px; background:var(--color-sidebar-hover); font-family:var(--font-brand)">
+            <div style="flex:1; min-width:0">
+              <div style="font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:var(--color-text-muted); line-height:1.25">PROJECTS</div>
+              <div style="font-size:11.375px; font-weight:600; color:var(--color-text)" class="truncate">conduit</div>
+            </div>
+            <span style="font-size:10px">▼</span>
+          </div>
+        </div>
+
+        <!-- Actions: px-2.5 py-2 -->
+        <div style="padding:8px 10px; display:flex; flex-direction:column; gap:1px">
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div>
+            <span>New session</span>
+          </div>
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div>
+            <span>File browser</span>
+          </div>
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div>
+            <span>Terminal</span>
+          </div>
+        </div>
+
+        <!-- Sessions header: via SessionList -->
+        <div style="padding:0 8px">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 8px">
+            <span style="font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:var(--color-text-muted); font-family:var(--font-brand)">SESSIONS</span>
+          </div>
+        </div>
+
+        <!-- Session items: px-2 py-0.5 -->
+        <div style="padding:0 8px 4px">
+          <div class="session-item" style="padding:6px 10px; gap:4px; font-size:13px; flex-direction:column; align-items:stretch; font-family:var(--font-brand)">
+            <div style="display:flex; align-items:center; gap:6px">
+              <span class="session-dot"></span>
+              <span class="truncate" style="flex:1">Refactor auth module</span>
+            </div>
+            <span class="session-meta" style="font-size:11px; padding-left:13px; font-family:var(--font-brand)">2 minutes ago</span>
+          </div>
+          <div class="session-item" style="padding:6px 10px; gap:4px; font-size:13px; flex-direction:column; align-items:stretch; font-family:var(--font-brand)">
+            <div style="display:flex; align-items:center; gap:6px">
+              <span class="truncate" style="flex:1; padding-left:13px">Fix deployment script</span>
+            </div>
+            <span class="session-meta" style="font-size:11px; padding-left:13px; font-family:var(--font-brand)">1 hour ago</span>
+          </div>
+        </div>
+
+        <!-- Footer: px-3.5 py-2.5 -->
+        <div style="padding:10px 14px; border-top:1px solid var(--color-border-subtle)">
+          <div style="font-size:10px; color:var(--color-text-dimmer); padding:0 8px; font-family:var(--font-brand)">conduit v0.8.2</div>
+        </div>
+      </div>
+
+      <div class="callout callout-err" style="margin-top:10px">
+        Horizontal padding: header <span class="val">px-3</span>, switcher <span class="val">px-1</span>, actions <span class="val">px-2.5</span>, sessions <span class="val">px-2</span>, footer <span class="val">px-3.5</span>.<br>
+        Brand font applied via <span class="val">style="font-family:..."</span> on every element.
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After</div>
+      <div class="sidebar-mock">
+        <!-- Header: px-3 pt-2.5 pb-2 (kept) -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px 8px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <div style="width:20px; height:20px; border-radius:4px; background:var(--color-accent); opacity:0.8"></div>
+            <span style="font-size:11px; font-weight:500; letter-spacing:0.14em; font-family:var(--font-brand); color:var(--color-text)">conduit</span>
+          </div>
+          <div style="width:20px; height:20px; border-radius:4px; background:var(--color-border-subtle)"></div>
+        </div>
+
+        <!-- ProjectSwitcher: px-2.5 (aligned with actions) -->
+        <div style="padding:0 10px">
+          <div style="padding:6px 10px; display:flex; align-items:center; gap:8px; border-radius:6px; background:var(--color-sidebar-hover); font-family:var(--font-brand)">
+            <div style="flex:1; min-width:0">
+              <div style="font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:var(--color-text-muted); line-height:1.25">PROJECTS</div>
+              <div style="font-size:13px; font-weight:600; color:var(--color-text)" class="truncate">conduit</div>
+            </div>
+            <span style="font-size:10px">▼</span>
+          </div>
+        </div>
+
+        <!-- Actions: px-2.5 py-2 (kept) -->
+        <div style="padding:8px 10px; display:flex; flex-direction:column; gap:1px">
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div>
+            <span>New session</span>
+          </div>
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div>
+            <span>File browser</span>
+          </div>
+          <div class="sidebar-action" style="padding:6px 10px; gap:8px; font-size:13px; font-family:var(--font-brand)">
+            <div class="sidebar-action-icon"></div>
+            <span>Terminal</span>
+          </div>
+        </div>
+
+        <!-- Sessions header: px-2.5 -->
+        <div style="padding:0 10px">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 10px">
+            <span style="font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:var(--color-text-muted); font-family:var(--font-brand)">SESSIONS</span>
+          </div>
+        </div>
+
+        <!-- Session items: px-2.5 -->
+        <div style="padding:0 10px 4px">
+          <div class="session-item" style="padding:6px 10px; gap:4px; font-size:13px; flex-direction:column; align-items:stretch; font-family:var(--font-brand)">
+            <div style="display:flex; align-items:center; gap:6px">
+              <span class="session-dot"></span>
+              <span class="truncate" style="flex:1">Refactor auth module</span>
+            </div>
+            <span class="session-meta" style="font-size:11px; padding-left:13px; font-family:var(--font-brand)">2 minutes ago</span>
+          </div>
+          <div class="session-item" style="padding:6px 10px; gap:4px; font-size:13px; flex-direction:column; align-items:stretch; font-family:var(--font-brand)">
+            <div style="display:flex; align-items:center; gap:6px">
+              <span class="truncate" style="flex:1; padding-left:13px">Fix deployment script</span>
+            </div>
+            <span class="session-meta" style="font-size:11px; padding-left:13px; font-family:var(--font-brand)">1 hour ago</span>
+          </div>
+        </div>
+
+        <!-- Footer: px-2.5 (aligned) -->
+        <div style="padding:10px 10px; border-top:1px solid var(--color-border-subtle)">
+          <div style="font-size:10px; color:var(--color-text-dimmer); padding:0 10px; font-family:var(--font-brand)">conduit v0.8.2</div>
+        </div>
+      </div>
+
+      <div class="callout callout-ok" style="margin-top:10px">
+        All sidebar sections use <span class="fix">px-2.5</span> as the container padding.<br>
+        Inner items remain <span class="fix">py-1.5 px-2.5</span> for action buttons and session items.<br>
+        Brand font via <span class="fix">font-brand</span> Tailwind class (not inline style).<br>
+        Brand name: <span class="fix">text-[11px]</span> (was text-sm / 11.375px — negligible visual change, consistent scale).
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     7. TOOL ITEMS & RESULT AREAS
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">07</span>
+    <span class="section-title">Tool Items & Result Areas</span>
+  </div>
+  <p class="section-desc">
+    ToolItem uses different padding and max-height for its result area vs SkillItem and ToolGroupItem.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before</div>
+      <div class="mock-group" style="gap:12px">
+
+        <div>
+          <div class="mock-group-label">ToolGroupItem / SkillItem result</div>
+          <div style="margin:0 10px">
+            <div class="tool-result" style="font-family:var(--font-mono); font-size:9.75px; padding:8px 10px; max-height:160px; overflow-y:auto">$ npm run build
+&gt; conduit@0.8.2 build
+&gt; vite build
+
+vite v6.0.0 building for production...
+✓ 142 modules transformed.
+dist/index.html  0.42 kB │ gzip: 0.27 kB
+dist/assets/index-DfKg4.js  285.42 kB │ gzip: 82.1 kB</div>
+          </div>
+          <div class="callout" style="margin-top:4px"><span class="val">py-2 px-2.5 max-h-[300px]</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">ToolItem generic result (different!)</div>
+          <div style="margin:0 10px">
+            <div class="tool-result" style="font-family:var(--font-mono); font-size:9.75px; padding:12px 16px; max-height:120px; overflow-y:auto">$ npm run build
+&gt; conduit@0.8.2 build
+&gt; vite build
+
+vite v6.0.0 building for production...
+✓ 142 modules transformed.
+dist/index.html  0.42 kB │ gzip: 0.27 kB
+dist/assets/index-DfKg4.js  285.42 kB │ gzip: 82.1 kB</div>
+          </div>
+          <div class="callout" style="margin-top:4px"><span class="val">py-3 px-4 max-h-[200px]</span> — larger padding, smaller max-height</div>
+        </div>
+      </div>
+      <div class="callout callout-err">
+        Same visual role, different padding (<span class="val">8/10</span> vs <span class="val">12/16</span>) and max-height (<span class="val">300</span> vs <span class="val">200</span>).
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After</div>
+      <div class="mock-group" style="gap:12px">
+
+        <div>
+          <div class="mock-group-label">All tool result areas (unified)</div>
+          <div style="margin:0 10px">
+            <div class="tool-result" style="font-family:var(--font-mono); font-size:11px; padding:8px 10px; max-height:160px; overflow-y:auto">$ npm run build
+&gt; conduit@0.8.2 build
+&gt; vite build
+
+vite v6.0.0 building for production...
+✓ 142 modules transformed.
+dist/index.html  0.42 kB │ gzip: 0.27 kB
+dist/assets/index-DfKg4.js  285.42 kB │ gzip: 82.1 kB</div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px"><span class="fix">py-2 px-2.5 text-[11px] max-h-[300px]</span></div>
+        </div>
+
+        <div>
+          <div class="mock-group-label">Same pattern everywhere</div>
+          <div style="margin:0 10px">
+            <div class="tool-result" style="font-family:var(--font-mono); font-size:11px; padding:8px 10px; max-height:160px; overflow-y:auto">Read file: src/lib/auth.ts (42 lines)
+1: import { sign, verify } from 'jsonwebtoken';
+2: import type { JWTPayload } from './types';
+3:
+4: export function createToken(payload: JWTPayload) {
+5:   return sign(payload, process.env.JWT_SECRET!);</div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px"><span class="fix">py-2 px-2.5 text-[11px] max-h-[300px]</span> — identical to above</div>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        Unified: <span class="fix">py-2 px-2.5 max-h-[300px] text-[11px] font-mono</span> for all tool results.<br>
+        Text size bumped from text-xs (9.75px) to <span class="fix">text-[11px]</span> for readability.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     8. LINE-HEIGHT
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">08</span>
+    <span class="section-title">Line-Height Tiers</span>
+  </div>
+  <p class="section-desc">
+    Currently 10 distinct line-height values. The proposal reduces to 4 semantic tiers.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — 10 values</div>
+      <div class="mock-group" style="gap:10px">
+        <div class="lh-specimen" data-lh="leading-none (1.0)" style="font-size:13px; line-height:1">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-none, used on close buttons and badges.
+        </div>
+        <div class="lh-specimen" data-lh="leading-[1.2]" style="font-size:13px; line-height:1.2">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-[1.2], used only on PastePreview thumbnail names.
+        </div>
+        <div class="lh-specimen" data-lh="leading-[1.3]" style="font-size:13px; line-height:1.3">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-[1.3], used on TodoOverlay descriptions and md-content headings.
+        </div>
+        <div class="lh-specimen" data-lh="leading-[1.4]" style="font-size:13px; line-height:1.4">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-[1.4], used on InputArea textarea, ModelSelector items, and TodoOverlay subjects.
+        </div>
+        <div class="lh-specimen" data-lh="1.5 (root default)" style="font-size:13px; line-height:1.5">
+          The quick brown fox jumps over the lazy dog. This text demonstrates the root default line-height of 1.5, inherited by most elements.
+        </div>
+        <div class="lh-specimen" data-lh="leading-[1.55]" style="font-size:13px; line-height:1.55">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-[1.55], used on ThinkingBlock streaming, FileViewer code, and md-content pre code.
+        </div>
+        <div class="lh-specimen" data-lh="leading-relaxed (1.625)" style="font-size:13px; line-height:1.625">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-relaxed (1.625), used on setup instructions and DebugPanel.
+        </div>
+        <div class="lh-specimen" data-lh="leading-[1.7]" style="font-size:13px; line-height:1.7">
+          The quick brown fox jumps over the lazy dog. This text demonstrates leading-[1.7], used on AssistantMessage body, UserMessage body, and PlanMode markdown.
+        </div>
+      </div>
+      <div class="callout callout-err">
+        <span class="val">1.2</span>, <span class="val">1.3</span>, <span class="val">1.4</span>, <span class="val">1.5</span>, <span class="val">1.55</span>, <span class="val">1.625</span>, <span class="val">1.7</span> all used for body-like text.
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — 4 tiers</div>
+      <div class="mock-group" style="gap:10px">
+        <div class="lh-specimen" data-lh="Compact — leading-none (1.0)" style="font-size:13px; line-height:1">
+          Badges, close buttons, status indicators.
+        </div>
+        <div class="lh-specimen" data-lh="UI — leading-[1.4]" style="font-size:13px; line-height:1.4">
+          The quick brown fox jumps over the lazy dog. Menu items, form inputs, todo subjects, model selector items, dropdowns — all interactive UI text.
+        </div>
+        <div class="lh-specimen" data-lh="Code — leading-[1.55]" style="font-size:13px; line-height:1.55">
+          The quick brown fox jumps over the lazy dog. Code blocks, file viewer, thinking blocks (streaming and expanded), tool results — monospaced content.
+        </div>
+        <div class="lh-specimen" data-lh="Prose — leading-[1.7]" style="font-size:13px; line-height:1.7">
+          The quick brown fox jumps over the lazy dog. Chat message bodies, markdown content, setup instructions, plan mode text — anything meant to be read as prose.
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        <span class="fix">leading-none</span> — compact/badges.<br>
+        <span class="fix">leading-[1.4]</span> — UI elements (absorbs 1.2, 1.3, 1.4).<br>
+        <span class="fix">leading-[1.55]</span> — code/mono content (absorbs 1.5, 1.55).<br>
+        <span class="fix">leading-[1.7]</span> — prose (absorbs 1.625, 1.7).
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     9. LETTER-SPACING
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">09</span>
+    <span class="section-title">Letter-Spacing</span>
+  </div>
+  <p class="section-desc">
+    Uppercase section headers alone use 5+ different tracking values. Brand text uses two different values.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — mixed tracking</div>
+      <div class="mock-group" style="gap:8px">
+        <div class="tracking-row">
+          <span class="tracking-label">0.3px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; color:var(--color-text-muted)">TODAY</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">SessionList date</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label">0.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted)">SESSIONS</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">SessionList</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label">0.05em</span>
+          <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--color-text-muted)">DARK</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">ThemePicker (scoped)</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label">0.1em</span>
+          <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--color-text-muted)">DARK</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">Settings appearance</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label">1px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:var(--color-text-muted)">STEP 1 OF 4</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">StepHeader</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label">1.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted)">ASSISTANT</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">Role labels</span>
+        </div>
+        <div class="mock-divider" style="margin:4px 0"></div>
+        <div class="tracking-row">
+          <span class="tracking-label">0.08em</span>
+          <span style="font-size:15px; font-weight:600; letter-spacing:0.08em; font-family:var(--font-brand); color:var(--color-text)">conduit</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">Header project</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label">0.14em</span>
+          <span style="font-size:11.375px; font-weight:500; letter-spacing:0.14em; font-family:var(--font-brand); color:var(--color-text)">conduit</span>
+          <span style="font-size:10px; color:var(--color-text-dimmer); margin-left:auto">Sidebar brand</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — 3 tracking values</div>
+      <div class="mock-group" style="gap:8px">
+        <div class="mock-group-label">Uppercase headers — tracking-[0.5px]</div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">0.5px</span>
+          <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted)">TODAY</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">0.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted)">SESSIONS</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">0.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted)">DARK</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">0.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted)">STEP 1 OF 4</span>
+        </div>
+
+        <div class="mock-divider" style="margin:4px 0"></div>
+        <div class="mock-group-label">Role labels — tracking-[1.5px]</div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">1.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted)">ASSISTANT</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">1.5px</span>
+          <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--color-text-muted)">YOU</span>
+        </div>
+
+        <div class="mock-divider" style="margin:4px 0"></div>
+        <div class="mock-group-label">Brand text — tracking-[0.14em]</div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">0.14em</span>
+          <span style="font-size:15px; font-weight:600; letter-spacing:0.14em; font-family:var(--font-brand); color:var(--color-text)">conduit</span>
+        </div>
+        <div class="tracking-row">
+          <span class="tracking-label" style="color:var(--color-success)">0.14em</span>
+          <span style="font-size:11px; font-weight:500; letter-spacing:0.14em; font-family:var(--font-brand); color:var(--color-text)">conduit</span>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        <span class="fix">0.5px</span> — all uppercase section headers.<br>
+        <span class="fix">1.5px</span> — role labels (wider to distinguish from headers).<br>
+        <span class="fix">0.14em</span> — brand text (em-based, scales with font size).
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     10. GAP SCALE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">10</span>
+    <span class="section-title">Gap Scale</span>
+  </div>
+  <p class="section-desc">
+    Gaps currently range from <code>gap-px</code> to <code>gap-4</code> with 10+ distinct values. The proposal defines 4 semantic tiers.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before — 10+ gap values</div>
+      <div class="mock-group" style="gap:8px">
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-px</span>
+          <div style="display:flex; gap:1px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">Sidebar actions</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-0.5</span>
+          <div style="display:flex; gap:2px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">SidebarFilePanel btns</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-[2px]</span>
+          <div style="display:flex; gap:2px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">AgentSelector, ModelSelector</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-1</span>
+          <div style="display:flex; gap:4px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">InputArea, SessionItem</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-1.5</span>
+          <div style="display:flex; gap:6px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">ThinkingBlock, ToolItem subtitle</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-2</span>
+          <div style="display:flex; gap:8px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">Header, Sidebar, ToolItem, ~20 more</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-2.5</span>
+          <div style="display:flex; gap:10px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">Tool headers, InputArea attach</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-3</span>
+          <div style="display:flex; gap:12px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">DiffView stats, ConnectOverlay</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-text-dimmer); min-width:60px; text-align:right">gap-4</span>
+          <div style="display:flex; gap:16px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-dimmer)">SettingsPanel cards, QrModal</span>
+        </div>
+      </div>
+      <div class="callout callout-err">
+        <span class="val">gap-px</span>, <span class="val">gap-0.5</span>, <span class="val">gap-[2px]</span> are visually indistinguishable.
+        <span class="val">gap-1.5</span> and <span class="val">gap-2</span> compete for "standard row" spacing.
+        <span class="val">gap-2.5</span> and <span class="val">gap-3</span> compete for "spacious" spacing.
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After — 4 semantic tiers</div>
+      <div class="mock-group" style="gap:12px">
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-success); min-width:60px; text-align:right; font-weight:600">gap-1</span>
+          <div style="display:flex; gap:4px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-secondary)">Tight — inline badges, icon+label, sidebar actions</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-success); min-width:60px; text-align:right; font-weight:600">gap-2</span>
+          <div style="display:flex; gap:8px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-secondary)">Standard — flex rows, headers, dropdowns, tool headers</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-success); min-width:60px; text-align:right; font-weight:600">gap-3</span>
+          <div style="display:flex; gap:12px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-secondary)">Spacious — card sections, settings rows</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:10px; color:var(--color-success); min-width:60px; text-align:right; font-weight:600">gap-4</span>
+          <div style="display:flex; gap:16px">
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+            <div style="width:40px; height:24px; background:var(--color-bg-surface); border-radius:4px; border:1px solid var(--color-border-subtle)"></div>
+          </div>
+          <span style="font-size:10px; color:var(--color-text-secondary)">Wide — page sections, dialogs</span>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        <span class="fix">gap-px, gap-0.5, gap-[2px] → gap-1</span>.<br>
+        <span class="fix">gap-1.5, gap-2 → gap-2</span> (standard).<br>
+        <span class="fix">gap-2.5, gap-3 → gap-3</span> (spacious).<br>
+        <span class="fix">gap-4</span> stays.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     11. MODAL DIALOGS
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">11</span>
+    <span class="section-title">Modal Dialogs</span>
+  </div>
+  <p class="section-desc">
+    Modal body text and button sizing differ between ConfirmModal, RewindBanner, and QrModal.
+  </p>
+
+  <div class="comparison">
+    <!-- BEFORE -->
+    <div class="comparison-col">
+      <div class="comparison-label label-before"><span class="label-dot"></span> Before</div>
+      <div class="mock-group" style="gap:20px">
+        <div>
+          <div class="mock-group-label">ConfirmModal / RewindBanner</div>
+          <div class="modal-mock" style="padding:20px 24px">
+            <p style="font-size:11.375px; line-height:1.5; color:var(--color-text); margin-bottom:16px">Are you sure you want to delete this session? This action cannot be undone.</p>
+            <div style="display:flex; gap:8px; justify-content:flex-end">
+              <button class="btn btn-secondary" style="font-size:13px; padding:6px 16px; border-radius:6px; font-family:var(--font-mono)">Cancel</button>
+              <button class="btn btn-primary" style="font-size:13px; font-weight:500; padding:6px 16px; border-radius:6px; font-family:var(--font-mono)">Delete</button>
+            </div>
+          </div>
+          <div class="callout" style="margin-top:4px">Body: <span class="val">text-sm (11.375px)</span> &middot; Buttons: <span class="val">text-[13px] py-1.5 px-4</span></div>
+        </div>
+        <div>
+          <div class="mock-group-label">QrModal</div>
+          <div class="modal-mock" style="padding:24px; display:flex; flex-direction:column; align-items:center; gap:16px">
+            <h2 style="font-size:13px; font-weight:600; color:var(--color-text)">Share via QR Code</h2>
+            <div style="width:160px; height:160px; background:white; border-radius:8px"></div>
+            <button class="btn btn-secondary" style="font-size:11.375px; font-family:var(--font-mono); padding:6px 12px; border-radius:6px">https://conduit.local:2634</button>
+          </div>
+          <div class="callout" style="margin-top:4px">Title: <span class="val">text-base (13px)</span> &middot; URL button: <span class="val">text-sm (11.375px)</span></div>
+        </div>
+      </div>
+      <div class="callout callout-err">
+        Body text: <span class="val">text-sm</span> vs title <span class="val">text-base</span> — only 1.6px difference.<br>
+        Padding: <span class="val">py-5 px-6</span> vs <span class="val">p-6</span>.<br>
+        URL button uses <span class="val">text-sm</span>, main buttons use <span class="val">text-[13px]</span>.
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="comparison-col">
+      <div class="comparison-label label-after"><span class="label-dot"></span> After</div>
+      <div class="mock-group" style="gap:20px">
+        <div>
+          <div class="mock-group-label">ConfirmModal / RewindBanner</div>
+          <div class="modal-mock" style="padding:20px 24px">
+            <p style="font-size:13px; line-height:1.4; color:var(--color-text); margin-bottom:16px">Are you sure you want to delete this session? This action cannot be undone.</p>
+            <div style="display:flex; gap:8px; justify-content:flex-end">
+              <button class="btn btn-secondary" style="font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; font-family:var(--font-mono)">Cancel</button>
+              <button class="btn btn-primary" style="font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; font-family:var(--font-mono)">Delete</button>
+            </div>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px">Body: <span class="fix">text-[13px] leading-[1.4]</span> &middot; Buttons: <span class="fix">Tier 2 — text-[13px] py-2 px-4</span></div>
+        </div>
+        <div>
+          <div class="mock-group-label">QrModal</div>
+          <div class="modal-mock" style="padding:20px 24px; display:flex; flex-direction:column; align-items:center; gap:16px">
+            <h2 style="font-size:15px; font-weight:600; color:var(--color-text)">Share via QR Code</h2>
+            <div style="width:160px; height:160px; background:white; border-radius:8px"></div>
+            <button class="btn btn-secondary" style="font-size:13px; font-family:var(--font-mono); padding:8px 16px; border-radius:6px">https://conduit.local:2634</button>
+          </div>
+          <div class="callout callout-ok" style="margin-top:4px">Title: <span class="fix">text-[15px]</span> — clear hierarchy. URL: <span class="fix">Tier 2 button</span>.</div>
+        </div>
+      </div>
+      <div class="callout callout-ok">
+        All modals: <span class="fix">py-5 px-6</span> padding, <span class="fix">text-[13px]</span> body, <span class="fix">text-[15px]</span> title.<br>
+        All buttons follow <span class="fix">Tier 2</span> pattern.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     SUMMARY TABLE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-number">&bull;</span>
+    <span class="section-title">Summary of Changes</span>
+  </div>
+
+  <div style="overflow-x:auto">
+    <table style="width:100%; border-collapse:collapse; font-size:12px; line-height:1.5">
+      <thead>
+        <tr style="border-bottom:2px solid var(--color-border)">
+          <th style="text-align:left; padding:8px 12px; color:var(--color-text-muted); font-weight:600">Property</th>
+          <th style="text-align:left; padding:8px 12px; color:var(--color-error); font-weight:600">Before (count)</th>
+          <th style="text-align:left; padding:8px 12px; color:var(--color-success); font-weight:600">After (count)</th>
+          <th style="text-align:left; padding:8px 12px; color:var(--color-text-muted); font-weight:600">Reduction</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Font sizes</td>
+          <td style="padding:8px 12px; color:var(--color-error)">18 values</td>
+          <td style="padding:8px 12px; color:var(--color-success)">7 values</td>
+          <td style="padding:8px 12px">-61%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Line-heights</td>
+          <td style="padding:8px 12px; color:var(--color-error)">10 values</td>
+          <td style="padding:8px 12px; color:var(--color-success)">4 tiers</td>
+          <td style="padding:8px 12px">-60%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Letter-spacings</td>
+          <td style="padding:8px 12px; color:var(--color-error)">11 values</td>
+          <td style="padding:8px 12px; color:var(--color-success)">3 values</td>
+          <td style="padding:8px 12px">-73%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Section header variants</td>
+          <td style="padding:8px 12px; color:var(--color-error)">9 variants</td>
+          <td style="padding:8px 12px; color:var(--color-success)">2 tiers</td>
+          <td style="padding:8px 12px">-78%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Button patterns</td>
+          <td style="padding:8px 12px; color:var(--color-error)">5+ patterns</td>
+          <td style="padding:8px 12px; color:var(--color-success)">3 tiers</td>
+          <td style="padding:8px 12px">-40%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Dropdown item patterns</td>
+          <td style="padding:8px 12px; color:var(--color-error)">6 patterns</td>
+          <td style="padding:8px 12px; color:var(--color-success)">1 pattern</td>
+          <td style="padding:8px 12px">-83%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Gap values</td>
+          <td style="padding:8px 12px; color:var(--color-error)">10+ values</td>
+          <td style="padding:8px 12px; color:var(--color-success)">4 tiers</td>
+          <td style="padding:8px 12px">-60%</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--color-border-subtle)">
+          <td style="padding:8px 12px">Inline font-family styles</td>
+          <td style="padding:8px 12px; color:var(--color-error)">30+ instances</td>
+          <td style="padding:8px 12px; color:var(--color-success)">0 (use font-brand class)</td>
+          <td style="padding:8px 12px">-100%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+</body>
+</html>

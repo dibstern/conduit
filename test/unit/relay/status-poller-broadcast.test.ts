@@ -190,10 +190,16 @@ async function createTestHarness(): Promise<TestHarness> {
 		projectDir: process.cwd(),
 		slug: "test-status-poller",
 		log: createSilentLogger(),
+		statusPollerInterval: 100,
+		messagePollerInterval: 150,
+		pollerGatingConfig: {
+			sseGracePeriodMs: 300,
+			sseActiveThresholdMs: 500,
+		},
 	});
 
 	// Wait for SSE + status poller to initialize
-	await new Promise((r) => setTimeout(r, 600));
+	await new Promise((r) => setTimeout(r, 200));
 
 	return {
 		relay,
@@ -317,7 +323,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		});
 
 		// Client B should NOT get status:processing — give it time to NOT arrive
-		await new Promise((r) => setTimeout(r, 300));
+		await new Promise((r) => setTimeout(r, 150));
 		const bStatuses = clientB
 			.getReceivedOfType("status")
 			.filter((m) => m["status"] === "processing");

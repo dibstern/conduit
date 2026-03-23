@@ -8,8 +8,7 @@
 	} from "../../stores/theme.svelte.js";
 	import { uiState } from "../../stores/ui.svelte.js";
 	import { routerState } from "../../stores/router.svelte.js";
-
-	let pickerEl = $state<HTMLDivElement>();
+	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 
 	const lists = $derived(getThemeLists());
 
@@ -20,12 +19,6 @@
 		"base0B",
 		"base0D",
 	] as const;
-
-	function handleClickOutside(e: MouseEvent) {
-		if (pickerEl && !pickerEl.contains(e.target as Node)) {
-			closeThemePicker();
-		}
-	}
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === "Escape") {
@@ -39,13 +32,9 @@
 
 	$effect(() => {
 		if (themeState.pickerOpen) {
-			setTimeout(() => {
-				document.addEventListener("click", handleClickOutside);
-				document.addEventListener("keydown", handleKeydown);
-			}, 0);
+			document.addEventListener("keydown", handleKeydown);
 		}
 		return () => {
-			document.removeEventListener("click", handleClickOutside);
 			document.removeEventListener("keydown", handleKeydown);
 		};
 	});
@@ -106,10 +95,10 @@
 
 {#if themeState.pickerOpen}
 	<div
-		bind:this={pickerEl}
 		class="theme-picker"
 		role="listbox"
 		aria-label="Select theme"
+		use:clickOutside={closeThemePicker}
 	>
 		{@render themeSection("Dark", lists.dark)}
 		{@render themeSection("Light", lists.light)}
