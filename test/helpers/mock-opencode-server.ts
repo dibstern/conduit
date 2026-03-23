@@ -87,6 +87,24 @@ export class MockOpenCodeServer {
 	 */
 	private statusOverride: QueuedRestResponse | undefined;
 
+	/** Counter for generating unique PTY IDs when no recording exists. */
+	private ptyCounter = 0;
+
+	/** Dynamically created PTY IDs (not from recording). */
+	private dynamicPtyIds = new Set<string>();
+
+	/** Sessions injected via POST /session (tracked separately for merging into all GET /session responses). */
+	private injectedSessions = new Map<string, Record<string, unknown>>();
+
+	/** Session IDs that have been deleted (filtered from GET /session). */
+	private deletedSessionIds = new Set<string>();
+
+	/** Title overrides from PATCH /session/:id. */
+	private renamedSessions = new Map<string, string>();
+
+	/** Counter for generating unique session IDs. */
+	private sessionCounter = 0;
+
 	/**
 	 * Whether the prompt has been sent (POST prompt_async consumed).
 	 * SSE batches are buffered until the prompt fires, preventing init-time
@@ -167,7 +185,81 @@ export class MockOpenCodeServer {
 		this.statusOverride = undefined;
 		this.promptFired = false;
 		this.pendingSseBatches = [];
+		this.ptyCounter = 0;
+		this.dynamicPtyIds.clear();
+		this.injectedSessions.clear();
+		this.deletedSessionIds.clear();
+		this.renamedSessions.clear();
+		this.sessionCounter = 0;
 		this.buildQueues();
+	}
+
+	/**
+	 * Force-flush any pending SSE batches without requiring a prompt.
+	 * Use in tests that need SSE events from REST activity alone.
+	 */
+	flushPendingSse(): void {
+		this.promptFired = true;
+		for (const batch of this.pendingSseBatches) {
+			this.emitSseBatch(batch);
+		}
+		this.pendingSseBatches = [];
+	}
+
+	/**
+	 * Emit a synthetic SSE event to all connected SSE clients.
+	 * Use in tests that need a specific event without depending on
+	 * the recording's SSE batch associations.
+	 */
+	emitTestEvent(
+		type = "session.updated",
+		properties: Record<string, unknown> = {},
+	): void {
+		const payload = JSON.stringify({ type, properties });
+		const frame = `data: ${payload}\n\n`;
+		for (const client of this.sseClients) {
+			if (!client.writableEnded) {
+				client.write(frame);
+			}
+		}
+	}
+
+	// ─── Session list fallback helpers ────────────────────────────────────
+	// These mutate the GET /session queue's fallback entry in place so that
+	// the standard queue-based response reflects create/delete/rename ops.
+
+	private getSessionListFallback(): Array<Record<string, unknown>> {
+		const queue = this.exactQueues.get("GET /session");
+		if (!queue || queue.length === 0) return [];
+		const fallback = queue.at(-1);
+		if (!fallback || !Array.isArray(fallback.responseBody)) return [];
+		return fallback.responseBody as Array<Record<string, unknown>>;
+	}
+
+	private injectIntoSessionListFallback(
+		session: Record<string, unknown>,
+	): void {
+		const queue = this.exactQueues.get("GET /session");
+		if (!queue || queue.length === 0) return;
+		const fallback = queue.at(-1);
+		if (!fallback || !Array.isArray(fallback.responseBody)) return;
+		(fallback.responseBody as Array<Record<string, unknown>>).push(session);
+	}
+
+	private removeFromSessionListFallback(id: string): void {
+		const queue = this.exactQueues.get("GET /session");
+		if (!queue || queue.length === 0) return;
+		const fallback = queue.at(-1);
+		if (!fallback || !Array.isArray(fallback.responseBody)) return;
+		fallback.responseBody = (
+			fallback.responseBody as Array<Record<string, unknown>>
+		).filter((s) => s["id"] !== id);
+	}
+
+	private renameInSessionListFallback(id: string, title: string): void {
+		const list = this.getSessionListFallback();
+		const session = list.find((s) => s["id"] === id);
+		if (session) session["title"] = title;
 	}
 
 	/**
@@ -188,6 +280,12 @@ export class MockOpenCodeServer {
 			this.promptFired = false;
 		}
 		this.pendingSseBatches = [];
+		this.ptyCounter = 0;
+		this.dynamicPtyIds.clear();
+		this.injectedSessions.clear();
+		this.deletedSessionIds.clear();
+		this.renamedSessions.clear();
+		this.sessionCounter = 0;
 		this.buildQueues();
 	}
 
@@ -293,21 +391,6 @@ export class MockOpenCodeServer {
 			{ name: "test", type: "directory" },
 		]);
 
-		// Session search endpoint returns empty matches by default.
-		this.ensureFallback("GET /session/search", 200, []);
-
-		// Ensure normalized fallbacks exist for endpoints that tests exercise
-		// but recordings don't always capture (session CRUD, PTY lifecycle).
-		this.ensureNormalizedFallback("DELETE /session/:param", 204, null);
-		this.ensureNormalizedFallback("PATCH /session/:param", 200, {
-			id: "mock-session",
-			title: "mock-title",
-		});
-		this.ensureFallback("POST /pty", 200, { id: "pty_mock001" });
-		this.ensureFallback("GET /pty", 200, [{ id: "pty_mock001" }]);
-		this.ensureNormalizedFallback("DELETE /pty/:param", 204, null);
-		this.ensureNormalizedFallback("PUT /pty/:param", 204, null);
-
 		// Ensure the relay selects the recording's target session at init
 		this.promoteTargetSession();
 
@@ -344,16 +427,6 @@ export class MockOpenCodeServer {
 	): void {
 		if (this.exactQueues.has(key) || this.normalizedQueues.has(key)) return;
 		this.exactQueues.set(key, [{ status, responseBody, sseBatch: [] }]);
-	}
-
-	/** Add a normalized fallback (e.g. "DELETE /session/:param") if not already present. */
-	private ensureNormalizedFallback(
-		key: string,
-		status: number,
-		responseBody: unknown,
-	): void {
-		if (this.normalizedQueues.has(key)) return;
-		this.normalizedQueues.set(key, [{ status, responseBody, sseBatch: [] }]);
 	}
 
 	/** Return a queue from a map that has at least one response, or undefined. */
@@ -444,8 +517,8 @@ export class MockOpenCodeServer {
 			return;
 		}
 
-		// Drain request body
-		await this.drainBody(req);
+		// Read request body (used by stateful session handlers)
+		const rawBody = await this.readBody(req);
 
 		const exact = exactKey(method, path);
 		const normalized = normalizedKey(method, path);
@@ -458,6 +531,233 @@ export class MockOpenCodeServer {
 			const override = this.statusOverride;
 			res.writeHead(override.status, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(override.responseBody));
+			return;
+		}
+
+		// ── Stateful PTY endpoints ──────────────────────────────────────────
+		const basePath = path.split("?")[0] ?? path;
+
+		if (method === "POST" && basePath === "/pty") {
+			const id = `pty_mock${String(++this.ptyCounter).padStart(3, "0")}`;
+			this.dynamicPtyIds.add(id);
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ id }));
+			return;
+		}
+
+		if (method === "GET" && basePath === "/pty") {
+			const list = [...this.dynamicPtyIds].map((id) => ({ id }));
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(list));
+			return;
+		}
+
+		if (method === "DELETE" && /^\/pty\/[^/]+$/.test(basePath)) {
+			const id = basePath.split("/").pop() ?? "";
+			this.dynamicPtyIds.delete(id);
+			res.writeHead(204);
+			res.end();
+			return;
+		}
+
+		if (method === "PUT" && /^\/pty\/[^/]+$/.test(basePath)) {
+			// Resize — no-op, just acknowledge
+			res.writeHead(204);
+			res.end();
+			return;
+		}
+
+		// ── Stateful session endpoints ──────────────────────────────────────
+		// POST /session: use queue if available, otherwise generate dynamic session.
+		// Dynamic sessions are injected into the GET /session queue fallback so
+		// subsequent list requests include them without a separate intercept.
+		if (method === "POST" && basePath === "/session") {
+			let title = "Untitled";
+			if (rawBody) {
+				try {
+					const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+					if (typeof parsed["title"] === "string") title = parsed["title"];
+				} catch {
+					/* ignore */
+				}
+			}
+
+			// Use queue if entries remain (consume extras, reuse last as fallback);
+			// only generate a dynamic session when the queue is completely empty.
+			const sessionQueue = this.getActiveQueue(
+				this.exactQueues,
+				"POST /session",
+			);
+			if (sessionQueue && sessionQueue.length >= 1) {
+				const entry =
+					sessionQueue.length > 1
+						? (sessionQueue.shift() as QueuedRestResponse)
+						: (sessionQueue[0] as QueuedRestResponse);
+				// Apply the requested title and ensure the session appears in
+				// the GET /session fallback so subsequent list calls include it.
+				const body = { ...(entry.responseBody as Record<string, unknown>) };
+				if (title !== "Untitled") {
+					body["title"] = title;
+				}
+				const sessionId = body["id"] as string;
+				// Track the title so GET /session renames queue-entry responses too
+				if (sessionId && title !== "Untitled") {
+					this.renamedSessions.set(sessionId, title);
+				}
+				if (sessionId) {
+					// Un-delete if this ID was previously deleted (fallback reuse)
+					this.deletedSessionIds.delete(sessionId);
+					// Track this session so GET /session always includes it
+					this.injectedSessions.set(sessionId, { ...body });
+					// Also inject into fallback for consistency
+					const fallbackList = this.getSessionListFallback();
+					const existing = fallbackList.find((s) => s["id"] === sessionId);
+					if (existing) {
+						if (title !== "Untitled") existing["title"] = title;
+					} else {
+						this.injectIntoSessionListFallback({ ...body });
+					}
+				}
+				res.writeHead(entry.status, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(body));
+				if (entry.sseBatch.length > 0) {
+					if (this.promptFired) {
+						this.emitSseBatch(entry.sseBatch);
+					} else {
+						this.pendingSseBatches.push(entry.sseBatch);
+					}
+				}
+				return;
+			}
+
+			// Generate dynamic session and inject into GET /session fallback
+			const id = `ses_mock${String(++this.sessionCounter).padStart(3, "0")}`;
+			const session = { id, title, createdAt: new Date().toISOString() };
+			this.injectedSessions.set(id, { ...session });
+			this.injectIntoSessionListFallback(session);
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(session));
+			return;
+		}
+
+		// GET /session: let the queue produce the base list, then apply
+		// renames and filter deletes so every response reflects mutations.
+		if (method === "GET" && basePath === "/session") {
+			const sessionQueue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+
+			if (sessionQueue) {
+				const entry =
+					sessionQueue.length > 1
+						? (sessionQueue.shift() as QueuedRestResponse)
+						: (sessionQueue[0] as QueuedRestResponse);
+				let list = Array.isArray(entry.responseBody)
+					? [...(entry.responseBody as Array<Record<string, unknown>>)]
+					: [];
+
+				// Apply renames
+				for (const item of list) {
+					const id = item["id"] as string;
+					const newTitle = this.renamedSessions.get(id);
+					if (newTitle !== undefined) item["title"] = newTitle;
+				}
+
+				// Merge injected sessions not already in list
+				for (const [id, session] of this.injectedSessions) {
+					if (!list.some((s) => s["id"] === id)) {
+						const renamedTitle = this.renamedSessions.get(id);
+						list.push(
+							renamedTitle
+								? { ...session, title: renamedTitle }
+								: { ...session },
+						);
+					}
+				}
+
+				// Filter deletes
+				list = list.filter(
+					(s) => !this.deletedSessionIds.has(s["id"] as string),
+				);
+
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(list));
+
+				if (entry.sseBatch.length > 0) {
+					if (this.promptFired) {
+						this.emitSseBatch(entry.sseBatch);
+					} else {
+						this.pendingSseBatches.push(entry.sseBatch);
+					}
+				}
+				return;
+			}
+		}
+
+		if (method === "DELETE" && /^\/session\/[^/]+$/.test(basePath)) {
+			const id = basePath.split("/").pop() ?? "";
+			this.deletedSessionIds.add(id);
+			this.injectedSessions.delete(id);
+			this.removeFromSessionListFallback(id);
+			res.writeHead(204);
+			res.end();
+			return;
+		}
+
+		if (method === "PATCH" && /^\/session\/[^/]+$/.test(basePath)) {
+			const id = basePath.split("/").pop() ?? "";
+			let title: string | undefined;
+			if (rawBody) {
+				try {
+					const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+					if (typeof parsed["title"] === "string") title = parsed["title"];
+				} catch {
+					/* ignore */
+				}
+			}
+			if (title !== undefined) {
+				this.renamedSessions.set(id, title);
+				this.renameInSessionListFallback(id, title);
+				const injected = this.injectedSessions.get(id);
+				if (injected) injected["title"] = title;
+			}
+			const fallbackList = this.getSessionListFallback();
+			const found = fallbackList.find((s) => s["id"] === id);
+			const session = found ?? { id, title: title ?? "mock-title" };
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(session));
+			return;
+		}
+
+		if (method === "GET" && basePath === "/session/search") {
+			const queryString = path.split("?")[1] ?? "";
+			const params = new URLSearchParams(queryString);
+			const query = (
+				params.get("q") ??
+				params.get("query") ??
+				""
+			).toLowerCase();
+
+			// Search both fallback list and injected sessions
+			const fallbackList = this.getSessionListFallback();
+			const allSessions = [...fallbackList];
+			for (const [id, session] of this.injectedSessions) {
+				if (!allSessions.some((s) => s["id"] === id)) {
+					const renamedTitle = this.renamedSessions.get(id);
+					allSessions.push(
+						renamedTitle ? { ...session, title: renamedTitle } : { ...session },
+					);
+				}
+			}
+			const matches = allSessions
+				.filter((s) => !this.deletedSessionIds.has(s["id"] as string))
+				.filter((s) => {
+					const title = String(s["title"] ?? "").toLowerCase();
+					return title.includes(query);
+				});
+
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(matches));
 			return;
 		}
 
@@ -604,14 +904,33 @@ export class MockOpenCodeServer {
 		const queue = this.ptyQueues.get(ptyId);
 
 		if (!queue || queue.length === 0) {
-			socket.destroy();
+			// No recording data — accept connection in echo mode
+			wss.handleUpgrade(req, socket, head, (ws) => {
+				// Send an initial prompt so xterm has content
+				if (ws.readyState === WebSocket.OPEN) {
+					ws.send("$ ");
+				}
+				ws.on("message", (data: Buffer, isBinary: boolean) => {
+					// Echo text frames back as output
+					if (!isBinary && ws.readyState === WebSocket.OPEN) {
+						ws.send(data.toString());
+					}
+				});
+			});
 			return;
 		}
 
 		// Find and consume the pty-open interaction
 		const openIdx = queue.findIndex((ix) => ix.kind === "pty-open");
 		if (openIdx < 0) {
-			socket.destroy();
+			// Has queue data but no pty-open — fall back to echo mode
+			wss.handleUpgrade(req, socket, head, (ws) => {
+				ws.on("message", (data: Buffer, isBinary: boolean) => {
+					if (!isBinary && ws.readyState === WebSocket.OPEN) {
+						ws.send(data.toString());
+					}
+				});
+			});
 			return;
 		}
 		queue.splice(openIdx, 1);
@@ -688,11 +1007,15 @@ export class MockOpenCodeServer {
 		this.sseClients.clear();
 	}
 
-	private drainBody(req: IncomingMessage): Promise<void> {
+	private readBody(req: IncomingMessage): Promise<string | undefined> {
 		return new Promise((resolve) => {
-			req.on("data", () => {});
-			req.on("end", resolve);
-			req.on("error", () => resolve());
+			const chunks: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => chunks.push(chunk));
+			req.on("end", () => {
+				if (chunks.length === 0) resolve(undefined);
+				else resolve(Buffer.concat(chunks).toString());
+			});
+			req.on("error", () => resolve(undefined));
 		});
 	}
 }

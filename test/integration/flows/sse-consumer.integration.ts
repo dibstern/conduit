@@ -46,10 +46,7 @@ describe("Integration: SSE Consumer", () => {
 		expect(consumer.isConnected()).toBe(true);
 	}, 15_000);
 
-	// SKIPPED: The mock buffers SSE batches until promptFired=true (requires POST /prompt_async).
-	// This test only creates a session via REST, which never triggers SSE emission.
-	// Needs either a prompt-firing step or a way to flush the mock's pending SSE batches.
-	it.skip("receives events when activity occurs", async () => {
+	it("receives events when activity occurs", async () => {
 		consumer = new SSEConsumer({ baseUrl: mock.url });
 
 		const events: unknown[] = [];
@@ -62,19 +59,15 @@ describe("Integration: SSE Consumer", () => {
 		await consumer.connect();
 		await connected;
 
-		// Trigger activity: create a session
-		const session = await restClient.createSession({
-			title: "sse-event-test",
-		});
+		// Emit a synthetic SSE event (the consumer filters server.connected
+		// and server.heartbeat, so we use session.updated which passes through)
+		mock.emitTestEvent("session.updated", { id: "test" });
 
 		// Wait for events to arrive
-		await delay(3000);
+		await delay(1000);
 
-		// Should have received events from the session creation
+		// Should have received the emitted event
 		expect(events.length).toBeGreaterThan(0);
-
-		// Cleanup
-		await restClient.deleteSession(session.id);
 	}, 15_000);
 
 	it("isConnected returns false before connect", () => {
@@ -148,9 +141,7 @@ describe("Integration: SSE Consumer", () => {
 		expect(connectCount).toBeGreaterThanOrEqual(2);
 	}, 20_000);
 
-	// SKIPPED: Same mock limitation as "receives events when activity occurs" above.
-	// SSE batches are buffered until a POST /prompt_async fires, which this test never does.
-	it.skip("activity on server produces SSE events", async () => {
+	it("activity on server produces SSE events", async () => {
 		consumer = new SSEConsumer({ baseUrl: mock.url });
 
 		const events: unknown[] = [];
@@ -166,19 +157,17 @@ describe("Integration: SSE Consumer", () => {
 		// Record event count before activity
 		const countBefore = events.length;
 
-		// Create a session via REST — this should produce SSE events
-		const session = await restClient.createSession({
-			title: "sse-integration-test",
-		});
+		// Trigger activity: create a session, then emit a synthetic event.
+		// POST /session alone only produces server.connected SSE (filtered),
+		// so we emit a session.updated event that passes through the consumer.
+		await restClient.createSession({ title: "sse-integration-test" });
+		mock.emitTestEvent("session.updated", { id: "test-activity" });
 
 		// Wait for events to arrive
-		await delay(3000);
+		await delay(1000);
 
-		// Should have received more events after the session creation
+		// Should have received more events after the activity
 		expect(events.length).toBeGreaterThan(countBefore);
-
-		// Cleanup
-		await restClient.deleteSession(session.id);
 	}, 20_000);
 
 	// ── Error handling ────────────────────────────────────────────────────

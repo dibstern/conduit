@@ -44,7 +44,7 @@ export class AppPage {
 		this.statusDot = page.locator("#status");
 		this.hamburgerBtn = page.locator("#hamburger-btn");
 		this.sidebarExpandBtn = page.locator("#sidebar-expand-btn");
-		this.terminalToggleBtn = page.locator("#terminal-toggle-btn");
+		this.terminalToggleBtn = page.locator("#header-terminal-btn");
 		this.qrBtn = page.locator("#qr-btn");
 		this.notifSettingsBtn = page.locator("#notif-settings-btn");
 		this.clientCountBadge = page.locator("#client-count-badge");

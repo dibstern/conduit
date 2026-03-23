@@ -86,16 +86,14 @@ describe("Integration: REST API Client", () => {
 		expect(found).toBeUndefined();
 	}, 15_000);
 
-	// NOTE: The mock returns a static pre-recorded session list from GET /session,
-	// so a dynamically created session ID won't appear in it. We relax the assertion
-	// to verify listSessions returns a non-empty array (the mock seeds at least one).
 	it("listSessions includes a newly created session", async () => {
 		const session = await client.createSession({
 			title: "integration-test-list",
 		});
 
 		const sessions = await client.listSessions();
-		expect(sessions.length).toBeGreaterThan(0);
+		const found = sessions.find((s: SessionDetail) => s.id === session.id);
+		expect(found).toBeDefined();
 
 		// Cleanup
 		await client.deleteSession(session.id);

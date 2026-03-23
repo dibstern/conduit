@@ -91,11 +91,7 @@ describe("Integration: Session Lifecycle", () => {
 
 	// ── Rename ──────────────────────────────────────────────────────────────
 
-	// SKIPPED: The mock returns static pre-recorded session lists from GET /session.
-	// Mutations (rename, delete) succeed at the API level (200/204) but the side
-	// effects are not reflected in subsequent list queries. Needs a stateful mock
-	// or a live OpenCode instance.
-	it.skip("rename a session", async () => {
+	it("rename a session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
@@ -130,8 +126,7 @@ describe("Integration: Session Lifecycle", () => {
 
 	// ── Delete ──────────────────────────────────────────────────────────────
 
-	// SKIPPED: Static mock lists — see rename test above.
-	it.skip("delete a session", async () => {
+	it("delete a session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
@@ -163,9 +158,7 @@ describe("Integration: Session Lifecycle", () => {
 
 	// ── Search ──────────────────────────────────────────────────────────────
 
-	// SKIPPED: The mock's GET /session/search returns a static empty array.
-	// A dynamically created session title won't appear in search results.
-	it.skip("search sessions by query", async () => {
+	it("search sessions by query", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
