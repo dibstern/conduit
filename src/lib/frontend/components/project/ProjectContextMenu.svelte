@@ -17,7 +17,7 @@
 	}: {
 		project: ProjectInfo;
 		anchor: HTMLElement;
-		onrename: (slug: string) => void;
+		onrename?: (slug: string) => void;
 		ondelete: (slug: string, title: string) => void;
 		onclose: () => void;
 	} = $props();
@@ -34,7 +34,7 @@
 
 	function handleRename(e: MouseEvent) {
 		e.stopPropagation();
-		onrename(project.slug);
+		onrename?.(project.slug);
 		onclose();
 	}
 
@@ -70,6 +70,7 @@
 		onclick={(e) => e.stopPropagation()}
 	>
 		<!-- Rename -->
+		{#if onrename}
 		<button
 			class="flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 			onclick={handleRename}
@@ -77,6 +78,7 @@
 			<Icon name="pencil" size={14} />
 			<span>Rename</span>
 		</button>
+		{/if}
 
 		<!-- Remove -->
 		<button
