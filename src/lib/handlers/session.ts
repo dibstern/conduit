@@ -420,12 +420,11 @@ export async function handleForkSession(
 		parentTitle: parent?.title ?? "Unknown",
 	});
 
-	// Associate the requesting client with the forked session and send session_switched
-	deps.wsHandler.setClientSession(clientId, forked.id);
-	deps.wsHandler.sendTo(clientId, {
-		type: "session_switched",
-		id: forked.id,
-	});
+	// Switch the requesting client to the forked session with full history.
+	// handleViewSession loads messages from the cache or OpenCode API and
+	// sends session_switched WITH events/history so the client can render
+	// inherited messages and the fork divider immediately.
+	await handleViewSession(deps, clientId, { sessionId: forked.id });
 
 	// Broadcast updated session list (now includes the fork)
 	await deps.sessionMgr.sendDualSessionLists((msg) =>
