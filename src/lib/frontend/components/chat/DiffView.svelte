@@ -129,12 +129,12 @@
 			{#each ops as op (op.type + "-" + (op.oldLineNo ?? "") + "-" + (op.newLineNo ?? ""))}
 				<div class={lineClass(op.type)}>
 					<span
-						class="diff-gutter diff-gutter-old min-w-[40px] px-2 text-right text-text-dimmer select-none shrink-0 text-[11px] border-r border-border-subtle"
+						class="diff-gutter diff-gutter-old min-w-[40px] px-2 text-right text-text-dimmer select-none shrink-0 text-sm border-r border-border-subtle"
 					>
 						{op.type !== "add" ? (op.oldLineNo ?? "") : ""}
 					</span>
 					<span
-						class="diff-gutter diff-gutter-new min-w-[40px] px-2 text-right text-text-dimmer select-none shrink-0 text-[11px]"
+						class="diff-gutter diff-gutter-new min-w-[40px] px-2 text-right text-text-dimmer select-none shrink-0 text-sm"
 					>
 						{op.type !== "remove" ? (op.newLineNo ?? "") : ""}
 					</span>
@@ -153,7 +153,7 @@
 					<tr class={splitRowClass(row.type)}>
 						<!-- Old side -->
 						<td
-							class="diff-ln text-right text-text-dimmer select-none px-2 text-[11px] w-[40px]"
+							class="diff-ln text-right text-text-dimmer select-none px-2 text-sm w-[40px]"
 						>
 							{row.oldLineNo ?? ""}
 						</td>
@@ -174,7 +174,7 @@
 
 						<!-- New side -->
 						<td
-							class="diff-ln text-right text-text-dimmer select-none px-2 text-[11px] w-[40px]"
+							class="diff-ln text-right text-text-dimmer select-none px-2 text-sm w-[40px]"
 						>
 							{row.newLineNo ?? ""}
 						</td>

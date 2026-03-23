@@ -41,7 +41,7 @@
 						class="w-full h-full object-cover block"
 					/>
 					<button
-						class="paste-remove-btn absolute top-0.5 right-0.5 w-[18px] h-[18px] border-none rounded-full bg-[rgba(0,0,0,0.6)] text-white text-[11px] leading-none flex items-center justify-center cursor-pointer opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+						class="paste-remove-btn absolute top-0.5 right-0.5 w-[18px] h-[18px] border-none rounded-full bg-[rgba(0,0,0,0.6)] text-white text-sm leading-none flex items-center justify-center cursor-pointer opacity-0 transition-opacity duration-150 group-hover:opacity-100"
 						title="Remove image"
 						onclick={(e: MouseEvent) => {
 							e.preventDefault();
@@ -52,7 +52,7 @@
 						&#x2715;
 					</button>
 					<span
-						class="paste-thumb-name absolute bottom-0 left-0 right-0 text-[8px] leading-[1.2] text-white bg-[rgba(0,0,0,0.55)] px-[3px] py-px text-center overflow-hidden text-ellipsis whitespace-nowrap"
+						class="paste-thumb-name absolute bottom-0 left-0 right-0 text-xs leading-[1.2] text-white bg-[rgba(0,0,0,0.55)] px-[3px] py-px text-center overflow-hidden text-ellipsis whitespace-nowrap"
 					>
 						{truncateName(image.name)}
 					</span>

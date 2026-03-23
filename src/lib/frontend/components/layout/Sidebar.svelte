@@ -146,7 +146,7 @@
 			class="sidebar-logo flex items-center gap-2 no-underline"
 			onclick={handleLogoClick}
 		>
-			<span style="font-family: var(--font-brand);" class="text-sm font-medium tracking-[0.14em] text-text">conduit</span>
+			<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
 			<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
 		</a>
 		<button
@@ -173,9 +173,8 @@
 		>
 			<button
 				id="new-session-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer disabled:cursor-default transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
-				style="font-family: var(--font-brand);"
-				onclick={handleNewSession}
+			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer disabled:cursor-default transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
+			onclick={handleNewSession}
 				disabled={sessionCreation.value.phase === "creating"}
 			>
 				{#if sessionCreation.value.phase === "creating"}
@@ -189,9 +188,8 @@
 			</button>
 			<button
 				id="resume-session-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
-				style="font-family: var(--font-brand);"
-				onclick={handleResumeSession}
+			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
+			onclick={handleResumeSession}
 			>
 				<Icon name="link" size={16} class="shrink-0" />
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
@@ -200,9 +198,8 @@
 			</button>
 			<button
 				id="file-browser-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
-				style="font-family: var(--font-brand);"
-				onclick={handleFileBrowser}
+			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
+			onclick={handleFileBrowser}
 			>
 				<Icon name="folder-tree" size={16} class="shrink-0" />
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
@@ -211,9 +208,8 @@
 			</button>
 			<button
 				id="terminal-sidebar-btn"
-				class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-[13px] cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text"
-				style="font-family: var(--font-brand);"
-				onclick={handleTerminalSidebar}
+			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
+			onclick={handleTerminalSidebar}
 			>
 				<Icon name="square-terminal" size={16} class="shrink-0" />
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
@@ -249,15 +245,14 @@
 				href="https://www.npmjs.com/package/conduit-code"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="flex items-center gap-2 px-2 py-1.5 mb-1.5 rounded-md bg-brand-a/10 text-brand-a text-[11px] font-medium no-underline hover:bg-brand-a/15 transition-colors"
-				style="font-family: var(--font-brand);"
+			class="flex items-center gap-2 px-2 py-1.5 mb-1.5 rounded-md bg-brand-a/10 text-brand-a text-sm font-medium no-underline hover:bg-brand-a/15 transition-colors font-brand"
 			>
 				<Icon name="arrow-up-circle" size={13} />
 				<span>Update available: v{versionState.latest}</span>
 			</a>
 		{/if}
 		{#if versionState.current}
-			<div class="text-[10px] text-text-dimmer px-2" style="font-family: var(--font-brand);">
+			<div class="text-xs text-text-dimmer px-2 font-brand">
 				conduit v{versionState.current}
 			</div>
 		{/if}

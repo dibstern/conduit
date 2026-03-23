@@ -20,10 +20,10 @@
 	}: Props = $props();
 
 	const CONFIGS = {
-		standard:  { textSize: 'text-[22px]', blockSize: 3.5, gap: 1.5, cols: 10, gridGap: '4px', glow: true },
+		standard:  { textSize: 'text-2xl', blockSize: 3.5, gap: 1.5, cols: 10, gridGap: '4px', glow: true },
 		loading:   { textSize: 'text-[28px]', blockSize: 8,   gap: 3,   cols: 10, gridGap: '6px', glow: true },
 		sidebar:   { textSize: 'text-[14px]', blockSize: 2,   gap: 1,   cols: 10, gridGap: '3px', glow: false },
-		inline:    { textSize: 'text-[13px]', blockSize: 2,   gap: 0.75,cols: 5,  gridGap: '2px', glow: false },
+		inline:    { textSize: 'text-base', blockSize: 2,   gap: 0.75,cols: 5,  gridGap: '2px', glow: false },
 	} as const;
 
 	const config = $derived(CONFIGS[size]);
@@ -41,8 +41,7 @@
 >
 	{#if showText}
 		<span
-			class="font-medium tracking-[0.14em] text-text {config.textSize}"
-			style="font-family: var(--font-brand);"
+			class="font-medium tracking-[0.14em] text-text font-brand {config.textSize}"
 		>
 			conduit
 		</span>

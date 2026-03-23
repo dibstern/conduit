@@ -87,7 +87,7 @@
 
 	function modelItemClass(model: ModelInfo): string {
 		const base =
-			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text text-[13px] text-left cursor-pointer transition-colors duration-100 leading-[1.4] hover:bg-bg-alt";
+			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 leading-[1.4] hover:bg-bg-alt";
 		if (isActiveModel(model)) {
 			return `${base} model-item-active text-accent`;
 		}
@@ -144,8 +144,7 @@
 <div id="model-display" class="relative inline-flex items-center" use:clickOutside={() => { dropdownOpen = false; }}>
 	<!-- Model button -->
 	<button
-		class="model-btn inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[180px] max-sm:max-w-[120px] hover:bg-bg-alt hover:text-text-secondary {hasModel ? '' : 'opacity-50'}"
-		style="font-family: var(--font-brand);"
+	class="model-btn inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[180px] max-sm:max-w-[120px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
 		title="Switch model"
 		onclick={toggleDropdown}
 	>
@@ -161,12 +160,11 @@
 	<!-- Model dropdown -->
 	{#if dropdownOpen}
 		<div
-			class="model-dropdown absolute bottom-[calc(100%+4px)] left-0 min-w-80 max-w-[90vw] max-h-[400px] overflow-y-auto bg-bg-alt border border-border rounded-xl shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] z-[200] py-1.5"
-			style="font-family: var(--font-brand);"
+		class="model-dropdown absolute bottom-[calc(100%+4px)] left-0 min-w-80 max-w-[90vw] max-h-[400px] overflow-y-auto bg-bg-alt border border-border rounded-xl shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] z-[200] py-1.5 font-brand"
 		>
 			{#if allGroups.length === 0}
 				<div
-					class="model-empty py-4 px-3.5 text-center text-[13px] text-text-dimmer"
+					class="model-empty py-4 px-3.5 text-center text-base text-text-dimmer"
 				>
 					No models available
 				</div>
@@ -174,7 +172,7 @@
 				{#each allGroups as group (group.provider.id)}
 					<div class={providerSectionClass(group)}>
 						<div
-							class="model-provider-header py-2 px-3.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.5px] text-text-dimmer"
+							class="model-provider-header py-2 px-3.5 pt-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer"
 						>
 							{group.provider.name || group.provider.id}
 						</div>
@@ -198,14 +196,14 @@
 										{stripDateSuffix(formatModelName(model))}
 										{#if isDefaultModel(model)}
 											<span
-												class="ml-1 text-[10px] text-text-dimmer font-normal"
+												class="ml-1 text-xs text-text-dimmer font-normal"
 												title="Default model">(default)</span
 											>
 										{/if}
 									</span>
 									{#if cost}
 										<span
-											class="model-item-cost shrink-0 text-[10px] text-text-dimmer whitespace-nowrap"
+											class="model-item-cost shrink-0 text-xs text-text-dimmer whitespace-nowrap"
 										>
 											{cost}
 										</span>
@@ -213,7 +211,7 @@
 								</button>
 								{#if !isDefaultModel(model)}
 									<button
-										class="shrink-0 px-1.5 py-1 mr-1 text-[10px] text-text-dimmer bg-transparent border-none cursor-pointer rounded hover:bg-bg hover:text-text-secondary transition-colors duration-100"
+										class="shrink-0 px-1.5 py-1 mr-1 text-xs text-text-dimmer bg-transparent border-none cursor-pointer rounded hover:bg-bg hover:text-text-secondary transition-colors duration-100"
 										title="Set as default model"
 										onclick={(e) => handleSetDefault(model, e)}
 									>

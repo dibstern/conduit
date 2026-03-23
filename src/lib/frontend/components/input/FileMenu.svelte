@@ -109,13 +109,13 @@
 		>
 			{#if loading && entries.length === 0}
 				<div
-					class="flex items-center gap-2 py-3 px-3.5 text-text-muted text-[13px]"
+					class="flex items-center gap-2 py-3 px-3.5 text-text-muted text-base"
 				>
 					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 					<span>Loading files…</span>
 				</div>
 			{:else if entries.length === 0}
-				<div class="py-3 px-3.5 text-text-muted text-[13px]">
+				<div class="py-3 px-3.5 text-text-muted text-base">
 					No files found
 				</div>
 			{:else}
@@ -141,7 +141,7 @@
 							class="shrink-0 {isDirectory(entry) ? 'text-warning' : 'text-text-muted'}"
 						/>
 						<span
-							class="file-path flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[13px] max-sm:text-xs"
+							class="file-path flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-base max-sm:text-xs"
 						>
 							{#if lastSlash >= 0}
 								<span class="text-text-muted"

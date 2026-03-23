@@ -118,13 +118,13 @@
 		</button>
 		<div id="header-project-scroll" class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap max-md:flex max-md:items-center">
 			<div class="flex items-center gap-2 whitespace-nowrap">
-			<h1 id="project-name" class="text-[15px] font-semibold tracking-[0.08em]" style="font-family: var(--font-brand);">
+			<h1 id="project-name" class="text-lg font-semibold tracking-[0.08em] font-brand">
 				<span class="header-project-inner inline-block pr-[3em]">{getCurrentSlug() ?? "conduit"}</span>
 			</h1>
 				{#if currentInstance}
 					<div class="relative">
 						<button
-							class="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-text-muted bg-black/[0.06] hover:bg-black/[0.1] cursor-pointer"
+							class="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-muted bg-black/[0.06] hover:bg-black/[0.1] cursor-pointer"
 							title="{currentInstance.name} ({currentInstance.status})"
 							data-testid="instance-badge"
 							onclick={handleToggleInstanceSelector}
@@ -229,7 +229,7 @@
 		<!-- Client count badge -->
 		<span
 			id="client-count-badge"
-			class="client-count-badge inline-flex items-center justify-center min-w-[18px] h-[18px] px-[5px] rounded-[9px] bg-accent text-bg text-[10px] font-semibold leading-none shrink-0"
+			class="client-count-badge inline-flex items-center justify-center min-w-[18px] h-[18px] px-[5px] rounded-[9px] bg-accent text-bg text-xs font-semibold leading-none shrink-0"
 			class:hidden={!showClientBadge}
 		>
 			{uiState.clientCount}

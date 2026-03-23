@@ -55,7 +55,7 @@
 
 <div class="fb-entry-wrapper">
 	<button
-		class="fb-entry flex items-center gap-1.5 w-full py-1 px-2 cursor-pointer bg-transparent border-none text-left text-[13px] text-text-secondary hover:bg-[rgba(var(--overlay-rgb),0.03)] rounded transition-colors duration-100 {hiddenClass}"
+		class="fb-entry flex items-center gap-1.5 w-full py-1 px-2 cursor-pointer bg-transparent border-none text-left text-base text-text-secondary hover:bg-[rgba(var(--overlay-rgb),0.03)] rounded transition-colors duration-100 {hiddenClass}"
 		style="padding-left: {depth * 16 + 8}px"
 		onclick={handleClick}
 	>
@@ -83,12 +83,12 @@
 		{/if}
 		<span class="fb-entry-name flex-1 truncate">{entry.name}</span>
 		{#if !isDir && entry.size !== undefined}
-			<span class="fb-entry-size text-[11px] text-text-dimmer shrink-0">
+			<span class="fb-entry-size text-sm text-text-dimmer shrink-0">
 				{formatFileSize(entry.size)}
 			</span>
 		{/if}
 		{#if shouldCollapse && !expanded}
-			<span class="fb-collapsed-hint text-[10px] text-text-dimmer italic">(click to expand)</span>
+			<span class="fb-collapsed-hint text-xs text-text-dimmer italic">(click to expand)</span>
 		{/if}
 	</button>
 
@@ -106,7 +106,7 @@
 				/>
 			{/each}
 		{:else}
-			<div class="py-1.5 text-[11px] text-text-dimmer" style="padding-left: {(depth + 1) * 16 + 8}px">
+			<div class="py-1.5 text-sm text-text-dimmer" style="padding-left: {(depth + 1) * 16 + 8}px">
 				Loading…
 			</div>
 		{/if}

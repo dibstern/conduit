@@ -88,8 +88,7 @@
 	<div class="relative" use:clickOutside={() => { variantDropdownOpen = false; }}>
 		<button
 			data-testid="variant-badge"
-			class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-[10px] font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary"
-			style="font-family: var(--font-brand);"
+		class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"
 			title="Thinking level ({variantLabel}) — Ctrl+T to cycle"
 			onclick={toggleVariantDropdown}
 		>
@@ -101,17 +100,16 @@
 		{#if variantDropdownOpen}
 			<div
 				data-testid="variant-dropdown"
-				class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-[0_-4px_16px_rgba(var(--shadow-rgb),0.3)] z-[210] py-1"
-				style="font-family: var(--font-brand);"
+			class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-[0_-4px_16px_rgba(var(--shadow-rgb),0.3)] z-[210] py-1 font-brand"
 			>
 				<!-- Default option (clears variant) -->
 				<button
 					data-testid="variant-option-default"
-					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-[12px] text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === '' ? 'text-accent' : ''}"
+					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === '' ? 'text-accent' : ''}"
 					onclick={(e) => selectVariant("", e)}
 				>
 					{#if currentVariant === ""}
-						<span class="text-accent font-bold text-[10px]">&#10003;</span>
+						<span class="text-accent font-bold text-xs">&#10003;</span>
 					{:else}
 						<span class="w-[10px]"></span>
 					{/if}
@@ -122,11 +120,11 @@
 				{#each variants as v (v)}
 					<button
 						data-testid="variant-option-{v}"
-						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-[12px] text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === v ? 'text-accent' : ''}"
+						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === v ? 'text-accent' : ''}"
 						onclick={(e) => selectVariant(v, e)}
 					>
 						{#if currentVariant === v}
-							<span class="text-accent font-bold text-[10px]">&#10003;</span>
+							<span class="text-accent font-bold text-xs">&#10003;</span>
 						{:else}
 							<span class="w-[10px]"></span>
 						{/if}
@@ -135,7 +133,7 @@
 				{/each}
 
 				<!-- Footer hint -->
-				<div class="border-t border-border mt-1 pt-1 px-3 pb-1 text-[10px] text-text-dimmer">
+				<div class="border-t border-border mt-1 pt-1 px-3 pb-1 text-xs text-text-dimmer">
 					Ctrl+T to cycle
 				</div>
 			</div>

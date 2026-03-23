@@ -77,7 +77,7 @@
 	);
 
 	const itemClass = $derived(
-		"session-item group flex items-center gap-1 py-1.5 px-2.5 rounded-md cursor-pointer relative text-[13px] transition-colors duration-100" +
+		"session-item group flex items-center gap-1 py-1.5 px-2.5 rounded-md cursor-pointer relative text-base transition-colors duration-100" +
 			(active
 				? " active bg-bg-surface text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
@@ -188,15 +188,13 @@
 	<!-- Title -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<span
-		class="session-item-title flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-		style="font-family: var(--font-brand);"
+		class="session-item-title flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-brand"
 		ondblclick={handleDblClick}
 	>
 		{#if isRenaming}
 			<input
 				type="text"
-				class="session-rename-input w-full bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none"
-				style="font-family: var(--font-brand);"
+			class="session-rename-input w-full bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
 				bind:value={renameValue}
 				onkeydown={handleRenameKeydown}
 				onblur={handleRenameBlur}
@@ -211,7 +209,7 @@
 	<!-- Fork indicator -->
 	{#if session.parentID}
 		<span
-			class="ml-1 text-[10px] text-text-dimmer shrink-0"
+			class="ml-1 text-xs text-text-dimmer shrink-0"
 			title="Forked session"
 		>
 			<Icon name="git-fork" size={11} class="inline-block align-[-1px]" />
@@ -221,8 +219,7 @@
 	<!-- Meta (time ago + message count) -->
 	{#if metaText && !isRenaming}
 		<span
-			class="session-item-meta shrink-0 text-[11px] text-text-dimmer whitespace-nowrap"
-			style="font-family: var(--font-brand);"
+		class="session-item-meta shrink-0 text-sm text-text-dimmer whitespace-nowrap font-brand"
 		>
 			{metaText}
 		</span>

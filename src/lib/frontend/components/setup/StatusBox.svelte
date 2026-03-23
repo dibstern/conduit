@@ -21,7 +21,7 @@
 </script>
 
 <div
-	class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-[13px] my-4 {statusClasses}"
+	class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-base my-4 {statusClasses}"
 	style="border-width: 1px;"
 >
 	{message}

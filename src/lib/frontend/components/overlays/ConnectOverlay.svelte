@@ -168,14 +168,14 @@
 
 		<!-- Status text — only one of these renders at a time, no empty wrapper -->
 		{#if relayStatus === "registering"}
-			<div class="text-sm font-medium text-text-muted" style="font-family: var(--font-brand);">
-				Starting relay...
-			</div>
+		<div class="text-sm font-medium text-text-muted font-brand">
+			Starting relay...
+		</div>
 		{:else if relayStatus === "error"}
 			<div class="flex flex-col items-center gap-2">
-				<div class="text-sm font-medium text-red-400" style="font-family: var(--font-brand);">
-					Relay failed to start
-				</div>
+			<div class="text-sm font-medium text-red-400 font-brand">
+				Relay failed to start
+			</div>
 				{#if relayError}
 					<div class="text-xs text-text-dimmer max-w-xs text-center truncate" title={relayError}>
 						{relayError}
@@ -191,8 +191,8 @@
 			</div>
 		{:else}
 			<div
-				class="text-sm font-medium"
-				style="font-family: var(--font-brand); background: linear-gradient(90deg, var(--color-brand-b), var(--color-brand-a)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;"
+				class="text-sm font-medium font-brand"
+				style="background: linear-gradient(90deg, var(--color-brand-b), var(--color-brand-a)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;"
 			>
 				{displayStatusText}
 			</div>

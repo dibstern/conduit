@@ -20,8 +20,8 @@
 		class:border-dashed={message.queued}
 		class:border-border={message.queued}
 	>
-		<div class="text-[11px] font-mono font-semibold uppercase tracking-[1.5px] text-brand-a mb-2">You</div>
-		<div class="text-[13px] leading-[1.7] break-words whitespace-pre-wrap text-text">
+		<div class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-a mb-2">You</div>
+		<div class="text-base leading-[1.7] break-words whitespace-pre-wrap text-text">
 			{@html escapeHtml(extractDisplayText(message.text))}
 		</div>
 		{#if message.queued}

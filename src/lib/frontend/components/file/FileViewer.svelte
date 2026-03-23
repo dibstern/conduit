@@ -190,7 +190,7 @@
 			>
 				<Icon name="folder-tree" size={16} />
 			</button>
-			<span class="flex-1 font-mono text-[13px] text-text-secondary truncate" dir="rtl">
+			<span class="flex-1 font-mono text-base text-text-secondary truncate" dir="rtl">
 				{filePath ?? ""}
 			</span>
 			<!-- Font size controls -->
@@ -203,7 +203,7 @@
 				>
 					&#8722;
 				</button>
-				<span class="text-[11px] text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
+				<span class="text-sm text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
 				<button
 					class="shrink-0 flex items-center justify-center w-[44px] h-[44px] border-none rounded bg-transparent text-text-dimmer font-mono text-base cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Increase font size"

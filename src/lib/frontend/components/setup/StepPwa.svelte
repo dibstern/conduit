@@ -35,7 +35,7 @@
 
 	{#if isIOS}
 		<div
-		class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-[13px] my-4 bg-bg-alt text-text border border-border"
+		class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-base my-4 bg-bg-alt text-text border border-border"
 		>
 			On iOS, push notifications only work from the installed app. This
 			step is required.
@@ -43,7 +43,7 @@
 
 		{#if !isSafari}
 			<div
-				class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-[13px] my-4 bg-bg-alt text-text border border-border"
+				class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-base my-4 bg-bg-alt text-text border border-border"
 			>
 				You must use <b>Safari</b> to install. Open this page in Safari
 				first.
@@ -203,7 +203,7 @@
 
 	<!-- Status -->
 	<div
-		class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-[13px] my-4 bg-bg-alt text-text-muted border border-border"
+		class="flex items-center gap-2 px-4 py-3 rounded-[10px] text-base my-4 bg-bg-alt text-text-muted border border-border"
 	>
 		{#if isAndroid}
 			Optional: install for quick access and full-screen experience.
@@ -216,7 +216,7 @@
 	<!-- Skip button (Android or desktop) -->
 	{#if isAndroid || isDesktop}
 		<button
-			class="block w-full text-center text-text-muted text-[13px] no-underline mt-3 cursor-pointer border-none bg-transparent font-sans hover:text-text-dimmer"
+			class="block w-full text-center text-text-muted text-base no-underline mt-3 cursor-pointer border-none bg-transparent font-sans hover:text-text-dimmer"
 			onclick={onnextstep}
 		>
 			Skip for now

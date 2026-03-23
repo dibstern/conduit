@@ -17,7 +17,7 @@
 
 {#if totalSteps > 1}
 	<div
-		class="text-[11px] uppercase tracking-[1px] text-text font-semibold mb-2"
+		class="text-sm uppercase tracking-[1px] text-text font-semibold mb-2"
 	>
 		Step {currentIdx + 1} of {totalSteps}
 	</div>

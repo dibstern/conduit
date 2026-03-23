@@ -244,7 +244,7 @@
 {#if visible}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-[11px] leading-relaxed overflow-hidden"
+		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-sm leading-relaxed overflow-hidden"
 		style={panelPos.x === -1
 			? `bottom: 1rem; right: 1rem; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`
 			: `left: ${panelPos.x}px; top: ${panelPos.y}px; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`}
@@ -271,21 +271,21 @@
 			<span class="text-green-500 font-semibold text-xs">WS Debug</span>
 		<div class="flex items-center gap-3">
 			<button
-				class="cursor-pointer text-[10px] px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
+				class="cursor-pointer text-xs px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={toggleVerbose}
 				title={wsDebugState.verboseMessages ? "Showing all messages — click to throttle" : "Showing 1 per 100 messages — click for all"}
 			>
 				{wsDebugState.verboseMessages ? "msgs:all" : "msgs:100"}
 			</button>
 			<button
-				class="cursor-pointer text-[10px] px-2 py-1.5 {copyFlash ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}"
+				class="cursor-pointer text-xs px-2 py-1.5 {copyFlash ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={copyLog}
 				title="Copy log to clipboard"
 			>
 				{copyFlash ? "copied!" : "copy"}
 			</button>
 			<button
-				class="text-gray-500 hover:text-gray-300 cursor-pointer text-[10px] px-2 py-1.5"
+				class="text-gray-500 hover:text-gray-300 cursor-pointer text-xs px-2 py-1.5"
 				onclick={handleClear}
 				title="Clear log"
 			>

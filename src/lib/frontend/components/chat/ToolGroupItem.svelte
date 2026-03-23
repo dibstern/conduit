@@ -83,7 +83,7 @@
 		<!-- Tags -->
 		{#if summary.tags}
 			{#each summary.tags as tag}
-				<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-[11px] text-text-dimmer shrink-0">
+				<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-sm text-text-dimmer shrink-0">
 					{tag}
 				</span>
 			{/each}

@@ -172,14 +172,14 @@
 
 			const header = document.createElement("div");
 			header.className =
-				"code-header flex justify-between items-center text-[11px] py-1 px-3 border-b border-border-subtle text-text-dimmer";
+				"code-header flex justify-between items-center text-sm py-1 px-3 border-b border-border-subtle text-text-dimmer";
 
 			const langSpan = document.createElement("span");
 			langSpan.textContent = lang || "code";
 
 			const copyBtn = document.createElement("button");
 			copyBtn.className =
-				"code-copy-btn text-[11px] cursor-pointer bg-transparent border border-border rounded px-2 py-0.5 text-text-muted hover:text-text hover:bg-bg-alt transition-colors duration-150";
+				"code-copy-btn text-sm cursor-pointer bg-transparent border border-border rounded px-2 py-0.5 text-text-muted hover:text-text hover:bg-bg-alt transition-colors duration-150";
 			copyBtn.textContent = "Copy";
 			copyBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
@@ -392,8 +392,8 @@
 			</div>
 		{/if}
 
-		<div class="text-[11px] font-mono font-semibold uppercase tracking-[1.5px] text-brand-b mb-2">Assistant</div>
-		<div class="md-content text-[13px] leading-[1.7]">
+		<div class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-b mb-2">Assistant</div>
+		<div class="md-content text-base leading-[1.7]">
 			{@html message.html}
 		</div>
 	</div>

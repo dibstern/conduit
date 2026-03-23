@@ -60,7 +60,7 @@
 				<span class="text-xs text-brand-b font-medium">{label}…</span>
 			</div>
 			{#if message.text}
-				<div class="font-mono text-[13px] leading-[1.55] text-text-secondary whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
+				<div class="font-mono text-base leading-[1.55] text-text-secondary whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
 					{message.text}
 				</div>
 			{/if}
@@ -80,7 +80,7 @@
 
 			<span class="thinking-label">{label}</span>
 			{#if durationText}
-				<span class="thinking-duration text-[11px] text-text-dimmer font-normal">
+				<span class="thinking-duration text-sm text-text-dimmer font-normal">
 					{durationText}
 				</span>
 			{/if}
@@ -88,7 +88,7 @@
 
 		{#if expanded && message.text}
 			<div
-				class="thinking-content glow-brand-b rounded-[10px] py-2 px-3 font-mono text-[13px] leading-[1.7] text-text-secondary whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto"
+				class="thinking-content glow-brand-b rounded-[10px] py-2 px-3 font-mono text-base leading-[1.7] text-text-secondary whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto"
 			>
 				{message.text}
 			</div>

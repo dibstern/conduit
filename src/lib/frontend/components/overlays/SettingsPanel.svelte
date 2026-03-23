@@ -237,14 +237,14 @@
 		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
 			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
-				<h2 class="text-lg font-semibold text-text" style="font-family: var(--font-brand);">Settings</h2>
+				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
 				<button class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
 					<Icon name="x" size={16} />
 				</button>
 			</div>
 
 			<!-- Tabs -->
-			<div class="flex border-b border-border px-5 gap-1" style="font-family: var(--font-brand);">
+			<div class="flex border-b border-border px-5 gap-1 font-brand">
 				{#each [
 					{ id: "notifications", label: "Alerts" },
 					{ id: "appearance", label: "Theme" },
@@ -267,21 +267,21 @@
 				<!-- ═══ Notifications ═══ -->
 				{#if activeTab === "notifications"}
 					<div class="space-y-2">
-						<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4" style="font-family: var(--font-brand);">
-							<div class="flex items-center gap-3 flex-1 min-w-0">
-								<Icon name="smartphone" size={16} class="text-text-muted shrink-0" />
-								<div><div class="text-sm font-medium text-text">Push notifications</div><div class="text-xs text-text-muted mt-0.5">Receive push notifications even when the tab is closed</div></div>
-							</div>
-							{@render toggleSwitch(notifSettings.push, togglePush, pushBusy || pushUnavailable, pushUnavailable, "Push notifications")}
+					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
+						<div class="flex items-center gap-3 flex-1 min-w-0">
+							<Icon name="smartphone" size={16} class="text-text-muted shrink-0" />
+							<div><div class="text-sm font-medium text-text">Push notifications</div><div class="text-xs text-text-muted mt-0.5">Receive push notifications even when the tab is closed</div></div>
 						</div>
-						<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4" style="font-family: var(--font-brand);">
-							<div class="flex items-center gap-3 flex-1 min-w-0">
-								<Icon name="bell" size={16} class="text-text-muted shrink-0" />
-								<div><div class="text-sm font-medium text-text">Browser alerts</div><div class="text-xs text-text-muted mt-0.5">Show desktop notifications when tasks complete</div></div>
-							</div>
-							{@render toggleSwitch(notifSettings.browser, toggleBrowser, undefined, undefined, "Browser alerts")}
+						{@render toggleSwitch(notifSettings.push, togglePush, pushBusy || pushUnavailable, pushUnavailable, "Push notifications")}
+					</div>
+					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
+						<div class="flex items-center gap-3 flex-1 min-w-0">
+							<Icon name="bell" size={16} class="text-text-muted shrink-0" />
+							<div><div class="text-sm font-medium text-text">Browser alerts</div><div class="text-xs text-text-muted mt-0.5">Show desktop notifications when tasks complete</div></div>
 						</div>
-						<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4" style="font-family: var(--font-brand);">
+						{@render toggleSwitch(notifSettings.browser, toggleBrowser, undefined, undefined, "Browser alerts")}
+					</div>
+					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
 							<div class="flex items-center gap-3 flex-1 min-w-0">
 								<Icon name="volume-2" size={16} class="text-text-muted shrink-0" />
 								<div><div class="text-sm font-medium text-text">Sound</div><div class="text-xs text-text-muted mt-0.5">Play a sound when notifications are triggered</div></div>
@@ -309,7 +309,7 @@
 						] as section}
 							{#if section.items.length > 0}
 								<div>
-									<div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted px-1 mb-2" style="font-family: var(--font-brand);">{section.label}</div>
+									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">{section.label}</div>
 									<div class="space-y-1">
 										{#each section.items as { id, theme }}
 											<button
@@ -321,7 +321,7 @@
 														<span class="w-3 h-3 rounded-sm border border-white/10" style="background: #{theme[key]};"></span>
 													{/each}
 												</div>
-												<span class="flex-1 text-left text-[13px] {themeState.currentThemeId === id ? 'text-text font-medium' : 'text-text-secondary'}" style="font-family: var(--font-brand);">
+												<span class="flex-1 text-left text-base font-brand {themeState.currentThemeId === id ? 'text-text font-medium' : 'text-text-secondary'}">
 													{theme.name}
 												</span>
 												{#if themeState.currentThemeId === id}
@@ -338,13 +338,12 @@
 				<!-- ═══ Instances ═══ -->
 				{:else if activeTab === "instances"}
 					<div class="flex items-center justify-between mb-3">
-						<span class="text-xs text-text-muted font-medium uppercase tracking-wide" style="font-family: var(--font-brand);">
+						<span class="text-xs text-text-muted font-medium uppercase tracking-wide font-brand">
 							{instances.length} instance{instances.length !== 1 ? "s" : ""}
 						</span>
 					<button
 						type="button"
-						class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-						style="font-family: var(--font-brand);"
+					class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-brand"
 						data-testid="scan-now-btn"
 						disabled={scanInFlight}
 						onclick={handleScanNow}
@@ -355,7 +354,7 @@
 					</div>
 
 					{#if scanResult && !scanInFlight}
-					<div class="mb-3 text-xs text-text-muted bg-white/[0.04] rounded px-2.5 py-1.5" style="font-family: var(--font-brand);">
+					<div class="mb-3 text-xs text-text-muted bg-white/[0.04] rounded px-2.5 py-1.5 font-brand">
 							{#if scanResult.discovered.length > 0}
 								Found {scanResult.discovered.length} new instance{scanResult.discovered.length !== 1 ? "s" : ""} on port{scanResult.discovered.length !== 1 ? "s" : ""} {scanResult.discovered.join(", ")}.
 							{:else if scanResult.lost.length > 0}
@@ -369,7 +368,7 @@
 					{/if}
 
 					{#if instances.length > 0}
-					<div id="instance-settings-list" class="space-y-1" style="font-family: var(--font-brand);">
+					<div id="instance-settings-list" class="space-y-1 font-brand">
 							{#each instances as inst}
 								<div class="border border-border rounded-lg">
 									<button class="flex items-center justify-between w-full px-3 py-2 text-left text-sm hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => handleToggleInstance(inst.id)}>
@@ -382,7 +381,7 @@
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}
 											{#if !inst.managed}
-												<span class="text-[10px] text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
+												<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
 											{/if}
 										</div>
 										<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
@@ -403,7 +402,7 @@
 					{/if}
 
 					{#if instances.length === 0}
-					<div class="mt-2 space-y-2" style="font-family: var(--font-brand);">
+					<div class="mt-2 space-y-2 font-brand">
 							<p class="text-sm text-text-muted mb-3">No OpenCode instances detected. Start one from your terminal and it will appear here automatically.</p>
 							<div class="border border-border rounded-lg overflow-hidden">
 								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("direct")}>
@@ -424,7 +423,7 @@
 								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("ccs")}>
 									<Icon name={expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Multi-Provider — Via CCS</span>
-									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-[9px] text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
+									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
 								</button>
 								{#if expandedScenario === "ccs"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
@@ -465,14 +464,14 @@
 				<!-- ═══ Debug ═══ -->
 				{:else if activeTab === "debug"}
 					<div class="space-y-2">
-						<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4" style="font-family: var(--font-brand);">
-							<div class="flex-1 min-w-0">
-								<div class="text-sm font-medium text-text">Connection debug panel</div>
+					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
+						<div class="flex-1 min-w-0">
+							<div class="text-sm font-medium text-text">Connection debug panel</div>
 								<div class="text-xs text-text-muted mt-0.5">Shows WebSocket state transitions, timing, and lifecycle events.</div>
 							</div>
 							{@render toggleSwitch(featureFlags.debug, () => toggleFeature("debug"), undefined, undefined, "Connection debug panel")}
 						</div>
-						<div class="text-xs text-text-dimmer space-y-1.5 px-1" style="font-family: var(--font-brand);">
+						<div class="text-xs text-text-dimmer space-y-1.5 px-1 font-brand">
 							<div>URL param: <code class="px-1 py-0.5 bg-white/[0.08] rounded text-text-muted">?feats=debug</code></div>
 							<div>Keyboard: <kbd class="px-1.5 py-0.5 bg-white/[0.08] rounded text-text-muted border border-border/50">Ctrl+Shift+D</kbd></div>
 						</div>

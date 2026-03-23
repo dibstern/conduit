@@ -59,7 +59,7 @@
 	>
 		<div class="bg-bg-alt border border-border rounded-xl p-3 shadow-lg">
 			<div class="flex items-start justify-between gap-2 mb-2">
-				<div class="text-[13px] font-medium text-text">
+				<div class="text-base font-medium text-text">
 					{sessionCount === 1 ? "1 session" : `${sessionCount} sessions`} need{sessionCount === 1 ? "s" : ""} permission
 				</div>
 				<button
