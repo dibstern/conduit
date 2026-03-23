@@ -26,7 +26,7 @@ export async function handleMessage(
 	clientId: string,
 	payload: PayloadMap["message"],
 ): Promise<void> {
-	const { text } = payload;
+	const { text, images } = payload;
 	const activeId = resolveSession(deps, clientId);
 	if (!text) return;
 	if (!activeId) {
@@ -59,7 +59,10 @@ export async function handleMessage(
 	// Track message activity for session ordering
 	deps.sessionMgr.recordMessageActivity(activeId);
 
-	const prompt: PromptOptions = { text };
+	const prompt: PromptOptions = {
+		text,
+		...(images && images.length > 0 && { images }),
+	};
 	const sessionAgent = deps.overrides.getAgent(activeId);
 	if (sessionAgent) prompt.agent = sessionAgent;
 	const sessionModel = deps.overrides.getModel(activeId);

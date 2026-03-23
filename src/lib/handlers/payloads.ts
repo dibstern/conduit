@@ -11,7 +11,7 @@ import type { PermissionId, RequestId } from "../shared-types.js";
  * Phase 2 (Valibot) will add runtime validation.
  */
 export interface PayloadMap {
-	message: { text: string };
+	message: { text: string; images?: string[] };
 	cancel: Record<string, never>;
 	rewind: { messageId?: string; uuid?: string };
 	input_sync: { text: string };

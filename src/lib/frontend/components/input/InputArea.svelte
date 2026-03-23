@@ -15,6 +15,7 @@
 	import ModelSelector from "../model/ModelSelector.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
+	import PastePreview from "../chat/PastePreview.svelte";
 	import { chatState, addUserMessage, inputSyncState } from "../../stores/chat.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
@@ -24,12 +25,14 @@
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
+	import type { PendingImage } from "../../types.js";
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 
 	let inputText = $state("");
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let attachMenuOpen = $state(false);
+	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
@@ -103,7 +106,7 @@
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
 	const isProcessing = $derived(chatState.processing);
-	const canSend = $derived(inputText.trim().length > 0);
+	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
 	const showContextMini = $derived(uiState.contextPercent > 0);
 
 	// ─── Auto-resize textarea ──────────────────────────────────────────────────
@@ -202,10 +205,18 @@
 			messageText = buildAttachedMessage(text, attachments);
 		}
 
+		// Collect image data URLs from pending images
+		const imageUrls = pendingImages.length > 0
+			? pendingImages.map((img) => img.dataUrl)
+			: undefined;
+
 		// Always send immediately — OpenCode queues server-side when busy.
 		// Mark the message as "queued" visually when the LLM is processing.
-		addUserMessage(messageText, undefined, isProcessing);
-		wsSend({ type: "message", text: messageText });
+		addUserMessage(messageText, imageUrls, isProcessing);
+		wsSend({ type: "message", text: messageText, ...(imageUrls && { images: imageUrls }) });
+
+		// Clear pending images
+		pendingImages = [];
 
 		inputText = "";
 		cursorPos = 0;
@@ -243,6 +254,7 @@
 		fileInput.type = "file";
 		fileInput.accept = "image/*";
 		fileInput.capture = "environment";
+		fileInput.onchange = () => processSelectedFiles(fileInput.files);
 		fileInput.click();
 	}
 
@@ -252,7 +264,33 @@
 		fileInput.type = "file";
 		fileInput.accept = "image/*";
 		fileInput.multiple = true;
+		fileInput.onchange = () => processSelectedFiles(fileInput.files);
 		fileInput.click();
+	}
+
+	// ─── Image attach helpers ──────────────────────────────────────────────────
+
+	/** Read selected files from a file input and add them as pending images. */
+	function processSelectedFiles(files: FileList | null) {
+		if (!files || files.length === 0) return;
+		for (const file of files) {
+			const reader = new FileReader();
+			reader.onload = () => {
+				if (typeof reader.result === "string") {
+					pendingImages = [...pendingImages, {
+						id: crypto.randomUUID(),
+						dataUrl: reader.result,
+						name: file.name,
+						size: file.size,
+					}];
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+
+	function removePendingImage(id: string) {
+		pendingImages = pendingImages.filter((img) => img.id !== id);
 	}
 
 	// ─── Command menu handlers ─────────────────────────────────────────────────
@@ -411,6 +449,11 @@
 					onclick={handleClick}
 				></textarea>
 			</div>
+
+						<!-- Pending image previews -->
+			{#if pendingImages.length > 0}
+				<PastePreview images={pendingImages} onRemove={removePendingImage} />
+			{/if}
 
 			<!-- Bottom row: attach + agent + model + send -->
 			<div id="input-bottom" class="flex items-center justify-between gap-1">
