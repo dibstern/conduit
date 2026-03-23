@@ -30,6 +30,9 @@ export type IncomingMessageType =
 	| "get_commands"
 	| "get_projects"
 	| "add_project"
+	| "list_directories"
+	| "remove_project"
+	| "rename_project"
 	| "get_file_list"
 	| "get_file_content"
 	| "get_file_tree"
@@ -76,6 +79,9 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"get_commands",
 	"get_projects",
 	"add_project",
+	"list_directories",
+	"remove_project",
+	"rename_project",
 	"get_file_list",
 	"get_file_content",
 	"get_file_tree",

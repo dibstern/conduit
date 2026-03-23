@@ -60,6 +60,9 @@ const validMessageTypes: IncomingMessageType[] = [
 	"get_commands",
 	"get_projects",
 	"add_project",
+	"list_directories",
+	"remove_project",
+	"rename_project",
 	"get_file_list",
 	"get_file_content",
 	"get_file_tree",
@@ -426,7 +429,7 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(isRouteError(invalidResult)).toBe(true);
 
 			// Verify our test list has exactly the right number (40 types in production)
-			expect(validMessageTypes).toHaveLength(44);
+			expect(validMessageTypes).toHaveLength(47);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

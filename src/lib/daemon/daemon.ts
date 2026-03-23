@@ -1145,6 +1145,13 @@ export class Daemon {
 						...(p.instanceId != null && { instanceId: p.instanceId }),
 					};
 				},
+				removeProject: async (slug: string) => {
+					await this.removeProject(slug);
+				},
+				setProjectTitle: (slug: string, title: string) => {
+					this.registry.updateProject(slug, { title });
+					this.persistConfig();
+				},
 				getInstances: () => this.getInstances(),
 				addInstance: (id, config) =>
 					this.instanceManager.addInstance(id, config),

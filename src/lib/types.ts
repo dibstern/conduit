@@ -204,6 +204,10 @@ export interface ProjectRelayConfig {
 		directory: string;
 		instanceId?: string;
 	}>;
+	/** Remove a project from the registry. */
+	removeProject?: (slug: string) => void | Promise<void>;
+	/** Set a project's display title. */
+	setProjectTitle?: (slug: string, title: string) => void;
 	/** Add a new project by directory path. Returns the created project info. */
 	addProject?: (
 		directory: string,

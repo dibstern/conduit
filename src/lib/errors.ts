@@ -44,6 +44,8 @@ export type ErrorCode =
 	| "INVALID_REQUEST"
 	| "NOT_SUPPORTED"
 	| "ADD_PROJECT_FAILED"
+	| "REMOVE_PROJECT_FAILED"
+	| "RENAME_PROJECT_FAILED"
 	| "INVALID_MESSAGE"
 	// Infrastructure codes (used by subclasses)
 	| "OPENCODE_UNREACHABLE"

@@ -65,6 +65,9 @@ export {
 	handleGetCommands,
 	handleGetProjects,
 	handleGetTodo,
+	handleListDirectories,
+	handleRemoveProject,
+	handleRenameProject,
 } from "./settings.js";
 export {
 	handlePtyClose,
@@ -129,6 +132,9 @@ import {
 	handleGetCommands,
 	handleGetProjects,
 	handleGetTodo,
+	handleListDirectories,
+	handleRemoveProject,
+	handleRenameProject,
 } from "./settings.js";
 import {
 	handlePtyClose,
@@ -168,6 +174,9 @@ export const MESSAGE_HANDLERS: Record<string, MessageHandler> = {
 	get_commands: handleGetCommands as MessageHandler,
 	get_projects: handleGetProjects as MessageHandler,
 	add_project: handleAddProject as MessageHandler,
+	list_directories: handleListDirectories as MessageHandler,
+	remove_project: handleRemoveProject as MessageHandler,
+	rename_project: handleRenameProject as MessageHandler,
 	get_file_list: handleGetFileList as MessageHandler,
 	get_file_content: handleGetFileContent as MessageHandler,
 	get_file_tree: handleGetFileTree as MessageHandler,

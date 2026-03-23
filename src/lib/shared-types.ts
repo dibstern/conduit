@@ -354,6 +354,7 @@ export type RelayMessage =
 			current?: string;
 			addedSlug?: string;
 	  }
+	| { type: "directory_list"; path: string; entries: string[] }
 	// ── File browser ───────────────────────────────────────────────────────
 	| { type: "file_list"; path: string; entries: FileEntry[] }
 	| { type: "file_content"; path: string; content: string; binary?: boolean }

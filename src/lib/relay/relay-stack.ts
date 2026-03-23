@@ -456,6 +456,12 @@ export async function createProjectRelay(
 		}),
 		...(config.getProjects != null && { getProjects: config.getProjects }),
 		...(config.triggerScan != null && { triggerScan: config.triggerScan }),
+		...(config.removeProject != null && {
+			removeProject: config.removeProject,
+		}),
+		...(config.setProjectTitle != null && {
+			setProjectTitle: config.setProjectTitle,
+		}),
 	};
 
 	const clientQueue = new ClientMessageQueue({

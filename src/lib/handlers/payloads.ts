@@ -41,6 +41,9 @@ export interface PayloadMap {
 	get_commands: Record<string, never>;
 	get_projects: Record<string, never>;
 	add_project: { directory: string; instanceId?: string };
+	list_directories: { path: string };
+	remove_project: { slug: string };
+	rename_project: { slug: string; title: string };
 	get_todo: Record<string, never>;
 	get_file_list: { path?: string };
 	get_file_content: { path: string };

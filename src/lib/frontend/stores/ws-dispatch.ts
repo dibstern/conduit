@@ -85,6 +85,7 @@ import {
 } from "./ui.svelte.js";
 import { setLatestVersion } from "./version.svelte.js";
 import {
+	directoryListeners,
 	fileBrowserListeners,
 	fileHistoryListeners,
 	planModeListeners,
@@ -362,6 +363,11 @@ export function handleMessage(msg: RelayMessage): void {
 		case "project_list":
 			handleProjectList(msg);
 			for (const fn of projectListeners) fn(msg);
+			break;
+
+		// ─── Directory Listing ──────────────────────────────────────────
+		case "directory_list":
+			for (const fn of directoryListeners) fn(msg);
 			break;
 
 		// ─── Todo ────────────────────────────────────────────────────────
