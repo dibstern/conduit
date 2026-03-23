@@ -40,6 +40,7 @@
 		"test:e2e:headed": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --headed",
 		"test:e2e:debug": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --debug",
 		"test:multi-instance": "npx playwright test --config test/e2e/playwright-multi-instance.config.ts",
+		"test:project-management": "npx playwright test --config test/e2e/playwright-project-management.config.ts",
 		"test:subagent-e2e": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-subagent.config.ts",
 		"test:daemon": "npx playwright test --config test/e2e/playwright-daemon.config.ts",
 		"test:e2e:live": "pnpm build:frontend && npx playwright test --config test/e2e/playwright-live.config.ts",

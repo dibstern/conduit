@@ -168,6 +168,9 @@
 	}
 
 	function commitProjectRename(slug: string) {
+		// Guard: if renamingSlug was already cleared (e.g. by Escape),
+		// the blur handler may still fire — skip to avoid double-send.
+		if (renamingSlug !== slug) return;
 		const newTitle = renameValue.trim();
 		renamingSlug = null;
 		if (newTitle && newTitle.length > 0) {
@@ -212,6 +215,9 @@
 
 	function handleOutsideClick(e: MouseEvent) {
 		if (open && containerEl && !containerEl.contains(e.target as Node)) {
+			// Don't close if the click is inside a modal overlay (e.g. confirm dialog)
+			const modal = document.getElementById("confirm-modal");
+			if (modal?.contains(e.target as Node)) return;
 			open = false;
 			showAddForm = false;
 			addError = "";

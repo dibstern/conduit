@@ -130,6 +130,7 @@
 			}
 			case "Escape":
 				e.preventDefault();
+				e.stopPropagation();
 				visible = false;
 				break;
 		}
