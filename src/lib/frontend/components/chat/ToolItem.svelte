@@ -12,7 +12,7 @@
 
 	import Icon from "../shared/Icon.svelte";
 	import BlockGrid from '../shared/BlockGrid.svelte';
-	import QuestionCard from "../features/QuestionCard.svelte";
+	import QuestionCard from "./QuestionCard.svelte";
 
 	let { message, isFirstInGroup = true, isLastInGroup = true }: { 
 		message: ToolMessage; 

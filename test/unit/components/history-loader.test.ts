@@ -48,7 +48,7 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.ts", () => ({
 	wsSend: (...args: unknown[]) => wsSendSpy(...args),
 }));
 
-import HistoryLoader from "../../../src/lib/frontend/components/features/HistoryLoader.svelte";
+import HistoryLoader from "../../../src/lib/frontend/components/chat/HistoryLoader.svelte";
 // We need real stores for historyState and sessionState so we can set values
 // and have the component read them.
 import { historyState } from "../../../src/lib/frontend/stores/chat.svelte.js";

@@ -13,7 +13,7 @@ function resetSessionState() {
 }
 
 const meta = {
-	title: "Features/SessionList",
+	title: "Session/SessionList",
 	component: SessionList,
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },

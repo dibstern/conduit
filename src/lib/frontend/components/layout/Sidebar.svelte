@@ -5,9 +5,9 @@
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
 	import BlockGrid from "../shared/BlockGrid.svelte";
-	import SessionList from "../features/SessionList.svelte";
-	import ProjectSwitcher from "../features/ProjectSwitcher.svelte";
-	import SidebarFilePanel from "../features/SidebarFilePanel.svelte";
+	import SessionList from "../session/SessionList.svelte";
+	import ProjectSwitcher from "../project/ProjectSwitcher.svelte";
+	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import { versionState } from "../../stores/version.svelte.js";
 	import {
 		uiState,

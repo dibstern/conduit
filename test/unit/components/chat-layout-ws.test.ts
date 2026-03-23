@@ -29,7 +29,7 @@ vi.mock(
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/layout/InputArea.svelte",
+	"../../../src/lib/frontend/components/input/InputArea.svelte",
 	emptyComponent,
 );
 
@@ -79,23 +79,23 @@ vi.mock(
 
 // Feature components
 vi.mock(
-	"../../../src/lib/frontend/components/features/TodoOverlay.svelte",
+	"../../../src/lib/frontend/components/todo/TodoOverlay.svelte",
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/features/TerminalPanel.svelte",
+	"../../../src/lib/frontend/components/terminal/TerminalPanel.svelte",
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/features/PlanMode.svelte",
+	"../../../src/lib/frontend/components/chat/PlanMode.svelte",
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/features/FileViewer.svelte",
+	"../../../src/lib/frontend/components/file/FileViewer.svelte",
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/features/PermissionNotification.svelte",
+	"../../../src/lib/frontend/components/permissions/PermissionNotification.svelte",
 	emptyComponent,
 );
 

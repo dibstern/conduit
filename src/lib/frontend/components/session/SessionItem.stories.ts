@@ -7,7 +7,7 @@ import {
 import SessionItem from "./SessionItem.svelte";
 
 const meta = {
-	title: "Features/SessionItem",
+	title: "Session/SessionItem",
 	component: SessionItem,
 	tags: ["autodocs"],
 } satisfies Meta<typeof SessionItem>;

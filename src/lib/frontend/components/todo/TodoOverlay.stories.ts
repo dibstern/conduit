@@ -77,7 +77,7 @@ const completedItems: TodoItem[] = [
 ];
 
 const meta = {
-	title: "Features/TodoOverlay",
+	title: "Todo/TodoOverlay",
 	component: TodoOverlay,
 	tags: ["autodocs"],
 } satisfies Meta<typeof TodoOverlay>;

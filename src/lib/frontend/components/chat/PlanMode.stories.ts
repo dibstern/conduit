@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import PlanMode from "./PlanMode.svelte";
 
 const meta = {
-	title: "Features/PlanMode",
+	title: "Chat/PlanMode",
 	component: PlanMode,
 	tags: ["autodocs"],
 } satisfies Meta<typeof PlanMode>;

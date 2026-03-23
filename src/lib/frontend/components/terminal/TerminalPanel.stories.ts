@@ -28,7 +28,7 @@ function setTabs(
 }
 
 const meta = {
-	title: "Features/TerminalPanel",
+	title: "Terminal/TerminalPanel",
 	component: TerminalPanel,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },

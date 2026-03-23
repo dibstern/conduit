@@ -92,7 +92,7 @@ const mockMultiQuestion: QuestionRequest = {
 // ─── Meta ───────────────────────────────────────────────────────────────────
 
 const meta = {
-	title: "Features/QuestionCard",
+	title: "Chat/QuestionCard",
 	component: QuestionCard,
 	tags: ["autodocs"],
 } satisfies Meta<typeof QuestionCard>;

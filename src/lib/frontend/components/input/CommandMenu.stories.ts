@@ -44,7 +44,7 @@ const noopSelect = (_command: string) => {};
 const noopClose = () => {};
 
 const meta = {
-	title: "Features/CommandMenu",
+	title: "Input/CommandMenu",
 	component: CommandMenu,
 	tags: ["autodocs"],
 	parameters: {

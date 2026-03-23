@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import FileTreeNode from "./FileTreeNode.svelte";
 
 const meta = {
-	title: "Features/FileTreeNode",
+	title: "File/FileTreeNode",
 	component: FileTreeNode,
 	tags: ["autodocs"],
 } satisfies Meta<typeof FileTreeNode>;

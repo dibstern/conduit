@@ -18,7 +18,7 @@ const noopSelect = (_path: string) => {};
 const noopClose = () => {};
 
 const meta = {
-	title: "Features/FileMenu",
+	title: "Input/FileMenu",
 	component: FileMenu,
 	tags: ["autodocs"],
 	parameters: {

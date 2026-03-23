@@ -3,7 +3,7 @@ import { discoveryState } from "../../stores/discovery.svelte.js";
 import AgentSelector from "./AgentSelector.svelte";
 
 const meta = {
-	title: "Features/AgentSelector",
+	title: "Model/AgentSelector",
 	component: AgentSelector,
 	tags: ["autodocs"],
 	beforeEach: () => {

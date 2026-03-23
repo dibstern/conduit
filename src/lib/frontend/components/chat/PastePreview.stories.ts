@@ -3,7 +3,7 @@ import type { PendingImage } from "../../types.js";
 import PastePreview from "./PastePreview.svelte";
 
 const meta = {
-	title: "Features/PastePreview",
+	title: "Chat/PastePreview",
 	component: PastePreview,
 	tags: ["autodocs"],
 } satisfies Meta<typeof PastePreview>;

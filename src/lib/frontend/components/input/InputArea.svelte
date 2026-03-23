@@ -5,12 +5,12 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import Icon from "../shared/Icon.svelte";
-	import AgentSelector from "../features/AgentSelector.svelte";
+	import AgentSelector from "../model/AgentSelector.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
-	import CommandMenu from "../features/CommandMenu.svelte";
+	import CommandMenu from "./CommandMenu.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
-	import FileMenu from "../features/FileMenu.svelte";
-	import ModelSelector from "../features/ModelSelector.svelte";
+	import FileMenu from "./FileMenu.svelte";
+	import ModelSelector from "../model/ModelSelector.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import { chatState, addUserMessage, inputSyncState } from "../../stores/chat.svelte.js";

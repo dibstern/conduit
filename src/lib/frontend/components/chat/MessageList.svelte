@@ -31,9 +31,9 @@
 	import { groupMessages, type GroupedMessage, type ToolGroup } from "../../utils/group-tools.js";
 	import ResultBar from "./ResultBar.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
-	import PermissionCard from "../features/PermissionCard.svelte";
-	import QuestionCard from "../features/QuestionCard.svelte";
-	import HistoryLoader from "../features/HistoryLoader.svelte";
+	import PermissionCard from "../permissions/PermissionCard.svelte";
+	import QuestionCard from "./QuestionCard.svelte";
+	import HistoryLoader from "./HistoryLoader.svelte";
 	import BlockGrid from "../shared/BlockGrid.svelte";
 
 

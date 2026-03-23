@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import ProjectSwitcher from "./ProjectSwitcher.svelte";
 
 const meta = {
-	title: "Features/ProjectSwitcher",
+	title: "Project/ProjectSwitcher",
 	component: ProjectSwitcher,
 	tags: ["autodocs"],
 } satisfies Meta<typeof ProjectSwitcher>;

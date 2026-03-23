@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import DiffView from "./DiffView.svelte";
 
 const meta = {
-	title: "Features/DiffView",
+	title: "Chat/DiffView",
 	component: DiffView,
 	tags: ["autodocs"],
 } satisfies Meta<typeof DiffView>;

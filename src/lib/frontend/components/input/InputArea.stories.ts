@@ -31,7 +31,7 @@ function setupDiscovery() {
 }
 
 const meta = {
-	title: "Layout/InputArea",
+	title: "Input/InputArea",
 	component: InputArea,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
