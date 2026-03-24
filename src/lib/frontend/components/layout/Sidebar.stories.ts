@@ -19,13 +19,13 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.sidebarPanel = "sessions";
 	},
 };
 
 export const FileBrowserPanel: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.sidebarPanel = "files";
 	},
 };
@@ -34,7 +34,7 @@ export const MobileOpen: Story = {
 	parameters: {
 		viewport: { defaultViewport: "mobile1" },
 	},
-	play: () => {
+	beforeEach: () => {
 		uiState.mobileSidebarOpen = true;
 	},
 };

@@ -58,7 +58,7 @@ export const UsagePanel: Story = {
 	args: {
 		usageData: mockUsage,
 	},
-	play: () => {
+	beforeEach: () => {
 		uiState.openPanels = new Set(["usage-panel"]);
 	},
 };
@@ -67,7 +67,7 @@ export const StatusPanel: Story = {
 	args: {
 		statusData: mockStatus,
 	},
-	play: () => {
+	beforeEach: () => {
 		uiState.openPanels = new Set(["status-panel"]);
 	},
 };
@@ -76,7 +76,7 @@ export const ContextPanel: Story = {
 	args: {
 		contextData: mockContext60,
 	},
-	play: () => {
+	beforeEach: () => {
 		uiState.openPanels = new Set(["context-panel"]);
 	},
 };
@@ -87,7 +87,7 @@ export const AllPanels: Story = {
 		statusData: mockStatus,
 		contextData: mockContext60,
 	},
-	play: () => {
+	beforeEach: () => {
 		uiState.openPanels = new Set([
 			"usage-panel",
 			"status-panel",
@@ -100,7 +100,7 @@ export const ContextCritical: Story = {
 	args: {
 		contextData: mockContext90,
 	},
-	play: () => {
+	beforeEach: () => {
 		uiState.openPanels = new Set(["context-panel"]);
 	},
 };

@@ -41,22 +41,19 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {
-	play: () => {
-		resetTerminal();
+	beforeEach: () => {
 		terminalState.panelOpen = true;
 	},
 };
 
 export const SingleTab: Story = {
-	play: () => {
-		resetTerminal();
+	beforeEach: () => {
 		setTabs([{ ptyId: "pty-001", title: "Terminal" }]);
 	},
 };
 
 export const MultipleTabs: Story = {
-	play: () => {
-		resetTerminal();
+	beforeEach: () => {
 		setTabs(
 			[
 				{ ptyId: "pty-001", title: "build" },
@@ -69,8 +66,7 @@ export const MultipleTabs: Story = {
 };
 
 export const TabExited: Story = {
-	play: () => {
-		resetTerminal();
+	beforeEach: () => {
 		setTabs(
 			[
 				{ ptyId: "pty-001", title: "build", exited: true },
@@ -82,8 +78,7 @@ export const TabExited: Story = {
 };
 
 export const WithStatusMessage: Story = {
-	play: () => {
-		resetTerminal();
+	beforeEach: () => {
 		terminalState.panelOpen = true;
 		terminalState.statusMessage = "Creating terminal...";
 		terminalState.pendingCreate = true;
@@ -91,8 +86,7 @@ export const WithStatusMessage: Story = {
 };
 
 export const MaxTabs: Story = {
-	play: () => {
-		resetTerminal();
+	beforeEach: () => {
 		const entries = Array.from({ length: 10 }, (_, i) => ({
 			ptyId: `pty-${String(i + 1).padStart(3, "0")}`,
 			title: `Terminal ${i + 1}`,

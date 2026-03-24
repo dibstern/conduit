@@ -7,6 +7,7 @@ import NotificationStack from "./NotificationStack.svelte";
 const meta = {
 	title: "Overlays/Toast",
 	component: NotificationStack,
+	tags: ["autodocs"],
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
@@ -23,7 +24,7 @@ function setToasts(toasts: ToastType[]): void {
 }
 
 export const DefaultToast: Story = {
-	play: () => {
+	beforeEach: () => {
 		setToasts([
 			{
 				id: "story-default-1",
@@ -36,7 +37,7 @@ export const DefaultToast: Story = {
 };
 
 export const WarnToast: Story = {
-	play: () => {
+	beforeEach: () => {
 		setToasts([
 			{
 				id: "story-warn-1",
@@ -49,7 +50,7 @@ export const WarnToast: Story = {
 };
 
 export const MultipleToasts: Story = {
-	play: () => {
+	beforeEach: () => {
 		setToasts([
 			{
 				id: "story-multi-1",

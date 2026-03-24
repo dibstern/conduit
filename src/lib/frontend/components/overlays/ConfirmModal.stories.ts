@@ -5,13 +5,17 @@ import ConfirmModal from "./ConfirmModal.svelte";
 const meta = {
 	title: "Overlays/ConfirmModal",
 	component: ConfirmModal,
-} satisfies Meta<ConfirmModal>;
+	tags: ["autodocs"],
+	beforeEach: () => {
+		uiState.confirmDialog = null;
+	},
+} satisfies Meta<typeof ConfirmModal>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Visible: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.confirmDialog = {
 			text: "Are you sure you want to delete this session? This action cannot be undone.",
 			actionLabel: "Confirm",
@@ -24,7 +28,7 @@ export const Visible: Story = {
 };
 
 export const WithCustomAction: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.confirmDialog = {
 			text: "This will permanently delete the selected session and all associated data.",
 			actionLabel: "Delete",
@@ -36,8 +40,4 @@ export const WithCustomAction: Story = {
 	},
 };
 
-export const Hidden: Story = {
-	play: () => {
-		uiState.confirmDialog = null;
-	},
-};
+export const Hidden: Story = {};

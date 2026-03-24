@@ -25,15 +25,10 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Empty: Story = {
-	play: () => {
-		resetSessionState();
-	},
-};
+export const Empty: Story = {};
 
 export const WithItems: Story = {
-	play: () => {
-		resetSessionState();
+	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
 		sessionState.allSessions = [...mockSessionsAllGroups];
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
@@ -42,8 +37,7 @@ export const WithItems: Story = {
 };
 
 export const Searching: Story = {
-	play: () => {
-		resetSessionState();
+	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
 		sessionState.allSessions = [...mockSessionsAllGroups];
 		setSearchQuery("dark");

@@ -49,7 +49,7 @@ type Story = StoryObj<typeof meta>;
 export const Empty: Story = {};
 
 export const Processing: Story = {
-	play: () => {
+	beforeEach: () => {
 		chatState.processing = true;
 		// Ensure discovery state persists through processing state change
 		discoveryState.currentVariant = "high";
@@ -57,19 +57,19 @@ export const Processing: Story = {
 };
 
 export const WithContextBar: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.contextPercent = 42;
 	},
 };
 
 export const HighContext: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.contextPercent = 85;
 	},
 };
 
 export const CriticalContext: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.contextPercent = 97;
 	},
 };

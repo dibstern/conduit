@@ -5,19 +5,23 @@ import ImageLightbox from "./ImageLightbox.svelte";
 const meta = {
 	title: "Overlays/ImageLightbox",
 	component: ImageLightbox,
-} satisfies Meta<ImageLightbox>;
+	tags: ["autodocs"],
+	beforeEach: () => {
+		uiState.lightboxSrc = null;
+	},
+} satisfies Meta<typeof ImageLightbox>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const WithImage: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.lightboxSrc = "https://picsum.photos/seed/opencode/800/600";
 	},
 };
 
 export const Hidden: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.lightboxSrc = null;
 	},
 };

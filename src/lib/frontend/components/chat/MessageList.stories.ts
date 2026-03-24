@@ -26,36 +26,28 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Empty: Story = {
-	play: () => {
-		resetChatState();
-	},
-};
+export const Empty: Story = {};
 
 export const SingleUserMessage: Story = {
-	play: () => {
-		resetChatState();
+	beforeEach: () => {
 		chatState.messages = [mockUserMessage];
 	},
 };
 
 export const SingleAssistantMessage: Story = {
-	play: () => {
-		resetChatState();
+	beforeEach: () => {
 		chatState.messages = [mockAssistantSimple];
 	},
 };
 
 export const FullConversation: Story = {
-	play: () => {
-		resetChatState();
+	beforeEach: () => {
 		chatState.messages = [...mockConversation];
 	},
 };
 
 export const MixedTypes: Story = {
-	play: () => {
-		resetChatState();
+	beforeEach: () => {
 		chatState.messages = [
 			mockUserMessage,
 			mockThinkingDone,

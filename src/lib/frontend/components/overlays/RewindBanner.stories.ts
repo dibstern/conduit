@@ -5,14 +5,19 @@ import RewindBanner from "./RewindBanner.svelte";
 const meta = {
 	title: "Overlays/RewindBanner",
 	component: RewindBanner,
-} satisfies Meta<RewindBanner>;
+	tags: ["autodocs"],
+	beforeEach: () => {
+		uiState.rewindActive = false;
+		uiState.rewindSelectedUuid = null;
+	},
+} satisfies Meta<typeof RewindBanner>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 /** Rewind mode active — banner showing at top. */
 export const Active: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.rewindActive = true;
 		uiState.rewindSelectedUuid = null;
 	},
@@ -20,16 +25,11 @@ export const Active: Story = {
 
 /** Rewind mode with a message selected — confirmation modal showing. */
 export const WithModal: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.rewindActive = true;
 		uiState.rewindSelectedUuid = "msg-abc-123";
 	},
 };
 
 /** Rewind mode off — nothing visible. */
-export const Inactive: Story = {
-	play: () => {
-		uiState.rewindActive = false;
-		uiState.rewindSelectedUuid = null;
-	},
-};
+export const Inactive: Story = {};

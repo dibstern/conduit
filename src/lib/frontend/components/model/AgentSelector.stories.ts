@@ -18,7 +18,7 @@ type Story = StoryObj<typeof meta>;
 
 /** Multiple agents with one active — pills visible. */
 export const Default: Story = {
-	play: () => {
+	beforeEach: () => {
 		discoveryState.agents = [
 			{ id: "code", name: "code", description: "Write and edit code" },
 			{ id: "plan", name: "plan", description: "Plan tasks" },
@@ -34,7 +34,7 @@ export const Default: Story = {
 
 /** Single agent — selector should be hidden. */
 export const SingleAgent: Story = {
-	play: () => {
+	beforeEach: () => {
 		discoveryState.agents = [
 			{ id: "code", name: "code", description: "Write and edit code" },
 		];
@@ -43,9 +43,4 @@ export const SingleAgent: Story = {
 };
 
 /** No agents — selector should be hidden. */
-export const NoAgents: Story = {
-	play: () => {
-		discoveryState.agents = [];
-		discoveryState.activeAgentId = null;
-	},
-};
+export const NoAgents: Story = {};

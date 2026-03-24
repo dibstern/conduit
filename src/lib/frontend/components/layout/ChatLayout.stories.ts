@@ -22,13 +22,13 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 
 export const SidebarCollapsed: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.sidebarCollapsed = true;
 	},
 };
 
 export const WithRewindBanner: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.rewindActive = true;
 	},
 };

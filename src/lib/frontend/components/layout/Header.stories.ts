@@ -25,7 +25,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Connected: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "connected";
 		wsState.statusText = "Connected";
 		routerState.path = "/p/my-project/";
@@ -33,28 +33,28 @@ export const Connected: Story = {
 };
 
 export const Disconnected: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "disconnected";
 		wsState.statusText = "Disconnected";
 	},
 };
 
 export const Processing: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "processing";
 		wsState.statusText = "Processing...";
 	},
 };
 
 export const WithError: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "error";
 		wsState.statusText = "Connection error";
 	},
 };
 
 export const WithMultipleClients: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "connected";
 		wsState.statusText = "Connected";
 		uiState.clientCount = 5;
@@ -62,7 +62,7 @@ export const WithMultipleClients: Story = {
 };
 
 export const WithTerminalBadge: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "connected";
 		wsState.statusText = "Connected";
 		const tabs = new Map();
@@ -73,7 +73,7 @@ export const WithTerminalBadge: Story = {
 };
 
 export const SidebarExpanded: Story = {
-	play: () => {
+	beforeEach: () => {
 		wsState.status = "connected";
 		wsState.statusText = "Connected";
 		uiState.sidebarCollapsed = false;

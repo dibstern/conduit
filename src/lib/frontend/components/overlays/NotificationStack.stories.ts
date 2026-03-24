@@ -53,7 +53,7 @@ function setupAttention(opts: {
 }
 
 export const ToastsOnly: Story = {
-	play: () => {
+	beforeEach: () => {
 		setToasts([
 			{ id: "t1", message: "File saved", variant: "default", duration: 999999 },
 			{
@@ -67,7 +67,7 @@ export const ToastsOnly: Story = {
 };
 
 export const AttentionOnly: Story = {
-	play: () => {
+	beforeEach: () => {
 		setupAttention({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },
@@ -83,7 +83,7 @@ export const AttentionOnly: Story = {
 
 export const Combined: Story = {
 	name: "Permissions + Questions + Toasts",
-	play: () => {
+	beforeEach: () => {
 		setupAttention({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },

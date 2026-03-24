@@ -60,7 +60,7 @@ type Story = StoryObj<typeof meta>;
 // ─── Stories ────────────────────────────────────────────────────────────────
 
 export const SinglePermission: Story = {
-	play: () => {
+	beforeEach: () => {
 		setupState({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },
@@ -71,7 +71,7 @@ export const SinglePermission: Story = {
 };
 
 export const MultiplePermissions: Story = {
-	play: () => {
+	beforeEach: () => {
 		setupState({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },
@@ -87,7 +87,7 @@ export const MultiplePermissions: Story = {
 };
 
 export const SingleQuestion: Story = {
-	play: () => {
+	beforeEach: () => {
 		setupState({
 			questionSessions: ["ses_other1"],
 			sessionTitles: { ses_other1: "API redesign" },
@@ -96,7 +96,7 @@ export const SingleQuestion: Story = {
 };
 
 export const PermissionsAndQuestions: Story = {
-	play: () => {
+	beforeEach: () => {
 		setupState({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },
@@ -112,7 +112,7 @@ export const PermissionsAndQuestions: Story = {
 
 export const MixedSameSession: Story = {
 	name: "Same session has both",
-	play: () => {
+	beforeEach: () => {
 		setupState({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },

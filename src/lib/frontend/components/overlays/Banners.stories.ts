@@ -17,7 +17,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const UpdateBanner: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.banners = [
 			{
 				id: "update-1",
@@ -32,7 +32,7 @@ export const UpdateBanner: Story = {
 };
 
 export const OnboardingBanner: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.banners = [
 			{
 				id: "onboarding-1",
@@ -46,7 +46,7 @@ export const OnboardingBanner: Story = {
 };
 
 export const SkipPermissionsBanner: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.banners = [
 			{
 				id: "skip-perms-1",
@@ -60,7 +60,7 @@ export const SkipPermissionsBanner: Story = {
 };
 
 export const MultipleBanners: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.banners = [
 			{
 				id: "update-1",
@@ -82,7 +82,7 @@ export const MultipleBanners: Story = {
 };
 
 export const DismissibleBanner: Story = {
-	play: () => {
+	beforeEach: () => {
 		uiState.banners = [
 			{
 				id: "dismissible-1",
