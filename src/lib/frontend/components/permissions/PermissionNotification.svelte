@@ -1,38 +1,48 @@
 <!-- ─── Permission Notification ───────────────────────────────────────────── -->
-<!-- Aggregated notification for permission requests in OTHER sessions.        -->
-<!-- Shows session count + clickable session titles. Fixed top-right.          -->
-<!-- Dismiss button hides until new remote permissions arrive.                 -->
+<!-- Aggregated notification for permission requests and questions in OTHER    -->
+<!-- sessions. Shows session count + clickable session titles. Fixed top-right.-->
+<!-- Dismiss button hides until new remote items arrive.                       -->
 
 <script lang="ts">
-	import { getRemotePermissions } from "../../stores/permissions.svelte.js";
+	import { getRemotePermissions, getRemoteQuestionSessions } from "../../stores/permissions.svelte.js";
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 
 	const remotePermissions = $derived(getRemotePermissions(sessionState.currentId));
+	const remoteQuestionSessionIds = $derived(getRemoteQuestionSessions(sessionState.currentId));
 
-	/** Group remote permissions by sessionId → count per session. */
+	/** Merge permissions and questions into a unified session → labels map. */
 	const sessionGroups = $derived.by(() => {
-		const groups = new Map<string, number>();
+		const groups = new Map<string, { permissions: number; questions: number }>();
+
 		for (const perm of remotePermissions) {
-			groups.set(perm.sessionId, (groups.get(perm.sessionId) ?? 0) + 1);
+			const entry = groups.get(perm.sessionId) ?? { permissions: 0, questions: 0 };
+			entry.permissions++;
+			groups.set(perm.sessionId, entry);
 		}
+
+		for (const sid of remoteQuestionSessionIds) {
+			const entry = groups.get(sid) ?? { permissions: 0, questions: 0 };
+			entry.questions++;
+			groups.set(sid, entry);
+		}
+
 		return groups;
 	});
 
 	const sessionCount = $derived(sessionGroups.size);
-	const hasRemote = $derived(remotePermissions.length > 0);
+	const totalItems = $derived(remotePermissions.length + remoteQuestionSessionIds.length);
+	const hasRemote = $derived(totalItems > 0);
 
-	/** Track dismissed state — resets when new remote permissions arrive. */
+	/** Track dismissed state — resets when new items arrive. */
 	let dismissed = $state(false);
 	let lastSeenCount = $state(0);
 
-	// Reset dismissed when the set of remote permissions changes
 	$effect(() => {
-		const count = remotePermissions.length;
-		if (count > lastSeenCount) {
+		if (totalItems > lastSeenCount) {
 			dismissed = false;
 		}
-		lastSeenCount = count;
+		lastSeenCount = totalItems;
 	});
 
 	const visible = $derived(hasRemote && !dismissed);
@@ -40,6 +50,13 @@
 	function getSessionTitle(sessionId: string): string {
 		const session = findSession(sessionId);
 		return session?.title ?? `${sessionId.slice(0, 8)}\u2026`;
+	}
+
+	function itemLabel(entry: { permissions: number; questions: number }): string {
+		const parts: string[] = [];
+		if (entry.permissions > 0) parts.push(`${entry.permissions} permission${entry.permissions > 1 ? "s" : ""}`);
+		if (entry.questions > 0) parts.push(`${entry.questions} question${entry.questions > 1 ? "s" : ""}`);
+		return parts.join(", ");
 	}
 
 	function goToSession(sessionId: string) {
@@ -60,7 +77,7 @@
 		<div class="bg-bg-alt border border-border rounded-xl p-3 shadow-lg">
 			<div class="flex items-start justify-between gap-2 mb-2">
 				<div class="text-base font-medium text-text">
-					{sessionCount === 1 ? "1 session" : `${sessionCount} sessions`} need{sessionCount === 1 ? "s" : ""} permission
+					{sessionCount === 1 ? "1 session" : `${sessionCount} sessions`} need{sessionCount === 1 ? "s" : ""} attention
 				</div>
 				<button
 					class="shrink-0 text-text-secondary hover:text-text cursor-pointer p-0.5 -m-0.5 rounded transition-colors"
@@ -73,12 +90,12 @@
 				</button>
 			</div>
 			<div class="flex flex-col gap-1.5">
-				{#each [...sessionGroups] as [sessionId, count] (sessionId)}
+				{#each [...sessionGroups] as [sessionId, entry] (sessionId)}
 					<button
 						class="text-left text-xs text-accent hover:text-accent/80 hover:underline cursor-pointer truncate px-1 py-0.5 rounded transition-colors"
 						onclick={() => goToSession(sessionId)}
 					>
-						{getSessionTitle(sessionId)}{count > 1 ? ` (${count})` : ""}
+						{getSessionTitle(sessionId)} ({itemLabel(entry)})
 					</button>
 				{/each}
 			</div>

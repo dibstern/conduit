@@ -16,6 +16,12 @@ export const permissionsState = $state({
 	pendingQuestions: [] as QuestionRequest[],
 	/** Error messages for questions that could not be delivered, keyed by toolId. */
 	questionErrors: new Map<string, string>(),
+	/**
+	 * Session IDs with pending questions the user hasn't seen yet.
+	 * Populated from notification_event broadcasts for ask_user events
+	 * in sessions the user is NOT currently viewing.
+	 */
+	remoteQuestionSessions: new Set<string>(),
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -93,6 +99,36 @@ export function getRemotePermissions(
 			!descendants.has(p.sessionId) &&
 			p.sessionId !== "",
 	);
+}
+
+/**
+ * Session IDs that have pending questions the user isn't viewing.
+ * Excludes the current session and its descendants.
+ */
+export function getRemoteQuestionSessions(
+	currentSessionId: string | null,
+): string[] {
+	const all = permissionsState.remoteQuestionSessions;
+	if (!currentSessionId) return [...all];
+	const descendants = getDescendantSessionIds(currentSessionId);
+	return [...all].filter(
+		(sid) => sid !== currentSessionId && !descendants.has(sid),
+	);
+}
+
+/** Record a cross-session question notification. */
+export function addRemoteQuestion(sessionId: string): void {
+	permissionsState.remoteQuestionSessions = new Set([
+		...permissionsState.remoteQuestionSessions,
+		sessionId,
+	]);
+}
+
+/** Remove a cross-session question notification (resolved or navigated). */
+export function removeRemoteQuestion(sessionId: string): void {
+	const next = new Set(permissionsState.remoteQuestionSessions);
+	next.delete(sessionId);
+	permissionsState.remoteQuestionSessions = next;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -255,6 +291,7 @@ export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
+	permissionsState.remoteQuestionSessions = new Set();
 }
 
 /** Clear only session-local pending items (for session switch).
@@ -275,4 +312,5 @@ export function clearAllPermissions(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
+	permissionsState.remoteQuestionSessions = new Set();
 }

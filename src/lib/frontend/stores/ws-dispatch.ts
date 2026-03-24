@@ -59,12 +59,14 @@ import {
 	handleScanResult,
 } from "./instance.svelte.js";
 import {
+	addRemoteQuestion,
 	clearSessionLocal,
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
 	handlePermissionRequest,
 	handlePermissionResolved,
+	removeRemoteQuestion,
 } from "./permissions.svelte.js";
 import { handleProjectList } from "./project.svelte.js";
 import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
@@ -489,6 +491,15 @@ export function handleMessage(msg: RelayMessage): void {
 				...(msg.message != null ? { message: msg.message } : {}),
 				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
 			} as RelayMessage;
+
+			// Track cross-session question notifications so the
+			// PermissionNotification component can show them.
+			if (msg.eventType === "ask_user" && msg.sessionId) {
+				addRemoteQuestion(msg.sessionId);
+			} else if (msg.eventType === "ask_user_resolved" && msg.sessionId) {
+				removeRemoteQuestion(msg.sessionId);
+			}
+
 			triggerNotifications(syntheticMsg);
 
 			// In-app toast so cross-session events are visible even when

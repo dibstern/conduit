@@ -190,9 +190,13 @@ export function handleSSEEvent(
 		// Broadcast directly from bridge data — bypasses the translator so
 		// permissions are delivered even when the SSE event lacks sessionID.
 		if (pending) {
+			// Prefer bridge's sessionId; fall back to the event-level
+			// sessionId so the notification is never empty-string (which
+			// getRemotePermissions filters out).
+			const permSessionId = pending.sessionId || eventSessionId || "";
 			const permMsg: RelayMessage = {
 				type: "permission_request",
-				sessionId: pending.sessionId,
+				sessionId: permSessionId,
 				requestId: pending.requestId,
 				toolName: pending.toolName,
 				toolInput: pending.toolInput,
@@ -204,7 +208,7 @@ export function handleSSEEvent(
 					pushManager,
 					permMsg,
 					log,
-					buildPushContext(deps.slug, pending.sessionId),
+					buildPushContext(deps.slug, permSessionId),
 				);
 			}
 		} else if (pushManager) {
@@ -335,6 +339,13 @@ export function handleSSEEvent(
 			}
 			if (targetSessionId) {
 				wsHandler.sendToSession(targetSessionId, msg);
+				// Broadcast a lightweight notification so clients on OTHER
+				// sessions know a question exists (PermissionNotification).
+				wsHandler.broadcast({
+					type: "notification_event",
+					eventType: msg.type,
+					...(targetSessionId != null ? { sessionId: targetSessionId } : {}),
+				});
 			} else {
 				// No session ID available — broadcast as fallback (defensive)
 				wsHandler.broadcast(msg);
