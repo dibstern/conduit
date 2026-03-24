@@ -426,3 +426,41 @@ describe("DaemonConfig with instances", () => {
 		expect(loaded!.projects[0]!.instanceId).toBe("personal");
 	});
 });
+
+// ─── DaemonConfig with keepAwakeCommand/keepAwakeArgs ───────────────────────
+
+describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
+	it("round-trips keepAwakeCommand and keepAwakeArgs through save/load", () => {
+		const config = makeSampleConfig({
+			keepAwake: true,
+			keepAwakeCommand: "systemd-inhibit",
+			keepAwakeArgs: ["--what=idle", "--who=conduit", "--why=active-session"],
+		});
+
+		saveDaemonConfig(config, tempDir);
+		const loaded = loadDaemonConfig(tempDir);
+
+		expect(loaded).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		expect(loaded!.keepAwakeCommand).toBe("systemd-inhibit");
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		expect(loaded!.keepAwakeArgs).toEqual([
+			"--what=idle",
+			"--who=conduit",
+			"--why=active-session",
+		]);
+	});
+
+	it("backward compat — loading config without these fields returns undefined", () => {
+		// Write a config that does NOT have keepAwakeCommand/keepAwakeArgs
+		const config = makeSampleConfig({ keepAwake: false });
+		saveDaemonConfig(config, tempDir);
+		const loaded = loadDaemonConfig(tempDir);
+
+		expect(loaded).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		expect(loaded!.keepAwakeCommand).toBeUndefined();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		expect(loaded!.keepAwakeArgs).toBeUndefined();
+	});
+});

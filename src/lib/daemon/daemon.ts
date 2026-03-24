@@ -110,6 +110,10 @@ export interface DaemonOptions {
 	pinHash?: string;
 	tlsEnabled?: boolean;
 	keepAwake?: boolean;
+	/** User-provided keep-awake command (overrides auto-detection). */
+	keepAwakeCommand?: string;
+	/** Args for user-provided keep-awake command. */
+	keepAwakeArgs?: string[];
 	/** OpenCode server URL (e.g., "http://localhost:4096") */
 	opencodeUrl?: string;
 	/** Override the static file directory (default: dist/frontend relative to cwd) */
@@ -205,6 +209,8 @@ export class Daemon {
 
 	// Keep-awake manager (Ticket 3.5)
 	private keepAwakeManager: KeepAwake | null = null;
+	private keepAwakeCommand: string | undefined;
+	private keepAwakeArgs: string[] | undefined;
 
 	// Storage monitor (Ticket 6.2 AC8)
 	private storageMonitor: StorageMonitor | null = null;
@@ -237,6 +243,8 @@ export class Daemon {
 		}
 		this.tlsEnabled = options?.tlsEnabled ?? false;
 		this.keepAwake = options?.keepAwake ?? false;
+		this.keepAwakeCommand = options?.keepAwakeCommand;
+		this.keepAwakeArgs = options?.keepAwakeArgs;
 		this.smartDefault = options?.smartDefault ?? true;
 		this.instanceManager = new InstanceManager();
 
@@ -428,6 +436,14 @@ export class Daemon {
 			for (const p of savedConfig.dismissedPaths) {
 				if (typeof p === "string") this.dismissedPaths.add(p);
 			}
+		}
+
+		// Rehydrate keep-awake command overrides
+		if (savedConfig?.keepAwakeCommand) {
+			this.keepAwakeCommand = savedConfig.keepAwakeCommand;
+		}
+		if (savedConfig?.keepAwakeArgs) {
+			this.keepAwakeArgs = savedConfig.keepAwakeArgs;
 		}
 
 		// ── Probe-and-convert: if the "default" instance was created as
@@ -814,6 +830,7 @@ export class Daemon {
 		this.keepAwakeManager = new KeepAwake({
 			enabled: this.keepAwake,
 		});
+		this.keepAwakeManager.activate();
 
 		// Start storage monitor (Ticket 6.2 AC8)
 		const firstProject = this.getProjects()[0];
@@ -1283,6 +1300,10 @@ export class Daemon {
 			tls: this.tlsEnabled,
 			debug: false,
 			keepAwake: this.keepAwake,
+			...(this.keepAwakeCommand != null && {
+				keepAwakeCommand: this.keepAwakeCommand,
+			}),
+			...(this.keepAwakeArgs != null && { keepAwakeArgs: this.keepAwakeArgs }),
 			dangerouslySkipPermissions: false,
 			projects: this.getProjects().map((p) => ({
 				path: p.directory,

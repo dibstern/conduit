@@ -30,6 +30,10 @@ export interface DaemonConfig {
 	tls: boolean;
 	debug: boolean;
 	keepAwake: boolean;
+	/** User-provided keep-awake command override (e.g. "systemd-inhibit"). */
+	keepAwakeCommand?: string;
+	/** Arguments for the keep-awake command override. */
+	keepAwakeArgs?: string[];
 	dangerouslySkipPermissions: boolean;
 	projects: Array<{
 		path: string;

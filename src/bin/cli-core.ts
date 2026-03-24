@@ -111,12 +111,18 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 
 		const pinHash = process.env[RELAY_ENV_KEYS.PIN_HASH];
 		const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
+		const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
+		const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
 		const daemon = new Daemon({
 			port: daemonPort,
 			...(daemonHost ? { host: daemonHost } : {}),
 			configDir: daemonConfigDir,
 			...(pinHash ? { pinHash } : {}),
 			keepAwake: process.env[RELAY_ENV_KEYS.KEEP_AWAKE] === "1",
+			...(keepAwakeCommand ? { keepAwakeCommand } : {}),
+			...(keepAwakeArgsRaw
+				? { keepAwakeArgs: JSON.parse(keepAwakeArgsRaw) as string[] }
+				: {}),
 			tlsEnabled: process.env[RELAY_ENV_KEYS.TLS] === "1",
 			...(opencodeUrl ? { opencodeUrl } : {}),
 			logLevel: args.logLevel,
