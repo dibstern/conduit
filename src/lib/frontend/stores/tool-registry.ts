@@ -6,8 +6,18 @@ import type { ToolStatus } from "../../shared-types.js";
 import type { ChatMessage, ToolMessage } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 import type { FrontendLogger } from "../utils/logger.js";
+import { createToolMessage } from "../utils/tool-message-factory.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
+
+/** Fields accepted by seedFromHistory — required core + optional rich data. */
+export type HistoryToolSeed = Pick<
+	ToolMessage,
+	"id" | "name" | "status" | "uuid"
+> &
+	Partial<
+		Pick<ToolMessage, "result" | "isError" | "input" | "metadata" | "messageId">
+	>;
 
 export interface TruncationExtras {
 	isTruncated?: boolean;
@@ -47,14 +57,7 @@ export interface ToolRegistry {
 	remove(id: string): void;
 	getUuid(callId: string): string | undefined;
 	/** Seed registry from history-loaded tool messages so SSE events can find them. */
-	seedFromHistory(
-		tools: ReadonlyArray<{
-			id: string;
-			name: string;
-			status: import("../../shared-types.js").ToolStatus;
-			uuid: string;
-		}>,
-	): void;
+	seedFromHistory(tools: ReadonlyArray<HistoryToolSeed>): void;
 }
 
 // ─── Transition Table ───────────────────────────────────────────────────────
@@ -102,14 +105,13 @@ export function createToolRegistry(
 		}
 
 		const uuid = makeUuid();
-		const tool: ToolMessage = {
-			type: "tool",
+		const tool: ToolMessage = createToolMessage({
 			uuid,
 			id,
 			name,
 			status: "pending",
 			...(messageId !== undefined && { messageId }),
-		};
+		});
 		entries.set(id, { uuid, status: "pending", tool });
 		return { action: "create", tool };
 	}
@@ -251,26 +253,13 @@ export function createToolRegistry(
 		return entries.get(callId)?.uuid;
 	}
 
-	function seedFromHistory(
-		tools: ReadonlyArray<{
-			id: string;
-			name: string;
-			status: ToolStatus;
-			uuid: string;
-		}>,
-	): void {
+	function seedFromHistory(tools: ReadonlyArray<HistoryToolSeed>): void {
 		for (const t of tools) {
 			if (entries.has(t.id)) continue; // already tracked
 			entries.set(t.id, {
 				uuid: t.uuid,
 				status: t.status,
-				tool: {
-					type: "tool",
-					uuid: t.uuid,
-					id: t.id,
-					name: t.name,
-					status: t.status,
-				},
+				tool: createToolMessage(t),
 			});
 		}
 	}

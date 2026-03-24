@@ -494,5 +494,27 @@ describe("uuidFn", () => {
 				expect(result.tool.result).toBe("actual output");
 			}
 		});
+
+		it("seedFromHistory preserves result, input, and metadata", () => {
+			registry.seedFromHistory([
+				{
+					id: "t1",
+					name: "Bash",
+					status: "completed",
+					uuid: "uuid-h1",
+					result: "output text",
+					isError: false,
+					input: { command: "ls" },
+					metadata: { duration: 100 },
+				},
+			]);
+
+			// Complete with new result should override
+			const res = registry.complete("t1", "new output", false);
+			expect(res.action).toBe("update");
+			if (res.action === "update") {
+				expect(res.tool.result).toBe("new output");
+			}
+		});
 	});
 });

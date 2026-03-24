@@ -12,13 +12,10 @@ import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { PermissionId } from "../shared-types.js";
 import type { OpenCodeEvent, RelayMessage } from "../types.js";
-import {
-	applyPipelineResult,
-	isNotificationWorthy,
-	processEvent,
-} from "./event-pipeline.js";
+import { applyPipelineResult, processEvent } from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
 import type { MessageCache } from "./message-cache.js";
+import { resolveNotifications } from "./notification-policy.js";
 import {
 	hasInfoWithSessionID,
 	hasPartWithSessionID,
@@ -87,6 +84,8 @@ export interface SSEWiringDeps {
 	>;
 	/** Optional: notify status poller of SSE idle events for fast transition detection */
 	statusPoller?: { notifySSEIdle(sessionId: string): void };
+	/** Optional: session parent map for subagent detection in notification routing */
+	getSessionParentMap?: () => Map<string, string>;
 	/** Project slug for push notification routing */
 	slug?: string;
 }
@@ -368,8 +367,17 @@ export function handleSSEEvent(
 			log: pipelineLog,
 		});
 
-		// Push notifications for done/error events (fire regardless of viewers)
-		if (pushManager) {
+		// Notification routing: push + cross-session broadcast
+		const isSubagent =
+			targetSessionId != null &&
+			(deps.getSessionParentMap?.().has(targetSessionId) ?? false);
+		const notification = resolveNotifications(
+			msg,
+			pipeResult.route,
+			isSubagent,
+			targetSessionId,
+		);
+		if (notification.sendPush && pushManager) {
 			sendPushForEvent(
 				pushManager,
 				msg,
@@ -377,17 +385,13 @@ export function handleSSEEvent(
 				buildPushContext(deps.slug, targetSessionId),
 			);
 		}
-
-		// Cross-session browser notifications: if the pipeline dropped a
-		// notification-worthy event (no viewers on that session), broadcast
-		// a notification_event so other clients can fire sound/browser alerts.
-		if (pipeResult.route.action === "drop" && isNotificationWorthy(msg.type)) {
-			wsHandler.broadcast({
-				type: "notification_event",
-				eventType: msg.type,
-				...(msg.type === "error" ? { message: msg.message } : {}),
-				...(targetSessionId != null ? { sessionId: targetSessionId } : {}),
-			});
+		if (
+			notification.broadcastCrossSession &&
+			notification.crossSessionPayload
+		) {
+			wsHandler.broadcast(
+				notification.crossSessionPayload as import("../shared-types.js").RelayMessage,
+			);
 		}
 	}
 }
