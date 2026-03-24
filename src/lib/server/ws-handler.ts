@@ -119,7 +119,7 @@ export class WebSocketHandler extends EventEmitter<WebSocketHandlerEvents> {
 
 		this.wss = new WebSocketServerClass({
 			...wssOptions,
-			maxPayload: options.maxPayload ?? 1024 * 1024, // 1MB default
+			maxPayload: options.maxPayload ?? 50 * 1024 * 1024, // 50MB — must accommodate base64 image payloads
 			// @perf-guard S5 — removing perMessageDeflate increases WS bandwidth by 30-60%
 			perMessageDeflate: {
 				// Compress everything — the threshold option only works with

@@ -19,8 +19,9 @@
 	import { chatState, addUserMessage, inputSyncState } from "../../stores/chat.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
-	import { fetchFileContent, fetchDirectoryListing } from "./input-utils.js";
+	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState } from "../../stores/session.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import { uiState } from "../../stores/ui.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
@@ -270,20 +271,28 @@
 
 	// ─── Image attach helpers ──────────────────────────────────────────────────
 
-	/** Read selected files from a file input and add them as pending images. */
+	/** Read selected files from a file input, auto-resizing if they exceed the API limit. */
 	function processSelectedFiles(files: FileList | null) {
 		if (!files || files.length === 0) return;
 		for (const file of files) {
 			const reader = new FileReader();
-			reader.onload = () => {
-				if (typeof reader.result === "string") {
+			reader.onload = async () => {
+				if (typeof reader.result !== "string") return;
+				try {
+					const { dataUrl, resized } = await resizeImageIfNeeded(reader.result);
 					pendingImages = [...pendingImages, {
 						id: crypto.randomUUID(),
-						dataUrl: reader.result,
+						dataUrl,
 						name: file.name,
 						size: file.size,
 					}];
-				}
+					if (resized) {
+						showToast(`"${file.name}" was resized to fit the 5 MB encoded size limit`, { variant: "warn" });
+					}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : "Image too large";
+				showToast(msg, { variant: "error" });
+			}
 			};
 			reader.readAsDataURL(file);
 		}
@@ -496,22 +505,24 @@
 					class="flex items-center gap-1 shrink-0"
 				>
 					<!-- Send / Stop buttons -->
-					<button
-						id="send"
-						class="send-btn shrink-0 w-8 h-8 rounded-[10px] border-none bg-brand-a text-white cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:opacity-90 disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
-						disabled={!canSend}
-						title={isProcessing ? "Queue message" : "Send message"}
-						onclick={handleSendClick}
-					>
+				<button
+					id="send"
+					type="button"
+					class="send-btn shrink-0 w-8 h-8 rounded-[10px] border-none bg-brand-a text-white cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:opacity-90 disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
+					disabled={!canSend}
+					title={isProcessing ? "Queue message" : "Send message"}
+					onclick={handleSendClick}
+				>
 						<Icon name="arrow-up" size={18} />
 					</button>
 					{#if isProcessing}
-						<button
-							id="stop"
-							class="shrink-0 w-8 h-8 rounded-[10px] bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
-							title="Stop generating"
-							onclick={handleStop}
-						>
+					<button
+						id="stop"
+						type="button"
+						class="shrink-0 w-8 h-8 rounded-[10px] bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
+						title="Stop generating"
+						onclick={handleStop}
+					>
 							<Icon name="square" size={18} />
 						</button>
 					{/if}
