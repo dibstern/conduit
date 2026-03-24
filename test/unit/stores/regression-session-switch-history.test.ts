@@ -54,6 +54,9 @@ import {
 	handleDelta,
 	handleDone,
 	historyState,
+	isProcessing,
+	isReplaying,
+	isStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
@@ -93,8 +96,8 @@ describe("Regression: session switch clears messages", () => {
 
 		// Messages must be cleared
 		expect(chatState.messages).toHaveLength(0);
-		expect(chatState.streaming).toBe(false);
-		expect(chatState.processing).toBe(false);
+		expect(isStreaming()).toBe(false);
+		expect(isProcessing()).toBe(false);
 		expect(chatState.currentAssistantText).toBe("");
 		expect(sessionState.currentId).toBe("session-b");
 	});
@@ -225,8 +228,8 @@ describe("Combined protocol: session_switched with inline events", () => {
 			"Partial respon",
 		);
 		// Streaming should still be active (no done event)
-		expect(chatState.streaming).toBe(true);
-		expect(chatState.processing).toBe(true);
+		expect(isStreaming()).toBe(true);
+		expect(isProcessing()).toBe(true);
 	});
 
 	it("replays tool events correctly", async () => {
@@ -287,7 +290,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 
 	it("replaying flag is set during replay and cleared after", async () => {
 		// Before replay
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 
 		// Replay is async but with small event arrays (< REPLAY_CHUNK_SIZE)
 		// the entire replay completes synchronously (no yield point hit).
@@ -302,7 +305,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 	});
 
 	it("rapid session switches: only last session's events are displayed", async () => {

@@ -5,7 +5,7 @@
 //
 // This was the root cause of the bouncing-bar not appearing: the status
 // poller broadcast a `session_list` (which updates the sidebar spinner) but
-// never sent a `status` message to update `chatState.processing`.
+// never sent a `status` message to update `isProcessing`.
 
 import {
 	createServer,

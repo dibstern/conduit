@@ -72,8 +72,9 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 import {
-	chatState,
 	clearMessages,
+	isProcessing,
+	isStreaming,
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
@@ -177,8 +178,8 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 		});
 
 		// Chat state should be unchanged — notification_event doesn't call handleDone
-		expect(chatState.processing).toBe(true);
-		expect(chatState.streaming).toBe(true);
+		expect(isProcessing()).toBe(true);
+		expect(isStreaming()).toBe(true);
 	});
 });
 

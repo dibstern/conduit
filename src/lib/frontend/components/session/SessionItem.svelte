@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { chatState } from "../../stores/chat.svelte.js";
+	import { isProcessing as chatIsProcessing } from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo, truncateTitle } from "../../utils/format.js";
 	import Icon from "../shared/Icon.svelte";
@@ -73,7 +73,7 @@
 	// Processing state: server flag OR local chat processing for active session
 	const isProcessing = $derived(
 		session.processing ||
-			(session.id === sessionState.currentId && chatState.processing),
+			(session.id === sessionState.currentId && chatIsProcessing()),
 	);
 
 	const itemClass = $derived(

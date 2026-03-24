@@ -40,6 +40,7 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
+	isReplaying,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
@@ -71,7 +72,7 @@ describe("Async chunked replayEvents", () => {
 	});
 
 	it("replaying flag is true during replay, false after", async () => {
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 
 		// Generate enough events to exceed REPLAY_CHUNK_SIZE (80) so there's
 		// an actual yield point where replaying is still true mid-flight.
@@ -83,11 +84,11 @@ describe("Async chunked replayEvents", () => {
 		const promise = replayEvents(events);
 
 		// Replaying is set synchronously before any awaits
-		expect(chatState.replaying).toBe(true);
+		expect(isReplaying()).toBe(true);
 
 		await drainReplay(promise);
 
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 	});
 
 	it("all events are processed after replay completes", async () => {
@@ -149,11 +150,11 @@ describe("Async chunked replayEvents", () => {
 
 		// Abort via clearMessages — sets replaying=false immediately
 		clearMessages();
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 
 		await drainReplay(promise);
 
 		// Should still be false after drain
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 	});
 });

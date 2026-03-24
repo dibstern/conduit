@@ -13,7 +13,7 @@
 	import { tick, onDestroy } from "svelte";
 	import type { AssistantMessage } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { chatState } from "../../stores/chat.svelte.js";
+	import { isReplaying } from "../../stores/chat.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import Icon from "../shared/Icon.svelte";
@@ -136,7 +136,7 @@
 		// All mounted AssistantMessage instances will run postRender when replay ends.
 		// requestIdleCallback spreads the work across idle frames to avoid a single jank spike.
 		const _html = message.html;
-		const replaying = chatState.replaying;
+		const replaying = isReplaying();
 		// @perf-guard C1 — removing this guard causes 50-300ms of wasted hljs/mermaid CPU during session switch replay
 		if (!_html || replaying) return;
 

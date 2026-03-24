@@ -48,6 +48,7 @@ import {
 	clearMessages,
 	handleDelta,
 	handleDone,
+	isStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -147,7 +148,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 	it("queued flag survives continuation deltas from current turn", () => {
 		// Start an assistant turn
 		handleMessage({ type: "delta", text: "Working on " } as RelayMessage);
-		expect(chatState.streaming).toBe(true);
+		expect(isStreaming()).toBe(true);
 
 		// User queues a message mid-stream
 		addUserMessage("follow-up question", undefined, true);
@@ -279,7 +280,7 @@ describe("clearMessages resets turn tracking cleanly", () => {
 		clearMessages();
 		expect(chatState.turnEpoch).toBe(0);
 		expect(chatState.messages).toHaveLength(0);
-		expect(chatState.streaming).toBe(false);
+		expect(isStreaming()).toBe(false);
 	});
 
 	it("queued tracking doesn't leak across sessions", () => {
@@ -294,7 +295,7 @@ describe("clearMessages resets turn tracking cleanly", () => {
 		// (no stale queuedAtEpoch from session A)
 		handleMessage({ type: "delta", text: "B response" } as RelayMessage);
 		// No queued messages exist, so this is just a normal delta
-		expect(chatState.streaming).toBe(true);
+		expect(isStreaming()).toBe(true);
 		expect(userMessages()).toHaveLength(0);
 	});
 });

@@ -5,7 +5,7 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
-	import { chatState, historyState } from "../../stores/chat.svelte.js";
+	import { chatState, historyState, isProcessing } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
 	import ForkContextBlock from "./ForkContextBlock.svelte";
@@ -187,7 +187,7 @@
 		const _permLen = permissionsState.pendingPermissions.length;
 		const _qLen = permissionsState.pendingQuestions.length;
 		// Untracked guards — checked but don't trigger re-runs:
-		const isActive = untrack(() => chatState.processing || chatState.streaming);
+		const isActive = untrack(() => isProcessing());
 		if (!awaitingPrepend && isActive) {
 			tick().then(() => {
 				scrollToBottom();
@@ -228,7 +228,7 @@
 	// ─── Scroll button text ────────────────────────────────────────────────────
 
 	const scrollButtonText = $derived(
-		chatState.processing ? "↓ New activity" : "↓ Latest",
+		isProcessing() ? "↓ New activity" : "↓ Latest",
 	);
 
 	const groupedMessages: GroupedMessage[] = $derived(groupMessages(chatState.messages));

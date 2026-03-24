@@ -47,6 +47,9 @@ import {
 	handleDelta,
 	handleDone,
 	handleError,
+	isProcessing,
+	isReplaying,
+	isStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 
 // ─── Reset state before each test ───────────────────────────────────────────
@@ -192,8 +195,8 @@ describe("Replay batch infrastructure", () => {
 		// Everything is reset
 		expect(chatState.messages).toHaveLength(0);
 		expect(getMessages()).toHaveLength(0);
-		expect(chatState.streaming).toBe(false);
-		expect(chatState.processing).toBe(false);
-		expect(chatState.replaying).toBe(false);
+		expect(isStreaming()).toBe(false);
+		expect(isProcessing()).toBe(false);
+		expect(isReplaying()).toBe(false);
 	});
 });

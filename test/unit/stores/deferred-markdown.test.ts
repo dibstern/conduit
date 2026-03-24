@@ -47,6 +47,7 @@ import {
 	clearMessages,
 	handleDelta,
 	handleDone,
+	isReplaying,
 	renderDeferredMarkdown,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
@@ -138,7 +139,7 @@ describe("Deferred markdown rendering", () => {
 
 	it("normal (non-replay) path calls renderMarkdown immediately", () => {
 		// Normal path: not replaying
-		expect(chatState.replaying).toBe(false);
+		expect(isReplaying()).toBe(false);
 
 		handleDelta({ type: "delta", text: "Live **bold**" });
 		vi.advanceTimersByTime(100); // flush debounce

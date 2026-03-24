@@ -49,6 +49,8 @@ import {
 	clearMessages,
 	handleDelta,
 	handleDone,
+	isProcessing,
+	isStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
@@ -91,12 +93,12 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect(chatState.messages.length).toBeGreaterThan(0);
 		const liveUserMsgs = chatState.messages.filter((m) => m.type === "user");
 		expect(liveUserMsgs).toHaveLength(1);
-		expect(chatState.streaming).toBe(true);
+		expect(isStreaming()).toBe(true);
 
 		// ── Phase 2: Switch to session B (clears everything) ──
 		handleMessage({ type: "session_switched", id: "session-b" });
 		expect(chatState.messages).toHaveLength(0);
-		expect(chatState.streaming).toBe(false);
+		expect(isStreaming()).toBe(false);
 		expect(sessionState.currentId).toBe("session-b");
 
 		// ── Phase 3: Switch back to session A with full cached events ──
@@ -139,8 +141,8 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect((assistantMsgs[0] as AssistantMessage).finalized).toBe(true);
 
 		// Stream should be complete
-		expect(chatState.streaming).toBe(false);
-		expect(chatState.processing).toBe(false);
+		expect(isStreaming()).toBe(false);
+		expect(isProcessing()).toBe(false);
 	});
 
 	it("switching away mid-stream then back WITHOUT done preserves partial stream", async () => {
@@ -178,8 +180,8 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect((assistantMsgs[0] as AssistantMessage).finalized).toBe(false);
 
 		// Should still be streaming (agent still working)
-		expect(chatState.streaming).toBe(true);
-		expect(chatState.processing).toBe(true);
+		expect(isStreaming()).toBe(true);
+		expect(isProcessing()).toBe(true);
 	});
 
 	it("switching away during tool execution then back preserves tool state", async () => {
@@ -383,8 +385,8 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		await vi.runAllTimersAsync();
 
 		// Should be mid-stream
-		expect(chatState.streaming).toBe(true);
-		expect(chatState.processing).toBe(true);
+		expect(isStreaming()).toBe(true);
+		expect(isProcessing()).toBe(true);
 
 		// Now simulate live events continuing to arrive (agent still working)
 		handleMessage({ type: "delta", text: "your request..." });
@@ -401,8 +403,8 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 
 		// Complete the stream
 		handleMessage({ type: "done", code: 0 });
-		expect(chatState.streaming).toBe(false);
-		expect(chatState.processing).toBe(false);
+		expect(isStreaming()).toBe(false);
+		expect(isProcessing()).toBe(false);
 		expect((assistantMsgs[0] as AssistantMessage).finalized).toBe(false); // stale ref
 		// Re-read from state
 		const finalAssistant = chatState.messages.filter(

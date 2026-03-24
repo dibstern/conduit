@@ -3,10 +3,10 @@
 // because `status: "processing"` events are NEVER cached by the server.
 // The prompt handler (prompt.ts:71-74) sends status:processing via
 // wsHandler.sendToSession() directly — it never calls recordEvent().
-// So during replayEvents(), chatState.processing stays false, and
-// addUserMessage(text, undefined, chatState.processing) never sets queued.
+// So during replayEvents(), isProcessing stays false, and
+// addUserMessage(text, undefined, isProcessing) never sets queued.
 //
-// Root cause: replayEvents relied on chatState.processing (set by status
+// Root cause: replayEvents relied on isProcessing (set by status
 // events) to decide if a user_message is queued. But status events aren't
 // in the message cache, so processing is always false during replay.
 //

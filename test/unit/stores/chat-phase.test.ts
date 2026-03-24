@@ -42,6 +42,9 @@ import {
 	handleDelta,
 	handleDone,
 	handleStatus,
+	isProcessing,
+	isReplaying,
+	isStreaming,
 	phaseEndReplay,
 	phaseStartReplay,
 	phaseToIdle,
@@ -83,32 +86,32 @@ describe("ChatPhase type", () => {
 describe("backward-compatible getters", () => {
 	it("idle: processing=false, streaming=false, replaying=false", () => {
 		expect(chatState.phase).toBe("idle");
-		expect(chatState.processing).toBe(false);
-		expect(chatState.streaming).toBe(false);
-		expect(chatState.replaying).toBe(false);
+		expect(isProcessing()).toBe(false);
+		expect(isStreaming()).toBe(false);
+		expect(isReplaying()).toBe(false);
 	});
 
 	it("processing: processing=true, streaming=false, replaying=false", () => {
 		handleStatus(statusMsg("processing"));
 		expect(chatState.phase).toBe("processing");
-		expect(chatState.processing).toBe(true);
-		expect(chatState.streaming).toBe(false);
-		expect(chatState.replaying).toBe(false);
+		expect(isProcessing()).toBe(true);
+		expect(isStreaming()).toBe(false);
+		expect(isReplaying()).toBe(false);
 	});
 
 	it("streaming: streaming=true, replaying=false", () => {
 		handleDelta({ type: "delta", text: "hello" });
 		expect(chatState.phase).toBe("streaming");
-		expect(chatState.streaming).toBe(true);
-		expect(chatState.replaying).toBe(false);
+		expect(isStreaming()).toBe(true);
+		expect(isReplaying()).toBe(false);
 	});
 
 	it("replaying: replaying=true, processing=false, streaming=false", () => {
 		phaseStartReplay();
 		expect(chatState.phase).toBe("replaying");
-		expect(chatState.replaying).toBe(true);
-		expect(chatState.processing).toBe(false);
-		expect(chatState.streaming).toBe(false);
+		expect(isReplaying()).toBe(true);
+		expect(isProcessing()).toBe(false);
+		expect(isStreaming()).toBe(false);
 	});
 });
 
@@ -192,7 +195,7 @@ describe("impossible states prevented", () => {
 		// derives from phase — no inconsistency possible.
 		phaseToStreaming();
 		// streaming is true — and phase is "streaming"
-		expect(chatState.streaming).toBe(true);
+		expect(isStreaming()).toBe(true);
 		expect(chatState.phase).toBe("streaming");
 	});
 });
