@@ -17,6 +17,7 @@
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import Icon from "../shared/Icon.svelte";
+	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import hljs from "highlight.js";
 	// Register aliases for template languages not natively supported by highlight.js.
 	// Consistent with FileViewer's mapExtToLanguage mapping (svelte/vue → xml).
@@ -108,6 +109,10 @@
 
 	// ─── Post-render: code block headers + syntax highlighting ─────────────────
 
+	// Track table scroll shadow cleanup so we can tear down listeners/observers
+	// before re-attaching on the next render, and on component destroy.
+	let tableScrollCleanup: (() => void) | null = null;
+
 	async function postRender() {
 		if (!containerEl) return;
 		await tick();
@@ -116,6 +121,10 @@
 
 		const contentEl = containerEl.querySelector(".md-content");
 		if (!contentEl) return;
+
+		// Tear down previous scroll shadow listeners before re-attaching
+		tableScrollCleanup?.();
+		tableScrollCleanup = initTableScrollShadows(contentEl as HTMLElement).destroy;
 
 		// Add code block headers
 		addCodeBlockHeaders(contentEl as HTMLElement);
@@ -350,6 +359,7 @@
 
 	onDestroy(() => {
 		if (copyResetTimer) clearTimeout(copyResetTimer);
+		tableScrollCleanup?.();
 	});
 </script>
 

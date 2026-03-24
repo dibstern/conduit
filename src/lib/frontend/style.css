@@ -481,6 +481,13 @@
 /* ─── Markdown content ──────────────────────────────────────────────────────── */
 
 @layer components {
+	/* Prevent long unbroken strings (URLs, inline code, etc.) from overflowing
+	   the message card and widening the viewport. */
+	.md-content {
+		overflow-wrap: break-word;
+		min-width: 0;
+	}
+
 	.md-content h1,
 	.md-content h2,
 	.md-content h3,
@@ -581,11 +588,61 @@
 		border-radius: 8px;
 		overflow: hidden;
 	}
-	.md-content .table-wrap {
-		@apply overflow-x-auto my-3.5;
+	/* ── Table scroll container with shadow affordances ── */
+	.md-content .table-scroll-container {
+		position: relative;
+		@apply my-3.5;
 	}
-	.md-content .table-wrap table {
+	.md-content .table-scroll {
+		@apply overflow-x-auto;
+		border-radius: 8px;
+	}
+	.md-content .table-scroll table {
 		@apply my-0;
+	}
+	/* Thin styled scrollbar */
+	.md-content .table-scroll::-webkit-scrollbar {
+		height: 6px;
+	}
+	.md-content .table-scroll::-webkit-scrollbar-track {
+		background: rgba(255, 255, 255, 0.03);
+		border-radius: 3px;
+	}
+	.md-content .table-scroll::-webkit-scrollbar-thumb {
+		background: var(--color-border);
+		border-radius: 3px;
+	}
+	/* Edge shadow overlays — hidden by default, shown via .visible class */
+	.md-content .table-shadow {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 32px;
+		pointer-events: none;
+		opacity: 0;
+		transition: opacity 0.2s ease;
+		z-index: 1;
+	}
+	.md-content .table-shadow.visible {
+		opacity: 1;
+	}
+	.md-content .table-shadow-left {
+		left: 0;
+		background: linear-gradient(
+			to right,
+			var(--color-bg-surface) 0%,
+			transparent 100%
+		);
+		border-radius: 8px 0 0 8px;
+	}
+	.md-content .table-shadow-right {
+		right: 0;
+		background: linear-gradient(
+			to left,
+			var(--color-bg-surface) 0%,
+			transparent 100%
+		);
+		border-radius: 0 8px 8px 0;
 	}
 	.md-content th {
 		@apply px-3.5 py-2 text-left align-top font-semibold;

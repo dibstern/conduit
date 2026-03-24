@@ -6,6 +6,7 @@
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
 	import { renderMarkdown } from "../../utils/markdown.js";
+	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	let {
 		mode,
@@ -107,7 +108,7 @@
 		</div>
 		{#if !collapsed}
 			<div class="plan-card-body">
-				<div class="md-content text-sm leading-[1.7]">
+				<div class="md-content text-sm leading-[1.7]" use:initTableScrollShadows>
 					{@html renderedHtml}
 				</div>
 			</div>
