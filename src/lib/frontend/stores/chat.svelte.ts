@@ -53,6 +53,11 @@ export const chatState = $state({
 	 *  Used by the unified rendering pipeline to know that the LLM has started
 	 *  responding to a previously-queued message (so the queued shimmer should be removed). */
 	queuedFlagsCleared: false,
+	/** Monotonically increasing counter, bumped on each `done` event.
+	 *  Provides an explicit, reliable turn-boundary signal for logic that
+	 *  needs to distinguish "same turn" from "new turn" (e.g. queued-flag
+	 *  clearing, future turn-aware features). Reset to 0 on clearMessages. */
+	turnEpoch: 0,
 });
 
 /** Pagination state for history loading (shared between HistoryLoader and dispatch). */
@@ -463,6 +468,7 @@ export function handleDone(
 	}
 
 	chatState.streaming = false;
+	chatState.turnEpoch++;
 	// Don't clear processing during event replay — replayed `done` events
 	// are historical (previous assistant turns) and must not overwrite the
 	// live processing flag set by the server's status:processing message.
@@ -538,6 +544,28 @@ export function handleError(
 	}
 }
 
+// ─── Turn-boundary tracking for queued-flag clearing ────────────────────────
+// When a user message is queued (sent while the LLM is working), its "Queued"
+// shimmer must persist until the LLM starts a NEW turn — not be stripped by
+// continuation deltas from the current turn.  We record the turnEpoch at
+// which the message was queued and only allow clearing once the epoch advances.
+
+let queuedAtEpoch = -1; // -1 → no queued message pending
+
+/** Should ws-dispatch call clearQueuedFlags() on this content-start event?
+ *  Returns true when:
+ *  - No queued message is pending (safe default), OR
+ *  - turnEpoch has advanced past the epoch when the message was queued
+ *    (a `done` event completed the previous turn). */
+export function shouldClearQueuedOnContent(): boolean {
+	if (queuedAtEpoch < 0) return true;
+	if (chatState.turnEpoch > queuedAtEpoch) {
+		queuedAtEpoch = -1; // consumed
+		return true;
+	}
+	return false;
+}
+
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 /** Add a user message to the chat.
@@ -554,6 +582,7 @@ export function addUserMessage(
 	images?: string[],
 	queued?: boolean,
 ): void {
+	if (queued) queuedAtEpoch = chatState.turnEpoch;
 	// Finalize the in-progress assistant message only during replay,
 	// where user_message events can appear between delta events without
 	// an intervening done event.  During live streaming (queued=true),
@@ -684,6 +713,8 @@ export function clearMessages(): void {
 	chatState.streaming = false;
 	chatState.processing = false;
 	chatState.queuedFlagsCleared = false;
+	chatState.turnEpoch = 0;
+	queuedAtEpoch = -1;
 	registry.clear();
 	doneMessageIds.clear();
 	if (renderTimer !== null) {

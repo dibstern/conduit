@@ -42,6 +42,7 @@ import {
 	registerClearMessagesHook,
 	renderDeferredMarkdown,
 	seedRegistryFromMessages,
+	shouldClearQueuedOnContent,
 } from "./chat.svelte.js";
 import {
 	handleAgentList,
@@ -186,12 +187,6 @@ async function convertHistoryAsync(
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
-	// Snapshot streaming state BEFORE the handler runs so we can detect
-	// a genuine new-turn start (streaming was off → content event turns it on).
-	// Used below to gate clearQueuedFlags() — continuation deltas from the
-	// current turn must NOT strip the "Queued" shimmer early.
-	const wasStreaming = chatState.streaming;
-
 	switch (msg.type) {
 		// ─── Chat / Streaming ────────────────────────────────────────────
 		case "delta":
@@ -537,12 +532,12 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 	}
 
-	// ── Queued-flag clearing (single source of truth) ────────────────
-	// Only clear when a genuinely NEW turn starts (streaming was off before
-	// this event).  Continuation deltas from the current turn must not
-	// strip the "Queued" shimmer — the queued message is waiting for the
-	// NEXT turn, not the current one.
-	if (isLlmContentStart(msg.type) && !wasStreaming) clearQueuedFlags();
+	// ── Queued-flag clearing ─────────────────────────────────────────
+	// Gated by shouldClearQueuedOnContent(): only clears when turnEpoch
+	// has advanced past the epoch when the queued message was added
+	// (i.e. a `done` event completed the previous turn).
+	if (isLlmContentStart(msg.type) && shouldClearQueuedOnContent())
+		clearQueuedFlags();
 }
 
 // ─── Event Replay (session switch with cached events) ────────────────────────
@@ -581,9 +576,6 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 		else if (event.type === "done") llmActive = false;
 		else if (event.type === "error" && event.code !== "RETRY")
 			llmActive = false;
-
-		// Snapshot streaming state before handler (same logic as handleMessage)
-		const wasStreaming = chatState.streaming;
 
 		switch (event.type) {
 			case "user_message":
@@ -640,10 +632,10 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 			// These are not part of the chat message stream.
 		}
 
-		// ── Queued-flag clearing (single source of truth) ────────────────
-		// Same new-turn gate as handleMessage(): only clear when streaming
-		// was off before this event (genuine new turn, not continuation).
-		if (isLlmContentStart(event.type) && !wasStreaming) clearQueuedFlags();
+		// ── Queued-flag clearing ─────────────────────────────────────────
+		// Same turnEpoch gate as handleMessage().
+		if (isLlmContentStart(event.type) && shouldClearQueuedOnContent())
+			clearQueuedFlags();
 
 		// Yield between chunks to keep the main thread responsive
 		if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
