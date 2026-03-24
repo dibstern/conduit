@@ -6,11 +6,14 @@
 	import { wsState } from "../../stores/ws.svelte.js";
 	import { wsDebugState, getDebugEvents, clearDebugLog } from "../../stores/ws-debug.svelte.js";
 	import { confirm } from "../../stores/ui.svelte.js";
+	import { rawSend } from "../../stores/ws-send.svelte.js";
 
 	let copyFlash = $state(false);
 
 	function toggleVerbose() {
-		wsDebugState.verboseMessages = !wsDebugState.verboseMessages;
+		const newValue = !wsDebugState.verboseMessages;
+		wsDebugState.verboseMessages = newValue;
+		rawSend({ type: "set_log_level", level: newValue ? "verbose" : "info" });
 	}
 
 	async function handleClear() {
@@ -273,9 +276,9 @@
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={toggleVerbose}
-				title={wsDebugState.verboseMessages ? "Showing all messages — click to throttle" : "Showing 1 per 100 messages — click for all"}
+				title={wsDebugState.verboseMessages ? "Verbose: showing all messages + server verbose logging" : "Normal: sampled messages + server info logging"}
 			>
-				{wsDebugState.verboseMessages ? "msgs:all" : "msgs:100"}
+				{wsDebugState.verboseMessages ? "verbose:on" : "verbose:off"}
 			</button>
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {copyFlash ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}"

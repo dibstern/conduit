@@ -54,7 +54,8 @@ export type IncomingMessageType =
 	| "switch_variant"
 	| "view_session"
 	| "proxy_detect"
-	| "scan_now";
+	| "scan_now"
+	| "set_log_level";
 
 const VALID_MESSAGE_TYPES = new Set<string>([
 	"message",
@@ -104,6 +105,7 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"view_session",
 	"proxy_detect",
 	"scan_now",
+	"set_log_level",
 ]);
 
 export interface IncomingMessage {

@@ -17,7 +17,12 @@ import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { dispatchMessage, type HandlerDeps } from "../handlers/index.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
-import { createLogger, type Logger } from "../logger.js";
+import {
+	createLogger,
+	type Logger,
+	type LogLevel,
+	setLogLevel,
+} from "../logger.js";
 import { ClientMessageQueue } from "../server/client-message-queue.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
@@ -508,6 +513,23 @@ export async function createProjectRelay(
 				});
 				return;
 			}
+		}
+
+		// Handle log level changes directly (no queue needed, synchronous)
+		if (handler === "set_log_level") {
+			const level = payload["level"];
+			const validLevels = new Set([
+				"debug",
+				"verbose",
+				"info",
+				"warn",
+				"error",
+			]);
+			if (typeof level === "string" && validLevels.has(level)) {
+				setLogLevel(level as LogLevel);
+				wsLog.info(`Log level changed to ${level} by client ${clientId}`);
+			}
+			return;
 		}
 
 		clientQueue.enqueue(clientId, async () => {

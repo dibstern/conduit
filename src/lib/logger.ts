@@ -159,6 +159,11 @@ export function setLogLevel(level: LogLevel): void {
 	rootPino = buildPino(currentLevel, currentFormat);
 }
 
+/** Get the current log level. */
+export function getLogLevel(): LogLevel {
+	return currentLevel;
+}
+
 /**
  * Set the output format.
  * - "pretty": column-aligned `[tag] [subtag]  message` for foreground/human use.
