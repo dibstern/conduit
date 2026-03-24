@@ -40,6 +40,24 @@
 
 	const isEmpty = $derived(!loading && projects.length === 0);
 
+	// ─── Scroll state ─────────────────────────────────────────────────────────
+	let scrollEl: HTMLElement | undefined = $state();
+	let showBottomFade = $state(false);
+
+	function handleScroll() {
+		if (!scrollEl) return;
+		const { scrollTop, scrollHeight, clientHeight } = scrollEl;
+		showBottomFade = scrollHeight - scrollTop - clientHeight > 10;
+	}
+
+	// Recompute fade when projects change or component mounts
+	$effect(() => {
+		// Track projects.length to re-run when list changes
+		void projects.length;
+		// Use requestAnimationFrame to ensure DOM has updated
+		requestAnimationFrame(() => handleScroll());
+	});
+
 	// ─── Context menu state ───────────────────────────────────────────────────
 	let ctxMenuProject: DashboardProject | null = $state(null);
 	let ctxMenuAnchor: HTMLElement | null = $state(null);
@@ -193,68 +211,87 @@
 </script>
 
 <div
-	class="bg-bg min-h-screen flex flex-col items-center p-[40px_20px] text-text font-sans"
+	class="bg-bg h-screen flex flex-col items-center pt-10 text-text font-sans"
 >
-	<h1 class="text-2xl font-semibold mb-2">Conduit</h1>
-	<div class="text-base text-text-muted mb-8">Select a project</div>
+	<!-- Pinned header -->
+	<h1 class="text-2xl font-semibold mb-2 shrink-0">Conduit</h1>
+	<div class="text-base text-text-muted mb-6 shrink-0">Select a project</div>
 
-	<div class="flex flex-col gap-3 w-full max-w-[480px]">
-		{#if loading}
-			<div class="text-center text-text-dimmer text-sm py-10">Loading...</div>
-		{:else if isEmpty}
-			<div class="text-center text-text-dimmer text-sm py-10 px-5">
-				No projects registered. Run
-				<code
-					class="bg-bg-alt px-1.5 py-0.5 rounded text-base text-text"
-					>conduit</code
-				> in a project directory to add one.
-			</div>
-		{:else}
-			{#each projects as project (project.slug)}
-				<a
-					href="/p/{project.slug}/"
-					data-testid="project-card"
-					data-slug={project.slug}
-					class="group block bg-bg-alt border border-border rounded-xl p-[16px_20px] no-underline text-text transition-[border-color,background] hover:border-accent hover:bg-bg-surface"
-					onclick={(e) => handleCardClick(e, project.slug)}
-				>
-					<div
-						class="text-lg font-semibold flex items-center gap-2"
-					>
-						{displayName(project)}
-						<span class="text-sm">{statusIcon(project)}</span>
-						<button
-							class="dash-more-btn shrink-0 ml-auto w-6 h-6 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center text-text-dimmer opacity-0 group-hover:opacity-100 hover:text-text hover:bg-bg-surface transition-[opacity,color] duration-100"
-							title="More options"
-							onclick={(e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								handleProjectContextMenu(project, e.currentTarget as HTMLElement);
-							}}
-						>
-							<Icon name="ellipsis" size={15} />
-						</button>
-					</div>
-				<div
-					class="text-xs text-text-muted mt-1 font-mono overflow-hidden text-ellipsis whitespace-nowrap"
-				>
-					{project.path}
+	<!-- Scrollable project list area -->
+	<div class="relative flex-1 min-h-0 w-full max-w-[480px] px-5" data-testid="project-list-scroll-area">
+		<div
+			bind:this={scrollEl}
+			onscroll={handleScroll}
+			class="h-full overflow-y-auto flex flex-col gap-3 pb-4"
+			data-testid="project-list"
+		>
+			{#if loading}
+				<div class="text-center text-text-dimmer text-sm py-10">Loading...</div>
+			{:else if isEmpty}
+				<div class="text-center text-text-dimmer text-sm py-10 px-5">
+					No projects registered. Run
+					<code
+						class="bg-bg-alt px-1.5 py-0.5 rounded text-base text-text"
+						>conduit</code
+					> in a project directory to add one.
 				</div>
-				{#if project.status === "error" && project.error}
-					<span class="block text-xs text-red-400 truncate mt-0.5" title={project.error}>
-						{project.error}
-					</span>
-				{/if}
-					<div class="text-xs text-text-dimmer mt-2">
-						{sessionLabel(project.sessions)} &middot; {clientLabel(project.clients)}
+			{:else}
+				{#each projects as project (project.slug)}
+					<a
+						href="/p/{project.slug}/"
+						data-testid="project-card"
+						data-slug={project.slug}
+						class="group block shrink-0 bg-bg-alt border border-border rounded-xl p-[16px_20px] no-underline text-text transition-[border-color,background] hover:border-accent hover:bg-bg-surface"
+						onclick={(e) => handleCardClick(e, project.slug)}
+					>
+						<div
+							class="text-lg font-semibold flex items-center gap-2"
+						>
+							{displayName(project)}
+							<span class="text-sm">{statusIcon(project)}</span>
+							<button
+								class="dash-more-btn shrink-0 ml-auto w-6 h-6 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center text-text-dimmer opacity-0 group-hover:opacity-100 hover:text-text hover:bg-bg-surface transition-[opacity,color] duration-100"
+								title="More options"
+								onclick={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									handleProjectContextMenu(project, e.currentTarget as HTMLElement);
+								}}
+							>
+								<Icon name="ellipsis" size={15} />
+							</button>
+						</div>
+					<div
+						class="text-xs text-text-muted mt-1 font-mono overflow-hidden text-ellipsis whitespace-nowrap"
+					>
+						{project.path}
 					</div>
-				</a>
-			{/each}
+					{#if project.status === "error" && project.error}
+						<span class="block text-xs text-red-400 truncate mt-0.5" title={project.error}>
+							{project.error}
+						</span>
+					{/if}
+						<div class="text-xs text-text-dimmer mt-2">
+							{sessionLabel(project.sessions)} &middot; {clientLabel(project.clients)}
+						</div>
+					</a>
+				{/each}
+			{/if}
+		</div>
+
+		<!-- Bottom fade gradient (visible when more content below) -->
+		{#if showBottomFade}
+			<div
+				class="pointer-events-none absolute bottom-0 left-0 right-0 h-12"
+				style="background: linear-gradient(to top, var(--color-bg), transparent)"
+				data-testid="scroll-fade"
+			></div>
 		{/if}
 	</div>
 
+	<!-- Pinned footer -->
 	{#if version}
-		<div class="mt-10 text-sm text-text-dimmer">v{version}</div>
+		<div class="shrink-0 py-4 text-sm text-text-dimmer">v{version}</div>
 	{/if}
 </div>
 

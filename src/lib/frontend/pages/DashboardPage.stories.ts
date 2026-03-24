@@ -91,3 +91,20 @@ export const SingleProject: Story = {
 		initialVersion: "0.4.2",
 	},
 };
+
+/** Many projects — exercises scroll behavior and bottom fade gradient. */
+export const ManyProjects: Story = {
+	args: {
+		initialProjects: Array.from({ length: 15 }, (_, i) => ({
+			slug: `project-${i + 1}`,
+			path: `/Users/dev/projects/project-${i + 1}`,
+			title: `Project ${i + 1}`,
+			status: (["ready", "ready", "registering", "error"] as const)[i % 4],
+			error: i % 4 === 3 ? "Connection refused" : undefined,
+			sessions: Math.floor(Math.random() * 20),
+			clients: Math.floor(Math.random() * 5),
+			isProcessing: i % 3 === 0,
+		})),
+		initialVersion: "0.4.2",
+	},
+};
