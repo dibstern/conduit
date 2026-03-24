@@ -9,7 +9,7 @@
 
 	const isError = $derived(message.variant === "error");
 	const hasDetails = $derived(
-		!!(message.errorCode || message.statusCode || (message.details && Object.keys(message.details).length > 0)),
+		!!(message.statusCode || (message.details && Object.keys(message.details).length > 0)),
 	);
 
 	let showDetails = $state(false);
