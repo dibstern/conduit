@@ -118,8 +118,8 @@
 	function payloadSummary(payload: unknown): string {
 		if (!payload || typeof payload !== "object") return "";
 		const p = payload as Record<string, unknown>;
-		// Helper: truncate an ID to first 8 chars for display
-		const shortId = (v: unknown) => typeof v === "string" ? v.slice(0, 8) : "";
+		// Helper: show last 6 chars of an ID (tool IDs all start with "toolu_01" so the prefix is useless)
+		const shortId = (v: unknown) => typeof v === "string" ? `…${v.slice(-6)}` : "";
 
 		switch (p.type) {
 			// ── Chat-visible: streaming ──────────────────────────────────────
