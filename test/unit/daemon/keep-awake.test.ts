@@ -7,7 +7,7 @@
 // T4:  deactivate() kills process, emits deactivated
 // T5:  isActive() tracks state correctly
 // T6:  setEnabled(false) deactivates if active
-// T7:  setEnabled(true) doesn't auto-activate
+// T7:  setEnabled(true) auto-activates on supported platform
 // T8:  Non-macOS: activate() emits unsupported, isActive() false
 // T9:  Idempotent: double activate doesn't spawn twice
 // T10: Idempotent: double deactivate is safe
@@ -16,6 +16,7 @@
 // T13: Disabled: activate() is no-op when not enabled
 // T14: PBT: enabled/disabled state machine consistency
 // T15: activate() when spawn throws synchronously
+// T16: Cross-platform tool resolution
 
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -93,7 +94,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				["-di"],
 				expect.objectContaining({
 					stdio: "ignore",
-					detached: false,
+					detached: true,
 				}),
 			);
 		});
@@ -142,9 +143,12 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 	// ─── T4: deactivate() kills process, emits deactivated ──────────────
 
 	describe("T4: deactivate() kills process, emits deactivated (AC2)", () => {
-		it("kills the child process", () => {
+		it("kills the child process group via process.kill(-pid)", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
+			const processKillSpy = vi
+				.spyOn(process, "kill")
+				.mockImplementation(() => true);
 
 			const ka = new KeepAwake({
 				_platform: "darwin",
@@ -154,7 +158,8 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			ka.activate();
 			ka.deactivate();
 
-			expect(child.kill).toHaveBeenCalled();
+			expect(processKillSpy).toHaveBeenCalledWith(-12345, "SIGTERM");
+			processKillSpy.mockRestore();
 		});
 
 		it("emits deactivated event", () => {
@@ -218,6 +223,9 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		it("deactivates when disabling while active", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
+			const processKillSpy = vi
+				.spyOn(process, "kill")
+				.mockImplementation(() => true);
 
 			const ka = new KeepAwake({
 				_platform: "darwin",
@@ -234,7 +242,8 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			expect(ka.isActive()).toBe(false);
 			expect(ka.isEnabled()).toBe(false);
 			expect(events).toEqual(["deactivated"]);
-			expect(child.kill).toHaveBeenCalled();
+			expect(processKillSpy).toHaveBeenCalledWith(-12345, "SIGTERM");
+			processKillSpy.mockRestore();
 		});
 
 		it("just disables when not active", () => {
@@ -246,12 +255,16 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T7: setEnabled(true) doesn't auto-activate ─────────────────────
+	// ─── T7: setEnabled(true) auto-activates ────────────────────────────
 
-	describe("T7: setEnabled(true) doesn't auto-activate (AC3)", () => {
-		it("enables but does not activate", () => {
+	describe("T7: setEnabled(true) auto-activates on supported platform", () => {
+		it("enables and activates on macOS", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
 			const ka = new KeepAwake({
 				_platform: "darwin",
+				_spawn: mockSpawn,
 				enabled: false,
 			});
 
@@ -260,21 +273,57 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 			ka.setEnabled(true);
 			expect(ka.isEnabled()).toBe(true);
-			expect(ka.isActive()).toBe(false);
-			expect(events).toHaveLength(0);
+			expect(ka.isActive()).toBe(true);
+			expect(events).toEqual(["activated"]);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
 		});
-	});
 
-	// ─── T8: Non-macOS emits unsupported ─────────────────────────────────
-
-	describe("T8: Non-macOS: activate() emits unsupported, isActive() false (AC4)", () => {
-		it("emits unsupported on linux", () => {
+		it("enables but does not activate on unsupported platform", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
 			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
+				_whichSync: () => null,
+				enabled: false,
+			});
+
+			ka.setEnabled(true);
+			expect(ka.isEnabled()).toBe(true);
+			expect(ka.isActive()).toBe(false);
+			expect(mockSpawn).not.toHaveBeenCalled();
+		});
+
+		it("is idempotent — does not spawn twice if already active", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
+			const ka = new KeepAwake({
+				_platform: "darwin",
+				_spawn: mockSpawn,
+			});
+
+			ka.activate();
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+
+			ka.setEnabled(true);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			expect(ka.isActive()).toBe(true);
+		});
+	});
+
+	// ─── T8: Non-macOS emits unsupported ─────────────────────────────────
+
+	describe("T8: Non-macOS: activate() emits unsupported, isActive() false (AC4)", () => {
+		it("emits unsupported on linux when no tool found", () => {
+			const mockSpawn =
+				vi.fn() as unknown as typeof import("node:child_process").spawn;
+
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_spawn: mockSpawn,
+				_whichSync: () => null,
 			});
 
 			const events: Array<{ platform: string }> = [];
@@ -294,6 +343,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const ka = new KeepAwake({
 				_platform: "win32",
 				_spawn: mockSpawn,
+				_whichSync: () => null,
 			});
 
 			const events: Array<{ platform: string }> = [];
@@ -306,7 +356,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("does not throw on unsupported platform", () => {
-			const ka = new KeepAwake({ _platform: "linux" });
+			const ka = new KeepAwake({ _platform: "linux", _whichSync: () => null });
 			expect(() => ka.activate()).not.toThrow();
 		});
 	});
@@ -512,24 +562,27 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 	// ─── T12: isSupported() ──────────────────────────────────────────────
 
-	describe("T12: isSupported() returns true only on darwin", () => {
+	describe("T12: isSupported() returns true on darwin, delegates to resolveCommand", () => {
 		it("returns true on darwin", () => {
 			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(ka.isSupported()).toBe(true);
 		});
 
-		it("returns false on linux", () => {
-			const ka = new KeepAwake({ _platform: "linux" });
+		it("returns false on linux when no tool found", () => {
+			const ka = new KeepAwake({ _platform: "linux", _whichSync: () => null });
 			expect(ka.isSupported()).toBe(false);
 		});
 
 		it("returns false on win32", () => {
-			const ka = new KeepAwake({ _platform: "win32" });
+			const ka = new KeepAwake({ _platform: "win32", _whichSync: () => null });
 			expect(ka.isSupported()).toBe(false);
 		});
 
 		it("returns false on freebsd", () => {
-			const ka = new KeepAwake({ _platform: "freebsd" });
+			const ka = new KeepAwake({
+				_platform: "freebsd",
+				_whichSync: () => null,
+			});
 			expect(ka.isSupported()).toBe(false);
 		});
 	});
@@ -633,10 +686,14 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			);
 		});
 
-		it("property: isSupported is deterministic for any platform", () => {
+		it("property: isSupported is deterministic for any platform (no tool)", () => {
 			fc.assert(
 				fc.property(fc.string({ minLength: 1, maxLength: 20 }), (platform) => {
-					const ka = new KeepAwake({ _platform: platform });
+					const ka = new KeepAwake({
+						_platform: platform,
+						_whichSync: () => null,
+					});
+					// With no which-sync tool, only darwin is supported (caffeinate hardcoded)
 					const expected = platform === "darwin";
 					expect(ka.isSupported()).toBe(expected);
 				}),
@@ -689,6 +746,206 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			expect(errors[0]!.message).toBe("ENOENT: caffeinate not found");
 			expect(ka.isActive()).toBe(false);
+		});
+	});
+
+	// ─── T16: Cross-platform tool resolution ────────────────────────────
+
+	describe("T16: Cross-platform tool resolution", () => {
+		it("uses config command/args when provided (any platform)", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_spawn: mockSpawn,
+				_whichSync: () => null,
+				command: "my-keep-awake",
+				args: ["--flag"],
+			});
+
+			ka.activate();
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"my-keep-awake",
+				["--flag"],
+				expect.objectContaining({ stdio: "ignore", detached: true }),
+			);
+			expect(ka.isActive()).toBe(true);
+		});
+
+		it("auto-detects systemd-inhibit on linux when available", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_spawn: mockSpawn,
+				_whichSync: (cmd: string) =>
+					cmd === "systemd-inhibit" ? "/usr/bin/systemd-inhibit" : null,
+			});
+
+			ka.activate();
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"systemd-inhibit",
+				[
+					"--what=idle",
+					"--who=conduit",
+					"--why=Conduit relay running",
+					"sleep",
+					"infinity",
+				],
+				expect.objectContaining({ stdio: "ignore", detached: true }),
+			);
+			expect(ka.isActive()).toBe(true);
+		});
+
+		it("emits unsupported on linux when systemd-inhibit is not found", () => {
+			const mockSpawn =
+				vi.fn() as unknown as typeof import("node:child_process").spawn;
+
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_spawn: mockSpawn,
+				_whichSync: () => null,
+			});
+
+			const events: Array<{ platform: string }> = [];
+			ka.on("unsupported", (info) => events.push(info));
+
+			ka.activate();
+
+			expect(events).toEqual([{ platform: "linux" }]);
+			expect(ka.isActive()).toBe(false);
+			expect(mockSpawn).not.toHaveBeenCalled();
+		});
+
+		it("isSupported() returns true on linux when systemd-inhibit is available", () => {
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_whichSync: (cmd: string) =>
+					cmd === "systemd-inhibit" ? "/usr/bin/systemd-inhibit" : null,
+			});
+
+			expect(ka.isSupported()).toBe(true);
+		});
+
+		it("isSupported() returns false on linux when no tool found", () => {
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_whichSync: () => null,
+			});
+
+			expect(ka.isSupported()).toBe(false);
+		});
+
+		it("config command overrides auto-detection", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
+			// darwin + custom command → should use custom, not caffeinate
+			const ka = new KeepAwake({
+				_platform: "darwin",
+				_spawn: mockSpawn,
+				command: "/opt/my-tool",
+				args: ["--no-sleep"],
+			});
+
+			ka.activate();
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"/opt/my-tool",
+				["--no-sleep"],
+				expect.any(Object),
+			);
+		});
+
+		it("windows with no config command emits unsupported", () => {
+			const mockSpawn =
+				vi.fn() as unknown as typeof import("node:child_process").spawn;
+
+			const ka = new KeepAwake({
+				_platform: "win32",
+				_spawn: mockSpawn,
+				_whichSync: () => null,
+			});
+
+			const events: Array<{ platform: string }> = [];
+			ka.on("unsupported", (info) => events.push(info));
+
+			ka.activate();
+
+			expect(events).toEqual([{ platform: "win32" }]);
+			expect(ka.isActive()).toBe(false);
+		});
+
+		it("windows with config command activates", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
+			const ka = new KeepAwake({
+				_platform: "win32",
+				_spawn: mockSpawn,
+				_whichSync: () => null,
+				command: "powercfg",
+				args: ["/change", "standby-timeout-ac", "0"],
+			});
+
+			ka.activate();
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"powercfg",
+				["/change", "standby-timeout-ac", "0"],
+				expect.objectContaining({ stdio: "ignore", detached: true }),
+			);
+			expect(ka.isActive()).toBe(true);
+		});
+
+		it("whichSync is only called once (cached)", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+			const processKillSpy = vi
+				.spyOn(process, "kill")
+				.mockImplementation(() => true);
+			const whichSpy = vi.fn((cmd: string) =>
+				cmd === "systemd-inhibit" ? "/usr/bin/systemd-inhibit" : null,
+			);
+
+			const ka = new KeepAwake({
+				_platform: "linux",
+				_spawn: mockSpawn,
+				_whichSync: whichSpy,
+			});
+
+			// activate → deactivate → activate: whichSync should only be called once
+			ka.activate();
+			ka.deactivate();
+			ka.activate();
+
+			expect(whichSpy).toHaveBeenCalledTimes(1);
+			processKillSpy.mockRestore();
+		});
+
+		it("empty string command is treated as no command (auto-detect)", () => {
+			const child = createMockChild();
+			const mockSpawn = createMockSpawn(child);
+
+			// darwin + command:"" → should auto-detect to caffeinate
+			const ka = new KeepAwake({
+				_platform: "darwin",
+				_spawn: mockSpawn,
+				command: "",
+			});
+
+			ka.activate();
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"caffeinate",
+				["-di"],
+				expect.objectContaining({ stdio: "ignore", detached: true }),
+			);
+			expect(ka.isActive()).toBe(true);
 		});
 	});
 });

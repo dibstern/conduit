@@ -1,9 +1,9 @@
 // ─── Keep-Awake Management (Ticket 3.5) ─────────────────────────────────────
 // Prevents the host machine from sleeping during long-running agent tasks.
-// Uses `caffeinate` on macOS, no-op on other platforms.
+// Uses `caffeinate` on macOS, `systemd-inhibit` on Linux, or a user-configured command.
 
 import type { ChildProcess } from "node:child_process";
-import { spawn as defaultSpawn } from "node:child_process";
+import { spawn as defaultSpawn, execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -16,6 +16,8 @@ export interface KeepAwakeOptions {
 	_platform?: string;
 	/** Injectable spawn for testing */
 	_spawn?: typeof import("node:child_process").spawn;
+	/** Injectable which-sync for testing (returns path or null) */
+	_whichSync?: (cmd: string) => string | null;
 }
 
 export interface KeepAwakeEvents {
@@ -30,13 +32,43 @@ export interface KeepAwakeEvents {
 const DEFAULT_COMMAND = "caffeinate";
 const DEFAULT_ARGS = ["-di"];
 
+const LINUX_COMMAND = "systemd-inhibit";
+const LINUX_ARGS = [
+	"--what=idle",
+	"--who=conduit",
+	"--why=Conduit relay running",
+	"sleep",
+	"infinity",
+];
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function defaultWhichSync(cmd: string): string | null {
+	try {
+		const result = execFileSync("which", [cmd], {
+			encoding: "utf-8",
+			timeout: 2000,
+		});
+		return result.trim() || null;
+	} catch {
+		return null;
+	}
+}
+
 // ─── KeepAwake ───────────────────────────────────────────────────────────────
 
 export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
-	private readonly command: string;
-	private readonly args: string[];
+	private readonly whichSync: (cmd: string) => string | null;
+	private readonly configCommand: string | undefined;
+	private readonly configArgs: string[] | undefined;
 	private readonly platform: string;
 	private readonly spawnFn: typeof import("node:child_process").spawn;
+
+	// undefined = not yet resolved; null = resolved to "no tool available"
+	private resolvedCommand:
+		| { command: string; args: string[] }
+		| null
+		| undefined;
 
 	private enabled: boolean;
 	private child: ChildProcess | null = null;
@@ -45,15 +77,57 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 	constructor(options?: KeepAwakeOptions) {
 		super();
 		this.enabled = options?.enabled ?? true;
-		this.command = options?.command ?? DEFAULT_COMMAND;
-		this.args = options?.args ?? [...DEFAULT_ARGS];
+		// Treat empty string as "no command" — fall through to auto-detect
+		this.configCommand = options?.command?.trim() || undefined;
+		this.configArgs = options?.args;
 		this.platform = options?._platform ?? process.platform;
 		this.spawnFn = options?._spawn ?? defaultSpawn;
+		this.whichSync = options?._whichSync ?? defaultWhichSync;
+	}
+
+	// ─── Private ─────────────────────────────────────────────────────────────
+
+	private resolveCommand(): { command: string; args: string[] } | null {
+		if (this.resolvedCommand !== undefined) return this.resolvedCommand;
+
+		// 1. User-configured command (non-empty) takes priority
+		if (this.configCommand != null) {
+			this.resolvedCommand = {
+				command: this.configCommand,
+				args: this.configArgs ?? [],
+			};
+			return this.resolvedCommand;
+		}
+
+		// 2. Auto-detect: macOS → caffeinate
+		if (this.platform === "darwin") {
+			this.resolvedCommand = {
+				command: DEFAULT_COMMAND,
+				args: [...DEFAULT_ARGS],
+			};
+			return this.resolvedCommand;
+		}
+
+		// 3. Auto-detect: Linux → systemd-inhibit (if found)
+		if (this.platform === "linux") {
+			const path = this.whichSync(LINUX_COMMAND);
+			if (path) {
+				this.resolvedCommand = {
+					command: LINUX_COMMAND,
+					args: [...LINUX_ARGS],
+				};
+				return this.resolvedCommand;
+			}
+		}
+
+		// 4. No tool found
+		this.resolvedCommand = null;
+		return null;
 	}
 
 	// ─── Public API ──────────────────────────────────────────────────────────
 
-	/** Start keeping awake (spawns caffeinate on macOS) */
+	/** Start keeping awake (spawns platform-appropriate command) */
 	activate(): void {
 		// No-op if disabled
 		if (!this.enabled) {
@@ -65,17 +139,17 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 			return;
 		}
 
-		// AC4: No-op on non-macOS
-		if (this.platform !== "darwin") {
+		const resolved = this.resolveCommand();
+		if (!resolved) {
 			this.emit("unsupported", { platform: this.platform });
 			return;
 		}
 
-		// AC1: Spawn caffeinate
+		// Spawn the keep-awake command
 		try {
-			const child = this.spawnFn(this.command, this.args, {
+			const child = this.spawnFn(resolved.command, resolved.args, {
 				stdio: "ignore",
-				detached: false,
+				detached: true,
 			});
 
 			this.child = child;
@@ -88,7 +162,7 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 					this.active = false;
 					this.child = null;
 					this.emit("error", {
-						error: new Error(`${this.command} exited unexpectedly`),
+						error: new Error(`${resolved.command} exited unexpectedly`),
 					});
 				}
 			});
@@ -109,7 +183,7 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 		}
 	}
 
-	/** Stop keeping awake (kills caffeinate) */
+	/** Stop keeping awake (kills process group) */
 	deactivate(): void {
 		// AC5: Idempotent — safe to call multiple times
 		if (!this.active || !this.child) {
@@ -121,7 +195,11 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 		this.child = null;
 
 		try {
-			child.kill();
+			if (child.pid) {
+				process.kill(-child.pid, "SIGTERM");
+			} else {
+				child.kill();
+			}
 		} catch {
 			// Process may already be dead
 		}
@@ -134,12 +212,15 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 		return this.active;
 	}
 
-	/** Enable/disable for future activate() calls */
+	/** Enable/disable — activates when enabling, deactivates when disabling */
 	setEnabled(value: boolean): void {
 		this.enabled = value;
 
-		// AC3: If disabling while active, deactivate
-		if (!value && this.active) {
+		if (value) {
+			// Activate when enabling (idempotent — no-op if already active)
+			this.activate();
+		} else if (this.active) {
+			// AC3: If disabling while active, deactivate
 			this.deactivate();
 		}
 	}
@@ -151,6 +232,6 @@ export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 
 	/** Is the platform supported? */
 	isSupported(): boolean {
-		return this.platform === "darwin";
+		return this.resolveCommand() !== null;
 	}
 }
