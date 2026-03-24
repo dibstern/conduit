@@ -40,14 +40,14 @@ describe("ws-debug", () => {
 			expect(events[0]?.time).toBeGreaterThan(0);
 		});
 
-		it("caps ring buffer at 200 events", () => {
-			for (let i = 0; i < 210; i++) {
+		it("caps ring buffer at 300 events", () => {
+			for (let i = 0; i < 310; i++) {
 				wsDebugLog(`event-${i}`, "connected");
 			}
 			const events = getDebugEvents();
-			expect(events).toHaveLength(200);
+			expect(events).toHaveLength(300);
 			expect(events[0]?.event).toBe("event-10");
-			expect(events[199]?.event).toBe("event-209");
+			expect(events[299]?.event).toBe("event-309");
 		});
 
 		it("updates wsDebugState.eventCount reactively", () => {
@@ -167,6 +167,40 @@ describe("ws-debug", () => {
 			const all = getDebugEvents();
 			// 2 lifecycle + 2 ws:messages = 4
 			expect(all).toHaveLength(4);
+		});
+
+		it("stores payload when provided", () => {
+			const msg = { type: "event", data: { id: "123" } };
+			wsDebugLogMessage("connected", "event", msg);
+			wsDebugState.verboseMessages = true;
+			const events = getDebugEvents();
+			expect(events).toHaveLength(1);
+			expect(events[0]?.payload).toEqual(msg);
+		});
+
+		it("does not include payload key when payload is omitted", () => {
+			wsDebugLogMessage("connected", "event");
+			wsDebugState.verboseMessages = true;
+			const events = getDebugEvents();
+			expect(events).toHaveLength(1);
+			expect("payload" in (events[0] ?? {})).toBe(false);
+		});
+
+		it("includes payload in console.debug when debug enabled", () => {
+			const spy = vi.spyOn(console, "debug").mockImplementation(() => {});
+			featureFlags.debug = true;
+			const msg = { type: "event", data: { id: "456" } };
+			wsDebugLogMessage("connected", "event", msg);
+			expect(spy).toHaveBeenCalledWith("[ws] ws:message", "#1 event", msg);
+			spy.mockRestore();
+		});
+
+		it("logs without payload in console.debug when payload is omitted", () => {
+			const spy = vi.spyOn(console, "debug").mockImplementation(() => {});
+			featureFlags.debug = true;
+			wsDebugLogMessage("connected", "event");
+			expect(spy).toHaveBeenCalledWith("[ws] ws:message", "#1 event");
+			spy.mockRestore();
 		});
 	});
 

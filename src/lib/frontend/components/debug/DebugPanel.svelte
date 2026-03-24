@@ -328,11 +328,24 @@
 				<div class="text-gray-600 py-2 text-center">No events yet</div>
 			{:else}
 				{#each events as evt}
-					<div class="flex gap-1.5 py-px">
-						<span class="text-gray-600 shrink-0 w-[84px] text-right">{fmtTime(evt.time)}</span>
-						<span class="{eventColor(evt.event)} shrink-0">{evt.event}</span>
-						{#if evt.detail}
-							<span class="text-gray-500 truncate">{evt.detail}</span>
+					<div>
+						<div class="flex gap-1.5 py-px items-start">
+							<span class="text-gray-600 shrink-0 w-[84px] text-right">{fmtTime(evt.time)}</span>
+							<span class="{eventColor(evt.event)} shrink-0">{evt.event}</span>
+							{#if evt.detail}
+								<span class="text-gray-500 truncate">{evt.detail}</span>
+							{/if}
+							{#if evt.payload}
+								<button
+									class="text-gray-600 hover:text-gray-300 text-[10px] ml-auto shrink-0 cursor-pointer"
+									onclick={() => { evt._expanded = !evt._expanded; }}
+								>
+									{evt._expanded ? '[-]' : '[+]'}
+								</button>
+							{/if}
+						</div>
+						{#if evt._expanded && evt.payload}
+							<pre class="text-[10px] text-green-300/70 ml-[90px] whitespace-pre-wrap break-all max-h-40 overflow-y-auto mb-1">{JSON.stringify(evt.payload, null, 2)}</pre>
 						{/if}
 					</div>
 				{/each}

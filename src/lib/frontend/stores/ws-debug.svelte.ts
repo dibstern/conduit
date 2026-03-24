@@ -14,6 +14,10 @@ export interface WsDebugEvent {
 	state: string; // ConnectionStatus at time of event
 	/** When true, this event is only shown in verbose mode (non-sampled ws:message). */
 	verbose?: boolean | undefined;
+	/** Full parsed message payload (for ws:message events). Always stored. */
+	payload?: unknown;
+	/** Transient UI flag (not persisted). */
+	_expanded?: boolean;
 }
 
 export interface WsDebugSnapshot {
@@ -24,7 +28,7 @@ export interface WsDebugSnapshot {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const MAX_EVENTS = 200;
+const MAX_EVENTS = 300;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -108,8 +112,13 @@ export function wsDebugLog(
  *
  * @param state - Current ConnectionStatus value
  * @param msgType - The parsed message type (e.g. "event", "session.list", "messages")
+ * @param payload - The full parsed message object (stored for expandable display)
  */
-export function wsDebugLogMessage(state: string, msgType?: string): void {
+export function wsDebugLogMessage(
+	state: string,
+	msgType?: string,
+	payload?: unknown,
+): void {
 	_messageCount++;
 	const isSampled = _messageCount === 1 || _messageCount % 100 === 0;
 	const detail = msgType ? `#${_messageCount} ${msgType}` : `#${_messageCount}`;
@@ -120,6 +129,7 @@ export function wsDebugLogMessage(state: string, msgType?: string): void {
 		detail,
 		state,
 		...(isSampled ? {} : { verbose: true }),
+		...(payload !== undefined ? { payload } : {}),
 	};
 
 	_events.push(entry);
@@ -132,7 +142,11 @@ export function wsDebugLogMessage(state: string, msgType?: string): void {
 	// Console output when debug is enabled (respect verbose setting for console)
 	if (featureFlags.debug && (wsDebugState.verboseMessages || isSampled)) {
 		const prefix = "[ws] ws:message";
-		console.debug(prefix, detail);
+		if (payload !== undefined) {
+			console.debug(prefix, detail, payload);
+		} else {
+			console.debug(prefix, detail);
+		}
 	}
 }
 

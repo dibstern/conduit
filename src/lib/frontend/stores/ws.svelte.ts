@@ -284,7 +284,7 @@ function doConnect(slug: string | undefined): void {
 			return;
 		}
 
-		wsDebugLogMessage(wsState.status, msg.type);
+		wsDebugLogMessage(wsState.status, msg.type, msg);
 
 		try {
 			handleMessage(msg);
