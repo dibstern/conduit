@@ -186,6 +186,12 @@ async function convertHistoryAsync(
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	// Snapshot streaming state BEFORE the handler runs so we can detect
+	// a genuine new-turn start (streaming was off → content event turns it on).
+	// Used below to gate clearQueuedFlags() — continuation deltas from the
+	// current turn must NOT strip the "Queued" shimmer early.
+	const wasStreaming = chatState.streaming;
+
 	switch (msg.type) {
 		// ─── Chat / Streaming ────────────────────────────────────────────
 		case "delta":
@@ -524,10 +530,11 @@ export function handleMessage(msg: RelayMessage): void {
 	}
 
 	// ── Queued-flag clearing (single source of truth) ────────────────
-	// Driven by LLM_CONTENT_START_TYPES — no manual clearQueuedFlags()
-	// calls in individual switch branches. See replayEvents() for the
-	// same pattern.
-	if (isLlmContentStart(msg.type)) clearQueuedFlags();
+	// Only clear when a genuinely NEW turn starts (streaming was off before
+	// this event).  Continuation deltas from the current turn must not
+	// strip the "Queued" shimmer — the queued message is waiting for the
+	// NEXT turn, not the current one.
+	if (isLlmContentStart(msg.type) && !wasStreaming) clearQueuedFlags();
 }
 
 // ─── Event Replay (session switch with cached events) ────────────────────────
@@ -566,6 +573,9 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 		else if (event.type === "done") llmActive = false;
 		else if (event.type === "error" && event.code !== "RETRY")
 			llmActive = false;
+
+		// Snapshot streaming state before handler (same logic as handleMessage)
+		const wasStreaming = chatState.streaming;
 
 		switch (event.type) {
 			case "user_message":
@@ -623,8 +633,9 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 		}
 
 		// ── Queued-flag clearing (single source of truth) ────────────────
-		// Same LLM_CONTENT_START_TYPES constant as handleMessage().
-		if (isLlmContentStart(event.type)) clearQueuedFlags();
+		// Same new-turn gate as handleMessage(): only clear when streaming
+		// was off before this event (genuine new turn, not continuation).
+		if (isLlmContentStart(event.type) && !wasStreaming) clearQueuedFlags();
 
 		// Yield between chunks to keep the main thread responsive
 		if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
