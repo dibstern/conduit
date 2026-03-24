@@ -400,7 +400,14 @@ export function wireSSEConsumer(
 ): void {
 	const { log } = deps;
 
+	// Generation counter: incremented on each SSE connect. Async rehydration
+	// callbacks compare their captured generation against the current value
+	// and bail if a newer connect has superseded them (prevents duplicate
+	// broadcasts on rapid reconnect).
+	let rehydrationGen = 0;
+
 	consumer.on("connected", () => {
+		const gen = ++rehydrationGen;
 		log.info("Connected to OpenCode event stream");
 		deps.wsHandler.broadcast({
 			type: "connection_status",
@@ -413,6 +420,7 @@ export function wireSSEConsumer(
 			deps
 				.listPendingPermissions()
 				.then((pendingPermissions) => {
+					if (gen !== rehydrationGen) return; // superseded
 					log.debug(
 						`listPendingPermissions returned ${pendingPermissions.length} permission(s)`,
 					);
@@ -466,6 +474,7 @@ export function wireSSEConsumer(
 			deps
 				.listPendingQuestions()
 				.then((pendingQuestions) => {
+					if (gen !== rehydrationGen) return; // superseded
 					log.debug(
 						`listPendingQuestions returned ${pendingQuestions.length} question(s)`,
 					);
