@@ -6,6 +6,9 @@ const meta = {
 	title: "Overlays/ImageLightbox",
 	component: ImageLightbox,
 	tags: ["autodocs"],
+	parameters: {
+		docs: { story: { inline: false, height: "400px" } },
+	},
 	beforeEach: () => {
 		uiState.lightboxSrc = null;
 	},

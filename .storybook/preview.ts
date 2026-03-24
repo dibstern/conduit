@@ -11,6 +11,11 @@ const preview: Preview = {
 			},
 		},
 		layout: "fullscreen",
+		// Overlay/modal/toast stories set `parameters.docs.story.inline = false`
+		// individually so their fixed/absolute-positioned elements render within
+		// the story iframe rather than escaping into the Storybook chrome.
+		// All other stories use the default inline rendering which auto-sizes
+		// to the component's natural height.
 	},
 
 	initialGlobals: {

@@ -6,6 +6,10 @@ const meta = {
 	title: "Overlays/RewindBanner",
 	component: RewindBanner,
 	tags: ["autodocs"],
+	parameters: {
+		// WithModal renders a fixed inset-0 dialog; needs own iframe viewport.
+		docs: { story: { inline: false, height: "360px" } },
+	},
 	beforeEach: () => {
 		uiState.rewindActive = false;
 		uiState.rewindSelectedUuid = null;

@@ -9,6 +9,8 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: {
 		layout: "fullscreen",
+		// Modal uses fixed inset-0; needs own iframe viewport.
+		docs: { story: { inline: false, height: "400px" } },
 	},
 } satisfies Meta<typeof QrModal>;
 

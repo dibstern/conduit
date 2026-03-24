@@ -44,7 +44,12 @@ const meta = {
 	title: "Overlays/InfoPanels",
 	component: InfoPanels,
 	tags: ["autodocs"],
-	parameters: { layout: "padded" },
+	parameters: {
+		layout: "padded",
+		// Panels are absolutely positioned; need own iframe viewport.
+		// 600px covers AllPanels (three panels stacked with gap).
+		docs: { story: { inline: false, height: "600px" } },
+	},
 	beforeEach: () => {
 		// Reset panels for each story
 		uiState.openPanels = new Set();

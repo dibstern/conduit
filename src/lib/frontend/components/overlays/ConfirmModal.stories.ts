@@ -6,6 +6,9 @@ const meta = {
 	title: "Overlays/ConfirmModal",
 	component: ConfirmModal,
 	tags: ["autodocs"],
+	parameters: {
+		docs: { story: { inline: false, height: "300px" } },
+	},
 	beforeEach: () => {
 		uiState.confirmDialog = null;
 	},

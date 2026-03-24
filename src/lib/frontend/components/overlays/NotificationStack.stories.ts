@@ -10,6 +10,9 @@ const meta = {
 	title: "Overlays/NotificationStack",
 	component: NotificationStack,
 	tags: ["autodocs"],
+	parameters: {
+		docs: { story: { inline: false, height: "200px" } },
+	},
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];

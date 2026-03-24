@@ -5,6 +5,10 @@ const meta = {
 	title: "Overlays/NotifSettings",
 	component: NotifSettings,
 	tags: ["autodocs"],
+	parameters: {
+		// Dropdown uses fixed positioning; needs own iframe viewport.
+		docs: { story: { inline: false, height: "300px" } },
+	},
 } satisfies Meta<typeof NotifSettings>;
 
 export default meta;
