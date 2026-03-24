@@ -638,6 +638,18 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 	// where no "done" event has been received yet)
 	flushPendingRender();
 	commitReplayBatch();
+
+	// Reconcile processing state: during replay, handleDone is guarded
+	// from clearing chatState.processing (to avoid overwriting a live
+	// status:processing message from the server that arrived during a
+	// yield). Now that replay is complete, derive the correct state:
+	// - llmActive: true if the last replayed turn is still in-flight
+	// - chatState.processing: may have been set to true by a live
+	//   status:processing WS message during a yield (status events are
+	//   NOT cacheable, so this can only come from a live server message)
+	// Either signal means the session is active.
+	chatState.processing = llmActive || chatState.processing;
+
 	chatState.replaying = false;
 	renderDeferredMarkdown();
 }

@@ -139,6 +139,25 @@
 				return `${p.eventType ?? "?"}${p.message ? `: ${p.message}` : ""}`;
 			case "session_list":
 				return Array.isArray(p.sessions) ? `${p.sessions.length} sessions` : "";
+			case "instance_list":
+				return Array.isArray(p.instances) ? `${p.instances.length} instances` : "";
+			case "pty_list":
+				return Array.isArray(p.ptys) ? `${p.ptys.length} ptys` : "";
+			case "variant_info":
+				return p.variant ? String(p.variant) : "";
+			case "model_info":
+				return p.provider && p.model ? `${p.provider}:${p.model}` : "";
+			case "default_model_info":
+				return p.provider && p.model ? `${p.provider}:${p.model}` : "";
+			case "model_list": {
+				if (!Array.isArray(p.providers)) return "";
+				const counts = (p.providers as Array<{ name?: string; models?: unknown[] }>)
+					.map((prov) => `${prov.name ?? "?"}: ${Array.isArray(prov.models) ? prov.models.length : 0}`)
+					.join(", ");
+				return counts;
+			}
+			case "client_count":
+				return `${p.count ?? 0} clients`;
 			default:
 				return "";
 		}

@@ -107,7 +107,9 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			id: "session-a",
 			events: [
 				{ type: "user_message", text: "What is TypeScript?" },
-				{ type: "status", status: "processing" },
+				// Note: "status" events are NOT cacheable (excluded from
+				// CACHEABLE_EVENT_TYPES in event-pipeline.ts), so they never
+				// appear in real cached event arrays.
 				{ type: "delta", text: "TypeScript is " },
 				{ type: "delta", text: "a typed superset " },
 				// These arrived while viewing session B:
@@ -154,7 +156,6 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			id: "session-a",
 			events: [
 				{ type: "user_message", text: "Explain monads" },
-				{ type: "status", status: "processing" },
 				{ type: "delta", text: "A monad is " },
 				{ type: "delta", text: "a design pattern " },
 				// Agent is still working — no done event
@@ -191,7 +192,6 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			id: "session-a",
 			events: [
 				{ type: "user_message", text: "Read foo.ts" },
-				{ type: "status", status: "processing" },
 				{ type: "delta", text: "Let me read that file." },
 				{ type: "tool_start", id: "t1", name: "Read" },
 				{
@@ -248,7 +248,6 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			id: "session-a",
 			events: [
 				{ type: "user_message", text: "Complex question" },
-				{ type: "status", status: "processing" },
 				{ type: "thinking_start" },
 				{ type: "thinking_delta", text: "Let me think about this..." },
 				{ type: "thinking_stop" },
@@ -288,12 +287,10 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			events: [
 				// Turn 1
 				{ type: "user_message", text: "Hello" },
-				{ type: "status", status: "processing" },
 				{ type: "delta", text: "Hi there!" },
 				{ type: "done", code: 0 },
 				// Turn 2
 				{ type: "user_message", text: "How are you?" },
-				{ type: "status", status: "processing" },
 				{ type: "delta", text: "I'm doing well, thanks!" },
 				{ type: "done", code: 0 },
 			],
@@ -380,7 +377,6 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			id: "session-a",
 			events: [
 				{ type: "user_message", text: "Hello" },
-				{ type: "status", status: "processing" },
 				{ type: "delta", text: "Working on " },
 			],
 		});

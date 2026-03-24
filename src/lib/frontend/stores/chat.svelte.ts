@@ -468,7 +468,14 @@ export function handleDone(
 	}
 
 	chatState.streaming = false;
-	chatState.processing = false;
+	// Don't clear processing during event replay — replayed `done` events
+	// are historical (previous assistant turns) and must not overwrite the
+	// live processing flag set by the server's status:processing message.
+	// Without this guard, a replayed `done` from an earlier turn clears
+	// processing AFTER the server re-asserted it, hiding the Stop button.
+	if (!chatState.replaying) {
+		chatState.processing = false;
+	}
 	chatState.currentAssistantText = "";
 }
 
@@ -527,7 +534,11 @@ export function handleError(
 	} else {
 		// Prominent error
 		addSystemMessage(message, "error", errorMeta);
-		chatState.processing = false;
+		// Same guard as handleDone — historical errors from replay must not
+		// clear live processing state.
+		if (!chatState.replaying) {
+			chatState.processing = false;
+		}
 		chatState.streaming = false;
 	}
 }

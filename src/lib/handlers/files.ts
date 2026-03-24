@@ -39,6 +39,28 @@ export async function handleGetFileContent(
 	}
 }
 
+/** Directories to skip when building the file tree (large, generated, or internal). */
+const SKIP_DIRS = new Set([
+	"node_modules",
+	".git",
+	".svn",
+	".hg",
+	"dist",
+	"build",
+	".next",
+	".nuxt",
+	".output",
+	".svelte-kit",
+	".turbo",
+	".cache",
+	"__pycache__",
+	".venv",
+	"venv",
+	"target",
+	"vendor",
+	".worktrees",
+]);
+
 export async function handleGetFileTree(
 	deps: HandlerDeps,
 	clientId: string,
@@ -47,7 +69,7 @@ export async function handleGetFileTree(
 	const entries: string[] = [];
 
 	try {
-		// Breadth-first walk of project directory
+		// Breadth-first walk of project directory, skipping well-known heavy dirs
 		const queue: string[] = ["."];
 
 		while (queue.length > 0) {
@@ -58,6 +80,7 @@ export async function handleGetFileTree(
 			for (const item of items) {
 				const path = dir === "." ? item.name : `${dir}/${item.name}`;
 				if (item.type === "directory") {
+					if (SKIP_DIRS.has(item.name)) continue;
 					entries.push(`${path}/`);
 					queue.push(path);
 				} else {
