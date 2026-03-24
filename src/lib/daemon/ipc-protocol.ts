@@ -12,6 +12,7 @@ export const VALID_COMMANDS = new Set([
 	"get_status",
 	"set_pin",
 	"set_keep_awake",
+	"set_keep_awake_command",
 	"shutdown",
 	"set_agent",
 	"set_model",
@@ -107,6 +108,19 @@ export function validateCommand(
 					ok: false,
 					error: "set_keep_awake requires a boolean 'enabled' field",
 				};
+			}
+			break;
+
+		case "set_keep_awake_command":
+			if (typeof cmd["command"] !== "string" || cmd["command"].length === 0) {
+				return {
+					ok: false,
+					error: "set_keep_awake_command requires a non-empty 'command' field",
+				};
+			}
+			if (!Array.isArray(cmd["args"])) {
+				// Default to empty array if not provided
+				cmd["args"] = [];
 			}
 			break;
 
@@ -239,6 +253,10 @@ export function createCommandRouter(handlers: {
 	getStatus: () => Promise<IPCResponse>;
 	setPin: (pin: string) => Promise<IPCResponse>;
 	setKeepAwake: (enabled: boolean) => Promise<IPCResponse>;
+	setKeepAwakeCommand: (
+		command: string,
+		args: string[],
+	) => Promise<IPCResponse>;
 	shutdown: () => Promise<IPCResponse>;
 	setAgent: (slug: string, agent: string) => Promise<IPCResponse>;
 	setModel: (
@@ -287,6 +305,8 @@ export function createCommandRouter(handlers: {
 				return handlers.setPin(cmd.pin);
 			case "set_keep_awake":
 				return handlers.setKeepAwake(cmd.enabled);
+			case "set_keep_awake_command":
+				return handlers.setKeepAwakeCommand(cmd.command, cmd.args);
 			case "shutdown":
 				return handlers.shutdown();
 			case "set_agent":

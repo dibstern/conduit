@@ -79,6 +79,7 @@ export type IPCCommand =
 	| { cmd: "set_project_title"; slug: string; title: string }
 	| { cmd: "set_pin"; pin: string }
 	| { cmd: "set_keep_awake"; enabled: boolean }
+	| { cmd: "set_keep_awake_command"; command: string; args: string[] }
 	| { cmd: "set_agent"; slug: string; agent: string }
 	| { cmd: "set_model"; slug: string; provider: string; model: string }
 	| { cmd: "instance_list" }

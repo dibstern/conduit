@@ -33,6 +33,11 @@ export interface SettingsMenuOptions extends PromptOptions {
 	removePin: () => Promise<{ ok: boolean; error?: string }>;
 	/** IPC: toggle keep-awake. */
 	setKeepAwake: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
+	/** IPC: set custom keep-awake command and args. */
+	setKeepAwakeCommand?: (
+		command: string,
+		args: string[],
+	) => Promise<{ ok: boolean; error?: string }>;
 	/** Callback: show notifications setup wizard. */
 	onSetupNotifications?: () => void | Promise<void>;
 	/** Callback: return to main menu. */

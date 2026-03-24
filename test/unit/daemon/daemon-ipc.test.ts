@@ -30,6 +30,7 @@ function makeContext(
 		setPinHash: vi.fn(),
 		getKeepAwake: vi.fn().mockReturnValue(false),
 		setKeepAwake: vi.fn().mockReturnValue({ supported: false, active: false }),
+		setKeepAwakeCommand: vi.fn(),
 		persistConfig: vi.fn(),
 		scheduleShutdown: vi.fn(),
 		getInstances: vi.fn().mockReturnValue([]),
@@ -204,6 +205,42 @@ describe("buildIPCHandlers", () => {
 				false,
 			);
 			expect((result as unknown as { active: boolean }).active).toBe(false);
+		});
+	});
+
+	describe("setKeepAwakeCommand", () => {
+		it("persists command and args via context", async () => {
+			let storedCommand: string | undefined;
+			let storedArgs: string[] | undefined;
+			const ctx = makeContext({
+				setKeepAwakeCommand: (command: string, args: string[]) => {
+					storedCommand = command;
+					storedArgs = args;
+				},
+			});
+			const handlers = makeHandlers(ctx);
+
+			const result = await handlers.setKeepAwakeCommand("my-tool", ["--flag"]);
+
+			expect(result).toEqual({ ok: true });
+			expect(storedCommand).toBe("my-tool");
+			expect(storedArgs).toEqual(["--flag"]);
+		});
+
+		it("returns ok:false when context throws", async () => {
+			const ctx = makeContext({
+				setKeepAwakeCommand: () => {
+					throw new Error("Something went wrong");
+				},
+			});
+			const handlers = makeHandlers(ctx);
+
+			const result = await handlers.setKeepAwakeCommand("bad-cmd", []);
+
+			expect(result.ok).toBe(false);
+			expect((result as { error: string }).error).toContain(
+				"Something went wrong",
+			);
 		});
 	});
 

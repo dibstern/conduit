@@ -1451,6 +1451,23 @@ export class Daemon {
 						active: this.keepAwakeManager?.isActive() ?? false,
 					};
 				},
+				setKeepAwakeCommand: (command, args) => {
+					this.keepAwakeCommand = command;
+					this.keepAwakeArgs = args;
+					// Deactivate old manager to clean up spawned processes
+					this.keepAwakeManager?.deactivate();
+					// Reconstruct with new command
+					this.keepAwakeManager = new KeepAwake({
+						enabled: this.keepAwake,
+						command,
+						args,
+					});
+					// Auto-activate if currently enabled
+					if (this.keepAwake) {
+						this.keepAwakeManager.activate();
+					}
+					this.persistConfig();
+				},
 				persistConfig: () => this.persistConfig(),
 				scheduleShutdown: () => {
 					setTimeout(() => this.stop(), DAEMON_SHUTDOWN_DELAY_MS);
