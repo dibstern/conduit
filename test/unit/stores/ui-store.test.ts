@@ -137,7 +137,7 @@ describe("showToast", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		expect(uiState.toasts[0]!.variant).toBe("default");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.duration).toBe(2000);
+		expect(uiState.toasts[0]!.duration).toBe(7000);
 	});
 
 	it("accepts custom options", () => {

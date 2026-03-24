@@ -688,7 +688,6 @@ function handleChatError(msg: Extract<RelayMessage, { type: "error" }>): void {
 		clearScanInFlight();
 		showToast(msg.message ?? "Instance operation failed", {
 			variant: "warn",
-			duration: 4000,
 		});
 		return;
 	}

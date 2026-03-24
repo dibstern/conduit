@@ -168,7 +168,7 @@ export function showToast(
 		id: generateUuid(),
 		message,
 		variant: options?.variant ?? "default",
-		duration: options?.duration ?? 2000,
+		duration: options?.duration ?? 7000,
 	};
 	uiState.toasts = [...uiState.toasts, toast];
 
