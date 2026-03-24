@@ -121,8 +121,9 @@ function validateTransitionSequence(statuses: ToolStatus[]): {
 } {
 	const violations: string[] = [];
 	for (let i = 1; i < statuses.length; i++) {
-		const from = statuses[i - 1]!;
-		const to = statuses[i]!;
+		const from = statuses[i - 1];
+		const to = statuses[i];
+		if (from === undefined || to === undefined) continue;
 		const allowed = VALID_FORWARD[from];
 		if (!allowed?.has(to)) {
 			violations.push(`${from} → ${to} (at index ${i})`);
@@ -260,8 +261,9 @@ describe("Tool SSE Transition Validation (live)", () => {
 			for (const [callID, events] of toolGroups) {
 				const statuses = events.map((e) => e.status);
 				for (let i = 1; i < statuses.length; i++) {
-					const from = statuses[i - 1]!;
-					const to = statuses[i]!;
+					const from = statuses[i - 1];
+					const to = statuses[i];
+					if (from === undefined || to === undefined) continue;
 					const disallowed = BACKWARD[from];
 					if (disallowed?.has(to)) {
 						expect.fail(
@@ -276,7 +278,8 @@ describe("Tool SSE Transition Validation (live)", () => {
 			if (skipIfNoServer() || toolGroups.size === 0) return;
 
 			for (const [callID, events] of toolGroups) {
-				const lastEvent = events[events.length - 1]!;
+				const lastEvent = events.at(-1);
+				if (!lastEvent) continue;
 				if (lastEvent.status === "completed") {
 					expect(
 						lastEvent.hasOutput,
@@ -342,7 +345,9 @@ describe("Tool SSE Transition Validation (live)", () => {
 
 			// Compare SSE terminal state with REST state
 			for (const [callID, events] of toolGroups) {
-				const sseTerminal = events[events.length - 1]!.status;
+				const lastEvent = events.at(-1);
+				if (!lastEvent) continue;
+				const sseTerminal = lastEvent.status;
 				const restTool = restTools.get(callID);
 
 				if (restTool) {

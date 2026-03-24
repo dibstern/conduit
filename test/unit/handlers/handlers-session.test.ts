@@ -185,7 +185,6 @@ describe("handleForkSession (ticket 5.3)", () => {
 	it("stores forkMessageId from messageId payload", async () => {
 		let storedSessionId: string | undefined;
 		let storedMessageId: string | undefined;
-		let storedParentId: string | undefined;
 		const forkMeta = {
 			setForkEntry: (
 				sid: string,
@@ -193,7 +192,6 @@ describe("handleForkSession (ticket 5.3)", () => {
 			) => {
 				storedSessionId = sid;
 				storedMessageId = entry.forkMessageId;
-				storedParentId = entry.parentID;
 			},
 		};
 		const depsWithMeta = { ...deps, forkMeta };
