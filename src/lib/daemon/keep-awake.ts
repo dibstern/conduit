@@ -57,6 +57,9 @@ function defaultWhichSync(cmd: string): string | null {
 
 // ─── KeepAwake ───────────────────────────────────────────────────────────────
 
+/** @internal Exported for testing only */
+export { defaultWhichSync as _defaultWhichSync };
+
 export class KeepAwake extends EventEmitter<KeepAwakeEvents> {
 	private readonly whichSync: (cmd: string) => string | null;
 	private readonly configCommand: string | undefined;

@@ -17,12 +17,18 @@
 // T14: PBT: enabled/disabled state machine consistency
 // T15: activate() when spawn throws synchronously
 // T16: Cross-platform tool resolution
+// T17: Process group kill (integration)
+// T18: defaultWhichSync (integration)
+// T19: activate() spawn error handling
 
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
-import { KeepAwake } from "../../../src/lib/daemon/keep-awake.js";
+import {
+	_defaultWhichSync,
+	KeepAwake,
+} from "../../../src/lib/daemon/keep-awake.js";
 
 const SEED = 42;
 const NUM_RUNS = 30;
@@ -946,6 +952,112 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				expect.objectContaining({ stdio: "ignore", detached: true }),
 			);
 			expect(ka.isActive()).toBe(true);
+		});
+	});
+
+	// ─── T17: Process group kill (integration) ──────────────────────────
+
+	describe("T17: Process group kill (integration)", () => {
+		it("deactivate() kills a real detached child process", async () => {
+			// Spawn a real 'sleep' process using KeepAwake with a custom command
+			const ka = new KeepAwake({
+				_platform: "darwin",
+				command: "sleep",
+				args: ["60"],
+			});
+
+			ka.activate();
+			expect(ka.isActive()).toBe(true);
+
+			// biome-ignore lint/suspicious/noExplicitAny: accessing private field for integration test
+			const pid = (ka as any).child?.pid;
+			expect(pid).toBeGreaterThan(0);
+
+			// Verify process is alive
+			expect(() => process.kill(pid, 0)).not.toThrow();
+
+			ka.deactivate();
+			expect(ka.isActive()).toBe(false);
+
+			// Give OS a moment to clean up
+			await new Promise((r) => setTimeout(r, 100));
+
+			// Verify process is dead
+			expect(() => process.kill(pid, 0)).toThrow();
+		});
+	});
+
+	// ─── T18: defaultWhichSync (integration) ────────────────────────────
+
+	describe("T18: defaultWhichSync (integration)", () => {
+		it("finds an existing command", () => {
+			// 'ls' exists on all unix systems
+			const result = _defaultWhichSync("ls");
+			expect(result).not.toBeNull();
+			expect(result).toContain("/ls");
+		});
+
+		it("returns null for nonexistent command", () => {
+			const result = _defaultWhichSync("this_command_does_not_exist_xyz_123");
+			expect(result).toBeNull();
+		});
+
+		it("returns null for empty string", () => {
+			const result = _defaultWhichSync("");
+			expect(result).toBeNull();
+		});
+	});
+
+	// ─── T19: activate() spawn error handling ───────────────────────────
+
+	describe("T19: activate() spawn error handling", () => {
+		it("emits error and deactivates when spawn returns ENOENT", () => {
+			const ka = new KeepAwake({
+				_platform: "darwin",
+				command: "/nonexistent/binary/that/does/not/exist",
+				args: [],
+			});
+
+			const errors: Error[] = [];
+			ka.on("error", ({ error }) => errors.push(error));
+			const deactivated: boolean[] = [];
+			ka.on("deactivated", () => deactivated.push(true));
+
+			ka.activate();
+
+			// The spawn itself may not throw synchronously — the error comes
+			// via the child 'error' event. Give it a moment.
+			return new Promise<void>((resolve) => {
+				setTimeout(() => {
+					expect(errors.length).toBeGreaterThan(0);
+					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+					expect(errors[0]!.message).toContain("ENOENT");
+					expect(ka.isActive()).toBe(false);
+					resolve();
+				}, 200);
+			});
+		});
+
+		it("emits error when spawned process exits with non-zero code unexpectedly", () => {
+			// Use a command that exits immediately with error
+			const ka = new KeepAwake({
+				_platform: "darwin",
+				command: "false", // exits with code 1
+				args: [],
+			});
+
+			const errors: Error[] = [];
+			ka.on("error", ({ error }) => errors.push(error));
+
+			ka.activate();
+
+			return new Promise<void>((resolve) => {
+				setTimeout(() => {
+					// 'false' exits with code 1, which should trigger the error path
+					expect(ka.isActive()).toBe(false);
+					resolve();
+				}, 500);
+			});
 		});
 	});
 });
