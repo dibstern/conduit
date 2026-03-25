@@ -1,16 +1,19 @@
 // ─── Daemon Utility Functions ───────────────────────────────────────────────
 // Pure utility functions extracted from the Daemon class.
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Check whether the `opencode` binary is available on PATH.
  * Uses `which` (Unix) or `where.exe` (Windows).
  */
-export function isOpencodeInstalled(): boolean {
+export async function isOpencodeInstalled(): Promise<boolean> {
 	const cmd = process.platform === "win32" ? "where.exe" : "which";
 	try {
-		execFileSync(cmd, ["opencode"], { stdio: "ignore" });
+		await execFileAsync(cmd, ["opencode"]);
 		return true;
 	} catch {
 		return false;

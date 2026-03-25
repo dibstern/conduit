@@ -346,6 +346,9 @@ export class Daemon {
 
 	/** Start the daemon: HTTP server + IPC socket + signal handlers */
 	async start(): Promise<void> {
+		const startupT0 = Date.now();
+		const elapsed = () => `${Date.now() - startupT0}ms`;
+
 		// Ensure config directory exists
 		if (!existsSync(this.configDir)) {
 			mkdirSync(this.configDir, { recursive: true });
@@ -363,6 +366,7 @@ export class Daemon {
 
 		// Write PID file
 		writePidFile(this.configDir, this.pidPath);
+		this.log.info(`[startup:${elapsed()}] PID file + crash counter done`);
 
 		// Rehydrate instances from persisted config (so relays can pick them up
 		// before HTTP/IPC servers start).
@@ -423,12 +427,18 @@ export class Daemon {
 			}
 		}
 
+		this.log.info(
+			`[startup:${elapsed()}] Rehydrated config (${this.registry.size} projects, ${savedConfig?.instances?.length ?? 0} instances)`,
+		);
+
 		// Rehydrate dismissed paths (directories the user explicitly removed)
 		if (savedConfig?.dismissedPaths) {
 			for (const p of savedConfig.dismissedPaths) {
 				if (typeof p === "string") this.dismissedPaths.add(p);
 			}
 		}
+
+		this.log.info(`[startup:${elapsed()}] Rehydration complete`);
 
 		// ── Probe-and-convert: if the "default" instance was created as
 		// unmanaged (via opencodeUrl from CLI), check whether it's actually
@@ -439,7 +449,7 @@ export class Daemon {
 			const reachable = await probeOpenCode(url);
 
 			if (!reachable) {
-				if (!isOpencodeInstalled()) {
+				if (!(await isOpencodeInstalled())) {
 					throw new Error(
 						`OpenCode is not running at ${url} and the "opencode" binary ` +
 							"was not found on PATH.\n" +
@@ -463,6 +473,8 @@ export class Daemon {
 			}
 		}
 
+		this.log.info(`[startup:${elapsed()}] Probe-and-convert done`);
+
 		// Smart default: if no "default" instance exists (neither from constructor
 		// opencodeUrl nor from rehydrated config), probe localhost:4096 to decide
 		// whether to connect as unmanaged or spawn as managed.
@@ -483,7 +495,7 @@ export class Daemon {
 				);
 			} else {
 				// OpenCode not running — spawn as managed
-				if (!isOpencodeInstalled()) {
+				if (!(await isOpencodeInstalled())) {
 					throw new Error(
 						`OpenCode is not running at ${probeUrl} and the "opencode" ` +
 							"binary was not found on PATH.\n" +
@@ -503,6 +515,8 @@ export class Daemon {
 			}
 		}
 
+		this.log.info(`[startup:${elapsed()}] Smart default detection done`);
+
 		// Auto-start managed default instance (if it was just created by smart
 		// detection or rehydrated from config). Non-fatal if it fails.
 		const defaultInst = this.instanceManager.getInstance("default");
@@ -517,6 +531,8 @@ export class Daemon {
 			}
 		}
 
+		this.log.info(`[startup:${elapsed()}] Instance auto-start done`);
+
 		// Start IPC server early so the CLI can send commands while the rest
 		// of the daemon initialises (TLS, HTTP, relays, port scanning).
 		// IPC handlers use closures over `this.*` that resolve at call time,
@@ -524,6 +540,8 @@ export class Daemon {
 		// registering without a relay (caught later by the relay startup loop
 		// or the instance_status_changed listener).
 		await this.startIPCServer();
+
+		this.log.info(`[startup:${elapsed()}] IPC server listening`);
 
 		// Initialize push notification manager (non-fatal if it fails)
 		try {
@@ -536,6 +554,8 @@ export class Daemon {
 			this.log.warn("Push notifications unavailable:", formatErrorDetail(err));
 			this.pushManager = null;
 		}
+
+		this.log.info(`[startup:${elapsed()}] Push notifications init done`);
 
 		// Load TLS certificates when TLS is enabled.
 		// ensureCerts auto-generates via mkcert if available; falls back to HTTP if not.
@@ -560,6 +580,10 @@ export class Daemon {
 				this.tlsEnabled = false;
 			}
 		}
+
+		this.log.info(
+			`[startup:${elapsed()}] TLS certs ${this.tlsEnabled ? "loaded" : "skipped"}`,
+		);
 
 		// Create HTTP request router
 		this.router = new RequestRouter({
@@ -605,6 +629,7 @@ export class Daemon {
 
 		// Start HTTP server
 		await this.startHttpServer();
+		this.log.info(`[startup:${elapsed()}] HTTP server listening`);
 
 		// Start HTTP onboarding server on port+1 when TLS is active
 		if (this.tlsEnabled) {
@@ -738,6 +763,10 @@ export class Daemon {
 		// Run initial scan immediately
 		void this.scanner.scan();
 
+		this.log.info(
+			`[startup:${elapsed()}] Port scanner + WS upgrade handler ready`,
+		);
+
 		// Start relays for rehydrated projects (HTTP + WS upgrade handler are
 		// ready, so startRelay can attach). Non-fatal per project.
 		for (const slug of this.registry.slugs()) {
@@ -752,6 +781,10 @@ export class Daemon {
 				);
 			}
 		}
+
+		this.log.info(
+			`[startup:${elapsed()}] Relay startup dispatched for ${this.registry.size} project(s)`,
+		);
 
 		// Retry relays for projects stuck in "registering" when an instance
 		// becomes available (e.g. resolveOpencodeUrl returned null above because
@@ -840,6 +873,8 @@ export class Daemon {
 			);
 		});
 		this.storageMonitor.start();
+
+		this.log.info(`[startup:${elapsed()}] Daemon fully started`);
 	}
 
 	/** Gracefully stop the daemon */

@@ -2,12 +2,15 @@
 // Manages mkcert-based TLS certificates for HTTPS access over LAN/Tailscale.
 // All system calls (exec, fs, networkInterfaces) are injectable for testing.
 
-import { execSync as defaultExecSync } from "node:child_process";
+import { exec as cpExec } from "node:child_process";
 import * as defaultFs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 
 import { DEFAULT_CONFIG_DIR } from "../env.js";
+
+const promisifiedExec = promisify(cpExec);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,11 +30,14 @@ export interface TlsFs {
 	mkdirSync: typeof defaultFs.mkdirSync;
 }
 
+/** Exec function type — accepts both sync and async implementations. */
+export type ExecFn = (cmd: string) => string | Promise<string>;
+
 export interface TlsOptions {
 	/** Config directory — defaults to ~/.conduit */
 	configDir?: string;
-	/** Injectable execSync for testing */
-	exec?: (cmd: string) => string;
+	/** Injectable exec for testing (sync or async) */
+	exec?: ExecFn;
 	/** Injectable networkInterfaces for testing */
 	networkInterfaces?: () => NodeJS.Dict<os.NetworkInterfaceInfo[]>;
 	/** Injectable fs for testing */
@@ -40,8 +46,9 @@ export interface TlsOptions {
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
-function defaultExec(cmd: string): string {
-	return defaultExecSync(cmd, { encoding: "utf8", stdio: "pipe" });
+async function defaultExec(cmd: string): Promise<string> {
+	const { stdout } = await promisifiedExec(cmd, { encoding: "utf8" });
+	return stdout;
 }
 
 // ─── PEM → DER conversion ───────────────────────────────────────────────────
@@ -173,10 +180,12 @@ export function hasTailscale(
 // ─── hasMkcert ───────────────────────────────────────────────────────────────
 
 /** Returns true if mkcert is installed and its CA root is accessible */
-export function hasMkcert(opts?: Pick<TlsOptions, "exec">): boolean {
+export async function hasMkcert(
+	opts?: Pick<TlsOptions, "exec">,
+): Promise<boolean> {
 	const exec = opts?.exec ?? defaultExec;
 	try {
-		exec("mkcert -CAROOT");
+		await exec("mkcert -CAROOT");
 		return true;
 	} catch {
 		return false;
@@ -186,12 +195,12 @@ export function hasMkcert(opts?: Pick<TlsOptions, "exec">): boolean {
 // ─── getMkcertCaRoot ─────────────────────────────────────────────────────────
 
 /** Get the mkcert CA root path, or null if mkcert is not available */
-export function getMkcertCaRoot(
+export async function getMkcertCaRoot(
 	opts?: Pick<TlsOptions, "exec">,
-): string | null {
+): Promise<string | null> {
 	const exec = opts?.exec ?? defaultExec;
 	try {
-		return exec("mkcert -CAROOT").trim();
+		return (await exec("mkcert -CAROOT")).trim();
 	} catch {
 		return null;
 	}
@@ -216,7 +225,7 @@ export async function ensureCerts(opts?: TlsOptions): Promise<TlsCerts | null> {
 	const fs = opts?.fs ?? defaultFs;
 	const configDir = opts?.configDir ?? DEFAULT_CONFIG_DIR;
 
-	const mkcertInstalled = hasMkcert({ exec });
+	const mkcertInstalled = await hasMkcert({ exec });
 
 	const certDir = path.join(configDir, "certs");
 	const keyPath = path.join(certDir, "key.pem");
@@ -228,7 +237,7 @@ export async function ensureCerts(opts?: TlsOptions): Promise<TlsCerts | null> {
 	let caCertDer: Buffer | null = null;
 	if (mkcertInstalled) {
 		try {
-			const caRootDir = exec("mkcert -CAROOT").trim();
+			const caRootDir = (await exec("mkcert -CAROOT")).trim();
 			const caRootPath = path.join(caRootDir, "rootCA.pem");
 			if (fs.existsSync(caRootPath)) {
 				caRoot = caRootPath;
@@ -265,7 +274,7 @@ export async function ensureCerts(opts?: TlsOptions): Promise<TlsCerts | null> {
 	if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
 		let needRegen = false;
 		try {
-			const certText = exec(`openssl x509 -in ${certPath} -text -noout`);
+			const certText = await exec(`openssl x509 -in ${certPath} -text -noout`);
 			for (const ip of allIPs) {
 				if (!certText.includes(ip)) {
 					needRegen = true;
@@ -318,7 +327,7 @@ export async function ensureCerts(opts?: TlsOptions): Promise<TlsCerts | null> {
 	// Generate certificates with mkcert
 	try {
 		const args = ["-key-file", keyPath, "-cert-file", certPath, ...domains];
-		exec(`mkcert ${args.join(" ")}`);
+		await exec(`mkcert ${args.join(" ")}`);
 	} catch {
 		return null;
 	}

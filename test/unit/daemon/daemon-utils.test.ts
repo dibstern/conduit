@@ -126,8 +126,8 @@ describe("findFreePort", () => {
 });
 
 describe("isOpencodeInstalled", () => {
-	it("returns a boolean", () => {
-		const result = isOpencodeInstalled();
+	it("returns a boolean", async () => {
+		const result = await isOpencodeInstalled();
 		expect(typeof result).toBe("boolean");
 	});
 
@@ -135,7 +135,7 @@ describe("isOpencodeInstalled", () => {
 		// `node` is always on PATH in our test environment.
 		// We can't easily stub `which`, so we just verify isOpencodeInstalled
 		// returns a boolean without throwing.
-		const result = isOpencodeInstalled();
+		const result = await isOpencodeInstalled();
 		// On CI or dev machines, opencode may or may not be installed.
 		// The function should never throw — only return true or false.
 		expect(result === true || result === false).toBe(true);

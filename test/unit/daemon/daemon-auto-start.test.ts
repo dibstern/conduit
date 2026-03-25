@@ -82,7 +82,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 
 	it("converts to managed when OpenCode is unreachable and binary exists", async () => {
 		mockProbe.mockResolvedValue(false);
-		mockInstalled.mockReturnValue(true);
+		mockInstalled.mockResolvedValue(true);
 
 		daemon = new Daemon({
 			...daemonOpts(tmpDir),
@@ -100,7 +100,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 
 	it("throws when OpenCode is unreachable and binary is not installed", async () => {
 		mockProbe.mockResolvedValue(false);
-		mockInstalled.mockReturnValue(false);
+		mockInstalled.mockResolvedValue(false);
 
 		daemon = new Daemon({
 			...daemonOpts(tmpDir),
@@ -133,7 +133,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 
 	it("smart default (no opencodeUrl) also checks binary before spawning", async () => {
 		mockProbe.mockResolvedValue(false);
-		mockInstalled.mockReturnValue(false);
+		mockInstalled.mockResolvedValue(false);
 
 		daemon = new Daemon({
 			...daemonOpts(tmpDir),
@@ -146,7 +146,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 
 	it("preserves instance name during conversion", async () => {
 		mockProbe.mockResolvedValue(false);
-		mockInstalled.mockReturnValue(true);
+		mockInstalled.mockResolvedValue(true);
 
 		daemon = new Daemon({
 			...daemonOpts(tmpDir),

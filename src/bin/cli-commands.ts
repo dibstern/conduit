@@ -253,7 +253,7 @@ async function launchMainMenu(
 					const status = await ipcSend({ cmd: "get_status" });
 					return {
 						tailscaleIP: getTailscaleIP(),
-						hasMkcert: hasMkcert(),
+						hasMkcert: await hasMkcert(),
 						tlsEnabled: (status["tlsEnabled"] as boolean) ?? false,
 						pinEnabled: (status["pinEnabled"] as boolean) ?? false,
 						keepAwake: (status["keepAwake"] as boolean) ?? false,

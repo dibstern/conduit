@@ -242,21 +242,21 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 	// ─── hasMkcert ───────────────────────────────────────────────────────
 
 	describe("hasMkcert", () => {
-		it("T20: returns true when mkcert succeeds", () => {
+		it("T20: returns true when mkcert succeeds", async () => {
 			const exec = vi.fn(() => "/home/user/.local/share/mkcert\n");
-			expect(hasMkcert({ exec })).toBe(true);
+			expect(await hasMkcert({ exec })).toBe(true);
 		});
 
-		it("T21: returns false when exec throws", () => {
+		it("T21: returns false when exec throws", async () => {
 			const exec = vi.fn(() => {
 				throw new Error("command not found: mkcert");
 			});
-			expect(hasMkcert({ exec })).toBe(false);
+			expect(await hasMkcert({ exec })).toBe(false);
 		});
 
-		it("T22: calls exec with correct command", () => {
+		it("T22: calls exec with correct command", async () => {
 			const exec = vi.fn(() => "/path/to/caroot\n");
-			hasMkcert({ exec });
+			await hasMkcert({ exec });
 			expect(exec).toHaveBeenCalledWith("mkcert -CAROOT");
 		});
 	});
@@ -264,16 +264,18 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 	// ─── getMkcertCaRoot ─────────────────────────────────────────────────
 
 	describe("getMkcertCaRoot", () => {
-		it("T23: returns trimmed path", () => {
+		it("T23: returns trimmed path", async () => {
 			const exec = vi.fn(() => "  /home/user/.local/share/mkcert  \n");
-			expect(getMkcertCaRoot({ exec })).toBe("/home/user/.local/share/mkcert");
+			expect(await getMkcertCaRoot({ exec })).toBe(
+				"/home/user/.local/share/mkcert",
+			);
 		});
 
-		it("T24: returns null when exec throws", () => {
+		it("T24: returns null when exec throws", async () => {
 			const exec = vi.fn(() => {
 				throw new Error("command not found");
 			});
-			expect(getMkcertCaRoot({ exec })).toBeNull();
+			expect(await getMkcertCaRoot({ exec })).toBeNull();
 		});
 	});
 
