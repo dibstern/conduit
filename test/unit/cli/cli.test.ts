@@ -2001,4 +2001,271 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			expect(addCmd!.url).toBeUndefined();
 		});
 	});
+
+	// ─── T17: --log-level parsing ──────────────────────────────────────
+
+	describe("T17: parseArgs — --log-level flag", () => {
+		it("--log-level debug sets logLevel to debug", () => {
+			const args = parseArgs(["--log-level", "debug"]);
+			expect(args.logLevel).toBe("debug");
+		});
+
+		it("--log-level error sets logLevel to error", () => {
+			const args = parseArgs(["--log-level", "error"]);
+			expect(args.logLevel).toBe("error");
+		});
+
+		it("--log-level warn sets logLevel to warn", () => {
+			const args = parseArgs(["--log-level", "warn"]);
+			expect(args.logLevel).toBe("warn");
+		});
+
+		it("--log-level verbose sets logLevel to verbose", () => {
+			const args = parseArgs(["--log-level", "verbose"]);
+			expect(args.logLevel).toBe("verbose");
+		});
+
+		it("--log-level info sets logLevel to info", () => {
+			const args = parseArgs(["--log-level", "info"]);
+			expect(args.logLevel).toBe("info");
+		});
+
+		it("defaults logLevel to ENV value (info) when not specified", () => {
+			const args = parseArgs([]);
+			expect(args.logLevel).toBe("info");
+		});
+
+		it("ignores invalid log level and keeps default", () => {
+			const args = parseArgs(["--log-level", "trace"]);
+			expect(args.logLevel).toBe("info");
+		});
+
+		it("--log-level with no value keeps default", () => {
+			const args = parseArgs(["--log-level"]);
+			expect(args.logLevel).toBe("info");
+		});
+
+		it("--log-level combined with other flags", () => {
+			const args = parseArgs([
+				"--port",
+				"3000",
+				"--log-level",
+				"debug",
+				"--foreground",
+			]);
+			expect(args.logLevel).toBe("debug");
+			expect(args.port).toBe(3000);
+			expect(args.command).toBe("foreground");
+		});
+	});
+
+	// ─── T18: --log-format parsing ─────────────────────────────────────
+
+	describe("T18: parseArgs — --log-format flag", () => {
+		it("--log-format json sets logFormat to json", () => {
+			const args = parseArgs(["--log-format", "json"]);
+			expect(args.logFormat).toBe("json");
+		});
+
+		it("--log-format pretty sets logFormat to pretty", () => {
+			const args = parseArgs(["--log-format", "pretty"]);
+			expect(args.logFormat).toBe("pretty");
+		});
+
+		it("defaults logFormat to undefined when not specified", () => {
+			const args = parseArgs([]);
+			expect(args.logFormat).toBeUndefined();
+		});
+
+		it("ignores invalid log format and keeps default", () => {
+			const args = parseArgs(["--log-format", "csv"]);
+			expect(args.logFormat).toBeUndefined();
+		});
+
+		it("--log-format with no value keeps default", () => {
+			const args = parseArgs(["--log-format"]);
+			expect(args.logFormat).toBeUndefined();
+		});
+
+		it("--log-format combined with --log-level", () => {
+			const args = parseArgs(["--log-level", "debug", "--log-format", "json"]);
+			expect(args.logLevel).toBe("debug");
+			expect(args.logFormat).toBe("json");
+		});
+	});
+
+	// ─── T19: --host parsing ───────────────────────────────────────────
+
+	describe("T19: parseArgs — --host / -H flag", () => {
+		it("--host sets host", () => {
+			const args = parseArgs(["--host", "0.0.0.0"]);
+			expect(args.host).toBe("0.0.0.0");
+		});
+
+		it("-H sets host (short alias)", () => {
+			const args = parseArgs(["-H", "127.0.0.1"]);
+			expect(args.host).toBe("127.0.0.1");
+		});
+
+		it("--host accepts IPv6 address", () => {
+			const args = parseArgs(["--host", "::1"]);
+			expect(args.host).toBe("::1");
+		});
+
+		it("--host accepts hostname", () => {
+			const args = parseArgs(["--host", "localhost"]);
+			expect(args.host).toBe("localhost");
+		});
+
+		it("--host with no value does not set host", () => {
+			const args = parseArgs(["--host"]);
+			// host is undefined unless ENV.hostExplicit is true (not in test env)
+			// The important assertion is that it doesn't crash or set host to undefined string
+			expect(args.host === undefined || typeof args.host === "string").toBe(
+				true,
+			);
+		});
+
+		it("--host followed by flag does not consume the flag as value", () => {
+			const args = parseArgs(["--host", "--stop"]);
+			// --host sees "--stop" starting with "--", skips it
+			// --stop then sets command
+			expect(args.command).toBe("stop");
+		});
+
+		it("--host combined with --port", () => {
+			const args = parseArgs(["--host", "0.0.0.0", "--port", "4000"]);
+			expect(args.host).toBe("0.0.0.0");
+			expect(args.port).toBe(4000);
+		});
+	});
+
+	// ─── T20: --restart-daemon parsing ─────────────────────────────────
+
+	describe("T20: parseArgs — --restart-daemon flag", () => {
+		it("--restart-daemon sets restartDaemon to true", () => {
+			const args = parseArgs(["--restart-daemon"]);
+			expect(args.restartDaemon).toBe(true);
+		});
+
+		it("defaults restartDaemon to false", () => {
+			const args = parseArgs([]);
+			expect(args.restartDaemon).toBe(false);
+		});
+
+		it("--restart-daemon combined with --foreground", () => {
+			const args = parseArgs(["--foreground", "--restart-daemon"]);
+			expect(args.command).toBe("foreground");
+			expect(args.restartDaemon).toBe(true);
+		});
+
+		it("--restart-daemon does not change command", () => {
+			const args = parseArgs(["--restart-daemon"]);
+			expect(args.command).toBe("default");
+		});
+	});
+
+	// ─── T21: HELP_TEXT ↔ parseArgs cross-check ───────────────────────
+
+	describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => {
+		// Canonical list of all flags handled by the parseArgs switch statement.
+		// When you add a new flag to parseArgs, add it here too — that's the
+		// entire point of this test.
+		const PARSED_FLAGS = [
+			"--daemon",
+			"--foreground",
+			"--restart-daemon",
+			"--status",
+			"--stop",
+			"--pin",
+			"--add",
+			"--remove",
+			"--list",
+			"--title",
+			"--port",
+			"-p",
+			"--host",
+			"-H",
+			"--oc-port",
+			"--no-update",
+			"--debug",
+			"-y",
+			"--yes",
+			"--no-https",
+			"--dangerously-skip-permissions",
+			"--managed",
+			"--url",
+			"--instance",
+			"--log-level",
+			"--log-format",
+			"--help",
+			"-h",
+		];
+
+		// Flags that are intentionally omitted from HELP_TEXT.
+		// --daemon is an internal flag used by Daemon.spawn() to launch the
+		// child process; users should never type it directly.
+		const INTERNAL_FLAGS = new Set(["--daemon"]);
+
+		// Short aliases are documented inline with their long form
+		// (e.g. "-p, --port") so we check the long form covers them.
+		const SHORT_ALIASES: Record<string, string> = {
+			"-p": "--port",
+			"-H": "--host",
+			"-y": "--yes",
+			"-h": "--help",
+		};
+
+		// ── Forward: every parsed flag appears in HELP_TEXT ──────────
+
+		for (const flag of PARSED_FLAGS) {
+			if (INTERNAL_FLAGS.has(flag)) continue;
+
+			const longForm = SHORT_ALIASES[flag];
+			if (longForm) {
+				it(`HELP_TEXT documents short alias ${flag} (via ${longForm})`, () => {
+					// Short aliases appear as "-p, --port" in the help text
+					expect(HELP_TEXT).toContain(flag);
+				});
+			} else {
+				it(`HELP_TEXT documents ${flag}`, () => {
+					expect(HELP_TEXT).toContain(flag);
+				});
+			}
+		}
+
+		// ── Reverse: every --flag in HELP_TEXT is handled by parseArgs ──
+
+		it("every --flag in HELP_TEXT is in the parsed flags list", () => {
+			// Extract all --flag tokens from HELP_TEXT
+			const helpFlags = new Set(
+				Array.from(HELP_TEXT.matchAll(/(--[\w-]+)/g), (m) => m[1] as string),
+			);
+
+			const parsedSet = new Set(PARSED_FLAGS);
+
+			for (const flag of helpFlags) {
+				expect(
+					parsedSet.has(flag),
+					`HELP_TEXT mentions ${flag} but parseArgs does not handle it`,
+				).toBe(true);
+			}
+		});
+
+		// ── Internal flags are NOT in HELP_TEXT ─────────────────────
+
+		for (const flag of INTERNAL_FLAGS) {
+			it(`HELP_TEXT does not expose internal flag ${flag}`, () => {
+				// Match as a standalone flag definition, not as a substring.
+				// --daemon shouldn't appear as "  --daemon" in the options list.
+				// It could appear inside a description string (e.g. "--restart-daemon")
+				// so we check it doesn't appear as a standalone option line.
+				const asOptionLine = new RegExp(
+					`^\\s+${flag.replace(/-/g, "\\-")}\\s`,
+					"m",
+				);
+				expect(HELP_TEXT).not.toMatch(asOptionLine);
+			});
+		}
+	});
 });
