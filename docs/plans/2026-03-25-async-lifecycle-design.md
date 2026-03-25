@@ -50,15 +50,15 @@ class AsyncTracker {
 }
 ```
 
-### TrackedComponent
+### TrackedService
 
 An abstract base class that gives children safe wrappers for async work. Children never call raw `setInterval`, `setTimeout`, or `fetch` — they use the parent's methods, which automatically track everything.
 
 ```ts
-abstract class TrackedComponent {
+abstract class TrackedService {
   private tracker = new AsyncTracker();
 
-  constructor(registry: ComponentRegistry) {
+  constructor(registry: ServiceRegistry) {
     registry.register(this);
   }
 
@@ -91,15 +91,15 @@ abstract class TrackedComponent {
 }
 ```
 
-### ComponentRegistry
+### ServiceRegistry
 
-Collects all `TrackedComponent` instances. One `drainAll()` call cleans up the entire tree.
+Collects all `TrackedService` instances. One `drainAll()` call cleans up the entire tree.
 
 ```ts
-class ComponentRegistry {
-  private components = new Set<TrackedComponent>();
+class ServiceRegistry {
+  private components = new Set<TrackedService>();
 
-  register(component: TrackedComponent): void {
+  register(component: TrackedService): void {
     this.components.add(component);
   }
 
@@ -112,16 +112,16 @@ class ComponentRegistry {
 }
 ```
 
-### Daemon extends TrackedComponent
+### Daemon extends TrackedService
 
-The Daemon is a TrackedComponent that also owns the registry. It creates the registry, passes it to `super()`, then passes it to children.
+The Daemon is a TrackedService that also owns the registry. It creates the registry, passes it to `super()`, then passes it to children.
 
 ```ts
-class Daemon extends TrackedComponent {
-  private registry: ComponentRegistry;
+class Daemon extends TrackedService {
+  private registry: ServiceRegistry;
 
   constructor(options: DaemonOptions) {
-    const registry = new ComponentRegistry();
+    const registry = new ServiceRegistry();
     super(registry);
     this.registry = registry;
   }
@@ -142,7 +142,7 @@ class Daemon extends TrackedComponent {
 
 ### Components that change
 
-Each component that currently uses raw timers or fire-and-forget fetches extends `TrackedComponent`:
+Each component that currently uses raw timers or fire-and-forget fetches extends `TrackedService`:
 
 - **PortScanner**: `setInterval(scan, 30_000)` → `this.repeating(scan, 30_000)`, `fetch(url)` → `this.fetch(url)`
 - **InstanceManager**: health polling intervals → `this.repeating(...)`, health check fetches → `this.fetch(...)`
@@ -151,9 +151,9 @@ Each component that currently uses raw timers or fire-and-forget fetches extends
 
 ### Enforcement
 
-1. **Constructor registration**: `TrackedComponent` requires a `ComponentRegistry` in its constructor. You cannot create one without registering it.
+1. **Constructor registration**: `TrackedService` requires a `ServiceRegistry` in its constructor. You cannot create one without registering it.
 2. **One drain call**: `registry.drainAll()` drains everything. No list to maintain.
-3. **Lint rule (optional)**: Flag raw `setInterval`, `setTimeout`, `global.fetch` in files that extend `TrackedComponent`.
+3. **Lint rule (optional)**: Flag raw `setInterval`, `setTimeout`, `global.fetch` in files that extend `TrackedService`.
 4. **Diagnostic afterAll**: Tests log `process._getActiveHandles()` if any tracked components have undrained work.
 
 ### What goes away
