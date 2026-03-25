@@ -1443,7 +1443,18 @@ export class Daemon {
 			{
 				addProject: (dir) => this.addProject(dir),
 				removeProject: (slug) => this.removeProject(slug),
-				getProjects: () => this.getProjects(),
+				getProjects: () =>
+					this.registry.allProjects().map((project) => {
+						// biome-ignore lint/style/noNonNullAssertion: safe — slug comes from registry
+						const entry = this.registry.get(project.slug)!;
+						const relay = entry.status === "ready" ? entry.relay : undefined;
+						return {
+							...project,
+							sessions: relay?.messageCache.sessionCount() ?? 0,
+							clients: relay?.wsHandler.getClientCount() ?? 0,
+							isProcessing: relay?.isAnySessionProcessing() ?? false,
+						};
+					}),
 				setProjectTitle: (slug, title) => {
 					this.registry.updateProject(slug, { title });
 				},

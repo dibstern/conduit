@@ -20,8 +20,16 @@ export interface DaemonIPCContext {
 	addProject(directory: string): Promise<StoredProject>;
 	/** Remove a project by slug. */
 	removeProject(slug: string): Promise<void>;
-	/** Return all registered projects. */
-	getProjects(): ReadonlyArray<Readonly<StoredProject>>;
+	/** Return all registered projects (enriched with live relay data). */
+	getProjects(): ReadonlyArray<
+		Readonly<
+			StoredProject & {
+				sessions?: number;
+				clients?: number;
+				isProcessing?: boolean;
+			}
+		>
+	>;
 	/** Set the project title via registry. */
 	setProjectTitle(slug: string, title: string): void;
 	/** Get current PIN hash (null if unset). */

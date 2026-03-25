@@ -415,11 +415,7 @@ export function startIPCServer(
 					try {
 						const response = await router(cmd);
 						const ipcMs = Date.now() - ipcT0;
-						if (ipcMs > 100) {
-							log.warn(`[ipc] ${cmd.cmd} took ${ipcMs}ms`);
-						} else {
-							log.debug(`[ipc] ${cmd.cmd} ${ipcMs}ms`);
-						}
+						log.info(`[ipc] ${cmd.cmd} ${ipcMs}ms`);
 						socket.write(serializeResponse(response));
 					} catch (err) {
 						const ipcMs = Date.now() - ipcT0;

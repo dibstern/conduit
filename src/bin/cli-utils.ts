@@ -1,6 +1,7 @@
 // ─── CLI Utilities ──────────────────────────────────────────────────────────
 // Shared utilities used by CLI commands: arg parsing, IPC, network, QR, formatting.
 
+import { appendFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
@@ -357,21 +358,37 @@ export async function sendIPCCommand(
 	let lastError: Error | undefined;
 	const cmdName = "cmd" in cmd ? (cmd as { cmd: string }).cmd : "unknown";
 	const t0 = Date.now();
+	const logPath = join(DEFAULT_CONFIG_DIR, "daemon.log");
+
+	function ipcLog(msg: string): void {
+		const entry = JSON.stringify({
+			level: 30,
+			time: Date.now(),
+			pid: process.pid,
+			component: ["cli", "ipc-client"],
+			msg,
+		});
+		try {
+			appendFileSync(logPath, `${entry}\n`);
+		} catch {
+			// Best-effort — don't crash if log write fails
+		}
+	}
 
 	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 		try {
 			const result = await sendIPCOnce(socketPath, cmd, PER_ATTEMPT_TIMEOUT);
 			if (attempt > 0) {
-				console.error(
-					`[ipc-client] ${cmdName} succeeded on attempt ${attempt + 1} after ${Date.now() - t0}ms`,
+				ipcLog(
+					`[ipc] ${cmdName} succeeded on attempt ${attempt + 1} after ${Date.now() - t0}ms`,
 				);
 			}
 			return result;
 		} catch (err) {
 			lastError = err instanceof Error ? err : new Error(String(err));
 			const code = (err as NodeJS.ErrnoException).code ?? "";
-			console.error(
-				`[ipc-client] ${cmdName} attempt ${attempt + 1} failed: ${code || lastError.message} (${Date.now() - t0}ms)`,
+			ipcLog(
+				`[ipc] ${cmdName} attempt ${attempt + 1} failed: ${code || lastError.message} (${Date.now() - t0}ms)`,
 			);
 			if (attempt < MAX_RETRIES && isRetryableError(err)) {
 				await new Promise<void>((r) => setTimeout(r, RETRY_DELAY));
