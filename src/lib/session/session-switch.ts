@@ -71,3 +71,19 @@ export interface SessionSwitchDeps {
 	};
 	readonly getInputDraft: (sessionId: string) => string | undefined;
 }
+
+// ─── Pure functions ─────────────────────────────────────────────────────────
+
+/**
+ * Classify whether cached SSE events contain renderable chat content.
+ * Pure function — no side effects, no I/O.
+ */
+export function classifyHistorySource(
+	events: readonly RelayMessage[] | null | undefined,
+): "cached-events" | "needs-rest" {
+	if (!events || events.length === 0) return "needs-rest";
+	const hasChatContent = events.some(
+		(e) => e.type === "user_message" || e.type === "delta",
+	);
+	return hasChatContent ? "cached-events" : "needs-rest";
+}
