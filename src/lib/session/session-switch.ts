@@ -60,7 +60,7 @@ export interface SessionSwitchDeps {
 	readonly statusPoller?: { isProcessing(sessionId: string): boolean };
 	readonly pollerManager?: {
 		isPolling(sessionId: string): boolean;
-		startPolling(sessionId: string, messages: unknown[]): void;
+		startPolling(sessionId: string, messages?: unknown[]): void;
 	};
 	readonly client: {
 		getMessages(sessionId: string): Promise<unknown[]>;

@@ -138,10 +138,7 @@ function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 		sessionMgr: deps.sessionMgr,
 		wsHandler: deps.wsHandler,
 		statusPoller: deps.statusPoller,
-		pollerManager: deps.pollerManager as {
-			isPolling(sessionId: string): boolean;
-			startPolling(sessionId: string, messages: unknown[]): void;
-		},
+		pollerManager: deps.pollerManager,
 		client: deps.client,
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,

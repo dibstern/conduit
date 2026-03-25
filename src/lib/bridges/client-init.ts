@@ -16,7 +16,10 @@ import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionStatusPoller } from "../session/session-status-poller.js";
-import { switchClientToSession } from "../session/session-switch.js";
+import {
+	type SessionSwitchDeps,
+	switchClientToSession,
+} from "../session/session-switch.js";
 import type { PtyInfo } from "../shared-types.js";
 import type { OpenCodeInstance, RelayMessage } from "../types.js";
 import type { PermissionBridge } from "./permission-bridge.js";
@@ -91,6 +94,10 @@ export async function handleClientConnected(
 	const activeId =
 		requestedSessionId || (await sessionMgr.getDefaultSessionId());
 	if (activeId) {
+		// pollerManager intentionally omitted — not available in ClientInitDeps.
+		// skipPollerSeed: true ensures switchClientToSession never accesses it.
+		// The `satisfies` check guarantees a compile error if SessionSwitchDeps
+		// adds new required fields that this object doesn't provide.
 		await switchClientToSession(
 			{
 				messageCache,
@@ -100,7 +107,7 @@ export async function handleClientConnected(
 				client: client as { getMessages: (id: string) => Promise<unknown[]> },
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
-			},
+			} satisfies SessionSwitchDeps,
 			clientId,
 			activeId,
 			{ skipPollerSeed: true },
