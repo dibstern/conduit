@@ -846,6 +846,9 @@ export class Daemon {
 			...(this.keepAwakeCommand != null && { command: this.keepAwakeCommand }),
 			...(this.keepAwakeArgs != null && { args: this.keepAwakeArgs }),
 		});
+		this.keepAwakeManager.on("error", ({ error }) => {
+			this.log.warn("KeepAwake error:", formatErrorDetail(error));
+		});
 		this.keepAwakeManager.activate();
 
 		// Start storage monitor (Ticket 6.2 AC8)
@@ -1473,6 +1476,9 @@ export class Daemon {
 						enabled: this.keepAwake,
 						command,
 						args,
+					});
+					this.keepAwakeManager.on("error", ({ error }) => {
+						this.log.warn("KeepAwake error:", formatErrorDetail(error));
 					});
 					// Auto-activate if currently enabled
 					if (this.keepAwake) {
