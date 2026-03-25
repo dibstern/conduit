@@ -435,14 +435,14 @@ describe("DaemonConfig with instances", () => {
 // ─── DaemonConfig with keepAwakeCommand/keepAwakeArgs ───────────────────────
 
 describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
-	it("round-trips keepAwakeCommand and keepAwakeArgs through save/load", () => {
+	it("round-trips keepAwakeCommand and keepAwakeArgs through save/load", async () => {
 		const config = makeSampleConfig({
 			keepAwake: true,
 			keepAwakeCommand: "systemd-inhibit",
 			keepAwakeArgs: ["--what=idle", "--who=conduit", "--why=active-session"],
 		});
 
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 
 		expect(loaded).not.toBeNull();
@@ -456,10 +456,10 @@ describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
 		]);
 	});
 
-	it("backward compat — loading config without these fields returns undefined", () => {
+	it("backward compat — loading config without these fields returns undefined", async () => {
 		// Write a config that does NOT have keepAwakeCommand/keepAwakeArgs
 		const config = makeSampleConfig({ keepAwake: false });
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 
 		expect(loaded).not.toBeNull();

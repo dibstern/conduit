@@ -728,80 +728,83 @@ export class Daemon {
 		// Lost instances (gone for 3 consecutive scans) are auto-removed if unmanaged.
 		// NOTE: Scanner must be created BEFORE starting rehydrated relays so that
 		// buildRelayFactory closures see this.scanner when they evaluate lazily.
-		this.scanner = new PortScanner(
-			this.serviceRegistry,
-			{
-				portRange: [4096, 4110],
-				intervalMs: 30_000,
-				probeTimeoutMs: 2000,
-				removalThreshold: 3,
-			},
-			(port) => probeOpenCodePort(port),
-		);
+		// Skipped when smartDefault is false (tests that don't want network probing).
+		if (this.smartDefault) {
+			this.scanner = new PortScanner(
+				this.serviceRegistry,
+				{
+					portRange: [4096, 4110],
+					intervalMs: 30_000,
+					probeTimeoutMs: 2000,
+					removalThreshold: 3,
+				},
+				(port) => probeOpenCodePort(port),
+			);
 
-		// Exclude ports already occupied by managed instances
-		const managedPorts = new Set(
-			this.instanceManager
-				.getInstances()
-				.filter((i) => i.managed)
-				.map((i) => i.port),
-		);
-		this.scanner.excludePorts(managedPorts);
-
-		this.scanner.on("scan", (result: ScanResult) => {
-			for (const port of result.discovered) {
-				// Skip if an instance already occupies this port
-				const existing = this.instanceManager
+			// Exclude ports already occupied by managed instances
+			const managedPorts = new Set(
+				this.instanceManager
 					.getInstances()
-					.find((i) => i.port === port);
-				if (existing) continue;
+					.filter((i) => i.managed)
+					.map((i) => i.port),
+			);
+			this.scanner.excludePorts(managedPorts);
 
-				const id = `discovered-${port}`;
-				try {
-					this.instanceManager.addInstance(id, {
-						name: `OpenCode :${port}`,
-						port,
-						managed: false,
-					});
-					this.log.info(`Auto-discovered OpenCode instance on port ${port}`);
-				} catch (err) {
-					// Max instances or other error — non-fatal
-					this.log.warn(
-						`Failed to register discovered instance on port ${port}:`,
-						formatErrorDetail(err),
-					);
-				}
-			}
+			this.scanner.on("scan", (result: ScanResult) => {
+				for (const port of result.discovered) {
+					// Skip if an instance already occupies this port
+					const existing = this.instanceManager
+						.getInstances()
+						.find((i) => i.port === port);
+					if (existing) continue;
 
-			for (const port of result.lost) {
-				const instance = this.instanceManager
-					.getInstances()
-					.find((i) => i.port === port && !i.managed);
-				if (instance) {
+					const id = `discovered-${port}`;
 					try {
-						this.instanceManager.removeInstance(instance.id);
-						this.log.info(
-							`Removed lost instance "${instance.id}" (port ${port})`,
+						this.instanceManager.addInstance(id, {
+							name: `OpenCode :${port}`,
+							port,
+							managed: false,
+						});
+						this.log.info(`Auto-discovered OpenCode instance on port ${port}`);
+					} catch (err) {
+						// Max instances or other error — non-fatal
+						this.log.warn(
+							`Failed to register discovered instance on port ${port}:`,
+							formatErrorDetail(err),
 						);
-					} catch {
-						// Already removed — ignore
 					}
 				}
-			}
 
-			// Broadcast updated instance list to all clients
-			if (result.discovered.length > 0 || result.lost.length > 0) {
-				const instances = this.instanceManager.getInstances();
-				this.registry.broadcastToAll({
-					type: "instance_list",
-					instances,
-				});
-			}
-		});
+				for (const port of result.lost) {
+					const instance = this.instanceManager
+						.getInstances()
+						.find((i) => i.port === port && !i.managed);
+					if (instance) {
+						try {
+							this.instanceManager.removeInstance(instance.id);
+							this.log.info(
+								`Removed lost instance "${instance.id}" (port ${port})`,
+							);
+						} catch {
+							// Already removed — ignore
+						}
+					}
+				}
 
-		this.scanner.start();
-		// Run initial scan immediately
-		this.tracker.track(this.scanner.scan());
+				// Broadcast updated instance list to all clients
+				if (result.discovered.length > 0 || result.lost.length > 0) {
+					const instances = this.instanceManager.getInstances();
+					this.registry.broadcastToAll({
+						type: "instance_list",
+						instances,
+					});
+				}
+			});
+
+			this.scanner.start();
+			// Run initial scan immediately
+			this.tracker.track(this.scanner.scan());
+		}
 
 		this.log.info(
 			`[startup:${elapsed()}] Port scanner + WS upgrade handler ready`,

@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="media/GENERATE-MAIN-UI.png"
-       alt="Conduit — OpenCode web UI open in a mobile browser" width="700">
+       alt="Conduit — OpenCode web UI open in a mobile browser" width="520">
 </p>
 
 > Web UI relay for [OpenCode](https://opencode.ai). Browser access from any
@@ -25,7 +25,7 @@ be at your desk.
 
 <p align="center">
   <img src="media/GENERATE-APPROVAL.png"
-       alt="OpenCode tool permission approval notification on iPhone" width="300">
+       alt="OpenCode tool permission approval notification on iPhone" width="220">
 </p>
 
 OpenCode pauses on every tool permission request. Conduit sends a push
@@ -40,7 +40,7 @@ optional.
 
 <p align="center">
   <img src="media/GENERATE-SPLIT.gif"
-       alt="Conduit split-screen: OpenCode session alongside a browser preview" width="700">
+       alt="Conduit split-screen: OpenCode session alongside a browser preview" width="520">
 </p>
 
 Chat history, tool output with diff rendering, file browser with live reload,
@@ -61,7 +61,7 @@ cd ~/frontend && npx conduit-code    # adds to same daemon
 
 <p align="center">
   <img src="media/GENERATE-DASHBOARD.png"
-       alt="Conduit project dashboard listing multiple OpenCode sessions" width="700">
+       alt="Conduit project dashboard listing multiple OpenCode sessions" width="520">
 </p>
 
 One port, all projects. Switch between registered sessions from the browser.
@@ -78,7 +78,7 @@ npx conduit-code
 
 <p align="center">
   <img src="media/GENERATE-SETUP.gif"
-       alt="Conduit first-run setup wizard with QR code" width="600">
+       alt="Conduit first-run setup wizard with QR code" width="440">
 </p>
 
 First run opens a setup wizard: set a port and PIN, optionally enable HTTPS,
