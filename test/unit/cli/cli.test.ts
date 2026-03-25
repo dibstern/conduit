@@ -1319,6 +1319,42 @@ describe("Ticket 3.3 — CLI Interface", () => {
 				}),
 			).rejects.toThrow();
 		});
+
+		it("sendIPCCommand retries and succeeds when server starts late", async () => {
+			const { createServer } = await import("node:net");
+			const { mkdtempSync } = await import("node:fs");
+			const { tmpdir } = await import("node:os");
+			const { join } = await import("node:path");
+
+			const dir = mkdtempSync(join(tmpdir(), "ipc-retry-"));
+			const sockPath = join(dir, "relay.sock");
+
+			// Start server after 800ms (will be caught by retry)
+			const server = createServer((conn) => {
+				let buf = "";
+				conn.on("data", (d: Buffer) => {
+					buf += d.toString();
+					if (buf.includes("\n")) {
+						conn.write('{"ok":true}\n');
+						conn.destroy();
+					}
+				});
+			});
+
+			const startTimer = setTimeout(() => {
+				server.listen(sockPath);
+			}, 800);
+
+			try {
+				const result = await sendIPCCommand(sockPath, {
+					cmd: "get_status",
+				});
+				expect(result).toEqual({ ok: true });
+			} finally {
+				clearTimeout(startTimer);
+				server.close();
+			}
+		});
 	});
 
 	// ─── --help ───────────────────────────────────────────────────────────

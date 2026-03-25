@@ -287,10 +287,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 // ─── IPC Client ─────────────────────────────────────────────────────────────
 
-/** Send a single IPC command to the daemon's Unix socket and return the response. */
-export function sendIPCCommand(
+/** Single-attempt IPC command with a per-attempt timeout. */
+function sendIPCOnce(
 	socketPath: string,
 	cmd: IPCCommand,
+	timeoutMs: number,
 ): Promise<IPCResponse> {
 	return new Promise((resolve, reject) => {
 		const client = connect(socketPath);
@@ -299,7 +300,7 @@ export function sendIPCCommand(
 		const timeout = setTimeout(() => {
 			client.destroy();
 			reject(new Error("IPC command timed out"));
-		}, 5000);
+		}, timeoutMs);
 
 		client.on("connect", () => {
 			client.write(`${JSON.stringify(cmd)}\n`);
@@ -325,6 +326,50 @@ export function sendIPCCommand(
 			reject(err);
 		});
 	});
+}
+
+/** Error codes that indicate the daemon isn't ready yet (retryable). */
+function isRetryableError(err: unknown): boolean {
+	if (!(err instanceof Error)) return false;
+	const code = (err as NodeJS.ErrnoException).code;
+	return (
+		code === "ENOENT" ||
+		code === "ECONNREFUSED" ||
+		err.message === "IPC command timed out"
+	);
+}
+
+/**
+ * Send an IPC command to the daemon with retry on transient connection errors.
+ * Retries up to 4 times with 500ms backoff (total budget ~7s) when the daemon
+ * socket doesn't exist yet (ENOENT), refuses connections (ECONNREFUSED), or
+ * times out — covering the startup race where the CLI proceeds before the
+ * daemon's IPC server is listening.
+ */
+export async function sendIPCCommand(
+	socketPath: string,
+	cmd: IPCCommand,
+): Promise<IPCResponse> {
+	const MAX_RETRIES = 4;
+	const RETRY_DELAY = 500;
+	const PER_ATTEMPT_TIMEOUT = 5000;
+
+	let lastError: Error | undefined;
+
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			return await sendIPCOnce(socketPath, cmd, PER_ATTEMPT_TIMEOUT);
+		} catch (err) {
+			lastError = err instanceof Error ? err : new Error(String(err));
+			if (attempt < MAX_RETRIES && isRetryableError(err)) {
+				await new Promise<void>((r) => setTimeout(r, RETRY_DELAY));
+				continue;
+			}
+			break;
+		}
+	}
+
+	throw lastError ?? new Error("IPC command failed");
 }
 
 // ─── Network Address ────────────────────────────────────────────────────────
