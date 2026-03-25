@@ -1,6 +1,7 @@
 // ─── Unit Tests: MessagePollerManager ─────────────────────────────────────────
 
 import { describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { MessagePollerManager } from "../../../src/lib/relay/message-poller-manager.js";
 
@@ -16,7 +17,7 @@ function makeMockClient() {
 
 describe("MessagePollerManager", () => {
 	it("starts independent pollers for different sessions", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000, // Long interval to prevent actual polling
@@ -30,7 +31,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("isPolling() without arg returns true when any poller is active", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -42,7 +43,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("stops only the specified session's poller", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -57,7 +58,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("allows unlimited concurrent pollers (capacity gated by reducer)", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -69,7 +70,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("allows up to 10 concurrent pollers", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -82,7 +83,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("allows more than 10 concurrent pollers (capacity gated upstream)", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -95,7 +96,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("no-op when starting a poller that already exists", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -107,7 +108,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("stopAll clears all pollers", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -122,7 +123,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("stopPolling is no-op for unknown session", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -133,7 +134,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("notifySSEEvent and emitDone are no-ops for unknown sessions", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -144,7 +145,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("getPollingSessionIds returns all active session IDs", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -157,7 +158,7 @@ describe("MessagePollerManager", () => {
 	});
 
 	it("can restart a session after stopping it", () => {
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: makeMockClient(),
 			log: createSilentLogger(),
 			interval: 60_000,
@@ -182,7 +183,7 @@ describe("MessagePollerManager", () => {
 			},
 		]);
 
-		const mgr = new MessagePollerManager({
+		const mgr = new MessagePollerManager(new ServiceRegistry(), {
 			client: mockClient,
 			log: createSilentLogger(),
 			interval: 50, // Fast polling for test
@@ -212,7 +213,7 @@ describe("MessagePollerManager", () => {
 	describe("viewer tracking", () => {
 		it("hasViewers delegates to injected function", () => {
 			const viewers = new Set<string>();
-			const mgr = new MessagePollerManager({
+			const mgr = new MessagePollerManager(new ServiceRegistry(), {
 				client: makeMockClient(),
 				log: createSilentLogger(),
 				interval: 60_000,
@@ -226,7 +227,7 @@ describe("MessagePollerManager", () => {
 		});
 
 		it("hasViewers returns false when no function is injected", () => {
-			const mgr = new MessagePollerManager({
+			const mgr = new MessagePollerManager(new ServiceRegistry(), {
 				client: makeMockClient(),
 				log: createSilentLogger(),
 				interval: 60_000,
@@ -239,7 +240,7 @@ describe("MessagePollerManager", () => {
 
 		it("hasViewers reflects external state changes", () => {
 			const viewers = new Set<string>();
-			const mgr = new MessagePollerManager({
+			const mgr = new MessagePollerManager(new ServiceRegistry(), {
 				client: makeMockClient(),
 				log: createSilentLogger(),
 				interval: 60_000,
@@ -263,7 +264,7 @@ describe("MessagePollerManager", () => {
 		it("passes hasViewers callback to individual pollers", async () => {
 			const mockClient = makeMockClient();
 			const viewers = new Set(["sess-1"]);
-			const mgr = new MessagePollerManager({
+			const mgr = new MessagePollerManager(new ServiceRegistry(), {
 				client: mockClient,
 				log: createSilentLogger(),
 				interval: 50,
@@ -279,6 +280,45 @@ describe("MessagePollerManager", () => {
 			expect(mgr.hasViewers("sess-1")).toBe(true);
 
 			mgr.stopAll();
+		});
+	});
+
+	// ─── drain() ───────────────────────────────────────────────────────
+
+	describe("drain", () => {
+		it("stops all child pollers and completes drain", async () => {
+			const registry = new ServiceRegistry();
+			const mgr = new MessagePollerManager(registry, {
+				client: makeMockClient(),
+				log: createSilentLogger(),
+				interval: 60_000,
+			});
+
+			mgr.startPolling("sess-1");
+			mgr.startPolling("sess-2");
+			mgr.startPolling("sess-3");
+			expect(mgr.size).toBe(3);
+
+			await mgr.drain();
+
+			expect(mgr.size).toBe(0);
+			expect(mgr.isPolling()).toBe(false);
+			expect(mgr.isPolling("sess-1")).toBe(false);
+			expect(mgr.isPolling("sess-2")).toBe(false);
+			expect(mgr.isPolling("sess-3")).toBe(false);
+		});
+
+		it("drain is safe to call with no active pollers", async () => {
+			const registry = new ServiceRegistry();
+			const mgr = new MessagePollerManager(registry, {
+				client: makeMockClient(),
+				log: createSilentLogger(),
+				interval: 60_000,
+			});
+
+			// Should not throw
+			await mgr.drain();
+			expect(mgr.size).toBe(0);
 		});
 	});
 });

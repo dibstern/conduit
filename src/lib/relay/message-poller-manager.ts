@@ -9,7 +9,8 @@
 // detect activity from external processes (e.g. the OpenCode TUI running
 // in a separate OS process that shares only SQLite).
 
-import { EventEmitter } from "node:events";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import { TrackedService } from "../daemon/tracked-service.js";
 import type { Message, OpenCodeClient } from "../instance/opencode-client.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
@@ -17,10 +18,10 @@ import { MessagePoller } from "./message-poller.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface MessagePollerManagerEvents {
+export type MessagePollerManagerEvents = {
 	/** Emitted with synthesized events + sessionId from REST diff */
 	events: [messages: RelayMessage[], sessionId: string];
-}
+};
 
 export interface MessagePollerManagerOptions {
 	client: Pick<OpenCodeClient, "getMessages">;
@@ -32,17 +33,19 @@ export interface MessagePollerManagerOptions {
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
 
-export class MessagePollerManager extends EventEmitter<MessagePollerManagerEvents> {
+export class MessagePollerManager extends TrackedService<MessagePollerManagerEvents> {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
 	private readonly client: Pick<OpenCodeClient, "getMessages">;
 	private readonly log: Logger;
 	private readonly interval?: number;
+	private readonly serviceRegistry: ServiceRegistry;
 
 	/** External viewer check — delegates to SessionRegistry when provided */
 	private readonly _hasViewers: ((sessionId: string) => boolean) | undefined;
 
-	constructor(options: MessagePollerManagerOptions) {
-		super();
+	constructor(registry: ServiceRegistry, options: MessagePollerManagerOptions) {
+		super(registry);
+		this.serviceRegistry = registry;
 		this.client = options.client;
 		this.log = options.log ?? createSilentLogger();
 		if (options.interval != null) this.interval = options.interval;
@@ -66,7 +69,7 @@ export class MessagePollerManager extends EventEmitter<MessagePollerManagerEvent
 	startPolling(sessionId: string, seedMessages?: Message[]): void {
 		if (this.pollers.has(sessionId)) return;
 
-		const poller = new MessagePoller({
+		const poller = new MessagePoller(this.serviceRegistry, {
 			client: this.client,
 			...(this.interval != null && { interval: this.interval }),
 			log: this.log,
@@ -119,6 +122,12 @@ export class MessagePollerManager extends EventEmitter<MessagePollerManagerEvent
 			poller.removeAllListeners();
 		}
 		this.pollers.clear();
+	}
+
+	/** Drain: stop all child pollers, then drain tracked async work. */
+	override async drain(): Promise<void> {
+		this.stopAll();
+		await super.drain();
 	}
 
 	/** Get the number of active pollers. */
