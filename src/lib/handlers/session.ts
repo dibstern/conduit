@@ -187,19 +187,14 @@ export async function handleNewSession(
 	const { title, requestId } = payload;
 	const session = await deps.sessionMgr.createSession(title, { silent: true });
 
-	deps.wsHandler.setClientSession(clientId, session.id);
-	deps.wsHandler.sendTo(clientId, {
-		type: "session_switched",
-		id: session.id,
-		// Note: exactOptionalPropertyTypes is enabled. The conditional spread
-		// avoids assigning `undefined` to the optional `requestId` property,
-		// which that flag forbids. Do NOT use `requestId: requestId ?? undefined`.
+	await switchClientToSession(toSessionSwitchDeps(deps), clientId, session.id, {
 		...(requestId != null && { requestId }),
+		skipHistory: true,
+		skipPollerSeed: true,
 	});
 
 	// Session list broadcast — non-blocking so session_switched reaches the
 	// client immediately without waiting for the listSessions() API call.
-	// This is the primary latency win. Errors are logged, not thrown.
 	deps.sessionMgr
 		.sendDualSessionLists((msg) => deps.wsHandler.broadcast(msg))
 		.catch((err) => {
