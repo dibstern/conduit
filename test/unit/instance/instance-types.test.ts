@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import type {
@@ -76,7 +77,7 @@ describe("Instance types", () => {
 	// ─── Behavioral tests ─────────────────────────────────────────────────────
 
 	it("addInstance with all required fields returns correct values at runtime", () => {
-		const manager = new InstanceManager();
+		const manager = new InstanceManager(new ServiceRegistry());
 		const config: InstanceConfig = {
 			name: "Personal",
 			port: 4096,
@@ -94,7 +95,7 @@ describe("Instance types", () => {
 	});
 
 	it("InstanceConfig url field is optional — addInstance succeeds without url", () => {
-		const manager = new InstanceManager();
+		const manager = new InstanceManager(new ServiceRegistry());
 		const configWithoutUrl: InstanceConfig = {
 			name: "No URL",
 			port: 4099,

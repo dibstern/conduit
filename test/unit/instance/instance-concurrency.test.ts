@@ -3,6 +3,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -22,7 +23,9 @@ describe("InstanceManager concurrency", () => {
 	});
 
 	it("survives rapid add/remove cycles without orphaned state", async () => {
-		const mgr = new InstanceManager({ maxInstances: 100 });
+		const mgr = new InstanceManager(new ServiceRegistry(), {
+			maxInstances: 100,
+		});
 		const ops: Promise<void>[] = [];
 
 		for (let i = 0; i < 50; i++) {
@@ -44,7 +47,9 @@ describe("InstanceManager concurrency", () => {
 	});
 
 	it("survives rapid start/stop cycles on the same instance", async () => {
-		const mgr = new InstanceManager({ healthPollIntervalMs: 999_999 });
+		const mgr = new InstanceManager(new ServiceRegistry(), {
+			healthPollIntervalMs: 999_999,
+		});
 		mgr.setSpawner(
 			vi
 				.fn()
@@ -69,7 +74,9 @@ describe("InstanceManager concurrency", () => {
 	});
 
 	it("concurrent startInstance calls don't double-spawn", async () => {
-		const mgr = new InstanceManager({ healthPollIntervalMs: 999_999 });
+		const mgr = new InstanceManager(new ServiceRegistry(), {
+			healthPollIntervalMs: 999_999,
+		});
 		let spawnCount = 0;
 		mgr.setSpawner(
 			vi.fn().mockImplementation(async () => {
@@ -93,7 +100,7 @@ describe("InstanceManager concurrency", () => {
 	});
 
 	it("adding instances up to maxInstances works, one more throws", () => {
-		const mgr = new InstanceManager({ maxInstances: 3 });
+		const mgr = new InstanceManager(new ServiceRegistry(), { maxInstances: 3 });
 		mgr.addInstance("a", { name: "A", port: 3001, managed: true });
 		mgr.addInstance("b", { name: "B", port: 3002, managed: true });
 		mgr.addInstance("c", { name: "C", port: 3003, managed: true });
@@ -103,7 +110,7 @@ describe("InstanceManager concurrency", () => {
 	});
 
 	it("removing and re-adding the same ID rapidly works cleanly", () => {
-		const mgr = new InstanceManager();
+		const mgr = new InstanceManager(new ServiceRegistry());
 
 		for (let i = 0; i < 20; i++) {
 			mgr.addInstance("cycle", {
@@ -121,7 +128,7 @@ describe("InstanceManager concurrency", () => {
 	});
 
 	it("events fire in correct order during rapid operations", () => {
-		const mgr = new InstanceManager();
+		const mgr = new InstanceManager(new ServiceRegistry());
 		const events: string[] = [];
 
 		mgr.on("instance_added", (inst) => events.push(`added:${inst.id}`));
