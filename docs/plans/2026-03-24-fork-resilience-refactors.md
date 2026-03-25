@@ -32,7 +32,7 @@ Two structural issues make fork-related bugs easy to introduce:
 | F | `bridges/client-init.ts:112-121` | sendTo (REST fallback) | **NO** |
 | G | `bridges/client-init.ts:124-128` | sendTo (error fallback) | **NO** |
 | H | `session/session-manager.ts:203` | broadcast (via emit) | **NO** (createSession) |
-| I | `relay/relay-stack.ts:388-405` | broadcast (augments H) | **NO** (augmenter) |
+| I | `relay/session-lifecycle-wiring.ts:56-74` | broadcast (augments H) | **NO** (augmenter) |
 
 ### Handlers that trigger session switches correctly (delegate to handleViewSession)
 
@@ -935,8 +935,10 @@ describe("switchClientToSession", () => {
 		});
 
 		await switchClientToSession(deps, "c1", "ses_1");
-		// Flush fire-and-forget promise
-		await new Promise((r) => setTimeout(r, 10));
+		// Flush fire-and-forget microtask chain (resolved mock → .then → startPolling)
+		await vi.waitFor(() => {
+			expect(deps.pollerManager?.startPolling).toHaveBeenCalled();
+		});
 
 		expect(deps.client.getMessages).toHaveBeenCalledWith("ses_1");
 		expect(deps.pollerManager?.startPolling).toHaveBeenCalledWith(
@@ -956,7 +958,9 @@ describe("switchClientToSession", () => {
 		await switchClientToSession(deps, "c1", "ses_1", {
 			skipPollerSeed: true,
 		});
-		await new Promise((r) => setTimeout(r, 10));
+		// Give microtask queue a chance to flush — getMessages should NOT be called
+		await Promise.resolve();
+		await Promise.resolve();
 
 		expect(deps.client.getMessages).not.toHaveBeenCalled();
 	});
@@ -979,9 +983,65 @@ describe("switchClientToSession", () => {
 		});
 
 		await switchClientToSession(deps, "c1", "ses_1");
-		await new Promise((r) => setTimeout(r, 10));
+		// Flush fire-and-forget rejection chain
+		await vi.waitFor(() => {
+			expect(deps.log.warn).toHaveBeenCalled();
+		});
+	});
 
-		expect(deps.log.warn).toHaveBeenCalled();
+	// ─── Ordering and argument correctness ──────────────────────────────
+
+	it("sends session_switched before status", async () => {
+		const deps = createFullDeps();
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
+		const switchIdx = calls.findIndex(
+			([, m]) => (m as { type: string }).type === "session_switched",
+		);
+		const statusIdx = calls.findIndex(
+			([, m]) => (m as { type: string }).type === "status",
+		);
+		expect(switchIdx).toBeGreaterThanOrEqual(0);
+		expect(statusIdx).toBeGreaterThanOrEqual(0);
+		expect(switchIdx).toBeLessThan(statusIdx);
+	});
+
+	it("sets client session before sending any messages", async () => {
+		const callOrder: string[] = [];
+		const deps = createFullDeps({
+			wsHandler: {
+				setClientSession: vi.fn(() => callOrder.push("setClient")),
+				sendTo: vi.fn(() => callOrder.push("sendTo")),
+			},
+		});
+
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		expect(callOrder[0]).toBe("setClient");
+		expect(callOrder.filter((c) => c === "sendTo").length).toBeGreaterThan(0);
+	});
+
+	it("calls getInputDraft with the target sessionId", async () => {
+		const deps = createFullDeps();
+		await switchClientToSession(deps, "c1", "ses_42");
+
+		expect(deps.getInputDraft).toHaveBeenCalledWith("ses_42");
+	});
+
+	it("omits inputText when getInputDraft returns empty string", async () => {
+		const deps = createFullDeps({
+			getInputDraft: vi.fn().mockReturnValue(""),
+		});
+
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
+		const switchMsg = calls.find(
+			([, m]) => (m as { type: string }).type === "session_switched",
+		);
+		expect(switchMsg).toBeDefined();
+		expect("inputText" in (switchMsg?.[1] ?? {})).toBe(false);
 	});
 });
 ```
@@ -1098,16 +1158,18 @@ import {
 
 /**
  * Map HandlerDeps to the narrowed SessionSwitchDeps.
- * Centralizes the exactOptionalPropertyTypes-safe construction
- * so each handler doesn't duplicate the conditional spreads.
+ * Centralizes the mapping so each handler doesn't duplicate it.
+ *
+ * NOTE: statusPoller and pollerManager are required on HandlerDeps
+ * (made non-optional by the pipeline-resilience Plan D2 refactor).
  */
 function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 	return {
 		messageCache: deps.messageCache,
 		sessionMgr: deps.sessionMgr,
 		wsHandler: deps.wsHandler,
-		...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
-		...(deps.pollerManager != null && { pollerManager: deps.pollerManager }),
+		statusPoller: deps.statusPoller,
+		pollerManager: deps.pollerManager,
 		client: deps.client,
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,
@@ -1214,7 +1276,7 @@ Expected: PASS. The existing tests verify:
 - session list broadcast ✓ (unchanged code)
 - broadcast failure logged ✓ (unchanged code)
 
-Note: `switchClientToSession` now also sends a `status: "idle"` message and calls `setClientSession`. The existing tests that capture `sendTo` calls will see one extra `status` message. If this causes assertion failures (e.g., tests checking exact call counts), adjust those specific assertions.
+**Intentional behavioral change:** `switchClientToSession` now also sends a `status: "idle"` message that `handleNewSession` did not previously send. This is correct — the previous code was inconsistent with `handleViewSession` which always sends status. The frontend handles this benignly (the session IS idle). Existing tests use `.find()` to locate specific messages, not call-count checks, so they won't break.
 
 **Step 4: Run full verification**
 
@@ -1243,12 +1305,16 @@ Expected: PASS
 
 **Step 2: Refactor handleClientConnected**
 
-Replace the duplicated session_switched logic (lines 92-134) with delegation to `switchClientToSession`. Since `ClientInitDeps` has a different shape than `HandlerDeps`, construct `SessionSwitchDeps` inline (no `toSessionSwitchDeps` helper — that's specific to `HandlerDeps`). Use conditional spreads for optional deps to satisfy `exactOptionalPropertyTypes`:
+Replace the duplicated session_switched logic (lines 92-134) with delegation to `switchClientToSession`. Since `ClientInitDeps` has a different shape than `HandlerDeps`, construct `SessionSwitchDeps` inline (no `toSessionSwitchDeps` helper — that's specific to `HandlerDeps`). Use conditional spreads for optional deps to satisfy `exactOptionalPropertyTypes`.
+
+The `if (activeId)` block currently spans lines 92-167. After the refactoring, lines 94-134 (setClientSession, cache check, session_switched, status) are replaced by the `switchClientToSession` call. Lines 136-167 (model info try/catch) remain unchanged.
 
 ```typescript
 import { switchClientToSession } from "../session/session-switch.js";
 
-// Inside handleClientConnected, replace lines 92-134 with:
+// Inside handleClientConnected, replace lines 94-134 with:
+// (remove the existing setClientSession, cache check, session_switched,
+//  draft lookup, and status send — switchClientToSession handles all of these)
 if (activeId) {
 	await switchClientToSession(
 		{
@@ -1266,21 +1332,50 @@ if (activeId) {
 		{ skipPollerSeed: true },
 	);
 
-	// Send model/agent info from the active session (existing code continues)
+	// ── Lines 136-167 remain UNCHANGED from here ──
+	// Send model/agent info from the active session
 	try {
 		const session = await client.getSession(activeId);
-		// ... rest of model info logic unchanged (lines 137-166)
+		if (session.modelID) {
+			wsHandler.sendTo(clientId, {
+				type: "model_info",
+				model: session.modelID,
+				provider: session.providerID ?? "",
+			});
+		} else {
+			// Session has no model set — fall back to per-session override or default
+			const fallbackModel = overrides.getModel(activeId);
+			if (fallbackModel) {
+				wsHandler.sendTo(clientId, {
+					type: "model_info",
+					model: fallbackModel.modelID,
+					provider: fallbackModel.providerID,
+				});
+			}
+		}
+	} catch (err) {
+		sendInitError(err, "Failed to load session info");
+		const fallbackModel = overrides.getModel(activeId);
+		if (fallbackModel) {
+			wsHandler.sendTo(clientId, {
+				type: "model_info",
+				model: fallbackModel.modelID,
+				provider: fallbackModel.providerID,
+			});
+		}
+	}
+}
+// ── Everything after line 167 (session list, permissions, agents, etc.) is unchanged ──
 ```
 
 This removes:
-- The duplicated cache check (lines 95-98)
-- The duplicated cache-hit session_switched send (lines 100-107)
-- The duplicated REST fallback (lines 108-121)
-- The duplicated error fallback (lines 122-129)
-- The duplicated status send (lines 131-134)
-- The duplicated draft lookup (line 99)
-
-The `setClientSession` call on line 94 can also be removed — `switchClientToSession` handles it internally.
+- `wsHandler.setClientSession(clientId, activeId)` (line 94) — `switchClientToSession` handles it
+- The cache check and hasChatContent logic (lines 95-98)
+- The draft lookup (line 99)
+- The cache-hit session_switched send (lines 100-107)
+- The REST fallback session_switched send (lines 108-121)
+- The error fallback session_switched send (lines 122-129)
+- The status send (lines 131-134)
 
 **Step 3: Run existing tests**
 
@@ -1308,10 +1403,10 @@ copied from handleViewSession. Both now use the same centralized path."
 
 **Files:**
 - Modify: `src/lib/session/session-manager.ts`
-- Modify: `src/lib/relay/relay-stack.ts`
+- Modify: `src/lib/relay/session-lifecycle-wiring.ts`
 - Test: existing tests
 
-The `createSession` non-silent path broadcasts a bare `{ type: "session_switched", id }` to ALL clients — the exact bug described in Problem 1. Currently unreachable (all callers use `silent: true`), but it's a latent vector. The relay-stack augmenter (lines 388-405) that intercepts this broadcast also becomes unnecessary.
+The `createSession` non-silent path broadcasts a bare `{ type: "session_switched", id }` to ALL clients — the exact bug described in Problem 1. Currently unreachable (all callers use `silent: true`), but it's a latent vector. The broadcast augmenter in `session-lifecycle-wiring.ts` (lines 56-74, extracted from relay-stack.ts by Plan G) that intercepts this broadcast also becomes unnecessary.
 
 **Step 1: Run existing tests to confirm green baseline**
 
@@ -1341,17 +1436,47 @@ Rationale: Broadcasting `session_switched` to ALL clients is wrong — you don't
 
 **Step 3: Update PBT tests that assert on non-silent createSession broadcast count**
 
-Two property-based tests in `test/unit/session/session-manager.pbt.test.ts` assert that non-silent `createSession` emits 3 broadcasts (`session_switched` + 2x `session_list`). After removing the `session_switched` broadcast, only 2 remain. Update these tests:
+Two property-based tests in `test/unit/session/session-manager.pbt.test.ts` assert that non-silent `createSession` emits 3 broadcasts (`session_switched` + 2x `session_list`). After removing the `session_switched` broadcast, only 2 remain.
 
-- Around line 184: change expected broadcast count from 3 to 2 and remove the `session_switched` assertion
-- Around line 685: same adjustment
+**Test 1 — line 184 ("creates session and broadcasts switch + list"):**
+
+Change the description and assertions:
+```typescript
+it("property: creates session and broadcasts list", async () => {
+```
+
+At line 200-207, replace:
+```typescript
+// Should broadcast session_switched, then dual session_list (roots + all)
+expect(broadcasts.length).toBe(3);
+// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
+expect(broadcasts[0]!.type).toBe("session_switched");
+// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
+expect(broadcasts[1]!.type).toBe("session_list");
+// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
+expect(broadcasts[2]!.type).toBe("session_list");
+```
+
+With:
+```typescript
+// Should broadcast dual session_list (roots + all) — no session_switched
+expect(broadcasts.length).toBe(2);
+// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
+expect(broadcasts[0]!.type).toBe("session_list");
+// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
+expect(broadcasts[1]!.type).toBe("session_list");
+```
+
+**Test 2 — line 685 ("createSession without opts still broadcasts as before"):**
+
+Same change: update description, change count from 3 to 2, remove `session_switched` assertion (lines 699-706). Apply the identical replacement pattern as Test 1.
 
 Run: `pnpm vitest run test/unit/session/session-manager.pbt.test.ts`
 Expected: PASS after adjustment
 
-**Step 4: Simplify the relay-stack broadcast listener**
+**Step 4: Simplify the broadcast listener in session-lifecycle-wiring.ts**
 
-In `src/lib/relay/relay-stack.ts`, simplify lines 388-405:
+In `src/lib/relay/session-lifecycle-wiring.ts`, simplify lines 56-74 (extracted from relay-stack.ts by Plan G):
 
 Before:
 ```typescript
@@ -1363,7 +1488,8 @@ sessionMgr.on("broadcast", (msg) => {
             const events = messageCache.getEvents(switchId);
             const hasChatContent =
                 events?.some(
-                    (e) => e.type === "user_message" || e.type === "delta",
+                    (e: RelayMessage) =>
+                        e.type === "user_message" || e.type === "delta",
                 ) ?? false;
             if (events && hasChatContent) {
                 wsHandler.broadcast({ ...msg, events });
@@ -1384,6 +1510,8 @@ sessionMgr.on("broadcast", (msg) => {
 
 The `session_switched` augmenter was only needed for the `createSession` broadcast path. With that broadcast removed, no `session_switched` messages flow through the SessionManager broadcast path.
 
+After this simplification, `messageCache` can be removed from `SessionLifecycleWiringDeps` if it's no longer used elsewhere in the module (check before removing).
+
 **Step 5: Run tests**
 
 Run: `pnpm test:unit`
@@ -1397,15 +1525,15 @@ Expected: PASS
 **Step 7: Commit**
 
 ```bash
-git add src/lib/session/session-manager.ts src/lib/relay/relay-stack.ts
+git add src/lib/session/session-manager.ts src/lib/relay/session-lifecycle-wiring.ts
 git commit -m "fix: remove bare session_switched broadcast from createSession
 
 Broadcasting session_switched to ALL clients forced every tab to switch
 sessions — the exact bug described in Problem 1. The session_list broadcast
 is sufficient to notify clients about new sessions.
 
-Also removes the relay-stack broadcast augmenter that was only needed for
-this path."
+Also removes the broadcast augmenter in session-lifecycle-wiring.ts that
+was only needed for this path."
 ```
 
 ---
@@ -1691,6 +1819,6 @@ After all tasks are complete, the 9 original send sites should be resolved as fo
 | F | `bridges/client-init.ts:112-121` (client-init REST) | **Replaced** — delegates to `switchClientToSession` |
 | G | `bridges/client-init.ts:124-128` (client-init error) | **Replaced** — delegates to `switchClientToSession` |
 | H | `session/session-manager.ts:203` (createSession broadcast) | **Removed** — bare broadcast was the root bug |
-| I | `relay/relay-stack.ts:388-405` (broadcast augmenter) | **Removed** — dead code after H removed |
+| I | `relay/session-lifecycle-wiring.ts:56-74` (broadcast augmenter) | **Removed** — dead code after H removed |
 
 **Result:** All `session_switched` message construction flows through `buildSessionSwitchedMessage` inside `session-switch.ts`. No handler can construct a bare `session_switched` without going through the centralized module.
