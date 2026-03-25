@@ -1,6 +1,10 @@
 // ─── Session Handlers ────────────────────────────────────────────────────────
 
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import {
+	type SessionSwitchDeps,
+	switchClientToSession,
+} from "../session/session-switch.js";
 import type { PermissionId } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { getSessionInputDraft } from "./prompt.js";
@@ -122,6 +126,30 @@ async function sendSessionMetadata(
 }
 
 /**
+ * Map HandlerDeps to the narrowed SessionSwitchDeps.
+ * Centralizes the mapping so each handler doesn't duplicate it.
+ *
+ * NOTE: statusPoller and pollerManager are required on HandlerDeps
+ * (made non-optional by the pipeline-resilience Plan D2 refactor).
+ */
+function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
+	return {
+		messageCache: deps.messageCache,
+		sessionMgr: deps.sessionMgr,
+		wsHandler: deps.wsHandler,
+		statusPoller: deps.statusPoller,
+		pollerManager: deps.pollerManager,
+		client: {
+			getMessages: (sid: string) => deps.client.getMessages(sid),
+			getMessageCount: (sid: string) =>
+				deps.client.getMessages(sid).then((m) => m.length),
+		},
+		log: deps.log,
+		getInputDraft: getSessionInputDraft,
+	};
+}
+
+/**
  * View a session in the requesting tab (per-tab session selection).
  * Just associates the client with the session and sends history to that client.
  */
@@ -135,68 +163,7 @@ export async function handleViewSession(
 	const { sessionId: id } = payload;
 	if (!id) return;
 
-	// setClientSession handles session switching automatically —
-	// the registry removes the client from the old session.
-	deps.wsHandler.setClientSession(clientId, id);
-
-	// Send session history to THIS client only
-	const events = deps.messageCache.getEvents(id);
-	const hasChatContent =
-		events?.some((e) => e.type === "user_message" || e.type === "delta") ??
-		false;
-
-	if (events && hasChatContent) {
-		const draft = getSessionInputDraft(id);
-		deps.wsHandler.sendTo(clientId, {
-			type: "session_switched",
-			id,
-			events,
-			...(draft && { inputText: draft }),
-		});
-	} else {
-		try {
-			const draft = getSessionInputDraft(id);
-			const history = await deps.sessionMgr.loadPreRenderedHistory(id);
-			deps.wsHandler.sendTo(clientId, {
-				type: "session_switched",
-				id,
-				history: {
-					messages: history.messages,
-					hasMore: history.hasMore,
-					...(history.total != null && { total: history.total }),
-				},
-				...(draft && { inputText: draft }),
-			});
-		} catch (err) {
-			deps.log.warn(
-				`Failed to load history for ${id}: ${err instanceof Error ? err.message : err}`,
-			);
-			const draft = getSessionInputDraft(id);
-			deps.wsHandler.sendTo(clientId, {
-				type: "session_switched",
-				id,
-				...(draft && { inputText: draft }),
-			});
-		}
-	}
-
-	// Sync: processing status (no await needed)
-	deps.wsHandler.sendTo(clientId, {
-		type: "status",
-		status: deps.statusPoller?.isProcessing(id) ? "processing" : "idle",
-	});
-
-	// Fire-and-forget: seed REST message poller for externally-started sessions.
-	if (deps.pollerManager && !deps.pollerManager.isPolling(id)) {
-		deps.client
-			.getMessages(id)
-			.then((msgs) => deps.pollerManager?.startPolling(id, msgs))
-			.catch((err) =>
-				deps.log.warn(
-					`Failed to seed poller for ${id.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-				),
-			);
-	}
+	await switchClientToSession(toSessionSwitchDeps(deps), clientId, id);
 
 	// @perf-guard S2 — awaiting this call adds 20-100ms to session switch latency
 	// Fire-and-forget: metadata is not on the critical path for session switching.
@@ -207,10 +174,7 @@ export async function handleViewSession(
 	// When skipMetadata is true, the caller (e.g. handleDeleteSession) will
 	// await sendSessionMetadata directly to avoid duplicate metadata sends.
 	if (!skipMetadata) {
-		sendSessionMetadata(deps, clientId, id).catch(() => {
-			// Errors already logged inside sendSessionMetadata.
-			// This .catch() prevents unhandled promise rejection.
-		});
+		sendSessionMetadata(deps, clientId, id).catch(() => {});
 	}
 
 	deps.log.info(`client=${clientId} Viewing: ${id}`);
@@ -224,19 +188,14 @@ export async function handleNewSession(
 	const { title, requestId } = payload;
 	const session = await deps.sessionMgr.createSession(title, { silent: true });
 
-	deps.wsHandler.setClientSession(clientId, session.id);
-	deps.wsHandler.sendTo(clientId, {
-		type: "session_switched",
-		id: session.id,
-		// Note: exactOptionalPropertyTypes is enabled. The conditional spread
-		// avoids assigning `undefined` to the optional `requestId` property,
-		// which that flag forbids. Do NOT use `requestId: requestId ?? undefined`.
+	await switchClientToSession(toSessionSwitchDeps(deps), clientId, session.id, {
 		...(requestId != null && { requestId }),
+		skipHistory: true,
+		skipPollerSeed: true,
 	});
 
 	// Session list broadcast — non-blocking so session_switched reaches the
 	// client immediately without waiting for the listSessions() API call.
-	// This is the primary latency win. Errors are logged, not thrown.
 	deps.sessionMgr
 		.sendDualSessionLists((msg) => deps.wsHandler.broadcast(msg))
 		.catch((err) => {
@@ -398,7 +357,7 @@ export async function handleForkSession(
 	}
 
 	// Persist fork-point metadata (forkMessageId + parentID)
-	if (forkMessageId && deps.forkMeta) {
+	if (forkMessageId) {
 		deps.forkMeta.setForkEntry(forked.id, {
 			forkMessageId,
 			parentID: sessionId,

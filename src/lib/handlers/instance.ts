@@ -12,8 +12,8 @@ import type { HandlerDeps } from "./types.js";
  * Called after every mutation so all browsers stay in sync.
  */
 function broadcastInstanceList(deps: HandlerDeps): void {
-	if (!deps.getInstances) return;
-	const instances = deps.getInstances();
+	if (!deps.instanceMgmt) return;
+	const instances = deps.instanceMgmt.getInstances();
 	deps.wsHandler.broadcast({ type: "instance_list", instances });
 }
 
@@ -35,7 +35,7 @@ export async function handleInstanceAdd(
 	clientId: string,
 	payload: PayloadMap["instance_add"],
 ): Promise<void> {
-	if (!deps.addInstance) {
+	if (!deps.instanceMgmt) {
 		sendError(deps, clientId, "Instance management not available");
 		return;
 	}
@@ -55,10 +55,10 @@ export async function handleInstanceAdd(
 			.replace(/^-|-$/g, "") || "instance";
 
 	// Ensure uniqueness
-	if (deps.getInstances) {
+	{
 		let counter = 2;
 		const baseId = id;
-		while (deps.getInstances().some((i) => i.id === id)) {
+		while (deps.instanceMgmt.getInstances().some((i) => i.id === id)) {
 			id = `${baseId}-${counter}`;
 			counter++;
 		}
@@ -69,7 +69,7 @@ export async function handleInstanceAdd(
 		const managed =
 			typeof payload.managed === "boolean" ? payload.managed : !hasUrl; // default: managed unless a URL is provided
 
-		deps.addInstance(id, {
+		deps.instanceMgmt.addInstance(id, {
 			name,
 			port: typeof payload.port === "number" ? payload.port : 0,
 			managed,
@@ -77,7 +77,7 @@ export async function handleInstanceAdd(
 			...(hasUrl && payload.url != null && { url: payload.url }),
 		});
 		broadcastInstanceList(deps);
-		deps.persistConfig?.();
+		deps.instanceMgmt.persistConfig();
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
 	}
@@ -90,7 +90,7 @@ export async function handleInstanceRemove(
 	clientId: string,
 	payload: PayloadMap["instance_remove"],
 ): Promise<void> {
-	if (!deps.removeInstance) {
+	if (!deps.instanceMgmt) {
 		sendError(deps, clientId, "Instance management not available");
 		return;
 	}
@@ -102,9 +102,9 @@ export async function handleInstanceRemove(
 	}
 
 	try {
-		deps.removeInstance(instanceId);
+		deps.instanceMgmt.removeInstance(instanceId);
 		broadcastInstanceList(deps);
-		deps.persistConfig?.();
+		deps.instanceMgmt.persistConfig();
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
 	}
@@ -117,7 +117,7 @@ export async function handleInstanceStart(
 	clientId: string,
 	payload: PayloadMap["instance_start"],
 ): Promise<void> {
-	if (!deps.startInstance) {
+	if (!deps.instanceMgmt) {
 		sendError(deps, clientId, "Instance management not available");
 		return;
 	}
@@ -129,7 +129,7 @@ export async function handleInstanceStart(
 	}
 
 	try {
-		await deps.startInstance(instanceId);
+		await deps.instanceMgmt.startInstance(instanceId);
 		broadcastInstanceList(deps);
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
@@ -143,7 +143,7 @@ export async function handleInstanceStop(
 	clientId: string,
 	payload: PayloadMap["instance_stop"],
 ): Promise<void> {
-	if (!deps.stopInstance) {
+	if (!deps.instanceMgmt) {
 		sendError(deps, clientId, "Instance management not available");
 		return;
 	}
@@ -155,7 +155,7 @@ export async function handleInstanceStop(
 	}
 
 	try {
-		deps.stopInstance(instanceId);
+		deps.instanceMgmt.stopInstance(instanceId);
 		broadcastInstanceList(deps);
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
@@ -169,7 +169,7 @@ export async function handleInstanceUpdate(
 	clientId: string,
 	payload: PayloadMap["instance_update"],
 ): Promise<void> {
-	if (!deps.updateInstance) {
+	if (!deps.instanceMgmt) {
 		sendError(deps, clientId, "Instance update not supported");
 		return;
 	}
@@ -192,9 +192,9 @@ export async function handleInstanceUpdate(
 	}
 
 	try {
-		deps.updateInstance(instanceId, updates);
+		deps.instanceMgmt.updateInstance(instanceId, updates);
 		broadcastInstanceList(deps);
-		deps.persistConfig?.();
+		deps.instanceMgmt.persistConfig();
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
 	}
@@ -207,7 +207,7 @@ export async function handleInstanceRename(
 	clientId: string,
 	payload: PayloadMap["instance_rename"],
 ): Promise<void> {
-	if (!deps.updateInstance) {
+	if (!deps.instanceMgmt) {
 		sendError(deps, clientId, "Instance management not available");
 		return;
 	}
@@ -223,9 +223,9 @@ export async function handleInstanceRename(
 	}
 
 	try {
-		deps.updateInstance(instanceId, { name: name.trim() });
+		deps.instanceMgmt.updateInstance(instanceId, { name: name.trim() });
 		broadcastInstanceList(deps);
-		deps.persistConfig?.();
+		deps.instanceMgmt.persistConfig();
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
 	}
@@ -238,8 +238,8 @@ export async function handleInstanceRename(
  * Called after project-instance binding changes so all browsers stay in sync.
  */
 function broadcastProjectList(deps: HandlerDeps): void {
-	if (!deps.getProjects) return;
-	const projects = deps.getProjects();
+	if (!deps.projectMgmt) return;
+	const projects = deps.projectMgmt.getProjects();
 	deps.wsHandler.broadcast({ type: "project_list", projects });
 }
 
@@ -248,7 +248,7 @@ export async function handleSetProjectInstance(
 	clientId: string,
 	payload: PayloadMap["set_project_instance"],
 ): Promise<void> {
-	if (!deps.setProjectInstance) {
+	if (!deps.projectMgmt) {
 		sendError(deps, clientId, "Project instance binding not available");
 		return;
 	}
@@ -264,7 +264,7 @@ export async function handleSetProjectInstance(
 	}
 
 	try {
-		await deps.setProjectInstance(slug, instanceId);
+		await deps.projectMgmt.setProjectInstance(slug, instanceId);
 		broadcastProjectList(deps);
 	} catch (err) {
 		sendError(deps, clientId, formatErrorDetail(err));
@@ -304,13 +304,13 @@ export async function handleScanNow(
 	clientId: string,
 	_payload: PayloadMap["scan_now"],
 ): Promise<void> {
-	if (!deps.triggerScan) {
+	if (!deps.scanDeps) {
 		sendError(deps, clientId, "Port scanning not available");
 		return;
 	}
 
 	try {
-		const result = await deps.triggerScan();
+		const result = await deps.scanDeps.triggerScan();
 		deps.wsHandler.sendTo(clientId, {
 			type: "scan_result",
 			discovered: result.discovered,

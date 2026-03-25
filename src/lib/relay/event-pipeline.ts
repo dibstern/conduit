@@ -41,8 +41,10 @@ export function truncateIfNeeded(msg: RelayMessage): TruncateResult {
 }
 
 /** Determine whether a message type should be cached for replay. */
-export function shouldCache(type: string): type is CacheableEventType {
-	return CACHEABLE_TYPES.has(type as CacheableEventType);
+export function shouldCache(
+	type: RelayMessage["type"],
+): type is CacheableEventType {
+	return CACHEABLE_TYPES.has(type);
 }
 
 /**
@@ -70,7 +72,16 @@ export const CACHEABLE_EVENT_TYPES = [
 
 export type CacheableEventType = (typeof CACHEABLE_EVENT_TYPES)[number];
 
-const CACHEABLE_TYPES: ReadonlySet<string> = new Set(CACHEABLE_EVENT_TYPES);
+const CACHEABLE_TYPES: ReadonlySet<RelayMessage["type"]> = new Set(
+	CACHEABLE_EVENT_TYPES,
+);
+
+// ─── Compile-time assertion: CACHEABLE_EVENT_TYPES ⊆ RelayMessage["type"] ──
+type _AssertCacheableSubset =
+	(typeof CACHEABLE_EVENT_TYPES)[number] extends RelayMessage["type"]
+		? true
+		: { error: "CACHEABLE_EVENT_TYPES has invalid types" };
+const _assertCacheableTypes: _AssertCacheableSubset = true;
 
 /**
  * Event types that warrant a notification (sound/browser alert/push).
@@ -82,13 +93,11 @@ const CACHEABLE_TYPES: ReadonlySet<string> = new Set(CACHEABLE_EVENT_TYPES);
  * separately in sse-wiring.ts (they bypass the pipeline), so only done and
  * error need the notification_event fallback.
  */
-export const NOTIFICATION_EVENT_TYPES: ReadonlySet<string> = new Set([
-	"done",
-	"error",
-]);
+export const NOTIFICATION_EVENT_TYPES: ReadonlySet<RelayMessage["type"]> =
+	new Set(["done", "error"]);
 
 /** Check if a message type warrants a cross-session notification broadcast. */
-export function isNotificationWorthy(type: string): boolean {
+export function isNotificationWorthy(type: RelayMessage["type"]): boolean {
 	return NOTIFICATION_EVENT_TYPES.has(type);
 }
 
@@ -146,12 +155,12 @@ export function applyPipelineResult(
 	sessionId: string | undefined,
 	deps: PipelineDeps,
 ): void {
-	if (result.fullContent !== undefined && sessionId) {
-		deps.toolContentStore.store(
-			(result.msg as { id: string }).id,
-			result.fullContent,
-			sessionId,
-		);
+	if (
+		result.fullContent !== undefined &&
+		sessionId &&
+		result.msg.type === "tool_result"
+	) {
+		deps.toolContentStore.store(result.msg.id, result.fullContent, sessionId);
 	}
 	if (result.timeout === "clear" && sessionId) {
 		deps.overrides.clearProcessingTimeout(sessionId);
@@ -164,7 +173,7 @@ export function applyPipelineResult(
 	if (result.route.action === "send") {
 		deps.wsHandler.sendToSession(result.route.sessionId, result.msg);
 	} else {
-		deps.log.verbose(
+		deps.log.info(
 			`${result.route.reason} — ${result.msg.type} (${result.source})`,
 		);
 	}

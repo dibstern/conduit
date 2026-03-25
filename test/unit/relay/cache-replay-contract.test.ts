@@ -319,7 +319,7 @@ describe("Contract: non-cacheable event types are exhaustively excluded", () => 
 		// 2. sendToSession(sessionId, { type: "status", status: "processing" }) ← NOT cached
 		//
 		// shouldCache("status") must be false
-		expect(shouldCache("status")).toBe(false);
+		expect(shouldCache("status" as const)).toBe(false);
 
 		// Verify the pipeline would NOT cache a status event
 		const result = processEvent(
@@ -350,7 +350,7 @@ describe("Contract: non-cacheable event types are exhaustively excluded", () => 
 			"pty_output",
 			"pty_created",
 			"banner",
-		];
+		] as const;
 
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);

@@ -2,6 +2,7 @@
 // Tests the SSEConsumer class against a mock OpenCode server.
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { OpenCodeClient } from "../../../src/lib/instance/opencode-client.js";
 import { SSEConsumer } from "../../../src/lib/relay/sse-consumer.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
@@ -34,7 +35,7 @@ describe("Integration: SSE Consumer", () => {
 	// ── Connection ────────────────────────────────────────────────────────
 
 	it("connects to real OpenCode SSE endpoint", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		const connected = new Promise<void>((resolve) => {
 			consumer.on("connected", () => resolve());
@@ -47,7 +48,7 @@ describe("Integration: SSE Consumer", () => {
 	}, 15_000);
 
 	it("receives events when activity occurs", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		const events: unknown[] = [];
 		consumer.on("event", (event) => events.push(event));
@@ -71,12 +72,12 @@ describe("Integration: SSE Consumer", () => {
 	}, 15_000);
 
 	it("isConnected returns false before connect", () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 		expect(consumer.isConnected()).toBe(false);
 	});
 
 	it("disconnect stops receiving events", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		const connected = new Promise<void>((resolve) => {
 			consumer.on("connected", () => resolve());
@@ -91,7 +92,7 @@ describe("Integration: SSE Consumer", () => {
 	}, 15_000);
 
 	it("getHealth reports connected state", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		const connected = new Promise<void>((resolve) => {
 			consumer.on("connected", () => resolve());
@@ -105,7 +106,7 @@ describe("Integration: SSE Consumer", () => {
 	}, 15_000);
 
 	it("connect is idempotent — calling twice doesn't crash", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		const connected = new Promise<void>((resolve) => {
 			consumer.on("connected", () => resolve());
@@ -120,7 +121,7 @@ describe("Integration: SSE Consumer", () => {
 	}, 15_000);
 
 	it("reconnects after disconnect/reconnect cycle", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		// First connection
 		let connectCount = 0;
@@ -142,7 +143,7 @@ describe("Integration: SSE Consumer", () => {
 	}, 20_000);
 
 	it("activity on server produces SSE events", async () => {
-		consumer = new SSEConsumer({ baseUrl: mock.url });
+		consumer = new SSEConsumer(new ServiceRegistry(), { baseUrl: mock.url });
 
 		const events: unknown[] = [];
 		consumer.on("event", (event) => events.push(event));
@@ -173,7 +174,7 @@ describe("Integration: SSE Consumer", () => {
 	// ── Error handling ────────────────────────────────────────────────────
 
 	it("emits error when connecting to invalid URL", async () => {
-		consumer = new SSEConsumer({
+		consumer = new SSEConsumer(new ServiceRegistry(), {
 			baseUrl: "http://127.0.0.1:1",
 			backoff: { baseDelay: 100, maxDelay: 100 },
 		});

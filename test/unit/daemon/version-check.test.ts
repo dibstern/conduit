@@ -4,6 +4,7 @@
 
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import {
 	fetchLatestVersion,
 	isNewer,
@@ -202,7 +203,7 @@ describe("Ticket 3.4 — fetchLatestVersion()", () => {
 describe("Ticket 3.4 — VersionChecker.check()", () => {
 	it("returns correct result shape when no update", async () => {
 		const fetcher = mockFetchOk("1.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -217,7 +218,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 
 	it("returns correct result shape when update available", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -232,7 +233,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 
 	it("emits update_available when newer version found", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -248,7 +249,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 
 	it("does not emit update_available when no update", async () => {
 		const fetcher = mockFetchOk("1.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -263,7 +264,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 
 	it("throws on network error (check does not catch)", async () => {
 		const fetcher = mockFetchNetworkError("Connection refused");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -273,7 +274,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 
 	it("downgrade detection: current=2.0.0, latest=1.0.0 returns updateAvailable: false", async () => {
 		const fetcher = mockFetchOk("1.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "2.0.0",
 			_fetch: fetcher,
 		});
@@ -304,7 +305,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 
 	it("performs immediate check on start", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -326,7 +327,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 
 	it("performs periodic checks at the configured interval", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -351,7 +352,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 
 	it("stop() clears the interval", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -370,7 +371,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 
 	it("stop() is safe to call multiple times", () => {
 		const fetcher = mockFetchOk("1.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -382,7 +383,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 
 	it("stop() is safe before start", () => {
 		const fetcher = mockFetchOk("1.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: fetcher,
 		});
@@ -404,7 +405,7 @@ describe("Ticket 3.4 — enabled: false (--no-update)", () => {
 
 	it("start() is a no-op when enabled is false", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			enabled: false,
 			_fetch: fetcher,
@@ -418,7 +419,7 @@ describe("Ticket 3.4 — enabled: false (--no-update)", () => {
 
 	it("does not set up an interval when disabled", async () => {
 		const fetcher = mockFetchOk("2.0.0");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			enabled: false,
 			checkInterval: 1_000,
@@ -437,7 +438,7 @@ describe("Ticket 3.4 — enabled: false (--no-update)", () => {
 
 describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	it("isUpdateAvailable() returns false before any check", () => {
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: mockFetchOk("1.0.0"),
 		});
@@ -445,7 +446,7 @@ describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	});
 
 	it("getLatestVersion() returns null before any check", () => {
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: mockFetchOk("1.0.0"),
 		});
@@ -453,7 +454,7 @@ describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	});
 
 	it("isUpdateAvailable() returns true after check finds update", async () => {
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: mockFetchOk("2.0.0"),
 		});
@@ -463,7 +464,7 @@ describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	});
 
 	it("isUpdateAvailable() returns false after check finds no update", async () => {
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: mockFetchOk("1.0.0"),
 		});
@@ -473,7 +474,7 @@ describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	});
 
 	it("getLatestVersion() returns version after check", async () => {
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			_fetch: mockFetchOk("3.1.4"),
 		});
@@ -496,7 +497,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 
 	it("emits check_error on network failure, does not throw", async () => {
 		const fetcher = mockFetchNetworkError("ECONNREFUSED");
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -528,7 +529,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 			});
 		}) as unknown as typeof globalThis.fetch;
 
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -555,7 +556,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 
 	it("emits check_error on HTTP error, does not throw", async () => {
 		const fetcher = mockFetchError(500);
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -587,7 +588,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 			});
 		}) as unknown as typeof globalThis.fetch;
 
-		const checker = new VersionChecker({
+		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
 			checkInterval: 60_000,
 			_fetch: fetcher,
@@ -613,6 +614,89 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		expect(checker.getLatestVersion()).toBe("3.0.0");
 
 		checker.stop();
+	});
+});
+
+// ─── TrackedService integration (drain) ────────────────────────────────────────
+
+describe("Ticket 3.4 — TrackedService drain() integration", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("after drain(), interval no longer fires", async () => {
+		const fetcher = mockFetchOk("2.0.0");
+		const registry = new ServiceRegistry();
+		const checker = new VersionChecker(registry, {
+			currentVersion: "1.0.0",
+			checkInterval: 60_000,
+			_fetch: fetcher,
+		});
+
+		checker.start();
+
+		// Initial check resolves
+		await vi.advanceTimersByTimeAsync(1);
+		expect(fetcher).toHaveBeenCalledTimes(1);
+
+		// Drain the registry (clears all tracked timers/signals)
+		await registry.drainAll();
+
+		// Advance past several intervals — no more calls
+		await vi.advanceTimersByTimeAsync(300_000);
+		expect(fetcher).toHaveBeenCalledTimes(1);
+	});
+
+	it("in-flight fetch is aborted by drain", async () => {
+		let capturedSignal: AbortSignal | undefined;
+		const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+			capturedSignal = init?.signal ?? undefined;
+			// Simulate a slow response that rejects on abort
+			return new Promise<Response>((resolve, reject) => {
+				if (capturedSignal) {
+					capturedSignal.addEventListener("abort", () => {
+						reject(new DOMException("The operation was aborted", "AbortError"));
+					});
+				}
+				// Resolve after a long delay (simulating slow network)
+				setTimeout(
+					() =>
+						resolve(
+							new Response(JSON.stringify({ version: "2.0.0" }), {
+								status: 200,
+								headers: { "Content-Type": "application/json" },
+							}),
+						),
+					60_000,
+				);
+			});
+		}) as unknown as typeof globalThis.fetch;
+
+		const registry = new ServiceRegistry();
+		const checker = new VersionChecker(registry, {
+			currentVersion: "1.0.0",
+			checkInterval: 300_000,
+			_fetch: fetcher,
+		});
+
+		// Start triggers runCheck() which calls check() -> fetchLatestVersion()
+		checker.start();
+
+		// Let the microtask for runCheck start the fetch
+		await vi.advanceTimersByTimeAsync(1);
+		expect(fetcher).toHaveBeenCalledTimes(1);
+		expect(capturedSignal).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		expect(capturedSignal!.aborted).toBe(false);
+
+		// Drain aborts the signal
+		await registry.drainAll();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		expect(capturedSignal!.aborted).toBe(true);
 	});
 });
 

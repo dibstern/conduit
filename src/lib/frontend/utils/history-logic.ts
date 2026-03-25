@@ -15,6 +15,7 @@ import type {
 	UserMessage,
 } from "../types.js";
 import { extractDisplayText, generateUuid } from "./format.js";
+import { createToolMessage } from "./tool-message-factory.js";
 
 // Re-export types for convenience
 export type { HistoryMessage, Turn };
@@ -207,17 +208,18 @@ function convertAssistantParts(
 					typeof state["metadata"] === "object"
 						? (state["metadata"] as Record<string, unknown>)
 						: undefined;
-				result.push({
-					type: "tool",
-					uuid: generateUuid(),
-					id: part.callID ?? part.id,
-					name: mapToolName(rawToolName),
-					status: mapToolStatus(state?.status, rawToolName),
-					...(toolResult != null && { result: toolResult }),
-					isError,
-					...(toolInput !== undefined && { input: toolInput }),
-					...(toolMetadata !== undefined && { metadata: toolMetadata }),
-				} satisfies ToolMessage);
+				result.push(
+					createToolMessage({
+						uuid: generateUuid(),
+						id: part.callID ?? part.id,
+						name: mapToolName(rawToolName),
+						status: mapToolStatus(state?.status, rawToolName),
+						...(toolResult != null && { result: toolResult }),
+						isError,
+						...(toolInput !== undefined && { input: toolInput }),
+						...(toolMetadata !== undefined && { metadata: toolMetadata }),
+					}),
+				);
 				break;
 			}
 			// Skip structural parts that have no visual representation

@@ -200,7 +200,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.emit("session_lifecycle", { type: "created", sessionId: session.id });
 
 		if (!opts?.silent) {
-			this.emit("broadcast", { type: "session_switched", id: session.id });
 			await this.broadcastSessionList();
 		}
 

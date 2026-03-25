@@ -10,6 +10,7 @@ import {
 import { Daemon } from "../../../src/lib/daemon/daemon.js";
 import { buildIPCHandlers } from "../../../src/lib/daemon/daemon-ipc.js";
 import { createCommandRouter } from "../../../src/lib/daemon/ipc-protocol.js";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig, StoredProject } from "../../../src/lib/types.js";
 
@@ -44,7 +45,8 @@ function makeIPCContext(manager: InstanceManager, _configDir: string) {
 		getPinHash: () => null,
 		setPinHash: () => {},
 		getKeepAwake: () => false,
-		setKeepAwake: () => {},
+		setKeepAwake: () => ({ supported: false, active: false }),
+		setKeepAwakeCommand: () => {},
 		persistConfig: () => {},
 		scheduleShutdown: () => {},
 	};
@@ -118,7 +120,7 @@ describe("instance lifecycle integration", () => {
 	// ─── IPC round-trip tests ─────────────────────────────────────────────────
 
 	it("instance_add IPC command returns ok:true with instance data", async () => {
-		const manager = new InstanceManager();
+		const manager = new InstanceManager(new ServiceRegistry());
 		const ctx = makeIPCContext(manager, tmpDir);
 		const handlers = buildIPCHandlers(ctx, () => ({
 			ok: true,
@@ -159,7 +161,7 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("instance_remove IPC command after adding returns ok:true", async () => {
-		const manager = new InstanceManager();
+		const manager = new InstanceManager(new ServiceRegistry());
 		const ctx = makeIPCContext(manager, tmpDir);
 		const handlers = buildIPCHandlers(ctx, () => ({
 			ok: true,

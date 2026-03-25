@@ -181,7 +181,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	});
 
 	describe("P2: Create session (AC1)", () => {
-		it("property: creates session and broadcasts switch + list", async () => {
+		it("property: creates session and broadcasts list", async () => {
 			await fc.assert(
 				fc.asyncProperty(arbSessionTitle, async (title) => {
 					const client = createMockClient([]);
@@ -197,14 +197,12 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					// Flush microtasks for background all-sessions broadcast
 					await new Promise((r) => setTimeout(r, 0));
 
-					// Should broadcast session_switched, then dual session_list (roots + all)
-					expect(broadcasts.length).toBe(3);
+					// Should broadcast dual session_list (roots + all) — no session_switched
+					expect(broadcasts.length).toBe(2);
 					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[0]!.type).toBe("session_switched");
+					expect(broadcasts[0]!.type).toBe("session_list");
 					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 					expect(broadcasts[1]!.type).toBe("session_list");
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[2]!.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);
@@ -682,7 +680,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			expect(sessionChangedEvents[0]!.type).toBe("created");
 		});
 
-		it("createSession without opts still broadcasts as before (backward compatible)", async () => {
+		it("createSession without opts still broadcasts list (backward compatible)", async () => {
 			await fc.assert(
 				fc.asyncProperty(arbSessionTitle, async (title) => {
 					const client = createMockClient([]);
@@ -696,14 +694,12 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					// Flush microtasks for background all-sessions broadcast
 					await new Promise((r) => setTimeout(r, 0));
 
-					// Should broadcast session_switched, then dual session_list (roots + all)
-					expect(broadcasts.length).toBe(3);
+					// Should broadcast dual session_list (roots + all) — no session_switched
+					expect(broadcasts.length).toBe(2);
 					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[0]!.type).toBe("session_switched");
+					expect(broadcasts[0]!.type).toBe("session_list");
 					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 					expect(broadcasts[1]!.type).toBe("session_list");
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[2]!.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);

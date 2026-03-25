@@ -1,8 +1,9 @@
 // ─── Version Check (Ticket 3.4) ────────────────────────────────────────────────
 // Periodically checks npm for newer versions and notifies browsers via events.
 
-import { EventEmitter } from "node:events";
 import { getVersion } from "../version.js";
+import type { ServiceRegistry } from "./service-registry.js";
+import { TrackedService } from "./tracked-service.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -33,10 +34,10 @@ export interface VersionCheckResult {
 	updateAvailable: boolean;
 }
 
-export interface VersionCheckEvents {
+export type VersionCheckEvents = {
 	update_available: [{ current: string; latest: string }];
 	check_error: [{ error: Error }];
-}
+};
 
 // ─── Semver comparison ─────────────────────────────────────────────────────────
 
@@ -160,12 +161,14 @@ export async function fetchLatestVersion(
 	packageName: string,
 	registryUrl: string,
 	_fetch?: typeof globalThis.fetch,
+	signal?: AbortSignal,
 ): Promise<string> {
 	const fetchFn = _fetch ?? globalThis.fetch;
 	const url = `${registryUrl}/${encodeURIComponent(packageName)}/latest`;
 
 	const response = await fetchFn(url, {
 		headers: { Accept: "application/json" },
+		...(signal ? { signal } : {}),
 	});
 
 	if (!response.ok) {
@@ -187,7 +190,7 @@ export async function fetchLatestVersion(
 
 // ─── VersionChecker ────────────────────────────────────────────────────────────
 
-export class VersionChecker extends EventEmitter<VersionCheckEvents> {
+export class VersionChecker extends TrackedService<VersionCheckEvents> {
 	private readonly packageName: string;
 	private readonly currentVersion: string;
 	private readonly checkInterval: number;
@@ -199,8 +202,8 @@ export class VersionChecker extends EventEmitter<VersionCheckEvents> {
 	private latestVersion: string | null = null;
 	private updateAvailable = false;
 
-	constructor(options?: VersionCheckOptions) {
-		super();
+	constructor(registry: ServiceRegistry, options?: VersionCheckOptions) {
+		super(registry);
 		this.packageName = options?.packageName ?? DEFAULT_PACKAGE_NAME;
 		this.currentVersion = options?.currentVersion ?? getVersion();
 		this.checkInterval = options?.checkInterval ?? DEFAULT_CHECK_INTERVAL;
@@ -216,25 +219,16 @@ export class VersionChecker extends EventEmitter<VersionCheckEvents> {
 		// Perform initial check (non-blocking — errors emitted, not thrown)
 		this.runCheck();
 
-		// Schedule periodic checks
-		this.intervalHandle = setInterval(() => {
+		// Schedule periodic checks (tracked — cleared automatically on drain)
+		this.intervalHandle = this.repeating(() => {
 			this.runCheck();
 		}, this.checkInterval);
-
-		// Ensure the interval doesn't keep the process alive
-		if (
-			this.intervalHandle &&
-			typeof this.intervalHandle === "object" &&
-			"unref" in this.intervalHandle
-		) {
-			this.intervalHandle.unref();
-		}
 	}
 
 	/** Stop periodic checking. */
 	stop(): void {
 		if (this.intervalHandle !== null) {
-			clearInterval(this.intervalHandle);
+			this.clearTrackedTimer(this.intervalHandle);
 			this.intervalHandle = null;
 		}
 	}
@@ -245,6 +239,7 @@ export class VersionChecker extends EventEmitter<VersionCheckEvents> {
 			this.packageName,
 			this.registryUrl,
 			this.fetchFn,
+			this.abortSignal,
 		);
 
 		this.latestVersion = latest;
@@ -277,11 +272,13 @@ export class VersionChecker extends EventEmitter<VersionCheckEvents> {
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
-	/** Run a check, catching errors and emitting check_error. */
+	/** Run a check, catching errors and emitting check_error. Tracked for drain. */
 	private runCheck(): void {
-		this.check().catch((err: unknown) => {
-			const error = err instanceof Error ? err : new Error(String(err));
-			this.emit("check_error", { error });
-		});
+		this.tracked(
+			this.check().catch((err: unknown) => {
+				const error = err instanceof Error ? err : new Error(String(err));
+				this.emit("check_error", { error });
+			}),
+		);
 	}
 }

@@ -9,73 +9,35 @@ import { stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import {
-	type ClientInitDeps,
-	handleClientConnected,
-} from "../bridges/client-init.js";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
-import { dispatchMessage, type HandlerDeps } from "../handlers/index.js";
+import { ServiceRegistry } from "../daemon/service-registry.js";
+import { formatErrorDetail } from "../errors.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
-import {
-	createLogger,
-	type Logger,
-	type LogLevel,
-	setLogLevel,
-} from "../logger.js";
-import { ClientMessageQueue } from "../server/client-message-queue.js";
+import { createLogger, type Logger } from "../logger.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
-import { RateLimiter } from "../server/rate-limiter.js";
 import { RelayServer } from "../server/server.js";
 import { WebSocketHandler } from "../server/ws-handler.js";
 import { SessionManager } from "../session/session-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import { SessionStatusPoller } from "../session/session-status-poller.js";
-import type { PermissionId } from "../shared-types.js";
-import type { OpenCodeEvent, ProjectRelayConfig } from "../types.js";
+import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
-import { type EffectDeps, executeEffects } from "./effect-executor.js";
-import {
-	applyPipelineResult,
-	isNotificationWorthy,
-	type PipelineDeps,
-	processEvent,
-} from "./event-pipeline.js";
-import {
-	createTranslator,
-	rebuildTranslatorFromHistory,
-} from "./event-translator.js";
+import { createTranslator } from "./event-translator.js";
+import { wireHandlerDeps } from "./handler-deps-wiring.js";
 import { MessageCache } from "./message-cache.js";
 import { MessagePollerManager } from "./message-poller-manager.js";
-import {
-	assembleContext,
-	evaluateAll,
-	initialMonitoringState,
-} from "./monitoring-reducer.js";
-import type {
-	MonitoringState,
-	PollerGatingConfig,
-	SessionEvalContext,
-} from "./monitoring-types.js";
-import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
-import { resolveNotifications } from "./notification-policy.js";
+import { wireMonitoring } from "./monitoring-wiring.js";
 import { PendingUserMessages } from "./pending-user-messages.js";
-import { classifyPollerBatch } from "./poller-pre-filter.js";
+import { wirePollers } from "./poller-wiring.js";
 import { PtyManager } from "./pty-manager.js";
-import {
-	connectPtyUpstream as connectPtyUpstreamImpl,
-	type PtyUpstreamDeps,
-} from "./pty-upstream.js";
+import type { PtyUpstreamDeps } from "./pty-upstream.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
-import { createSessionSSETracker } from "./session-sse-tracker.js";
+import { wireSessionLifecycle } from "./session-lifecycle-wiring.js";
 import { SSEConsumer } from "./sse-consumer.js";
-import {
-	extractSessionId,
-	sendPushForEvent,
-	wireSSEConsumer,
-} from "./sse-wiring.js";
+import { wireSSEConsumer } from "./sse-wiring.js";
+import { wireTimers } from "./timer-wiring.js";
 import { ToolContentStore } from "./tool-content-store.js";
 
 // ─── WebSocket library for upstream PTY connections ─────────────────────────
@@ -175,6 +137,9 @@ export async function createProjectRelay(
 	const ptyLog = log.child("pty");
 	const pipelineLog = log.child("pipeline");
 
+	// ── Service registry (optional — used by daemon for coordinated drain) ──
+	const serviceRegistry = config.registry ?? new ServiceRegistry();
+
 	// ── Components ──────────────────────────────────────────────────────────
 
 	const client = new OpenCodeClient({
@@ -208,11 +173,8 @@ export async function createProjectRelay(
 
 	const toolContentStore = new ToolContentStore();
 
-	// Per-client sliding-window rate limiter for chat messages
-	const rateLimiter = new RateLimiter();
-
 	// Per-session overrides (agent, model, processing timeout)
-	const overrides = new SessionOverrides();
+	const overrides = new SessionOverrides(serviceRegistry);
 
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
@@ -233,23 +195,26 @@ export async function createProjectRelay(
 	}
 
 	// ── Session status poller (polls GET /session/status for processing indicators) ──
-	const statusPoller: SessionStatusPoller = new SessionStatusPoller({
-		client,
-		interval: config.statusPollerInterval ?? 500,
-		log: statusLog,
-		getSessionParentMap: (): Map<string, string> =>
-			sessionMgr.getSessionParentMap(),
-	});
+	const statusPoller: SessionStatusPoller = new SessionStatusPoller(
+		serviceRegistry,
+		{
+			client,
+			interval: config.statusPollerInterval ?? 500,
+			log: statusLog,
+			getSessionParentMap: (): Map<string, string> =>
+				sessionMgr.getSessionParentMap(),
+		},
+	);
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
-	const registry = new SessionRegistry();
+	const registry = new SessionRegistry(log.child("session-registry"));
 
 	// ── Message poller manager (REST fallback for CLI sessions without SSE events) ──
 	// Manages multiple pollers concurrently — one per busy session.
-	const pollerManager = new MessagePollerManager({
+	const pollerManager = new MessagePollerManager(serviceRegistry, {
 		client,
 		log: pollerMgrLog,
-		hasViewers: (sid) => registry.hasViewers(sid),
+		hasViewers: (sid: string) => registry.hasViewers(sid),
 		...(config.messagePollerInterval != null && {
 			interval: config.messagePollerInterval,
 		}),
@@ -265,14 +230,6 @@ export async function createProjectRelay(
 
 	const ptyManager = new PtyManager({ log: ptyLog });
 	const pendingUserMessages = new PendingUserMessages();
-
-	// ── Monitoring reducer state ──────────────────────────────────────────────
-	const sseTracker = createSessionSSETracker();
-	let monitoringState: MonitoringState = initialMonitoringState();
-	const pollerGatingCfg: PollerGatingConfig = {
-		...DEFAULT_POLLER_GATING_CONFIG,
-		...config.pollerGatingConfig,
-	};
 
 	// ── Health check ────────────────────────────────────────────────────────
 
@@ -319,6 +276,7 @@ export async function createProjectRelay(
 	// ── WebSocket handler ───────────────────────────────────────────────────
 
 	const wsHandler = new WebSocketHandler(
+		serviceRegistry,
 		config.noServer ? null : config.httpServer,
 		{
 			registry,
@@ -339,110 +297,8 @@ export async function createProjectRelay(
 		WebSocketClass,
 	};
 
-	const clientInitDeps: ClientInitDeps = {
-		wsHandler,
-		client,
-		sessionMgr,
-		messageCache,
-		overrides,
-		ptyManager,
-		permissionBridge,
-		statusPoller,
-		...(config.getInstances != null && { getInstances: config.getInstances }),
-		log: wsLog,
-	};
-
-	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
-		wsLog.info(
-			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
-		);
-		// Viewer tracking is now handled by the shared SessionRegistry via
-		// wsHandler.setClientSession() (called by handleClientConnected / view_session).
-		// No manual addViewer needed — the registry IS the source of truth.
-		handleClientConnected(clientInitDeps, clientId, requestedSessionId).catch(
-			(err) =>
-				wsLog.error(
-					`Client init failed for ${clientId}: ${formatErrorDetail(err)}`,
-				),
-		);
-	});
-
-	wsHandler.on("client_disconnected", ({ clientId, sessionId: _sessionId }) => {
-		// Clean up per-client message queue on disconnect
-		clientQueue.removeClient(clientId);
-		// Viewer tracking cleanup is handled by ws-handler's onClose which
-		// calls registry.removeClient(). No manual removeViewer needed.
-		wsLog.info(`Client disconnected: ${clientId}`);
-	});
-
-	// ── SSE consumer ────────────────────────────────────────────────────────
-
-	const sseConsumer = new SSEConsumer({
-		baseUrl: config.opencodeUrl,
-		authHeaders: client.getAuthHeaders(),
-		log: sseLog,
-	});
-
-	// ── Wire session manager → WebSocket ────────────────────────────────────
-
-	sessionMgr.on("broadcast", (msg) => {
-		// Augment session_switched with cached events (combined protocol)
-		if (msg.type === "session_switched") {
-			const switchId = (msg as { id?: string }).id;
-			if (switchId) {
-				const events = messageCache.getEvents(switchId);
-				const hasChatContent =
-					events?.some(
-						(e) => e.type === "user_message" || e.type === "delta",
-					) ?? false;
-				if (events && hasChatContent) {
-					wsHandler.broadcast({ ...msg, events });
-					return;
-				}
-			}
-		}
-		wsHandler.broadcast(msg);
-	});
-	sessionMgr.on("session_lifecycle", async (ev) => {
-		const sid = ev.sessionId;
-		translator.reset(sid);
-
-		if (ev.type === "created") {
-			const existingMessages = await rebuildTranslatorFromHistory(
-				translator,
-				(id) => client.getMessages(id),
-				sid,
-				sessionLog,
-			);
-
-			if (existingMessages) {
-				pollerManager.startPolling(sid, existingMessages);
-			} else {
-				sessionLog.debug(
-					`Skipping poller start for ${sid.slice(0, 12)} — no seed messages`,
-				);
-			}
-		} else {
-			// deleted — clean up poller, activity, SSE tracker, and monitoring state
-			pollerManager.stopPolling(sid);
-			statusPoller.clearMessageActivity(sid);
-			sseTracker.remove(sid);
-
-			// Remove from monitoring state to prevent the reducer from
-			// generating spurious notify-idle effects for already-deleted sessions
-			const sessions = new Map(monitoringState.sessions);
-			sessions.delete(sid);
-			monitoringState = { sessions };
-		}
-	});
-
-	// ── Handle incoming messages from browser ───────────────────────────────
-	// Messages are serialized: each handler completes before the next starts.
-	// Without this, concurrent async handlers (e.g. new_session + switch_session)
-	// race — createSession's broadcast can arrive on the client AFTER
-	// a switch_session reply, clearing messages the user just switched to.
-
-	const handlerDeps: HandlerDeps = {
+	// ── Handler deps wiring (G1: client init, message queue, rate limiter) ──
+	const { rateLimiter } = wireHandlerDeps({
 		wsHandler,
 		client,
 		sessionMgr,
@@ -454,86 +310,19 @@ export async function createProjectRelay(
 		toolContentStore,
 		config,
 		log,
-		connectPtyUpstream: (ptyId: string, cursor?: number) =>
-			connectPtyUpstreamImpl(ptyDeps, ptyId, cursor),
+		wsLog,
 		statusPoller,
 		registry,
 		pollerManager,
-		forkMeta: {
-			setForkEntry: (sid, entry) => sessionMgr.setForkEntry(sid, entry),
-		},
-		...(config.getInstances != null && { getInstances: config.getInstances }),
-		...(config.addInstance != null && { addInstance: config.addInstance }),
-		...(config.removeInstance != null && {
-			removeInstance: config.removeInstance,
-		}),
-		...(config.startInstance != null && {
-			startInstance: config.startInstance,
-		}),
-		...(config.stopInstance != null && { stopInstance: config.stopInstance }),
-		...(config.updateInstance != null && {
-			updateInstance: config.updateInstance,
-		}),
-		...(config.persistConfig != null && {
-			persistConfig: config.persistConfig,
-		}),
-		...(config.setProjectInstance != null && {
-			setProjectInstance: config.setProjectInstance,
-		}),
-		...(config.getProjects != null && { getProjects: config.getProjects }),
-		...(config.triggerScan != null && { triggerScan: config.triggerScan }),
-		...(config.removeProject != null && {
-			removeProject: config.removeProject,
-		}),
-		...(config.setProjectTitle != null && {
-			setProjectTitle: config.setProjectTitle,
-		}),
-	};
-
-	const clientQueue = new ClientMessageQueue({
-		onError: (cid, err) => {
-			wsLog.error(`Error handling message for ${cid}:`, formatErrorDetail(err));
-			wsHandler.sendTo(
-				cid,
-				RelayError.fromCaught(err, "HANDLER_ERROR").toMessage(),
-			);
-		},
+		ptyDeps,
 	});
 
-	wsHandler.on("message", ({ clientId, handler, payload }) => {
-		// Rate-limit check stays outside the queue (it's synchronous)
-		if (handler === "message") {
-			const result = rateLimiter.check(clientId);
-			if (!result.allowed) {
-				wsHandler.sendTo(clientId, {
-					type: "error",
-					code: "RATE_LIMITED",
-					message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
-				});
-				return;
-			}
-		}
+	// ── SSE consumer ────────────────────────────────────────────────────────
 
-		// Handle log level changes directly (no queue needed, synchronous)
-		if (handler === "set_log_level") {
-			const level = payload["level"];
-			const validLevels = new Set([
-				"debug",
-				"verbose",
-				"info",
-				"warn",
-				"error",
-			]);
-			if (typeof level === "string" && validLevels.has(level)) {
-				setLogLevel(level as LogLevel);
-				wsLog.info(`Log level changed to ${level} by client ${clientId}`);
-			}
-			return;
-		}
-
-		clientQueue.enqueue(clientId, async () => {
-			await dispatchMessage(handlerDeps, clientId, handler, payload);
-		});
+	const sseConsumer = new SSEConsumer(serviceRegistry, {
+		baseUrl: config.opencodeUrl,
+		authHeaders: client.getAuthHeaders(),
+		log: sseLog,
 	});
 
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
@@ -552,6 +341,7 @@ export async function createProjectRelay(
 			log: sseLog,
 			pipelineLog,
 			getSessionStatuses: () => statusPoller.getCurrentStatuses(),
+			getSessionParentMap: () => sessionMgr.getSessionParentMap(),
 			listPendingQuestions: () => client.listPendingQuestions(),
 			listPendingPermissions: () => client.listPendingPermissions(),
 			statusPoller,
@@ -563,252 +353,68 @@ export async function createProjectRelay(
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	await sseConsumer.connect();
 
-	// ── Shared pipeline deps (used by status poller + message poller) ──────
-	const pipelineDeps: PipelineDeps = {
-		toolContentStore,
-		overrides,
-		messageCache,
+	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
+	const { pipelineDeps, sseTracker, getMonitoringState, setMonitoringState } =
+		wireMonitoring({
+			client,
+			wsHandler,
+			sessionMgr,
+			overrides,
+			toolContentStore,
+			messageCache,
+			statusPoller,
+			pollerManager,
+			registry,
+			sseConsumer,
+			config: {
+				...(config.pollerGatingConfig != null && {
+					pollerGatingConfig: config.pollerGatingConfig,
+				}),
+				...(config.pushManager != null && { pushManager: config.pushManager }),
+				slug: config.slug,
+			},
+			statusLog,
+			sseLog,
+			pipelineLog,
+		});
+
+	// ── Session lifecycle wiring (G4: broadcast + session_lifecycle) ─────────
+	wireSessionLifecycle({
+		sessionMgr,
 		wsHandler,
-		log: pipelineLog,
-	};
+		client,
+		translator,
+		pollerManager,
+		statusPoller,
+		sseTracker,
+		getMonitoringState,
+		setMonitoringState,
+		sessionLog,
+	});
 
-	// ── Effect executor deps (used by monitoring reducer effects) ─────────
-	const effectDeps: EffectDeps = {
-		startPoller: (sessionId) => {
-			client
-				.getMessages(sessionId)
-				.then((msgs) => pollerManager.startPolling(sessionId, msgs))
-				.catch((err) =>
-					statusLog.warn(
-						`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-					),
-				);
+	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
+	wirePollers({
+		pollerManager,
+		sseConsumer,
+		statusPoller,
+		pendingUserMessages,
+		wsHandler,
+		sessionMgr,
+		pipelineDeps,
+		sseTracker,
+		config: {
+			...(config.pushManager != null && { pushManager: config.pushManager }),
+			slug: config.slug,
 		},
-		stopPoller: (sessionId) => pollerManager.stopPolling(sessionId),
-		sendStatusToSession: (sessionId, msg) =>
-			wsHandler.sendToSession(sessionId, msg),
-		processAndApplyDone: (sessionId, isSubagent) => {
-			const doneMsg = { type: "done" as const, code: 0 };
-			const doneViewers = wsHandler.getClientsForSession(sessionId);
-			const doneResult = processEvent(
-				doneMsg,
-				sessionId,
-				doneViewers,
-				"status-poller",
-			);
-			applyPipelineResult(doneResult, sessionId, pipelineDeps);
-
-			const notification = resolveNotifications(
-				doneMsg,
-				doneResult.route,
-				isSubagent,
-				sessionId,
-			);
-			if (notification.sendPush && config.pushManager) {
-				sendPushForEvent(config.pushManager, doneMsg, sseLog, {
-					slug: config.slug,
-					sessionId,
-				});
-			}
-			if (
-				notification.broadcastCrossSession &&
-				notification.crossSessionPayload
-			) {
-				wsHandler.broadcast(
-					notification.crossSessionPayload as import("../shared-types.js").RelayMessage,
-				);
-			}
-		},
-		clearProcessingTimeout: (sessionId) =>
-			overrides.clearProcessingTimeout(sessionId),
-		clearMessageActivity: (sessionId) =>
-			statusPoller.clearMessageActivity(sessionId),
-		log: statusLog,
-	};
-
-	// ── Session status poller wiring ────────────────────────────────────────
-
-	statusPoller.on("changed", async (statuses, statusesChanged) => {
-		// ── Session list broadcast (only when statuses actually changed) ────
-		if (statusesChanged) {
-			try {
-				await sessionMgr.sendDualSessionLists(
-					(msg) => wsHandler.broadcast(msg),
-					{ statuses },
-				);
-			} catch (err) {
-				statusLog.warn(
-					`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
-				);
-			}
-		}
-
-		// ── Monitoring reducer: evaluate all sessions ──────────────────────
-		const parentMap = sessionMgr.getSessionParentMap();
-		const now = Date.now();
-		const contexts = new Map<string, SessionEvalContext>();
-		for (const [sessionId, status] of Object.entries(statuses)) {
-			if (status == null) continue;
-			contexts.set(
-				sessionId,
-				assembleContext(
-					sessionId,
-					status,
-					{ connected: sseConsumer.isConnected() },
-					sseTracker,
-					parentMap,
-					(sid) => registry.hasViewers(sid),
-					now,
-				),
-			);
-		}
-
-		const prevState = monitoringState;
-		const result = evaluateAll(prevState, contexts, pollerGatingCfg);
-		monitoringState = result.state;
-
-		if (result.effects.length > 0) {
-			executeEffects(result.effects, effectDeps);
-		}
-
-		// Log sessions that newly hit the safety cap
-		for (const [sessionId, phase] of result.state.sessions) {
-			if (
-				phase.phase === "busy-capped" &&
-				prevState.sessions.get(sessionId)?.phase !== "busy-capped"
-			) {
-				statusLog.warn(
-					`Session ${sessionId.slice(0, 12)} capped — max ${DEFAULT_POLLER_GATING_CONFIG.maxPollers} concurrent pollers reached`,
-				);
-			}
-		}
+		pollerLog,
 	});
 
-	statusPoller.start();
-
-	// ── Message poller manager wiring (REST fallback → cache + per-session routing) ──
-
-	pollerManager.on("events", (events, polledSessionId) => {
-		// If message poller found new content, signal that the session is
-		// actively processing. This covers CLI sessions where /session/status
-		// doesn't report busy but message content is changing.
-		//
-		// Only mark activity for content events (delta, tool_*, thinking_*,
-		// user_message), NOT for completion signals (result, done). The
-		// `result` event means an assistant turn finished (has cost/tokens) —
-		// refreshing activity on it would keep the session artificially busy
-		// after processing is done. Similarly, `done` is a termination signal
-		// from emitDone() — marking activity on it would create a circular
-		// dependency where emitDone → markActivity → busy → emitDone…
-		if (events.length > 0 && polledSessionId) {
-			if (classifyPollerBatch(events).hasContentActivity) {
-				statusPoller.markMessageActivity(polledSessionId);
-			}
-		}
-
-		for (const msg of events) {
-			// Suppress relay-originated user messages from poller (same as SSE path)
-			if (
-				msg.type === "user_message" &&
-				polledSessionId &&
-				pendingUserMessages.consume(polledSessionId, msg.text)
-			) {
-				pollerLog.debug(
-					`Suppressed relay-originated user_message echo for session=${polledSessionId}`,
-				);
-				continue;
-			}
-			const pollerViewers = polledSessionId
-				? wsHandler.getClientsForSession(polledSessionId)
-				: [];
-			const pollerResult = processEvent(
-				msg,
-				polledSessionId,
-				pollerViewers,
-				"message-poller",
-			);
-			applyPipelineResult(pollerResult, polledSessionId, pipelineDeps);
-
-			// Push notification for done/error from message poller.
-			// Skip done notifications for subagent sessions — only root agent
-			// completions should fire push/browser alerts.
-			const isSubagentPoller =
-				msg.type === "done" &&
-				polledSessionId != null &&
-				sessionMgr.getSessionParentMap().has(polledSessionId);
-
-			if (config.pushManager && !isSubagentPoller) {
-				sendPushForEvent(config.pushManager, msg, pollerLog, {
-					slug: config.slug,
-					sessionId: polledSessionId ?? undefined,
-				});
-			}
-
-			// Cross-session browser notification for dropped notification-worthy events
-			if (
-				pollerResult.route.action === "drop" &&
-				isNotificationWorthy(msg.type) &&
-				!isSubagentPoller
-			) {
-				wsHandler.broadcast({
-					type: "notification_event",
-					eventType: msg.type,
-					...(msg.type === "error"
-						? {
-								message:
-									(msg as { message?: string }).message ?? "An error occurred",
-							}
-						: {}),
-					...(polledSessionId != null ? { sessionId: polledSessionId } : {}),
-				});
-			}
-		}
+	// ── Timer wiring (G5: permission timeouts + rate limiter cleanup) ────────
+	const { timeoutTimer, rateLimitCleanupTimer } = wireTimers({
+		permissionBridge,
+		rateLimiter,
+		wsHandler,
 	});
-
-	// ── Notify poller manager of SSE events (to suppress REST polling) ────
-	sseConsumer.on("event", (event: OpenCodeEvent) => {
-		const sid = extractSessionId(event);
-		if (sid) {
-			sseTracker.recordEvent(sid, Date.now());
-			pollerManager.notifySSEEvent(sid);
-		}
-	});
-
-	// ── Permission/question timeout checks ──────────────────────────────────
-
-	const timeoutTimer = setInterval(() => {
-		const timedOutPerms = permissionBridge.checkTimeouts();
-		for (const id of timedOutPerms) {
-			wsHandler.broadcast({
-				type: "permission_resolved",
-				requestId: id as PermissionId,
-				decision: "timeout",
-			});
-		}
-		// Question timeouts are handled by OpenCode itself — no bridge tracking needed.
-	}, 30_000);
-
-	// Don't let the timer keep the process alive
-	if (
-		timeoutTimer &&
-		typeof timeoutTimer === "object" &&
-		"unref" in timeoutTimer
-	) {
-		timeoutTimer.unref();
-	}
-
-	// Periodic cleanup of stale rate-limiter entries (every 60s)
-	const rateLimitCleanupTimer = setInterval(() => {
-		rateLimiter.cleanup();
-	}, 60_000);
-
-	if (
-		rateLimitCleanupTimer &&
-		typeof rateLimitCleanupTimer === "object" &&
-		"unref" in rateLimitCleanupTimer
-	) {
-		rateLimitCleanupTimer.unref();
-	}
 
 	// ── Return project relay ────────────────────────────────────────────────
 

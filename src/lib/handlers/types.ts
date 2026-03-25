@@ -20,6 +20,43 @@ import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
 import type { PayloadMap } from "./payloads.js";
 
+/** Instance management capability group — only available in daemon mode. */
+export interface InstanceManagementDeps {
+	getInstances: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
+	addInstance: (id: string, config: InstanceConfig) => OpenCodeInstance;
+	removeInstance: (id: string) => void;
+	startInstance: (id: string) => Promise<void>;
+	stopInstance: (id: string) => void;
+	updateInstance: (
+		id: string,
+		updates: { name?: string; env?: Record<string, string>; port?: number },
+	) => OpenCodeInstance;
+	persistConfig: () => void;
+}
+
+/** Project management capability group — only available in daemon mode. */
+export interface ProjectManagementDeps {
+	getProjects: () => ReadonlyArray<{
+		slug: string;
+		title: string;
+		directory: string;
+		instanceId?: string;
+	}>;
+	setProjectInstance: (
+		slug: string,
+		instanceId: string,
+	) => void | Promise<void>;
+}
+
+/** Port scan capability — only available in daemon mode. */
+export interface ScanDeps {
+	triggerScan: () => Promise<{
+		discovered: number[];
+		lost: number[];
+		active: number[];
+	}>;
+}
+
 export interface HandlerDeps {
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
@@ -40,55 +77,26 @@ export interface HandlerDeps {
 	toolContentStore: ToolContentStore;
 	config: ProjectRelayConfig;
 	log: Logger;
-	/** Optional session status poller for processing state */
-	statusPoller?: Pick<SessionStatusPoller, "isProcessing">;
+	/** Session status poller for processing state */
+	statusPoller: Pick<SessionStatusPoller, "isProcessing">;
 	/** Shared session registry for client→session viewer tracking */
-	registry?: SessionRegistry;
-	/** Optional message poller manager — used to start REST polling when viewing sessions */
-	pollerManager?: Pick<MessagePollerManager, "isPolling" | "startPolling">;
+	registry: SessionRegistry;
+	/** Message poller manager — used to start REST polling when viewing sessions */
+	pollerManager: Pick<MessagePollerManager, "isPolling" | "startPolling">;
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;
-	/** Instance management (optional — only available in daemon mode) */
-	getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
-	addInstance?: (id: string, config: InstanceConfig) => OpenCodeInstance;
-	removeInstance?: (id: string) => void;
-	startInstance?: (id: string) => Promise<void>;
-	stopInstance?: (id: string) => void;
-	/** Update an instance's name, env, or port (optional — daemon mode only). */
-	updateInstance?: (
-		id: string,
-		updates: { name?: string; env?: Record<string, string>; port?: number },
-	) => OpenCodeInstance;
-	/** Persist the current daemon config to disk (optional — daemon mode only). */
-	persistConfig?: () => void;
-	/** Change a project's instance binding and rebuild relay (optional — daemon mode only). */
-	setProjectInstance?: (
-		slug: string,
-		instanceId: string,
-	) => void | Promise<void>;
-	/** Trigger an immediate port scan (optional — daemon mode only). */
-	triggerScan?: () => Promise<{
-		discovered: number[];
-		lost: number[];
-		active: number[];
-	}>;
-	/** Optional fork-point metadata store — used to persist forkMessageId and parentID */
-	forkMeta?: {
+	/** Fork-point metadata store — used to persist forkMessageId and parentID */
+	forkMeta: {
 		setForkEntry: (
 			sessionId: string,
 			entry: { forkMessageId: string; parentID: string },
 		) => void;
 	};
-	/** Return the current project list (for broadcasting after mutations). */
-	getProjects?: () => ReadonlyArray<{
-		slug: string;
-		title: string;
-		directory: string;
-		instanceId?: string;
-	}>;
-	/** Remove a project from the registry (optional — daemon mode only). */
-	removeProject?: (slug: string) => void | Promise<void>;
-	/** Set a project's display title (optional — daemon mode only). */
-	setProjectTitle?: (slug: string, title: string) => void;
+	/** Instance management capability group (optional — only available in daemon mode) */
+	instanceMgmt?: InstanceManagementDeps;
+	/** Project management capability group (optional — only available in daemon mode) */
+	projectMgmt?: ProjectManagementDeps;
+	/** Port scan capability (optional — only available in daemon mode) */
+	scanDeps?: ScanDeps;
 }
 
 export type MessageHandler<K extends keyof PayloadMap = keyof PayloadMap> = (

@@ -3,7 +3,8 @@
 // Uses sse-backoff.ts for reconnection logic and event-translator.ts for parsing.
 // IO layer: actual HTTP fetch + SSE parsing.
 
-import { EventEmitter } from "node:events";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import { TrackedService } from "../daemon/tracked-service.js";
 import { SSEConnectionError } from "../errors.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth, OpenCodeEvent } from "../types.js";
@@ -25,18 +26,18 @@ export interface SSEConsumerOptions {
 	log?: Logger;
 }
 
-export interface SSEConsumerEvents {
+export type SSEConsumerEvents = {
 	event: [OpenCodeEvent];
 	connected: [];
 	disconnected: [Error | undefined];
 	reconnecting: [{ attempt: number; delay: number }];
 	error: [Error];
 	heartbeat: [];
-}
+};
 
 // ─── SSE Consumer ────────────────────────────────────────────────────────────
 
-export class SSEConsumer extends EventEmitter<SSEConsumerEvents> {
+export class SSEConsumer extends TrackedService<SSEConsumerEvents> {
 	private readonly baseUrl: string;
 	private readonly authHeaders: Record<string, string>;
 	private readonly backoffConfig: BackoffConfig;
@@ -48,8 +49,8 @@ export class SSEConsumer extends EventEmitter<SSEConsumerEvents> {
 	private running = false;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-	constructor(options: SSEConsumerOptions) {
-		super();
+	constructor(registry: ServiceRegistry, options: SSEConsumerOptions) {
+		super(registry);
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.authHeaders = options.authHeaders ?? {};
 		this.log = options.log ?? createSilentLogger();
@@ -72,19 +73,21 @@ export class SSEConsumer extends EventEmitter<SSEConsumerEvents> {
 		this.reconnectAttempt = 0;
 		// Fire-and-forget: startStream handles its own errors via emit + reconnect.
 		// Catch edge cases where startStream throws before its internal try/catch.
-		this.startStream().catch((err) => {
-			if (!this.running) return;
-			const error = err instanceof Error ? err : new Error(String(err));
-			this.emit("error", error);
-			this.scheduleReconnect();
-		});
+		this.tracked(
+			this.startStream().catch((err) => {
+				if (!this.running) return;
+				const error = err instanceof Error ? err : new Error(String(err));
+				this.emit("error", error);
+				this.scheduleReconnect();
+			}),
+		);
 	}
 
 	/** Stop consuming and clean up */
 	async disconnect(): Promise<void> {
 		this.running = false;
 		if (this.reconnectTimer) {
-			clearTimeout(this.reconnectTimer);
+			this.clearTrackedTimer(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
 		if (this.abortController) {
@@ -243,6 +246,12 @@ export class SSEConsumer extends EventEmitter<SSEConsumerEvents> {
 		this.emit("event", event);
 	}
 
+	/** Kill SSE stream and drain tracked work. */
+	override async drain(): Promise<void> {
+		await this.disconnect();
+		await super.drain();
+	}
+
 	private scheduleReconnect(): void {
 		if (!this.running) return;
 
@@ -259,9 +268,16 @@ export class SSEConsumer extends EventEmitter<SSEConsumerEvents> {
 
 		this.healthTracker.onReconnect();
 
-		this.reconnectTimer = setTimeout(() => {
+		this.reconnectTimer = this.delayed(() => {
 			this.reconnectTimer = null;
-			this.startStream();
+			this.tracked(
+				this.startStream().catch((err) => {
+					if (!this.running) return;
+					const error = err instanceof Error ? err : new Error(String(err));
+					this.emit("error", error);
+					this.scheduleReconnect();
+				}),
+			);
 		}, delay);
 	}
 }

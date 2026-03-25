@@ -2,7 +2,7 @@
 // Verifies that switching sessions delivers history embedded in session_switched
 // so agent output doesn't disappear when switching away and back.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -19,17 +19,23 @@ describe("Integration: Session Switch History", () => {
 		if (harness) await harness.stop();
 	});
 
+	beforeEach(() => {
+		harness.mock.resetQueues();
+	});
+
 	// ── Core regression: switching back to a session with messages ────────
 
 	it("switch_session broadcasts history_page with session messages", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		// Record the initial session (assigned on connect)
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		expect(initialSwitched.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const sessionA = initialSwitched[0]!["id"] as string;
+		// Create a fresh session to avoid cross-test cache contamination
+		client.clearReceived();
+		client.send({ type: "new_session", title: "Test1 Session A" });
+		const freshSession = await client.waitFor("session_switched", {
+			timeout: 5_000,
+		});
+		const sessionA = freshSession["id"] as string;
 
 		// Send a message to create conversation history in session A
 		client.clearReceived();
@@ -90,11 +96,13 @@ describe("Integration: Session Switch History", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		// Use the initial session
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		expect(initialSwitched.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const sessionA = initialSwitched[0]!["id"] as string;
+		// Create a fresh session to avoid cross-test cache contamination
+		client.clearReceived();
+		client.send({ type: "new_session", title: "Test2 Session A" });
+		const freshSession = await client.waitFor("session_switched", {
+			timeout: 5_000,
+		});
+		const sessionA = freshSession["id"] as string;
 
 		// Ask something that produces a longer, multi-part response.
 		const userPrompt =
@@ -187,7 +195,10 @@ describe("Integration: Session Switch History", () => {
 			const allDeltaText = deltaEvts
 				.map((d) => String(d["text"] ?? ""))
 				.join("");
-			expect(allDeltaText.length).toBeGreaterThan(50);
+			// Relative check: cached deltas must contain at least the first
+			// streamed snippet. Absolute thresholds are fragile because model
+			// response length and chunking vary across runs.
+			expect(allDeltaText.length).toBeGreaterThanOrEqual(deltaSnippet.length);
 			expect(allDeltaText).toContain(deltaSnippet);
 
 			const safePrefix = streamedText.slice(
@@ -217,7 +228,7 @@ describe("Integration: Session Switch History", () => {
 
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			const assistantText = getTextContent(assistantMsg!);
-			expect(assistantText.length).toBeGreaterThan(50);
+			expect(assistantText.length).toBeGreaterThanOrEqual(deltaSnippet.length);
 			expect(assistantText).toContain(deltaSnippet);
 
 			const safePrefix = streamedText.slice(

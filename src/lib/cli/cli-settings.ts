@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { assertNever } from "../utils.js";
 import { printLogo } from "./cli-setup.js";
 import type { PromptOptions, SelectPromptOptions } from "./prompts.js";
-import { promptPin, promptSelect } from "./prompts.js";
+import { promptPin, promptSelect, promptText } from "./prompts.js";
 import type { Writable } from "./terminal-render.js";
 import { a, log, sym } from "./terminal-render.js";
 
@@ -32,7 +32,17 @@ export interface SettingsMenuOptions extends PromptOptions {
 	/** IPC: remove PIN (set null). */
 	removePin: () => Promise<{ ok: boolean; error?: string }>;
 	/** IPC: toggle keep-awake. */
-	setKeepAwake: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
+	setKeepAwake: (enabled: boolean) => Promise<{
+		ok: boolean;
+		supported?: boolean;
+		active?: boolean;
+		error?: string;
+	}>;
+	/** IPC: set custom keep-awake command and args. */
+	setKeepAwakeCommand?: (
+		command: string,
+		args: string[],
+	) => Promise<{ ok: boolean; error?: string }>;
 	/** Callback: show notifications setup wizard. */
 	onSetupNotifications?: () => void | Promise<void>;
 	/** Callback: return to main menu. */
@@ -66,7 +76,7 @@ type SettingsChoice =
 export function renderSettingsStatus(
 	info: SettingsInfo,
 	stdout: Writable,
-	isMacOS: boolean,
+	_isMacOS: boolean,
 ): void {
 	const tsStatus = info.tailscaleIP
 		? `${a.green}Connected${a.reset}${a.dim} \u00B7 ${info.tailscaleIP}${a.reset}`
@@ -88,9 +98,7 @@ export function renderSettingsStatus(
 	log(`${sym.bar}  mkcert       ${mcStatus}`, stdout);
 	log(`${sym.bar}  HTTPS        ${tlsStatus}`, stdout);
 	log(`${sym.bar}  PIN          ${pinStatus}`, stdout);
-	if (isMacOS) {
-		log(`${sym.bar}  Keep awake   ${awakeStatus}`, stdout);
-	}
+	log(`${sym.bar}  Keep awake   ${awakeStatus}`, stdout);
 	log(sym.bar, stdout);
 }
 
@@ -136,12 +144,10 @@ export async function showSettingsMenu(
 		items.push({ label: "Set PIN", value: "pin" });
 	}
 
-	if (isMacOS) {
-		items.push({
-			label: info.keepAwake ? "Disable keep awake" : "Enable keep awake",
-			value: "awake",
-		});
-	}
+	items.push({
+		label: info.keepAwake ? "Disable keep awake" : "Enable keep awake",
+		value: "awake",
+	});
 
 	items.push({ label: "View logs", value: "logs" });
 	items.push({ label: "Back", value: "back" });
@@ -203,11 +209,62 @@ export async function showSettingsMenu(
 						break;
 					}
 
-					case "awake":
-						await opts.setKeepAwake(!info.keepAwake);
+					case "awake": {
+						const result = await opts.setKeepAwake(!info.keepAwake);
+						if (
+							!info.keepAwake &&
+							result.supported === false &&
+							opts.setKeepAwakeCommand
+						) {
+							// Enabling, but no tool auto-detected — prompt for custom command
+							log(
+								`${sym.bar}  ${a.yellow}No keep-awake tool detected for your platform.${a.reset}`,
+								opts.stdout,
+							);
+							log(
+								`${sym.bar}  ${a.dim}Enter a command to prevent sleep, e.g.: caffeinate -di${a.reset}`,
+								opts.stdout,
+							);
+							const cmdPromise = new Promise<void>((cmdResolve) => {
+								promptText(
+									"Command",
+									"",
+									async (val) => {
+										if (val?.trim()) {
+											const parts = val.trim().split(/\s+/);
+											// biome-ignore lint/style/noNonNullAssertion: safe — split always returns at least one element
+											const command = parts[0]!;
+											const args = parts.slice(1);
+											// biome-ignore lint/style/noNonNullAssertion: safe — guarded by opts.setKeepAwakeCommand check above
+											await opts.setKeepAwakeCommand!(command, args);
+											await opts.setKeepAwake(true);
+											log(
+												`${sym.done}  ${a.green}Keep awake configured${a.reset}`,
+												opts.stdout,
+											);
+										} else {
+											// User skipped — disable keep awake
+											await opts.setKeepAwake(false);
+											log(
+												`${sym.done}  ${a.dim}Keep awake disabled${a.reset}`,
+												opts.stdout,
+											);
+										}
+										cmdResolve();
+									},
+									{
+										stdin: opts.stdin,
+										stdout: opts.stdout,
+										exit: opts.exit,
+									},
+								);
+							});
+							await cmdPromise;
+						}
 						await showSettingsMenu(opts);
 						resolve();
 						break;
+					}
 
 					case "logs": {
 						showLogs(opts.stdout, opts.logPath, readFileFn);

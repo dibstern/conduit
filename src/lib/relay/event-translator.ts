@@ -13,6 +13,7 @@ import type {
 	ToolName,
 	ToolStatus,
 } from "../types.js";
+import type { KnownOpenCodeEventType } from "./opencode-events.js";
 import {
 	isFileEvent,
 	isInstallationUpdateEvent,
@@ -32,6 +33,40 @@ import {
 	isSessionStatusEvent,
 	isTodoUpdatedEvent,
 } from "./opencode-events.js";
+
+// ─── Compile-time exhaustiveness assertion ──────────────────────────────────
+// If a new event type is added to KnownOpenCodeEvent but not handled here,
+// _MissingTypes will be non-never and this file will fail to compile.
+
+type _HandledByTranslator =
+	| "message.part.delta"
+	| "message.part.updated"
+	| "message.part.removed"
+	| "message.created"
+	| "message.updated"
+	| "message.removed"
+	| "session.status"
+	| "session.error"
+	| "permission.asked"
+	| "question.asked"
+	| "pty.created"
+	| "pty.exited"
+	| "pty.deleted"
+	| "file.edited"
+	| "file.watcher.updated"
+	| "installation.update-available"
+	| "todo.updated";
+
+type _HandledByBridge = "permission.replied";
+
+type _MissingTypes = Exclude<
+	KnownOpenCodeEventType,
+	_HandledByTranslator | _HandledByBridge
+>;
+type _AssertAllHandled = _MissingTypes extends never
+	? true
+	: { error: "Unhandled event type(s)"; types: _MissingTypes };
+const _exhaustiveCheck: _AssertAllHandled = true;
 
 // ─── Tool name mapping ──────────────────────────────────────────────────────
 

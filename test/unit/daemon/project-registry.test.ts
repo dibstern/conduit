@@ -1,6 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectRegistry } from "../../../src/lib/daemon/project-registry.js";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import {
@@ -51,7 +52,7 @@ function deferredRelayFactoryNoAbort() {
 
 describe("ProjectRegistry — Lifecycle basics", () => {
 	it("add() sets status to 'registering', emits project_added", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const listener = vi.fn();
 		reg.on("project_added", listener);
 
@@ -64,7 +65,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("relay factory resolves → status 'ready', emits project_ready", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const readyListener = vi.fn();
 		reg.on("project_ready", readyListener);
 
@@ -81,7 +82,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("relay factory rejects → status 'error', emits project_error", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const errorListener = vi.fn();
 		reg.on("project_error", errorListener);
 
@@ -97,7 +98,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("remove() on ready project calls relay.stop(), emits project_removed", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const relay = createMockProjectRelay();
 		reg.add(makeProject("alpha"), immediateRelayFactory(relay));
 
@@ -115,7 +116,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("remove() on registering project aborts factory, discards result", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		// Use the no-abort variant so resolve() after removal delivers the relay
 		// to the success handler, which calls relay.stop() to discard it.
 		const deferred = deferredRelayFactoryNoAbort();
@@ -134,7 +135,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("updateProject() updates project fields, emits project_updated", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.add(makeProject("alpha"), immediateRelayFactory());
 
 		await vi.waitFor(() => {
@@ -153,7 +154,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("addWithoutRelay() sets status to 'registering' with no factory", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const listener = vi.fn();
 		reg.on("project_added", listener);
 
@@ -165,7 +166,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("addWithoutRelay({ silent: true }) does NOT emit project_added", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const listener = vi.fn();
 		reg.on("project_added", listener);
 
@@ -176,7 +177,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("startRelay() on 'registering' entry starts relay creation", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.addWithoutRelay(makeProject("alpha"));
 
 		const relay = createMockProjectRelay();
@@ -193,7 +194,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("startRelay() on 'error' entry retries, can become 'ready'", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.add(makeProject("alpha"), failingRelayFactory("first-fail"));
 
 		await vi.waitFor(() => {
@@ -212,7 +213,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 
 	it("replaceRelay() stops old relay, transitions through 'registering' to 'ready'", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const oldRelay = createMockProjectRelay();
 		reg.add(makeProject("alpha"), immediateRelayFactory(oldRelay));
 
@@ -238,7 +239,7 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 
 describe("ProjectRegistry — Queries", () => {
 	it("getRelay() returns relay only for 'ready' entries, undefined otherwise", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred = deferredRelayFactory();
 		reg.add(makeProject("alpha"), deferred.factory);
 
@@ -254,7 +255,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("getRelay() returns undefined for error entries", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.add(makeProject("alpha"), failingRelayFactory("fail"));
 
 		await vi.waitFor(() => {
@@ -265,7 +266,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("getProject() returns project regardless of status", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const project = makeProject("alpha");
 		const deferred = deferredRelayFactory();
 		reg.add(project, deferred.factory);
@@ -283,7 +284,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("allProjects() returns all projects, readyEntries() returns only ready", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred = deferredRelayFactory();
 		reg.add(makeProject("alpha"), immediateRelayFactory());
 		reg.add(makeProject("beta"), deferred.factory);
@@ -301,7 +302,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("findByDirectory() finds entry by path", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.addWithoutRelay(makeProject("alpha", "/custom/path"));
 
 		const entry = reg.findByDirectory("/custom/path");
@@ -312,7 +313,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("has() and isReady() reflect current state", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		expect(reg.has("alpha")).toBe(false);
 		expect(reg.isReady("alpha")).toBe(false);
 
@@ -329,7 +330,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("size getter is accurate", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		expect(reg.size).toBe(0);
 
 		reg.addWithoutRelay(makeProject("alpha"));
@@ -340,7 +341,7 @@ describe("ProjectRegistry — Queries", () => {
 	});
 
 	it("slugs() returns all registered slugs", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.addWithoutRelay(makeProject("alpha"));
 		reg.addWithoutRelay(makeProject("beta"));
 		reg.addWithoutRelay(makeProject("gamma"));
@@ -354,7 +355,7 @@ describe("ProjectRegistry — Queries", () => {
 
 describe("ProjectRegistry — waitForRelay", () => {
 	it("already ready → resolves immediately", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const relay = createMockProjectRelay();
 		reg.add(makeProject("alpha"), immediateRelayFactory(relay));
 
@@ -367,7 +368,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 
 	it("registering → resolves when factory completes", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred = deferredRelayFactory();
 		reg.add(makeProject("alpha"), deferred.factory);
 
@@ -381,7 +382,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 
 	it("error → rejects immediately with error message", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.add(makeProject("alpha"), failingRelayFactory("broken"));
 
 		await vi.waitFor(() => {
@@ -394,7 +395,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 
 	it("non-existent slug → rejects immediately", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 
 		await expect(reg.waitForRelay("ghost")).rejects.toThrow(
 			'Project "ghost" not found',
@@ -404,7 +405,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	it("timeout while registering → rejects with timeout error, cleans up listeners", async () => {
 		vi.useFakeTimers();
 		try {
-			const reg = new ProjectRegistry();
+			const reg = new ProjectRegistry(new ServiceRegistry());
 			const deferred = deferredRelayFactory();
 			reg.add(makeProject("alpha"), deferred.factory);
 
@@ -426,7 +427,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 
 	it("project removed while waiting → rejects", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred = deferredRelayFactory();
 		reg.add(makeProject("alpha"), deferred.factory);
 
@@ -438,7 +439,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 
 	it("multiple concurrent waiters all resolve when relay becomes ready", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred = deferredRelayFactory();
 		reg.add(makeProject("alpha"), deferred.factory);
 
@@ -454,7 +455,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 
 	it("registering → factory rejects while waiter is blocked → rejects waiter", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred = deferredRelayFactory();
 		reg.add(makeProject("alpha"), deferred.factory);
 
@@ -473,7 +474,7 @@ describe("ProjectRegistry — waitForRelay", () => {
 
 describe("ProjectRegistry — Concurrency", () => {
 	it("add() for existing slug throws", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.addWithoutRelay(makeProject("alpha"));
 
 		expect(() => {
@@ -482,7 +483,7 @@ describe("ProjectRegistry — Concurrency", () => {
 	});
 
 	it("remove() during registering, factory resolves after → relay stopped and discarded", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		// Use no-abort variant so resolve() after removal still delivers the relay
 		const deferred = deferredRelayFactoryNoAbort();
 		reg.add(makeProject("alpha"), deferred.factory);
@@ -504,7 +505,7 @@ describe("ProjectRegistry — Concurrency", () => {
 	});
 
 	it("replaceRelay() aborts old factory, starts new", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const deferred1 = deferredRelayFactory();
 		reg.add(makeProject("alpha"), deferred1.factory);
 
@@ -528,7 +529,7 @@ describe("ProjectRegistry — Concurrency", () => {
 
 describe("ProjectRegistry — Edge cases", () => {
 	it("stopAll() stops all ready relays, aborts all registering, empties map", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const readyRelay = createMockProjectRelay();
 		reg.add(makeProject("alpha"), immediateRelayFactory(readyRelay));
 
@@ -548,13 +549,13 @@ describe("ProjectRegistry — Edge cases", () => {
 	});
 
 	it("remove() on non-existent slug is a no-op (no throw)", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		// Should not throw
 		await reg.remove("nonexistent");
 	});
 
 	it("add() then immediate remove() before factory resolves", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		// Use no-abort variant so resolve() after removal delivers the relay
 		const deferred = deferredRelayFactoryNoAbort();
 		const addedListener = vi.fn();
@@ -581,9 +582,35 @@ describe("ProjectRegistry — Edge cases", () => {
 	});
 
 	it("stopAll() with no entries is a no-op", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		await reg.stopAll();
 		expect(reg.size).toBe(0);
+	});
+
+	it("drain() stops all relays, aborts pending creations, and drains tracked promises", async () => {
+		const registry = new ServiceRegistry();
+		const reg = new ProjectRegistry(registry);
+
+		// Add a ready relay
+		const readyRelay = createMockProjectRelay();
+		reg.add(makeProject("alpha"), immediateRelayFactory(readyRelay));
+
+		await vi.waitFor(() => {
+			expect(reg.isReady("alpha")).toBe(true);
+		});
+
+		// Add a pending (registering) relay
+		const deferred = deferredRelayFactory();
+		reg.add(makeProject("beta"), deferred.factory);
+		expect(reg.get("beta")?.status).toBe("registering");
+
+		// drain() should stop all relays and abort pending creations
+		await reg.drain();
+
+		expect(readyRelay.stop).toHaveBeenCalled();
+		expect(reg.size).toBe(0);
+		expect(reg.has("alpha")).toBe(false);
+		expect(reg.has("beta")).toBe(false);
 	});
 });
 
@@ -591,7 +618,7 @@ describe("ProjectRegistry — Edge cases", () => {
 
 describe("ProjectRegistry — Negative paths", () => {
 	it("addWithoutRelay() for duplicate slug throws", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.addWithoutRelay(makeProject("alpha"));
 
 		expect(() => {
@@ -600,7 +627,7 @@ describe("ProjectRegistry — Negative paths", () => {
 	});
 
 	it("startRelay() on already-ready project throws", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		reg.add(makeProject("alpha"), immediateRelayFactory());
 
 		await vi.waitFor(() => {
@@ -613,7 +640,7 @@ describe("ProjectRegistry — Negative paths", () => {
 	});
 
 	it("startRelay() on non-existent slug throws", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 
 		expect(() => {
 			reg.startRelay("ghost", immediateRelayFactory());
@@ -621,7 +648,7 @@ describe("ProjectRegistry — Negative paths", () => {
 	});
 
 	it("replaceRelay() on non-existent slug throws", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 
 		await expect(
 			reg.replaceRelay("ghost", immediateRelayFactory()),
@@ -629,7 +656,7 @@ describe("ProjectRegistry — Negative paths", () => {
 	});
 
 	it("updateProject() on non-existent slug throws", () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 
 		expect(() => {
 			reg.updateProject("ghost", { title: "nope" });
@@ -641,7 +668,7 @@ describe("ProjectRegistry — Negative paths", () => {
 
 describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 	it("broadcastToAll() sends to all ready relays' wsHandler", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const relay1 = createMockProjectRelay();
 		const relay2 = createMockProjectRelay();
 
@@ -663,7 +690,7 @@ describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 	});
 
 	it("broadcastToAll() skips registering/error entries", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const readyRelay = createMockProjectRelay();
 		reg.add(makeProject("alpha"), immediateRelayFactory(readyRelay));
 
@@ -691,7 +718,7 @@ describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 	});
 
 	it("evictOldestSessions() returns evicted session IDs", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const relay1 = createMockProjectRelay({
 			messageCache: {
 				evictOldestSession: vi
@@ -723,7 +750,7 @@ describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 	});
 
 	it("evictOldestSessions() stops early per relay when evictOldestSession returns null", async () => {
-		const reg = new ProjectRegistry();
+		const reg = new ProjectRegistry(new ServiceRegistry());
 		const evictMock = vi
 			.fn()
 			.mockReturnValueOnce("s1")
@@ -845,7 +872,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 			fc.asyncProperty(
 				fc.array(opArb, { minLength: 1, maxLength: 30 }),
 				async (ops) => {
-					const reg = new ProjectRegistry();
+					const reg = new ProjectRegistry(new ServiceRegistry());
 
 					for (const op of ops) {
 						await applyOp(reg, op);
@@ -864,7 +891,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 			fc.asyncProperty(
 				fc.array(opArb, { minLength: 1, maxLength: 20 }),
 				async (ops) => {
-					const reg = new ProjectRegistry();
+					const reg = new ProjectRegistry(new ServiceRegistry());
 
 					for (const op of ops) {
 						await applyOp(reg, op);
@@ -885,7 +912,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 			fc.asyncProperty(
 				fc.array(opArb, { minLength: 1, maxLength: 20 }),
 				async (ops) => {
-					const reg = new ProjectRegistry();
+					const reg = new ProjectRegistry(new ServiceRegistry());
 
 					for (const op of ops) {
 						await applyOp(reg, op);
@@ -1151,7 +1178,7 @@ describe("ProjectRegistry — Stateful model tests", () => {
 				fc.commands(commandArbs, { maxCommands: 30 }),
 				async (cmds) => {
 					const model: Model = new Map();
-					const reg = new ProjectRegistry();
+					const reg = new ProjectRegistry(new ServiceRegistry());
 
 					await fc.asyncModelRun(() => ({ model, real: reg }), cmds);
 				},

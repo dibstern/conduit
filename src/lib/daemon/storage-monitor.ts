@@ -2,8 +2,9 @@
 // Periodically checks available disk space and emits events on transitions
 // between low/ok states. Used by the Daemon to warn about disk space issues.
 
-import { EventEmitter } from "node:events";
 import { statfs as nodeStatfs } from "node:fs/promises";
+import type { ServiceRegistry } from "./service-registry.js";
+import { TrackedService } from "./tracked-service.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,10 +28,10 @@ export interface DiskSpaceOkEvent {
 	availableBytes: number;
 }
 
-export interface StorageMonitorEvents {
+export type StorageMonitorEvents = {
 	low_disk_space: [event: LowDiskSpaceEvent];
 	disk_space_ok: [event: DiskSpaceOkEvent];
-}
+};
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ async function defaultStatfs(path: string): Promise<{ available: number }> {
 
 // ─── StorageMonitor ─────────────────────────────────────────────────────────
 
-export class StorageMonitor extends EventEmitter<StorageMonitorEvents> {
+export class StorageMonitor extends TrackedService<StorageMonitorEvents> {
 	private readonly monitorPath: string;
 	private readonly thresholdBytes: number;
 	private readonly intervalMs: number;
@@ -56,8 +57,8 @@ export class StorageMonitor extends EventEmitter<StorageMonitorEvents> {
 	private wasLow: boolean | null = null; // null = no check yet
 	private checking = false;
 
-	constructor(options: StorageMonitorOptions) {
-		super();
+	constructor(registry: ServiceRegistry, options: StorageMonitorOptions) {
+		super(registry);
 		this.monitorPath = options.path;
 		this.thresholdBytes = options.thresholdBytes ?? DEFAULT_THRESHOLD_BYTES;
 		this.intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
@@ -69,21 +70,18 @@ export class StorageMonitor extends EventEmitter<StorageMonitorEvents> {
 	/** Start periodic polling. First check runs immediately, then on interval. */
 	start(): void {
 		// Run the first check immediately
-		void this.check();
+		this.tracked(this.check());
 
 		// Set up periodic polling
-		this.timer = setInterval(() => {
-			void this.check();
+		this.timer = this.repeating(() => {
+			this.tracked(this.check());
 		}, this.intervalMs);
-
-		// Don't keep the process alive just for this timer
-		this.timer.unref();
 	}
 
 	/** Stop polling (idempotent). */
 	stop(): void {
 		if (this.timer !== null) {
-			clearInterval(this.timer);
+			this.clearTrackedTimer(this.timer);
 			this.timer = null;
 		}
 	}

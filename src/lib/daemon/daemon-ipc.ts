@@ -39,7 +39,9 @@ export interface DaemonIPCContext {
 	/** Get current keepAwake state. */
 	getKeepAwake(): boolean;
 	/** Update keepAwake state, underlying manager, and persist config. */
-	setKeepAwake(enabled: boolean): void;
+	setKeepAwake(enabled: boolean): { supported: boolean; active: boolean };
+	/** Set custom keep-awake command and args, replacing the current manager. */
+	setKeepAwakeCommand(command: string, args: string[]): void;
 	/** Persist daemon config to disk. */
 	persistConfig(): void;
 	/** Schedule a graceful daemon shutdown. */
@@ -74,6 +76,10 @@ export interface IPCHandlerMap {
 	getStatus: () => Promise<IPCResponse>;
 	setPin: (pin: string) => Promise<IPCResponse>;
 	setKeepAwake: (enabled: boolean) => Promise<IPCResponse>;
+	setKeepAwakeCommand: (
+		command: string,
+		args: string[],
+	) => Promise<IPCResponse>;
 	shutdown: () => Promise<IPCResponse>;
 	setAgent: (slug: string, agent: string) => Promise<IPCResponse>;
 	setModel: (
@@ -165,8 +171,20 @@ export function buildIPCHandlers(
 		},
 
 		setKeepAwake: async (enabled: boolean): Promise<IPCResponse> => {
-			ctx.setKeepAwake(enabled);
-			return { ok: true };
+			const result = ctx.setKeepAwake(enabled);
+			return { ok: true, supported: result.supported, active: result.active };
+		},
+
+		setKeepAwakeCommand: async (
+			command: string,
+			args: string[],
+		): Promise<IPCResponse> => {
+			try {
+				ctx.setKeepAwakeCommand(command, args);
+				return { ok: true };
+			} catch (err) {
+				return { ok: false, error: formatErrorDetail(err) };
+			}
 		},
 
 		shutdown: async (): Promise<IPCResponse> => {

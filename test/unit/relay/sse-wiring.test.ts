@@ -86,7 +86,7 @@ describe("shouldCache", () => {
 			"result",
 			"done",
 			"error",
-		];
+		] as const;
 		for (const type of cacheableTypes) {
 			expect(shouldCache(type)).toBe(true);
 		}
@@ -101,7 +101,7 @@ describe("shouldCache", () => {
 			"pty_created",
 			"pty_output",
 			"status",
-		];
+		] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}
@@ -1159,6 +1159,131 @@ describe("handleSSEEvent – tool_result truncation", () => {
 // When the pipeline drops a notification-worthy event (done, error) because no
 // clients are viewing that session, the server should broadcast a
 // notification_event so clients on other sessions can fire sound/browser alerts.
+
+// ─── Notification routing through resolveNotifications (F2 wiring) ───────────
+// Verifies that handleSSEEvent gates push and cross-session broadcast through
+// resolveNotifications() — not inline logic. These tests exercise the REAL
+// wiring path, not the policy function in isolation.
+
+describe("notification routing: push gating via resolveNotifications", () => {
+	it("does NOT call push for non-notification-worthy events (delta)", () => {
+		const mockPush = {
+			sendToAll: vi.fn().mockResolvedValue(undefined),
+		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
+		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [{ type: "delta", text: "hello" } as RelayMessage],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "s1" },
+		};
+		handleSSEEvent(deps, event);
+
+		expect(mockPush.sendToAll).not.toHaveBeenCalled();
+	});
+
+	it("calls push for done event from root session (no parent)", () => {
+		const mockPush = {
+			sendToAll: vi.fn().mockResolvedValue(undefined),
+		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const deps = createMockSSEWiringDeps({
+			pushManager: mockPush,
+			getSessionParentMap: () => new Map(),
+		});
+		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [{ type: "done", code: 0 } as RelayMessage],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "root-session" },
+		};
+		handleSSEEvent(deps, event);
+
+		expect(mockPush.sendToAll).toHaveBeenCalled();
+	});
+
+	it("does NOT call push for done event from subagent session", () => {
+		const mockPush = {
+			sendToAll: vi.fn().mockResolvedValue(undefined),
+		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const deps = createMockSSEWiringDeps({
+			pushManager: mockPush,
+			getSessionParentMap: () => new Map([["child-session", "parent-session"]]),
+		});
+		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [{ type: "done", code: 0 } as RelayMessage],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "child-session" },
+		};
+		handleSSEEvent(deps, event);
+
+		expect(mockPush.sendToAll).not.toHaveBeenCalled();
+	});
+
+	it("does NOT broadcast cross-session notification for subagent done", () => {
+		const deps = createMockSSEWiringDeps({
+			getSessionParentMap: () => new Map([["child-session", "parent-session"]]),
+		});
+		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [{ type: "done", code: 0 } as RelayMessage],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "child-session" },
+		};
+		handleSSEEvent(deps, event);
+
+		const broadcastCalls = vi.mocked(deps.wsHandler.broadcast).mock.calls;
+		const notifCalls = broadcastCalls.filter(
+			(call) => (call[0] as RelayMessage).type === "notification_event",
+		);
+		expect(notifCalls).toHaveLength(0);
+	});
+
+	it("DOES call push for subagent error (errors always notify)", () => {
+		const mockPush = {
+			sendToAll: vi.fn().mockResolvedValue(undefined),
+		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const deps = createMockSSEWiringDeps({
+			pushManager: mockPush,
+			getSessionParentMap: () => new Map([["child-session", "parent-session"]]),
+		});
+		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [
+				{
+					type: "error",
+					code: "FATAL",
+					message: "crashed",
+				} as RelayMessage,
+			],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.error",
+			properties: { sessionID: "child-session" },
+		};
+		handleSSEEvent(deps, event);
+
+		expect(mockPush.sendToAll).toHaveBeenCalled();
+	});
+});
 
 describe("notification_event broadcast for dropped notification-worthy events", () => {
 	it("broadcasts notification_event when done is dropped (no viewers)", () => {

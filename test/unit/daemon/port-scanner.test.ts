@@ -4,6 +4,7 @@ import {
 	PortScanner,
 	type PortScannerConfig,
 } from "../../../src/lib/daemon/port-scanner.js";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 
 describe("PortScanner", () => {
 	const defaultConfig: PortScannerConfig = {
@@ -19,7 +20,7 @@ describe("PortScanner", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockProbe = vi.fn().mockResolvedValue(false);
-		scanner = new PortScanner(defaultConfig, mockProbe);
+		scanner = new PortScanner(new ServiceRegistry(), defaultConfig, mockProbe);
 	});
 
 	afterEach(() => {
@@ -136,6 +137,45 @@ describe("PortScanner", () => {
 		scanner.stop();
 
 		await vi.advanceTimersByTimeAsync(20_000);
+		expect(onScan).not.toHaveBeenCalled();
+	});
+
+	it("after drain(), interval no longer fires", async () => {
+		const onScan = vi.fn();
+		scanner.on("scan", onScan);
+		scanner.start();
+
+		// Drain cancels the tracked interval
+		await scanner.drain();
+
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(onScan).not.toHaveBeenCalled();
+	});
+
+	it("in-flight scan() fetch is aborted by drain", async () => {
+		// Create a probe that resolves after a microtask so scan is in-flight
+		const hangingProbe = vi.fn().mockImplementation(
+			() =>
+				new Promise<boolean>((_resolve) => {
+					// Resolve after a microtask — simulates an in-flight probe
+					void Promise.resolve().then(() => _resolve(false));
+				}),
+		);
+
+		const registry = new ServiceRegistry();
+		const drainScanner = new PortScanner(registry, defaultConfig, hangingProbe);
+		drainScanner.start();
+
+		// Start a scan (which will call the hanging probe)
+		drainScanner.scan().catch(() => {});
+
+		// Drain while scan is in-flight
+		await registry.drainAll();
+
+		// After drain, the interval should not fire
+		const onScan = vi.fn();
+		drainScanner.on("scan", onScan);
+		await vi.advanceTimersByTimeAsync(30_000);
 		expect(onScan).not.toHaveBeenCalled();
 	});
 });

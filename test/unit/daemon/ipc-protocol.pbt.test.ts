@@ -267,6 +267,7 @@ describe("Ticket 3.2 — IPC Protocol PBT", () => {
 				getStatus: async () => ({ ok: true }),
 				setPin: async () => ({ ok: true }),
 				setKeepAwake: async () => ({ ok: true }),
+				setKeepAwakeCommand: async () => ({ ok: true }),
 				shutdown: async () => ({ ok: true }),
 				setAgent: async () => ({ ok: true }),
 				setModel: async () => ({ ok: true }),
@@ -288,8 +289,8 @@ describe("Ticket 3.2 — IPC Protocol PBT", () => {
 			expect(called).toBe(true);
 		});
 
-		it("VALID_COMMANDS now contains 18 commands", () => {
-			expect(VALID_COMMANDS.size).toBe(18);
+		it("VALID_COMMANDS now contains 19 commands", () => {
+			expect(VALID_COMMANDS.size).toBe(19);
 		});
 	});
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import type { Message } from "../../../src/lib/instance/opencode-client.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
@@ -95,7 +96,7 @@ describe("MessagePoller", () => {
 		client: ReturnType<typeof createMockClient>,
 		interval = POLL_INTERVAL_MS,
 	) {
-		return new MessagePoller({
+		return new MessagePoller(new ServiceRegistry(), {
 			client: client as unknown as MessagePollerOptions["client"],
 			interval,
 			log: createSilentLogger(),
@@ -816,7 +817,7 @@ describe("MessagePoller", () => {
 	describe("hasViewers idle suppression", () => {
 		it("poller stays alive past IDLE_TIMEOUT_MS when hasViewers returns true", async () => {
 			const client = createMockClient([]);
-			const poller = new MessagePoller({
+			const poller = new MessagePoller(new ServiceRegistry(), {
 				client: client as unknown as MessagePollerOptions["client"],
 				interval: POLL_INTERVAL_MS,
 				log: createSilentLogger(),
@@ -838,7 +839,7 @@ describe("MessagePoller", () => {
 		it("poller auto-stops when hasViewers returns false after idle timeout", async () => {
 			let viewers = true;
 			const client = createMockClient([]);
-			const poller = new MessagePoller({
+			const poller = new MessagePoller(new ServiceRegistry(), {
 				client: client as unknown as MessagePollerOptions["client"],
 				interval: POLL_INTERVAL_MS,
 				log: createSilentLogger(),
@@ -862,7 +863,7 @@ describe("MessagePoller", () => {
 
 		it("poller without hasViewers option still auto-stops (backward compatible)", async () => {
 			const client = createMockClient([]);
-			const poller = new MessagePoller({
+			const poller = new MessagePoller(new ServiceRegistry(), {
 				client: client as unknown as MessagePollerOptions["client"],
 				interval: POLL_INTERVAL_MS,
 				log: createSilentLogger(),
@@ -915,7 +916,7 @@ describe("MessagePoller", () => {
 			const client = createMockClient([]);
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
-			const poller = new MessagePoller({
+			const poller = new MessagePoller(new ServiceRegistry(), {
 				client: client as unknown as MessagePollerOptions["client"],
 				interval: POLL_INTERVAL_MS,
 				log,
@@ -1384,6 +1385,47 @@ describe("MessagePoller", () => {
 			});
 
 			poller.stopPolling();
+		});
+	});
+
+	// ─── TrackedService drain ────────────────────────────────────────────
+
+	describe("TrackedService drain", () => {
+		it("after drain(), interval no longer fires", async () => {
+			const client = createMockClient([]);
+			const registry = new ServiceRegistry();
+			const poller = new MessagePoller(registry, {
+				client: client as unknown as MessagePollerOptions["client"],
+				interval: POLL_INTERVAL_MS,
+				log: createSilentLogger(),
+			});
+
+			poller.startPolling("sess_1");
+			await vi.advanceTimersByTimeAsync(0); // immediate poll
+			const callsAfterStart = client.getMessages.mock.calls.length;
+
+			// Drain the registry — should cancel the interval
+			await registry.drainAll();
+
+			// Advance past several poll intervals
+			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5);
+
+			// No new REST calls after drain
+			expect(client.getMessages).toHaveBeenCalledTimes(callsAfterStart);
+		});
+
+		it("registry registers the poller (size increases)", () => {
+			const registry = new ServiceRegistry();
+			expect(registry.size).toBe(0);
+
+			new MessagePoller(registry, {
+				client: createMockClient(
+					[],
+				) as unknown as MessagePollerOptions["client"],
+				log: createSilentLogger(),
+			});
+
+			expect(registry.size).toBe(1);
 		});
 	});
 });

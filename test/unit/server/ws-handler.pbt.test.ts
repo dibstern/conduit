@@ -3,6 +3,7 @@
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { WebSocketHandler } from "../../../src/lib/server/ws-handler.js";
 
 const require = createRequire(import.meta.url);
@@ -93,7 +94,7 @@ async function setup(options?: {
 	const server = createServer();
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const port = (server.address() as { port: number }).port;
-	const handler = new WebSocketHandler(server, {
+	const handler = new WebSocketHandler(new ServiceRegistry(), server, {
 		heartbeatInterval: options?.heartbeatInterval ?? 60_000,
 	});
 	return { server, handler, port };
@@ -410,5 +411,36 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 
 		await c.close();
 		await teardown(server, handler);
+	});
+
+	it("P11: drain() closes connections and clears heartbeat timer", async () => {
+		const { server, handler, port } = await setup();
+
+		const c = await createBufferedClient(port);
+		await c.waitForMessages(1); // client_count
+
+		// Verify clients map is populated before drain
+		const handlerInternal = handler as unknown as {
+			clients: Map<string, WS>;
+		};
+		expect(handlerInternal.clients.size).toBe(1);
+
+		await handler.drain();
+
+		// After drain, internal clients map should be cleared
+		expect(handlerInternal.clients.size).toBe(0);
+
+		await new Promise<void>((r) => server.close(() => r()));
+	});
+
+	it("P12: WebSocketHandler registers with ServiceRegistry on construction", () => {
+		const registry = new ServiceRegistry();
+		expect(registry.size).toBe(0);
+
+		const handler = new WebSocketHandler(registry, null, {
+			heartbeatInterval: 60_000,
+		});
+		expect(registry.size).toBe(1);
+		handler.close();
 	});
 });

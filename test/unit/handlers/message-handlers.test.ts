@@ -786,7 +786,8 @@ describe("handleSwitchSession", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "s2",
-			events: cachedEvents,
+			// Session is idle and cache has no done — synthetic done is appended
+			events: [...cachedEvents, { type: "done", code: 0 }],
 		});
 	});
 
@@ -1478,9 +1479,10 @@ describe("dispatchMessage", () => {
 			"proxy_detect",
 			"scan_now",
 		];
+		const table = MESSAGE_HANDLERS as Record<string, unknown>;
 		for (const name of expectedHandlers) {
-			expect(MESSAGE_HANDLERS[name]).toBeDefined();
-			expect(typeof MESSAGE_HANDLERS[name]).toBe("function");
+			expect(table[name]).toBeDefined();
+			expect(typeof table[name]).toBe("function");
 		}
 		// Reverse check: no handlers in production that we don't expect
 		expect(Object.keys(MESSAGE_HANDLERS).sort()).toEqual(

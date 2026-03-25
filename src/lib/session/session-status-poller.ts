@@ -8,7 +8,8 @@
 // the subagent as busy — the parent appears idle even though it's waiting
 // for subagent results.
 
-import { EventEmitter } from "node:events";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import { TrackedService } from "../daemon/tracked-service.js";
 import type {
 	OpenCodeClient,
 	SessionStatus,
@@ -48,14 +49,14 @@ export interface SessionStatusPollerOptions {
 	getSessionParentMap?: () => Map<string, string>;
 }
 
-export interface SessionStatusPollerEvents {
+export type SessionStatusPollerEvents = {
 	/** Emitted every poll cycle. statusesChanged indicates if status types actually differ from last poll. */
 	changed: [statuses: Record<string, SessionStatus>, statusesChanged: boolean];
-}
+};
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
 
-export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents> {
+export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvents> {
 	private readonly client: Pick<
 		OpenCodeClient,
 		"getSessionStatuses" | "getSession"
@@ -96,8 +97,8 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 	 */
 	private sseIdleSessions = new Set<string>();
 
-	constructor(options: SessionStatusPollerOptions) {
-		super();
+	constructor(registry: ServiceRegistry, options: SessionStatusPollerOptions) {
+		super(registry);
 		this.client = options.client;
 		this.interval = options.interval ?? 500;
 		this.log = options.log ?? createSilentLogger();
@@ -164,22 +165,18 @@ export class SessionStatusPoller extends EventEmitter<SessionStatusPollerEvents>
 	/** Start polling. Safe to call multiple times (idempotent). */
 	start(): void {
 		if (this.timer) return;
-		this.timer = setInterval(() => {
-			void this.poll();
+		this.timer = this.repeating(() => {
+			void this.tracked(this.poll());
 		}, this.interval);
-		// Don't keep the process alive just for this timer
-		if (this.timer && typeof this.timer === "object" && "unref" in this.timer) {
-			this.timer.unref();
-		}
 		// Immediate first poll so statuses are available right away
 		// (avoids a race where a browser connects before the first interval fires)
-		void this.poll();
+		void this.tracked(this.poll());
 	}
 
 	/** Stop polling and clear the timer. */
 	stop(): void {
 		if (this.timer) {
-			clearInterval(this.timer);
+			this.clearTrackedTimer(this.timer);
 			this.timer = null;
 		}
 	}

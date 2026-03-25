@@ -55,27 +55,31 @@ describe("Instance handlers", () => {
 				sendTo: (clientId: string, msg: unknown) =>
 					sendToCalls.push({ clientId, msg }),
 			} as unknown as HandlerDeps["wsHandler"],
-			getInstances: () => instances,
-			addInstance: vi.fn((id: string, config) => {
-				const inst: OpenCodeInstance = {
-					id,
-					name: config.name,
-					port: config.port,
-					managed: config.managed,
-					status: "stopped",
-					restartCount: 0,
-					createdAt: Date.now(),
-				};
-				instances.push(inst);
-				return inst;
-			}),
-			removeInstance: vi.fn((id: string) => {
-				const idx = instances.findIndex((i) => i.id === id);
-				if (idx === -1) throw new Error(`Instance "${id}" not found`);
-				instances.splice(idx, 1);
-			}),
-			startInstance: vi.fn(),
-			stopInstance: vi.fn(),
+			instanceMgmt: {
+				getInstances: () => instances,
+				addInstance: vi.fn((id: string, config) => {
+					const inst: OpenCodeInstance = {
+						id,
+						name: config.name,
+						port: config.port,
+						managed: config.managed,
+						status: "stopped",
+						restartCount: 0,
+						createdAt: Date.now(),
+					};
+					instances.push(inst);
+					return inst;
+				}),
+				removeInstance: vi.fn((id: string) => {
+					const idx = instances.findIndex((i) => i.id === id);
+					if (idx === -1) throw new Error(`Instance "${id}" not found`);
+					instances.splice(idx, 1);
+				}),
+				startInstance: vi.fn(),
+				stopInstance: vi.fn(),
+				updateInstance: vi.fn(),
+				persistConfig: vi.fn(),
+			},
 			log: createSilentLogger(),
 		});
 	});
@@ -90,12 +94,10 @@ describe("Instance handlers", () => {
 				managed: true,
 			});
 
-			expect(deps.addInstance).toHaveBeenCalledWith("staging", {
+			expect(deps.instanceMgmt?.addInstance).toHaveBeenCalledWith("staging", {
 				name: "staging",
 				port: 4098,
 				managed: true,
-				env: undefined,
-				url: undefined,
 			});
 			expect(broadcastCalls).toHaveLength(1);
 			const msg = broadcastCalls[0] as { type: string; instances: unknown[] };
@@ -104,30 +106,13 @@ describe("Instance handlers", () => {
 		});
 
 		it("calls persistConfig after adding instance", async () => {
-			const persistConfig = vi.fn();
-			deps.persistConfig = persistConfig;
-
 			await handleInstanceAdd(deps, "client-1", {
 				name: "staging",
 				port: 4098,
 				managed: true,
 			});
 
-			expect(persistConfig).toHaveBeenCalledTimes(1);
-		});
-
-		it("does not fail when persistConfig is not provided", async () => {
-			delete deps.persistConfig;
-
-			await handleInstanceAdd(deps, "client-1", {
-				name: "staging",
-				port: 4098,
-				managed: true,
-			});
-
-			// Should still add and broadcast, just not persist
-			expect(deps.addInstance).toHaveBeenCalled();
-			expect(broadcastCalls).toHaveLength(1);
+			expect(deps.instanceMgmt?.persistConfig).toHaveBeenCalledTimes(1);
 		});
 
 		it("adds an external instance with URL (managed=false)", async () => {
@@ -136,11 +121,10 @@ describe("Instance handlers", () => {
 				url: "http://remote.example.com:4096",
 			});
 
-			expect(deps.addInstance).toHaveBeenCalledWith("remote", {
+			expect(deps.instanceMgmt?.addInstance).toHaveBeenCalledWith("remote", {
 				name: "remote",
 				port: 0,
 				managed: false,
-				env: undefined,
 				url: "http://remote.example.com:4096",
 			});
 			expect(broadcastCalls).toHaveLength(1);
@@ -154,7 +138,7 @@ describe("Instance handlers", () => {
 			});
 
 			// "personal" is taken, so it should be "personal-2"
-			expect(deps.addInstance).toHaveBeenCalledWith(
+			expect(deps.instanceMgmt?.addInstance).toHaveBeenCalledWith(
 				"personal-2",
 				expect.objectContaining({ name: "Personal" }),
 			);
@@ -165,7 +149,7 @@ describe("Instance handlers", () => {
 				port: 4098,
 			} as unknown as PayloadMap["instance_add"]);
 
-			expect(deps.addInstance).not.toHaveBeenCalled();
+			expect(deps.instanceMgmt?.addInstance).not.toHaveBeenCalled();
 			expect(broadcastCalls).toHaveLength(0);
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
@@ -176,8 +160,8 @@ describe("Instance handlers", () => {
 			});
 		});
 
-		it("sends error when addInstance is not available", async () => {
-			delete deps.addInstance;
+		it("sends error when instanceMgmt is not available", async () => {
+			delete deps.instanceMgmt;
 
 			await handleInstanceAdd(deps, "client-1", {
 				name: "staging",
@@ -202,7 +186,7 @@ describe("Instance handlers", () => {
 				instanceId: "work",
 			});
 
-			expect(deps.removeInstance).toHaveBeenCalledWith("work");
+			expect(deps.instanceMgmt?.removeInstance).toHaveBeenCalledWith("work");
 			expect(broadcastCalls).toHaveLength(1);
 			const msg = broadcastCalls[0] as { type: string; instances: unknown[] };
 			expect(msg.type).toBe("instance_list");
@@ -210,14 +194,11 @@ describe("Instance handlers", () => {
 		});
 
 		it("calls persistConfig after removing instance", async () => {
-			const persistConfig = vi.fn();
-			deps.persistConfig = persistConfig;
-
 			await handleInstanceRemove(deps, "client-1", {
 				instanceId: "work",
 			});
 
-			expect(persistConfig).toHaveBeenCalledTimes(1);
+			expect(deps.instanceMgmt?.persistConfig).toHaveBeenCalledTimes(1);
 		});
 
 		it("sends error when instanceId is missing", async () => {
@@ -227,7 +208,7 @@ describe("Instance handlers", () => {
 				{} as unknown as PayloadMap["instance_remove"],
 			);
 
-			expect(deps.removeInstance).not.toHaveBeenCalled();
+			expect(deps.instanceMgmt?.removeInstance).not.toHaveBeenCalled();
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
@@ -258,7 +239,7 @@ describe("Instance handlers", () => {
 				instanceId: "work",
 			});
 
-			expect(deps.startInstance).toHaveBeenCalledWith("work");
+			expect(deps.instanceMgmt?.startInstance).toHaveBeenCalledWith("work");
 			expect(broadcastCalls).toHaveLength(1);
 		});
 
@@ -269,7 +250,7 @@ describe("Instance handlers", () => {
 				{} as unknown as PayloadMap["instance_start"],
 			);
 
-			expect(deps.startInstance).not.toHaveBeenCalled();
+			expect(deps.instanceMgmt?.startInstance).not.toHaveBeenCalled();
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
@@ -287,7 +268,7 @@ describe("Instance handlers", () => {
 				instanceId: "personal",
 			});
 
-			expect(deps.stopInstance).toHaveBeenCalledWith("personal");
+			expect(deps.instanceMgmt?.stopInstance).toHaveBeenCalledWith("personal");
 			expect(broadcastCalls).toHaveLength(1);
 		});
 
@@ -298,7 +279,7 @@ describe("Instance handlers", () => {
 				{} as unknown as PayloadMap["instance_stop"],
 			);
 
-			expect(deps.stopInstance).not.toHaveBeenCalled();
+			expect(deps.instanceMgmt?.stopInstance).not.toHaveBeenCalled();
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
@@ -324,10 +305,10 @@ describe("Instance handlers", () => {
 				const p = projects.find((p) => p.slug === slug);
 				if (p) p.instanceId = instanceId;
 			});
-			(deps as unknown as Record<string, unknown>)["setProjectInstance"] =
-				setProjectInstance;
-			(deps as unknown as Record<string, unknown>)["getProjects"] = () =>
-				projects;
+			deps.projectMgmt = {
+				setProjectInstance,
+				getProjects: () => projects,
+			};
 
 			await handleSetProjectInstance(deps, "client-1", {
 				slug: "myapp",
@@ -343,6 +324,11 @@ describe("Instance handlers", () => {
 		});
 
 		it("sends error when slug is missing", async () => {
+			deps.projectMgmt = {
+				setProjectInstance: vi.fn(),
+				getProjects: () => [],
+			};
+
 			await handleSetProjectInstance(deps, "client-1", {
 				instanceId: "work",
 			} as unknown as PayloadMap["set_project_instance"]);
@@ -356,6 +342,11 @@ describe("Instance handlers", () => {
 		});
 
 		it("sends error when instanceId is missing", async () => {
+			deps.projectMgmt = {
+				setProjectInstance: vi.fn(),
+				getProjects: () => [],
+			};
+
 			await handleSetProjectInstance(deps, "client-1", {
 				slug: "myapp",
 			} as unknown as PayloadMap["set_project_instance"]);
@@ -368,8 +359,8 @@ describe("Instance handlers", () => {
 			});
 		});
 
-		it("sends error when setProjectInstance is not available", async () => {
-			delete deps.setProjectInstance;
+		it("sends error when projectMgmt is not available", async () => {
+			// projectMgmt is undefined by default
 
 			await handleSetProjectInstance(deps, "client-1", {
 				slug: "myapp",
@@ -386,9 +377,10 @@ describe("Instance handlers", () => {
 
 		it("calls setProjectInstance with slug and instanceId", async () => {
 			const setProjectInstance = vi.fn();
-			(deps as unknown as Record<string, unknown>)["setProjectInstance"] =
-				setProjectInstance;
-			(deps as unknown as Record<string, unknown>)["getProjects"] = () => [];
+			deps.projectMgmt = {
+				setProjectInstance,
+				getProjects: () => [],
+			};
 
 			await handleSetProjectInstance(deps, "client-1", {
 				slug: "myapp",

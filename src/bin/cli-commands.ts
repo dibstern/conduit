@@ -277,6 +277,15 @@ async function launchMainMenu(
 					const error = res.error as string | undefined;
 					return { ok: res.ok, ...(error != null && { error }) };
 				},
+				setKeepAwakeCommand: async (command: string, args: string[]) => {
+					const res = await ipcSend({
+						cmd: "set_keep_awake_command",
+						command,
+						args,
+					});
+					const error = res.error as string | undefined;
+					return { ok: res.ok, ...(error != null && { error }) };
+				},
 				onBack: async () => {
 					/* returns to main menu via re-render */
 				},

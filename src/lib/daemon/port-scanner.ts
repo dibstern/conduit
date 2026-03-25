@@ -1,5 +1,6 @@
 // src/lib/daemon/port-scanner.ts
-import { EventEmitter } from "node:events";
+import type { ServiceRegistry } from "./service-registry.js";
+import { TrackedService } from "./tracked-service.js";
 
 export interface PortScannerConfig {
 	portRange: [number, number];
@@ -15,13 +16,13 @@ export interface ScanResult {
 	active: number[];
 }
 
-export interface PortScannerEvents {
+export type PortScannerEvents = {
 	scan: [result: ScanResult];
-}
+};
 
 type ProbeFn = (port: number) => Promise<boolean>;
 
-export class PortScanner extends EventEmitter<PortScannerEvents> {
+export class PortScanner extends TrackedService<PortScannerEvents> {
 	private config: PortScannerConfig;
 	private probeFn: ProbeFn;
 	private discovered = new Set<number>();
@@ -29,8 +30,12 @@ export class PortScanner extends EventEmitter<PortScannerEvents> {
 	private excluded = new Set<number>();
 	private timer: ReturnType<typeof setInterval> | null = null;
 
-	constructor(config: PortScannerConfig, probeFn: ProbeFn) {
-		super();
+	constructor(
+		registry: ServiceRegistry,
+		config: PortScannerConfig,
+		probeFn: ProbeFn,
+	) {
+		super(registry);
 		this.config = config;
 		this.probeFn = probeFn;
 	}
@@ -88,12 +93,12 @@ export class PortScanner extends EventEmitter<PortScannerEvents> {
 
 	start(): void {
 		this.stop();
-		this.timer = setInterval(() => void this.scan(), this.config.intervalMs);
+		this.timer = this.repeating(() => void this.scan(), this.config.intervalMs);
 	}
 
 	stop(): void {
 		if (this.timer) {
-			clearInterval(this.timer);
+			this.clearTrackedTimer(this.timer);
 			this.timer = null;
 		}
 	}

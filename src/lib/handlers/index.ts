@@ -151,7 +151,7 @@ import type { HandlerDeps, MessageHandler } from "./types.js";
 // default MessageHandler (union payload). This is safe because dispatchMessage
 // only calls a handler with the payload matching its key. The cast is the
 // single trust boundary — Phase 2 will add Valibot runtime validation here.
-export const MESSAGE_HANDLERS: Record<string, MessageHandler> = {
+export const MESSAGE_HANDLERS: Record<keyof PayloadMap, MessageHandler> = {
 	message: handleMessage as MessageHandler,
 	permission_response: handlePermissionResponse as MessageHandler,
 	ask_user_response: handleAskUserResponse as MessageHandler,
@@ -211,7 +211,9 @@ export async function dispatchMessage(
 	handler: string,
 	payload: Record<string, unknown>,
 ): Promise<void> {
-	const fn = MESSAGE_HANDLERS[handler];
+	const fn = (MESSAGE_HANDLERS as Record<string, MessageHandler | undefined>)[
+		handler
+	];
 	if (fn) {
 		await fn(deps, clientId, payload as PayloadMap[keyof PayloadMap]);
 	} else {

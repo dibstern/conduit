@@ -3,6 +3,7 @@
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { WebSocketHandler } from "../../../src/lib/server/ws-handler.js";
 
 const require = createRequire(import.meta.url);
@@ -95,7 +96,7 @@ async function setup(): Promise<{
 	const server = createServer();
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const port = (server.address() as { port: number }).port;
-	const handler = new WebSocketHandler(server, {
+	const handler = new WebSocketHandler(new ServiceRegistry(), server, {
 		heartbeatInterval: 60_000,
 	});
 	return { server, handler, port };

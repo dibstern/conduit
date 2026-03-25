@@ -3,8 +3,9 @@
 // process spawning, and health checks.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import { TrackedService } from "../daemon/tracked-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
 
@@ -20,12 +21,12 @@ export type InstanceHealthChecker = (
 	instance: OpenCodeInstance,
 ) => Promise<boolean>;
 
-export interface InstanceManagerEvents {
+export type InstanceManagerEvents = {
 	instance_added: [instance: OpenCodeInstance];
 	instance_removed: [id: string];
 	status_changed: [instance: OpenCodeInstance];
 	instance_error: [payload: { id: string; error: string }];
-}
+};
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ export interface InstanceManagerOptions {
 
 // ─── InstanceManager ────────────────────────────────────────────────────────
 
-export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
+export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	private readonly maxInstances: number;
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;
@@ -72,8 +73,8 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 	/** Restart timestamps per instance for rate-limiting. */
 	private readonly restartTimestamps = new Map<string, number[]>();
 
-	constructor(options: InstanceManagerOptions = {}) {
-		super();
+	constructor(registry: ServiceRegistry, options: InstanceManagerOptions = {}) {
+		super(registry);
 		this.maxInstances = options.maxInstances ?? 5;
 		this.maxRestartsPerWindow = options.maxRestartsPerWindow ?? 3;
 		this.restartWindowMs = options.restartWindowMs ?? 60_000;
@@ -389,15 +390,24 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 	}
 
 	/**
-	 * Stops all non-stopped instances, killing processes and clearing
-	 * health polling.
+	 * Stops all instances — including "stopped" ones that may still have
+	 * health polling (e.g. unmanaged instances). Kills processes, clears
+	 * health polling and pending restart timers for every instance.
 	 */
 	stopAll(): void {
 		for (const instance of this.instances.values()) {
+			this.cancelPendingRestart(instance.id);
+			this.stopHealthPolling(instance.id);
 			if (instance.status !== "stopped") {
 				this.stopInstance(instance.id);
 			}
 		}
+	}
+
+	/** Cancel all work and wait for in-flight operations to settle. */
+	async drain(): Promise<void> {
+		this.stopAll();
+		await super.drain();
 	}
 
 	// ─── Health polling (private) ───────────────────────────────────────────
@@ -407,7 +417,7 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 		// Clear any existing interval first
 		this.stopHealthPolling(id);
 
-		const interval = setInterval(async () => {
+		const interval = this.repeating(async () => {
 			const instance = this.instances.get(id);
 			if (!instance) {
 				this.stopHealthPolling(id);
@@ -454,7 +464,7 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 	private stopHealthPolling(id: string): void {
 		const interval = this.healthIntervals.get(id);
 		if (interval) {
-			clearInterval(interval);
+			this.clearTrackedTimer(interval);
 			this.healthIntervals.delete(id);
 		}
 	}
@@ -463,7 +473,7 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 	private cancelPendingRestart(id: string): void {
 		const timer = this.pendingRestarts.get(id);
 		if (timer) {
-			clearTimeout(timer);
+			this.clearTrackedTimer(timer);
 			this.pendingRestarts.delete(id);
 		}
 	}
@@ -538,7 +548,7 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 
 		// Restart with exponential backoff: 1s, 2s, 4s, ... capped at 30s
 		const backoffMs = Math.min(1000 * 2 ** (recent.length - 1), 30_000);
-		const timer = setTimeout(async () => {
+		const timer = this.delayed(async () => {
 			this.pendingRestarts.delete(id);
 			try {
 				// Reset status so startInstance doesn't return early
@@ -587,7 +597,7 @@ export class InstanceManager extends EventEmitter<InstanceManagerEvents> {
 		_instance: OpenCodeInstance,
 	): Promise<boolean> {
 		try {
-			const res = await fetch(`http://localhost:${port}/health`);
+			const res = await this.fetch(`http://localhost:${port}/health`);
 			return res.ok;
 		} catch {
 			return false;

@@ -2,7 +2,7 @@
 // Typed interfaces and runtime type guard functions for OpenCode SSE events.
 // Replaces unsafe `as` casts scattered across event-translator.ts / sse-wiring.ts.
 
-import type { OpenCodeEvent, PartType, ToolStatus } from "../types.js";
+import type { BaseOpenCodeEvent, PartType, ToolStatus } from "../types.js";
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ function hasProps(
 
 // ─── Part Delta ──────────────────────────────────────────────────────────────
 
-export interface PartDeltaEvent extends OpenCodeEvent {
+export interface PartDeltaEvent extends BaseOpenCodeEvent {
 	type: "message.part.delta";
 	properties: {
 		sessionID?: string;
@@ -45,7 +45,7 @@ export function isPartDeltaEvent(event: unknown): event is PartDeltaEvent {
 
 // ─── Part Updated ────────────────────────────────────────────────────────────
 
-export interface PartUpdatedEvent extends OpenCodeEvent {
+export interface PartUpdatedEvent extends BaseOpenCodeEvent {
 	type: "message.part.updated";
 	properties: {
 		partID?: string;
@@ -77,7 +77,7 @@ export function isPartUpdatedEvent(event: unknown): event is PartUpdatedEvent {
 
 // ─── Part Removed ────────────────────────────────────────────────────────────
 
-export interface PartRemovedEvent extends OpenCodeEvent {
+export interface PartRemovedEvent extends BaseOpenCodeEvent {
 	type: "message.part.removed";
 	properties: {
 		partID: string;
@@ -93,7 +93,7 @@ export function isPartRemovedEvent(event: unknown): event is PartRemovedEvent {
 
 // ─── Session Status ──────────────────────────────────────────────────────────
 
-export interface SessionStatusEvent extends OpenCodeEvent {
+export interface SessionStatusEvent extends BaseOpenCodeEvent {
 	type: "session.status";
 	properties: {
 		sessionID?: string;
@@ -117,7 +117,7 @@ export function isSessionStatusEvent(
 
 // ─── Session Error ───────────────────────────────────────────────────────────
 
-export interface SessionErrorEvent extends OpenCodeEvent {
+export interface SessionErrorEvent extends BaseOpenCodeEvent {
 	type: "session.error";
 	properties: {
 		sessionID?: string;
@@ -139,7 +139,7 @@ export function isSessionErrorEvent(
 
 // ─── Permission Asked ────────────────────────────────────────────────────────
 
-export interface PermissionAskedEvent extends OpenCodeEvent {
+export interface PermissionAskedEvent extends BaseOpenCodeEvent {
 	type: "permission.asked";
 	properties: {
 		id: string;
@@ -161,7 +161,7 @@ export function isPermissionAskedEvent(
 
 // ─── Permission Replied ──────────────────────────────────────────────────────
 
-export interface PermissionRepliedEvent extends OpenCodeEvent {
+export interface PermissionRepliedEvent extends BaseOpenCodeEvent {
 	type: "permission.replied";
 	properties: {
 		id: string;
@@ -178,7 +178,7 @@ export function isPermissionRepliedEvent(
 
 // ─── Question Asked ──────────────────────────────────────────────────────────
 
-export interface QuestionAskedEvent extends OpenCodeEvent {
+export interface QuestionAskedEvent extends BaseOpenCodeEvent {
 	type: "question.asked";
 	properties: {
 		id: string;
@@ -206,7 +206,7 @@ export function isQuestionAskedEvent(
 
 // ─── Message Created ─────────────────────────────────────────────────────────
 
-export interface MessageCreatedEvent extends OpenCodeEvent {
+export interface MessageCreatedEvent extends BaseOpenCodeEvent {
 	type: "message.created";
 	properties: {
 		sessionID?: string;
@@ -244,7 +244,7 @@ interface MessagePayload {
 	time?: { created?: number; completed?: number };
 }
 
-export interface MessageUpdatedEvent extends OpenCodeEvent {
+export interface MessageUpdatedEvent extends BaseOpenCodeEvent {
 	type: "message.updated";
 	properties: {
 		sessionID?: string;
@@ -264,7 +264,7 @@ export function isMessageUpdatedEvent(
 
 // ─── Message Removed ─────────────────────────────────────────────────────────
 
-export interface MessageRemovedEvent extends OpenCodeEvent {
+export interface MessageRemovedEvent extends BaseOpenCodeEvent {
 	type: "message.removed";
 	properties: {
 		messageID: string;
@@ -281,7 +281,7 @@ export function isMessageRemovedEvent(
 
 // ─── PTY Events ──────────────────────────────────────────────────────────────
 
-export interface PtyCreatedEvent extends OpenCodeEvent {
+export interface PtyCreatedEvent extends BaseOpenCodeEvent {
 	type: "pty.created";
 	properties: {
 		info?: {
@@ -302,7 +302,7 @@ export interface PtyCreatedEvent extends OpenCodeEvent {
 	};
 }
 
-export interface PtyExitedEvent extends OpenCodeEvent {
+export interface PtyExitedEvent extends BaseOpenCodeEvent {
 	type: "pty.exited";
 	properties: {
 		id?: string;
@@ -310,7 +310,7 @@ export interface PtyExitedEvent extends OpenCodeEvent {
 	};
 }
 
-export interface PtyDeletedEvent extends OpenCodeEvent {
+export interface PtyDeletedEvent extends BaseOpenCodeEvent {
 	type: "pty.deleted";
 	properties: {
 		id?: string;
@@ -342,14 +342,14 @@ export function isPtyDeletedEvent(event: unknown): event is PtyDeletedEvent {
 
 // ─── File Events ─────────────────────────────────────────────────────────────
 
-export interface FileEditedEvent extends OpenCodeEvent {
+export interface FileEditedEvent extends BaseOpenCodeEvent {
 	type: "file.edited";
 	properties: {
 		file: string;
 	};
 }
 
-export interface FileWatcherUpdatedEvent extends OpenCodeEvent {
+export interface FileWatcherUpdatedEvent extends BaseOpenCodeEvent {
 	type: "file.watcher.updated";
 	properties: {
 		file: string;
@@ -368,7 +368,7 @@ export function isFileEvent(event: unknown): event is FileEvent {
 
 // ─── Installation Update Available ───────────────────────────────────────────
 
-export interface InstallationUpdateEvent extends OpenCodeEvent {
+export interface InstallationUpdateEvent extends BaseOpenCodeEvent {
 	type: "installation.update-available";
 	properties: {
 		version?: string;
@@ -383,7 +383,7 @@ export function isInstallationUpdateEvent(
 
 // ─── Todo Updated ────────────────────────────────────────────────────────────
 
-export interface TodoUpdatedEvent extends OpenCodeEvent {
+export interface TodoUpdatedEvent extends BaseOpenCodeEvent {
 	type: "todo.updated";
 	properties: {
 		todos?: Array<{
@@ -428,3 +428,28 @@ export function hasInfoWithSessionID(props: Record<string, unknown>): props is {
 		(typeof info["id"] === "string" && info["id"] !== "")
 	);
 }
+
+// ─── Composed Event Union ────────────────────────────────────────────────────
+// Every typed event in a single union so downstream can narrow on `.type`.
+
+export type KnownOpenCodeEvent =
+	| PartDeltaEvent
+	| PartUpdatedEvent
+	| PartRemovedEvent
+	| SessionStatusEvent
+	| SessionErrorEvent
+	| PermissionAskedEvent
+	| PermissionRepliedEvent
+	| QuestionAskedEvent
+	| MessageCreatedEvent
+	| MessageUpdatedEvent
+	| MessageRemovedEvent
+	| PtyCreatedEvent
+	| PtyExitedEvent
+	| PtyDeletedEvent
+	| FileEditedEvent
+	| FileWatcherUpdatedEvent
+	| InstallationUpdateEvent
+	| TodoUpdatedEvent;
+
+export type KnownOpenCodeEventType = KnownOpenCodeEvent["type"];

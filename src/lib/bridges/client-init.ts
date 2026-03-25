@@ -16,6 +16,10 @@ import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionStatusPoller } from "../session/session-status-poller.js";
+import {
+	type SessionSwitchDeps,
+	switchClientToSession,
+} from "../session/session-switch.js";
 import type { PtyInfo } from "../shared-types.js";
 import type { OpenCodeInstance, RelayMessage } from "../types.js";
 import type { PermissionBridge } from "./permission-bridge.js";
@@ -90,48 +94,24 @@ export async function handleClientConnected(
 	const activeId =
 		requestedSessionId || (await sessionMgr.getDefaultSessionId());
 	if (activeId) {
-		// Track which session this client is viewing
-		wsHandler.setClientSession(clientId, activeId);
-		const events = messageCache.getEvents(activeId);
-		const hasChatContent =
-			events?.some((e) => e.type === "user_message" || e.type === "delta") ??
-			false;
-		const draft = getSessionInputDraft(activeId);
-		if (events && hasChatContent) {
-			// Cache hit with content: include raw events for client replay
-			wsHandler.sendTo(clientId, {
-				type: "session_switched",
-				id: activeId,
-				events,
-				...(draft && { inputText: draft }),
-			});
-		} else {
-			// Cache miss (session from before relay started): REST API fallback
-			try {
-				const history = await sessionMgr.loadPreRenderedHistory(activeId);
-				wsHandler.sendTo(clientId, {
-					type: "session_switched",
-					id: activeId,
-					history: {
-						messages: history.messages,
-						hasMore: history.hasMore,
-						...(history.total != null && { total: history.total }),
-					},
-					...(draft && { inputText: draft }),
-				});
-			} catch {
-				// If REST API fails too, just send the switch without history
-				wsHandler.sendTo(clientId, {
-					type: "session_switched",
-					id: activeId,
-					...(draft && { inputText: draft }),
-				});
-			}
-		}
-		wsHandler.sendTo(clientId, {
-			type: "status",
-			status: deps.statusPoller?.isProcessing(activeId) ? "processing" : "idle",
-		});
+		// pollerManager intentionally omitted — not available in ClientInitDeps.
+		// skipPollerSeed: true ensures switchClientToSession never accesses it.
+		// The `satisfies` check guarantees a compile error if SessionSwitchDeps
+		// adds new required fields that this object doesn't provide.
+		await switchClientToSession(
+			{
+				messageCache,
+				sessionMgr,
+				wsHandler,
+				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
+				client: client as { getMessages: (id: string) => Promise<unknown[]> },
+				log: deps.log,
+				getInputDraft: getSessionInputDraft,
+			} satisfies SessionSwitchDeps,
+			clientId,
+			activeId,
+			{ skipPollerSeed: true },
+		);
 
 		// Send model/agent info from the active session
 		try {

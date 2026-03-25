@@ -79,7 +79,6 @@ function createMockIO() {
 				exit,
 				isPortFree: async () => true,
 				getRecentProjects: () => [],
-				isMacOS: false,
 				...overrides,
 			};
 		},
@@ -212,8 +211,8 @@ describe("disclaimer", () => {
 		expect(all).toContain("private network");
 		expect(all).toContain("no responsibility");
 
-		// Clean up — accept and finish
-		await sendKeys(io.stdin, ["\r", "\r", "\r"]);
+		// Clean up — accept and finish (disclaimer, port, PIN, keep-awake)
+		await sendKeys(io.stdin, ["\r", "\r", "\r", "\r"]);
 		await setupPromise;
 	});
 
@@ -226,8 +225,8 @@ describe("disclaimer", () => {
 		expect(all).toContain("Conduit");
 		expect(all).toContain("Unofficial, open-source project");
 
-		// Clean up
-		await sendKeys(io.stdin, ["\r", "\r", "\r"]);
+		// Clean up (disclaimer, port, PIN, keep-awake)
+		await sendKeys(io.stdin, ["\r", "\r", "\r", "\r"]);
 		await setupPromise;
 	});
 
@@ -256,7 +255,9 @@ describe("port prompt", () => {
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 
-		// Accept default port (Enter with empty = placeholder "2633"), then Enter for PIN skip
+		// Accept default port (Enter with empty = placeholder "2633"), then skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -278,7 +279,9 @@ describe("port prompt", () => {
 		await sendKeys(io.stdin, ["8", "0", "8", "0", "\r"]);
 		await tick();
 
-		// Skip PIN
+		// Skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		const result = await setupPromise;
 
@@ -301,7 +304,9 @@ describe("port prompt", () => {
 		const all = stripAnsi(io.output.join(""));
 		expect(all).toContain("Invalid port number");
 
-		// Retry with default valid port, then skip PIN
+		// Retry with default valid port, then skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -326,7 +331,9 @@ describe("port prompt", () => {
 		const all = stripAnsi(io.output.join(""));
 		expect(all).toContain("Invalid port number");
 
-		// Retry with valid default, then skip PIN
+		// Retry with valid default, then skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -360,7 +367,9 @@ describe("port prompt", () => {
 		const all = stripAnsi(io.output.join(""));
 		expect(all).toContain("already in use");
 
-		// Second attempt with same port (now free), then skip PIN
+		// Second attempt with same port (now free), then skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -384,8 +393,10 @@ describe("PIN prompt", () => {
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 
-		// Enter PIN "1234"
+		// Enter PIN "1234", then accept keep-awake default
 		await sendKeys(io.stdin, ["1", "2", "3", "4", "\r"]);
+		await tick();
+		await sendKeys(io.stdin, ["\r"]);
 		const result = await setupPromise;
 
 		expect(result.pin).toBe("1234");
@@ -402,7 +413,9 @@ describe("PIN prompt", () => {
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 
-		// Skip PIN (just Enter)
+		// Skip PIN (just Enter), then accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		const result = await setupPromise;
 
@@ -418,7 +431,10 @@ describe("PIN prompt", () => {
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
+		// Enter PIN, then accept keep-awake default
 		await sendKeys(io.stdin, ["5", "6", "7", "8", "\r"]);
+		await tick();
+		await sendKeys(io.stdin, ["\r"]);
 		const result = await setupPromise;
 
 		expect(result).toHaveProperty("pin");
@@ -429,9 +445,9 @@ describe("PIN prompt", () => {
 // ─── Keep awake ──────────────────────────────────────────────────────────────
 
 describe("keep awake", () => {
-	it("shows keep-awake prompt on macOS", async () => {
+	it("shows keep-awake prompt on all platforms", async () => {
 		const io = createMockIO();
-		const setupPromise = runSetup(io.opts({ isMacOS: true }));
+		const setupPromise = runSetup(io.opts());
 		await tick();
 
 		// Accept disclaimer, default port, skip PIN
@@ -453,27 +469,9 @@ describe("keep awake", () => {
 		expect(result.keepAwake).toBe(false);
 	});
 
-	it("does not show keep-awake on non-macOS", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts({ isMacOS: false }));
-		await tick();
-
-		// Accept disclaimer, default port, skip PIN
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result.keepAwake).toBe(false);
-		const all = stripAnsi(io.output.join(""));
-		expect(all).not.toContain("Keep awake");
-	});
-
 	it("defaults to false", async () => {
 		const io = createMockIO();
-		const setupPromise = runSetup(io.opts({ isMacOS: true }));
+		const setupPromise = runSetup(io.opts());
 		await tick();
 
 		// Accept disclaimer, default port, skip PIN
@@ -500,7 +498,9 @@ describe("restore projects", () => {
 		const setupPromise = runSetup(io.opts({ getRecentProjects: () => [] }));
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -533,7 +533,9 @@ describe("restore projects", () => {
 		);
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -574,7 +576,9 @@ describe("restore projects", () => {
 		);
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -605,7 +609,9 @@ describe("restore projects", () => {
 		);
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -629,7 +635,9 @@ describe("full flow", () => {
 		const setupPromise = runSetup(io.opts());
 		await tick();
 
-		// Accept disclaimer (default Yes), default port, skip PIN
+		// Accept disclaimer (default Yes), default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -657,7 +665,6 @@ describe("full flow", () => {
 		];
 		const setupPromise = runSetup(
 			io.opts({
-				isMacOS: true,
 				getRecentProjects: () => recentProjects,
 			}),
 		);
@@ -712,7 +719,9 @@ describe("full flow", () => {
 		const setupPromise = runSetup(io.opts());
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -738,7 +747,9 @@ describe("edge cases", () => {
 		const setupPromise = runSetup(io.opts({ getRecentProjects: () => [] }));
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -774,7 +785,9 @@ describe("edge cases", () => {
 		await sendKeys(io.stdin, ["\r"]);
 		await tick(30);
 
-		// Third attempt — succeeds, then skip PIN
+		// Third attempt — succeeds, then skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);
@@ -784,12 +797,14 @@ describe("edge cases", () => {
 		expect(attempt).toBe(3);
 	});
 
-	it("isMacOS false skips keep-awake entirely", async () => {
+	it("keep-awake defaults to false when accepted with Enter", async () => {
 		const io = createMockIO();
-		const setupPromise = runSetup(io.opts({ isMacOS: false }));
+		const setupPromise = runSetup(io.opts());
 		await tick();
 
-		// Accept disclaimer, default port, skip PIN
+		// Accept disclaimer, default port, skip PIN, accept keep-awake default
+		await sendKeys(io.stdin, ["\r"]);
+		await tick();
 		await sendKeys(io.stdin, ["\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["\r"]);

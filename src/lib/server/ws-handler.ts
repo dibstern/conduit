@@ -3,10 +3,11 @@
 // Wires ws-router.ts (pure logic) to real WebSocket connections.
 
 import { randomBytes } from "node:crypto";
-import { EventEmitter } from "node:events";
 import type { IncomingMessage, Server } from "node:http";
 import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import { TrackedService } from "../daemon/tracked-service.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../types.js";
 import {
@@ -52,7 +53,7 @@ export interface WebSocketHandlerOptions {
 	registry?: SessionRegistry;
 }
 
-export interface WebSocketHandlerEvents {
+export type WebSocketHandlerEvents = {
 	/** Client connected */
 	client_connected: [
 		{
@@ -81,11 +82,11 @@ export interface WebSocketHandlerEvents {
 	];
 	/** Error on a client connection */
 	client_error: [{ clientId: string; error: Error }];
-}
+};
 
 // ─── WebSocket Handler ──────────────────────────────────────────────────────
 
-export class WebSocketHandler extends EventEmitter<WebSocketHandlerEvents> {
+export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 	private readonly wss: InstanceType<typeof WebSocketServerClass>;
 	private readonly clients: Map<string, WSType> = new Map();
 	private readonly tracker: ClientTracker;
@@ -94,8 +95,12 @@ export class WebSocketHandler extends EventEmitter<WebSocketHandlerEvents> {
 	/** Per-tab session tracking: delegates to shared SessionRegistry */
 	private readonly registry: SessionRegistry;
 
-	constructor(server: Server | null, options: WebSocketHandlerOptions = {}) {
-		super();
+	constructor(
+		registry: ServiceRegistry,
+		server: Server | null,
+		options: WebSocketHandlerOptions = {},
+	) {
+		super(registry);
 		this.tracker = createClientTracker();
 		this.heartbeatInterval = options.heartbeatInterval ?? 30_000;
 		this.registry = options.registry ?? new SessionRegistry();
@@ -213,7 +218,7 @@ export class WebSocketHandler extends EventEmitter<WebSocketHandlerEvents> {
 	/** Close all connections and clean up */
 	close(): void {
 		if (this.heartbeatTimer) {
-			clearInterval(this.heartbeatTimer);
+			this.clearTrackedTimer(this.heartbeatTimer);
 			this.heartbeatTimer = null;
 		}
 
@@ -224,6 +229,12 @@ export class WebSocketHandler extends EventEmitter<WebSocketHandlerEvents> {
 		this.clients.clear();
 		this.registry.clear();
 		this.wss.close();
+	}
+
+	/** Drain: close connections then cancel tracked async work. */
+	override async drain(): Promise<void> {
+		this.close();
+		await super.drain();
 	}
 
 	/**
@@ -333,7 +344,7 @@ export class WebSocketHandler extends EventEmitter<WebSocketHandlerEvents> {
 	}
 
 	private startHeartbeat(): void {
-		this.heartbeatTimer = setInterval(() => {
+		this.heartbeatTimer = this.repeating(() => {
 			for (const [clientId, wsConn] of this.clients) {
 				const aliveWs = wsConn as WSType & { isAlive: boolean };
 				if (!aliveWs.isAlive) {

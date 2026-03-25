@@ -3,9 +3,9 @@
 // three independent data structures (projects, projectRelays, pendingRelaySlugs)
 // with a typed discriminated union.
 
-import { EventEmitter } from "node:events";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import type { RelayMessage, StoredProject } from "../types.js";
+import { TrackedService } from "./tracked-service.js";
 
 // ─── Discriminated union ────────────────────────────────────────────────────
 
@@ -30,17 +30,17 @@ export type ProjectEntry = ProjectRegistering | ProjectReady | ProjectError;
 
 // ─── Events ─────────────────────────────────────────────────────────────────
 
-export interface ProjectRegistryEvents {
+export type ProjectRegistryEvents = {
 	project_added: [slug: string, project: StoredProject];
 	project_ready: [slug: string, relay: ProjectRelay];
 	project_error: [slug: string, error: string];
 	project_updated: [slug: string, project: StoredProject];
 	project_removed: [slug: string];
-}
+};
 
 // ─── Registry class ─────────────────────────────────────────────────────────
 
-export class ProjectRegistry extends EventEmitter<ProjectRegistryEvents> {
+export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 	private readonly entries = new Map<string, ProjectEntry>();
 	private readonly abortControllers = new Map<string, AbortController>();
 
@@ -142,24 +142,30 @@ export class ProjectRegistry extends EventEmitter<ProjectRegistryEvents> {
 		const ac = new AbortController();
 		this.abortControllers.set(slug, ac);
 
-		createRelay(ac.signal).then(
-			(relay) => {
-				// If removed or replaced while creating, discard
-				if (!this.abortControllers.has(slug) || ac.signal.aborted) {
-					relay.stop().catch(() => {});
-					return;
-				}
-				this.abortControllers.delete(slug);
-				this.entries.set(slug, { status: "ready", project, relay });
-				this.emit("project_ready", slug, relay);
-			},
-			(err) => {
-				if (ac.signal.aborted) return; // Expected — remove() was called
-				this.abortControllers.delete(slug);
-				const message = err instanceof Error ? err.message : String(err);
-				this.entries.set(slug, { status: "error", project, error: message });
-				this.emit("project_error", slug, message);
-			},
+		this.tracked(
+			createRelay(ac.signal).then(
+				(relay) => {
+					// If removed or replaced while creating, discard
+					if (!this.abortControllers.has(slug) || ac.signal.aborted) {
+						relay.stop().catch(() => {});
+						return;
+					}
+					this.abortControllers.delete(slug);
+					this.entries.set(slug, { status: "ready", project, relay });
+					this.emit("project_ready", slug, relay);
+				},
+				(err) => {
+					if (ac.signal.aborted) return; // Expected — remove() was called
+					this.abortControllers.delete(slug);
+					const message = err instanceof Error ? err.message : String(err);
+					this.entries.set(slug, {
+						status: "error",
+						project,
+						error: message,
+					});
+					this.emit("project_error", slug, message);
+				},
+			),
 		);
 	}
 
@@ -195,31 +201,33 @@ export class ProjectRegistry extends EventEmitter<ProjectRegistryEvents> {
 		const ac = new AbortController();
 		this.abortControllers.set(slug, ac);
 
-		createRelay(ac.signal).then(
-			(relay) => {
-				if (!this.abortControllers.has(slug) || ac.signal.aborted) {
-					relay.stop().catch(() => {});
-					return;
-				}
-				this.abortControllers.delete(slug);
-				this.entries.set(slug, {
-					status: "ready",
-					project: entry.project,
-					relay,
-				});
-				this.emit("project_ready", slug, relay);
-			},
-			(err) => {
-				if (ac.signal.aborted) return;
-				this.abortControllers.delete(slug);
-				const message = err instanceof Error ? err.message : String(err);
-				this.entries.set(slug, {
-					status: "error",
-					project: entry.project,
-					error: message,
-				});
-				this.emit("project_error", slug, message);
-			},
+		this.tracked(
+			createRelay(ac.signal).then(
+				(relay) => {
+					if (!this.abortControllers.has(slug) || ac.signal.aborted) {
+						relay.stop().catch(() => {});
+						return;
+					}
+					this.abortControllers.delete(slug);
+					this.entries.set(slug, {
+						status: "ready",
+						project: entry.project,
+						relay,
+					});
+					this.emit("project_ready", slug, relay);
+				},
+				(err) => {
+					if (ac.signal.aborted) return;
+					this.abortControllers.delete(slug);
+					const message = err instanceof Error ? err.message : String(err);
+					this.entries.set(slug, {
+						status: "error",
+						project: entry.project,
+						error: message,
+					});
+					this.emit("project_error", slug, message);
+				},
+			),
 		);
 	}
 
@@ -342,67 +350,69 @@ export class ProjectRegistry extends EventEmitter<ProjectRegistryEvents> {
 		timeoutMs = 10_000,
 		signal?: AbortSignal,
 	): Promise<ProjectRelay> {
-		return new Promise((resolve, reject) => {
-			const entry = this.entries.get(slug);
+		return this.tracked(
+			new Promise((resolve, reject) => {
+				const entry = this.entries.get(slug);
 
-			if (!entry) {
-				reject(new Error(`Project "${slug}" not found`));
-				return;
-			}
-			if (entry.status === "ready") {
-				resolve(entry.relay);
-				return;
-			}
-			if (entry.status === "error") {
-				reject(new Error(`Project "${slug}" relay failed: ${entry.error}`));
-				return;
-			}
-			if (signal?.aborted) {
-				reject(new Error(`Wait for relay "${slug}" was aborted`));
-				return;
-			}
+				if (!entry) {
+					reject(new Error(`Project "${slug}" not found`));
+					return;
+				}
+				if (entry.status === "ready") {
+					resolve(entry.relay);
+					return;
+				}
+				if (entry.status === "error") {
+					reject(new Error(`Project "${slug}" relay failed: ${entry.error}`));
+					return;
+				}
+				if (signal?.aborted) {
+					reject(new Error(`Wait for relay "${slug}" was aborted`));
+					return;
+				}
 
-			// status === "registering" — wait for resolution
-			const cleanup = () => {
-				this.off("project_ready", onReady);
-				this.off("project_error", onError);
-				this.off("project_removed", onRemoved);
-				if (signal) signal.removeEventListener("abort", onAbort);
-				clearTimeout(timer);
-			};
+				// status === "registering" — wait for resolution
+				const cleanup = () => {
+					this.off("project_ready", onReady);
+					this.off("project_error", onError);
+					this.off("project_removed", onRemoved);
+					if (signal) signal.removeEventListener("abort", onAbort);
+					clearTimeout(timer);
+				};
 
-			const onReady = (readySlug: string, relay: ProjectRelay) => {
-				if (readySlug !== slug) return;
-				cleanup();
-				resolve(relay);
-			};
-			const onError = (errorSlug: string, error: string) => {
-				if (errorSlug !== slug) return;
-				cleanup();
-				reject(new Error(`Project "${slug}" relay failed: ${error}`));
-			};
-			const onRemoved = (removedSlug: string) => {
-				if (removedSlug !== slug) return;
-				cleanup();
-				reject(new Error(`Project "${slug}" was removed`));
-			};
-			const onAbort = () => {
-				cleanup();
-				reject(new Error(`Wait for relay "${slug}" was aborted`));
-			};
+				const onReady = (readySlug: string, relay: ProjectRelay) => {
+					if (readySlug !== slug) return;
+					cleanup();
+					resolve(relay);
+				};
+				const onError = (errorSlug: string, error: string) => {
+					if (errorSlug !== slug) return;
+					cleanup();
+					reject(new Error(`Project "${slug}" relay failed: ${error}`));
+				};
+				const onRemoved = (removedSlug: string) => {
+					if (removedSlug !== slug) return;
+					cleanup();
+					reject(new Error(`Project "${slug}" was removed`));
+				};
+				const onAbort = () => {
+					cleanup();
+					reject(new Error(`Wait for relay "${slug}" was aborted`));
+				};
 
-			this.on("project_ready", onReady);
-			this.on("project_error", onError);
-			this.on("project_removed", onRemoved);
-			if (signal) signal.addEventListener("abort", onAbort, { once: true });
+				this.on("project_ready", onReady);
+				this.on("project_error", onError);
+				this.on("project_removed", onRemoved);
+				if (signal) signal.addEventListener("abort", onAbort, { once: true });
 
-			const timer = setTimeout(() => {
-				cleanup();
-				reject(
-					new Error(`Timed out waiting for relay "${slug}" (${timeoutMs}ms)`),
-				);
-			}, timeoutMs);
-		});
+				const timer = setTimeout(() => {
+					cleanup();
+					reject(
+						new Error(`Timed out waiting for relay "${slug}" (${timeoutMs}ms)`),
+					);
+				}, timeoutMs);
+			}),
+		);
 	}
 
 	// ── Teardown ────────────────────────────────────────────────────────
@@ -424,5 +434,10 @@ export class ProjectRegistry extends EventEmitter<ProjectRegistryEvents> {
 		}
 
 		await Promise.all(stops);
+	}
+
+	override async drain(): Promise<void> {
+		await this.stopAll();
+		await super.drain();
 	}
 }

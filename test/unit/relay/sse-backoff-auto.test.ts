@@ -96,7 +96,9 @@ describe("parseSSEDataAuto — global format", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(result.event!.type).toBe("permission.asked");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result.event!.properties["id"]).toBe("perm-1");
+		expect((result.event!.properties as Record<string, unknown>)["id"]).toBe(
+			"perm-1",
+		);
 	});
 
 	it("normalizes missing properties in payload to empty object", () => {
@@ -129,7 +131,9 @@ describe("parseSSEDataAuto — direct format", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(result.event!.type).toBe("message.part.delta");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result.event!.properties["delta"]).toBe("Hi");
+		expect((result.event!.properties as Record<string, unknown>)["delta"]).toBe(
+			"Hi",
+		);
 	});
 
 	it("normalizes missing properties to empty object", () => {

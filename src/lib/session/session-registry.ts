@@ -3,15 +3,23 @@
 // Replaces the scattered tracking across ws-handler.clientSessions,
 // pollerManager.viewerCounts, and relay-stack viewer management.
 
+import type { Logger } from "../logger.js";
+
 export class SessionRegistry {
 	/** Primary state: clientId → sessionId */
 	private clients = new Map<string, string>();
+	private log: Logger | undefined;
+
+	constructor(log?: Logger) {
+		this.log = log;
+	}
 
 	/** Set which session a client is viewing. Handles switching automatically. */
 	setClientSession(clientId: string, sessionId: string): void {
 		const previous = this.clients.get(clientId);
 		if (previous === sessionId) return; // no-op
 		this.clients.set(clientId, sessionId);
+		this.log?.info(`client=${clientId} registered for session=${sessionId}`);
 	}
 
 	/** Get the session a client is viewing. */
@@ -49,6 +57,11 @@ export class SessionRegistry {
 	removeClient(clientId: string): string | undefined {
 		const sessionId = this.clients.get(clientId);
 		this.clients.delete(clientId);
+		if (sessionId) {
+			this.log?.info(
+				`client=${clientId} unregistered from session=${sessionId}`,
+			);
+		}
 		return sessionId;
 	}
 

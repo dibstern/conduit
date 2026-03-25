@@ -345,6 +345,13 @@ export const validIPCCommand: fc.Arbitrary<IPCCommand> = fc.oneof(
 		enabled: fc.boolean(),
 	}),
 	fc.record({
+		cmd: fc.constant("set_keep_awake_command" as const),
+		command: fc.string({ minLength: 1, maxLength: 50 }),
+		args: fc.array(fc.string({ minLength: 0, maxLength: 30 }), {
+			maxLength: 5,
+		}),
+	}),
+	fc.record({
 		cmd: fc.constant("set_project_title"),
 		slug: fc.string({ minLength: 1, maxLength: 50 }),
 		title: fc.string({ minLength: 0, maxLength: 100 }),
@@ -415,6 +422,7 @@ export const invalidIPCCommand = fc.oneof(
 						"remove_project",
 						"set_pin",
 						"set_keep_awake",
+						"set_keep_awake_command",
 						"set_project_title",
 						"set_agent",
 						"set_model",

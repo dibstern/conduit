@@ -97,7 +97,9 @@ function createMockIO() {
 				getSettingsInfo: () => defaultSettingsInfo(),
 				setPin: vi.fn().mockResolvedValue({ ok: true }),
 				removePin: vi.fn().mockResolvedValue({ ok: true }),
-				setKeepAwake: vi.fn().mockResolvedValue({ ok: true }),
+				setKeepAwake: vi
+					.fn()
+					.mockResolvedValue({ ok: true, supported: true, active: true }),
 				onBack: vi.fn(),
 				isMacOS: false,
 				...overrides,
@@ -304,7 +306,7 @@ describe("detection status: keep awake", () => {
 		await tick();
 	});
 
-	it("hides keep awake on non-macOS", async () => {
+	it("shows keep awake on non-macOS", async () => {
 		const io = createMockIO();
 		void showSettingsMenu(
 			io.opts({
@@ -315,7 +317,7 @@ describe("detection status: keep awake", () => {
 		await tick();
 
 		const text = io.text();
-		expect(text).not.toContain("Keep awake");
+		expect(text).toContain("Keep awake");
 
 		io.stdin.emit("data", "\x03");
 		await tick();
@@ -438,14 +440,15 @@ describe("PIN remove action", () => {
 
 describe("keep awake toggle", () => {
 	it("calls setKeepAwake with toggled value", async () => {
-		const setKeepAwake = vi.fn().mockResolvedValue({ ok: true });
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: true, active: true });
 		const io = createMockIO();
 		let renderCount = 0;
 
 		void showSettingsMenu(
 			io.opts({
 				setKeepAwake,
-				isMacOS: true,
 				getSettingsInfo: () => {
 					renderCount++;
 					if (renderCount > 1) {
@@ -460,7 +463,7 @@ describe("keep awake toggle", () => {
 		);
 		await tick();
 
-		// Items with macOS + no PIN:
+		// Items with no PIN (keep-awake always shown):
 		// 0: Setup notifications
 		// 1: Set PIN
 		// 2: Enable keep awake
@@ -469,6 +472,335 @@ describe("keep awake toggle", () => {
 		await tick(50);
 
 		expect(setKeepAwake).toHaveBeenCalledWith(true);
+	});
+
+	it("shows keep-awake toggle on non-macOS platforms", async () => {
+		const io = createMockIO();
+		void showSettingsMenu(
+			io.opts({
+				isMacOS: false,
+				getSettingsInfo: () => defaultSettingsInfo({ keepAwake: false }),
+			}),
+		);
+		await tick();
+
+		const text = io.text();
+		expect(text).toContain("Enable keep awake");
+
+		io.stdin.emit("data", "\x03");
+		await tick();
+	});
+
+	it("prompts for custom command when supported is false", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Should show the "No keep-awake tool detected" prompt
+		const text = io.text();
+		expect(text).toContain("No keep-awake tool detected");
+		expect(text).toContain("Command");
+
+		// Type a custom command and press Enter
+		await sendKeys(io.stdin, [
+			"c",
+			"a",
+			"f",
+			"f",
+			"e",
+			"i",
+			"n",
+			"a",
+			"t",
+			"e",
+			" ",
+			"-",
+			"d",
+			"i",
+			"\r",
+		]);
+		await tick(100);
+
+		expect(setKeepAwakeCommand).toHaveBeenCalledWith("caffeinate", ["-di"]);
+		// Should re-enable after setting command
+		expect(setKeepAwake).toHaveBeenCalledTimes(2);
+		expect(setKeepAwake).toHaveBeenLastCalledWith(true);
+	});
+
+	// ─── Keep-awake custom command parsing edge cases ───────────────────────
+
+	it("parses command with multiple arguments", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Type: systemd-inhibit --what=idle sleep infinity
+		const cmd = "systemd-inhibit --what=idle sleep infinity";
+		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
+		await tick(100);
+
+		expect(setKeepAwakeCommand).toHaveBeenCalledWith("systemd-inhibit", [
+			"--what=idle",
+			"sleep",
+			"infinity",
+		]);
+	});
+
+	it("parses command with no arguments", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Type just: caffeinate (no args)
+		const cmd = "caffeinate";
+		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
+		await tick(100);
+
+		expect(setKeepAwakeCommand).toHaveBeenCalledWith("caffeinate", []);
+	});
+
+	it("handles extra whitespace between arguments", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Type: "  caffeinate   -d   -i  " (extra whitespace everywhere)
+		const cmd = "  caffeinate   -d   -i  ";
+		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
+		await tick(100);
+
+		// trim() + split(/\s+/) should normalize all whitespace
+		expect(setKeepAwakeCommand).toHaveBeenCalledWith("caffeinate", [
+			"-d",
+			"-i",
+		]);
+	});
+
+	it("handles command with equals-sign arguments", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Type: systemd-inhibit --what=idle --who=conduit
+		const cmd = "systemd-inhibit --what=idle --who=conduit";
+		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
+		await tick(100);
+
+		expect(setKeepAwakeCommand).toHaveBeenCalledWith("systemd-inhibit", [
+			"--what=idle",
+			"--who=conduit",
+		]);
+	});
+
+	it("handles paths as commands", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Type: /usr/bin/caffeinate -di
+		const cmd = "/usr/bin/caffeinate -di";
+		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
+		await tick(100);
+
+		expect(setKeepAwakeCommand).toHaveBeenCalledWith("/usr/bin/caffeinate", [
+			"-di",
+		]);
+	});
+
+	it("disables keep-awake when custom command prompt is skipped", async () => {
+		const setKeepAwake = vi
+			.fn()
+			.mockResolvedValue({ ok: true, supported: false, active: false });
+		const setKeepAwakeCommand = vi.fn().mockResolvedValue({ ok: true });
+		const io = createMockIO();
+		let renderCount = 0;
+
+		void showSettingsMenu(
+			io.opts({
+				setKeepAwake,
+				setKeepAwakeCommand,
+				isMacOS: false,
+				getSettingsInfo: () => {
+					renderCount++;
+					if (renderCount > 1) {
+						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
+					}
+					return defaultSettingsInfo({
+						pinEnabled: false,
+						keepAwake: false,
+					});
+				},
+			}),
+		);
+		await tick();
+
+		// Navigate to "Enable keep awake" (index 2)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+
+		// Press Enter with empty input to skip
+		await sendKeys(io.stdin, ["\r"]);
+		await tick(100);
+
+		// Should disable keep-awake since user skipped
+		expect(setKeepAwakeCommand).not.toHaveBeenCalled();
+		expect(setKeepAwake).toHaveBeenLastCalledWith(false);
 	});
 });
 
@@ -490,11 +822,12 @@ describe("view logs", () => {
 		);
 		await tick();
 
-		// Items with no PIN, non-macOS:
+		// Items with no PIN (keep-awake always shown):
 		// 0: Setup notifications
 		// 1: Set PIN
-		// 2: View logs
-		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		// 2: Enable keep awake
+		// 3: View logs
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
 		await tick();
 
 		const text = io.text();
@@ -525,8 +858,8 @@ describe("view logs", () => {
 		);
 		await tick();
 
-		// Navigate to "View logs" (index 2)
-		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		// Navigate to "View logs" (index 3, keep-awake always shown)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
 		await tick();
 
 		expect(io.text()).toContain("(empty)");
@@ -598,7 +931,7 @@ describe("back navigation", () => {
 	it("selecting visible Back item calls onBack", async () => {
 		const onBack = vi.fn();
 		const io = createMockIO();
-		// non-macOS, no PIN: items = [notifications, set PIN, logs, back] → 4 items
+		// non-macOS, no PIN: items = [notifications, set PIN, keep awake, logs, back] → 5 items
 		const menuPromise = showSettingsMenu(
 			io.opts({
 				onBack,
@@ -609,8 +942,8 @@ describe("back navigation", () => {
 		await tick();
 
 		// Navigate down to last item (Back) and press Enter
-		// Items: notifications(0), set PIN(1), logs(2), back(3)
-		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		// Items: notifications(0), set PIN(1), keep awake(2), logs(3), back(4)
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
 		await menuPromise;
 
 		expect(onBack).toHaveBeenCalledOnce();

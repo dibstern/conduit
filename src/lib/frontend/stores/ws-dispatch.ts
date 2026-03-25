@@ -183,6 +183,105 @@ async function convertHistoryAsync(
 	return result;
 }
 
+// ─── Shared chat-event dispatch ─────────────────────────────────────────────
+// Single dispatch function for ALL chat event types (CACHEABLE_EVENT_TYPES
+// plus `status`). Used by both handleMessage (live) and replayEvents (replay)
+// to eliminate the parallel switch statements that previously diverged subtly.
+
+/** Context passed to dispatchChatEvent to abstract live/replay differences. */
+export interface DispatchContext {
+	/** True when replaying cached events (suppresses notifications). */
+	isReplay: boolean;
+	/** Whether the session is currently processing (queued-flag source).
+	 *  Live: `chatState.processing`. Replay: local `llmActive` tracker. */
+	isQueued: boolean;
+}
+
+/**
+ * Dispatch a single chat event to the appropriate store handler.
+ * Returns `true` if the event was a chat event (handled), `false` otherwise.
+ *
+ * Live vs replay divergences:
+ * - `user_message`: 3rd arg uses `ctx.isQueued` (live: processing, replay: llmActive)
+ * - `tool_result`: TodoWrite side-effect uses `getMessages()` (works for both)
+ * - `done`: notifications fire only when `!ctx.isReplay` and not a subagent
+ * - `error`: live routes through `handleChatError` (PTY/HANDLER/INSTANCE) +
+ *   notifications; replay uses `handleError` directly (those error codes
+ *   never appear in the cache — they're sent via sendToSession, not recordEvent)
+ */
+function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
+	switch (event.type) {
+		case "user_message":
+			addUserMessage(event.text, undefined, ctx.isQueued);
+			return true;
+		case "delta":
+			handleDelta(event);
+			return true;
+		case "thinking_start":
+			handleThinkingStart(event);
+			return true;
+		case "thinking_delta":
+			handleThinkingDelta(event);
+			return true;
+		case "thinking_stop":
+			handleThinkingStop(event);
+			return true;
+		case "tool_start":
+			handleToolStart(event);
+			return true;
+		case "tool_executing":
+			handleToolExecuting(event);
+			return true;
+		case "tool_result":
+			handleToolResult(event);
+			// If this was a TodoWrite result, also update the todo store.
+			// The tool_result has no `name`, so look up the message in chat state.
+			// getMessages() returns the replay batch during replay, chatState.messages live.
+			{
+				const msgs = getMessages();
+				const toolMsg = msgs.find(
+					(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
+				);
+				if (toolMsg?.name === "TodoWrite" && !event.is_error && event.content) {
+					updateTodosFromToolResult(event.content);
+				}
+			}
+			return true;
+		case "result":
+			handleResult(event);
+			return true;
+		case "done": {
+			handleDone(event);
+			if (!ctx.isReplay) {
+				// Only notify for root agent sessions — subagent completions are
+				// intermediate steps; the parent emits its own done when finished.
+				const doneSession = findSession(sessionState.currentId ?? "");
+				if (!doneSession?.parentID) {
+					triggerNotifications(event);
+				}
+			}
+			return true;
+		}
+		case "status":
+			handleStatus(event);
+			return true;
+		case "error":
+			if (ctx.isReplay) {
+				// Replay: route directly to handleError. PTY/HANDLER/INSTANCE
+				// error codes never appear in the cache (they're sent via
+				// sendToSession, not recordEvent), so no routing is needed.
+				handleError(event);
+			} else {
+				// Live: full error routing (PTY, HANDLER, INSTANCE) + notifications.
+				handleChatError(event);
+				triggerNotifications(event);
+			}
+			return true;
+		default:
+			return false;
+	}
+}
+
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
 /**
@@ -190,67 +289,27 @@ async function convertHistoryAsync(
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	// ── Chat events (shared dispatch) ───────────────────────────────────
+	const ctx: DispatchContext = {
+		isReplay: false,
+		isQueued: isProcessing(),
+	};
+	if (dispatchChatEvent(msg, ctx)) {
+		// Queued-flag clearing: gated by shouldClearQueuedOnContent() which
+		// uses turnEpoch to ensure only genuinely NEW turns clear flags.
+		if (isLlmContentStart(msg.type) && shouldClearQueuedOnContent())
+			clearQueuedFlags();
+		return;
+	}
+
+	// ── Live-only chat events (not cacheable, not in replay) ────────────
 	switch (msg.type) {
-		// ─── Chat / Streaming ────────────────────────────────────────────
-		case "delta":
-			handleDelta(msg);
-			break;
-		case "thinking_start":
-			handleThinkingStart(msg);
-			break;
-		case "thinking_delta":
-			handleThinkingDelta(msg);
-			break;
-		case "thinking_stop":
-			handleThinkingStop(msg);
-			break;
-		case "tool_start":
-			handleToolStart(msg);
-			break;
-		case "tool_executing":
-			handleToolExecuting(msg);
-			break;
-		case "tool_result":
-			handleToolResult(msg);
-			// If this was a TodoWrite result, also update the todo store.
-			// The tool_result has no `name`, so look up the message in chat state.
-			{
-				const toolMsg = chatState.messages.find(
-					(m): m is ToolMessage => m.type === "tool" && m.id === msg.id,
-				);
-				if (toolMsg?.name === "TodoWrite" && !msg.is_error && msg.content) {
-					updateTodosFromToolResult(msg.content);
-				}
-			}
-			break;
 		case "tool_content":
 			handleToolContentResponse(msg);
-			break;
-		case "result":
-			handleResult(msg);
-			break;
-		case "done": {
-			handleDone(msg);
-			// Only notify for root agent sessions — subagent completions are
-			// intermediate steps; the parent emits its own done when finished.
-			const doneSession = findSession(sessionState.currentId ?? "");
-			if (!doneSession?.parentID) {
-				triggerNotifications(msg);
-			}
-			break;
-		}
-		case "status":
-			handleStatus(msg);
-			break;
-		case "error":
-			handleChatError(msg);
-			triggerNotifications(msg);
-			break;
-		case "user_message":
-			// From another tab/client — mark as queued if the session is processing
-			addUserMessage(msg.text, undefined, isProcessing());
-			break;
+			return;
+	}
 
+	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_list":
 			handleSessionList(msg);
@@ -299,9 +358,10 @@ export function handleMessage(msg: RelayMessage): void {
 				const historyMsgs = msg.history.messages;
 				const hasMore = msg.history.hasMore;
 				const msgCount = historyMsgs.length;
+				const gen = replayGeneration; // snapshot before async
 				convertHistoryAsync(historyMsgs, renderMarkdown)
 					.then((chatMsgs) => {
-						if (chatMsgs) {
+						if (chatMsgs && gen === replayGeneration) {
 							prependMessages(chatMsgs);
 							seedRegistryFromMessages(chatMsgs);
 							historyState.hasMore = hasMore;
@@ -405,10 +465,12 @@ export function handleMessage(msg: RelayMessage): void {
 			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
 			const rawMessages = historyMsg.messages ?? [];
 			const hasMore = historyMsg.hasMore ?? false;
+			const gen = replayGeneration; // snapshot before async
 			convertHistoryAsync(rawMessages, renderMarkdown)
 				.then((chatMsgs) => {
-					if (chatMsgs) {
+					if (chatMsgs && gen === replayGeneration) {
 						prependMessages(chatMsgs);
+						seedRegistryFromMessages(chatMsgs);
 						historyState.hasMore = hasMore;
 						historyState.messageCount += rawMessages.length;
 					}
@@ -537,13 +599,6 @@ export function handleMessage(msg: RelayMessage): void {
 			log.debug("Unhandled message type:", msg.type, msg);
 			break;
 	}
-
-	// ── Queued-flag clearing ─────────────────────────────────────────
-	// Gated by shouldClearQueuedOnContent(): only clears when turnEpoch
-	// has advanced past the epoch when the queued message was added
-	// (i.e. a `done` event completed the previous turn).
-	if (isLlmContentStart(msg.type) && shouldClearQueuedOnContent())
-		clearQueuedFlags();
 }
 
 // ─── Event Replay (session switch with cached events) ────────────────────────
@@ -583,60 +638,8 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 		else if (event.type === "error" && event.code !== "RETRY")
 			llmActive = false;
 
-		switch (event.type) {
-			case "user_message":
-				addUserMessage(event.text, undefined, llmActive);
-				break;
-			case "delta":
-				handleDelta(event);
-				break;
-			case "done":
-				handleDone(event);
-				break;
-			case "tool_start":
-				handleToolStart(event);
-				break;
-			case "tool_executing":
-				handleToolExecuting(event);
-				break;
-			case "tool_result":
-				handleToolResult(event);
-				// Also update todo store if this was a TodoWrite result
-				{
-					const msgs = getMessages(); // reads from batch during replay
-					const toolMsg = msgs.find(
-						(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
-					);
-					if (
-						toolMsg?.name === "TodoWrite" &&
-						!event.is_error &&
-						event.content
-					) {
-						updateTodosFromToolResult(event.content);
-					}
-				}
-				break;
-			case "result":
-				handleResult(event);
-				break;
-			case "thinking_start":
-				handleThinkingStart(event);
-				break;
-			case "thinking_delta":
-				handleThinkingDelta(event);
-				break;
-			case "thinking_stop":
-				handleThinkingStop(event);
-				break;
-			case "status":
-				handleStatus(event);
-				break;
-			case "error":
-				handleError(event);
-				break;
-			// Skip: session_switched, permission_*, session_list, etc.
-			// These are not part of the chat message stream.
-		}
+		const ctx: DispatchContext = { isReplay: true, isQueued: llmActive };
+		dispatchChatEvent(event, ctx);
 
 		// ── Queued-flag clearing ─────────────────────────────────────────
 		// Same turnEpoch gate as handleMessage().

@@ -9,6 +9,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { StorageMonitor } from "../../../src/lib/daemon/storage-monitor.js";
 import { MessageCache } from "../../../src/lib/relay/message-cache.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
@@ -74,7 +75,7 @@ describe("StorageMonitor → daemon → MessageCache eviction chain (AC8)", () =
 			available: lowSpace,
 		}));
 
-		const monitor = new StorageMonitor({
+		const monitor = new StorageMonitor(new ServiceRegistry(), {
 			path: testDir,
 			thresholdBytes: threshold,
 			intervalMs: 60_000, // Won't fire — we control checks manually
@@ -134,7 +135,7 @@ describe("StorageMonitor → daemon → MessageCache eviction chain (AC8)", () =
 			available: threshold - 1,
 		}));
 
-		const monitor = new StorageMonitor({
+		const monitor = new StorageMonitor(new ServiceRegistry(), {
 			path: testDir,
 			thresholdBytes: threshold,
 			intervalMs: 60_000,
@@ -186,7 +187,7 @@ describe("StorageMonitor → daemon → MessageCache eviction chain (AC8)", () =
 			available: threshold + 1_000_000, // Well above threshold
 		}));
 
-		const monitor = new StorageMonitor({
+		const monitor = new StorageMonitor(new ServiceRegistry(), {
 			path: testDir,
 			thresholdBytes: threshold,
 			intervalMs: 60_000,
@@ -223,7 +224,7 @@ describe("StorageMonitor → daemon → MessageCache eviction chain (AC8)", () =
 			available: threshold - 1,
 		}));
 
-		const monitor = new StorageMonitor({
+		const monitor = new StorageMonitor(new ServiceRegistry(), {
 			path: testDir,
 			thresholdBytes: threshold,
 			intervalMs: 60_000,

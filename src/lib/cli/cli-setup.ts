@@ -43,8 +43,6 @@ export interface SetupOptions {
 		title?: string;
 		lastUsed: number;
 	}>;
-	/** Injectable: is macOS? */
-	isMacOS?: boolean;
 }
 
 // ─── Default Helpers ─────────────────────────────────────────────────────────
@@ -196,7 +194,7 @@ export function printLogo(stdout: Writable): void {
  * 2. Security disclaimer with accept toggle
  * 3. Port prompt (default 2633, validates range + availability)
  * 4. PIN prompt (optional, 4-8 digits)
- * 5. Keep-awake toggle (macOS only)
+ * 5. Keep-awake toggle
  * 6. Restore recent projects (if any exist)
  * 7. Return SetupResult
  */
@@ -204,8 +202,6 @@ export async function runSetup(opts: SetupOptions): Promise<SetupResult> {
 	const { stdout, exit } = opts;
 	const isPortFree = opts.isPortFree ?? defaultIsPortFree;
 	const getRecentProjects = opts.getRecentProjects ?? defaultGetRecentProjects;
-	const isMacOS = opts.isMacOS ?? process.platform === "darwin";
-
 	// Step 1: Logo
 	printLogo(stdout);
 
@@ -266,19 +262,16 @@ export async function runSetup(opts: SetupOptions): Promise<SetupResult> {
 		promptPin(resolve, promptOpts);
 	});
 
-	// Step 6: Keep-awake (macOS only)
-	let keepAwake = false;
-	if (isMacOS) {
-		keepAwake = await new Promise<boolean>((resolve) => {
-			promptToggle(
-				"Keep awake?",
-				"Prevent the system from sleeping while the relay is running",
-				false,
-				resolve,
-				promptOpts,
-			);
-		});
-	}
+	// Step 6: Keep-awake
+	const keepAwake = await new Promise<boolean>((resolve) => {
+		promptToggle(
+			"Keep awake?",
+			"Prevent the system from sleeping while the relay is running",
+			false,
+			resolve,
+			promptOpts,
+		);
+	});
 
 	// Step 7: Restore recent projects
 	const recentProjects = getRecentProjects();

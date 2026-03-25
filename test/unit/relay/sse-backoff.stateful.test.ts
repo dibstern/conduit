@@ -335,7 +335,7 @@ class ParseSSECommand implements fc.Command<ModelState, RealState> {
 			}
 			if (typeof result.event.type !== "string") {
 				throw new Error(
-					`event.type is not string: ${typeof result.event.type}`,
+					`event.type is not string: ${typeof (result.event as Record<string, unknown>)["type"]}`,
 				);
 			}
 		} else {

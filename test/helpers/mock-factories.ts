@@ -216,6 +216,17 @@ export function createMockHandlerDeps(
 		config: createMockConfig(),
 		log: createSilentLogger(),
 		connectPtyUpstream: vi.fn().mockResolvedValue(undefined),
+		statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
+		registry: {
+			hasViewers: vi.fn().mockReturnValue(false),
+			addViewer: vi.fn(),
+			removeClient: vi.fn(),
+		} as unknown as HandlerDeps["registry"],
+		pollerManager: {
+			isPolling: vi.fn().mockReturnValue(true),
+			startPolling: vi.fn(),
+		},
+		forkMeta: { setForkEntry: vi.fn() },
 		...overrides,
 	};
 }

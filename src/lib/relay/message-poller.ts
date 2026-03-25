@@ -7,7 +7,8 @@
 // RelayMessages (delta, tool_start, tool_executing, tool_result, thinking_*,
 // result, done, etc.) that feed into the same cache + broadcast pipeline.
 
-import { EventEmitter } from "node:events";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import { TrackedService } from "../daemon/tracked-service.js";
 import type { Message, OpenCodeClient } from "../instance/opencode-client.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
@@ -444,14 +445,14 @@ export interface MessagePollerOptions {
 	hasViewers?: () => boolean;
 }
 
-export interface MessagePollerEvents {
+export type MessagePollerEvents = {
 	/** Emitted with synthesized streaming events from REST diff */
 	events: [messages: RelayMessage[]];
-}
+};
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
 
-export class MessagePoller extends EventEmitter<MessagePollerEvents> {
+export class MessagePoller extends TrackedService<MessagePollerEvents> {
 	private readonly client: Pick<OpenCodeClient, "getMessages">;
 	private readonly interval: number;
 	private readonly log: Logger;
@@ -476,8 +477,8 @@ export class MessagePoller extends EventEmitter<MessagePollerEvents> {
 	 */
 	private needsReseed = false;
 
-	constructor(options: MessagePollerOptions) {
-		super();
+	constructor(registry: ServiceRegistry, options: MessagePollerOptions) {
+		super(registry);
 		this.client = options.client;
 		this.interval = options.interval ?? POLL_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
@@ -519,22 +520,18 @@ export class MessagePoller extends EventEmitter<MessagePollerEvents> {
 			);
 		}
 
-		this.timer = setInterval(() => {
-			void this.poll();
+		this.timer = this.repeating(() => {
+			this.tracked(this.poll());
 		}, this.interval);
 
-		if (this.timer && typeof this.timer === "object" && "unref" in this.timer) {
-			this.timer.unref();
-		}
-
 		// Immediate first poll
-		void this.poll();
+		this.tracked(this.poll());
 	}
 
 	/** Stop polling and clear state. */
 	stopPolling(): void {
 		if (this.timer) {
-			clearInterval(this.timer);
+			this.clearTrackedTimer(this.timer);
 			this.timer = null;
 		}
 		if (this.activeSessionId) {

@@ -352,22 +352,6 @@ describe("handleViewSession — per-tab session viewing", () => {
 		);
 	});
 
-	it("gracefully handles missing statusPoller (defaults to idle)", async () => {
-		(deps as { statusPoller?: unknown }).statusPoller = undefined;
-
-		await handleViewSession(deps, "client-1", { sessionId: "sess_target" });
-
-		// Should not crash; should send idle since poller is unavailable
-		const statusMsg = sendToCalls.find(
-			(c) =>
-				c.clientId === "client-1" &&
-				(c.msg as Record<string, unknown>)["type"] === "status",
-		);
-		expect(statusMsg).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect((statusMsg!.msg as Record<string, unknown>)["status"]).toBe("idle");
-	});
-
 	it("does nothing when sessionId is empty", async () => {
 		await handleViewSession(deps, "client-1", { sessionId: "" });
 
