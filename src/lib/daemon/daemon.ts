@@ -386,7 +386,7 @@ export class Daemon {
 
 		// Write PID file
 		writePidFile(this.configDir, this.pidPath);
-		this.log.info(`[startup:${elapsed()}] PID file + crash counter done`);
+		this.log.debug(`[startup:${elapsed()}] PID file + crash counter done`);
 
 		// Rehydrate instances from persisted config (so relays can pick them up
 		// before HTTP/IPC servers start).
@@ -470,7 +470,7 @@ export class Daemon {
 			this.keepAwakeArgs = savedConfig.keepAwakeArgs;
 		}
 
-		this.log.info(`[startup:${elapsed()}] Rehydration complete`);
+		this.log.debug(`[startup:${elapsed()}] Rehydration complete`);
 
 		// ── Probe-and-convert: if the "default" instance was created as
 		// unmanaged (via opencodeUrl from CLI), check whether it's actually
@@ -505,7 +505,7 @@ export class Daemon {
 			}
 		}
 
-		this.log.info(`[startup:${elapsed()}] Probe-and-convert done`);
+		this.log.debug(`[startup:${elapsed()}] Probe-and-convert done`);
 
 		// Smart default: if no "default" instance exists (neither from constructor
 		// opencodeUrl nor from rehydrated config), probe localhost:4096 to decide
@@ -547,7 +547,7 @@ export class Daemon {
 			}
 		}
 
-		this.log.info(`[startup:${elapsed()}] Smart default detection done`);
+		this.log.debug(`[startup:${elapsed()}] Smart default detection done`);
 
 		// Auto-start managed default instance (if it was just created by smart
 		// detection or rehydrated from config). Non-fatal if it fails.
@@ -563,7 +563,7 @@ export class Daemon {
 			}
 		}
 
-		this.log.info(`[startup:${elapsed()}] Instance auto-start done`);
+		this.log.debug(`[startup:${elapsed()}] Instance auto-start done`);
 
 		// Start IPC server early so the CLI can send commands while the rest
 		// of the daemon initialises (TLS, HTTP, relays, port scanning).
@@ -573,7 +573,7 @@ export class Daemon {
 		// or the instance_status_changed listener).
 		await this.startIPCServer();
 
-		this.log.info(`[startup:${elapsed()}] IPC server listening`);
+		this.log.debug(`[startup:${elapsed()}] IPC server listening`);
 
 		// Initialize push notification manager (non-fatal if it fails)
 		try {
@@ -587,7 +587,7 @@ export class Daemon {
 			this.pushManager = null;
 		}
 
-		this.log.info(`[startup:${elapsed()}] Push notifications init done`);
+		this.log.debug(`[startup:${elapsed()}] Push notifications init done`);
 
 		// Load TLS certificates when TLS is enabled.
 		// ensureCerts auto-generates via mkcert if available; falls back to HTTP if not.
@@ -665,7 +665,7 @@ export class Daemon {
 
 		// Start HTTP server
 		await this.startHttpServer();
-		this.log.info(`[startup:${elapsed()}] HTTP server listening`);
+		this.log.debug(`[startup:${elapsed()}] HTTP server listening`);
 
 		// Start HTTP onboarding server on port+1 when TLS is active
 		if (this.tlsEnabled) {
@@ -941,7 +941,7 @@ export class Daemon {
 		});
 		this.storageMonitor.start();
 
-		this.log.info(`[startup:${elapsed()}] Daemon fully started`);
+		this.log.info(`Daemon fully started in ${elapsed()}`);
 
 		// Event loop blocking detector — logs when the loop is blocked >50ms
 		let lastTick = Date.now();
@@ -949,7 +949,7 @@ export class Daemon {
 			const now = Date.now();
 			const delta = now - lastTick;
 			if (delta > 100) {
-				this.log.warn(`[eventloop] blocked for ${delta}ms`);
+				this.log.debug(`[eventloop] blocked for ${delta}ms`);
 			}
 			lastTick = now;
 		}, 50);

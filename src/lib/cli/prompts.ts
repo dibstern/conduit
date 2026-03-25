@@ -56,6 +56,8 @@ export interface SelectPromptOptions extends PromptOptions {
 	backItem?: string;
 	hint?: string[];
 	hotkeys?: Map<string, number>;
+	/** Initial selection index (default 0). */
+	defaultIndex?: number;
 }
 
 // ─── promptToggle ────────────────────────────────────────────────────────────
@@ -481,7 +483,7 @@ export function promptSelect<T = string>(
 	opts: SelectPromptOptions,
 ): void {
 	const { stdin, stdout, exit } = opts;
-	let idx = 0;
+	let idx = Math.min(opts.defaultIndex ?? 0, items.length - 1);
 
 	function render(): string {
 		let out = "";

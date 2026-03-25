@@ -68,7 +68,7 @@ function makeHandlers(ctx: DaemonIPCContext) {
 		uptime: 0,
 		port: 3000,
 		host: "127.0.0.1",
-		projectCount: 0,
+		projectCount: 0, sessionCount: 0,
 		clientCount: 0,
 		pinEnabled: false,
 		tlsEnabled: false,
