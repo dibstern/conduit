@@ -51,6 +51,7 @@
 		"storybook:build": "storybook build -o dist/storybook",
 		"test:storybook-visual": "pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts",
 		"test:storybook-visual:update": "pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts --update-snapshots",
+		"generate:media": "tsx scripts/generate-media/index.ts",
 		"check:storybook": "node scripts/check-storybook-health.mjs",
 		"test:all": "pnpm check && pnpm lint && pnpm build && vitest run && vitest run --config vitest.integration.config.ts && vitest run --config vitest.contract.config.ts && npx playwright test --config test/e2e/playwright-replay.config.ts && npx playwright test --config test/e2e/playwright-daemon.config.ts && npx playwright test --config test/e2e/playwright-multi-instance.config.ts && npx playwright test --config test/e2e/playwright-subagent.config.ts && npx playwright test --config test/e2e/playwright-visual.config.ts && pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts",
 		"test:coverage": "vitest run --coverage",

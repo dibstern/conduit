@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conduit — Split View</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #0c0c14;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 24px;
+        height: 100vh;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+
+      .panel {
+        flex: 1;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        border-radius: 12px;
+        border: 1px solid #27272a;
+        background: #18181b;
+        overflow: hidden;
+      }
+
+      .panel-bar {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: #1e1e24;
+        border-bottom: 1px solid #27272a;
+      }
+
+      .dots {
+        display: flex;
+        gap: 6px;
+      }
+
+      .dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .dots span:nth-child(1) {
+        background: #ef4444;
+      }
+
+      .dots span:nth-child(2) {
+        background: #eab308;
+      }
+
+      .dots span:nth-child(3) {
+        background: #22c55e;
+      }
+
+      .url-bar {
+        flex: 1;
+        background: #0a0a0f;
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 11px;
+        color: #71717a;
+        text-align: center;
+      }
+
+      iframe {
+        flex: 1;
+        border: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <div class="panel-bar">
+        <div class="dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="url-bar">localhost:2633/p/saas-landing</div>
+      </div>
+      <iframe id="conduit-frame" src="about:blank" title="Conduit relay"></iframe>
+    </div>
+
+    <div class="panel">
+      <div class="panel-bar">
+        <div class="dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="url-bar">localhost:3000</div>
+      </div>
+      <iframe id="site-frame" src="about:blank" title="Dummy site"></iframe>
+    </div>
+  </body>
+</html>

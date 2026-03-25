@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Acme</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #0a0a0f;
+        color: #e4e4e7;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif,
+          "Apple Color Emoji",
+          "Segoe UI Emoji";
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      /* ── Nav ── */
+      nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 32px;
+        border-bottom: 1px solid #27272a;
+      }
+
+      .logo {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: #fff;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 28px;
+        list-style: none;
+      }
+
+      .nav-links a {
+        color: #a1a1aa;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+        transition: color 0.15s;
+      }
+
+      .nav-links a:hover {
+        color: #e4e4e7;
+      }
+
+      /* ── Main ── */
+      .main-section {
+        padding: 56px 32px;
+        max-width: 720px;
+        margin: 0 auto;
+        text-align: center;
+      }
+
+      .main-section h2 {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        color: #fff;
+        margin-bottom: 12px;
+      }
+
+      .main-section p {
+        font-size: 16px;
+        color: #a1a1aa;
+        max-width: 480px;
+        margin: 0 auto;
+      }
+
+      /* ── Features ── */
+      .features {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        padding: 0 32px 64px;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      .card {
+        background: #18181b;
+        border: 1px solid #27272a;
+        border-radius: 12px;
+        padding: 24px;
+      }
+
+      .card h3 {
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 8px;
+      }
+
+      .card p {
+        font-size: 14px;
+        color: #a1a1aa;
+        line-height: 1.5;
+      }
+
+      /* ── Footer ── */
+      footer {
+        border-top: 1px solid #27272a;
+        padding: 24px 32px;
+        text-align: center;
+        font-size: 13px;
+        color: #52525b;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <span class="logo">Acme</span>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="#docs">Docs</a></li>
+      </ul>
+    </nav>
+
+    <section class="main-section">
+      <h2>Welcome to Acme</h2>
+      <p>
+        The developer platform that helps you build, deploy, and scale your
+        applications without the overhead.
+      </p>
+    </section>
+
+    <section class="features" id="features">
+      <div class="card">
+        <h3>Fast builds</h3>
+        <p>
+          Incremental compilation and smart caching cut build times by up to 10x
+          compared to traditional toolchains.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Edge deploy</h3>
+        <p>
+          Push to 200+ edge locations worldwide with zero-config deployments and
+          instant rollbacks.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Team tools</h3>
+        <p>
+          Built-in review workflows, branch previews, and granular permissions
+          keep your team moving fast.
+        </p>
+      </div>
+    </section>
+
+    <footer>&copy; 2026 Acme, Inc. All rights reserved.</footer>
+  </body>
+</html>
