@@ -12,10 +12,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shouldCache } from "../../../src/lib/relay/event-pipeline.js";
 import { createTranslator } from "../../../src/lib/relay/event-translator.js";
 import { MessageCache } from "../../../src/lib/relay/message-cache.js";
+import {
+	countUniqueMessages,
+	resolveSessionHistory,
+} from "../../../src/lib/session/session-switch.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -294,17 +298,12 @@ describe("Server cache pipeline: events survive session switch", () => {
 		expect(recorded2[0]!.type).toBe("delta"); // Should be thinking_delta, but it's delta
 	});
 
-	it("REGRESSION: cache with partial history preempts REST API full history", () => {
-		// This is the core design issue: the cache only has events from the
-		// relay's lifetime. If a session had prior history (from before the relay
-		// started), the cache is incomplete. But hasChatContent returns true
-		// (cache has some deltas), causing the relay to use cache-only mode
-		// and skip the REST API that would provide full history.
+	it("REGRESSION: stale cache falls back to REST when message count diverges", async () => {
+		// Previously: cache with partial history preempted REST API full history.
+		// Now: resolveSessionHistory validates cache against upstream message count.
 		const activeSession = "session-a";
 
-		// Simulate: session A had 5 turns of conversation BEFORE the relay started.
-		// The relay has NO record of those turns.
-		// Then a new event arrives (turn 6) and gets cached:
+		// Simulate: relay only captured turn 6 (the bug scenario from the original test)
 		cache.recordEvent("session-a", { type: "user_message", text: "Turn 6" });
 		processEvent(
 			makePartDelta("session-a", "p1", "Response to turn 6"),
@@ -313,33 +312,47 @@ describe("Server cache pipeline: events survive session switch", () => {
 			activeSession,
 			extractSessionId,
 		);
-		processEvent(
-			makeSessionStatus("session-a", "idle"),
-			translator,
-			cache,
-			activeSession,
-			extractSessionId,
-		);
 
-		// Now check: what would the relay send on switch-back?
+		// classifyHistorySource still says "cached-events" (has chat content)
 		const events = cache.getEvents("session-a");
 		const hasChatContent =
 			events?.some((e) => e.type === "user_message" || e.type === "delta") ??
 			false;
-
-		// hasChatContent is TRUE — the relay will use cache-only mode
 		expect(hasChatContent).toBe(true);
 
-		// But the cache only has turn 6. Turns 1-5 are GONE.
-		// The relay SHOULD fall back to REST API for full history,
-		// but hasChatContent prevents that.
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const userMessages = events!.filter((e) => e.type === "user_message");
-		expect(userMessages).toHaveLength(1); // Only turn 6
+		// Independently verify countUniqueMessages — cache has 1 user_message +
+		// 1 delta with messageId "msg1" (from makePartDelta) = 2 unique messages
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by hasChatContent assertion above
+		expect(countUniqueMessages(events!)).toBe(2);
 
-		// BUG: The client would only see turn 6, not turns 1-5.
-		// This test documents the design issue — the relay can't distinguish
-		// between a complete cache and a partial one.
+		// But OpenCode has 12 messages (turns 1-6, each with user + assistant)
+		const fullHistory = {
+			messages: Array.from({ length: 12 }, (_, i) => ({
+				id: `m${i}`,
+				role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+			})),
+			hasMore: false,
+			total: 12,
+		};
+
+		// Use the real cache, only mock network-bound calls
+		const result = await resolveSessionHistory("session-a", {
+			messageCache: cache,
+			sessionMgr: {
+				loadPreRenderedHistory: vi.fn().mockResolvedValue(fullHistory),
+			},
+			client: {
+				getMessages: vi.fn().mockResolvedValue([]),
+				getMessageCount: vi.fn().mockResolvedValue(12),
+			},
+			log: { info: vi.fn(), warn: vi.fn() },
+		});
+
+		// Fix: falls back to REST — all 12 messages visible
+		expect(result.kind).toBe("rest-history");
+		if (result.kind === "rest-history") {
+			expect(result.history.total).toBe(12);
+		}
 	});
 
 	it("session.status busy/idle no longer produce cached events (handled by status poller)", () => {
