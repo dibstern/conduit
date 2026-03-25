@@ -655,12 +655,11 @@ describe("Ticket 3.4 — TrackedService drain() integration", () => {
 		let capturedSignal: AbortSignal | undefined;
 		const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
 			capturedSignal = init?.signal ?? undefined;
-			// Simulate a slow response that never resolves on its own
-			return new Promise<Response>((resolve) => {
-				// Resolve only if not aborted — otherwise the abort will reject
+			// Simulate a slow response that rejects on abort
+			return new Promise<Response>((resolve, reject) => {
 				if (capturedSignal) {
 					capturedSignal.addEventListener("abort", () => {
-						// Don't resolve — the abort makes the promise settle via rejection upstream
+						reject(new DOMException("The operation was aborted", "AbortError"));
 					});
 				}
 				// Resolve after a long delay (simulating slow network)

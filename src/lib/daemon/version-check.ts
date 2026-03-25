@@ -272,11 +272,13 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
-	/** Run a check, catching errors and emitting check_error. */
+	/** Run a check, catching errors and emitting check_error. Tracked for drain. */
 	private runCheck(): void {
-		this.check().catch((err: unknown) => {
-			const error = err instanceof Error ? err : new Error(String(err));
-			this.emit("check_error", { error });
-		});
+		this.tracked(
+			this.check().catch((err: unknown) => {
+				const error = err instanceof Error ? err : new Error(String(err));
+				this.emit("check_error", { error });
+			}),
+		);
 	}
 }
