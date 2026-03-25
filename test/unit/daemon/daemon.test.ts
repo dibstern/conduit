@@ -1558,7 +1558,8 @@ describe("Ticket 3.1 — Daemon Process", () => {
 			// pinEnabled should now be true
 			expect(d.getStatus().pinEnabled).toBe(true);
 
-			// Config should reflect the pin hash
+			// Flush async config save before reading the file
+			await d.flushConfigSave();
 			const config = loadDaemonConfig(tmpDir);
 			expect(config).not.toBeNull();
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -1591,7 +1592,8 @@ describe("Ticket 3.1 — Daemon Process", () => {
 			// keepAwake should now be true
 			expect(d.getStatus().keepAwake).toBe(true);
 
-			// Config should reflect the change
+			// Flush async config save before reading the file
+			await d.flushConfigSave();
 			const config = loadDaemonConfig(tmpDir);
 			expect(config).not.toBeNull();
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -2800,6 +2802,10 @@ describe("addProject with instanceId", () => {
 		await d.start();
 		await d.addProject("/tmp/test-project-persist", undefined, "default");
 
+		// Wait for any background config saves (e.g. from discoverProjects)
+		await new Promise((r) => setTimeout(r, 50));
+		await d.flushConfigSave();
+
 		const config = loadDaemonConfig(tmpDir);
 		expect(config).not.toBeNull();
 		// discoverProjects runs async on start(), so other projects may exist
@@ -2876,7 +2882,7 @@ describe("instance rehydration on daemon restart", () => {
 		const { saveDaemonConfig } = await import(
 			"../../../src/lib/daemon/config-persistence.js"
 		);
-		saveDaemonConfig(
+		await saveDaemonConfig(
 			{
 				pid: 0,
 				port: 2633,
@@ -2928,7 +2934,7 @@ describe("instance rehydration on daemon restart", () => {
 		const { saveDaemonConfig } = await import(
 			"../../../src/lib/daemon/config-persistence.js"
 		);
-		saveDaemonConfig(
+		await saveDaemonConfig(
 			{
 				pid: 0,
 				port: 2633,
@@ -2967,7 +2973,7 @@ describe("instance rehydration on daemon restart", () => {
 		const { saveDaemonConfig } = await import(
 			"../../../src/lib/daemon/config-persistence.js"
 		);
-		saveDaemonConfig(
+		await saveDaemonConfig(
 			{
 				pid: 0,
 				port: 2633,
@@ -3011,7 +3017,7 @@ describe("instance rehydration on daemon restart", () => {
 			url: `http://host${i}:${5000 + i}`,
 		}));
 
-		saveDaemonConfig(
+		await saveDaemonConfig(
 			{
 				pid: 0,
 				port: 2633,
@@ -3044,7 +3050,7 @@ describe("instance rehydration on daemon restart", () => {
 		const { saveDaemonConfig } = await import(
 			"../../../src/lib/daemon/config-persistence.js"
 		);
-		saveDaemonConfig(
+		await saveDaemonConfig(
 			{
 				pid: 0,
 				port: 2633,

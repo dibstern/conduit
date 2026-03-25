@@ -122,11 +122,12 @@ describe("recordEvent + getEvents", () => {
 // ─── JSONL file persistence ─────────────────────────────────────────────────
 
 describe("JSONL file persistence", () => {
-	it("writes events to a .jsonl file on disk", () => {
+	it("writes events to a .jsonl file on disk", async () => {
 		const cache = new MessageCache(testDir);
 
 		cache.recordEvent("session-a", { type: "delta", text: "hello" });
 		cache.recordEvent("session-a", { type: "done", code: 0 });
+		await cache.flush();
 
 		const filePath = join(testDir, "session-a.jsonl");
 		expect(existsSync(filePath)).toBe(true);
@@ -140,14 +141,16 @@ describe("JSONL file persistence", () => {
 		expect(JSON.parse(lines[1]!)).toEqual({ type: "done", code: 0 });
 	});
 
-	it("appends each event as a new line (not rewriting)", () => {
+	it("appends each event as a new line (not rewriting)", async () => {
 		const cache = new MessageCache(testDir);
 
 		cache.recordEvent("s1", { type: "delta", text: "a" });
+		await cache.flush();
 		const contentAfterFirst = readFileSync(join(testDir, "s1.jsonl"), "utf8");
 		expect(contentAfterFirst.trim().split("\n")).toHaveLength(1);
 
 		cache.recordEvent("s1", { type: "delta", text: "b" });
+		await cache.flush();
 		const contentAfterSecond = readFileSync(join(testDir, "s1.jsonl"), "utf8");
 		expect(contentAfterSecond.trim().split("\n")).toHaveLength(2);
 	});
@@ -317,10 +320,11 @@ describe("session isolation", () => {
 // ─── remove ─────────────────────────────────────────────────────────────────
 
 describe("remove", () => {
-	it("clears memory and deletes file", () => {
+	it("clears memory and deletes file", async () => {
 		const cache = new MessageCache(testDir);
 
 		cache.recordEvent("to-delete", { type: "delta", text: "gone" });
+		await cache.flush();
 		expect(existsSync(join(testDir, "to-delete.jsonl"))).toBe(true);
 
 		cache.remove("to-delete");
@@ -489,10 +493,11 @@ describe("evictOldestSession", () => {
 		expect(after).toBeLessThan(before);
 	});
 
-	it("also removes the JSONL file from disk", () => {
+	it("also removes the JSONL file from disk", async () => {
 		const cache = new MessageCache(testDir);
 
 		cache.recordEvent("s1", { type: "delta", text: "data" });
+		await cache.flush();
 		expect(existsSync(join(testDir, "s1.jsonl"))).toBe(true);
 
 		cache.evictOldestSession();

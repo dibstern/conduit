@@ -7,16 +7,9 @@
 //   - Append-only JSONL files (crash-safe, O(1) per event)
 //   - Fallback chain: memory → file → null (caller uses REST API)
 
-import {
-	appendFileSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { formatErrorDetail } from "../errors.js";
 import type { RelayMessage } from "../types.js";
 
 /** Maximum events per session before eviction. */
@@ -234,23 +227,35 @@ export class MessageCache {
 		return events.length > 0 ? events : null;
 	}
 
-	private appendToFile(sessionId: string, event: RelayMessage): FileOpResult {
-		try {
-			appendFileSync(this.filePath(sessionId), `${JSON.stringify(event)}\n`);
-			return { ok: true };
-		} catch (err) {
-			return { ok: false, error: formatErrorDetail(err) };
-		}
+	/** Per-session write chains to serialize file I/O and preserve order. */
+	private writeChains = new Map<string, Promise<void>>();
+
+	private appendToFile(sessionId: string, event: RelayMessage): void {
+		const prev = this.writeChains.get(sessionId) ?? Promise.resolve();
+		const next = prev
+			.then(() =>
+				appendFile(this.filePath(sessionId), `${JSON.stringify(event)}\n`),
+			)
+			.catch(() => {
+				// Best-effort persistence — memory cache is the primary source
+			});
+		this.writeChains.set(sessionId, next);
 	}
 
 	/** Rewrite the JSONL file with only the given events (after eviction). */
-	private rewriteFile(sessionId: string, events: RelayMessage[]): FileOpResult {
-		try {
-			const content = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
-			writeFileSync(this.filePath(sessionId), content);
-			return { ok: true };
-		} catch (err) {
-			return { ok: false, error: formatErrorDetail(err) };
-		}
+	private rewriteFile(sessionId: string, events: RelayMessage[]): void {
+		const content = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
+		const prev = this.writeChains.get(sessionId) ?? Promise.resolve();
+		const next = prev
+			.then(() => writeFile(this.filePath(sessionId), content))
+			.catch(() => {
+				// Best-effort persistence — memory cache is the primary source
+			});
+		this.writeChains.set(sessionId, next);
+	}
+
+	/** Wait for all pending file writes to complete. */
+	async flush(): Promise<void> {
+		await Promise.all(this.writeChains.values());
 	}
 }

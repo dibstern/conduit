@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -102,9 +103,9 @@ describe("loadDaemonConfig", () => {
 // ─── saveDaemonConfig ───────────────────────────────────────────────────────
 
 describe("saveDaemonConfig", () => {
-	it("writes valid JSON that can be loaded back", () => {
+	it("writes valid JSON that can be loaded back", async () => {
 		const config = makeSampleConfig({ pid: 42, debug: true });
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 
 		const raw = readFileSync(join(tempDir, "daemon.json"), "utf-8");
 		const parsed = JSON.parse(raw);
@@ -112,26 +113,30 @@ describe("saveDaemonConfig", () => {
 		expect(parsed.debug).toBe(true);
 	});
 
-	it("creates directory if it doesn't exist", () => {
+	it("creates directory if it doesn't exist", async () => {
 		const nestedDir = join(tempDir, "a", "b", "c");
 		expect(existsSync(nestedDir)).toBe(false);
 
-		saveDaemonConfig(makeSampleConfig(), nestedDir);
+		await saveDaemonConfig(makeSampleConfig(), nestedDir);
 
 		expect(existsSync(nestedDir)).toBe(true);
 		expect(existsSync(join(nestedDir, "daemon.json"))).toBe(true);
 	});
 
-	it("atomic write: tmp file is cleaned up", () => {
-		saveDaemonConfig(makeSampleConfig(), tempDir);
+	it("atomic write: tmp file is cleaned up", async () => {
+		await saveDaemonConfig(makeSampleConfig(), tempDir);
 
-		// The .tmp file should not remain after a successful write
-		expect(existsSync(join(tempDir, ".daemon.json.tmp"))).toBe(false);
+		// No tmp files should remain after a successful write
+		const files = readdirSync(tempDir);
+		const tmpFiles = files.filter((f: string) =>
+			f.startsWith(".daemon.json.tmp"),
+		);
+		expect(tmpFiles).toHaveLength(0);
 		// The final file should exist
 		expect(existsSync(join(tempDir, "daemon.json"))).toBe(true);
 	});
 
-	it("round-trip: save then load returns same data", () => {
+	it("round-trip: save then load returns same data", async () => {
 		const config = makeSampleConfig({
 			pid: 7777,
 			port: 8080,
@@ -150,7 +155,7 @@ describe("saveDaemonConfig", () => {
 			],
 		});
 
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 
 		expect(loaded).toEqual(config);
@@ -352,7 +357,7 @@ describe("syncRecentProjects", () => {
 // ─── DaemonConfig with instances ────────────────────────────────────────────
 
 describe("DaemonConfig with instances", () => {
-	it("saves and loads config with instances array", () => {
+	it("saves and loads config with instances array", async () => {
 		const config: DaemonConfig = {
 			pid: 1234,
 			port: 2633,
@@ -372,7 +377,7 @@ describe("DaemonConfig with instances", () => {
 				},
 			],
 		};
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 		expect(loaded).not.toBeNull();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -383,7 +388,7 @@ describe("DaemonConfig with instances", () => {
 		expect(inst.env).toEqual({ ANTHROPIC_API_KEY: "sk-test" });
 	});
 
-	it("loads config without instances array (backward compat)", () => {
+	it("loads config without instances array (backward compat)", async () => {
 		const config: DaemonConfig = {
 			pid: 1234,
 			port: 2633,
@@ -394,14 +399,14 @@ describe("DaemonConfig with instances", () => {
 			dangerouslySkipPermissions: false,
 			projects: [],
 		};
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 		expect(loaded).not.toBeNull();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(loaded!.instances).toBeUndefined();
 	});
 
-	it("saves config with project instanceId bindings", () => {
+	it("saves config with project instanceId bindings", async () => {
 		const config: DaemonConfig = {
 			pid: 1234,
 			port: 2633,
@@ -420,7 +425,7 @@ describe("DaemonConfig with instances", () => {
 			],
 			instances: [],
 		};
-		saveDaemonConfig(config, tempDir);
+		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		expect(loaded!.projects[0]!.instanceId).toBe("personal");

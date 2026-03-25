@@ -184,6 +184,7 @@ export class Daemon {
 	private startTime: number = Date.now();
 	private clientCount = 0;
 	private shuttingDown = false;
+	private _eventLoopTimer: ReturnType<typeof setInterval> | null = null;
 
 	// Enhanced daemon fields (Ticket 8.7)
 	private pinHash: string | null;
@@ -828,7 +829,7 @@ export class Daemon {
 
 		// Clear any previous crash info and save config (Ticket 8.7)
 		clearCrashInfo(this.configDir);
-		saveDaemonConfig(this.buildConfig(), this.configDir);
+		await saveDaemonConfig(this.buildConfig(), this.configDir);
 
 		// Start version checker (non-fatal if it fails)
 		this.versionChecker = new VersionChecker({
@@ -875,6 +876,18 @@ export class Daemon {
 		this.storageMonitor.start();
 
 		this.log.info(`[startup:${elapsed()}] Daemon fully started`);
+
+		// Event loop blocking detector — logs when the loop is blocked >50ms
+		let lastTick = Date.now();
+		this._eventLoopTimer = setInterval(() => {
+			const now = Date.now();
+			const delta = now - lastTick;
+			if (delta > 100) {
+				this.log.warn(`[eventloop] blocked for ${delta}ms`);
+			}
+			lastTick = now;
+		}, 50);
+		this._eventLoopTimer.unref(); // Don't prevent process exit
 	}
 
 	/** Gracefully stop the daemon */
@@ -884,6 +897,10 @@ export class Daemon {
 
 		// Remove signal handlers
 		removeSignalHandlers();
+
+		// Stop event loop monitor
+		if (this._eventLoopTimer) clearInterval(this._eventLoopTimer);
+		this._eventLoopTimer = null;
 
 		// Stop version checker
 		this.versionChecker?.stop();
@@ -901,8 +918,9 @@ export class Daemon {
 		this.scanner?.stop();
 		this.scanner = null;
 
-		// Persist final config so instances survive restart (Fix #11)
-		saveDaemonConfig(this.buildConfig(), this.configDir);
+		// Wait for any in-flight config save, then persist final config (Fix #11)
+		await this.flushConfigSave();
+		await saveDaemonConfig(this.buildConfig(), this.configDir);
 
 		// Stop all relay pipelines via registry
 		await this.registry.stopAll();
@@ -1000,6 +1018,9 @@ export class Daemon {
 			this.configDir,
 		);
 
+		// Wait for the config save triggered by project_added event
+		await this.flushConfigSave();
+
 		return project;
 	}
 
@@ -1024,6 +1045,9 @@ export class Daemon {
 			})),
 			this.configDir,
 		);
+
+		// Wait for the config save triggered by project removal events
+		await this.flushConfigSave();
 	}
 
 	/** Get all registered projects */
@@ -1236,8 +1260,34 @@ export class Daemon {
 		};
 	}
 
+	private _pendingSave: Promise<void> | null = null;
+	private _needsResave = false;
+
+	/**
+	 * Persist config asynchronously with coalescing: rapid calls are batched
+	 * into a single write. The latest config snapshot is always used.
+	 */
 	private persistConfig(): void {
-		saveDaemonConfig(this.buildConfig(), this.configDir);
+		if (this._pendingSave) {
+			this._needsResave = true;
+			return;
+		}
+		this._pendingSave = saveDaemonConfig(this.buildConfig(), this.configDir)
+			.catch(() => {
+				// Best-effort — log but don't crash
+			})
+			.finally(() => {
+				this._pendingSave = null;
+				if (this._needsResave) {
+					this._needsResave = false;
+					this.persistConfig();
+				}
+			});
+	}
+
+	/** Wait for any in-flight config save to complete. */
+	async flushConfigSave(): Promise<void> {
+		if (this._pendingSave) await this._pendingSave;
 	}
 
 	// ─── Private: Context adapters ─────────────────────────────────────────

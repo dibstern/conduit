@@ -4,13 +4,8 @@
 // ~/.conduit/crash.json. Uses atomic writes (tmp + rename) for
 // daemon.json to prevent corruption.
 
-import {
-	mkdirSync,
-	readFileSync,
-	renameSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { DEFAULT_CONFIG_DIR } from "../env.js";
@@ -95,17 +90,17 @@ export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 	}
 }
 
-/** Atomic write: write to .daemon.json.tmp then rename to daemon.json. */
-export function saveDaemonConfig(
+/** Atomic write: write to a unique tmp file then rename to daemon.json. */
+export async function saveDaemonConfig(
 	config: DaemonConfig,
 	configDir?: string,
-): void {
+): Promise<void> {
 	const dir = resolveDir(configDir);
 	ensureDir(dir);
-	const tmpPath = join(dir, ".daemon.json.tmp");
+	const tmpPath = join(dir, `.daemon.json.tmp.${process.pid}.${Date.now()}`);
 	const finalPath = join(dir, "daemon.json");
-	writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
-	renameSync(tmpPath, finalPath);
+	await writeFile(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+	await rename(tmpPath, finalPath);
 }
 
 /** Remove daemon.json, relay.sock, and daemon.pid. Ignores ENOENT. */
