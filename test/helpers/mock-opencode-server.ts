@@ -207,6 +207,21 @@ export class MockOpenCodeServer {
 	}
 
 	/**
+	 * Override the response for a specific exact endpoint.
+	 * Replaces the entire queue for that key with a single sticky response
+	 * (never consumed — always returns the same response).
+	 */
+	setExactResponse(
+		method: string,
+		path: string,
+		status: number,
+		responseBody: unknown,
+	): void {
+		const key = `${method} ${path}`;
+		this.exactQueues.set(key, [{ status, responseBody, sseBatch: [] }]);
+	}
+
+	/**
 	 * Emit a synthetic SSE event to all connected SSE clients.
 	 * Use in tests that need a specific event without depending on
 	 * the recording's SSE batch associations.
