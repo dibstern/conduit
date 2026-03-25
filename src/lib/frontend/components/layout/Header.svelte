@@ -12,7 +12,7 @@
 		togglePanel,
 	} from "../../stores/ui.svelte.js";
 	import { wsState, wsSend } from "../../stores/ws.svelte.js";
-	import { togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
+	import { terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
 	import { getCurrentSlug, navigate } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import {
@@ -90,6 +90,15 @@
 	function handleManageInstances() {
 		instanceSelectorOpen = false;
 		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
+	}
+
+	function handleTerminalToggle() {
+		const wasOpen = terminalState.panelOpen;
+		toggleTerminalPanel(wsSend);
+		// On mobile: maximize terminal so it doesn't clash with chat content
+		if (!wasOpen && window.innerWidth <= 768) {
+			window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
+		}
 	}
 </script>
 
@@ -201,7 +210,7 @@
 			id="header-terminal-btn"
 			class="header-icon-btn"
 			title="Toggle terminal"
-			onclick={() => toggleTerminalPanel(wsSend)}
+			onclick={handleTerminalToggle}
 		>
 			<Icon name="square-terminal" size={15} />
 		</button>
