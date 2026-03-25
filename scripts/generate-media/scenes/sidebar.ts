@@ -8,7 +8,7 @@ import {
 	waitForIcons,
 } from "../../../test/e2e/helpers/visual-helpers.js";
 import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
-import { sidebarInit } from "../fixtures/media-state.js";
+import { mainUiTurn1, sidebarInit } from "../fixtures/media-state.js";
 import type { SceneDefinition } from "../scene-runner.js";
 
 export const sidebarScene: SceneDefinition = {
@@ -23,7 +23,12 @@ export const sidebarScene: SceneDefinition = {
 		await phase("setup-ws-mock", async () => {
 			await mockRelayWebSocket(page, {
 				initMessages: sidebarInit,
-				responses: new Map(),
+				responses: new Map([
+					[
+						"Build me a landing page with a hero section, features grid, and footer",
+						mainUiTurn1,
+					],
+				]),
 			});
 		});
 
@@ -43,6 +48,25 @@ export const sidebarScene: SceneDefinition = {
 				.waitFor({ state: "visible", timeout: 5000 });
 		});
 
+		await phase("send-message", async () => {
+			const input = page.locator("textarea").first();
+			await input.fill(
+				"Build me a landing page with a hero section, features grid, and footer",
+			);
+			await page.keyboard.press("Enter");
+		});
+
+		await assert("response-rendered", async () => {
+			await page
+				.locator("[data-tool-id]")
+				.first()
+				.waitFor({ state: "visible", timeout: 10_000 });
+			await page.waitForFunction(
+				() => !document.querySelector("[data-status='processing']"),
+				{ timeout: 10_000 },
+			);
+		});
+
 		await assert("sidebar-visible", async () => {
 			await page
 				.locator("#sidebar")
@@ -50,7 +74,6 @@ export const sidebarScene: SceneDefinition = {
 		});
 
 		await assert("session-list-populated", async () => {
-			// Wait for session items to render in the sidebar
 			await page
 				.locator("#session-list [data-session-id]")
 				.first()

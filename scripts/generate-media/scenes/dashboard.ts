@@ -14,7 +14,7 @@ export const dashboardScene: SceneDefinition = {
 	config: {
 		name: "dashboard",
 		outputFile: "GENERATE-DASHBOARD.png",
-		viewport: { width: 1440, height: 900 },
+		viewport: { width: 1440, height: 560 },
 		animated: false,
 	},
 
