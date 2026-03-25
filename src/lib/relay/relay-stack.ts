@@ -821,8 +821,7 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
-			// relayTimers are cleaned up by the service registry drain —
-			// no manual clearInterval needed.
+			await relayTimers.drain();
 			statusPoller.stop();
 			pollerManager.stopAll();
 			overrides.dispose();
