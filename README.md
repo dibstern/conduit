@@ -304,7 +304,9 @@ graph LR
 
 ## Disclaimer
 
-Independent project. Not affiliated with the OpenCode project or its authors.
+Independent project. Not affiliated with the OpenCode project or its authors. 
+
+Conduit is provided "as is" without warranty of any kind. Users are responsible for complying with the terms of service of underlying AI providers (e.g., Anthropic, OpenAI) and all applicable terms of any third-party services. Features such as multi-user mode are experimental and may involve sharing access to API-based services. Before enabling such features, review your provider's usage policies regarding account sharing, acceptable use, and any applicable rate limits or restrictions. The authors assume no liability for misuse or violations arising from the use of this software.
 
 ## License
 
