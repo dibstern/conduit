@@ -117,6 +117,28 @@ export function countUniqueMessages(events: readonly RelayMessage[]): number {
 }
 
 /**
+ * If session is idle and cached events lack a `done` event, append a synthetic one.
+ * Matches the shape used by monitoring-wiring.ts and message-poller.ts.
+ * Pure function — returns a new source or the original unchanged.
+ */
+export function patchMissingDone(
+	source: SessionHistorySource,
+	statusPoller: SessionSwitchDeps["statusPoller"],
+	sessionId: string,
+): SessionHistorySource {
+	if (source.kind !== "cached-events") return source;
+	if (statusPoller?.isProcessing(sessionId)) return source;
+
+	const hasDone = source.events.some((e) => e.type === "done");
+	if (hasDone) return source;
+
+	return {
+		kind: "cached-events",
+		events: [...source.events, { type: "done", code: 0 }],
+	};
+}
+
+/**
  * Build a session_switched message from resolved history source.
  * Pure function — no side effects, no I/O.
  *
@@ -237,9 +259,12 @@ export async function switchClientToSession(
 		? { kind: "empty" }
 		: await resolveSessionHistory(sessionId, deps);
 
+	// Patch missing done event for idle sessions served from cache
+	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId);
+
 	// Build and send session_switched
 	const draft = deps.getInputDraft(sessionId);
-	const message = buildSessionSwitchedMessage(sessionId, source, {
+	const message = buildSessionSwitchedMessage(sessionId, patchedSource, {
 		...(draft ? { draft } : {}),
 		...(options?.requestId != null ? { requestId: options.requestId } : {}),
 	});

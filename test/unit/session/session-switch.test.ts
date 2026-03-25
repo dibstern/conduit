@@ -460,7 +460,9 @@ describe("switchClientToSession", () => {
 			([, msg]) => (msg as { type: string }).type === "session_switched",
 		);
 		expect(switchMsg).toBeDefined();
-		expect((switchMsg?.[1] as { events?: unknown }).events).toEqual(events);
+		// Session is idle and cache has no done — synthetic done is appended
+		const sentEvents = (switchMsg?.[1] as { events?: RelayMessage[] }).events;
+		expect(sentEvents).toEqual([...events, { type: "done", code: 0 }]);
 	});
 
 	it("sends session_switched with REST history on cache miss", async () => {
@@ -686,5 +688,93 @@ describe("switchClientToSession", () => {
 		);
 		expect(switchMsg).toBeDefined();
 		expect("inputText" in (switchMsg?.[1] ?? {})).toBe(false);
+	});
+
+	it("appends synthetic done to cached-events when session is idle and cache lacks done", async () => {
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "hi" },
+		];
+		const deps = createFullDeps({
+			messageCache: { getEvents: vi.fn().mockReturnValue(events) },
+			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
+		});
+
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
+		const switchMsg = calls.find(
+			([, msg]) => (msg as { type: string }).type === "session_switched",
+		);
+		expect(switchMsg).toBeDefined();
+		const payload = switchMsg?.[1] as { events?: RelayMessage[] };
+		// Last event should be synthetic done
+		const lastEvent = payload.events?.[payload.events.length - 1];
+		expect(lastEvent).toEqual({ type: "done", code: 0 });
+	});
+
+	it("does NOT append done when session is processing", async () => {
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "thinking..." },
+		];
+		const deps = createFullDeps({
+			messageCache: { getEvents: vi.fn().mockReturnValue(events) },
+			statusPoller: { isProcessing: vi.fn().mockReturnValue(true) },
+		});
+
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
+		const switchMsg = calls.find(
+			([, msg]) => (msg as { type: string }).type === "session_switched",
+		);
+		const payload = switchMsg?.[1] as { events?: RelayMessage[] };
+		const doneEvents = payload.events?.filter((e) => e.type === "done") ?? [];
+		expect(doneEvents).toHaveLength(0);
+	});
+
+	it("does NOT append done when cache already has one", async () => {
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "hi" },
+			{ type: "done", code: 0 },
+		];
+		const deps = createFullDeps({
+			messageCache: { getEvents: vi.fn().mockReturnValue(events) },
+			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
+		});
+
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
+		const switchMsg = calls.find(
+			([, msg]) => (msg as { type: string }).type === "session_switched",
+		);
+		const payload = switchMsg?.[1] as { events?: RelayMessage[] };
+		const doneEvents = payload.events?.filter((e) => e.type === "done") ?? [];
+		expect(doneEvents).toHaveLength(1); // Original only, no duplicate
+	});
+
+	it("appends synthetic done when statusPoller is undefined (assumes idle)", async () => {
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "hi" },
+		];
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		const { statusPoller, ...rest } = createFullDeps({
+			messageCache: { getEvents: vi.fn().mockReturnValue(events) },
+		});
+		const deps = rest as SessionSwitchDeps;
+
+		await switchClientToSession(deps, "c1", "ses_1");
+
+		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
+		const switchMsg = calls.find(
+			([, msg]) => (msg as { type: string }).type === "session_switched",
+		);
+		const payload = switchMsg?.[1] as { events?: RelayMessage[] };
+		const lastEvent = payload.events?.[payload.events.length - 1];
+		expect(lastEvent).toEqual({ type: "done", code: 0 });
 	});
 });

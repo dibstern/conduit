@@ -71,7 +71,8 @@ describe("handleClientConnected — session with cached events", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
-			events: cachedEvents,
+			// Session is idle and cache has no done — synthetic done is appended
+			events: [...cachedEvents, { type: "done", code: 0 }],
 		});
 	});
 
