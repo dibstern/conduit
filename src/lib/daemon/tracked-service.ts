@@ -62,6 +62,11 @@ export abstract class TrackedService<
 		this._tracker.clearTimer(id);
 	}
 
+	/** Exposes the tracker's AbortSignal for subclasses that call standalone functions. */
+	protected get abortSignal(): AbortSignal {
+		return this._tracker.signal;
+	}
+
 	/** Cancel all work and wait for in-flight operations to settle. */
 	async drain(): Promise<void> {
 		await this._tracker.drain();
