@@ -1,18 +1,13 @@
 # Conduit
 
-[![CI](https://github.com/dibstern/conduit/actions/workflows/ci.yml/badge.svg)](https://github.com/dibstern/conduit/actions/workflows/ci.yml)
-
 <p align="center">
   <img src="media/GENERATE-MAIN-UI.png"
        alt="Conduit — OpenCode web UI open in a mobile browser" width="320">
 </p>
 
-> Web UI relay for [OpenCode](https://opencode.ai). Browser access from any
-> device on your network. Push notifications when approval is needed.
+<h3 align="center">Browser UI for OpenCode. Any device, one command.</h3>
 
-```bash
-npx conduit-code
-```
+[![CI](https://github.com/dibstern/conduit/actions/workflows/ci.yml/badge.svg)](https://github.com/dibstern/conduit/actions/workflows/ci.yml) [![npm version](https://img.shields.io/npm/v/conduit-code)](https://www.npmjs.com/package/conduit-code) [![npm downloads](https://img.shields.io/npm/dw/conduit-code)](https://www.npmjs.com/package/conduit-code) [![GitHub stars](https://img.shields.io/github/stars/dibstern/conduit)](https://github.com/dibstern/conduit) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dibstern/conduit/blob/main/LICENSE)
 
 Conduit connects to `opencode serve` and streams your session to a browser.
 Phone, tablet, desktop — anything on your local network. Scan the QR code. Done.
@@ -20,6 +15,27 @@ Phone, tablet, desktop — anything on your local network. Scan the QR code. Don
 The part worth setting up for: when OpenCode needs permission to run something,
 you get a push notification. Tap Allow. OpenCode continues. You don't need to
 be at your desk.
+
+---
+
+## Getting started
+
+```bash
+# Requires: opencode serve (running on port 4096)
+npx conduit-code
+```
+
+<p align="center">
+  <img src="media/GENERATE-SETUP.gif"
+       alt="Conduit first-run setup wizard with QR code" width="280">
+</p>
+
+First run opens a setup wizard: set a port and PIN, optionally enable HTTPS,
+scan the QR code with your phone. About two minutes.
+
+For access beyond your local network, [Tailscale](https://tailscale.com) is
+the cleanest option — encrypted tunnel, no port forwarding, free for personal
+use.
 
 ---
 
@@ -71,24 +87,38 @@ The daemon stays running after the terminal closes — sessions survive.
 
 ---
 
-## Getting started
+## Why Conduit?
 
-```bash
-# Requires: opencode serve (running on port 4096)
-npx conduit-code
-```
+| | tmux / SSH | ntfy / Pushover hooks | ngrok / tunnel | **Conduit** |
+|---|---|---|---|---|
+| Mobile UI | ❌ Raw terminal | ❌ Alert only | ❌ Raw terminal | ✅ Full GUI |
+| Push notifications | ❌ | ✅ | ❌ | ✅ |
+| One-tap approval | ❌ | ❌ No action UI | ❌ | ✅ |
+| Stays on your network | ✅ | ✅ | ❌ Third-party relay | ✅ |
+| Multi-project | ❌ | ❌ | ❌ | ✅ |
+| PWA / home screen | ❌ | ❌ | ❌ | ✅ |
 
-<p align="center">
-  <img src="media/GENERATE-SETUP.gif"
-       alt="Conduit first-run setup wizard with QR code" width="280">
-</p>
+<details>
+<summary>Detailed comparisons</summary>
 
-First run opens a setup wizard: set a port and PIN, optionally enable HTTPS,
-scan the QR code with your phone. About two minutes.
+**Why not tmux + Termius?**
+No push notifications. No way to approve OpenCode permissions without switching
+back to the terminal. Raw terminal on a phone is painful to navigate.
 
-For access beyond your local network, [Tailscale](https://tailscale.com) is
-the cleanest option — encrypted tunnel, no port forwarding, free for personal
-use.
+**Why not adding notification hooks?**
+Hooks with ntfy or Pushover get you alerts, but when the notification arrives
+there's no approval UI — you're back in a terminal. Conduit gives you the
+notification and the one-tap response in the same place.
+
+**Why not ngrok or a tunnel service?**
+Third-party servers see your traffic. Conduit stays on your local network
+or Tailscale — nothing routes through an external service.
+
+**Why not SSH + terminal on mobile?**
+Raw terminal, no approval UI, no push notifications, no mobile-optimised
+interface. You end up checking manually instead of getting notified.
+
+</details>
 
 ---
 
@@ -170,6 +200,40 @@ Do not expose this to the public internet. For remote access, use
 
 ---
 
+## FAQ
+
+<details>
+<summary>Common questions</summary>
+
+**"Does my code leave my machine?"**
+No. Conduit runs locally and relays between your browser and `opencode serve`.
+Files stay on your machine. Only OpenCode's own API calls go out, same as the CLI.
+
+**"Is this a terminal wrapper?"**
+No. Conduit connects to OpenCode's HTTP/SSE API directly. It doesn't scrape
+or parse terminal output.
+
+**"Can I continue a CLI session in the browser?"**
+Yes. Conduit picks up existing sessions from `opencode serve`. Switch between
+the terminal and browser freely.
+
+**"Does it work with my existing OpenCode config?"**
+Yes. Agents, models, MCP servers, and project-level configuration all carry
+over as-is.
+
+**"Do I need mkcert for basic use?"**
+No. Conduit works over plain HTTP on localhost. mkcert is only needed for
+HTTPS, which is required for push notifications and LAN access.
+
+**"What happens if the daemon crashes?"**
+Sessions are owned by OpenCode (SQLite), not Conduit. Restart the daemon and
+your sessions are still there. Conduit includes a crash counter that prevents
+restart loops.
+
+</details>
+
+---
+
 ## CLI reference
 
 ```
@@ -226,27 +290,6 @@ graph LR
     Daemon -->|Permission event| Push
     Push -->|Notification| Browser
 ```
-
----
-
-## Why not X?
-
-**Why not tmux + Termius?**
-No push notifications. No way to approve OpenCode permissions without switching
-back to the terminal. Raw terminal on a phone is painful to navigate.
-
-**Why not adding notification hooks?**
-Hooks with ntfy or Pushover get you alerts, but when the notification arrives
-there's no approval UI — you're back in a terminal. Conduit gives you the
-notification and the one-tap response in the same place.
-
-**Why not ngrok or a tunnel service?**
-Third-party servers see your traffic. Conduit stays on your local network
-or Tailscale — nothing routes through an external service.
-
-**Why not SSH + terminal on mobile?**
-Raw terminal, no approval UI, no push notifications, no mobile-optimised
-interface. You end up checking manually instead of getting notified.
 
 ---
 
