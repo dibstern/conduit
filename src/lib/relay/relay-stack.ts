@@ -14,6 +14,7 @@ import {
 	handleClientConnected,
 } from "../bridges/client-init.js";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
+import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { dispatchMessage, type HandlerDeps } from "../handlers/index.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
@@ -178,7 +179,7 @@ export async function createProjectRelay(
 	// ── Service registry (optional — used by daemon for coordinated drain) ──
 	// Stored locally so Tasks 8-15 can pass it to service constructors as
 	// they are migrated to TrackedService.
-	const _serviceRegistry = config.registry;
+	const serviceRegistry = config.registry ?? new ServiceRegistry();
 
 	// ── Components ──────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ export async function createProjectRelay(
 	const rateLimiter = new RateLimiter();
 
 	// Per-session overrides (agent, model, processing timeout)
-	const overrides = new SessionOverrides();
+	const overrides = new SessionOverrides(serviceRegistry);
 
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
@@ -238,13 +239,16 @@ export async function createProjectRelay(
 	}
 
 	// ── Session status poller (polls GET /session/status for processing indicators) ──
-	const statusPoller: SessionStatusPoller = new SessionStatusPoller({
-		client,
-		interval: config.statusPollerInterval ?? 500,
-		log: statusLog,
-		getSessionParentMap: (): Map<string, string> =>
-			sessionMgr.getSessionParentMap(),
-	});
+	const statusPoller: SessionStatusPoller = new SessionStatusPoller(
+		serviceRegistry,
+		{
+			client,
+			interval: config.statusPollerInterval ?? 500,
+			log: statusLog,
+			getSessionParentMap: (): Map<string, string> =>
+				sessionMgr.getSessionParentMap(),
+		},
+	);
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
 	const registry = new SessionRegistry();
@@ -324,6 +328,7 @@ export async function createProjectRelay(
 	// ── WebSocket handler ───────────────────────────────────────────────────
 
 	const wsHandler = new WebSocketHandler(
+		serviceRegistry,
 		config.noServer ? null : config.httpServer,
 		{
 			registry,
@@ -382,7 +387,7 @@ export async function createProjectRelay(
 
 	// ── SSE consumer ────────────────────────────────────────────────────────
 
-	const sseConsumer = new SSEConsumer({
+	const sseConsumer = new SSEConsumer(serviceRegistry, {
 		baseUrl: config.opencodeUrl,
 		authHeaders: client.getAuthHeaders(),
 		log: sseLog,
