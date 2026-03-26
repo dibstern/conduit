@@ -295,6 +295,104 @@ describe("groupIntoTurns with OpenCode normalized messages", () => {
 	});
 });
 
+// ─── Tool status mapping ─────────────────────────────────────────────────────
+
+describe("historyToChatMessages — tool status mapping", () => {
+	test("Task tools preserve running status from REST API", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_asst",
+				role: "assistant",
+				parts: [
+					{
+						id: "p1",
+						type: "tool",
+						callID: "toolu_123",
+						tool: "task",
+						state: {
+							status: "running",
+							input: {
+								description: "do stuff",
+								subagent_type: "general",
+							},
+						},
+					},
+				],
+			},
+		];
+		const chatMsgs = historyToChatMessages(history);
+		const toolMsg = chatMsgs.find((m) => m.type === "tool");
+		expect(toolMsg).toBeDefined();
+		expect(toolMsg?.type === "tool" && toolMsg.status).toBe("running");
+	});
+
+	test("Task tools preserve pending status from REST API", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_asst",
+				role: "assistant",
+				parts: [
+					{
+						id: "p1",
+						type: "tool",
+						callID: "toolu_456",
+						tool: "task",
+						state: { status: "pending" },
+					},
+				],
+			},
+		];
+		const chatMsgs = historyToChatMessages(history);
+		const toolMsg = chatMsgs.find((m) => m.type === "tool");
+		expect(toolMsg).toBeDefined();
+		expect(toolMsg?.type === "tool" && toolMsg.status).toBe("pending");
+	});
+
+	test("completed Task tools stay completed", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_asst",
+				role: "assistant",
+				parts: [
+					{
+						id: "p1",
+						type: "tool",
+						callID: "toolu_789",
+						tool: "task",
+						state: { status: "completed", output: "done" },
+					},
+				],
+			},
+		];
+		const chatMsgs = historyToChatMessages(history);
+		const toolMsg = chatMsgs.find((m) => m.type === "tool");
+		expect(toolMsg).toBeDefined();
+		expect(toolMsg?.type === "tool" && toolMsg.status).toBe("completed");
+	});
+
+	test("regular tools are forced to completed even if running", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_asst",
+				role: "assistant",
+				parts: [
+					{
+						id: "p1",
+						type: "tool",
+						callID: "toolu_abc",
+						tool: "read",
+						state: { status: "running" },
+					},
+				],
+			},
+		];
+		const chatMsgs = historyToChatMessages(history);
+		const toolMsg = chatMsgs.find((m) => m.type === "tool");
+		expect(toolMsg).toBeDefined();
+		expect(toolMsg?.type === "tool" && toolMsg.status).toBe("completed");
+	});
+});
+
 // ─── messageId propagation (fork-split dependency) ───────────────────────────
 
 describe("historyToChatMessages — messageId propagation", () => {

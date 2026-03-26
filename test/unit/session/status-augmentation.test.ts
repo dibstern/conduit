@@ -19,7 +19,7 @@ describe("computeAugmentedStatuses", () => {
 		expect(result.augmented["parent1"]).toEqual({ type: "busy" });
 	});
 
-	it("does not override existing parent status", () => {
+	it("overrides idle parent to busy when subagent is busy", () => {
 		const input: AugmentInput = {
 			raw: {
 				child1: { type: "busy" },
@@ -33,7 +33,51 @@ describe("computeAugmentedStatuses", () => {
 			messageActivityTtlMs: 10_000,
 		};
 		const result = computeAugmentedStatuses(input);
-		expect(result.augmented["parent1"]).toEqual({ type: "idle" });
+		expect(result.augmented["parent1"]).toEqual({ type: "busy" });
+	});
+
+	it("does not downgrade parent already in busy state", () => {
+		const input: AugmentInput = {
+			raw: {
+				child1: { type: "busy" },
+				parent1: { type: "busy" },
+			},
+			parentMap: new Map([["child1", "parent1"]]),
+			childToParentResolved: new Map(),
+			messageActivityTimestamps: new Map(),
+			sseIdleSessions: new Set(),
+			now: 1000,
+			messageActivityTtlMs: 10_000,
+		};
+		const result = computeAugmentedStatuses(input);
+		expect(result.augmented["parent1"]).toEqual({ type: "busy" });
+	});
+
+	it("does not downgrade parent in retry state", () => {
+		const input: AugmentInput = {
+			raw: {
+				child1: { type: "busy" },
+				parent1: {
+					type: "retry",
+					attempt: 2,
+					message: "err",
+					next: 3000,
+				},
+			},
+			parentMap: new Map([["child1", "parent1"]]),
+			childToParentResolved: new Map(),
+			messageActivityTimestamps: new Map(),
+			sseIdleSessions: new Set(),
+			now: 1000,
+			messageActivityTtlMs: 10_000,
+		};
+		const result = computeAugmentedStatuses(input);
+		expect(result.augmented["parent1"]).toEqual({
+			type: "retry",
+			attempt: 2,
+			message: "err",
+			next: 3000,
+		});
 	});
 
 	it("resolves parent from childToParentResolved cache", () => {

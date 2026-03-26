@@ -110,8 +110,15 @@ export function getAssistantText(msg: HistoryMessage | undefined): string {
 
 /** Tool names that should preserve their live status in history.
  *  Question tools may still be awaiting a user response even when loaded
- *  from the REST API, so we must not force them to "completed". */
-const LIVE_STATUS_TOOLS = new Set(["question", "AskUserQuestion"]);
+ *  from the REST API, so we must not force them to "completed".
+ *  Task (subagent) tools may still be running — forcing them to "completed"
+ *  would show "Done" while the subagent session is still active. */
+const LIVE_STATUS_TOOLS = new Set([
+	"question",
+	"AskUserQuestion",
+	"task",
+	"Task",
+]);
 
 /**
  * Map a tool status from the REST API to the ToolMessage status used in live rendering.

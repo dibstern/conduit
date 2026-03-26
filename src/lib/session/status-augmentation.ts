@@ -43,6 +43,9 @@ export function computeAugmentedStatuses(input: AugmentInput): AugmentResult {
 	}
 
 	// ── Step 2: Subagent propagation ──────────────────────────────────────
+	// A parent waiting for a busy subagent IS busy, even if OpenCode's raw
+	// /session/status reports it as "idle".  Override idle parents but don't
+	// downgrade parents that are already in a processing state (busy/retry).
 	for (const busyId of busyIds) {
 		// Fast path: session list parentMap
 		let parentId = input.parentMap.get(busyId);
@@ -52,7 +55,9 @@ export function computeAugmentedStatuses(input: AugmentInput): AugmentResult {
 			parentId = input.childToParentResolved.get(busyId) ?? undefined;
 		}
 
-		if (parentId && !augmented[parentId]) {
+		if (!parentId) continue;
+		const existing = augmented[parentId];
+		if (!existing || existing.type === "idle") {
 			augmented[parentId] = { type: "busy" };
 		}
 	}
