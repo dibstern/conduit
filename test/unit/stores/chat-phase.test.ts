@@ -1,6 +1,7 @@
 // ─── ChatPhase Discriminated Union Tests ─────────────────────────────────────
 // Verifies that chatState.phase is the single source of truth for
-// processing/streaming/replaying, with backward-compatible getters.
+// processing/streaming, with backward-compatible getters.
+// Replaying is now tracked via loadLifecycle, not phase.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,6 +50,7 @@ import {
 	phaseEndReplay,
 	phaseStartReplay,
 	phaseToIdle,
+	phaseToProcessing,
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -80,6 +82,12 @@ describe("LoadLifecycle", () => {
 		chatState.loadLifecycle = "empty";
 		expect(isLoading()).toBe(false);
 	});
+
+	it("clearMessages resets loadLifecycle to 'empty'", () => {
+		chatState.loadLifecycle = "loading";
+		clearMessages();
+		expect(chatState.loadLifecycle).toBe("empty");
+	});
 });
 
 // ─── Phase field exists and defaults correctly ──────────────────────────────
@@ -97,7 +105,7 @@ describe("ChatPhase type", () => {
 	});
 });
 
-// ─── Backward-compatible getters derive from phase ──────────────────────────
+// ─── Backward-compatible getters derive from phase + loadLifecycle ──────────
 
 describe("backward-compatible getters", () => {
 	it("idle: processing=false, streaming=false, replaying=false", () => {
@@ -124,7 +132,7 @@ describe("backward-compatible getters", () => {
 
 	it("replaying: replaying=true, processing=false, streaming=false", () => {
 		phaseStartReplay();
-		expect(chatState.phase).toBe("replaying");
+		expect(chatState.loadLifecycle).toBe("loading");
 		expect(isReplaying()).toBe(true);
 		expect(isProcessing()).toBe(false);
 		expect(isStreaming()).toBe(false);
@@ -150,20 +158,22 @@ describe("phase transitions", () => {
 		expect(chatState.phase).toBe("idle");
 	});
 
-	it("phaseStartReplay → phase='replaying'", () => {
+	it("phaseStartReplay → loadLifecycle='loading'", () => {
 		phaseStartReplay();
-		expect(chatState.phase).toBe("replaying");
+		expect(chatState.loadLifecycle).toBe("loading");
 	});
 
-	it("phaseEndReplay(false) → phase='idle'", () => {
+	it("phaseEndReplay(false) → loadLifecycle='ready', phase stays idle", () => {
 		phaseStartReplay();
 		phaseEndReplay(false);
+		expect(chatState.loadLifecycle).toBe("ready");
 		expect(chatState.phase).toBe("idle");
 	});
 
-	it("phaseEndReplay(true) → phase='processing'", () => {
+	it("phaseEndReplay(true) → loadLifecycle='ready', phase='processing' when idle", () => {
 		phaseStartReplay();
 		phaseEndReplay(true);
+		expect(chatState.loadLifecycle).toBe("ready");
 		expect(chatState.phase).toBe("processing");
 	});
 
@@ -178,12 +188,7 @@ describe("phase transitions", () => {
 
 describe("impossible states prevented", () => {
 	it("phase is always one of the valid values", () => {
-		const validPhases: ChatPhase[] = [
-			"idle",
-			"processing",
-			"streaming",
-			"replaying",
-		];
+		const validPhases: ChatPhase[] = ["idle", "processing", "streaming"];
 
 		// Run through various transitions
 		expect(validPhases).toContain(chatState.phase);
@@ -213,5 +218,47 @@ describe("impossible states prevented", () => {
 		// streaming is true — and phase is "streaming"
 		expect(isStreaming()).toBe(true);
 		expect(chatState.phase).toBe("streaming");
+	});
+});
+
+// ─── Phase split: replaying removed from ChatPhase ──────────────────────────
+
+describe("Phase split: replaying removed from ChatPhase", () => {
+	it("isProcessing() returns false during loading even if phase is processing", () => {
+		chatState.phase = "processing";
+		chatState.loadLifecycle = "loading";
+		expect(isProcessing()).toBe(false);
+	});
+
+	it("isProcessing() returns true when not loading and phase is processing", () => {
+		chatState.phase = "processing";
+		chatState.loadLifecycle = "ready";
+		expect(isProcessing()).toBe(true);
+	});
+
+	it("phaseToStreaming sets phase directly (no _replayInnerStreaming)", () => {
+		chatState.loadLifecycle = "loading";
+		phaseToStreaming();
+		expect(chatState.phase).toBe("streaming");
+		expect(isStreaming()).toBe(false);
+	});
+
+	it("phaseToProcessing sets phase even during loading", () => {
+		chatState.loadLifecycle = "loading";
+		phaseToProcessing();
+		expect(chatState.phase).toBe("processing");
+	});
+
+	it("phaseEndReplay with streaming phase sets lifecycle to ready and preserves streaming", () => {
+		phaseStartReplay();
+		expect(chatState.loadLifecycle).toBe("loading");
+		phaseToStreaming();
+		expect(chatState.phase).toBe("streaming");
+		expect(isStreaming()).toBe(false);
+		phaseEndReplay(true);
+		expect(chatState.loadLifecycle).toBe("ready");
+		expect(chatState.phase).toBe("streaming");
+		expect(isStreaming()).toBe(true);
+		expect(isProcessing()).toBe(true);
 	});
 });
