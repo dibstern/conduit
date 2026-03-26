@@ -591,6 +591,47 @@ export function handleStatus(
 ): void {
 	if (msg.status === "processing") {
 		phaseToProcessing();
+		// Fallback: if the session was just loaded (replay or REST history)
+		// and the last user message has no sentDuringEpoch, it means the
+		// replay/history path couldn't determine the queued state.  Since
+		// the session IS processing, the last unresponded user message must
+		// be queued.  Set sentDuringEpoch so the shimmer appears.
+		//
+		// This is safe because sentDuringEpoch is write-once: if replay or
+		// addUserMessage already set it, this is a no-op.  And unlike the
+		// old mutable `queued` boolean, sentDuringEpoch is never cleared —
+		// so the "re-apply after clear" race that caused the original bugs
+		// is structurally impossible.
+		ensureSentDuringEpochOnLastUnrespondedUser();
+	}
+}
+
+/** Set `sentDuringEpoch` on the last unresponded user message if not
+ *  already set.  Called from `handleStatus` as a fallback for session
+ *  loads where replay couldn't infer the queued state from events. */
+function ensureSentDuringEpochOnLastUnrespondedUser(): void {
+	const msgs = getMessages();
+	if (msgs.length === 0) return;
+
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		const m = msgs[i];
+		if (!m) continue;
+		if (m.type === "user") {
+			// Already has sentDuringEpoch — write-once, don't touch
+			if (m.sentDuringEpoch != null) return;
+			// Has an assistant response after it — not queued
+			const hasResponse = msgs
+				.slice(i + 1)
+				.some((msg) => msg.type === "assistant");
+			if (hasResponse) return;
+			// No sentDuringEpoch and no response — set it
+			setMessages(
+				msgs.map((msg, idx) =>
+					idx === i ? { ...msg, sentDuringEpoch: chatState.turnEpoch } : msg,
+				),
+			);
+			return;
+		}
 	}
 }
 
