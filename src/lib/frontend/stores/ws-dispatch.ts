@@ -17,7 +17,7 @@ import {
 	beginReplayBatch,
 	chatState,
 	clearMessages,
-	commitReplayBatch,
+	clearQueuedFlags,
 	commitReplayFinal,
 	discardReplayBatch,
 	findMessage,

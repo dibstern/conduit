@@ -385,6 +385,219 @@ test.describe("Scroll Stability — Mobile", () => {
 	});
 });
 
+test.describe("Scroll Controller — History Load", () => {
+	test.describe.configure({ timeout: 45_000 });
+	test.use({ viewport: { width: 1440, height: 900 } });
+
+	test("history replay renders at bottom without visible scroll animation", async ({
+		page,
+		relayUrl,
+	}) => {
+		const initMessages = createInitMessages(TURN_COUNT);
+
+		await mockRelayWebSocket(page, {
+			initMessages,
+			responses: new Map(),
+		});
+
+		// Capture scroll positions over time during page load
+		const scrollPositions: number[] = [];
+
+		await page.goto(relayUrl);
+		await page.locator("#connect-overlay").waitFor({
+			state: "hidden",
+			timeout: 15_000,
+		});
+
+		// Sample scroll position rapidly for 2 seconds after connect overlay hides.
+		// If the old "visible replay scrolling" bug exists, we'd see scrollTop
+		// increasing gradually from 0 to scrollHeight. With the fix, scrollTop
+		// should either be 0 (loading) or near-bottom (after single commit).
+		for (let i = 0; i < 20; i++) {
+			const pos = await getScrollTop(page);
+			scrollPositions.push(pos);
+			await page.waitForTimeout(100);
+		}
+
+		// The final position should be near the bottom
+		const finalScrollTop = await getScrollTop(page);
+		const scrollHeight = await getScrollHeight(page);
+		const clientHeight = await getClientHeight(page);
+		const distFromBottom = scrollHeight - finalScrollTop - clientHeight;
+
+		// Should be at or near the bottom after load
+		expect(distFromBottom).toBeLessThan(50);
+
+		// Count the number of DISTINCT scroll positions observed.
+		// With the old code: many intermediate positions (scrolling from 0 to bottom).
+		// With the fix: at most 2-3 distinct positions (0/loading, then final position).
+		const uniquePositions = new Set(scrollPositions);
+		// Allow some tolerance — DOM rendering may cause a few intermediate states.
+		// But it should NOT be a smooth gradient of 10+ positions.
+		expect(uniquePositions.size).toBeLessThan(8);
+	});
+
+	test("large session only renders last ~50 messages initially", async ({
+		page,
+		relayUrl,
+	}) => {
+		// Create a session with 60 turns (120+ messages after processing)
+		const initMessages = createInitMessages(60);
+
+		await mockRelayWebSocket(page, {
+			initMessages,
+			responses: new Map(),
+		});
+
+		await page.goto(relayUrl);
+		await page.locator("#connect-overlay").waitFor({
+			state: "hidden",
+			timeout: 15_000,
+		});
+
+		await page.waitForTimeout(2000);
+
+		// Count rendered message containers
+		const msgContainerCount = await page.evaluate(() => {
+			return document.querySelectorAll(".msg-container").length;
+		});
+
+		// With 60 turns and a 50-message page size, the initial render
+		// should have approximately 50 messages, not all 120+.
+		// Allow some tolerance for tool messages and grouping.
+		expect(msgContainerCount).toBeLessThan(80);
+		expect(msgContainerCount).toBeGreaterThan(20);
+	});
+});
+
+test.describe("Scroll Controller — Streaming", () => {
+	test.describe.configure({ timeout: 45_000 });
+	test.use({ viewport: { width: 1440, height: 900 } });
+
+	test("auto-scroll follows streaming content to bottom", async ({
+		page,
+		relayUrl,
+	}) => {
+		const initMessages = createInitMessages(TURN_COUNT);
+
+		const wsMock = await mockRelayWebSocket(page, {
+			initMessages,
+			responses: new Map(),
+		});
+
+		await page.goto(relayUrl);
+		await page.locator("#connect-overlay").waitFor({
+			state: "hidden",
+			timeout: 15_000,
+		});
+
+		await page.waitForTimeout(2000);
+
+		// Simulate streaming: status:processing, then deltas
+		wsMock.sendMessage({ type: "status", status: "processing" });
+		await page.waitForTimeout(200);
+
+		// Send streaming deltas
+		for (let i = 0; i < 10; i++) {
+			wsMock.sendMessage({
+				type: "delta",
+				text: `Streaming content line ${i}. This is a fairly long line to ensure the scroll height changes meaningfully with each delta. `,
+			});
+			await page.waitForTimeout(100);
+		}
+
+		// While streaming, scroll should be near the bottom (auto-following)
+		const scrollTop = await getScrollTop(page);
+		const scrollHeight = await getScrollHeight(page);
+		const clientHeight = await getClientHeight(page);
+		const distFromBottom = scrollHeight - scrollTop - clientHeight;
+
+		expect(distFromBottom).toBeLessThan(100);
+
+		// Clean up streaming
+		wsMock.sendMessage({ type: "done", code: 0 });
+	});
+
+	test("wheel-up detaches during streaming, button appears, no snap-back", async ({
+		page,
+		relayUrl,
+	}) => {
+		const initMessages = createInitMessages(TURN_COUNT);
+
+		const wsMock = await mockRelayWebSocket(page, {
+			initMessages,
+			responses: new Map(),
+		});
+
+		await page.goto(relayUrl);
+		await page.locator("#connect-overlay").waitFor({
+			state: "hidden",
+			timeout: 15_000,
+		});
+
+		await page.waitForTimeout(2000);
+
+		// Start streaming
+		wsMock.sendMessage({ type: "status", status: "processing" });
+		await page.waitForTimeout(200);
+		wsMock.sendMessage({ type: "delta", text: "Starting response..." });
+		await page.waitForTimeout(200);
+
+		// Scroll up while streaming using mouse wheel
+		const messagesEl = page.locator("#messages");
+		await messagesEl.hover();
+		await page.mouse.wheel(0, -500);
+		await page.waitForTimeout(300);
+
+		const scrollAfterWheel = await getScrollTop(page);
+
+		// Scroll-to-bottom button should be visible (we detached)
+		const scrollBtn = page.locator("#scroll-btn");
+		await expect(scrollBtn).toBeVisible({ timeout: 3000 });
+
+		// Continue streaming — should NOT snap back to bottom
+		for (let i = 0; i < 5; i++) {
+			wsMock.sendMessage({
+				type: "delta",
+				text: `More streaming content ${i}. `,
+			});
+			await page.waitForTimeout(150);
+		}
+
+		// Scroll position should NOT have been forced to bottom
+		const scrollAfterMoreStreaming = await getScrollTop(page);
+		const _drift = Math.abs(scrollAfterMoreStreaming - scrollAfterWheel);
+
+		// Allow small drift for rendering but NOT a full snap to bottom
+		const scrollHeight = await getScrollHeight(page);
+		const clientHeight = await getClientHeight(page);
+		const distFromBottom =
+			scrollHeight - scrollAfterMoreStreaming - clientHeight;
+
+		// We should still be significantly away from bottom (detached)
+		expect(distFromBottom).toBeGreaterThan(200);
+
+		// Button should still be visible
+		await expect(scrollBtn).toBeVisible();
+
+		// Click button to re-follow
+		await scrollBtn.click();
+		await page.waitForTimeout(500);
+
+		// Now we should be at the bottom
+		const scrollAfterFollow = await getScrollTop(page);
+		const finalDist = scrollHeight - scrollAfterFollow - clientHeight;
+		// May not be exactly 0 due to timing, but should be close
+		expect(finalDist).toBeLessThan(150);
+
+		// Button should be hidden
+		await expect(scrollBtn).toBeHidden({ timeout: 3000 });
+
+		// Clean up
+		wsMock.sendMessage({ type: "done", code: 0 });
+	});
+});
+
 test.describe("Scroll Stability — Desktop", () => {
 	test.describe.configure({ timeout: 45_000 });
 	test.use({ viewport: { width: 1440, height: 900 } });

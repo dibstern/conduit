@@ -112,8 +112,18 @@ export function createScrollController(
 		if (!container) return;
 		const distFromBottom =
 			container.scrollHeight - container.scrollTop - container.clientHeight;
+		// Re-follow when scrolled near bottom
 		if (distFromBottom < SCROLL_THRESHOLD && userDetached) {
 			userDetached = false;
+		}
+		// Detach when scrolled away from bottom (catches keyboard scroll,
+		// programmatic scroll, page search, etc. — not just wheel/touch).
+		if (
+			distFromBottom > SCROLL_THRESHOLD &&
+			!userDetached &&
+			getState() === "following"
+		) {
+			userDetached = true;
 		}
 	}
 
