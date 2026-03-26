@@ -302,7 +302,7 @@ function recordTurn(
 								decision: "allow",
 							}),
 						);
-					}, 500);
+					}, 3_000);
 				}
 
 				// Auto-approve ask_user questions (answer all with first option or "yes")
@@ -582,6 +582,22 @@ async function main(): Promise<void> {
 							);
 							console.log(`    Events: ${turn.events.length}`);
 							turns.push(turn);
+						}
+					}
+
+					// For multi-turn scenarios, fetch message history through the
+					// proxy so the recording contains non-empty GET /session/:id/message
+					// responses. This is needed for pagination E2E tests that load
+					// history via REST instead of the SSE events cache.
+					if (scenario.multiTurn) {
+						const sessions = await fetch(`${proxy.url}/session`).then(
+							(r) => r.json() as Promise<Array<{ id: string }>>,
+						);
+						if (sessions.length > 0) {
+							// biome-ignore lint/style/noNonNullAssertion: checked length
+							const sid = sessions[sessions.length - 1]!.id;
+							await fetch(`${proxy.url}/session/${sid}/message`);
+							console.log(`  Captured message history for ${sid}`);
 						}
 					}
 
