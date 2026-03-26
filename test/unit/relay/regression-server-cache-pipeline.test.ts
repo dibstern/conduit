@@ -298,9 +298,11 @@ describe("Server cache pipeline: events survive session switch", () => {
 		expect(recorded2[0]!.type).toBe("delta"); // Should be thinking_delta, but it's delta
 	});
 
-	it("REGRESSION: stale cache falls back to REST when message count diverges", async () => {
-		// Previously: cache with partial history preempted REST API full history.
-		// Now: resolveSessionHistory validates cache against upstream message count.
+	it("serves cached-events when cache has chat content (even if partial)", async () => {
+		// Previously: resolveSessionHistory validated cache against upstream message
+		// count and fell back to REST when stale. Now: cache with chat content is
+		// served directly without a validation fetch. Users load older messages via
+		// pagination, and cold-cache-repair handles incomplete turns on restart.
 		const activeSession = "session-a";
 
 		// Simulate: relay only captured turn 6 (the bug scenario from the original test)
@@ -313,7 +315,7 @@ describe("Server cache pipeline: events survive session switch", () => {
 			extractSessionId,
 		);
 
-		// classifyHistorySource still says "cached-events" (has chat content)
+		// classifyHistorySource says "cached-events" (has chat content)
 		const events = await cache.getEvents("session-a");
 		const hasChatContent =
 			events?.some((e) => e.type === "user_message" || e.type === "delta") ??
@@ -325,45 +327,17 @@ describe("Server cache pipeline: events survive session switch", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by hasChatContent assertion above
 		expect(countUniqueMessages(events!)).toBe(2);
 
-		// But OpenCode has 12 messages (turns 1-6, each with user + assistant)
-		const fullHistory = {
-			messages: Array.from({ length: 12 }, (_, i) => ({
-				id: `m${i}`,
-				role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-			})),
-			hasMore: false,
-			total: 12,
-		};
-
-		// Use the real cache, only mock network-bound calls.
-		// getMessages returns 12 messages — more than the 7 unique in cache —
-		// so resolveSessionHistory detects staleness and uses the fetched data
-		// via buildPreRenderedHistoryFromMessages (single-fetch path).
+		// resolveSessionHistory serves cache directly — no validation fetch needed
 		const result = await resolveSessionHistory("session-a", {
 			messageCache: cache,
 			sessionMgr: {
-				loadPreRenderedHistory: vi.fn().mockResolvedValue(fullHistory),
-				buildPreRenderedHistoryFromMessages: vi
-					.fn()
-					.mockReturnValue(fullHistory),
-			},
-			client: {
-				getMessages: vi.fn().mockResolvedValue(
-					Array.from({ length: 12 }, (_, i) => ({
-						id: `m${i}`,
-						role: i % 2 === 0 ? "user" : "assistant",
-						sessionID: "session-a",
-					})),
-				),
+				loadPreRenderedHistory: vi.fn(),
 			},
 			log: { info: vi.fn(), warn: vi.fn() },
 		});
 
-		// Fix: falls back to REST — all 12 messages visible
-		expect(result.source.kind).toBe("rest-history");
-		if (result.source.kind === "rest-history") {
-			expect(result.source.history.total).toBe(12);
-		}
+		// Cache has chat content → served as cached-events
+		expect(result.kind).toBe("cached-events");
 	});
 
 	it("session.status busy/idle no longer produce cached events (handled by status poller)", async () => {

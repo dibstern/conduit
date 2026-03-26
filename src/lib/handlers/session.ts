@@ -139,9 +139,6 @@ function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 		wsHandler: deps.wsHandler,
 		statusPoller: deps.statusPoller,
 		pollerManager: deps.pollerManager,
-		client: {
-			getMessages: (sid: string) => deps.client.getMessages(sid),
-		},
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,
 	};
@@ -350,10 +347,10 @@ export async function handleForkSession(
 	// Determine the fork-point messageId
 	let forkMessageId: string | undefined = messageId;
 	if (!forkMessageId) {
-		// Whole-session fork: get all messages in the forked session and use the last one.
-		// At this point the fork just happened, so all messages are inherited.
+		// Whole-session fork: get the most recent message to use as fork point.
+		// Uses limit=1 to avoid fetching the entire message history.
 		try {
-			const msgs = await deps.client.getMessages(forked.id);
+			const msgs = await deps.client.getMessagesPage(forked.id, { limit: 1 });
 			if (msgs.length > 0) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 				forkMessageId = msgs[msgs.length - 1]!.id;

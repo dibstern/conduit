@@ -104,7 +104,6 @@ export async function handleClientConnected(
 				sessionMgr,
 				wsHandler,
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
-				client: client as { getMessages: (id: string) => Promise<unknown[]> },
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
 			} satisfies SessionSwitchDeps,

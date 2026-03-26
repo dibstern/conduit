@@ -71,6 +71,23 @@ function createMockClient(initial: MockSession[] = []): OpenCodeClient & {
 			return messages.get(sessionId) ?? [];
 		},
 
+		async getMessagesPage(
+			sessionId: string,
+			options?: { limit?: number; before?: string },
+		) {
+			const all = messages.get(sessionId) ?? [];
+			const limit = options?.limit ?? all.length;
+			if (!options?.before) {
+				// No cursor: return the last `limit` messages (most recent page)
+				return all.slice(-limit);
+			}
+			// Cursor: return `limit` messages before the given ID
+			const idx = all.findIndex((m) => m.id === options.before);
+			if (idx <= 0) return [];
+			const start = Math.max(0, idx - limit);
+			return all.slice(start, idx);
+		},
+
 		// Stubs for other methods that SessionManager doesn't call
 		async getHealth() {
 			return { ok: true };
@@ -594,9 +611,8 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 			expect(page1.messages[49]!.id).toBe("msg_119");
 			expect(page1.hasMore).toBe(true);
-			expect(page1.total).toBe(120);
 
-			// offset=50: next older 50 (msg_20..msg_69)
+			// offset=50: next older 50 (msg_20..msg_69) via cursor
 			const page2 = await mgr.loadHistory("ses_h", 50);
 			expect(page2.messages.length).toBe(50);
 			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
@@ -605,7 +621,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			expect(page2.messages[49]!.id).toBe("msg_69");
 			expect(page2.hasMore).toBe(true);
 
-			// offset=100: oldest 20 (msg_0..msg_19)
+			// offset=100: oldest 20 (msg_0..msg_19) via cursor
 			const page3 = await mgr.loadHistory("ses_h", 100);
 			expect(page3.messages.length).toBe(20);
 			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
@@ -643,8 +659,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						const page = await mgr.loadHistory("ses_p", 0);
 
 						expect(page.messages.length).toBe(Math.min(pageSize, msgCount));
-						expect(page.hasMore).toBe(msgCount > pageSize);
-						expect(page.total).toBe(msgCount);
+						// Cursor-based pagination: hasMore = page.length >= pageSize,
+						// so it's true when msgCount >= pageSize (can't distinguish exact boundary)
+						expect(page.hasMore).toBe(msgCount >= pageSize);
 					},
 				),
 				{ seed: SEED, numRuns: NUM_RUNS },

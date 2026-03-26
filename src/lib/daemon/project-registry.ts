@@ -231,6 +231,11 @@ export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 		);
 	}
 
+	/** True if a relay creation is currently in-flight for this slug. */
+	isStarting(slug: string): boolean {
+		return this.abortControllers.has(slug);
+	}
+
 	async remove(slug: string): Promise<void> {
 		const entry = this.entries.get(slug);
 		if (!entry) return;

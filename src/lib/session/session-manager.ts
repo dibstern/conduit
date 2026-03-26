@@ -97,6 +97,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 */
 	private pendingQuestionCounts = new Map<string, number>();
 
+	/**
+	 * Cursor for paginated history loading. Maps sessionId → oldest message ID
+	 * from the last loaded page. Used by loadHistory(offset>0) to fetch the
+	 * next page of older messages via getMessagesPage({ before }).
+	 * Reset on session switch (when offset=0 is loaded for a new session).
+	 */
+	private paginationCursors = new Map<string, string>();
+
 	constructor(options: SessionManagerOptions) {
 		super();
 		this.client = options.client;
@@ -182,30 +190,40 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	}
 
 	/**
-	 * Load a page of message history for a session.
+	 * Load a page of message history for a session using paginated API.
 	 *
 	 * Messages are returned in chronological order (oldest first).
-	 * Pagination loads from the END (most recent) backwards:
-	 *   offset=0  → most recent pageSize messages
-	 *   offset=50 → the 50 messages before those
+	 * Uses cursor-based pagination via the `before` message ID:
+	 *   offset=0  → most recent pageSize messages (no cursor)
+	 *   offset>0  → next page of older messages (uses tracked cursor)
 	 *
-	 * This matches chat UI expectations: show newest messages first,
-	 * lazy-load older messages as the user scrolls up.
+	 * This avoids fetching ALL messages (which can be 40MB+ for large sessions)
+	 * and prevents OOM when many project relays are loaded.
 	 */
 	async loadHistory(sessionId: string, offset = 0): Promise<HistoryPage> {
-		const all = await this.client.getMessages(sessionId);
-		const total = all.length;
+		const before =
+			offset > 0 ? this.paginationCursors.get(sessionId) : undefined;
 
-		// Slice from the end, moving backwards by `offset`
-		const end = Math.max(0, total - offset);
-		const start = Math.max(0, end - this.historyPageSize);
-		const page = all.slice(start, end);
+		// If caller wants an older page but we have no cursor, we can't paginate.
+		// This happens if the initial page was never loaded. Return empty.
+		if (offset > 0 && !before) {
+			return { messages: [], hasMore: false };
+		}
+
+		const page = await this.client.getMessagesPage(sessionId, {
+			limit: this.historyPageSize,
+			...(before ? { before } : {}),
+		});
+
+		// Track the oldest message ID for cursor-based "load more"
+		const oldest = page[0];
+		if (oldest) {
+			this.paginationCursors.set(sessionId, oldest.id);
+		}
 
 		return {
-			// Message.role is `string` but the API only returns "user" | "assistant"
 			messages: page as unknown as HistoryMessage[],
-			hasMore: start > 0,
-			total,
+			hasMore: page.length >= this.historyPageSize,
 		};
 	}
 
@@ -222,28 +240,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		const page = await this.loadHistory(sessionId, offset);
 		preRenderHistoryMessages(page.messages);
 		return page;
-	}
-
-	/**
-	 * Build a pre-rendered history page from already-fetched messages.
-	 * Avoids a redundant REST call when the caller already holds the full
-	 * message array (e.g. after a cache-validation fetch).
-	 * Synchronous — no I/O.
-	 */
-	buildPreRenderedHistoryFromMessages(
-		messages: unknown[],
-		offset = 0,
-	): HistoryPage {
-		const total = messages.length;
-		const end = Math.max(0, total - offset);
-		const start = Math.max(0, end - this.historyPageSize);
-		const page = messages.slice(start, end) as unknown as HistoryMessage[];
-		preRenderHistoryMessages(page);
-		return {
-			messages: page,
-			hasMore: start > 0,
-			total,
-		};
 	}
 
 	// ─── Mutations ────────────────────────────────────────────────────────

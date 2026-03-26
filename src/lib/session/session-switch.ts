@@ -52,15 +52,6 @@ export interface SessionSwitchDeps {
 			hasMore: boolean;
 			total?: number;
 		}>;
-		/** Build a history page from already-fetched messages (no I/O). */
-		buildPreRenderedHistoryFromMessages(
-			messages: unknown[],
-			offset?: number,
-		): {
-			messages: HistoryMessage[];
-			hasMore: boolean;
-			total?: number;
-		};
 	};
 	readonly wsHandler: {
 		sendTo(clientId: string, msg: RelayMessage): void;
@@ -70,9 +61,6 @@ export interface SessionSwitchDeps {
 	readonly pollerManager?: {
 		isPolling(sessionId: string): boolean;
 		startPolling(sessionId: string, messages?: unknown[]): void;
-	};
-	readonly client: {
-		getMessages(sessionId: string): Promise<unknown[]>;
 	};
 	readonly log: {
 		info(...args: unknown[]): void;
@@ -194,71 +182,38 @@ export function buildSessionSwitchedMessage(
 
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
-/** Result of resolveSessionHistory, including any messages fetched during resolution. */
-export interface ResolvedSessionHistory {
-	readonly source: SessionHistorySource;
-	/**
-	 * Raw messages fetched during resolution — reusable for poller seeding
-	 * to avoid a redundant full-fetch. Only present when a REST fetch occurred.
-	 */
-	readonly fetchedMessages?: unknown[];
-}
-
 /**
  * Resolve session history from cache or REST API.
  * Impure — reads from cache and may call REST.
  *
- * When the cache exists but may be stale, a SINGLE getMessages() call is
- * used for both count validation AND as the REST fallback data. This avoids
- * the previous pattern where getMessageCount + loadPreRenderedHistory caused
- * two full-message fetches whose overlapping heap usage could OOM the process.
+ * When the cache has chat content, it is served directly WITHOUT a validation
+ * fetch. The cache may be stale (missing older messages), but:
+ * - SSE events continuously fill the cache with new activity
+ * - Users can load older messages via the "load more" pagination
+ * - cold-cache-repair cleans up incomplete turns on restart
+ *
+ * This avoids fetching all messages (which can be 40MB+ for large sessions)
+ * and prevents OOM when many project relays are loaded.
  */
 export async function resolveSessionHistory(
 	sessionId: string,
-	deps: Pick<
-		SessionSwitchDeps,
-		"messageCache" | "sessionMgr" | "log" | "client"
-	>,
-): Promise<ResolvedSessionHistory> {
+	deps: Pick<SessionSwitchDeps, "messageCache" | "sessionMgr" | "log">,
+): Promise<SessionHistorySource> {
 	const events = await deps.messageCache.getEvents(sessionId);
 	const classification = classifyHistorySource(events);
 
 	if (classification === "cached-events" && events) {
-		// Validate cache completeness with a SINGLE fetch — the same response
-		// serves as both the count source and the REST fallback when stale.
-		try {
-			const messages = await deps.client.getMessages(sessionId);
-			const cachedCount = countUniqueMessages(events);
-			if (cachedCount >= messages.length) {
-				return {
-					source: { kind: "cached-events", events },
-					fetchedMessages: messages,
-				};
-			}
-			deps.log.info(
-				`Cache stale for ${sessionId.slice(0, 12)}: cache covers ${cachedCount}/${messages.length} messages — falling back to REST`,
-			);
-			// Reuse the already-fetched messages instead of a second REST call
-			const history =
-				deps.sessionMgr.buildPreRenderedHistoryFromMessages(messages);
-			return {
-				source: { kind: "rest-history", history },
-				fetchedMessages: messages,
-			};
-		} catch {
-			// Validation failed — serve cache rather than nothing
-			return { source: { kind: "cached-events", events } };
-		}
+		return { kind: "cached-events", events };
 	}
 
 	try {
 		const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
-		return { source: { kind: "rest-history", history } };
+		return { kind: "rest-history", history };
 	} catch (err) {
 		deps.log.warn(
 			`Failed to load history for ${sessionId}: ${err instanceof Error ? err.message : err}`,
 		);
-		return { source: { kind: "empty" } };
+		return { kind: "empty" };
 	}
 }
 
@@ -281,17 +236,13 @@ export async function switchClientToSession(
 
 	deps.wsHandler.setClientSession(clientId, sessionId);
 
-	// Resolve history source (single-fetch: returns any messages already fetched)
-	const resolved: ResolvedSessionHistory = options?.skipHistory
-		? { source: { kind: "empty" } }
+	// Resolve history source — cache-first, paginated REST fallback, no full-fetch
+	const source: SessionHistorySource = options?.skipHistory
+		? { kind: "empty" }
 		: await resolveSessionHistory(sessionId, deps);
 
 	// Patch missing done event for idle sessions served from cache
-	const patchedSource = patchMissingDone(
-		resolved.source,
-		deps.statusPoller,
-		sessionId,
-	);
+	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId);
 
 	// Build and send session_switched
 	const draft = deps.getInputDraft(sessionId);
@@ -307,24 +258,13 @@ export async function switchClientToSession(
 		status: deps.statusPoller?.isProcessing(sessionId) ? "processing" : "idle",
 	});
 
-	// Seed poller — reuse already-fetched messages when available to avoid
-	// yet another full REST fetch (the previous triple-fetch was the OOM trigger).
+	// Start poller without seeding — the poller will self-seed on first poll.
+	// Avoids a full getMessages() fetch that can OOM on large sessions.
 	if (
 		!options?.skipPollerSeed &&
 		deps.pollerManager &&
 		!deps.pollerManager.isPolling(sessionId)
 	) {
-		if (resolved.fetchedMessages) {
-			deps.pollerManager.startPolling(sessionId, resolved.fetchedMessages);
-		} else {
-			deps.client
-				.getMessages(sessionId)
-				.then((msgs) => deps.pollerManager?.startPolling(sessionId, msgs))
-				.catch((err) =>
-					deps.log.warn(
-						`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-					),
-				);
-		}
+		deps.pollerManager.startPolling(sessionId);
 	}
 }

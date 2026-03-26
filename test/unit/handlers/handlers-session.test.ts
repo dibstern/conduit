@@ -230,19 +230,13 @@ describe("handleForkSession (ticket 5.3)", () => {
 				storedMessageId = entry.forkMessageId;
 			},
 		};
-		// Re-create deps with a client that includes getMessages
-		const getMessagesMock = vi
-			.fn()
-			.mockResolvedValue([
-				{ id: "msg_1" },
-				{ id: "msg_2" },
-				{ id: "msg_last" },
-			]);
+		// Re-create deps with a client that includes getMessagesPage
+		const getMessagesPageMock = vi.fn().mockResolvedValue([{ id: "msg_last" }]);
 		const depsWithMeta = {
 			...deps,
 			client: {
 				...deps.client,
-				getMessages: getMessagesMock,
+				getMessagesPage: getMessagesPageMock,
 			} as unknown as HandlerDeps["client"],
 			forkMeta,
 		};

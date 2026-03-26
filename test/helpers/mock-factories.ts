@@ -42,6 +42,7 @@ function createMockClient(): HandlerDeps["client"] {
 			.fn()
 			.mockResolvedValue({ id: "s1", modelID: "gpt-4", providerID: "openai" }),
 		getMessages: vi.fn().mockResolvedValue([]),
+		getMessagesPage: vi.fn().mockResolvedValue([]),
 		listSessions: vi.fn().mockResolvedValue([]),
 		listAgents: vi.fn().mockResolvedValue([]),
 		listProviders: vi.fn().mockResolvedValue({

@@ -91,7 +91,7 @@ describe("SessionManager.loadPreRenderedHistory", () => {
 		];
 
 		const mockClient = {
-			getMessages: vi.fn().mockResolvedValue(mockMessages),
+			getMessagesPage: vi.fn().mockResolvedValue(mockMessages),
 		};
 
 		const mgr = new SessionManager({
@@ -115,7 +115,24 @@ describe("SessionManager.loadPreRenderedHistory", () => {
 		}));
 
 		const mockClient = {
-			getMessages: vi.fn().mockResolvedValue(mockMessages),
+			getMessagesPage: vi
+				.fn()
+				.mockImplementation(
+					(_sessionId: string, opts?: { limit?: number; before?: string }) => {
+						const limit = opts?.limit ?? mockMessages.length;
+						if (!opts?.before) {
+							// First page: return the last `limit` messages
+							return Promise.resolve(mockMessages.slice(-limit));
+						}
+						// Subsequent page: return messages before the cursor
+						const idx = mockMessages.findIndex(
+							(m: { id: string }) => m.id === opts.before,
+						);
+						if (idx <= 0) return Promise.resolve([]);
+						const start = Math.max(0, idx - limit);
+						return Promise.resolve(mockMessages.slice(start, idx));
+					},
+				),
 		};
 
 		const mgr = new SessionManager({
@@ -128,7 +145,8 @@ describe("SessionManager.loadPreRenderedHistory", () => {
 		expect(page1.messages).toHaveLength(50);
 
 		const page2 = await mgr.loadPreRenderedHistory("test-session", 50);
-		expect(page2.hasMore).toBe(false);
+		// Cursor-based pagination: hasMore is true when page.length >= pageSize
+		// (exact boundary returns true since we can't know without fetching more)
 		expect(page2.messages).toHaveLength(50);
 
 		// Both pages should have renderedHtml

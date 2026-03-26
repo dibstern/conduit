@@ -701,6 +701,8 @@ export class Daemon {
 			}
 
 			try {
+				// Lazy relay start: trigger creation on first WS connection
+				this.ensureRelayStarted(slug);
 				const relay = await this.registry.waitForRelay(slug, 10_000);
 				if (socket.destroyed || this.shuttingDown) {
 					if (!socket.destroyed) socket.destroy();
@@ -812,21 +814,9 @@ export class Daemon {
 			`[startup:${elapsed()}] Port scanner + WS upgrade handler ready`,
 		);
 
-		// Start relays for rehydrated projects (HTTP + WS upgrade handler are
-		// ready, so startRelay can attach). Non-fatal per project.
-		for (const slug of this.registry.slugs()) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — slug comes from registry.slugs()
-			const entry = this.registry.get(slug)!;
-			if (entry.status === "ready") continue;
-			const opencodeUrl = this.resolveOpencodeUrl(entry.project.instanceId);
-			if (opencodeUrl) {
-				this.registry.startRelay(
-					slug,
-					this.buildRelayFactory(entry.project, opencodeUrl),
-				);
-			}
-		}
-
+		// Relays are started lazily on first WS connection (see ensureRelayStarted).
+		// This keeps daemon startup fast and prevents idle projects from consuming
+		// memory (each relay holds an SSE consumer, message caches, pollers, etc.).
 		this.log.info(
 			`[startup:${elapsed()}] Relay startup dispatched for ${this.registry.size} project(s)`,
 		);
@@ -835,25 +825,17 @@ export class Daemon {
 		// so session counts are available before slow relay initialization finishes.
 		this.prefetchSessionCounts();
 
-		// Retry relays for projects stuck in "registering" when an instance
-		// becomes available (e.g. resolveOpencodeUrl returned null above because
-		// the managed instance hadn't started yet).
+		// When an instance becomes healthy, log it but don't eagerly start relays.
+		// Relays are started lazily on first WS connection (see ensureRelayStarted).
+		// Error-state relays are reset so the next WS connection can retry.
 		this.instanceManager.on("status_changed", (instance: OpenCodeInstance) => {
 			if (instance.status !== "healthy") return;
 			for (const slug of this.registry.slugs()) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — slug comes from registry.slugs()
 				const entry = this.registry.get(slug)!;
-				if (entry.status !== "registering") continue;
-				const opencodeUrl = this.resolveOpencodeUrl(entry.project.instanceId);
-				if (opencodeUrl) {
-					this.log.info(
-						{ slug, instanceId: instance.id },
-						"Instance became healthy — starting relay for registering project",
-					);
-					this.registry.startRelay(
-						slug,
-						this.buildRelayFactory(entry.project, opencodeUrl),
-					);
+				if (entry.status === "error") {
+					// Reset error state so next WS connection triggers a fresh relay attempt
+					this.registry.addWithoutRelay(entry.project, { silent: true });
 				}
 			}
 		});
@@ -1071,13 +1053,9 @@ export class Daemon {
 			...(resolvedInstanceId != null && { instanceId: resolvedInstanceId }),
 		};
 
-		// Start relay pipeline for this project if OpenCode is available
-		const opencodeUrl = this.resolveOpencodeUrl(project.instanceId);
-		if (opencodeUrl && this.httpServer) {
-			this.registry.add(project, this.buildRelayFactory(project, opencodeUrl));
-		} else {
-			this.registry.addWithoutRelay(project);
-		}
+		// Register the project without starting a relay. Relays are started
+		// lazily on first WS connection (see ensureRelayStarted).
+		this.registry.addWithoutRelay(project);
 
 		// Sync recent projects
 		syncRecentProjects(
@@ -1187,19 +1165,14 @@ export class Daemon {
 				}
 			}
 
-			// Retry error-state projects — their relay may have failed transiently
+			// Reset error-state projects so next WS connection can retry.
+			// Relays are started lazily, not eagerly.
 			for (const slug of this.registry.slugs()) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — slug comes from registry.slugs()
 				const entry = this.registry.get(slug)!;
 				if (entry.status !== "error") continue;
-				const opencodeUrl = this.resolveOpencodeUrl(entry.project.instanceId);
-				if (opencodeUrl) {
-					this.registry.startRelay(
-						slug,
-						this.buildRelayFactory(entry.project, opencodeUrl),
-					);
-					discoveryLog.info({ slug }, "Retrying relay for error-state project");
-				}
+				this.registry.addWithoutRelay(entry.project, { silent: true });
+				discoveryLog.info({ slug }, "Reset error-state project for lazy retry");
 			}
 
 			discoveryLog.info(
@@ -1289,6 +1262,27 @@ export class Daemon {
 			);
 			return null;
 		}
+	}
+
+	/**
+	 * Start a relay for a project if one isn't already started or in-flight.
+	 * Called lazily from the WS upgrade handler on first client connection.
+	 * No-op if the relay is already ready or being created.
+	 */
+	private ensureRelayStarted(slug: string): void {
+		const entry = this.registry.get(slug);
+		if (!entry) return;
+		// Already ready or in-flight — nothing to do
+		if (entry.status === "ready") return;
+		if (entry.status === "registering" && this.registry.isStarting(slug))
+			return;
+		const opencodeUrl = this.resolveOpencodeUrl(entry.project.instanceId);
+		if (!opencodeUrl) return;
+		this.log.info({ slug }, "Lazy-starting relay on first client connection");
+		this.registry.startRelay(
+			slug,
+			this.buildRelayFactory(entry.project, opencodeUrl),
+		);
 	}
 
 	private buildRelayFactory(
