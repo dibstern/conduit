@@ -250,19 +250,19 @@ test.describe("Scroll Stability — Mobile", () => {
 		// ─── Simulate the mobile race condition ──────────────────────────
 		// On real mobile browsers, viewport changes (address bar show/hide)
 		// and content-visibility layout shifts can cause the user to appear
-		// "near bottom" (within the 100px SCROLL_THRESHOLD) even while they
-		// are actually reading content above. When this happens,
-		// isUserScrolledUp is false, so scrollToBottom() executes.
+		// "near bottom" (within the detach threshold) even while they are
+		// actually reading content above. When this happens, the scroll
+		// controller hasn't detached, so auto-scroll would fire.
 		//
 		// We simulate this by scrolling to just within the threshold (90px
 		// from bottom), then injecting a user_message that changes
 		// chatState.messages.length — the primary $effect trigger.
 		//
-		// With the buggy code: the $effect fires, isUserScrolledUp is false
-		//   (we're within 100px), scrollToBottom() fires → snaps to exact
-		//   bottom → scroll position changes.
-		// With the fix: the $effect checks chatState.processing/streaming,
-		//   sees the session is idle, and skips → no position change.
+		// With the buggy code: the $effect fires, scrollCtrl.isDetached is
+		//   false (we're within the threshold), scrollToBottom() fires →
+		//   snaps to exact bottom → scroll position changes.
+		// With the fix: the scroll controller only auto-scrolls when
+		//   actively streaming/processing, not on idle background events.
 
 		// Position ourselves 90px from bottom (within the 100px threshold)
 		const nearBottom = scrollHeight - clientHeight - 90;
