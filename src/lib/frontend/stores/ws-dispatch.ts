@@ -63,14 +63,14 @@ import {
 	handleProxyDetected,
 	handleScanResult,
 } from "./instance.svelte.js";
+import { dispatch } from "./notification-reducer.svelte.js";
 import {
+	clearSessionLocal,
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
-	handleNotificationEvent,
 	handlePermissionRequest,
 	handlePermissionResolved,
-	onSessionSwitch,
 } from "./permissions.svelte.js";
 import { handleProjectList } from "./project.svelte.js";
 import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
@@ -310,9 +310,28 @@ export function handleMessage(msg: RelayMessage): void {
 
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
-		case "session_list":
+		case "session_list": {
 			handleSessionList(msg);
+			// Reconcile notification reducer with server-side question counts.
+			// session_list messages include pendingQuestionCount per session.
+			const sessions = msg.sessions;
+			if (Array.isArray(sessions)) {
+				const counts = new Map<
+					string,
+					{ questions: number; permissions: number }
+				>();
+				for (const s of sessions) {
+					if (s.pendingQuestionCount && s.pendingQuestionCount > 0) {
+						counts.set(s.id, {
+							questions: s.pendingQuestionCount,
+							permissions: 0,
+						});
+					}
+				}
+				dispatch({ type: "reconcile", counts });
+			}
 			break;
+		}
 		case "session_forked": {
 			handleSessionForked(msg);
 			const parentTitle = msg.parentTitle ?? "session";
@@ -338,7 +357,8 @@ export function handleMessage(msg: RelayMessage): void {
 			clearMessages();
 			updateContextPercent(0);
 			clearTodoState();
-			onSessionSwitch(previousSessionId, msg.id);
+			clearSessionLocal(previousSessionId);
+			dispatch({ type: "session_viewed", sessionId: msg.id });
 
 			if (msg.events) {
 				// Cache hit: replay raw events through existing chat handlers
@@ -563,7 +583,16 @@ export function handleMessage(msg: RelayMessage): void {
 				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
 			} as RelayMessage;
 
-			handleNotificationEvent(msg);
+			// Dispatch to notification reducer based on event type
+			if (msg.sessionId) {
+				if (msg.eventType === "ask_user") {
+					dispatch({ type: "question_appeared", sessionId: msg.sessionId });
+				} else if (msg.eventType === "ask_user_resolved") {
+					dispatch({ type: "question_resolved", sessionId: msg.sessionId });
+				} else if (msg.eventType === "done") {
+					dispatch({ type: "session_done", sessionId: msg.sessionId });
+				}
+			}
 
 			// Suppress all frontend notifications for subagent done events.
 			// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.

@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { flushSync } from "svelte";
+import {
+	dispatch,
+	resetNotifState,
+} from "../../stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../stores/permissions.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -35,9 +39,10 @@ function setupState(opts: {
 			toolInput: {},
 		}));
 
-		permissionsState.remoteQuestionCounts = new Map(
-			(opts.questionSessions ?? []).map((s) => [s, 1] as const),
-		);
+		resetNotifState();
+		for (const sid of opts.questionSessions ?? []) {
+			dispatch({ type: "question_appeared", sessionId: sid });
+		}
 	});
 }
 
@@ -53,7 +58,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
-		permissionsState.remoteQuestionCounts = new Map();
+		resetNotifState();
 	},
 } satisfies Meta<typeof NotificationStack>;
 

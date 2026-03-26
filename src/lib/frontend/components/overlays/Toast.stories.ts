@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { resetNotifState } from "../../stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../stores/permissions.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import type { Toast as ToastType } from "../../types.js";
@@ -14,7 +15,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
-		permissionsState.remoteQuestionCounts = new Map();
+		resetNotifState();
 	},
 } satisfies Meta<typeof NotificationStack>;
 
