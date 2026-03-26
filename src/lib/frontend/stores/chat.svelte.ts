@@ -583,35 +583,13 @@ export function handleStatus(
 		phaseToProcessing();
 		// Reset so queued styling can be applied for new processing turns
 		chatState.queuedFlagsCleared = false;
-		// Apply queued flag to the last unresponded user message.
-		// This handles the REST history path where messages are prepended
-		// before status:processing arrives as a separate WS message.
-		applyQueuedFlagInPlace();
-	}
-}
-
-/** Mark the last unresponded user message as queued in-place.
- *  Called when processing starts — handles the timing gap between
- *  REST history prepend and status:processing arrival. */
-function applyQueuedFlagInPlace(): void {
-	const msgs = getMessages();
-	if (msgs.length === 0) return;
-
-	for (let i = msgs.length - 1; i >= 0; i--) {
-		const m = msgs[i];
-		if (!m) continue;
-		if (m.type === "user") {
-			// Check if there's an assistant response after it
-			const hasResponse = msgs
-				.slice(i + 1)
-				.some((msg) => msg.type === "assistant");
-			if (hasResponse) return; // Already responded — no queued flag needed
-			// No response — mark as queued (immutable update)
-			setMessages(
-				msgs.map((msg, idx) => (idx === i ? { ...msg, queued: true } : msg)),
-			);
-			return;
-		}
+		// NOTE: applyQueuedFlagInPlace() was previously called here but caused
+		// two bugs: (1) it re-applied the queued flag after clearQueuedFlags()
+		// already cleared it (when status:processing arrived late from the
+		// monitoring poller), permanently sticking messages in "Queued" state;
+		// (2) it marked non-queued messages as queued when sent to idle sessions.
+		// The queued flag is now set exclusively by addUserMessage() (live sends)
+		// and replay dispatch (event replay), which have the correct context.
 	}
 }
 

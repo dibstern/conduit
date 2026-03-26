@@ -506,9 +506,15 @@ describe("history_page for load_more_history pagination", () => {
 });
 
 // ─── Queued flag timing (Task 5) ────────────────────────────────────────────
+// status:processing no longer applies queued flags — the queued flag is set
+// exclusively by addUserMessage() (live sends) and replay dispatch. The old
+// applyQueuedFlagInPlace() was removed because it caused two bugs:
+//   1. Re-applied the queued flag after clearQueuedFlags() already cleared it
+//      (when status:processing arrived late from the monitoring poller).
+//   2. Marked non-queued messages as queued when sent to idle sessions.
 
 describe("Queued flag timing with REST history", () => {
-	it("applies queued flag when status:processing arrives after REST history prepend", async () => {
+	it("status:processing does NOT apply queued flag to REST history messages", async () => {
 		// Load session with an unresponded user message via REST fallback
 		handleMessage({
 			type: "session_switched",
@@ -526,21 +532,20 @@ describe("Queued flag timing with REST history", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		// At this point, processing is false (clearMessages reset it), no queued flag
+		// No queued flag before status
 		const usersBefore = chatState.messages.filter((m) => m.type === "user");
 		expect(usersBefore[0]?.queued).toBeFalsy();
 
-		// Status arrives as a separate WS message (as in client-init.ts:131-134)
+		// Status arrives as a separate WS message — should NOT mark as queued
 		handleMessage({ type: "status", status: "processing" });
 
-		// Now the last unresponded user message should be queued
 		const usersAfter = chatState.messages.filter((m) => m.type === "user");
 		expect(
 			(usersAfter[usersAfter.length - 1] as { queued?: boolean }).queued,
-		).toBe(true);
+		).toBeFalsy();
 	});
 
-	it("queued flag is cleared when LLM starts responding", async () => {
+	it("status:processing sets phase to processing without queued side-effects", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
@@ -558,16 +563,19 @@ describe("Queued flag timing with REST history", () => {
 		await vi.runAllTimersAsync();
 
 		handleMessage({ type: "status", status: "processing" });
-		// Queued flag should be set
-		let users = chatState.messages.filter((m) => m.type === "user");
-		expect((users[users.length - 1] as { queued?: boolean }).queued).toBe(true);
 
-		// LLM starts responding — queued flag should be cleared
-		handleMessage({ type: "delta", text: "Hello" });
-		vi.advanceTimersByTime(100);
-		users = chatState.messages.filter((m) => m.type === "user");
+		// Phase should be processing but no queued flags
+		const users = chatState.messages.filter((m) => m.type === "user");
 		expect(
 			(users[users.length - 1] as { queued?: boolean }).queued,
+		).toBeFalsy();
+
+		// LLM starts responding — no queued flags to clear, just normal streaming
+		handleMessage({ type: "delta", text: "Hello" });
+		vi.advanceTimersByTime(100);
+		const usersAfter = chatState.messages.filter((m) => m.type === "user");
+		expect(
+			(usersAfter[usersAfter.length - 1] as { queued?: boolean }).queued,
 		).toBeFalsy();
 	});
 });
