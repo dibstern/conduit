@@ -38,6 +38,7 @@ import {
 	handleToolStart,
 	historyState,
 	isProcessing,
+	markPendingHistoryQueuedFallback,
 	phaseEndReplay,
 	phaseStartReplay,
 	prependMessages,
@@ -416,6 +417,10 @@ export function handleMessage(msg: RelayMessage): void {
 				// so the IntersectionObserver can never fire spuriously.
 			} else if (msg.history) {
 				// REST API fallback: convert to ChatMessages and prepend.
+				// REST history has no event-level data, so sentDuringEpoch
+				// can't be set during conversion.  Signal that the next
+				// status:processing should apply the queued-state fallback.
+				markPendingHistoryQueuedFallback();
 				// Fire-and-forget — handleMessage stays synchronous.
 				const historyMsgs = msg.history.messages;
 				const hasMore = msg.history.hasMore;

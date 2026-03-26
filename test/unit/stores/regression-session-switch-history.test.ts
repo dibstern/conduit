@@ -506,11 +506,11 @@ describe("history_page for load_more_history pagination", () => {
 });
 
 // ─── Queued state timing (Task 5) ───────────────────────────────────────────
-// status:processing sets sentDuringEpoch as a FALLBACK on the last unresponded
-// user message (only if not already set). This handles REST history and replay
-// paths where the queued state couldn't be determined from events alone.
-// Unlike the old mutable `queued` boolean, sentDuringEpoch is write-once —
-// the "re-apply after clear" race is structurally impossible.
+// The queued-state fallback (ensureSentDuringEpochOnLastUnrespondedUser) ONLY
+// fires after REST history loads, because that's the one path where messages
+// don't go through addUserMessage and sentDuringEpoch can't be set from event
+// ordering.  Events replay and live sends both use addUserMessage, which sets
+// the correct sentDuringEpoch already.
 
 describe("Queued state timing with REST history", () => {
 	it("status:processing sets sentDuringEpoch on unresponded user message from REST history", async () => {
@@ -534,13 +534,78 @@ describe("Queued state timing with REST history", () => {
 		const usersBefore = chatState.messages.filter((m) => m.type === "user");
 		expect(usersBefore[0]?.sentDuringEpoch).toBeUndefined();
 
-		// Status arrives — fallback sets sentDuringEpoch
+		// Status arrives — REST history fallback sets sentDuringEpoch
 		handleMessage({ type: "status", status: "processing" });
 
 		const usersAfter = chatState.messages.filter((m) => m.type === "user");
 		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
 			chatState.turnEpoch,
 		);
+	});
+
+	it("status:processing does NOT apply fallback after events replay (only REST history)", async () => {
+		// Events replay — addUserMessage sets correct sentDuringEpoch via llmActive
+		handleMessage({
+			type: "session_switched",
+			id: "s2",
+			events: [
+				{ type: "user_message", text: "first" },
+				{ type: "delta", text: "responding..." },
+				{ type: "user_message", text: "queued" },
+			],
+		});
+		await vi.runAllTimersAsync();
+
+		const usersBefore = chatState.messages.filter((m) => m.type === "user");
+		const epochBefore = usersBefore[usersBefore.length - 1]?.sentDuringEpoch;
+		expect(epochBefore).toBe(0); // set by replay
+
+		// status:processing arrives — fallback flag NOT set for events replay
+		handleMessage({ type: "status", status: "processing" });
+
+		const usersAfter = chatState.messages.filter((m) => m.type === "user");
+		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
+			epochBefore,
+		);
+	});
+
+	it("status:processing does NOT apply fallback for normal live sends", () => {
+		// User sends a message to an idle session — NOT queued
+		addUserMessage("hello");
+		handleMessage({ type: "status", status: "processing" });
+
+		const users = chatState.messages.filter((m) => m.type === "user");
+		// sentDuringEpoch should NOT be set — message was sent to idle session
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
+	});
+
+	it("status:processing skips messages that already have an assistant response", async () => {
+		handleMessage({
+			type: "session_switched",
+			id: "s3",
+			history: {
+				messages: [
+					{
+						id: "m1",
+						role: "user",
+						parts: [{ id: "p1", type: "text", text: "hello" }],
+					},
+					{
+						id: "m2",
+						role: "assistant",
+						parts: [{ id: "p2", type: "text", text: "hi" }],
+					},
+				],
+				hasMore: false,
+			},
+		});
+		await vi.runAllTimersAsync();
+
+		handleMessage({ type: "status", status: "processing" });
+
+		// User message has a response after it — fallback should NOT set sentDuringEpoch
+		const users = chatState.messages.filter((m) => m.type === "user");
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
 	});
 
 	it("status:processing does NOT overwrite existing sentDuringEpoch (write-once)", async () => {

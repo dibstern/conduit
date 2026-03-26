@@ -586,29 +586,39 @@ export function handleDone(
 	phaseToIdle();
 }
 
+// ─── REST history queued-state fallback ──────────────────────────────────────
+// The REST history path (historyToChatMessages) has no event-level data, so it
+// cannot determine which messages were queued.  When status:processing arrives
+// after a REST history load, we set sentDuringEpoch on the last unresponded
+// user message.  This flag is ONLY set by the REST history load path in
+// ws-dispatch.ts and consumed by the first status:processing after it.
+let _pendingHistoryQueuedFallback = false;
+
+/** Signal that the current session was loaded via REST history (no events).
+ *  The next status:processing will apply the queued-state fallback. */
+export function markPendingHistoryQueuedFallback(): void {
+	_pendingHistoryQueuedFallback = true;
+}
+
 export function handleStatus(
 	msg: Extract<RelayMessage, { type: "status" }>,
 ): void {
 	if (msg.status === "processing") {
 		phaseToProcessing();
-		// Fallback: if the session was just loaded (replay or REST history)
-		// and the last user message has no sentDuringEpoch, it means the
-		// replay/history path couldn't determine the queued state.  Since
-		// the session IS processing, the last unresponded user message must
-		// be queued.  Set sentDuringEpoch so the shimmer appears.
-		//
-		// This is safe because sentDuringEpoch is write-once: if replay or
-		// addUserMessage already set it, this is a no-op.  And unlike the
-		// old mutable `queued` boolean, sentDuringEpoch is never cleared —
-		// so the "re-apply after clear" race that caused the original bugs
-		// is structurally impossible.
-		ensureSentDuringEpochOnLastUnrespondedUser();
+		// Fallback ONLY for REST history loads — the one path where messages
+		// don't go through addUserMessage and sentDuringEpoch can't be set
+		// from event ordering.  Events replay and live sends both go through
+		// addUserMessage, which sets the correct sentDuringEpoch already.
+		if (_pendingHistoryQueuedFallback) {
+			_pendingHistoryQueuedFallback = false;
+			ensureSentDuringEpochOnLastUnrespondedUser();
+		}
 	}
 }
 
 /** Set `sentDuringEpoch` on the last unresponded user message if not
- *  already set.  Called from `handleStatus` as a fallback for session
- *  loads where replay couldn't infer the queued state from events. */
+ *  already set.  Called ONLY after REST history loads when the session
+ *  is processing — the only path where queued state can't be inferred. */
 function ensureSentDuringEpochOnLastUnrespondedUser(): void {
 	const msgs = getMessages();
 	if (msgs.length === 0) return;
@@ -673,6 +683,13 @@ export function addUserMessage(
 	images?: string[],
 	sentWhileProcessing?: boolean,
 ): void {
+	// A live (non-replay) addUserMessage call means addUserMessage is
+	// setting the correct sentDuringEpoch — consume the history fallback
+	// flag so a subsequent status:processing doesn't override it.
+	if (chatState.loadLifecycle !== "loading") {
+		_pendingHistoryQueuedFallback = false;
+	}
+
 	// Finalize the in-progress assistant message only during replay,
 	// where user_message events can appear between delta events without
 	// an intervening done event.  During live streaming the assistant
@@ -768,6 +785,7 @@ export function clearMessages(): void {
 	chatState.messages = [];
 	chatState.currentAssistantText = "";
 	chatState.turnEpoch = 0;
+	_pendingHistoryQueuedFallback = false;
 	registry.clear();
 	doneMessageIds.clear();
 	if (renderTimer !== null) {
