@@ -32,10 +32,10 @@ test.describe("Unified Rendering: No Duplication", () => {
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
 
-	// Send the first message to establish baseline content
-	await app.sendMessage("Show me a tool call");
-	await chat.waitForAssistantMessage();
-	await chat.waitForStreamingComplete();
+		// Send the first message to establish baseline content
+		await app.sendMessage("Show me a tool call");
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
 
 		const usersBefore = await chat.getUserMessageCount();
 		const assistantsBefore = await page.locator(".msg-assistant").count();
@@ -65,10 +65,10 @@ test.describe("Unified Rendering: No Duplication", () => {
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
 
-	// Send a message to populate the DOM
-	await app.sendMessage("Show me a tool call");
-	await chat.waitForAssistantMessage();
-	await chat.waitForStreamingComplete();
+		// Send a message to populate the DOM
+		await app.sendMessage("Show me a tool call");
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
 
 		// Send a prompt to add more content
 		await app.sendMessage("Ping");

@@ -16,7 +16,8 @@ const DEBUG_BTN = "#debug-btn";
 const SETTINGS_BTN = "#header-settings-btn";
 const SETTINGS_PANEL = "#settings-panel";
 const DEBUG_TAB = 'button:has-text("Debug")';
-const DEBUG_TOGGLE = 'button[role="switch"][aria-label="Connection debug panel"]';
+const DEBUG_TOGGLE =
+	'button[role="switch"][aria-label="Connection debug panel"]';
 const CLEAR_BTN = 'button[title="Clear log"]';
 const CLOSE_BTN = 'button[title="Close panel"]';
 const VERBOSE_BTN = 'button[title*="logging"]';
