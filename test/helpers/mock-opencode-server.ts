@@ -325,7 +325,7 @@ export class MockOpenCodeServer {
 					this.pushQueue(this.normalizedQueues, nk, { ...queued });
 				}
 			} else if (ix.kind === "sse") {
-				this.sseSegments[currentSegment]!.push({
+				this.sseSegments[currentSegment]?.push({
 					type: ix.type,
 					properties: ix.properties,
 					delayMs: ix.delayMs,
@@ -813,16 +813,18 @@ export class MockOpenCodeServer {
 	private emitEvents(events: SseEvent[]): void {
 		if (events.length === 0) return;
 
-		const hasIdle = events.some((e) => e.type === "session.idle");
-		if (hasIdle) {
-			this.statusOverride = { status: 200, responseBody: {} };
-		}
-
 		void (async () => {
 			for (const event of events) {
 				const delay = Math.min(event.delayMs, 5);
 				if (delay > 0) {
 					await new Promise<void>((r) => setTimeout(r, delay));
+				}
+
+				// Set statusOverride when session.idle is actually emitted,
+				// not before — the relay's status poller needs to see busy
+				// from the queue before idle for correct monitoring behavior.
+				if (event.type === "session.idle") {
+					this.statusOverride = { status: 200, responseBody: {} };
 				}
 
 				const payload = JSON.stringify({
