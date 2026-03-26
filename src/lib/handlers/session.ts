@@ -141,8 +141,6 @@ function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 		pollerManager: deps.pollerManager,
 		client: {
 			getMessages: (sid: string) => deps.client.getMessages(sid),
-			getMessageCount: (sid: string) =>
-				deps.client.getMessages(sid).then((m) => m.length),
 		},
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,

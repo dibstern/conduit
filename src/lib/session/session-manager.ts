@@ -224,6 +224,28 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		return page;
 	}
 
+	/**
+	 * Build a pre-rendered history page from already-fetched messages.
+	 * Avoids a redundant REST call when the caller already holds the full
+	 * message array (e.g. after a cache-validation fetch).
+	 * Synchronous — no I/O.
+	 */
+	buildPreRenderedHistoryFromMessages(
+		messages: unknown[],
+		offset = 0,
+	): HistoryPage {
+		const total = messages.length;
+		const end = Math.max(0, total - offset);
+		const start = Math.max(0, end - this.historyPageSize);
+		const page = messages.slice(start, end) as unknown as HistoryMessage[];
+		preRenderHistoryMessages(page);
+		return {
+			messages: page,
+			hasMore: start > 0,
+			total,
+		};
+	}
+
 	// ─── Mutations ────────────────────────────────────────────────────────
 
 	/** Create a new session */

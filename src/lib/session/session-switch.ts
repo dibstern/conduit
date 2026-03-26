@@ -52,6 +52,15 @@ export interface SessionSwitchDeps {
 			hasMore: boolean;
 			total?: number;
 		}>;
+		/** Build a history page from already-fetched messages (no I/O). */
+		buildPreRenderedHistoryFromMessages(
+			messages: unknown[],
+			offset?: number,
+		): {
+			messages: HistoryMessage[];
+			hasMore: boolean;
+			total?: number;
+		};
 	};
 	readonly wsHandler: {
 		sendTo(clientId: string, msg: RelayMessage): void;
@@ -64,8 +73,6 @@ export interface SessionSwitchDeps {
 	};
 	readonly client: {
 		getMessages(sessionId: string): Promise<unknown[]>;
-		/** Fast message count for cache validation. Implementations may use getMessages().length. */
-		getMessageCount?(sessionId: string): Promise<number>;
 	};
 	readonly log: {
 		info(...args: unknown[]): void;
@@ -187,9 +194,24 @@ export function buildSessionSwitchedMessage(
 
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
+/** Result of resolveSessionHistory, including any messages fetched during resolution. */
+export interface ResolvedSessionHistory {
+	readonly source: SessionHistorySource;
+	/**
+	 * Raw messages fetched during resolution — reusable for poller seeding
+	 * to avoid a redundant full-fetch. Only present when a REST fetch occurred.
+	 */
+	readonly fetchedMessages?: unknown[];
+}
+
 /**
  * Resolve session history from cache or REST API.
  * Impure — reads from cache and may call REST.
+ *
+ * When the cache exists but may be stale, a SINGLE getMessages() call is
+ * used for both count validation AND as the REST fallback data. This avoids
+ * the previous pattern where getMessageCount + loadPreRenderedHistory caused
+ * two full-message fetches whose overlapping heap usage could OOM the process.
  */
 export async function resolveSessionHistory(
 	sessionId: string,
@@ -197,41 +219,46 @@ export async function resolveSessionHistory(
 		SessionSwitchDeps,
 		"messageCache" | "sessionMgr" | "log" | "client"
 	>,
-): Promise<SessionHistorySource> {
+): Promise<ResolvedSessionHistory> {
 	const events = await deps.messageCache.getEvents(sessionId);
 	const classification = classifyHistorySource(events);
 
 	if (classification === "cached-events" && events) {
-		// Validate cache completeness if getMessageCount is available
-		if (deps.client?.getMessageCount) {
-			try {
-				const actualCount = await deps.client.getMessageCount(sessionId);
-				const cachedCount = countUniqueMessages(events);
-				if (cachedCount < actualCount) {
-					deps.log.info(
-						`Cache stale for ${sessionId.slice(0, 12)}: cache covers ${cachedCount}/${actualCount} messages — falling back to REST`,
-					);
-					// Fall through to REST below
-				} else {
-					return { kind: "cached-events", events };
-				}
-			} catch {
-				// Validation failed — serve cache rather than nothing
-				return { kind: "cached-events", events };
+		// Validate cache completeness with a SINGLE fetch — the same response
+		// serves as both the count source and the REST fallback when stale.
+		try {
+			const messages = await deps.client.getMessages(sessionId);
+			const cachedCount = countUniqueMessages(events);
+			if (cachedCount >= messages.length) {
+				return {
+					source: { kind: "cached-events", events },
+					fetchedMessages: messages,
+				};
 			}
-		} else {
-			return { kind: "cached-events", events };
+			deps.log.info(
+				`Cache stale for ${sessionId.slice(0, 12)}: cache covers ${cachedCount}/${messages.length} messages — falling back to REST`,
+			);
+			// Reuse the already-fetched messages instead of a second REST call
+			const history =
+				deps.sessionMgr.buildPreRenderedHistoryFromMessages(messages);
+			return {
+				source: { kind: "rest-history", history },
+				fetchedMessages: messages,
+			};
+		} catch {
+			// Validation failed — serve cache rather than nothing
+			return { source: { kind: "cached-events", events } };
 		}
 	}
 
 	try {
 		const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
-		return { kind: "rest-history", history };
+		return { source: { kind: "rest-history", history } };
 	} catch (err) {
 		deps.log.warn(
 			`Failed to load history for ${sessionId}: ${err instanceof Error ? err.message : err}`,
 		);
-		return { kind: "empty" };
+		return { source: { kind: "empty" } };
 	}
 }
 
@@ -254,13 +281,17 @@ export async function switchClientToSession(
 
 	deps.wsHandler.setClientSession(clientId, sessionId);
 
-	// Resolve history source
-	const source: SessionHistorySource = options?.skipHistory
-		? { kind: "empty" }
+	// Resolve history source (single-fetch: returns any messages already fetched)
+	const resolved: ResolvedSessionHistory = options?.skipHistory
+		? { source: { kind: "empty" } }
 		: await resolveSessionHistory(sessionId, deps);
 
 	// Patch missing done event for idle sessions served from cache
-	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId);
+	const patchedSource = patchMissingDone(
+		resolved.source,
+		deps.statusPoller,
+		sessionId,
+	);
 
 	// Build and send session_switched
 	const draft = deps.getInputDraft(sessionId);
@@ -276,19 +307,24 @@ export async function switchClientToSession(
 		status: deps.statusPoller?.isProcessing(sessionId) ? "processing" : "idle",
 	});
 
-	// Seed poller (fire-and-forget)
+	// Seed poller — reuse already-fetched messages when available to avoid
+	// yet another full REST fetch (the previous triple-fetch was the OOM trigger).
 	if (
 		!options?.skipPollerSeed &&
 		deps.pollerManager &&
 		!deps.pollerManager.isPolling(sessionId)
 	) {
-		deps.client
-			.getMessages(sessionId)
-			.then((msgs) => deps.pollerManager?.startPolling(sessionId, msgs))
-			.catch((err) =>
-				deps.log.warn(
-					`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-				),
-			);
+		if (resolved.fetchedMessages) {
+			deps.pollerManager.startPolling(sessionId, resolved.fetchedMessages);
+		} else {
+			deps.client
+				.getMessages(sessionId)
+				.then((msgs) => deps.pollerManager?.startPolling(sessionId, msgs))
+				.catch((err) =>
+					deps.log.warn(
+						`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
+					),
+				);
+		}
 	}
 }

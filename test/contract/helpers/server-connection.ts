@@ -9,7 +9,7 @@ export const OPENCODE_BASE_URL =
 	process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
 /** Build auth headers if OPENCODE_SERVER_PASSWORD is set. */
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
 	const pw = process.env["OPENCODE_SERVER_PASSWORD"];
 	if (!pw) return {};
 	const encoded = Buffer.from(`opencode:${pw}`).toString("base64");
@@ -87,7 +87,9 @@ export async function apiPost<T = unknown>(
 	}
 	const contentType = res.headers.get("content-type") ?? "";
 	if (contentType.includes("application/json")) {
-		return res.json() as Promise<T>;
+		const text = await res.text();
+		if (text.length === 0) return undefined as T;
+		return JSON.parse(text) as T;
 	}
 	return undefined as T;
 }

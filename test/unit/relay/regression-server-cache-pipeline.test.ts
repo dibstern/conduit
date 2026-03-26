@@ -335,23 +335,34 @@ describe("Server cache pipeline: events survive session switch", () => {
 			total: 12,
 		};
 
-		// Use the real cache, only mock network-bound calls
+		// Use the real cache, only mock network-bound calls.
+		// getMessages returns 12 messages — more than the 7 unique in cache —
+		// so resolveSessionHistory detects staleness and uses the fetched data
+		// via buildPreRenderedHistoryFromMessages (single-fetch path).
 		const result = await resolveSessionHistory("session-a", {
 			messageCache: cache,
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockResolvedValue(fullHistory),
+				buildPreRenderedHistoryFromMessages: vi
+					.fn()
+					.mockReturnValue(fullHistory),
 			},
 			client: {
-				getMessages: vi.fn().mockResolvedValue([]),
-				getMessageCount: vi.fn().mockResolvedValue(12),
+				getMessages: vi.fn().mockResolvedValue(
+					Array.from({ length: 12 }, (_, i) => ({
+						id: `m${i}`,
+						role: i % 2 === 0 ? "user" : "assistant",
+						sessionID: "session-a",
+					})),
+				),
 			},
 			log: { info: vi.fn(), warn: vi.fn() },
 		});
 
 		// Fix: falls back to REST — all 12 messages visible
-		expect(result.kind).toBe("rest-history");
-		if (result.kind === "rest-history") {
-			expect(result.history.total).toBe(12);
+		expect(result.source.kind).toBe("rest-history");
+		if (result.source.kind === "rest-history") {
+			expect(result.source.history.total).toBe(12);
 		}
 	});
 

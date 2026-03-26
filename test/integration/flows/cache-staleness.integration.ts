@@ -78,8 +78,8 @@ describe("Integration: Cache Staleness Detection", () => {
 		client.send({ type: "new_session", title: "Temp Session" });
 		await client.waitFor("session_switched", { timeout: 5_000 });
 
-		// Clear and switch back — this triggers resolveSessionHistory with
-		// getMessageCount = 20, but cache has fewer → REST fallback
+		// Clear and switch back — this triggers resolveSessionHistory which
+		// fetches 20 messages, but cache has fewer → REST fallback
 		client.clearReceived();
 		client.send({ type: "switch_session", sessionId: sessionA });
 

@@ -4,6 +4,7 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+	authHeaders,
 	checkServerHealth,
 	connectSSE,
 	OPENCODE_BASE_URL,
@@ -149,7 +150,7 @@ describe("AC1 — SSE Event Shape Validation", () => {
 			const controller = new AbortController();
 			const res = await fetch(`${OPENCODE_BASE_URL}/event`, {
 				signal: controller.signal,
-				headers: { Accept: "text/event-stream" },
+				headers: { Accept: "text/event-stream", ...authHeaders() },
 			});
 
 			expect(res.ok).toBe(true);

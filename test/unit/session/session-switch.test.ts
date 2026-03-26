@@ -13,6 +13,15 @@ import {
 import type { RequestId } from "../../../src/lib/shared-types.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 
+/** Helper: build a fake messages array of the given length. */
+function fakeMessages(count: number) {
+	return Array.from({ length: count }, (_, i) => ({
+		id: `m${i}`,
+		role: i % 2 === 0 ? "user" : "assistant",
+		sessionID: "ses_test",
+	}));
+}
+
 describe("classifyHistorySource", () => {
 	it('returns "needs-rest" when events is null', () => {
 		expect(classifyHistorySource(null)).toBe("needs-rest");
@@ -171,6 +180,9 @@ function createMinimalDeps(
 				messages: [],
 				hasMore: false,
 			}),
+			buildPreRenderedHistoryFromMessages: vi
+				.fn()
+				.mockReturnValue({ messages: [], hasMore: false }),
 		},
 		client: { getMessages: vi.fn().mockResolvedValue([]) },
 		log: { info: vi.fn(), warn: vi.fn() },
@@ -265,16 +277,20 @@ describe("countUniqueMessages", () => {
 });
 
 describe("resolveSessionHistory", () => {
-	it("returns cached-events when cache has chat content", async () => {
+	it("returns cached-events when cache has chat content and count matches", async () => {
 		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
 		const deps = createMinimalDeps({
 			messageCache: { getEvents: vi.fn().mockReturnValue(events) },
+			// getMessages returns 1 message — matches the 1 user_message in cache
+			client: { getMessages: vi.fn().mockResolvedValue(fakeMessages(1)) },
 		});
 
 		const result = await resolveSessionHistory("ses_1", deps);
 
-		expect(result.kind).toBe("cached-events");
-		expect(result.kind === "cached-events" && result.events).toEqual(events);
+		expect(result.source.kind).toBe("cached-events");
+		expect(
+			result.source.kind === "cached-events" && result.source.events,
+		).toEqual(events);
 		expect(deps.sessionMgr.loadPreRenderedHistory).not.toHaveBeenCalled();
 	});
 
@@ -287,16 +303,17 @@ describe("resolveSessionHistory", () => {
 		const deps = createMinimalDeps({
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockResolvedValue(history),
+				buildPreRenderedHistoryFromMessages: vi.fn(),
 			},
 		});
 
 		const result = await resolveSessionHistory("ses_2", deps);
 
-		expect(result.kind).toBe("rest-history");
-		if (result.kind === "rest-history") {
-			expect(result.history.messages).toEqual(history.messages);
-			expect(result.history.hasMore).toBe(true);
-			expect(result.history.total).toBe(5);
+		expect(result.source.kind).toBe("rest-history");
+		if (result.source.kind === "rest-history") {
+			expect(result.source.history.messages).toEqual(history.messages);
+			expect(result.source.history.hasMore).toBe(true);
+			expect(result.source.history.total).toBe(5);
 		}
 	});
 
@@ -307,12 +324,13 @@ describe("resolveSessionHistory", () => {
 			messageCache: { getEvents: vi.fn().mockReturnValue(events) },
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockResolvedValue(history),
+				buildPreRenderedHistoryFromMessages: vi.fn(),
 			},
 		});
 
 		const result = await resolveSessionHistory("ses_3", deps);
 
-		expect(result.kind).toBe("rest-history");
+		expect(result.source.kind).toBe("rest-history");
 		expect(deps.sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
 			"ses_3",
 		);
@@ -324,12 +342,13 @@ describe("resolveSessionHistory", () => {
 				loadPreRenderedHistory: vi
 					.fn()
 					.mockRejectedValue(new Error("API down")),
+				buildPreRenderedHistoryFromMessages: vi.fn(),
 			},
 		});
 
 		const result = await resolveSessionHistory("ses_4", deps);
 
-		expect(result.kind).toBe("empty");
+		expect(result.source.kind).toBe("empty");
 		expect(deps.log.warn).toHaveBeenCalled();
 	});
 
@@ -337,6 +356,7 @@ describe("resolveSessionHistory", () => {
 		const deps = createMinimalDeps({
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockRejectedValue(new Error("timeout")),
+				buildPreRenderedHistoryFromMessages: vi.fn(),
 			},
 		});
 
@@ -347,8 +367,9 @@ describe("resolveSessionHistory", () => {
 		expect(warnCall).toContain("timeout");
 	});
 
-	it("falls back to REST when cache has fewer messages than OpenCode", async () => {
-		// Cache has events from 3 user turns, but OpenCode has 10 messages total
+	it("falls back to REST via single fetch when cache is stale", async () => {
+		// Cache has events from 3 user turns (6 unique messages),
+		// but OpenCode has 10 messages total
 		const cachedEvents: RelayMessage[] = [
 			{ type: "user_message", text: "Turn 1" },
 			{ type: "delta", text: "Response 1", messageId: "msg_asst1" },
@@ -357,31 +378,36 @@ describe("resolveSessionHistory", () => {
 			{ type: "user_message", text: "Turn 3" },
 			{ type: "delta", text: "Response 3", messageId: "msg_asst3" },
 		];
-		const restHistory = {
-			messages: Array.from({ length: 10 }, (_, i) => ({
-				id: `m${i}`,
-				role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-			})),
+		const builtHistory = {
+			messages: fakeMessages(10),
 			hasMore: false,
 			total: 10,
 		};
 		const deps = createMinimalDeps({
 			messageCache: { getEvents: vi.fn().mockReturnValue(cachedEvents) },
 			sessionMgr: {
-				loadPreRenderedHistory: vi.fn().mockResolvedValue(restHistory),
+				loadPreRenderedHistory: vi.fn(),
+				buildPreRenderedHistoryFromMessages: vi
+					.fn()
+					.mockReturnValue(builtHistory),
 			},
-			client: {
-				getMessages: vi.fn().mockResolvedValue([]),
-				getMessageCount: vi.fn().mockResolvedValue(10),
-			},
+			// Return 10 messages — more than the 6 unique in cache
+			client: { getMessages: vi.fn().mockResolvedValue(fakeMessages(10)) },
 		});
 
 		const result = await resolveSessionHistory("ses_stale", deps);
 
-		expect(result.kind).toBe("rest-history");
-		if (result.kind === "rest-history") {
-			expect(result.history.total).toBe(10);
+		expect(result.source.kind).toBe("rest-history");
+		if (result.source.kind === "rest-history") {
+			expect(result.source.history.total).toBe(10);
 		}
+		// Critical: used buildPreRenderedHistoryFromMessages, NOT loadPreRenderedHistory
+		expect(
+			deps.sessionMgr.buildPreRenderedHistoryFromMessages,
+		).toHaveBeenCalled();
+		expect(deps.sessionMgr.loadPreRenderedHistory).not.toHaveBeenCalled();
+		// Critical: getMessages called only ONCE (the OOM fix)
+		expect(deps.client.getMessages).toHaveBeenCalledTimes(1);
 	});
 
 	it("uses cache when message count matches OpenCode", async () => {
@@ -393,50 +419,31 @@ describe("resolveSessionHistory", () => {
 		];
 		const deps = createMinimalDeps({
 			messageCache: { getEvents: vi.fn().mockReturnValue(cachedEvents) },
-			client: {
-				getMessages: vi.fn().mockResolvedValue([]),
-				getMessageCount: vi.fn().mockResolvedValue(2),
-			},
+			client: { getMessages: vi.fn().mockResolvedValue(fakeMessages(2)) },
 		});
 
 		const result = await resolveSessionHistory("ses_fresh", deps);
 
-		expect(result.kind).toBe("cached-events");
+		expect(result.source.kind).toBe("cached-events");
 		expect(deps.sessionMgr.loadPreRenderedHistory).not.toHaveBeenCalled();
 	});
 
-	it("uses cache when getMessageCount is unavailable (graceful degradation)", async () => {
+	it("falls back to cache when getMessages rejects during validation", async () => {
 		const cachedEvents: RelayMessage[] = [
 			{ type: "user_message", text: "hello" },
 			{ type: "delta", text: "hi" },
 		];
 		const deps = createMinimalDeps({
 			messageCache: { getEvents: vi.fn().mockReturnValue(cachedEvents) },
-			// client has no getMessageCount — graceful degradation
-		});
-
-		const result = await resolveSessionHistory("ses_no_count", deps);
-
-		expect(result.kind).toBe("cached-events");
-	});
-
-	it("uses cache when getMessageCount rejects (network error)", async () => {
-		const cachedEvents: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "hi" },
-		];
-		const deps = createMinimalDeps({
 			client: {
-				getMessages: vi.fn().mockResolvedValue([]),
-				getMessageCount: vi.fn().mockRejectedValue(new Error("timeout")),
+				getMessages: vi.fn().mockRejectedValue(new Error("network error")),
 			},
-			messageCache: { getEvents: vi.fn().mockReturnValue(cachedEvents) },
 		});
 
 		const result = await resolveSessionHistory("ses_err", deps);
 
 		// Graceful degradation: serve stale cache rather than nothing
-		expect(result.kind).toBe("cached-events");
+		expect(result.source.kind).toBe("cached-events");
 	});
 
 	it("uses cache for user-message-only session (no assistant response yet)", async () => {
@@ -446,15 +453,28 @@ describe("resolveSessionHistory", () => {
 		];
 		const deps = createMinimalDeps({
 			messageCache: { getEvents: vi.fn().mockReturnValue(cachedEvents) },
-			client: {
-				getMessages: vi.fn().mockResolvedValue([]),
-				getMessageCount: vi.fn().mockResolvedValue(1),
-			},
+			// 1 message in OpenCode matches the 1 user_message in cache
+			client: { getMessages: vi.fn().mockResolvedValue(fakeMessages(1)) },
 		});
 
 		const result = await resolveSessionHistory("ses_pending", deps);
 
-		expect(result.kind).toBe("cached-events");
+		expect(result.source.kind).toBe("cached-events");
+	});
+
+	it("returns fetchedMessages for poller reuse when messages were fetched", async () => {
+		const cachedEvents: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+		];
+		const msgs = fakeMessages(1);
+		const deps = createMinimalDeps({
+			messageCache: { getEvents: vi.fn().mockReturnValue(cachedEvents) },
+			client: { getMessages: vi.fn().mockResolvedValue(msgs) },
+		});
+
+		const result = await resolveSessionHistory("ses_reuse", deps);
+
+		expect(result.fetchedMessages).toBe(msgs);
 	});
 });
 
@@ -470,6 +490,9 @@ function createFullDeps(
 				messages: [],
 				hasMore: false,
 			}),
+			buildPreRenderedHistoryFromMessages: vi
+				.fn()
+				.mockReturnValue({ messages: [], hasMore: false }),
 		},
 		wsHandler: {
 			sendTo: vi.fn(),
@@ -525,6 +548,7 @@ describe("switchClientToSession", () => {
 		const deps = createFullDeps({
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockResolvedValue(history),
+				buildPreRenderedHistoryFromMessages: vi.fn(),
 			},
 		});
 		await switchClientToSession(deps, "c1", "ses_2");
@@ -543,6 +567,7 @@ describe("switchClientToSession", () => {
 		const deps = createFullDeps({
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockRejectedValue(new Error("fail")),
+				buildPreRenderedHistoryFromMessages: vi.fn(),
 			},
 		});
 		await switchClientToSession(deps, "c1", "ses_3");
