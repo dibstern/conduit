@@ -830,3 +830,113 @@ describe("switchClientToSession", () => {
 		expect(lastEvent).toEqual({ type: "done", code: 0 });
 	});
 });
+
+describe("resolveSessionHistory — repaired cold cache regression", () => {
+	it("falls back to REST when repair removed an incomplete assistant turn", async () => {
+		// After repair: 2 complete turns + 1 user_message with no response
+		// countUniqueMessages: 3 user_messages + 2 messageIds = 5
+		// REST has: 3 user + 3 assistant = 6 messages (the 3rd assistant was truncated)
+		const repairedEvents: RelayMessage[] = [
+			{ type: "user_message", text: "q1" },
+			{ type: "delta", text: "a1", messageId: "msg_1" },
+			{ type: "result", usage: { input: 10, output: 20, cache_read: 0, cache_creation: 0 }, cost: 0.01, duration: 500, sessionId: "s1" },
+			{ type: "done", code: 0 },
+			{ type: "user_message", text: "q2" },
+			{ type: "delta", text: "a2", messageId: "msg_2" },
+			{ type: "result", usage: { input: 15, output: 25, cache_read: 0, cache_creation: 0 }, cost: 0.02, duration: 600, sessionId: "s1" },
+			{ type: "done", code: 0 },
+			{ type: "user_message", text: "q3" },
+			// repair removed: delta "partial-a3" with messageId "msg_3"
+		];
+
+		const deps = createMinimalDeps({
+			messageCache: {
+				getEvents: vi.fn().mockReturnValue(repairedEvents),
+			},
+			client: {
+				getMessages: vi.fn().mockResolvedValue([]),
+				getMessageCount: vi.fn().mockResolvedValue(6),
+			},
+			sessionMgr: {
+				loadPreRenderedHistory: vi.fn().mockResolvedValue({
+					messages: [{ id: "m1", role: "user" as const, parts: [] }],
+					hasMore: false,
+				}),
+			},
+		});
+
+		const source = await resolveSessionHistory("ses_repaired", deps);
+
+		// countUniqueMessages: 3 user_messages + 2 messageIds (msg_1, msg_2) = 5
+		// actualCount: 6
+		// 5 < 6 → stale → falls back to REST
+		expect(source.kind).toBe("rest-history");
+	});
+
+	it("falls back to REST when repair removed ALL streaming events (only user_messages remain)", async () => {
+		// Scenario: first assistant turn was interrupted before any terminal event.
+		// Repair keeps only user_messages.
+		// countUniqueMessages: 2 user_messages + 0 messageIds = 2
+		// REST has: 2 user + 2 assistant = 4 messages
+		const repairedEvents: RelayMessage[] = [
+			{ type: "user_message", text: "q1" },
+			// repair removed: delta "partial-a1" (no terminal ever arrived)
+			{ type: "user_message", text: "q2" },
+			// repair removed: delta "partial-a2"
+		];
+
+		const deps = createMinimalDeps({
+			messageCache: {
+				getEvents: vi.fn().mockReturnValue(repairedEvents),
+			},
+			client: {
+				getMessages: vi.fn().mockResolvedValue([]),
+				getMessageCount: vi.fn().mockResolvedValue(4),
+			},
+			sessionMgr: {
+				loadPreRenderedHistory: vi.fn().mockResolvedValue({
+					messages: [{ id: "m1", role: "user" as const, parts: [] }],
+					hasMore: false,
+				}),
+			},
+		});
+
+		const source = await resolveSessionHistory("ses_all_removed", deps);
+
+		// countUniqueMessages: 2, actualCount: 4 → 2 < 4 → REST fallback
+		expect(source.kind).toBe("rest-history");
+	});
+
+	it("serves cache when repair removed events without messageId (staleness check still passes)", async () => {
+		// Scenario: incomplete turn's deltas had no messageId. Repair removes them
+		// but the count doesn't change because they weren't counted anyway.
+		// This is the "safe" case — the removed events didn't contribute to the count.
+		const repairedEvents: RelayMessage[] = [
+			{ type: "user_message", text: "q1" },
+			{ type: "delta", text: "a1", messageId: "msg_1" },
+			{ type: "result", usage: { input: 10, output: 20, cache_read: 0, cache_creation: 0 }, cost: 0.01, duration: 500, sessionId: "s1" },
+			{ type: "done", code: 0 },
+			{ type: "user_message", text: "q2" },
+			// repair removed: delta without messageId — these don't affect countUniqueMessages
+		];
+
+		const deps = createMinimalDeps({
+			messageCache: {
+				getEvents: vi.fn().mockReturnValue(repairedEvents),
+			},
+			client: {
+				getMessages: vi.fn().mockResolvedValue([]),
+				// REST count: 2 user + 1 complete assistant = 3.
+				// Incomplete assistant wasn't persisted in OpenCode before crash.
+				getMessageCount: vi.fn().mockResolvedValue(3),
+			},
+		});
+
+		const source = await resolveSessionHistory("ses_safe_pass", deps);
+
+		// countUniqueMessages: 2 user_messages + 1 messageId (msg_1) = 3
+		// actualCount: 3
+		// 3 >= 3 → passes → serves cache (this is correct — the incomplete data was removed)
+		expect(source.kind).toBe("cached-events");
+	});
+});
