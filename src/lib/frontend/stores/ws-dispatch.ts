@@ -565,11 +565,21 @@ export function handleMessage(msg: RelayMessage): void {
 
 			handleNotificationEvent(msg);
 
-			triggerNotifications(syntheticMsg);
+			// Suppress all frontend notifications for subagent done events.
+			// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.
+			const isSubagentDone =
+				msg.eventType === "done" &&
+				msg.sessionId &&
+				findSession(msg.sessionId)?.parentID;
+
+			if (!isSubagentDone) {
+				triggerNotifications(syntheticMsg);
+			}
 
 			// In-app toast for cross-session events — skip for ask_user and
 			// ask_user_resolved since the AttentionBanner already handles those.
 			if (
+				!isSubagentDone &&
 				msg.eventType !== "ask_user" &&
 				msg.eventType !== "ask_user_resolved"
 			) {

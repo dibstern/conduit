@@ -35,8 +35,8 @@ function setupState(opts: {
 			toolInput: {},
 		}));
 
-		permissionsState.remoteQuestionSessions = new Set(
-			opts.questionSessions ?? [],
+		permissionsState.remoteQuestionCounts = new Map(
+			(opts.questionSessions ?? []).map((s) => [s, 1] as const),
 		);
 	});
 }
@@ -53,7 +53,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
-		permissionsState.remoteQuestionSessions = new Set();
+		permissionsState.remoteQuestionCounts = new Map();
 	},
 } satisfies Meta<typeof NotificationStack>;
 

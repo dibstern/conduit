@@ -14,7 +14,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
-		permissionsState.remoteQuestionSessions = new Set();
+		permissionsState.remoteQuestionCounts = new Map();
 	},
 } satisfies Meta<typeof NotificationStack>;
 

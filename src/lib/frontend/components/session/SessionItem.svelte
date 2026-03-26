@@ -5,6 +5,7 @@
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
 	import { isProcessing as chatIsProcessing } from "../../stores/chat.svelte.js";
+	import { getSessionIndicator } from "../../stores/permissions.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../shared/Icon.svelte";
@@ -75,6 +76,9 @@
 		session.processing ||
 			(session.id === sessionState.currentId && chatIsProcessing()),
 	);
+
+	// Sidebar indicator: attention > done-unviewed > processing
+	const indicator = $derived(getSessionIndicator(session.id, sessionState.currentId));
 
 	const itemClass = $derived(
 		"session-item group flex items-center gap-1 py-1.5 px-2.5 rounded-md cursor-pointer relative text-base transition-colors duration-100" +
@@ -178,8 +182,12 @@
 		</button>
 	{/if}
 
-	<!-- Processing indicator (pulsing dot) -->
-	{#if isProcessing}
+	<!-- Session indicator dot: attention > done-unviewed > processing -->
+	{#if indicator === "attention"}
+		<span class="w-[7px] h-[7px] rounded-full shrink-0 bg-brand-b"></span>
+	{:else if indicator === "done-unviewed"}
+		<span class="w-[7px] h-[7px] rounded-full shrink-0 border-[1.5px] border-brand-b bg-transparent"></span>
+	{:else if isProcessing}
 		<span
 			class="session-processing-dot w-[7px] h-[7px] rounded-full shrink-0 animate-pulse-dot {active ? 'bg-brand-a' : 'bg-accent'}"
 		></span>

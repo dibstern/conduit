@@ -21,10 +21,16 @@ export const permissionsState = $state({
 	questionErrors: new Map<string, string>(),
 	/**
 	 * Session IDs with pending questions the user hasn't seen yet.
+	 * Ref-counted: a session can have multiple outstanding questions.
 	 * Populated from notification_event broadcasts for ask_user events
 	 * in sessions the user is NOT currently viewing.
 	 */
-	remoteQuestionSessions: new Set<string>(),
+	remoteQuestionCounts: new Map<string, number>(),
+	/**
+	 * Sessions that completed (done event) while the user was not viewing them.
+	 * Cleared when the user navigates to the session.
+	 */
+	doneNotViewedSessions: new Set<string>(),
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -111,27 +117,36 @@ export function getRemotePermissions(
 export function getRemoteQuestionSessions(
 	currentSessionId: string | null,
 ): string[] {
-	const all = permissionsState.remoteQuestionSessions;
-	if (!currentSessionId) return [...all];
+	const all = permissionsState.remoteQuestionCounts;
+	if (!currentSessionId) return [...all.keys()];
 	const descendants = getDescendantSessionIds(currentSessionId);
-	return [...all].filter(
+	return [...all.keys()].filter(
 		(sid) => sid !== currentSessionId && !descendants.has(sid),
 	);
 }
 
-/** Record a cross-session question notification. */
-export function addRemoteQuestion(sessionId: string): void {
-	permissionsState.remoteQuestionSessions = new Set([
-		...permissionsState.remoteQuestionSessions,
-		sessionId,
-	]);
+/** Get the ref-counted question count for a single session (for AttentionBanner). */
+export function getRemoteQuestionCount(sessionId: string): number {
+	return permissionsState.remoteQuestionCounts.get(sessionId) ?? 0;
 }
 
-/** Remove a cross-session question notification (resolved or navigated). */
+/** Record a cross-session question notification (ref-counted). */
+export function addRemoteQuestion(sessionId: string): void {
+	const next = new Map(permissionsState.remoteQuestionCounts);
+	next.set(sessionId, (next.get(sessionId) ?? 0) + 1);
+	permissionsState.remoteQuestionCounts = next;
+}
+
+/** Remove a cross-session question notification (ref-counted; resolved or navigated). */
 export function removeRemoteQuestion(sessionId: string): void {
-	const next = new Set(permissionsState.remoteQuestionSessions);
-	next.delete(sessionId);
-	permissionsState.remoteQuestionSessions = next;
+	const next = new Map(permissionsState.remoteQuestionCounts);
+	const count = (next.get(sessionId) ?? 0) - 1;
+	if (count <= 0) {
+		next.delete(sessionId);
+	} else {
+		next.set(sessionId, count);
+	}
+	permissionsState.remoteQuestionCounts = next;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -291,7 +306,8 @@ export interface NotificationEventParams {
 
 /**
  * Handle notification_event state effects.
- * Single entry point for all remote question tracking from cross-session broadcasts.
+ * Single entry point for all remote question tracking and done-not-viewed
+ * tracking from cross-session broadcasts.
  */
 export function handleNotificationEvent(params: NotificationEventParams): void {
 	if (!params.sessionId) return;
@@ -299,6 +315,11 @@ export function handleNotificationEvent(params: NotificationEventParams): void {
 		addRemoteQuestion(params.sessionId);
 	} else if (params.eventType === "ask_user_resolved") {
 		removeRemoteQuestion(params.sessionId);
+	} else if (params.eventType === "done") {
+		// Track done-not-viewed (notification_event only fires when no viewers)
+		const next = new Set(permissionsState.doneNotViewedSessions);
+		next.add(params.sessionId);
+		permissionsState.doneNotViewedSessions = next;
 	}
 }
 
@@ -315,6 +336,12 @@ export function onSessionSwitch(
 ): void {
 	clearSessionLocal(previousSessionId);
 	removeRemoteQuestion(newSessionId);
+	// Clear done-not-viewed for the session we're switching to
+	if (permissionsState.doneNotViewedSessions.has(newSessionId)) {
+		const next = new Set(permissionsState.doneNotViewedSessions);
+		next.delete(newSessionId);
+		permissionsState.doneNotViewedSessions = next;
+	}
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -339,7 +366,8 @@ export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	permissionsState.remoteQuestionSessions = new Set();
+	permissionsState.remoteQuestionCounts = new Map();
+	permissionsState.doneNotViewedSessions = new Set();
 }
 
 /** Clear only session-local pending items (for session switch).
@@ -360,5 +388,28 @@ export function clearAllPermissions(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	permissionsState.remoteQuestionSessions = new Set();
+	permissionsState.remoteQuestionCounts = new Map();
+	permissionsState.doneNotViewedSessions = new Set();
+}
+
+/** Get session indicator state for sidebar dot rendering. */
+export function getSessionIndicator(
+	sessionId: string,
+	currentSessionId: string | null,
+): "attention" | "done-unviewed" | null {
+	// Check attention: remote questions for this session
+	const hasQuestions = permissionsState.remoteQuestionCounts.has(sessionId);
+
+	// Check permissions: pending permissions for this sessionId,
+	// excluding current session and descendants
+	const hasPermissions = permissionsState.pendingPermissions.some(
+		(p) => p.sessionId === sessionId && p.sessionId !== currentSessionId,
+	);
+
+	if (hasQuestions || hasPermissions) return "attention";
+
+	if (permissionsState.doneNotViewedSessions.has(sessionId))
+		return "done-unviewed";
+
+	return null;
 }

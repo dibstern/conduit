@@ -4,7 +4,7 @@
 <!-- Dismiss button hides until new remote items arrive.                       -->
 
 <script lang="ts">
-	import { getRemotePermissions, getRemoteQuestionSessions, removeRemoteQuestion } from "../../stores/permissions.svelte.js";
+	import { getRemotePermissions, getRemoteQuestionCount, getRemoteQuestionSessions, removeRemoteQuestion } from "../../stores/permissions.svelte.js";
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 
@@ -23,7 +23,7 @@
 
 		for (const sid of remoteQuestionSessionIds) {
 			const entry = groups.get(sid) ?? { permissions: 0, questions: 0 };
-			entry.questions++;
+			entry.questions = getRemoteQuestionCount(sid);
 			groups.set(sid, entry);
 		}
 
