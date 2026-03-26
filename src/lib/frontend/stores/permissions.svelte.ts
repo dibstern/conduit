@@ -257,11 +257,13 @@ export function removeQuestion(toolId: string): void {
 	);
 }
 
-/** Clear all pending items (e.g. on disconnect). */
+/** Clear all pending items (e.g. on disconnect).
+ *  Also resets the notification reducer (cross-session indicators). */
 export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
+	dispatch({ type: "reset" });
 }
 
 /** Clear only session-local pending items (for session switch).

@@ -1,8 +1,14 @@
 // ─── Permissions Store Tests ─────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	dispatch,
+	getNotifState,
+	resetNotifState,
+} from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
+import {
 	buildAnswerPayload,
 	clearAll,
+	clearAllPermissions,
 	clearSessionLocal,
 	formatQuestionHeader,
 	getDescendantSessionIds,
@@ -47,6 +53,7 @@ beforeEach(() => {
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;
+	resetNotifState();
 });
 
 // ─── Pure helper: buildAnswerPayload ────────────────────────────────────────
@@ -487,6 +494,63 @@ describe("clearAll", () => {
 		permissionsState.questionErrors.set("t1", "Some error");
 		clearAll();
 		expect(permissionsState.questionErrors.size).toBe(0);
+	});
+
+	it("resets the notification reducer state", () => {
+		dispatch({ type: "permission_appeared", sessionId: "sess-1" });
+		dispatch({ type: "question_appeared", sessionId: "sess-2" });
+		expect(getNotifState("sess-1").kind).toBe("attention");
+		expect(getNotifState("sess-2").kind).toBe("attention");
+
+		clearAll();
+
+		expect(getNotifState("sess-1").kind).toBe("none");
+		expect(getNotifState("sess-2").kind).toBe("none");
+	});
+});
+
+// ─── clearAllPermissions ────────────────────────────────────────────────────
+
+describe("clearAllPermissions", () => {
+	it("clears all pending items", () => {
+		handlePermissionRequest({
+			type: "permission_request",
+			sessionId: "ses-1",
+			requestId: pid("r1"),
+			toolName: "Write",
+			toolInput: {},
+		});
+		handleAskUser({
+			type: "ask_user",
+			toolId: "t1",
+			questions: [
+				{
+					question: "Q",
+					header: "H",
+					options: [{ label: "A" }],
+					multiSelect: false,
+				},
+			],
+		});
+		permissionsState.questionErrors.set("t1", "Some error");
+
+		clearAllPermissions();
+
+		expect(permissionsState.pendingPermissions).toHaveLength(0);
+		expect(permissionsState.pendingQuestions).toHaveLength(0);
+		expect(permissionsState.questionErrors.size).toBe(0);
+	});
+
+	it("resets the notification reducer state", () => {
+		dispatch({ type: "permission_appeared", sessionId: "sess-1" });
+		dispatch({ type: "question_appeared", sessionId: "sess-2" });
+		expect(getNotifState("sess-1").kind).toBe("attention");
+		expect(getNotifState("sess-2").kind).toBe("attention");
+
+		clearAllPermissions();
+
+		expect(getNotifState("sess-1").kind).toBe("none");
+		expect(getNotifState("sess-2").kind).toBe("none");
 	});
 });
 
