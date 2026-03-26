@@ -13,13 +13,13 @@ test.use({ recording: "chat-simple" });
 
 const DEBUG_PANEL = ".debug-panel";
 const DEBUG_BTN = "#debug-btn";
-const SETTINGS_BTN = "#settings-btn";
+const SETTINGS_BTN = "#header-settings-btn";
 const SETTINGS_PANEL = "#settings-panel";
 const DEBUG_TAB = 'button:has-text("Debug")';
-const DEBUG_TOGGLE = 'button[role="switch"][aria-label="Toggle debug panel"]';
+const DEBUG_TOGGLE = 'button[role="switch"][aria-label="Connection debug panel"]';
 const CLEAR_BTN = 'button[title="Clear log"]';
 const CLOSE_BTN = 'button[title="Close panel"]';
-const VERBOSE_BTN = 'button[title*="messages"]';
+const VERBOSE_BTN = 'button[title*="logging"]';
 
 // ─── URL param activation ────────────────────────────────────────────────────
 
@@ -198,6 +198,7 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Click clear
 		await page.locator(CLEAR_BTN).click();
+		await page.locator('button:has-text("Clear")').last().click();
 
 		// "No events yet" should appear
 		await expect(panel.getByText("No events yet")).toBeVisible();
@@ -219,7 +220,7 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Verbose toggle should show "msgs:100" (throttled mode)
 		const verboseBtn = page.locator(VERBOSE_BTN);
-		await expect(verboseBtn).toHaveText("msgs:100");
+		await expect(verboseBtn).toHaveText("verbose:off");
 
 		// Count events in throttled mode
 		const logContainer = panel.locator(".overflow-y-auto");
@@ -234,7 +235,7 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Click to switch to verbose mode
 		await verboseBtn.click();
-		await expect(verboseBtn).toHaveText("msgs:all");
+		await expect(verboseBtn).toHaveText("verbose:on");
 
 		// Verbose count should be >= throttled count
 		const verboseCount = await logContainer.locator("> div.flex").count();
@@ -247,7 +248,7 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Toggle back should restore original count
 		await verboseBtn.click();
-		await expect(verboseBtn).toHaveText("msgs:100");
+		await expect(verboseBtn).toHaveText("verbose:off");
 		const restoredCount = await logContainer.locator("> div.flex").count();
 		expect(restoredCount).toBe(throttledCount);
 	});
