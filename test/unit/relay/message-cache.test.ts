@@ -9,6 +9,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -527,5 +528,94 @@ describe("evictOldestSession", () => {
 		// s2 should now be oldest
 		const evicted = cache.evictOldestSession();
 		expect(evicted).toBe("s2");
+	});
+});
+
+// ─── repairColdSessions ─────────────────────────────────────────────────────
+
+describe("repairColdSessions", () => {
+	it("truncates incomplete turn from loaded JSONL and rewrites file", async () => {
+		// Simulate a JSONL file with an incomplete assistant turn
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "response" },
+			{ type: "done", code: 0 },
+			{ type: "user_message", text: "next" },
+			{ type: "delta", text: "partial" }, // incomplete turn
+		];
+		const jsonlContent = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
+		writeFileSync(join(testDir, "ses_test.jsonl"), jsonlContent);
+
+		const cache = new MessageCache(testDir);
+		await cache.loadFromDisk();
+		await cache.repairColdSessions();
+
+		// In-memory should be repaired
+		const loaded = await cache.getEvents("ses_test");
+		expect(loaded).toHaveLength(4); // incomplete delta removed
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+		expect(loaded![3]).toEqual({ type: "user_message", text: "next" });
+
+		// JSONL file should be rewritten
+		const fileContent = readFileSync(join(testDir, "ses_test.jsonl"), "utf8");
+		const fileEvents = fileContent
+			.trim()
+			.split("\n")
+			.map((l) => JSON.parse(l));
+		expect(fileEvents).toHaveLength(4);
+	});
+
+	it("does not rewrite JSONL for complete sessions", async () => {
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "response" },
+			{ type: "done", code: 0 },
+		];
+		const jsonlContent = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
+		const filePath = join(testDir, "ses_complete.jsonl");
+		writeFileSync(filePath, jsonlContent);
+		const mtimeBefore = statSync(filePath).mtimeMs;
+
+		const cache = new MessageCache(testDir);
+		await cache.loadFromDisk();
+		await cache.repairColdSessions();
+
+		// File should not be touched
+		const mtimeAfter = statSync(filePath).mtimeMs;
+		expect(mtimeAfter).toBe(mtimeBefore);
+
+		const loaded = await cache.getEvents("ses_complete");
+		expect(loaded).toHaveLength(3);
+	});
+
+	it("repairs session with no terminal events to user_messages only", async () => {
+		const events: RelayMessage[] = [
+			{ type: "user_message", text: "hello" },
+			{ type: "delta", text: "partial" },
+		];
+		const jsonlContent = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
+		writeFileSync(join(testDir, "ses_no_terminal.jsonl"), jsonlContent);
+
+		const cache = new MessageCache(testDir);
+		await cache.loadFromDisk();
+		await cache.repairColdSessions();
+
+		// In-memory should be repaired
+		const loaded = await cache.getEvents("ses_no_terminal");
+		expect(loaded).toHaveLength(1);
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+		expect(loaded![0]).toEqual({ type: "user_message", text: "hello" });
+
+		// JSONL file should be rewritten with only user_message
+		const fileContent = readFileSync(
+			join(testDir, "ses_no_terminal.jsonl"),
+			"utf8",
+		);
+		const fileEvents = fileContent
+			.trim()
+			.split("\n")
+			.map((l) => JSON.parse(l));
+		expect(fileEvents).toHaveLength(1);
+		expect(fileEvents[0]).toEqual({ type: "user_message", text: "hello" });
 	});
 });

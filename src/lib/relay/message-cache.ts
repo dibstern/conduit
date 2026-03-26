@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RelayMessage } from "../types.js";
+import { repairColdSession } from "./cold-cache-repair.js";
 
 /** Maximum events per session before eviction. */
 const MAX_EVENTS = 5000;
@@ -118,6 +119,32 @@ export class MessageCache {
 			if (loaded && loaded.events.length > 0) {
 				this.sessions.set(sessionId, loaded);
 			}
+		}
+	}
+
+	/**
+	 * Repair all sessions loaded from disk by removing incomplete assistant turns.
+	 * Called once after loadFromDisk() during relay startup.
+	 *
+	 * Uses the existing rewriteFile() and flush() mechanisms — no direct I/O.
+	 */
+	async repairColdSessions(): Promise<void> {
+		let repairedCount = 0;
+		for (const [sessionId, session] of this.sessions) {
+			const { repaired, changed } = repairColdSession(session.events);
+			if (changed) {
+				session.events = repaired;
+				// Recalculate approx bytes from repaired events
+				session.approxBytes = repaired.reduce(
+					(sum, e) => sum + JSON.stringify(e).length * 2,
+					0,
+				);
+				this.rewriteFile(sessionId, repaired);
+				repairedCount++;
+			}
+		}
+		if (repairedCount > 0) {
+			await this.flush();
 		}
 	}
 
