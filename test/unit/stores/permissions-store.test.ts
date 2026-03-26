@@ -1025,6 +1025,16 @@ describe("handleAskUserResolved — remoteQuestionCounts cleanup", () => {
 		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
 	});
 
+	it("force-evicts session even when ref-count is inflated (duplicate notification_events)", () => {
+		// Simulate inflated count from duplicate notification_events
+		permissionsState.remoteQuestionCounts = new Map([["s1", 3]]);
+		handleAskUserResolved(
+			msg({ type: "ask_user_resolved", toolId: "q1", sessionId: "s1" }),
+		);
+		// Should be fully deleted, not decremented to 2
+		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
+	});
+
 	it("handles missing sessionId gracefully (no remote cleanup)", () => {
 		permissionsState.remoteQuestionCounts = new Map([["s1", 1]]);
 		permissionsState.pendingQuestions = [
@@ -1058,6 +1068,19 @@ describe("handleNotificationEvent", () => {
 		handleNotificationEvent({ eventType: "done", sessionId: "s1" });
 		expect(permissionsState.doneNotViewedSessions.has("s1")).toBe(true);
 		expect(permissionsState.remoteQuestionCounts.size).toBe(0);
+	});
+
+	it("done event evicts stale question counts for that session", () => {
+		// Simulate stale question count (e.g., from inflated ref-count)
+		permissionsState.remoteQuestionCounts = new Map([
+			["s1", 2],
+			["s2", 1],
+		]);
+		handleNotificationEvent({ eventType: "done", sessionId: "s1" });
+		// s1 fully evicted, s2 untouched
+		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
+		expect(permissionsState.remoteQuestionCounts.has("s2")).toBe(true);
+		expect(permissionsState.doneNotViewedSessions.has("s1")).toBe(true);
 	});
 
 	it("no-ops when sessionId is missing", () => {

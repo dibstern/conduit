@@ -149,6 +149,19 @@ export function removeRemoteQuestion(sessionId: string): void {
 	permissionsState.remoteQuestionCounts = next;
 }
 
+/**
+ * Force-remove ALL question tracking for a session regardless of ref-count.
+ * Used when we have authoritative evidence the session has no pending questions
+ * (e.g., question resolved, session completed). Ref-counts can drift from
+ * duplicate notification_events on SSE reconnect, so this is the hard reset.
+ */
+export function evictRemoteQuestions(sessionId: string): void {
+	if (!permissionsState.remoteQuestionCounts.has(sessionId)) return;
+	const next = new Map(permissionsState.remoteQuestionCounts);
+	next.delete(sessionId);
+	permissionsState.remoteQuestionCounts = next;
+}
+
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
 /** Build the answer payload for a question response.
@@ -275,10 +288,12 @@ export function handleAskUserResolved(
 		(q) => q.toolId !== toolId,
 	);
 
-	// Also clean up remote tracking (fixes stale AttentionBanner)
+	// Force-remove session from remote tracking entirely (not just decrement).
+	// Ref-counts can drift from duplicate notification_events (SSE reconnect,
+	// replayed events). A resolved question is authoritative — blow it away.
 	const sessionId = msg.sessionId;
 	if (sessionId) {
-		removeRemoteQuestion(sessionId);
+		evictRemoteQuestions(sessionId);
 	}
 }
 
@@ -316,6 +331,9 @@ export function handleNotificationEvent(params: NotificationEventParams): void {
 	} else if (params.eventType === "ask_user_resolved") {
 		removeRemoteQuestion(params.sessionId);
 	} else if (params.eventType === "done") {
+		// A completed session can't have pending questions — evict any stale
+		// remote question counts that survived due to ref-count drift.
+		evictRemoteQuestions(params.sessionId);
 		// Track done-not-viewed (notification_event only fires when no viewers)
 		const next = new Set(permissionsState.doneNotViewedSessions);
 		next.add(params.sessionId);
