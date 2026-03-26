@@ -298,14 +298,6 @@ export function beginReplayBatch(): void {
 	replayBatch = [...chatState.messages];
 }
 
-export function commitReplayBatch(): void {
-	if (replayBatch !== null) {
-		chatState.messages = replayBatch;
-		replayBatch = null;
-		chatState.loadLifecycle = "committed";
-	}
-}
-
 export function discardReplayBatch(): void {
 	replayBatch = null;
 }
