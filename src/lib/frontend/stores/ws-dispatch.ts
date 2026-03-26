@@ -649,7 +649,7 @@ export async function replayEvents(events: RelayMessage[]): Promise<void> {
 		// Abort: a newer replay or clearMessages happened
 		if (generation !== replayGeneration) {
 			discardReplayBatch();
-			return; // don't set replaying=false — clearMessages already did, or new replay set it true
+			return; // don't call phaseEndReplay — clearMessages already reset loadLifecycle, or a new replay set it to loading
 		}
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
