@@ -398,7 +398,7 @@ To:
 
 ```typescript
 	// Send the first message to establish baseline content
-	await chat.sendMessage("Show me a tool call");
+	await app.sendMessage("Show me a tool call");
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
 ```
@@ -417,7 +417,7 @@ To:
 
 ```typescript
 	// Send a message to populate the DOM
-	await chat.sendMessage("Show me a tool call");
+	await app.sendMessage("Show me a tool call");
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
 ```
