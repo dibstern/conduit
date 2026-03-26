@@ -65,11 +65,21 @@ function normalizedKey(method: string, path: string): string {
 
 // ─── MockOpenCodeServer ──────────────────────────────────────────────────────
 
+/** Structured log entry for debugging SSE delivery in E2E tests. */
+export interface MockDiagnosticEntry {
+	ts: number;
+	event: string;
+	detail?: string | undefined;
+}
+
 export class MockOpenCodeServer {
 	private readonly recording: OpenCodeRecording;
 	private server: Server | undefined;
 	private wss: WebSocketServer | undefined;
 	private _url = "";
+
+	/** Diagnostic log for debugging E2E SSE delivery issues. */
+	readonly diagnostics: MockDiagnosticEntry[] = [];
 
 	// Replay state (rebuilt on reset)
 	private exactQueues = new Map<string, QueuedRestResponse[]>();
@@ -123,6 +133,11 @@ export class MockOpenCodeServer {
 
 	/** The session ID used in prompt_async calls in the recording, if any. */
 	readonly targetSessionId: string | undefined;
+
+	/** Append a diagnostic entry. */
+	private diag(event: string, detail?: string): void {
+		this.diagnostics.push({ ts: Date.now(), event, detail });
+	}
 
 	/** Base URL of the mock server. Valid after start(). */
 	get url(): string {
@@ -476,6 +491,11 @@ export class MockOpenCodeServer {
 		const path = req.url ?? "/";
 		const method = req.method ?? "GET";
 
+		// Log all incoming requests for diagnostics (skip noisy status polls)
+		if (!(method === "GET" && path === "/session/status")) {
+			this.diag("request", `${method} ${path}`);
+		}
+
 		// SSE endpoint
 		if (path === "/event" && method === "GET") {
 			this.handleSse(res);
@@ -744,14 +764,23 @@ export class MockOpenCodeServer {
 		if (method === "POST" && path.includes("/prompt_async")) {
 			this.promptsFired++;
 			this.statusOverride = undefined;
+			const sseClientCount = this.sseClients.size;
 			if (this.promptsFired === 1) {
 				const combined = [
 					...(this.sseSegments[0] ?? []),
 					...(this.sseSegments[1] ?? []),
 				];
+				this.diag(
+					"prompt_async",
+					`#${this.promptsFired} seg0=${this.sseSegments[0]?.length ?? 0} seg1=${this.sseSegments[1]?.length ?? 0} combined=${combined.length} sseClients=${sseClientCount}`,
+				);
 				this.emitEvents(combined);
 			} else {
 				const segment = this.sseSegments[this.promptsFired] ?? [];
+				this.diag(
+					"prompt_async",
+					`#${this.promptsFired} segment=${segment.length} sseClients=${sseClientCount}`,
+				);
 				this.emitEvents(segment);
 			}
 		}
@@ -786,9 +815,11 @@ export class MockOpenCodeServer {
 		this.keepaliveIntervals.add(interval);
 
 		this.sseClients.add(res);
+		this.diag("sse_connect", `clients=${this.sseClients.size}`);
 
 		res.on("close", () => {
 			this.sseClients.delete(res);
+			this.diag("sse_disconnect", `clients=${this.sseClients.size}`);
 			clearInterval(interval);
 			this.keepaliveIntervals.delete(interval);
 		});
@@ -812,8 +843,13 @@ export class MockOpenCodeServer {
 
 	private emitEvents(events: SseEvent[]): void {
 		if (events.length === 0) return;
+		this.diag(
+			"emit_start",
+			`count=${events.length} types=${[...new Set(events.map((e) => e.type))].join(",")} sseClients=${this.sseClients.size}`,
+		);
 
 		void (async () => {
+			let emitCount = 0;
 			for (const event of events) {
 				const delay = Math.min(event.delayMs, 5);
 				if (delay > 0) {
@@ -838,7 +874,9 @@ export class MockOpenCodeServer {
 						client.write(frame);
 					}
 				}
+				emitCount++;
 			}
+			this.diag("emit_done", `emitted=${emitCount}/${events.length}`);
 		})();
 	}
 
