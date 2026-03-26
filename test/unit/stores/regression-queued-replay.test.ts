@@ -1,18 +1,10 @@
-// ─── Regression: Queued flag preserved during replay / session switch ────────
-// Bug: The `queued` visual state on user messages was lost during replay
-// because `status: "processing"` events are NEVER cached by the server.
-// The prompt handler (prompt.ts:71-74) sends status:processing via
-// wsHandler.sendToSession() directly — it never calls recordEvent().
-// So during replayEvents(), isProcessing stays false, and
-// addUserMessage(text, undefined, isProcessing) never sets queued.
-//
-// Root cause: replayEvents relied on isProcessing (set by status
-// events) to decide if a user_message is queued. But status events aren't
-// in the message cache, so processing is always false during replay.
-//
-// Fix: Use a local `llmActive` tracker in replayEvents() that infers
-// queued state from the event structure (delta/thinking/tool = active,
-// done/error = inactive) instead of relying on status events.
+// ─── Regression: sentDuringEpoch preserved during replay / session switch ────
+// The queued visual is now DERIVED from write-once `sentDuringEpoch` and
+// live `turnEpoch`. During replay, `addUserMessage` is called with
+// `sentWhileProcessing=true` when the local `llmActive` tracker in
+// replayEvents() is true, which sets `sentDuringEpoch` to the current
+// `turnEpoch`. The visual clears automatically when `handleDone` increments
+// `turnEpoch` past the recorded epoch — no mutation or clearing needed.
 //
 // IMPORTANT: These test event arrays intentionally contain NO status events,
 // matching what the real message cache stores (see event-pipeline.ts
@@ -56,7 +48,6 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
-	clearQueuedFlags,
 	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -86,22 +77,27 @@ function userMessages(): UserMessage[] {
 	return chatState.messages.filter((m): m is UserMessage => m.type === "user");
 }
 
+/** Mirrors the derived visual logic in UserMessage.svelte. */
+function isVisuallyQueued(msg: UserMessage): boolean {
+	return (
+		msg.sentDuringEpoch != null && chatState.turnEpoch <= msg.sentDuringEpoch
+	);
+}
+
 /** Replay events with cache-realism validation.
  *  Fails the test if any event has a type that wouldn't exist in the real cache.
  *  Async: drains the event loop so chunked replay completes before assertions. */
 async function replayValidated(events: RelayMessage[]): Promise<void> {
 	assertCacheRealisticEvents(events);
-	replayEvents(events);
+	replayEvents(events, "test-session");
 	await vi.runAllTimersAsync();
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 // NOTE: No status events in any event array — they're never in the real cache.
 
-describe("Regression: queued flag preserved during replayEvents", () => {
-	it("marks user message as queued when replayed mid-stream", async () => {
-		// Real cache contents: user_message is recorded by prompt.ts,
-		// delta comes from SSE pipeline. No status events are recorded.
+describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
+	it("sets sentDuringEpoch when replayed mid-stream", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Responding to first..." },
@@ -109,22 +105,22 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		];
 
 		await replayValidated(events);
-		vi.advanceTimersByTime(100); // flush debounced render
+		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		expect(users[0]?.queued).toBeFalsy();
-		expect(users[1]?.queued).toBe(true);
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
+		expect(users[1]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(true);
 	});
 
-	it("clears queued flag when assistant content follows during replay", async () => {
-		// LLM finished "first", then started responding to "second"
+	it("visual clears when done advances turnEpoch during replay", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Response to first" },
 			{ type: "user_message", text: "second" },
 			{ type: "done", code: 0 },
-			// LLM starts responding to "second"
 			{ type: "delta", text: "Response to second" },
 		];
 
@@ -133,17 +129,18 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		// "second" was briefly queued but should be cleared when delta arrived
-		expect(users[1]?.queued).toBeFalsy();
+		// sentDuringEpoch is still set (write-once), but turnEpoch advanced past it
+		expect(users[1]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(false);
 	});
 
-	it("clears queued flag on thinking_start during replay", async () => {
+	it("visual clears when done fires (thinking_start is irrelevant)", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Response" },
 			{ type: "user_message", text: "second" },
 			{ type: "done", code: 0 },
-			// LLM starts thinking about "second"
 			{ type: "thinking_start" },
 		];
 
@@ -151,16 +148,16 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
-		expect(users[1]?.queued).toBeFalsy();
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(false);
 	});
 
-	it("clears queued flag on tool_start during replay", async () => {
+	it("visual clears when done fires (tool_start is irrelevant)", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Response" },
 			{ type: "user_message", text: "second" },
 			{ type: "done", code: 0 },
-			// LLM starts a tool call for "second"
 			{ type: "tool_start", id: "t1", name: "Read" },
 		];
 
@@ -168,49 +165,49 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
-		expect(users[1]?.queued).toBeFalsy();
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(false);
 	});
 
-	it("preserves queued flag across session switch round-trip", async () => {
-		// Real cache: no status events, just user_message + delta
+	it("preserves sentDuringEpoch across session switch round-trip", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Partial response" },
 			{ type: "user_message", text: "second" },
 		];
 
-		// First replay (initial load)
+		// First replay
 		await replayValidated(events);
 		vi.advanceTimersByTime(100);
-		expect(userMessages()[1]?.queued).toBe(true);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[1]!)).toBe(true);
 
-		// Switch away (clears everything)
+		// Switch away
 		clearMessages();
 		expect(chatState.messages).toHaveLength(0);
 
-		// Switch back (replay same events)
+		// Switch back
 		await replayValidated(events);
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		expect(users[0]?.queued).toBeFalsy();
-		expect(users[1]?.queued).toBe(true);
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(true);
 	});
 
-	it("does not mark user message as queued when no prior content", async () => {
-		// Message sent while idle — no preceding delta/thinking/tool events
+	it("does not set sentDuringEpoch when no prior content", async () => {
 		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
 
 		await replayValidated(events);
 
 		const users = userMessages();
 		expect(users).toHaveLength(1);
-		expect(users[0]?.queued).toBeFalsy();
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
 	});
 
-	it("does not mark user message as queued after done clears llm activity", async () => {
-		// A completed (done), then user sent B during idle
+	it("does not set sentDuringEpoch after done clears llm activity", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Response" },
@@ -223,12 +220,10 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		// "second" was sent after done — LLM was idle, not queued
-		expect(users[1]?.queued).toBeFalsy();
+		expect(users[1]?.sentDuringEpoch).toBeUndefined();
 	});
 
-	it("marks queued when user_message follows thinking events (no delta)", async () => {
-		// LLM thinking (not streaming text) when second message arrives
+	it("sets sentDuringEpoch when user_message follows thinking events", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "thinking_start" },
@@ -240,11 +235,12 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
-		expect(users[1]?.queued).toBe(true);
+		expect(users[1]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(true);
 	});
 
-	it("marks queued when user_message follows tool events (no delta)", async () => {
-		// LLM executing a tool when second message arrives
+	it("sets sentDuringEpoch when user_message follows tool events", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "tool_start", id: "t1", name: "Read" },
@@ -256,11 +252,12 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 		vi.advanceTimersByTime(100);
 
 		const users = userMessages();
-		expect(users[1]?.queued).toBe(true);
+		expect(users[1]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(true);
 	});
 
 	it("resets llm activity on non-retry error", async () => {
-		// LLM was active, then errored out — next message should NOT be queued
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "Partial..." },
@@ -273,56 +270,30 @@ describe("Regression: queued flag preserved during replayEvents", () => {
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		// "second" was briefly queued but should be cleared when delta arrived
-		expect(users[1]?.queued).toBeFalsy();
+		// Error resets llm activity → second message not queued
+		expect(users[1]?.sentDuringEpoch).toBeUndefined();
 	});
 });
 
 // ─── Multi-tab: live user_message from another client ───────────────────────
 
-describe("Multi-tab: live user_message queued flag", () => {
-	it("marks live user_message as queued when session is processing", () => {
-		// Another tab sent a message; this client's session is already processing
+describe("Multi-tab: live user_message sentDuringEpoch", () => {
+	it("sets sentDuringEpoch on live user_message when session is processing", () => {
 		phaseToProcessing();
 		handleMessage({ type: "user_message", text: "from other tab" });
 
 		const users = userMessages();
 		expect(users).toHaveLength(1);
-		expect(users[0]?.queued).toBe(true);
+		expect(users[0]?.sentDuringEpoch).toBe(chatState.turnEpoch);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[0]!)).toBe(true);
 	});
 
-	it("does not mark live user_message as queued when idle", () => {
-		// Session is idle — message from another tab shouldn't be queued
+	it("does not set sentDuringEpoch on live user_message when idle", () => {
 		handleMessage({ type: "user_message", text: "from other tab" });
 
 		const users = userMessages();
 		expect(users).toHaveLength(1);
-		expect(users[0]?.queued).toBeFalsy();
-	});
-});
-
-// ─── queuedFlagsCleared state tracking ──────────────────────────────────────
-
-describe("chatState.queuedFlagsCleared tracking", () => {
-	it("is false initially", () => {
-		expect(chatState.queuedFlagsCleared).toBe(false);
-	});
-
-	it("becomes true when clearQueuedFlags is called", () => {
-		phaseToProcessing();
-		clearQueuedFlags();
-		expect(chatState.queuedFlagsCleared).toBe(true);
-	});
-
-	it("resets to false when processing starts", () => {
-		chatState.queuedFlagsCleared = true;
-		handleMessage({ type: "status", status: "processing" });
-		expect(chatState.queuedFlagsCleared).toBe(false);
-	});
-
-	it("resets to false on clearMessages", () => {
-		chatState.queuedFlagsCleared = true;
-		clearMessages();
-		expect(chatState.queuedFlagsCleared).toBe(false);
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
 	});
 });

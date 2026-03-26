@@ -28,6 +28,8 @@ export class RecordingProxy {
 	private interactions: OpenCodeInteraction[] = [];
 	private lastEventTime: number | undefined;
 	private _url = "";
+	private activeSseReaders: Set<ReadableStreamDefaultReader<Uint8Array>> =
+		new Set();
 
 	constructor(upstreamUrl: string) {
 		this.upstreamUrl = upstreamUrl.replace(/\/$/, "");
@@ -81,8 +83,14 @@ export class RecordingProxy {
 		return [...this.interactions];
 	}
 
-	/** Clear all recorded interactions. */
+	/** Clear all recorded interactions and abort active SSE streams. */
 	reset(): void {
+		// Cancel any active SSE readers so zombie pump loops don't
+		// push events into the new interactions array.
+		for (const reader of this.activeSseReaders) {
+			reader.cancel().catch(() => {});
+		}
+		this.activeSseReaders.clear();
 		this.interactions = [];
 		this.lastEventTime = undefined;
 	}
@@ -204,8 +212,14 @@ export class RecordingProxy {
 		}
 
 		const reader = body.getReader();
+		this.activeSseReaders.add(reader);
 		const decoder = new TextDecoder();
 		let buffer = "";
+
+		const cleanup = (): void => {
+			this.activeSseReaders.delete(reader);
+			res.end();
+		};
 
 		const pump = (): void => {
 			reader
@@ -216,7 +230,7 @@ export class RecordingProxy {
 						if (buffer.trim()) {
 							this.processSseBuffer(buffer);
 						}
-						res.end();
+						cleanup();
 						return;
 					}
 
@@ -237,7 +251,7 @@ export class RecordingProxy {
 					pump();
 				})
 				.catch(() => {
-					res.end();
+					cleanup();
 				});
 		};
 

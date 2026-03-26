@@ -158,6 +158,7 @@ export async function handleAskUserResponse(
 	try {
 		await deps.client.replyQuestion({ id: toolId, answers: formatted });
 		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId, sessionId });
+		if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
 		restartProcessingTimeout(deps, sessionId);
 	} catch (err) {
 		deps.log.warn(
@@ -180,6 +181,7 @@ export async function handleAskUserResponse(
 					toolId: queId,
 					sessionId,
 				});
+				if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
 				restartProcessingTimeout(deps, sessionId);
 				return;
 			}
@@ -219,6 +221,7 @@ export async function handleQuestionReject(
 	try {
 		await deps.client.rejectQuestion(toolId);
 		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId, sessionId });
+		if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
 		restartProcessingTimeout(deps, sessionId);
 	} catch (err) {
 		deps.log.warn(
@@ -240,6 +243,7 @@ export async function handleQuestionReject(
 					toolId: queId,
 					sessionId,
 				});
+				if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
 				restartProcessingTimeout(deps, sessionId);
 				return;
 			}

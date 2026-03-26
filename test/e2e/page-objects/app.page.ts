@@ -66,6 +66,11 @@ export class AppPage {
 
 	async goto(baseUrl: string): Promise<void> {
 		await this.page.goto(baseUrl);
+		// Wait for Svelte SPA to mount — layout appears on initial render.
+		// Without this, the overlay waitFor({ state: 'hidden' }) can pass
+		// immediately because Playwright treats "not attached" as "hidden",
+		// and #connect-overlay doesn't exist until Svelte renders.
+		await this.layout.waitFor({ state: "attached", timeout: 15_000 });
 		// Wait for WebSocket to connect — overlay should disappear
 		await this.connectOverlay.waitFor({ state: "hidden", timeout: 15_000 });
 	}

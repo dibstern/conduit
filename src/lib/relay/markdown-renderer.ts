@@ -10,7 +10,7 @@
 
 import createDOMPurify, { type WindowLike } from "dompurify";
 import { JSDOM } from "jsdom";
-import { Marked } from "marked";
+import { Marked, Renderer } from "marked";
 
 import type { HistoryMessage } from "../shared-types.js";
 
@@ -23,8 +23,27 @@ const purify = createDOMPurify(jsdomWindow as unknown as WindowLike);
 
 // Use a dedicated Marked instance (not the global singleton) to avoid
 // shared-state conflicts if other server-side code imports marked.
-// Config mirrors the frontend's marked.use({ gfm: true, breaks: false }).
-const serverMarked = new Marked({ gfm: true, breaks: false });
+// Config mirrors the frontend's marked.use({ gfm: true, breaks: false })
+// plus the custom table renderer that wraps tables in scroll containers
+// (must match the frontend's markdown.ts renderer for visual parity).
+const serverMarked = new Marked({
+	gfm: true,
+	breaks: false,
+	renderer: {
+		table(token) {
+			const tableHtml = Renderer.prototype.table.call(this, token);
+			return (
+				'<div class="table-scroll-container">' +
+				'<div class="table-scroll">' +
+				tableHtml +
+				"</div>" +
+				'<div class="table-shadow table-shadow-left"></div>' +
+				'<div class="table-shadow table-shadow-right"></div>' +
+				"</div>"
+			);
+		},
+	},
+});
 
 /**
  * Render markdown text to sanitized HTML.

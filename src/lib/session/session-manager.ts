@@ -90,6 +90,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 */
 	private _lastKnownSessionCount = 0;
 
+	/**
+	 * Tracks the number of pending questions per session.
+	 * Updated from SSE events (question.asked, ask_user_resolved) and
+	 * bulk-set on SSE reconnect from listPendingQuestions.
+	 */
+	private pendingQuestionCounts = new Map<string, number>();
+
 	constructor(options: SessionManagerOptions) {
 		super();
 		this.client = options.client;
@@ -170,6 +177,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			resolvedStatuses,
 			this.lastMessageAt,
 			this.forkMeta,
+			this.pendingQuestionCounts,
 		);
 	}
 
@@ -275,6 +283,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			this.getStatuses?.(),
 			this.lastMessageAt,
 			this.forkMeta,
+			this.pendingQuestionCounts,
 		);
 	}
 
@@ -350,6 +359,29 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		saveForkMetadata(this.forkMeta, this.configDir);
 	}
 
+	// ─── Pending Question Counts ──────────────────────────────────────────
+
+	/** Increment pending question count (called from SSE wiring on question.asked). */
+	incrementPendingQuestionCount(sessionId: string): void {
+		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
+		this.pendingQuestionCounts.set(sessionId, current + 1);
+	}
+
+	/** Decrement pending question count (called from handlers on answer/reject). */
+	decrementPendingQuestionCount(sessionId: string): void {
+		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
+		if (current <= 1) {
+			this.pendingQuestionCounts.delete(sessionId);
+		} else {
+			this.pendingQuestionCounts.set(sessionId, current - 1);
+		}
+	}
+
+	/** Bulk-set pending question counts (called on SSE reconnect from listPendingQuestions). */
+	setPendingQuestionCounts(counts: Map<string, number>): void {
+		this.pendingQuestionCounts = counts;
+	}
+
 	/**
 	 * Send roots-only session list immediately, then all-sessions in background.
 	 * Used by all broadcast/unicast send points.
@@ -412,6 +444,7 @@ function toSessionInfoList(
 	statuses?: Record<string, SessionStatus>,
 	lastMessageAt?: ReadonlyMap<string, number>,
 	forkMeta?: ReadonlyMap<string, ForkEntry>,
+	pendingQuestionCounts?: ReadonlyMap<string, number>,
 ): SessionInfo[] {
 	return sessions
 		.map((s) => {
@@ -437,6 +470,10 @@ function toSessionInfoList(
 				if (status && (status.type === "busy" || status.type === "retry")) {
 					info.processing = true;
 				}
+			}
+			const qCount = pendingQuestionCounts?.get(s.id);
+			if (qCount != null && qCount > 0) {
+				info.pendingQuestionCount = qCount;
 			}
 			return info;
 		})

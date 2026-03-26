@@ -42,7 +42,9 @@ export function findMessage<T extends ChatMessage["type"]>(
 /** Valid chat pipeline phases. Single source of truth — the derived
  *  flags (isProcessing, isStreaming, isReplaying) derive from this value.
  *  Impossible boolean combinations are unrepresentable. */
-export type ChatPhase = "idle" | "processing" | "streaming" | "replaying";
+export type ChatPhase = "idle" | "processing" | "streaming";
+
+export type LoadLifecycle = "empty" | "loading" | "committed" | "ready";
 
 export const chatState = $state({
 	messages: [] as ChatMessage[],
@@ -50,10 +52,8 @@ export const chatState = $state({
 	currentAssistantText: "",
 	/** Single source of truth for the chat pipeline phase. */
 	phase: "idle" as ChatPhase,
-	/** True after clearQueuedFlags() is called, reset when processing starts.
-	 *  Used by the unified rendering pipeline to know that the LLM has started
-	 *  responding to a previously-queued message (so the queued shimmer should be removed). */
-	queuedFlagsCleared: false,
+	/** Tracks the lifecycle of loading session data into the chat store. */
+	loadLifecycle: "empty" as LoadLifecycle,
 	/** Monotonically increasing counter, bumped on each `done` event.
 	 *  Provides an explicit, reliable turn-boundary signal for logic that
 	 *  needs to distinguish "same turn" from "new turn" (e.g. queued-flag
@@ -67,10 +67,14 @@ export const chatState = $state({
 // reactive value.  Call sites read them as `isProcessing()`.
 
 const _isProcessing = $derived(
-	chatState.phase === "processing" || chatState.phase === "streaming",
+	chatState.loadLifecycle !== "loading" &&
+		(chatState.phase === "processing" || chatState.phase === "streaming"),
 );
-const _isStreaming = $derived(chatState.phase === "streaming");
-const _isReplaying = $derived(chatState.phase === "replaying");
+const _isStreaming = $derived(
+	chatState.loadLifecycle !== "loading" && chatState.phase === "streaming",
+);
+const _isReplaying = $derived(chatState.loadLifecycle === "loading");
+const _isLoading = $derived(chatState.loadLifecycle === "loading");
 
 /** LLM is active (processing or streaming). */
 export function isProcessing(): boolean {
@@ -84,6 +88,10 @@ export function isStreaming(): boolean {
 export function isReplaying(): boolean {
 	return _isReplaying;
 }
+/** Session data is being loaded into the chat store. */
+export function isLoading(): boolean {
+	return _isLoading;
+}
 
 // ─── Phase Transitions ─────────────────────────────────────────────────────
 // Enforce valid combinations of processing/streaming/replaying.
@@ -95,57 +103,41 @@ export function phaseToIdle(): void {
 	chatState.phase = "idle";
 }
 
-/** LLM is active, awaiting first delta.
- *  During replay, this is a no-op — phaseEndReplay handles reconciliation. */
+/** LLM is active, awaiting first delta. */
 export function phaseToProcessing(): void {
-	if (chatState.phase !== "replaying") {
-		chatState.phase = "processing";
-	}
+	chatState.phase = "processing";
 }
 
-/** Receiving deltas — assistant message being built.
- *  During replay, tracks inner streaming state without leaving "replaying" phase. */
+/** Receiving deltas — assistant message being built. */
 export function phaseToStreaming(): void {
-	if (chatState.phase === "replaying") {
-		_replayInnerStreaming = true;
-	} else {
-		chatState.phase = "streaming";
-	}
+	chatState.phase = "streaming";
 }
-
-// Tracks whether we're mid-stream inside a replay (for phaseEndReplay)
-let _replayInnerStreaming = false;
 
 /** Start event replay. */
 export function phaseStartReplay(): void {
-	_replayInnerStreaming = false;
-	chatState.phase = "replaying";
+	chatState.loadLifecycle = "loading";
 }
 
-/** End event replay, reconcile phase based on inner streaming state
+/** End event replay, reconcile phase based on current phase
  *  and external processing signals.
+ *  loadLifecycle stays at "committed" — renderDeferredMarkdown will
+ *  transition to "ready" once all deferred markdown is rendered.
+ *  If there are no deferred messages, renderDeferredMarkdown sets
+ *  "ready" on its first (and only) batch.
  *  @param llmActive — whether the replayed event stream ended mid-turn */
 export function phaseEndReplay(llmActive: boolean): void {
-	if (_replayInnerStreaming) {
-		// Replay ended mid-stream — session is still producing content
-		chatState.phase = "streaming";
-	} else if (
-		llmActive ||
-		chatState.phase === "processing" ||
-		chatState.phase === "streaming"
-	) {
-		// Last turn completed but LLM still active, or live status:processing
-		// arrived during a yield
+	// Don't set loadLifecycle here — leave at "committed" so the
+	// scroll controller's settle phase can run while deferred markdown
+	// rendering completes. renderDeferredMarkdown sets "ready" when done.
+	if (llmActive && chatState.phase === "idle") {
 		chatState.phase = "processing";
-	} else {
-		chatState.phase = "idle";
 	}
-	_replayInnerStreaming = false;
 }
 
 /** Full reset — used by clearMessages on session switch. */
 function phaseReset(): void {
 	chatState.phase = "idle";
+	chatState.loadLifecycle = "empty";
 }
 
 /** Pagination state for history loading (shared between HistoryLoader and dispatch). */
@@ -256,9 +248,8 @@ export function updateLastMessage<T extends ChatMessage["type"]>(
  *  Consolidates the pattern previously duplicated in handleDone,
  *  handleToolStart, and addUserMessage. */
 function flushAndFinalizeAssistant(): string | undefined {
-	// Check both the public getter AND the replay-internal flag
-	if (chatState.phase !== "streaming" && !_replayInnerStreaming)
-		return undefined;
+	// Check the phase flag
+	if (chatState.phase !== "streaming") return undefined;
 
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
@@ -303,15 +294,47 @@ export function beginReplayBatch(): void {
 	replayBatch = [...chatState.messages];
 }
 
-export function commitReplayBatch(): void {
-	if (replayBatch !== null) {
-		chatState.messages = replayBatch;
-		replayBatch = null;
-	}
-}
-
 export function discardReplayBatch(): void {
 	replayBatch = null;
+}
+
+// ─── Replay Paging ──────────────────────────────────────────────────────────
+// When a replay produces more than INITIAL_PAGE_SIZE messages, only the last
+// page is committed to chatState.messages. Older messages are stored in a
+// per-session buffer for HistoryLoader to page through on demand.
+
+const INITIAL_PAGE_SIZE = 50;
+const replayBuffers = new Map<string, ChatMessage[]>();
+
+export function getReplayBuffer(sessionId: string): ChatMessage[] | undefined {
+	return replayBuffers.get(sessionId);
+}
+
+export function consumeReplayBuffer(
+	sessionId: string,
+	count: number,
+): ChatMessage[] {
+	const buffer = replayBuffers.get(sessionId);
+	if (!buffer || buffer.length === 0) return [];
+	const page = buffer.splice(buffer.length - count, count);
+	if (buffer.length === 0) replayBuffers.delete(sessionId);
+	return page;
+}
+
+export function commitReplayFinal(sessionId: string): void {
+	if (replayBatch === null) return;
+	const all = replayBatch;
+	replayBatch = null;
+
+	if (all.length <= INITIAL_PAGE_SIZE) {
+		chatState.messages = all;
+	} else {
+		const cutoff = all.length - INITIAL_PAGE_SIZE;
+		replayBuffers.set(sessionId, all.slice(0, cutoff));
+		chatState.messages = all.slice(cutoff);
+		historyState.hasMore = true;
+	}
+	chatState.loadLifecycle = "committed";
 }
 
 export function getMessages(): ChatMessage[] {
@@ -342,10 +365,7 @@ export function handleDelta(
 	}
 
 	// If no current assistant message, create one.
-	// During replay, phase is "replaying" (not "streaming"),
-	// so also check the replay-internal flag.
-	const isCurrentlyStreaming =
-		chatState.phase === "streaming" || _replayInnerStreaming;
+	const isCurrentlyStreaming = chatState.phase === "streaming";
 	if (!isCurrentlyStreaming) {
 		const uuid = generateUuid();
 		const assistantMsg: AssistantMessage = {
@@ -429,13 +449,9 @@ export function handleToolStart(
 
 	// Finalize current assistant text before inserting tool.
 	// Transition to processing — LLM is still active, just not streaming text.
-	if (chatState.phase === "streaming" || _replayInnerStreaming) {
+	if (chatState.phase === "streaming") {
 		flushAndFinalizeAssistant();
-		if (chatState.phase !== "replaying") {
-			phaseToProcessing();
-		} else {
-			_replayInnerStreaming = false;
-		}
+		phaseToProcessing();
 	}
 
 	applyToolCreate(result.tool);
@@ -567,13 +583,7 @@ export function handleDone(
 	}
 
 	chatState.turnEpoch++;
-	if (chatState.phase === "replaying") {
-		// Replayed `done` — clear inner streaming but stay in "replaying" phase.
-		// phaseEndReplay handles the final phase reconciliation.
-		_replayInnerStreaming = false;
-	} else {
-		phaseToIdle();
-	}
+	phaseToIdle();
 }
 
 export function handleStatus(
@@ -581,15 +591,47 @@ export function handleStatus(
 ): void {
 	if (msg.status === "processing") {
 		phaseToProcessing();
-		// Reset so queued styling can be applied for new processing turns
-		chatState.queuedFlagsCleared = false;
-		// NOTE: applyQueuedFlagInPlace() was previously called here but caused
-		// two bugs: (1) it re-applied the queued flag after clearQueuedFlags()
-		// already cleared it (when status:processing arrived late from the
-		// monitoring poller), permanently sticking messages in "Queued" state;
-		// (2) it marked non-queued messages as queued when sent to idle sessions.
-		// The queued flag is now set exclusively by addUserMessage() (live sends)
-		// and replay dispatch (event replay), which have the correct context.
+		// Fallback: if the session was just loaded (replay or REST history)
+		// and the last user message has no sentDuringEpoch, it means the
+		// replay/history path couldn't determine the queued state.  Since
+		// the session IS processing, the last unresponded user message must
+		// be queued.  Set sentDuringEpoch so the shimmer appears.
+		//
+		// This is safe because sentDuringEpoch is write-once: if replay or
+		// addUserMessage already set it, this is a no-op.  And unlike the
+		// old mutable `queued` boolean, sentDuringEpoch is never cleared —
+		// so the "re-apply after clear" race that caused the original bugs
+		// is structurally impossible.
+		ensureSentDuringEpochOnLastUnrespondedUser();
+	}
+}
+
+/** Set `sentDuringEpoch` on the last unresponded user message if not
+ *  already set.  Called from `handleStatus` as a fallback for session
+ *  loads where replay couldn't infer the queued state from events. */
+function ensureSentDuringEpochOnLastUnrespondedUser(): void {
+	const msgs = getMessages();
+	if (msgs.length === 0) return;
+
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		const m = msgs[i];
+		if (!m) continue;
+		if (m.type === "user") {
+			// Already has sentDuringEpoch — write-once, don't touch
+			if (m.sentDuringEpoch != null) return;
+			// Has an assistant response after it — not queued
+			const hasResponse = msgs
+				.slice(i + 1)
+				.some((msg) => msg.type === "assistant");
+			if (hasResponse) return;
+			// No sentDuringEpoch and no response — set it
+			setMessages(
+				msgs.map((msg, idx) =>
+					idx === i ? { ...msg, sentDuringEpoch: chatState.turnEpoch } : msg,
+				),
+			);
+			return;
+		}
 	}
 }
 
@@ -609,66 +651,36 @@ export function handleError(
 	} else {
 		// Prominent error
 		addSystemMessage(message, "error", errorMeta);
-		// Same guard as handleDone — historical errors from replay must not
-		// clear live processing state. During replay, phase is already
-		// "replaying" so streaming getter is already false.
-		if (chatState.phase !== "replaying") {
-			phaseToIdle();
-		}
+		phaseToIdle();
 	}
-}
-
-// ─── Turn-boundary tracking for queued-flag clearing ────────────────────────
-// When a user message is queued (sent while the LLM is working), its "Queued"
-// shimmer must persist until the LLM starts a NEW turn — not be stripped by
-// continuation deltas from the current turn.  We record the turnEpoch at
-// which the message was queued and only allow clearing once the epoch advances.
-
-let queuedAtEpoch = -1; // -1 → no queued message pending
-
-/** Should ws-dispatch call clearQueuedFlags() on this content-start event?
- *  Returns true when:
- *  - No queued message is pending (safe default), OR
- *  - turnEpoch has advanced past the epoch when the message was queued
- *    (a `done` event completed the previous turn). */
-export function shouldClearQueuedOnContent(): boolean {
-	if (queuedAtEpoch < 0) return true;
-	if (chatState.turnEpoch > queuedAtEpoch) {
-		queuedAtEpoch = -1; // consumed
-		return true;
-	}
-	return false;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 /** Add a user message to the chat.
- *  When `queued` is true the message is visually dimmed with a shimmer —
- *  it has been sent to the server but is waiting for the LLM to start.
+ *  When `sentWhileProcessing` is true the message records the current
+ *  `turnEpoch` in `sentDuringEpoch` — a write-once, immutable fact.
+ *  The UI derives the "Queued" shimmer reactively from this value
+ *  and the live `turnEpoch`; no clearing/mutation is ever needed.
  *
  *  During replay, defensively finalizes any in-progress assistant message
  *  so that subsequent delta events create a new AssistantMessage block.
- *  During live streaming (queued=true), the assistant message is left
- *  unfinalized so deltas keep updating it in-place and the queued user
- *  message stays at the bottom instead of splitting the response. */
+ *  During live streaming (sentWhileProcessing=true), the assistant message
+ *  is left unfinalized so deltas keep updating it in-place and the queued
+ *  user message stays at the bottom instead of splitting the response. */
 export function addUserMessage(
 	text: string,
 	images?: string[],
-	queued?: boolean,
+	sentWhileProcessing?: boolean,
 ): void {
-	if (queued) queuedAtEpoch = chatState.turnEpoch;
 	// Finalize the in-progress assistant message only during replay,
 	// where user_message events can appear between delta events without
-	// an intervening done event.  During live streaming (queued=true),
-	// keep the assistant message unfinalized so subsequent deltas
-	// continue updating it and the queued user message stays at the end.
-	if (!queued && chatState.currentAssistantText) {
+	// an intervening done event.  During live streaming the assistant
+	// message stays unfinalized so subsequent deltas continue updating
+	// it and the queued user message stays at the end.
+	if (!sentWhileProcessing && chatState.currentAssistantText) {
 		flushAndFinalizeAssistant();
-		if (chatState.phase === "replaying") {
-			_replayInnerStreaming = false;
-		} else {
-			phaseToIdle();
-		}
+		phaseToIdle();
 	}
 
 	const uuid = generateUuid();
@@ -677,7 +689,7 @@ export function addUserMessage(
 		uuid,
 		text,
 		...(images != null && { images }),
-		...(queued != null && { queued }),
+		...(sentWhileProcessing ? { sentDuringEpoch: chatState.turnEpoch } : {}),
 	};
 	setMessages([...getMessages(), msg]);
 }
@@ -687,24 +699,6 @@ export function addUserMessage(
 export function prependMessages(msgs: ChatMessage[]): void {
 	if (msgs.length === 0) return;
 	setMessages([...msgs, ...getMessages()]);
-}
-
-/** Clear the `queued` flag on all user messages.
- *  Called when a new streaming response starts (first delta) so the
- *  previously-queued message transitions to its normal appearance.
- *  Also sets `queuedFlagsCleared` so the unified rendering pipeline
- *  can reactively remove its queued styling. */
-export function clearQueuedFlags(): void {
-	chatState.queuedFlagsCleared = true;
-	let changed = false;
-	const messages = getMessages().map((m) => {
-		if (m.type === "user" && m.queued) {
-			changed = true;
-			return { ...m, queued: false };
-		}
-		return m;
-	});
-	if (changed) setMessages(messages);
 }
 
 /** Add a system message to the chat. */
@@ -767,14 +761,13 @@ export function seedRegistryFromMessages(
 
 export function clearMessages(): void {
 	replayBatch = null;
+	replayBuffers.clear();
 	phaseReset(); // must be cleared before abort hook — stops replay generation check
 	onClearMessages?.(); // abort in-flight async replays
 	cancelDeferredMarkdown(); // abort in-flight deferred renders
 	chatState.messages = [];
 	chatState.currentAssistantText = "";
-	chatState.queuedFlagsCleared = false;
 	chatState.turnEpoch = 0;
-	queuedAtEpoch = -1;
 	registry.clear();
 	doneMessageIds.clear();
 	if (renderTimer !== null) {
@@ -795,6 +788,10 @@ const SESSION_CACHE_MAX = 10;
 
 interface CachedSession {
 	messages: ChatMessage[];
+	/** Preserved so that `sentDuringEpoch` comparisons remain correct
+	 *  after restore — without this, turnEpoch resets to 0 and messages
+	 *  with sentDuringEpoch would incorrectly show the "Queued" shimmer. */
+	turnEpoch: number;
 	contextPercent: number;
 	historyHasMore: boolean;
 	historyMessageCount: number;
@@ -818,6 +815,7 @@ export function stashSessionMessages(sessionId: string): void {
 	sessionMessageCache.delete(sessionId);
 	sessionMessageCache.set(sessionId, {
 		messages: $state.snapshot(chatState.messages),
+		turnEpoch: chatState.turnEpoch,
 		contextPercent: uiState.contextPercent,
 		historyHasMore: historyState.hasMore,
 		historyMessageCount: historyState.messageCount,
@@ -830,6 +828,7 @@ export function restoreCachedMessages(sessionId: string): boolean {
 	const entry = sessionMessageCache.get(sessionId);
 	if (!entry) return false;
 	chatState.messages = entry.messages;
+	chatState.turnEpoch = entry.turnEpoch;
 	updateContextPercent(entry.contextPercent);
 	historyState.hasMore = entry.historyHasMore;
 	historyState.messageCount = entry.historyMessageCount;
@@ -877,8 +876,8 @@ function flushAssistantRender(): void {
 
 	const rawText = chatState.currentAssistantText;
 	const html =
-		chatState.phase === "replaying" ? rawText : renderMarkdown(rawText);
-	const isReplay = chatState.phase === "replaying";
+		chatState.loadLifecycle === "loading" ? rawText : renderMarkdown(rawText);
+	const isReplay = chatState.loadLifecycle === "loading";
 
 	const { messages, found } = updateLastMessage(
 		getMessages(),
@@ -934,6 +933,8 @@ export function renderDeferredMarkdown(): void {
 		);
 		if (hasMore) {
 			setTimeout(processBatch, 0);
+		} else if (chatState.loadLifecycle === "committed") {
+			chatState.loadLifecycle = "ready";
 		}
 	}
 

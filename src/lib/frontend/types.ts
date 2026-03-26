@@ -74,9 +74,13 @@ export interface UserMessage {
 	uuid: string;
 	text: string;
 	images?: string[];
-	/** True when the message was sent while the LLM is already processing.
-	 *  OpenCode queues it server-side — this flag drives the UI shimmer. */
-	queued?: boolean;
+	/** The `turnEpoch` at which this message was sent, present only when it
+	 *  was sent while the LLM was already processing (queued server-side).
+	 *  Write-once / immutable — set in `addUserMessage`, never mutated.
+	 *  The UI derives the "Queued" shimmer reactively:
+	 *    `sentDuringEpoch != null && turnEpoch <= sentDuringEpoch`
+	 *  The shimmer clears automatically when `handleDone` increments `turnEpoch`. */
+	sentDuringEpoch?: number;
 }
 
 export interface AssistantMessage {

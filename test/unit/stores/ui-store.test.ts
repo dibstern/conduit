@@ -60,7 +60,6 @@ beforeEach(() => {
 	uiState.sidebarCollapsed = false;
 	uiState.sidebarPanel = "sessions";
 	uiState.mobileSidebarOpen = false;
-	uiState.isUserScrolledUp = false;
 	uiState.toasts = [];
 	uiState.confirmDialog = null;
 	uiState.openPanels = new Set();

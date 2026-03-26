@@ -1,7 +1,7 @@
 {
 	"name": "fork-session",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-23T03:18:51.478Z",
+	"recordedAt": "2026-03-26T11:06:51.738Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,7 +13,7 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
+			"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 			"history": {
 				"messages": [],
 				"hasMore": false,
@@ -33,9 +33,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-					"title": "New session - 2026-03-23T03:18:35.436Z",
-					"updatedAt": 1774235915436,
+					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+					"title": "New session - 2026-03-26T11:06:32.746Z",
+					"updatedAt": 1774523192746,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +45,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-					"title": "New session - 2026-03-23T03:18:35.436Z",
-					"updatedAt": 1774235915436,
+					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+					"title": "New session - 2026-03-26T11:06:32.746Z",
+					"updatedAt": 1774523192746,
 					"messageCount": 0
 				}
 			],
@@ -84,7 +84,11 @@
 								"context": 1000000,
 								"output": 128000
 							},
-							"variants": ["low", "medium", "high"]
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
 						},
 						{
 							"id": "mimo-v2-omni-free",
@@ -94,7 +98,11 @@
 								"context": 262144,
 								"output": 64000
 							},
-							"variants": ["low", "medium", "high"]
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
 						},
 						{
 							"id": "mimo-v2-pro-free",
@@ -104,7 +112,11 @@
 								"context": 1048576,
 								"output": 64000
 							},
-							"variants": ["low", "medium", "high"]
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
 						},
 						{
 							"id": "big-pickle",
@@ -114,7 +126,10 @@
 								"context": 200000,
 								"output": 128000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "minimax-m2.5-free",
@@ -134,7 +149,12 @@
 								"input": 272000,
 								"output": 128000
 							},
-							"variants": ["minimal", "low", "medium", "high"]
+							"variants": [
+								"minimal",
+								"low",
+								"medium",
+								"high"
+							]
 						}
 					]
 				},
@@ -151,7 +171,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-3-5-haiku-latest",
@@ -170,7 +193,10 @@
 								"context": 200000,
 								"output": 32000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-3-5-sonnet-20241022",
@@ -198,7 +224,12 @@
 								"context": 1000000,
 								"output": 128000
 							},
-							"variants": ["low", "medium", "high", "max"]
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-sonnet-4-6",
@@ -208,7 +239,12 @@
 								"context": 1000000,
 								"output": 64000
 							},
-							"variants": ["low", "medium", "high", "max"]
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-sonnet-4-0",
@@ -218,7 +254,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-opus-4-20250514",
@@ -228,7 +267,10 @@
 								"context": 200000,
 								"output": 32000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-sonnet-4-5-20250929",
@@ -238,7 +280,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-opus-4-0",
@@ -248,7 +293,10 @@
 								"context": 200000,
 								"output": 32000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-3-5-haiku-20241022",
@@ -276,7 +324,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-3-7-sonnet-20250219",
@@ -286,7 +337,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-3-haiku-20240307",
@@ -305,7 +359,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-haiku-4-5",
@@ -315,7 +372,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-opus-4-5",
@@ -325,7 +385,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-3-opus-20240229",
@@ -344,7 +407,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-sonnet-4-20250514",
@@ -354,7 +420,10 @@
 								"context": 200000,
 								"output": 64000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						},
 						{
 							"id": "claude-opus-4-1-20250805",
@@ -364,7 +433,10 @@
 								"context": 200000,
 								"output": 32000
 							},
-							"variants": ["high", "max"]
+							"variants": [
+								"high",
+								"max"
+							]
 						}
 					]
 				}
@@ -372,8 +444,13 @@
 		},
 		{
 			"type": "variant_info",
-			"variant": "high",
-			"variants": ["low", "medium", "high", "max"]
+			"variant": "max",
+			"variants": [
+				"low",
+				"medium",
+				"high",
+				"max"
+			]
 		},
 		{
 			"type": "default_model_info",
@@ -410,15 +487,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
-							"title": "New session - 2026-03-23T03:18:37.752Z",
-							"updatedAt": 1774235918811,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"title": "New session - 2026-03-26T11:06:32.746Z",
+							"updatedAt": 1774523195097,
 							"messageCount": 0
 						}
 					],
@@ -428,15 +499,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
-							"title": "New session - 2026-03-23T03:18:37.752Z",
-							"updatedAt": 1774235918811,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"title": "New session - 2026-03-26T11:06:32.746Z",
+							"updatedAt": 1774523195097,
 							"messageCount": 0
 						}
 					],
@@ -446,15 +511,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
-							"title": "New session - 2026-03-23T03:18:37.752Z",
-							"updatedAt": 1774235918811,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"title": "New session - 2026-03-26T11:06:32.746Z",
+							"updatedAt": 1774523195097,
 							"messageCount": 0
 						}
 					],
@@ -464,15 +523,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
-							"title": "New session - 2026-03-23T03:18:37.752Z",
-							"updatedAt": 1774235918811,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"title": "New session - 2026-03-26T11:06:32.746Z",
+							"updatedAt": 1774523195097,
 							"messageCount": 0
 						}
 					],
@@ -482,17 +535,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
-							"title": "New session - 2026-03-23T03:18:37.752Z",
-							"updatedAt": 1774235918811,
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"title": "New session - 2026-03-26T11:06:32.746Z",
+							"updatedAt": 1774523195097,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
-							"messageCount": 0
 						}
 					],
 					"roots": true
@@ -505,17 +552,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
-							"title": "New session - 2026-03-23T03:18:37.752Z",
-							"updatedAt": 1774235918811,
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"title": "New session - 2026-03-26T11:06:32.746Z",
+							"updatedAt": 1774523195097,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
-							"messageCount": 0
 						}
 					],
 					"roots": false
@@ -524,17 +565,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235918811,
+							"updatedAt": 1774523195097,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
-							"messageCount": 0
 						}
 					],
 					"roots": true
@@ -543,17 +578,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235918811,
+							"updatedAt": 1774523195097,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
-							"messageCount": 0
 						}
 					],
 					"roots": false
@@ -561,22 +590,22 @@
 				{
 					"type": "delta",
 					"text": "ok",
-					"messageId": "msg_d18b3a1be001Scv54gsB6S1VRN"
+					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
 				},
 				{
 					"type": "delta",
 					"text": ", remembered.",
-					"messageId": "msg_d18b3a1be001Scv54gsB6S1VRN"
+					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
 						"output": 7,
-						"cache_read": 0,
-						"cache_creation": 18117
+						"cache_read": 17817,
+						"cache_creation": 334
 					},
-					"cost": 0.11342125,
+					"cost": 0.011186,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -585,26 +614,20 @@
 					"usage": {
 						"input": 3,
 						"output": 7,
-						"cache_read": 0,
-						"cache_creation": 18117
+						"cache_read": 17817,
+						"cache_creation": 334
 					},
-					"cost": 0.11342125,
-					"duration": 4190,
+					"cost": 0.011186,
+					"duration": 3523,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235922973,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523198597,
 							"messageCount": 0
 						}
 					],
@@ -618,15 +641,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235922983,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523198617,
 							"messageCount": 0
 						}
 					],
@@ -636,15 +653,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235922983,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523198617,
 							"messageCount": 0
 						}
 					],
@@ -654,15 +665,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235922983,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523198617,
 							"messageCount": 0
 						}
 					],
@@ -693,15 +698,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235923503,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523199120,
 							"messageCount": 0
 						}
 					],
@@ -711,15 +710,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235923503,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523199120,
 							"messageCount": 0
 						}
 					],
@@ -729,15 +722,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235923503,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523199120,
 							"messageCount": 0
 						}
 					],
@@ -747,15 +734,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235923503,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523199120,
 							"messageCount": 0
 						}
 					],
@@ -765,17 +746,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235923503,
+							"updatedAt": 1774523199120,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
-							"messageCount": 0
 						}
 					],
 					"roots": true
@@ -788,17 +763,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235923503,
+							"updatedAt": 1774523199120,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
-							"messageCount": 0
 						}
 					],
 					"roots": false
@@ -806,22 +775,22 @@
 				{
 					"type": "delta",
 					"text": "ok",
-					"messageId": "msg_d18b3b427001m4vZxLf3D8mK4c"
+					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
 				},
 				{
 					"type": "delta",
 					"text": ", remembered.",
-					"messageId": "msg_d18b3b427001m4vZxLf3D8mK4c"
+					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
 						"output": 7,
-						"cache_read": 18117,
+						"cache_read": 18151,
 						"cache_creation": 26
 					},
-					"cost": 0.009411,
+					"cost": 0.009428,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -830,26 +799,20 @@
 					"usage": {
 						"input": 3,
 						"output": 7,
-						"cache_read": 18117,
+						"cache_read": 18151,
 						"cache_creation": 26
 					},
-					"cost": 0.009411,
-					"duration": 3001,
+					"cost": 0.009428,
+					"duration": 6025,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926497,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205143,
 							"messageCount": 0
 						}
 					],
@@ -863,15 +826,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926497,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -881,15 +838,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -899,15 +850,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -938,22 +883,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235928552,
+							"updatedAt": 1774523207209,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -963,22 +903,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235928552,
+							"updatedAt": 1774523207209,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -988,22 +923,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235928552,
+							"updatedAt": 1774523207209,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1013,22 +943,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235928552,
+							"updatedAt": 1774523207209,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1038,23 +963,18 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235928552,
+							"updatedAt": 1774523207209,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59",
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
 							"processing": true
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1068,23 +988,18 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235928552,
+							"updatedAt": 1774523207209,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59",
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
 							"processing": true
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1093,22 +1008,22 @@
 				{
 					"type": "delta",
 					"text": "alpha",
-					"messageId": "msg_d18b3c7e1001C5lCkMoUFGpiT4"
+					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
 				},
 				{
 					"type": "delta",
 					"text": ", beta",
-					"messageId": "msg_d18b3c7e1001C5lCkMoUFGpiT4"
+					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
 						"output": 6,
-						"cache_read": 18143,
+						"cache_read": 18177,
 						"cache_creation": 25
 					},
-					"cost": 0.00939275,
+					"cost": 0.00940975,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -1117,33 +1032,28 @@
 					"usage": {
 						"input": 3,
 						"output": 6,
-						"cache_read": 18143,
+						"cache_read": 18177,
 						"cache_creation": 25
 					},
-					"cost": 0.00939275,
-					"duration": 2425,
+					"cost": 0.00940975,
+					"duration": 4007,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235930971,
+							"updatedAt": 1774523211214,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1157,22 +1067,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235930971,
+							"updatedAt": 1774523211229,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1182,22 +1087,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235930980,
+							"updatedAt": 1774523211229,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],
@@ -1207,22 +1107,17 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2e74c3e15ffe38E0OlzucTmvvU",
+							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
 							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774235930980,
+							"updatedAt": 1774523211229,
 							"messageCount": 0,
-							"forkMessageId": "msg_d18b3c1f20031gC8566yrPQU59"
+							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
 						},
 						{
-							"id": "ses_2e74c6247ffeiDL23JGsFmwReR",
+							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
 							"title": "Memory test: alpha",
-							"updatedAt": 1774235926509,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2e74c6b53ffeJKaf2c3AeFhSKx",
-							"title": "New session - 2026-03-23T03:18:35.436Z",
-							"updatedAt": 1774235915436,
+							"updatedAt": 1774523205164,
 							"messageCount": 0
 						}
 					],

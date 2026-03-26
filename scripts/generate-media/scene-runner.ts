@@ -14,7 +14,7 @@ import {
 } from "@playwright/test";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
-const MEDIA_DIR = path.join(PROJECT_ROOT, "media");
+const MEDIA_DIR = process.env["MEDIA_DIR"] || path.join(PROJECT_ROOT, "media");
 const DEBUG_DIR = path.join(MEDIA_DIR, "_debug");
 const PREVIEW_PORT = 4173;
 const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}`;

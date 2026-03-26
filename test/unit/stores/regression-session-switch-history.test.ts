@@ -505,17 +505,15 @@ describe("history_page for load_more_history pagination", () => {
 	});
 });
 
-// ─── Queued flag timing (Task 5) ────────────────────────────────────────────
-// status:processing no longer applies queued flags — the queued flag is set
-// exclusively by addUserMessage() (live sends) and replay dispatch. The old
-// applyQueuedFlagInPlace() was removed because it caused two bugs:
-//   1. Re-applied the queued flag after clearQueuedFlags() already cleared it
-//      (when status:processing arrived late from the monitoring poller).
-//   2. Marked non-queued messages as queued when sent to idle sessions.
+// ─── Queued state timing (Task 5) ───────────────────────────────────────────
+// status:processing sets sentDuringEpoch as a FALLBACK on the last unresponded
+// user message (only if not already set). This handles REST history and replay
+// paths where the queued state couldn't be determined from events alone.
+// Unlike the old mutable `queued` boolean, sentDuringEpoch is write-once —
+// the "re-apply after clear" race is structurally impossible.
 
-describe("Queued flag timing with REST history", () => {
-	it("status:processing does NOT apply queued flag to REST history messages", async () => {
-		// Load session with an unresponded user message via REST fallback
+describe("Queued state timing with REST history", () => {
+	it("status:processing sets sentDuringEpoch on unresponded user message from REST history", async () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
@@ -532,29 +530,60 @@ describe("Queued flag timing with REST history", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		// No queued flag before status
+		// Before status — no sentDuringEpoch
 		const usersBefore = chatState.messages.filter((m) => m.type === "user");
-		expect(usersBefore[0]?.queued).toBeFalsy();
+		expect(usersBefore[0]?.sentDuringEpoch).toBeUndefined();
 
-		// Status arrives as a separate WS message — should NOT mark as queued
+		// Status arrives — fallback sets sentDuringEpoch
 		handleMessage({ type: "status", status: "processing" });
 
 		const usersAfter = chatState.messages.filter((m) => m.type === "user");
-		expect(
-			(usersAfter[usersAfter.length - 1] as { queued?: boolean }).queued,
-		).toBeFalsy();
+		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
+			chatState.turnEpoch,
+		);
 	});
 
-	it("status:processing sets phase to processing without queued side-effects", async () => {
+	it("status:processing does NOT overwrite existing sentDuringEpoch (write-once)", async () => {
+		// Simulate replay that already set sentDuringEpoch
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
+			events: [
+				{ type: "user_message", text: "first" },
+				{ type: "delta", text: "responding..." },
+				{ type: "user_message", text: "queued" },
+			],
+		});
+		await vi.runAllTimersAsync();
+
+		const usersBefore = chatState.messages.filter((m) => m.type === "user");
+		const epochBefore = usersBefore[usersBefore.length - 1]?.sentDuringEpoch;
+		expect(epochBefore).toBe(0); // set by replay
+
+		// status:processing arrives — should NOT change the existing value
+		handleMessage({ type: "status", status: "processing" });
+
+		const usersAfter = chatState.messages.filter((m) => m.type === "user");
+		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
+			epochBefore,
+		);
+	});
+
+	it("status:processing skips messages that already have an assistant response", async () => {
+		handleMessage({
+			type: "session_switched",
+			id: "s3",
 			history: {
 				messages: [
 					{
 						id: "m1",
 						role: "user",
-						parts: [{ id: "p1", type: "text", text: "waiting" }],
+						parts: [{ id: "p1", type: "text", text: "hello" }],
+					},
+					{
+						id: "m2",
+						role: "assistant",
+						parts: [{ id: "p2", type: "text", text: "hi" }],
 					},
 				],
 				hasMore: false,
@@ -564,18 +593,8 @@ describe("Queued flag timing with REST history", () => {
 
 		handleMessage({ type: "status", status: "processing" });
 
-		// Phase should be processing but no queued flags
+		// User message has a response — should NOT get sentDuringEpoch
 		const users = chatState.messages.filter((m) => m.type === "user");
-		expect(
-			(users[users.length - 1] as { queued?: boolean }).queued,
-		).toBeFalsy();
-
-		// LLM starts responding — no queued flags to clear, just normal streaming
-		handleMessage({ type: "delta", text: "Hello" });
-		vi.advanceTimersByTime(100);
-		const usersAfter = chatState.messages.filter((m) => m.type === "user");
-		expect(
-			(usersAfter[usersAfter.length - 1] as { queued?: boolean }).queued,
-		).toBeFalsy();
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
 	});
 });

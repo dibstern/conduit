@@ -17,8 +17,7 @@ import {
 	beginReplayBatch,
 	chatState,
 	clearMessages,
-	clearQueuedFlags,
-	commitReplayBatch,
+	commitReplayFinal,
 	discardReplayBatch,
 	findMessage,
 	flushPendingRender,
@@ -45,7 +44,6 @@ import {
 	registerClearMessagesHook,
 	renderDeferredMarkdown,
 	seedRegistryFromMessages,
-	shouldClearQueuedOnContent,
 } from "./chat.svelte.js";
 import {
 	handleAgentList,
@@ -63,14 +61,14 @@ import {
 	handleProxyDetected,
 	handleScanResult,
 } from "./instance.svelte.js";
+import { dispatch } from "./notification-reducer.svelte.js";
 import {
+	clearSessionLocal,
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
-	handleNotificationEvent,
 	handlePermissionRequest,
 	handlePermissionResolved,
-	onSessionSwitch,
 } from "./permissions.svelte.js";
 import { handleProjectList } from "./project.svelte.js";
 import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
@@ -116,14 +114,12 @@ import { wsSend } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
-// ─── LLM Content Start (queued-flag coordination) ───────────────────────────
+// ─── LLM Content Start ──────────────────────────────────────────────────────
 // Single source of truth for event types that indicate the LLM started
-// producing content for a turn. Used for two purposes:
-//   1. clearQueuedFlags() — remove the "Queued" shimmer when the LLM responds
-//   2. llmActive tracking in replayEvents() — infer queued state from events
-//
-// Both handleMessage() and replayEvents() use this constant via
-// isLlmContentStart() so there is exactly one place to update.
+// producing content for a turn. Used by replayEvents() to track `llmActive`
+// and infer whether a user_message was sent while the LLM was busy (queued).
+// A user_message that appears while llmActive is true gets `sentDuringEpoch`
+// set, so the UI can derive the "Queued" shimmer reactively.
 
 const LLM_CONTENT_START_TYPES: ReadonlySet<RelayMessage["type"]> = new Set([
 	"delta",
@@ -144,9 +140,51 @@ function yieldToEventLoop(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// ─── Live event buffer during replay ────────────────────────────────────────
+// When an async replay is in progress, live WebSocket chat events are buffered
+// instead of being dispatched immediately. This prevents interleaving of live
+// events (e.g. thinking_stop) with cached events being replayed, which would
+// cause data loss (e.g. cached thinking_deltas silently dropped after a live
+// thinking_stop prematurely marks the thinking message as done).
+let liveEventBuffer: RelayMessage[] | null = null;
+
+/** Event types handled by dispatchChatEvent — used to decide what to buffer. */
+const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
+	"user_message",
+	"delta",
+	"thinking_start",
+	"thinking_delta",
+	"thinking_stop",
+	"tool_start",
+	"tool_executing",
+	"tool_result",
+	"result",
+	"done",
+	"status",
+	"error",
+]);
+
+/** Start buffering live chat events (called at the start of replay). */
+function startBufferingLiveEvents(): void {
+	liveEventBuffer = [];
+}
+
+/** Drain buffered live events through normal dispatch (called after replay commits). */
+function drainLiveEventBuffer(): void {
+	const buffer = liveEventBuffer;
+	liveEventBuffer = null;
+	if (!buffer || buffer.length === 0) return;
+	for (const event of buffer) {
+		const ctx: DispatchContext = { isReplay: false, isQueued: isProcessing() };
+		dispatchChatEvent(event, ctx);
+	}
+}
+
 // Register abort hook: clearMessages bumps generation to cancel in-flight replays
+// and discards the live event buffer (session is changing, buffered events are stale).
 registerClearMessagesHook(() => {
 	replayGeneration++;
+	liveEventBuffer = null;
 });
 
 // ─── Async history conversion ───────────────────────────────────────────────
@@ -191,8 +229,8 @@ async function convertHistoryAsync(
 export interface DispatchContext {
 	/** True when replaying cached events (suppresses notifications). */
 	isReplay: boolean;
-	/** Whether the session is currently processing (queued-flag source).
-	 *  Live: `chatState.processing`. Replay: local `llmActive` tracker. */
+	/** Whether the LLM is currently active (sentDuringEpoch source).
+	 *  Live: `isProcessing()`. Replay: local `llmActive` tracker. */
 	isQueued: boolean;
 }
 
@@ -288,16 +326,22 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	// ── Buffer live chat events during replay ───────────────────────────
+	// Prevents interleaving with cached events being replayed async.
+	// Without this, a live thinking_stop can arrive mid-replay and mark
+	// a thinking message as done, causing remaining cached thinking_deltas
+	// to be silently dropped (updateLastMessage can't find !done message).
+	if (liveEventBuffer !== null && CHAT_EVENT_TYPES.has(msg.type)) {
+		liveEventBuffer.push(msg);
+		return;
+	}
+
 	// ── Chat events (shared dispatch) ───────────────────────────────────
 	const ctx: DispatchContext = {
 		isReplay: false,
 		isQueued: isProcessing(),
 	};
 	if (dispatchChatEvent(msg, ctx)) {
-		// Queued-flag clearing: gated by shouldClearQueuedOnContent() which
-		// uses turnEpoch to ensure only genuinely NEW turns clear flags.
-		if (isLlmContentStart(msg.type) && shouldClearQueuedOnContent())
-			clearQueuedFlags();
 		return;
 	}
 
@@ -310,9 +354,28 @@ export function handleMessage(msg: RelayMessage): void {
 
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
-		case "session_list":
+		case "session_list": {
 			handleSessionList(msg);
+			// Reconcile notification reducer with server-side question counts.
+			// session_list messages include pendingQuestionCount per session.
+			const sessions = msg.sessions;
+			if (Array.isArray(sessions)) {
+				const counts = new Map<
+					string,
+					{ questions: number; permissions: number }
+				>();
+				for (const s of sessions) {
+					if (s.pendingQuestionCount && s.pendingQuestionCount > 0) {
+						counts.set(s.id, {
+							questions: s.pendingQuestionCount,
+							permissions: 0,
+						});
+					}
+				}
+				dispatch({ type: "reconcile", counts });
+			}
 			break;
+		}
 		case "session_forked": {
 			handleSessionForked(msg);
 			const parentTitle = msg.parentTitle ?? "session";
@@ -338,13 +401,14 @@ export function handleMessage(msg: RelayMessage): void {
 			clearMessages();
 			updateContextPercent(0);
 			clearTodoState();
-			onSessionSwitch(previousSessionId, msg.id);
+			clearSessionLocal(previousSessionId);
+			dispatch({ type: "session_viewed", sessionId: msg.id });
 
 			if (msg.events) {
 				// Cache hit: replay raw events through existing chat handlers
 				// (full fidelity — same code paths as live streaming).
 				// Fire-and-forget — handleMessage stays synchronous.
-				replayEvents(msg.events).catch((err) => {
+				replayEvents(msg.events, msg.id).catch((err) => {
 					log.warn("Replay error:", err);
 				});
 				// Events cache covers the full session — suppress history loading.
@@ -364,6 +428,9 @@ export function handleMessage(msg: RelayMessage): void {
 							seedRegistryFromMessages(chatMsgs);
 							historyState.hasMore = hasMore;
 							historyState.messageCount = msgCount;
+							// Transition loadLifecycle so the scroll controller
+							// exits "loading" state and scrolls to bottom.
+							chatState.loadLifecycle = "ready";
 						}
 					})
 					.catch((err) => {
@@ -372,6 +439,9 @@ export function handleMessage(msg: RelayMessage): void {
 			} else {
 				// Empty session (neither events nor history) — hasMore stays false
 				// so "Beginning of session" marker shows immediately.
+				// Transition loadLifecycle to "ready" so the scroll controller
+				// exits "loading" state and can handle live events normally.
+				chatState.loadLifecycle = "ready";
 			}
 
 			// Apply server-provided input draft for this session.
@@ -563,7 +633,21 @@ export function handleMessage(msg: RelayMessage): void {
 				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
 			} as RelayMessage;
 
-			handleNotificationEvent(msg);
+			// Dispatch to notification reducer based on event type
+			if (msg.sessionId) {
+				if (msg.eventType === "ask_user") {
+					dispatch({ type: "question_appeared", sessionId: msg.sessionId });
+				} else if (msg.eventType === "ask_user_resolved") {
+					dispatch({ type: "question_resolved", sessionId: msg.sessionId });
+				} else if (msg.eventType === "done") {
+					dispatch({ type: "session_done", sessionId: msg.sessionId });
+				} else if (msg.eventType === "session_viewed") {
+					dispatch({ type: "session_viewed", sessionId: msg.sessionId });
+				}
+			}
+
+			// session_viewed is a silent indicator update — no notifications or toasts.
+			if (msg.eventType === "session_viewed") break;
 
 			// Suppress all frontend notifications for subagent done events.
 			// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.
@@ -613,64 +697,81 @@ export function handleMessage(msg: RelayMessage): void {
 // llmActive=true; done and non-retry errors set it false. A user_message
 // that appears while llmActive is true was queued behind an in-progress turn.
 
-export async function replayEvents(events: RelayMessage[]): Promise<void> {
+export async function replayEvents(
+	events: RelayMessage[],
+	sessionId: string,
+): Promise<void> {
 	phaseStartReplay();
 	const generation = ++replayGeneration;
 
 	beginReplayBatch();
+	startBufferingLiveEvents();
 
-	// Local tracker: true when the LLM is producing content for the current
-	// turn. Inferred from event structure, NOT from status events (which
-	// aren't cached). Used to set the `queued` flag on user_message events.
-	let llmActive = false;
+	try {
+		// Local tracker: true when the LLM is producing content for the current
+		// turn. Inferred from event structure, NOT from status events (which
+		// aren't cached). Used to set the `queued` flag on user_message events.
+		let llmActive = false;
 
-	for (let i = 0; i < events.length; i++) {
-		// Abort: a newer replay or clearMessages happened
-		if (generation !== replayGeneration) {
-			discardReplayBatch();
-			return; // don't set replaying=false — clearMessages already did, or new replay set it true
+		for (let i = 0; i < events.length; i++) {
+			// Abort: a newer replay or clearMessages happened
+			if (generation !== replayGeneration) {
+				discardReplayBatch();
+				return; // don't call phaseEndReplay — clearMessages already reset loadLifecycle, or a new replay set it to loading
+			}
+
+			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
+			const event = events[i]!;
+
+			// ── LLM activity tracking (before handler, so user_message reads it) ──
+			if (isLlmContentStart(event.type)) llmActive = true;
+			else if (event.type === "done") llmActive = false;
+			else if (event.type === "error" && event.code !== "RETRY")
+				llmActive = false;
+
+			const ctx: DispatchContext = { isReplay: true, isQueued: llmActive };
+			dispatchChatEvent(event, ctx);
+
+			// Yield between chunks to keep the main thread responsive.
+			// NOTE: Do NOT call discardReplayBatch() on abort after yield.
+			// A newer replay may have already called beginReplayBatch() and
+			// started populating it — discarding here would destroy the new
+			// replay's batch. clearMessages() already sets replayBatch = null.
+			if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
+				await yieldToEventLoop();
+				if (generation !== replayGeneration) return;
+			}
 		}
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const event = events[i]!;
+		// Flush any pending debounced render (for mid-stream sessions
+		// where no "done" event has been received yet)
+		flushPendingRender();
 
-		// ── LLM activity tracking (before handler, so user_message reads it) ──
-		if (isLlmContentStart(event.type)) llmActive = true;
-		else if (event.type === "done") llmActive = false;
-		else if (event.type === "error" && event.code !== "RETRY")
-			llmActive = false;
+		// Single commit: page large replays so only the last 50 messages
+		// render immediately, with older messages buffered for lazy loading.
+		commitReplayFinal(sessionId);
 
-		const ctx: DispatchContext = { isReplay: true, isQueued: llmActive };
-		dispatchChatEvent(event, ctx);
+		// Reconcile processing state after replay completes.
+		// During replay, handler functions (handleDone, handleDelta, etc.)
+		// set chatState.phase directly (no longer guarded by "replaying").
+		// phaseEndReplay only needs to handle the edge case where llmActive
+		// is true but phase ended at "idle" (all turns completed during
+		// replay, but server says LLM is still active).
+		phaseEndReplay(llmActive);
 
-		// ── Queued-flag clearing ─────────────────────────────────────────
-		// Same turnEpoch gate as handleMessage().
-		if (isLlmContentStart(event.type) && shouldClearQueuedOnContent())
-			clearQueuedFlags();
+		// Drain live events that arrived while the replay was in progress.
+		// These are post-cache events dispatched as normal live events,
+		// continuing the timeline where the cache left off.
+		drainLiveEventBuffer();
 
-		// Yield between chunks to keep the main thread responsive
-		if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
-			commitReplayBatch();
-			await yieldToEventLoop();
-			if (generation !== replayGeneration) return; // aborted during yield
-			beginReplayBatch();
-		}
+		renderDeferredMarkdown();
+	} finally {
+		// Safety: ensure buffer is cleared on any exit path not handled above.
+		// Normal path: drainLiveEventBuffer already set buffer to null.
+		// Abort path: clearMessages hook already set buffer to null.
+		// Error path: discard any un-drained buffer to prevent infinite buffering.
+		liveEventBuffer = null;
 	}
-
-	// Flush any pending debounced render (for mid-stream sessions
-	// where no "done" event has been received yet)
-	flushPendingRender();
-	commitReplayBatch();
-
-	// Reconcile processing state: during replay, handleDone is guarded
-	// from clearing isProcessing (to avoid overwriting a live
-	// status:processing message from the server that arrived during a
-	// yield). Now that replay is complete, reconcile the processing state.
-	// phaseEndReplay merges two signals: llmActive (last replayed turn
-	// still in-flight) and isProcessing (live status:processing
-	// arrived during a yield — status events are NOT cacheable).
-	phaseEndReplay(llmActive);
-	renderDeferredMarkdown();
 }
 
 // ─── Auxiliary handlers (only called from handleMessage) ────────────────────

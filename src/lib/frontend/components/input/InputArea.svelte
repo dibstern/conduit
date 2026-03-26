@@ -211,7 +211,8 @@
 			: undefined;
 
 		// Always send immediately — OpenCode queues server-side when busy.
-		// Mark the message as "queued" visually when the LLM is processing.
+		// When the LLM is processing, `sentDuringEpoch` is recorded so the
+		// UI can derive the "Queued" shimmer reactively.
 		addUserMessage(messageText, imageUrls, isProcessing());
 		wsSend({ type: "message", text: messageText, ...(imageUrls && { images: imageUrls }) });
 

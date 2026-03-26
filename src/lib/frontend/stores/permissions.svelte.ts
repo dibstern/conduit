@@ -8,6 +8,7 @@ import type {
 	RelayMessage,
 } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
+import { dispatch } from "./notification-reducer.svelte.js";
 import { sessionState } from "./session.svelte.js";
 
 const log = createFrontendLogger("permissions");
@@ -19,18 +20,6 @@ export const permissionsState = $state({
 	pendingQuestions: [] as QuestionRequest[],
 	/** Error messages for questions that could not be delivered, keyed by toolId. */
 	questionErrors: new Map<string, string>(),
-	/**
-	 * Session IDs with pending questions the user hasn't seen yet.
-	 * Ref-counted: a session can have multiple outstanding questions.
-	 * Populated from notification_event broadcasts for ask_user events
-	 * in sessions the user is NOT currently viewing.
-	 */
-	remoteQuestionCounts: new Map<string, number>(),
-	/**
-	 * Sessions that completed (done event) while the user was not viewing them.
-	 * Cleared when the user navigates to the session.
-	 */
-	doneNotViewedSessions: new Set<string>(),
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -108,58 +97,6 @@ export function getRemotePermissions(
 			!descendants.has(p.sessionId) &&
 			p.sessionId !== "",
 	);
-}
-
-/**
- * Session IDs that have pending questions the user isn't viewing.
- * Excludes the current session and its descendants.
- */
-export function getRemoteQuestionSessions(
-	currentSessionId: string | null,
-): string[] {
-	const all = permissionsState.remoteQuestionCounts;
-	if (!currentSessionId) return [...all.keys()];
-	const descendants = getDescendantSessionIds(currentSessionId);
-	return [...all.keys()].filter(
-		(sid) => sid !== currentSessionId && !descendants.has(sid),
-	);
-}
-
-/** Get the ref-counted question count for a single session (for AttentionBanner). */
-export function getRemoteQuestionCount(sessionId: string): number {
-	return permissionsState.remoteQuestionCounts.get(sessionId) ?? 0;
-}
-
-/** Record a cross-session question notification (ref-counted). */
-export function addRemoteQuestion(sessionId: string): void {
-	const next = new Map(permissionsState.remoteQuestionCounts);
-	next.set(sessionId, (next.get(sessionId) ?? 0) + 1);
-	permissionsState.remoteQuestionCounts = next;
-}
-
-/** Remove a cross-session question notification (ref-counted; resolved or navigated). */
-export function removeRemoteQuestion(sessionId: string): void {
-	const next = new Map(permissionsState.remoteQuestionCounts);
-	const count = (next.get(sessionId) ?? 0) - 1;
-	if (count <= 0) {
-		next.delete(sessionId);
-	} else {
-		next.set(sessionId, count);
-	}
-	permissionsState.remoteQuestionCounts = next;
-}
-
-/**
- * Force-remove ALL question tracking for a session regardless of ref-count.
- * Used when we have authoritative evidence the session has no pending questions
- * (e.g., question resolved, session completed). Ref-counts can drift from
- * duplicate notification_events on SSE reconnect, so this is the hard reset.
- */
-export function evictRemoteQuestions(sessionId: string): void {
-	if (!permissionsState.remoteQuestionCounts.has(sessionId)) return;
-	const next = new Map(permissionsState.remoteQuestionCounts);
-	next.delete(sessionId);
-	permissionsState.remoteQuestionCounts = next;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -287,14 +224,6 @@ export function handleAskUserResolved(
 	permissionsState.pendingQuestions = permissionsState.pendingQuestions.filter(
 		(q) => q.toolId !== toolId,
 	);
-
-	// Force-remove session from remote tracking entirely (not just decrement).
-	// Ref-counts can drift from duplicate notification_events (SSE reconnect,
-	// replayed events). A resolved question is authoritative — blow it away.
-	const sessionId = msg.sessionId;
-	if (sessionId) {
-		evictRemoteQuestions(sessionId);
-	}
 }
 
 /**
@@ -309,57 +238,6 @@ export function handleAskUserError(
 
 	// Store the error keyed by toolId so components can react
 	permissionsState.questionErrors.set(toolId, message);
-}
-
-// ─── Cross-session notification state ───────────────────────────────────────
-
-/** Notification event state parameters. */
-export interface NotificationEventParams {
-	eventType: string;
-	sessionId?: string;
-}
-
-/**
- * Handle notification_event state effects.
- * Single entry point for all remote question tracking and done-not-viewed
- * tracking from cross-session broadcasts.
- */
-export function handleNotificationEvent(params: NotificationEventParams): void {
-	if (!params.sessionId) return;
-	if (params.eventType === "ask_user") {
-		addRemoteQuestion(params.sessionId);
-	} else if (params.eventType === "ask_user_resolved") {
-		removeRemoteQuestion(params.sessionId);
-	} else if (params.eventType === "done") {
-		// A completed session can't have pending questions — evict any stale
-		// remote question counts that survived due to ref-count drift.
-		evictRemoteQuestions(params.sessionId);
-		// Track done-not-viewed (notification_event only fires when no viewers)
-		const next = new Set(permissionsState.doneNotViewedSessions);
-		next.add(params.sessionId);
-		permissionsState.doneNotViewedSessions = next;
-	}
-}
-
-/**
- * Consolidate all notification state cleanup for a session switch.
- * - Clears previous session's permissions from pending
- * - Clears all pending questions (they belong to previous session view)
- * - Clears question errors
- * - Removes new session from remote tracking (now viewing it)
- */
-export function onSessionSwitch(
-	previousSessionId: string | null,
-	newSessionId: string,
-): void {
-	clearSessionLocal(previousSessionId);
-	removeRemoteQuestion(newSessionId);
-	// Clear done-not-viewed for the session we're switching to
-	if (permissionsState.doneNotViewedSessions.has(newSessionId)) {
-		const next = new Set(permissionsState.doneNotViewedSessions);
-		next.delete(newSessionId);
-		permissionsState.doneNotViewedSessions = next;
-	}
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -379,13 +257,13 @@ export function removeQuestion(toolId: string): void {
 	);
 }
 
-/** Clear all pending items (e.g. on disconnect). */
+/** Clear all pending items (e.g. on disconnect).
+ *  Also resets the notification reducer (cross-session indicators). */
 export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	permissionsState.remoteQuestionCounts = new Map();
-	permissionsState.doneNotViewedSessions = new Set();
+	dispatch({ type: "reset" });
 }
 
 /** Clear only session-local pending items (for session switch).
@@ -401,39 +279,11 @@ export function clearSessionLocal(previousSessionId: string | null): void {
 	permissionsState.questionErrors = new Map();
 }
 
-/** Clear all permissions state (for project switch). */
+/** Clear all permissions state (for project switch).
+ *  Also resets the notification reducer (cross-session indicators). */
 export function clearAllPermissions(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	permissionsState.remoteQuestionCounts = new Map();
-	permissionsState.doneNotViewedSessions = new Set();
-}
-
-/** Get session indicator state for sidebar dot rendering. */
-export function getSessionIndicator(
-	sessionId: string,
-	currentSessionId: string | null,
-): "attention" | "done-unviewed" | null {
-	// The currently-viewed session never needs an indicator —
-	// you're already looking at its questions/permissions/results.
-	// This also ensures the dot clears instantly on click (before
-	// the server round-trip that triggers onSessionSwitch).
-	if (sessionId === currentSessionId) return null;
-
-	// Check attention: remote questions for this session
-	const hasQuestions = permissionsState.remoteQuestionCounts.has(sessionId);
-
-	// Check permissions: pending permissions for this sessionId,
-	// excluding current session and descendants
-	const hasPermissions = permissionsState.pendingPermissions.some(
-		(p) => p.sessionId === sessionId && p.sessionId !== currentSessionId,
-	);
-
-	if (hasQuestions || hasPermissions) return "attention";
-
-	if (permissionsState.doneNotViewedSessions.has(sessionId))
-		return "done-unviewed";
-
-	return null;
+	dispatch({ type: "reset" });
 }

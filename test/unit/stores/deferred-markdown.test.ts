@@ -80,10 +80,13 @@ afterEach(() => {
 describe("Deferred markdown rendering", () => {
 	it("flushAssistantRender skips renderMarkdown during replay", async () => {
 		// Replay a simple turn: delta + done
-		const promise = replayEvents([
-			{ type: "delta", text: "Hello **world**" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const promise = replayEvents(
+			[
+				{ type: "delta", text: "Hello **world**" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		await drainReplay(promise);
 
@@ -108,13 +111,16 @@ describe("Deferred markdown rendering", () => {
 
 	it("renderDeferredMarkdown renders unrendered messages after replay", async () => {
 		// Replay multiple turns
-		const promise = replayEvents([
-			{ type: "delta", text: "First response" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "second question" },
-			{ type: "delta", text: "Second response" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const promise = replayEvents(
+			[
+				{ type: "delta", text: "First response" },
+				{ type: "done", code: 0 },
+				{ type: "user_message", text: "second question" },
+				{ type: "delta", text: "Second response" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		await drainReplay(promise);
 
@@ -161,10 +167,13 @@ describe("Deferred markdown rendering", () => {
 
 	it("calling renderDeferredMarkdown twice is idempotent", async () => {
 		// Replay a turn
-		const promise = replayEvents([
-			{ type: "delta", text: "Idempotent test" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const promise = replayEvents(
+			[
+				{ type: "delta", text: "Idempotent test" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		// Drain replay AND the deferred rendering it triggers
 		await drainReplay(promise);
@@ -193,10 +202,13 @@ describe("Deferred markdown rendering", () => {
 
 	it("clearMessages cancels in-flight deferred renders", async () => {
 		// Replay a turn
-		const promise = replayEvents([
-			{ type: "delta", text: "Will be cleared" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const promise = replayEvents(
+			[
+				{ type: "delta", text: "Will be cleared" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		await drainReplay(promise);
 

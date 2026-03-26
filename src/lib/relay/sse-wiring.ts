@@ -238,6 +238,9 @@ export function handleSSEEvent(
 		// sends back with the answer.  The handler calls the OpenCode API
 		// directly.
 		log.debug(`question.asked: event received`);
+		if (eventSessionId) {
+			sessionMgr.incrementPendingQuestionCount(eventSessionId);
+		}
 		if (pushManager) {
 			sendPushForEvent(
 				pushManager,
@@ -498,6 +501,19 @@ export function wireSSEConsumer(
 					log.debug(
 						`listPendingQuestions returned ${pendingQuestions.length} question(s)`,
 					);
+
+					// Build per-session pending question counts and update SessionManager.
+					// This runs even when length === 0 to clear stale counts from a
+					// previous connection.
+					const questionCounts = new Map<string, number>();
+					for (const pq of pendingQuestions) {
+						const sid = pq["sessionID"] as string | undefined;
+						if (sid) {
+							questionCounts.set(sid, (questionCounts.get(sid) ?? 0) + 1);
+						}
+					}
+					deps.sessionMgr.setPendingQuestionCounts(questionCounts);
+
 					if (pendingQuestions.length === 0) return;
 					log.info(
 						`Rehydrating ${pendingQuestions.length} pending question(s) from API`,

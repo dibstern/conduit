@@ -73,7 +73,7 @@ afterEach(() => {
 /** Replay events with cache-realism validation and full timer drain. */
 async function replayValidated(events: RelayMessage[]): Promise<void> {
 	assertCacheRealisticEvents(events);
-	const promise = replayEvents(events);
+	const promise = replayEvents(events, "test-session");
 	await vi.runAllTimersAsync();
 	await promise;
 }
@@ -189,12 +189,11 @@ describe("Dispatch coverage: every CACHEABLE_EVENT_TYPE handled by replay", () =
 		expect(chatState.phase).not.toBe("replaying");
 	});
 
-	it("phase transitions to streaming when replay ends mid-turn (last event is RETRY error)", async () => {
+	it("phase is idle after replay ends with a FATAL error", async () => {
 		await replayValidated(FIXTURE_EVENTS);
-		// The fixture's last event is an error with code "RETRY" — this is
-		// non-terminal, so the LLM is still active. phaseEndReplay correctly
-		// transitions to "streaming" (not "idle").
-		expect(chatState.phase).toBe("streaming");
+		// The fixture's last event is a FATAL error — this is terminal,
+		// so the LLM is no longer active. Phase should be idle.
+		expect(chatState.phase).toBe("idle");
 	});
 
 	it("each cacheable type individually survives replay", async () => {

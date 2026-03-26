@@ -4,14 +4,15 @@
 <!-- Dismiss button hides until new remote items arrive.                       -->
 
 <script lang="ts">
-	import { getRemotePermissions, getRemoteQuestionCount, getRemoteQuestionSessions, removeRemoteQuestion } from "../../stores/permissions.svelte.js";
+	import { getAttentionSessions, dispatch } from "../../stores/notification-reducer.svelte.js";
+	import { getDescendantSessionIds, getRemotePermissions } from "../../stores/permissions.svelte.js";
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 
 	const remotePermissions = $derived(getRemotePermissions(sessionState.currentId));
-	const remoteQuestionSessionIds = $derived(getRemoteQuestionSessions(sessionState.currentId));
+	const attentionSessions = $derived(getAttentionSessions(sessionState.currentId, getDescendantSessionIds));
 
-	/** Merge permissions and questions into a unified session → labels map. */
+	/** Merge permissions and reducer attention into a unified session → labels map. */
 	const sessionGroups = $derived.by(() => {
 		const groups = new Map<string, { permissions: number; questions: number }>();
 
@@ -21,9 +22,11 @@
 			groups.set(perm.sessionId, entry);
 		}
 
-		for (const sid of remoteQuestionSessionIds) {
+		for (const [sid, counts] of attentionSessions) {
 			const entry = groups.get(sid) ?? { permissions: 0, questions: 0 };
-			entry.questions = getRemoteQuestionCount(sid);
+			entry.questions = counts.questions;
+			// Merge permission counts from reducer (server-reconciled) with local permissions
+			entry.permissions = Math.max(entry.permissions, counts.permissions);
 			groups.set(sid, entry);
 		}
 
@@ -31,18 +34,17 @@
 	});
 
 	const sessionCount = $derived(sessionGroups.size);
-	const totalItems = $derived(remotePermissions.length + remoteQuestionSessionIds.length);
-	const hasRemote = $derived(totalItems > 0);
+	const hasRemote = $derived(sessionGroups.size > 0);
 
 	/** Track dismissed state — resets when new items arrive. */
 	let dismissed = $state(false);
 	let lastSeenCount = $state(0);
 
 	$effect(() => {
-		if (totalItems > lastSeenCount) {
+		if (sessionCount > lastSeenCount) {
 			dismissed = false;
 		}
-		lastSeenCount = totalItems;
+		lastSeenCount = sessionCount;
 	});
 
 	const visible = $derived(hasRemote && !dismissed);
@@ -60,8 +62,8 @@
 	}
 
 	function goToSession(sessionId: string) {
-		// Remove from remote set — this session is now "local" once we switch.
-		removeRemoteQuestion(sessionId);
+		// Mark session as viewed in the reducer, then switch to it.
+		dispatch({ type: "session_viewed", sessionId });
 		switchToSession(sessionId, wsSend);
 	}
 

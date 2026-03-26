@@ -4,7 +4,7 @@
 <!-- Preserves #messages ID for E2E. -->
 
 <script lang="ts">
-	import { tick, untrack } from "svelte";
+	import { untrack } from "svelte";
 	import { chatState, historyState, isProcessing } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
@@ -12,11 +12,10 @@
 	import ForkDivider from "./ForkDivider.svelte";
 	import {
 		uiState,
-		setUserScrolledUp,
 		selectRewindMessage,
-		SCROLL_THRESHOLD,
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
+	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
 	import type {
 		AssistantMessage as AssistantMsg,
 		ThinkingMessage,
@@ -43,64 +42,55 @@
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let sentinelEl: HTMLElement | undefined = $state();
 
-	// ─── Auto-scroll ───────────────────────────────────────────────────────────
+	// ─── Scroll controller ────────────────────────────────────────────────────
 
-	function scrollToBottom() {
-		if (!messagesEl || uiState.isUserScrolledUp) return;
-		messagesEl.scrollTop = messagesEl.scrollHeight;
-	}
+	const scrollCtrl = createScrollController(
+		() => chatState.loadLifecycle,
+	);
 
-	function forceScrollToBottom() {
-		if (!messagesEl) return;
-		setUserScrolledUp(false);
-		messagesEl.scrollTop = messagesEl.scrollHeight;
-	}
-
-	// ─── Scroll to bottom on session change ───────────────────────────────
-	// When switching sessions, scroll to bottom and keep scrolling for up
-	// to ~1s while deferred markdown rendering changes element heights.
-	// A wheel/touchmove from the user aborts settling immediately so
-	// intentional scroll-up is never overridden.
-	//
-	// NOTE: tracks messages.length so that the msgCount===0 branch can
-	// reset lastScrolledSessionId when clearMessages() is called. This
-	// allows the settle loop to re-fire after server replay even when
-	// the session ID hasn't changed (reconnect, same-session replay).
-	let lastScrolledSessionId = "";
-
+	// Attach/detach the controller to the scroll container
 	$effect(() => {
-		const sid = sessionState.currentId ?? "";
-		const msgCount = chatState.messages.length;
-
-		if (msgCount === 0) {
-			lastScrolledSessionId = "";
-			return;
+		if (messagesEl) {
+			scrollCtrl.attach(messagesEl);
+			return () => scrollCtrl.detach();
 		}
+	});
 
-		if (sid && sid !== lastScrolledSessionId) {
-			lastScrolledSessionId = sid;
-			setUserScrolledUp(false);
+	// Reset scroll state on session switch
+	$effect(() => {
+		const _sid = sessionState.currentId; // track session changes
+		scrollCtrl.resetForSession();
+	});
 
-			let frames = 0;
-			let aborted = false;
-			const abort = () => { aborted = true; };
-			messagesEl?.addEventListener("wheel", abort, { once: true, passive: true });
-			messagesEl?.addEventListener("touchmove", abort, { once: true, passive: true });
+	// Scroll to bottom when loadLifecycle transitions to "ready" after settling.
+	// This handles the case where deferred markdown rendering adds height after
+	// the settle loop completes. The settle loop scrolls during "committed",
+	// but the final scroll-to-bottom on "ready" ensures we're at the very bottom.
+	$effect(() => {
+		if (chatState.loadLifecycle === "ready") {
+			scrollCtrl.onNewContent();
+		}
+	});
 
-			function settle() {
-				if (!messagesEl || frames++ > 60 || aborted) {
-					messagesEl?.removeEventListener("wheel", abort);
-					messagesEl?.removeEventListener("touchmove", abort);
-					return;
-				}
-				messagesEl.scrollTop = messagesEl.scrollHeight;
-				requestAnimationFrame(settle);
-			}
-
-			tick().then(() => {
-				if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-				requestAnimationFrame(settle);
-			});
+	// Auto-scroll when content changes (messages, permissions, questions).
+	// Guards:
+	// - Skip during prepend (scroll preservation handles that case).
+	// - Only auto-scroll when session is actively producing content
+	//   (processing or streaming) OR when the scroll controller is settling
+	//   (post-replay, deferred markdown rendering). On inactive sessions,
+	//   background events (cross-tab user_message, permission state) must
+	//   NOT snap to bottom.
+	// NOTE: isProcessing() is checked via untrack() so it acts as a guard
+	// (checked but not tracked). The effect only re-runs when actual content
+	// changes — not on every processing/streaming toggle.
+	$effect(() => {
+		const _len = chatState.messages.length;
+		const _permLen = permissionsState.pendingPermissions.length;
+		const _qLen = permissionsState.pendingQuestions.length;
+		const isActive = untrack(() => isProcessing());
+		const isSettling = untrack(() => scrollCtrl.state === "settling");
+		if (!awaitingPrepend && (isActive || isSettling)) {
+			scrollCtrl.onNewContent();
 		}
 	});
 
@@ -154,60 +144,13 @@
 		prevMessageCount = currentCount;
 	});
 
-	// Restore scroll position AFTER DOM update
+	// Restore scroll position AFTER DOM update (delegate to controller)
 	$effect(() => {
 		if (awaitingPrepend && messagesEl) {
-			tick().then(() => {
-				if (messagesEl && awaitingPrepend) {
-					const newScrollHeight = messagesEl.scrollHeight;
-					messagesEl.scrollTop =
-						prevScrollTop + (newScrollHeight - prevScrollHeight);
-					awaitingPrepend = false;
-				}
-			});
+			scrollCtrl.onPrepend(prevScrollHeight, prevScrollTop);
+			awaitingPrepend = false;
 		}
 	});
-
-	// Auto-scroll when messages change (only if not scrolled up)
-	// Skip scroll-to-bottom when a prepend is in progress.
-	// IMPORTANT: Only auto-scroll when the session is actively producing content
-	// (processing or streaming). On inactive sessions the message list is static —
-	// spurious $effect triggers (e.g. permission state changes, message cache
-	// reassignments, user_message from another tab) must NOT snap the user back
-	// to the bottom while they are browsing history. The initial scroll-to-bottom
-	// after session switch is handled by the dedicated session-change $effect above.
-	//
-	// NOTE: processing and streaming are checked via untrack() so they act as
-	// guards (checked but not tracked). The effect only re-runs when actual
-	// content changes (message count, permission count) — not on every
-	// processing/streaming toggle, which eliminates 2-3 spurious runs per delta.
-	$effect(() => {
-		// Tracked dependencies — only these trigger re-runs:
-		const _len = chatState.messages.length;
-		const _permLen = permissionsState.pendingPermissions.length;
-		const _qLen = permissionsState.pendingQuestions.length;
-		// Untracked guards — checked but don't trigger re-runs:
-		const isActive = untrack(() => isProcessing());
-		if (!awaitingPrepend && isActive) {
-			tick().then(() => {
-				scrollToBottom();
-				requestAnimationFrame(() => {
-					if (!uiState.isUserScrolledUp) {
-						scrollToBottom();
-					}
-				});
-			});
-		}
-	});
-
-	// ─── Scroll detection ──────────────────────────────────────────────────────
-
-	function handleScroll() {
-		if (!messagesEl) return;
-		const distFromBottom =
-			messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
-		setUserScrolledUp(distFromBottom > SCROLL_THRESHOLD);
-	}
 
 	// ─── Rewind mode click delegation ──────────────────────────────────────────
 
@@ -264,7 +207,6 @@
 	class="flex-1 overflow-y-auto pt-5 pb-3 relative"
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}
-	onscroll={handleScroll}
 >
 	<!-- History sentinel (triggers lazy-loading of older messages) -->
 	<div id="history-sentinel" class="h-1" bind:this={sentinelEl}></div>
@@ -369,9 +311,9 @@
 	<button
 		id="scroll-btn"
 		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary cursor-pointer z-5 font-sans hover:bg-bg-surface"
-		class:hidden={!uiState.isUserScrolledUp}
+		class:hidden={!scrollCtrl.isDetached}
 		title="Scroll to bottom"
-		onclick={forceScrollToBottom}
+		onclick={() => scrollCtrl.requestFollow()}
 	>
 		{scrollButtonText}
 	</button>

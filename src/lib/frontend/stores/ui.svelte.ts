@@ -27,8 +27,6 @@ export const SIDEBAR_MAX_WIDTH = 480;
 export const FILE_VIEWER_DEFAULT_WIDTH = 50; // percentage of layout
 export const FILE_VIEWER_MIN_WIDTH = 20; // percentage
 export const FILE_VIEWER_MAX_WIDTH = 70; // percentage
-export const SCROLL_THRESHOLD = 100;
-
 // ─── State ──────────────────────────────────────────────────────────────────
 
 export const uiState = $state({
@@ -40,9 +38,6 @@ export const uiState = $state({
 
 	// Subagent sessions filter
 	hideSubagentSessions: safeGetItem(HIDE_SUBAGENT_SESSIONS_KEY) !== "false",
-
-	// Scroll
-	isUserScrolledUp: false,
 
 	// Toasts
 	toasts: [] as Toast[],
@@ -326,12 +321,6 @@ export function setClientCount(count: number): void {
 	uiState.clientCount = count;
 }
 
-// ─── Scroll ─────────────────────────────────────────────────────────────────
-
-export function setUserScrolledUp(scrolled: boolean): void {
-	uiState.isUserScrolledUp = scrolled;
-}
-
 /** Reset transient per-session UI state (for project switch). */
 export function resetProjectUI(): void {
 	uiState.rewindActive = false;
@@ -344,7 +333,6 @@ export function resetProjectUI(): void {
 	uiState.sidebarPanel = "sessions";
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
-	uiState.isUserScrolledUp = false;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
 	// Close mobile sidebar overlay so the app isn't blocked after project switch.

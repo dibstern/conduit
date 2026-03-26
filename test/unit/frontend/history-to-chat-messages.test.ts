@@ -5,9 +5,7 @@
 // This powers ticket 11.2: History Tool & Thinking Block Rendering.
 
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import {
-	applyHistoryQueuedFlag,
 	type HistoryMessage,
 	historyToChatMessages,
 } from "../../../src/lib/frontend/utils/history-logic.js";
@@ -575,77 +573,7 @@ describe("historyToChatMessages: edge cases", () => {
 	});
 });
 
-// ─── applyHistoryQueuedFlag ─────────────────────────────────────────────────
-// Marks the last unresponded user message as queued when the session is
-// processing and queued flags haven't been cleared yet.
-
-describe("applyHistoryQueuedFlag", () => {
-	function makeUser(text: string): ChatMessage {
-		return { type: "user", uuid: `u-${text}`, text };
-	}
-
-	function makeAssistant(text: string): ChatMessage {
-		return {
-			type: "assistant",
-			uuid: `a-${text}`,
-			rawText: text,
-			html: text,
-			finalized: true,
-		};
-	}
-
-	it("marks last user message as queued when processing and not cleared", () => {
-		const msgs = [makeUser("hello"), makeAssistant("hi"), makeUser("queued")];
-		const result = applyHistoryQueuedFlag(msgs, true, false);
-		expect(result[2]).toMatchObject({
-			type: "user",
-			text: "queued",
-			queued: true,
-		});
-	});
-
-	it("does not mutate original array", () => {
-		const msgs = [makeUser("hello"), makeAssistant("hi"), makeUser("queued")];
-		const result = applyHistoryQueuedFlag(msgs, true, false);
-		expect(result).not.toBe(msgs);
-		expect(msgs[2]).not.toHaveProperty("queued");
-	});
-
-	it("returns same array when not processing", () => {
-		const msgs = [makeUser("hello"), makeAssistant("hi"), makeUser("queued")];
-		const result = applyHistoryQueuedFlag(msgs, false, false);
-		expect(result).toBe(msgs);
-	});
-
-	it("returns same array when queued flags have been cleared", () => {
-		const msgs = [makeUser("hello"), makeAssistant("hi"), makeUser("queued")];
-		const result = applyHistoryQueuedFlag(msgs, true, true);
-		expect(result).toBe(msgs);
-	});
-
-	it("does not mark when last user message has an assistant response", () => {
-		const msgs = [makeUser("hello"), makeAssistant("response")];
-		const result = applyHistoryQueuedFlag(msgs, true, false);
-		expect(result).toBe(msgs);
-	});
-
-	it("does not mark when messages are empty", () => {
-		const result = applyHistoryQueuedFlag([], true, false);
-		expect(result).toEqual([]);
-	});
-
-	it("handles single user message with no response", () => {
-		const msgs = [makeUser("only message")];
-		const result = applyHistoryQueuedFlag(msgs, true, false);
-		expect(result[0]).toMatchObject({ type: "user", queued: true });
-	});
-
-	it("only marks the LAST unresponded user message", () => {
-		// Two user messages in a row (unusual but possible)
-		const msgs = [makeUser("first"), makeUser("second")];
-		const result = applyHistoryQueuedFlag(msgs, true, false);
-		// Only the last user message should be queued
-		expect(result[0]).not.toHaveProperty("queued");
-		expect(result[1]).toMatchObject({ type: "user", queued: true });
-	});
-});
+// ─── applyHistoryQueuedFlag (REMOVED) ───────────────────────────────────────
+// Tests removed along with the function — it wrote the old mutable `queued`
+// boolean which was replaced by the immutable `sentDuringEpoch` pattern.
+// See turn-epoch-queued-pipeline.test.ts for the current queued visual tests.

@@ -1,10 +1,13 @@
-// ─── Turn Epoch & Queued-Flag Pipeline Tests ────────────────────────────────
+// ─── Turn Epoch & Queued Pipeline Tests ──────────────────────────────────────
 // Integration tests for the multi-step sequences that caused scroll and
 // queued-message bugs.  These test the PIPELINE (multiple functions in
 // sequence), not individual functions in isolation.
 //
+// The queued visual is DERIVED: sentDuringEpoch != null && turnEpoch <= sentDuringEpoch.
+// No mutable flags or clearing needed — turnEpoch advancing is the only signal.
+//
 // Bugs these tests prevent:
-// 1. Queued shimmer stripped by continuation deltas from the current turn
+// 1. sentDuringEpoch set incorrectly (wrong epoch or missing)
 // 2. Assistant message split when queued user message finalizes the stream
 // 3. turnEpoch correctly tracks turn boundaries across live and replay paths
 
@@ -49,6 +52,8 @@ import {
 	handleDelta,
 	handleDone,
 	isStreaming,
+	restoreCachedMessages,
+	stashSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -87,6 +92,13 @@ function assistantMessages(): AssistantMessage[] {
 
 function msgTypes(): string[] {
 	return chatState.messages.map((m) => m.type);
+}
+
+/** Mirrors the derived visual logic in UserMessage.svelte. */
+function isVisuallyQueued(msg: UserMessage): boolean {
+	return (
+		msg.sentDuringEpoch != null && chatState.turnEpoch <= msg.sentDuringEpoch
+	);
 }
 
 // ─── turnEpoch basics ───────────────────────────────────────────────────────
@@ -135,7 +147,7 @@ describe("turnEpoch tracking", () => {
 			{ type: "done", code: 0 },
 		];
 
-		replayEvents(events);
+		replayEvents(events, "test-session");
 		await vi.runAllTimersAsync();
 
 		expect(chatState.turnEpoch).toBe(2);
@@ -145,39 +157,44 @@ describe("turnEpoch tracking", () => {
 // ─── Queued shimmer persists until new turn ─────────────────────────────────
 
 describe("queued shimmer persists through current-turn deltas", () => {
-	it("queued flag survives continuation deltas from current turn", () => {
+	it("sentDuringEpoch survives continuation deltas (visual stays queued)", () => {
 		// Start an assistant turn
 		handleMessage({ type: "delta", text: "Working on " } as RelayMessage);
 		expect(isStreaming()).toBe(true);
 
 		// User queues a message mid-stream
 		addUserMessage("follow-up question", undefined, true);
-		expect(userMessages()[0]?.queued).toBe(true);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
-		// More deltas arrive from the CURRENT turn — must NOT clear queued
+		// More deltas arrive from the CURRENT turn — visual stays queued
+		// because turnEpoch hasn't advanced past sentDuringEpoch
 		handleMessage({ type: "delta", text: "your request..." } as RelayMessage);
-		expect(userMessages()[0]?.queued).toBe(true);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
 		handleMessage({ type: "delta", text: " almost done" } as RelayMessage);
-		expect(userMessages()[0]?.queued).toBe(true);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 	});
 
-	it("queued flag is cleared when the NEW turn starts", () => {
+	it("visual queued clears when done advances turnEpoch", () => {
 		// Turn 1: assistant streaming
 		handleMessage({ type: "delta", text: "response" } as RelayMessage);
 
-		// User queues message
+		// User queues message at epoch 0
 		addUserMessage("next question", undefined, true);
-		expect(userMessages()[0]?.queued).toBe(true);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
-		// Turn 1 completes
+		// Turn 1 completes — done increments turnEpoch to 1
+		// sentDuringEpoch was 0, so turnEpoch(1) > sentDuringEpoch(0) → not queued
 		handleMessage({ type: "done", code: 0 } as RelayMessage);
-		// Still queued — done doesn't clear, content start of new turn does
-		expect(userMessages()[0]?.queued).toBe(true);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
 
-		// Turn 2 starts — THIS should clear the queued flag
-		handleMessage({ type: "delta", text: "new response" } as RelayMessage);
-		expect(userMessages()[0]?.queued).toBe(false);
+		// sentDuringEpoch is still set (write-once, never mutated)
+		expect(userMessages()[0]?.sentDuringEpoch).toBe(0);
 	});
 });
 
@@ -219,8 +236,8 @@ describe("queued user message doesn't split assistant response", () => {
 
 // ─── Replay pipeline: queued flags with turnEpoch ───────────────────────────
 
-describe("replay pipeline: queued flags respect turn boundaries", () => {
-	it("queued flag set during replay is cleared by next-turn content", async () => {
+describe("replay pipeline: sentDuringEpoch respects turn boundaries", () => {
+	it("sentDuringEpoch is set during replay; visual clears after done", async () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
 			{ type: "delta", text: "responding..." },
@@ -228,24 +245,26 @@ describe("replay pipeline: queued flags respect turn boundaries", () => {
 			{ type: "user_message", text: "second" },
 			{ type: "delta", text: " still going" },
 			{ type: "done", code: 0 },
-			// New turn starts — should clear queued on "second"
+			// New turn starts — turnEpoch advanced past sentDuringEpoch
 			{ type: "delta", text: "Answering second..." },
 			{ type: "done", code: 0 },
 		];
 
-		replayEvents(events);
+		replayEvents(events, "test-session");
 		await vi.runAllTimersAsync();
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		// Both should be non-queued after full replay
-		expect(users[0]?.queued).toBeFalsy();
-		expect(users[1]?.queued).toBeFalsy();
-		// Turn epoch should be 2 (two done events)
+		// First was not queued (no prior LLM activity)
+		expect(users[0]?.sentDuringEpoch).toBeUndefined();
+		// Second was queued at epoch 0, but turnEpoch is now 2 → not visually queued
+		expect(users[1]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(false);
 		expect(chatState.turnEpoch).toBe(2);
 	});
 
-	it("queued flag persists when replay ends mid-stream", async () => {
+	it("sentDuringEpoch persists visually when replay ends mid-stream", async () => {
 		// Session still processing — no done event at end
 		const events: RelayMessage[] = [
 			{ type: "user_message", text: "first" },
@@ -255,14 +274,16 @@ describe("replay pipeline: queued flags respect turn boundaries", () => {
 			// No done — session is mid-stream
 		];
 
-		replayEvents(events);
+		replayEvents(events, "test-session");
 		await vi.runAllTimersAsync();
 
 		const users = userMessages();
 		expect(users).toHaveLength(2);
-		// Second message should still be queued (no done → no new turn)
-		expect(users[1]?.queued).toBe(true);
-		expect(chatState.turnEpoch).toBe(0); // no done events
+		// Second message has sentDuringEpoch = 0, turnEpoch = 0 → still visually queued
+		expect(users[1]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(users[1]!)).toBe(true);
+		expect(chatState.turnEpoch).toBe(0);
 	});
 });
 
@@ -283,7 +304,7 @@ describe("clearMessages resets turn tracking cleanly", () => {
 		expect(isStreaming()).toBe(false);
 	});
 
-	it("queued tracking doesn't leak across sessions", () => {
+	it("sentDuringEpoch doesn't leak across sessions", () => {
 		// Session A: queue a message
 		handleMessage({ type: "delta", text: "A response" } as RelayMessage);
 		addUserMessage("queued in A", undefined, true);
@@ -291,11 +312,40 @@ describe("clearMessages resets turn tracking cleanly", () => {
 		// Switch to session B
 		clearMessages();
 
-		// Session B: first delta should be able to clear queued flags normally
-		// (no stale queuedAtEpoch from session A)
+		// Session B: fresh turnEpoch — no stale state from session A
 		handleMessage({ type: "delta", text: "B response" } as RelayMessage);
-		// No queued messages exist, so this is just a normal delta
 		expect(isStreaming()).toBe(true);
 		expect(userMessages()).toHaveLength(0);
+	});
+});
+
+// ─── Session message cache preserves turnEpoch ──────────────────────────────
+
+describe("session cache round-trip preserves turnEpoch", () => {
+	it("restored messages with sentDuringEpoch are not visually queued after cache round-trip", () => {
+		// Turn 1: queue a message at epoch 0
+		handleMessage({ type: "delta", text: "response" } as RelayMessage);
+		addUserMessage("queued msg", undefined, true);
+		expect(userMessages()[0]?.sentDuringEpoch).toBe(0);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
+
+		// Turn 1 completes — shimmer clears
+		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
+		expect(chatState.turnEpoch).toBe(1);
+
+		// Stash and switch away
+		stashSessionMessages("sess-A");
+		clearMessages();
+		expect(chatState.turnEpoch).toBe(0);
+
+		// Restore — turnEpoch must be restored so sentDuringEpoch comparison is correct
+		const hit = restoreCachedMessages("sess-A");
+		expect(hit).toBe(true);
+		expect(chatState.turnEpoch).toBe(1);
+		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
+		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
 	});
 });

@@ -2,7 +2,7 @@
 // Verifies Bug A: the relay sends the correct body format to OpenCode's
 // prompt_async endpoint. If this test passes, messages actually work.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -17,6 +17,10 @@ describe("Integration: Send Message", () => {
 
 	afterAll(async () => {
 		if (harness) await harness.stop();
+	});
+
+	beforeEach(() => {
+		harness.mock.resetQueues();
 	});
 
 	it("sends a message and receives processing status", async () => {

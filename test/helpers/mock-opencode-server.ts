@@ -88,14 +88,6 @@ export class MockOpenCodeServer {
 	private sseClients = new Set<ServerResponse>();
 	private keepaliveIntervals = new Set<ReturnType<typeof setInterval>>();
 
-	/**
-	 * When set, GET /session/status returns this response instead of the
-	 * queued entry. Set when an SSE batch containing session.idle fires,
-	 * ensuring subsequent status polls see idle state regardless of what
-	 * the queue contains. Cleared on reset() for multi-test reuse.
-	 */
-	private statusOverride: { status: number; responseBody: unknown } | undefined;
-
 	/** Counter for generating unique PTY IDs when no recording exists. */
 	private ptyCounter = 0;
 
@@ -125,14 +117,17 @@ export class MockOpenCodeServer {
 	/** Number of prompt_async calls processed so far. */
 	private promptsFired = 0;
 
+	/**
+	 * Session IDs from the recording's prompt_async URLs, in order.
+	 * Used to rewrite SSE event session IDs to match the actual session
+	 * used by the test, enabling correct per-session routing in the relay.
+	 */
+	private recordedPromptSessionIds: string[] = [];
+
 	constructor(recording: OpenCodeRecording) {
 		this.recording = recording;
-		this.targetSessionId = this.findTargetSessionId();
 		this.buildQueues();
 	}
-
-	/** The session ID used in prompt_async calls in the recording, if any. */
-	readonly targetSessionId: string | undefined;
 
 	/** Append a diagnostic entry. */
 	private diag(event: string, detail?: string): void {
@@ -197,7 +192,6 @@ export class MockOpenCodeServer {
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
 		this.sseSegments = [[]];
-		this.statusOverride = undefined;
 		this.promptsFired = 0;
 		this.ptyCounter = 0;
 		this.dynamicPtyIds.clear();
@@ -205,6 +199,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sessionCounter = 0;
+		this.recordedPromptSessionIds = [];
 		this.buildQueues();
 	}
 
@@ -292,23 +287,19 @@ export class MockOpenCodeServer {
 	/**
 	 * Reset response queues without disconnecting SSE clients.
 	 * For multi-test reuse within a shared relay.
-	 *
-	 * Preserves `statusOverride` so that background status pollers
-	 * continue to see the correct idle/busy state between tests.
-	 * The override is cleared naturally when the next prompt_async fires.
 	 */
 	resetQueues(): void {
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
 		this.promptsFired = 0;
-		// Preserve statusOverride — cleared when next prompt_async fires
 		this.ptyCounter = 0;
 		this.dynamicPtyIds.clear();
 		this.injectedSessions.clear();
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sessionCounter = 0;
+		this.recordedPromptSessionIds = [];
 		this.buildQueues();
 	}
 
@@ -318,6 +309,7 @@ export class MockOpenCodeServer {
 		const { interactions } = this.recording;
 
 		this.sseSegments = [[]];
+		this.recordedPromptSessionIds = [];
 		let currentSegment = 0;
 
 		for (const ix of interactions) {
@@ -325,6 +317,11 @@ export class MockOpenCodeServer {
 				if (ix.method === "POST" && ix.path.includes("/prompt_async")) {
 					currentSegment++;
 					this.sseSegments[currentSegment] = [];
+					// Extract the recording's session ID from the prompt URL
+					const match = /\/session\/([^/]+)\/prompt_async/.exec(ix.path);
+					if (match?.[1]) {
+						this.recordedPromptSessionIds.push(match[1]);
+					}
 				}
 
 				const queued: QueuedRestResponse = {
@@ -349,40 +346,6 @@ export class MockOpenCodeServer {
 				this.pushPty(ix);
 			}
 		}
-
-		// Inject fallback responses for essential init endpoints that may be
-		// missing from recordings captured after the initial health check.
-		this.ensureFallback("GET /path", 200, {
-			home: "/tmp",
-			state: "/tmp/.local/state/opencode",
-			config: "/tmp/config/opencode",
-			worktree: process.cwd(),
-			directory: process.cwd(),
-		});
-
-		// Commands and file-listing endpoints are used by discovery tests but
-		// are rarely present in recordings.  Provide sensible defaults so the
-		// relay can serve command_list / file_list without a 404.
-		this.ensureFallback("GET /command", 200, [
-			{ name: "help", description: "Show available commands" },
-			{ name: "compact", description: "Compact conversation history" },
-		]);
-		this.ensureFallback("GET /file", 200, [
-			{ name: "package.json", type: "file" },
-			{ name: "src", type: "directory" },
-			{ name: "test", type: "directory" },
-		]);
-
-		// Ensure the relay selects the recording's target session at init
-		this.promoteTargetSession();
-
-		// Override normalized message fallback with empty arrays.
-		// During init the relay fetches messages for ALL sessions in the list.
-		// Non-target sessions hit the normalized fallback. Without this override,
-		// they'd get the target session's messages (complete with timestamps),
-		// which can make the sort pick the wrong session as default.
-		const msgNormKey = "GET /session/:param/message";
-		this.normalizedQueues.set(msgNormKey, [{ status: 200, responseBody: [] }]);
 	}
 
 	/** Push a response onto a queue map. */
@@ -399,16 +362,6 @@ export class MockOpenCodeServer {
 		}
 	}
 
-	/** Add a fallback response for an endpoint if it's not already in either queue. */
-	private ensureFallback(
-		key: string,
-		status: number,
-		responseBody: unknown,
-	): void {
-		if (this.exactQueues.has(key) || this.normalizedQueues.has(key)) return;
-		this.exactQueues.set(key, [{ status, responseBody }]);
-	}
-
 	/** Return a queue from a map that has at least one response, or undefined. */
 	private getActiveQueue(
 		map: Map<string, QueuedRestResponse[]>,
@@ -416,60 +369,6 @@ export class MockOpenCodeServer {
 	): QueuedRestResponse[] | undefined {
 		const queue = map.get(key);
 		return queue && queue.length > 0 ? queue : undefined;
-	}
-
-	/**
-	 * Find the session ID used in prompt_async calls in the recording.
-	 * This is the "target" session that the relay should view when replaying.
-	 */
-	private findTargetSessionId(): string | undefined {
-		for (const ix of this.recording.interactions) {
-			if (ix.kind === "rest" && ix.method === "POST") {
-				const match = /\/session\/([^/]+)\/prompt_async/.exec(ix.path);
-				if (match?.[1]) return match[1];
-			}
-		}
-		return undefined;
-	}
-
-	/**
-	 * Promote the target session to the top of GET /session list responses.
-	 * This ensures the relay selects the recording's session during init,
-	 * matching the session ID in SSE events and prompt_async calls.
-	 */
-	private promoteTargetSession(): void {
-		const targetId = this.targetSessionId;
-		if (!targetId) return;
-
-		// Find the POST /session response that created the target session
-		let targetSession: Record<string, unknown> | undefined;
-		for (const ix of this.recording.interactions) {
-			if (
-				ix.kind === "rest" &&
-				ix.method === "POST" &&
-				ix.path === "/session"
-			) {
-				const body = ix.responseBody as Record<string, unknown> | undefined;
-				if (body && typeof body === "object" && body["id"] === targetId) {
-					targetSession = body;
-					break;
-				}
-			}
-		}
-		if (!targetSession) return;
-
-		// Patch all GET /session responses to include the target session at the top
-		for (const [key, queue] of this.exactQueues) {
-			if (key !== "GET /session") continue;
-			for (const entry of queue) {
-				if (!Array.isArray(entry.responseBody)) continue;
-				const list = entry.responseBody as Array<Record<string, unknown>>;
-				// Only add if not already present
-				if (!list.some((s) => s["id"] === targetId)) {
-					list.unshift(targetSession);
-				}
-			}
-		}
 	}
 
 	private pushPty(ix: PtyInteraction): void {
@@ -508,17 +407,6 @@ export class MockOpenCodeServer {
 		const exact = exactKey(method, path);
 		const normalized = normalizedKey(method, path);
 
-		// If session.idle has fired, return the idle override for status polls
-		// instead of consuming from the queue. This ensures the relay's status
-		// poller sees idle state immediately, avoiding a race where the queue
-		// still has stale "busy" entries or the message poller re-injects busy.
-		if (this.statusOverride && exact === "GET /session/status") {
-			const override = this.statusOverride;
-			res.writeHead(override.status, { "Content-Type": "application/json" });
-			res.end(JSON.stringify(override.responseBody));
-			return;
-		}
-
 		// ── Stateful PTY endpoints ──────────────────────────────────────────
 		const basePath = path.split("?")[0] ?? path;
 
@@ -550,6 +438,52 @@ export class MockOpenCodeServer {
 			res.writeHead(204);
 			res.end();
 			return;
+		}
+
+		// ── Synthetic fallbacks for endpoints not in every recording ────────
+		// These endpoints are called by relay handlers but may not appear in
+		// the recorded interactions. Return empty arrays so the relay doesn't
+		// crash with 404 errors during integration tests.
+		if (method === "GET" && basePath === "/command") {
+			const queue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			if (!queue) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify([]));
+				return;
+			}
+		}
+
+		if (method === "GET" && basePath === "/file") {
+			const queue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			if (!queue) {
+				// Return a minimal project directory listing so integration
+				// tests that check for common project files can pass.
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(
+					JSON.stringify([
+						{ name: "package.json", type: "file" },
+						{ name: "tsconfig.json", type: "file" },
+						{ name: "src", type: "directory" },
+						{ name: "test", type: "directory" },
+					]),
+				);
+				return;
+			}
+		}
+
+		if (method === "GET" && basePath === "/file/content") {
+			const queue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			if (!queue) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ content: "", binary: false }));
+				return;
+			}
 		}
 
 		// ── Stateful session endpoints ──────────────────────────────────────
@@ -758,13 +692,29 @@ export class MockOpenCodeServer {
 		}
 
 		// Detect prompt_async — emit the corresponding SSE segment.
-		// Clear the statusOverride so the status queue is used again (the next
-		// turn's busy status needs to come from the queue, not the stale idle
-		// override from the previous turn's session.idle).
+		// Rewrite session IDs in SSE events so that the relay routes them
+		// to the session the test is actually using (not the recording's).
 		if (method === "POST" && path.includes("/prompt_async")) {
 			this.promptsFired++;
-			this.statusOverride = undefined;
 			const sseClientCount = this.sseClients.size;
+
+			// Extract the actual session ID the test is prompting
+			const promptMatch = /\/session\/([^/]+)\/prompt_async/.exec(path);
+			const actualSessionId = promptMatch?.[1];
+
+			// Determine which recorded session ID to replace:
+			// promptsFired=1 → recordedPromptSessionIds[0], etc.
+			const recordedSessionId =
+				this.recordedPromptSessionIds[this.promptsFired - 1];
+
+			// Build the session ID mapping for rewriting
+			const sessionIdMap =
+				actualSessionId &&
+				recordedSessionId &&
+				actualSessionId !== recordedSessionId
+					? { from: recordedSessionId, to: actualSessionId }
+					: undefined;
+
 			if (this.promptsFired === 1) {
 				const combined = [
 					...(this.sseSegments[0] ?? []),
@@ -772,16 +722,16 @@ export class MockOpenCodeServer {
 				];
 				this.diag(
 					"prompt_async",
-					`#${this.promptsFired} seg0=${this.sseSegments[0]?.length ?? 0} seg1=${this.sseSegments[1]?.length ?? 0} combined=${combined.length} sseClients=${sseClientCount}`,
+					`#${this.promptsFired} seg0=${this.sseSegments[0]?.length ?? 0} seg1=${this.sseSegments[1]?.length ?? 0} combined=${combined.length} sseClients=${sseClientCount}${sessionIdMap ? ` rewrite=${sessionIdMap.from.slice(0, 12)}→${sessionIdMap.to.slice(0, 12)}` : ""}`,
 				);
-				this.emitEvents(combined);
+				this.emitEvents(combined, sessionIdMap);
 			} else {
 				const segment = this.sseSegments[this.promptsFired] ?? [];
 				this.diag(
 					"prompt_async",
-					`#${this.promptsFired} segment=${segment.length} sseClients=${sseClientCount}`,
+					`#${this.promptsFired} segment=${segment.length} sseClients=${sseClientCount}${sessionIdMap ? ` rewrite=${sessionIdMap.from.slice(0, 12)}→${sessionIdMap.to.slice(0, 12)}` : ""}`,
 				);
-				this.emitEvents(segment);
+				this.emitEvents(segment, sessionIdMap);
 			}
 		}
 
@@ -803,8 +753,9 @@ export class MockOpenCodeServer {
 			Connection: "keep-alive",
 		});
 
-		// Immediately emit server.connected
-		res.write('data: {"type":"server.connected","properties":{}}\n\n');
+		// Flush headers so the client's body reader starts streaming.
+		// SSE comments (lines starting with ':') are ignored by clients.
+		res.write(": ok\n\n");
 
 		// Keepalive every 15 seconds
 		const interval = setInterval(() => {
@@ -841,7 +792,39 @@ export class MockOpenCodeServer {
 		this.emitEvents(batch);
 	}
 
-	private emitEvents(events: SseEvent[]): void {
+	/**
+	 * Rewrite session IDs in SSE event properties.
+	 * Only replaces occurrences of `map.from` with `map.to` so that
+	 * events for other sessions (e.g. session.created for the NEXT session)
+	 * are left untouched.
+	 */
+	private rewriteSessionIds(
+		properties: Record<string, unknown>,
+		map: { from: string; to: string },
+	): Record<string, unknown> {
+		const props = structuredClone(properties);
+		// Top-level sessionID (most common: message.part.delta, session.status, etc.)
+		if (props["sessionID"] === map.from) {
+			props["sessionID"] = map.to;
+		}
+		// Nested in part (message.part.updated)
+		const part = props["part"] as Record<string, unknown> | undefined;
+		if (part && part["sessionID"] === map.from) {
+			part["sessionID"] = map.to;
+		}
+		// Nested in info (session.updated, message.updated)
+		const info = props["info"] as Record<string, unknown> | undefined;
+		if (info) {
+			if (info["id"] === map.from) info["id"] = map.to;
+			if (info["sessionID"] === map.from) info["sessionID"] = map.to;
+		}
+		return props;
+	}
+
+	private emitEvents(
+		events: SseEvent[],
+		sessionIdMap?: { from: string; to: string },
+	): void {
 		if (events.length === 0) return;
 		this.diag(
 			"emit_start",
@@ -856,16 +839,13 @@ export class MockOpenCodeServer {
 					await new Promise<void>((r) => setTimeout(r, delay));
 				}
 
-				// Set statusOverride when session.idle is actually emitted,
-				// not before — the relay's status poller needs to see busy
-				// from the queue before idle for correct monitoring behavior.
-				if (event.type === "session.idle") {
-					this.statusOverride = { status: 200, responseBody: {} };
-				}
+				const properties = sessionIdMap
+					? this.rewriteSessionIds(event.properties, sessionIdMap)
+					: event.properties;
 
 				const payload = JSON.stringify({
 					type: event.type,
-					properties: event.properties,
+					properties,
 				});
 				const frame = `data: ${payload}\n\n`;
 

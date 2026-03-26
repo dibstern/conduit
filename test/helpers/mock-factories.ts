@@ -118,6 +118,9 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 		getLastMessageAtMap: vi.fn().mockReturnValue(new Map()),
 		getLastKnownSessionCount: vi.fn().mockReturnValue(0),
 		initialize: vi.fn().mockResolvedValue("session-1"),
+		incrementPendingQuestionCount: vi.fn(),
+		decrementPendingQuestionCount: vi.fn(),
+		setPendingQuestionCounts: vi.fn(),
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 

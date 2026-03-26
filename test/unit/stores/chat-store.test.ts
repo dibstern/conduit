@@ -13,7 +13,6 @@ import {
 	addUserMessage,
 	chatState,
 	clearMessages,
-	clearQueuedFlags,
 	handleDelta,
 	handleDone,
 	handleError,
@@ -610,41 +609,41 @@ describe("clearMessages", () => {
 
 // ─── Queued User Messages ──────────────────────────────────────────────────
 
-describe("queued user message flag", () => {
-	it("addUserMessage sets queued flag when passed", () => {
+describe("queued user message (sentDuringEpoch)", () => {
+	it("addUserMessage sets sentDuringEpoch when sent while processing", () => {
 		addUserMessage("hello", undefined, true);
 		expect(chatState.messages).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		const msg = chatState.messages[0]!;
 		expect(msg.type).toBe("user");
-		expect((msg as UserMsg).queued).toBe(true);
+		expect((msg as UserMsg).sentDuringEpoch).toBe(chatState.turnEpoch);
 	});
 
-	it("addUserMessage defaults queued to undefined", () => {
+	it("addUserMessage defaults sentDuringEpoch to undefined", () => {
 		addUserMessage("hello");
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		const msg = chatState.messages[0]!;
-		expect((msg as UserMsg).queued).toBeUndefined();
+		expect((msg as UserMsg).sentDuringEpoch).toBeUndefined();
 	});
 
-	it("clearQueuedFlags clears queued flag on all user messages", () => {
+	it("sentDuringEpoch is write-once — never mutated after creation", () => {
 		addUserMessage("first", undefined, true);
 		addUserMessage("second", undefined, true);
-		addUserMessage("third");
-		clearQueuedFlags();
+		const epoch = chatState.turnEpoch;
+		// Both messages captured the same epoch (no done events between them)
 		for (const m of chatState.messages) {
 			if (m.type === "user") {
-				expect((m as UserMsg).queued).toBeFalsy();
+				expect((m as UserMsg).sentDuringEpoch).toBe(epoch);
 			}
 		}
-	});
-
-	it("clearQueuedFlags is a no-op when no queued messages", () => {
-		addUserMessage("normal");
-		const before = chatState.messages;
-		clearQueuedFlags();
-		// Should not create new array reference if nothing changed
-		expect(chatState.messages).toBe(before);
+		// After a done event, turnEpoch advances but existing messages are unchanged
+		handleDelta({ type: "delta", text: "response" });
+		handleDone({ type: "done", code: 0 });
+		for (const m of chatState.messages) {
+			if (m.type === "user") {
+				expect((m as UserMsg).sentDuringEpoch).toBe(epoch);
+			}
+		}
 	});
 
 	it("clearMessages resets all state", () => {

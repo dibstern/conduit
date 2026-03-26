@@ -768,7 +768,10 @@ describe("Group 5: Notifications", () => {
 		await wait(TEST_STATUS_POLL_MS * 3);
 
 		// Client viewing sess-1 should NOT receive notification_event for subagent done
-		const notifications = client.getReceivedOfType("notification_event");
+		// (filter out session_viewed which is the harmless indicator-clearing broadcast)
+		const notifications = client
+			.getReceivedOfType("notification_event")
+			.filter((m) => m["eventType"] !== "session_viewed");
 		expect(notifications.length).toBe(0);
 
 		await client.close();
@@ -821,8 +824,11 @@ describe("Group 5: Notifications", () => {
 		expect(done["type"]).toBe("done");
 
 		// Should NOT receive notification_event (done was delivered to viewer directly)
+		// (filter out session_viewed which is the harmless indicator-clearing broadcast)
 		await wait(TEST_STATUS_POLL_MS * 3);
-		const notifications = client.getReceivedOfType("notification_event");
+		const notifications = client
+			.getReceivedOfType("notification_event")
+			.filter((m) => m["eventType"] !== "session_viewed");
 		expect(notifications.length).toBe(0);
 
 		await client.close();

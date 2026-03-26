@@ -41,7 +41,7 @@ import {
 	beginReplayBatch,
 	chatState,
 	clearMessages,
-	commitReplayBatch,
+	commitReplayFinal,
 	discardReplayBatch,
 	getMessages,
 	handleDelta,
@@ -85,7 +85,7 @@ describe("Replay batch infrastructure", () => {
 		discardReplayBatch();
 	});
 
-	it("commitReplayBatch flushes accumulated messages to chatState", () => {
+	it("commitReplayFinal flushes accumulated messages to chatState", () => {
 		beginReplayBatch();
 
 		handleDelta({ type: "delta", text: "Batched response" });
@@ -95,17 +95,19 @@ describe("Replay batch infrastructure", () => {
 		// Before commit: chatState.messages is empty
 		expect(chatState.messages).toHaveLength(0);
 
-		// Commit
-		commitReplayBatch();
+		// Commit via the production path
+		commitReplayFinal("test-session");
 
 		// After commit: chatState.messages has the accumulated messages
 		expect(chatState.messages.length).toBeGreaterThan(0);
 		const assistant = chatState.messages.find((m) => m.type === "assistant");
 		expect(assistant).toBeDefined();
 		expect((assistant as { rawText: string }).rawText).toBe("Batched response");
+		// loadLifecycle should be "committed"
+		expect(chatState.loadLifecycle).toBe("committed");
 	});
 
-	it("multiple events accumulate in batch with single commitReplayBatch", () => {
+	it("multiple events accumulate in batch with single commitReplayFinal", () => {
 		beginReplayBatch();
 
 		// Simulate a multi-turn conversation replay
@@ -122,7 +124,7 @@ describe("Replay batch infrastructure", () => {
 		expect(batchMsgs.length).toBeGreaterThan(0);
 
 		// Single commit flushes everything
-		commitReplayBatch();
+		commitReplayFinal("test-session");
 		expect(chatState.messages.length).toBe(batchMsgs.length);
 	});
 
@@ -175,7 +177,7 @@ describe("Replay batch infrastructure", () => {
 		expect((msgs[0] as { text: string }).text).toBe("Something failed");
 
 		// Commit and verify
-		commitReplayBatch();
+		commitReplayFinal("test-session");
 		expect(chatState.messages).toHaveLength(1);
 		expect(chatState.messages[0]?.type).toBe("system");
 	});

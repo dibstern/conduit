@@ -65,7 +65,7 @@ afterEach(() => {
 
 describe("Async chunked replayEvents", () => {
 	it("replayEvents returns a promise", () => {
-		const result = replayEvents([]);
+		const result = replayEvents([], "test-session");
 		expect(result).toBeInstanceOf(Promise);
 		// Drain to avoid unhandled rejection
 		return drainReplay(result);
@@ -81,7 +81,7 @@ describe("Async chunked replayEvents", () => {
 			events.push({ type: "user_message", text: `msg-${i}` } as RelayMessage);
 		}
 
-		const promise = replayEvents(events);
+		const promise = replayEvents(events, "test-session");
 
 		// Replaying is set synchronously before any awaits
 		expect(isReplaying()).toBe(true);
@@ -92,14 +92,17 @@ describe("Async chunked replayEvents", () => {
 	});
 
 	it("all events are processed after replay completes", async () => {
-		const promise = replayEvents([
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "response one" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "second" },
-			{ type: "delta", text: "response two" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const promise = replayEvents(
+			[
+				{ type: "user_message", text: "first" },
+				{ type: "delta", text: "response one" },
+				{ type: "done", code: 0 },
+				{ type: "user_message", text: "second" },
+				{ type: "delta", text: "response two" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		await drainReplay(promise);
 
@@ -116,20 +119,26 @@ describe("Async chunked replayEvents", () => {
 
 	it("rapid replay aborts the first replay (clearMessages between replays)", async () => {
 		// Start first replay
-		const firstPromise = replayEvents([
-			{ type: "user_message", text: "from session A" },
-			{ type: "delta", text: "response A" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const firstPromise = replayEvents(
+			[
+				{ type: "user_message", text: "from session A" },
+				{ type: "delta", text: "response A" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		// Simulate session switch: clearMessages aborts first, then start second
 		clearMessages();
 
-		const secondPromise = replayEvents([
-			{ type: "user_message", text: "from session B" },
-			{ type: "delta", text: "response B" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const secondPromise = replayEvents(
+			[
+				{ type: "user_message", text: "from session B" },
+				{ type: "delta", text: "response B" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		await drainReplay(firstPromise);
 		await drainReplay(secondPromise);
@@ -142,11 +151,14 @@ describe("Async chunked replayEvents", () => {
 
 	it("replaying is cleared on abort (not left stale)", async () => {
 		// Start replay
-		const promise = replayEvents([
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "world" },
-			{ type: "done", code: 0 },
-		] as RelayMessage[]);
+		const promise = replayEvents(
+			[
+				{ type: "user_message", text: "hello" },
+				{ type: "delta", text: "world" },
+				{ type: "done", code: 0 },
+			] as RelayMessage[],
+			"test-session",
+		);
 
 		// Abort via clearMessages — sets replaying=false immediately
 		clearMessages();

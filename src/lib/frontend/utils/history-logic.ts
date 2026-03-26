@@ -309,43 +309,9 @@ export function historyToChatMessages(
 	return result;
 }
 
-// ─── History Queued Flag ────────────────────────────────────────────────────
-
-/**
- * Mark the last unresponded user message as queued when the session is
- * processing and queued flags haven't been cleared yet.
- *
- * No longer used in production after the unified rendering migration.
- * `applyQueuedFlagInPlace` in `chat.svelte.ts` replaced it.
- * Kept as utility/reference along with its tests.
- *
- * Returns the same array reference when no modification is needed.
- */
-export function applyHistoryQueuedFlag(
-	messages: ChatMessage[],
-	processing: boolean,
-	queuedFlagsCleared: boolean,
-): ChatMessage[] {
-	if (!processing || queuedFlagsCleared || messages.length === 0) {
-		return messages;
-	}
-
-	// Walk backward to find the last user message
-	for (let i = messages.length - 1; i >= 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const m = messages[i]!;
-		if (m.type === "user") {
-			// Check if there's an assistant response after it
-			const hasResponse = messages
-				.slice(i + 1)
-				.some((msg) => msg.type === "assistant");
-			if (hasResponse) return messages;
-			// No response — mark as queued (immutable update)
-			return messages.map((msg, idx) =>
-				idx === i ? { ...msg, queued: true } : msg,
-			);
-		}
-	}
-
-	return messages;
-}
+// ─── History Queued Flag (REMOVED) ──────────────────────────────────────────
+// `applyHistoryQueuedFlag` was removed: it wrote the old mutable `queued`
+// boolean which no longer exists on UserMessage (replaced by the immutable
+// `sentDuringEpoch` + derived-state pattern). The queued visual is now
+// handled entirely by addUserMessage (write-once sentDuringEpoch) and the
+// $derived check in UserMessage.svelte.

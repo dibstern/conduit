@@ -5,7 +5,7 @@
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
 	import { isProcessing as chatIsProcessing } from "../../stores/chat.svelte.js";
-	import { getSessionIndicator } from "../../stores/permissions.svelte.js";
+	import { getSessionIndicator } from "../../stores/notification-reducer.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../shared/Icon.svelte";

@@ -329,8 +329,15 @@ describe("handleViewSession — per-tab session viewing", () => {
 		expect(statusMsg).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect((statusMsg!.msg as Record<string, unknown>)["status"]).toBe("idle");
-		// Should NOT broadcast
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
+		// Only broadcast is the session_viewed notification_event (for cross-client indicator clearing)
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledOnce();
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "notification_event",
+				eventType: "session_viewed",
+				sessionId: "sess_target",
+			}),
+		);
 	});
 
 	it("sends status 'processing' when session is busy", async () => {

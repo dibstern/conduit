@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export class SidebarPage {
 	readonly page: Page;
@@ -61,6 +61,19 @@ export class SidebarPage {
 	async openContextMenu(sessionId: string): Promise<void> {
 		const item = this.sessionList.locator(`[data-session-id="${sessionId}"]`);
 		await item.locator(".session-more-btn").click();
+	}
+
+	/**
+	 * Wait until at least one session item is rendered in the sidebar.
+	 * Uses Playwright's auto-retrying assertion to avoid race conditions
+	 * between WS connection and session data rendering.
+	 */
+	async waitForSessions(timeout = 10_000): Promise<void> {
+		await expect(this.sessionList.locator(".session-item").first()).toBeVisible(
+			{
+				timeout,
+			},
+		);
 	}
 
 	async openFilePanel(): Promise<void> {

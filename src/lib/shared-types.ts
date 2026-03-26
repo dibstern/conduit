@@ -147,6 +147,8 @@ export interface SessionInfo {
 	parentID?: string;
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId?: string;
+	/** Number of pending questions on this session (from server). */
+	pendingQuestionCount?: number;
 }
 
 // ─── Ask User / Questions ───────────────────────────────────────────────────

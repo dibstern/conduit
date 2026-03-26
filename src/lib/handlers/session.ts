@@ -5,7 +5,7 @@ import {
 	type SessionSwitchDeps,
 	switchClientToSession,
 } from "../session/session-switch.js";
-import type { PermissionId } from "../shared-types.js";
+import type { PermissionId, RelayMessage } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { getSessionInputDraft } from "./prompt.js";
 import { resolveSession } from "./resolve-session.js";
@@ -164,6 +164,15 @@ export async function handleViewSession(
 	if (!id) return;
 
 	await switchClientToSession(toSessionSwitchDeps(deps), clientId, id);
+
+	// Broadcast to all clients so they can clear done-unviewed indicators.
+	// The viewing client already dispatches session_viewed locally from the
+	// session_switched handler — the duplicate dispatch is a harmless no-op.
+	deps.wsHandler.broadcast({
+		type: "notification_event",
+		eventType: "session_viewed",
+		sessionId: id,
+	} as RelayMessage);
 
 	// @perf-guard S2 — awaiting this call adds 20-100ms to session switch latency
 	// Fire-and-forget: metadata is not on the critical path for session switching.

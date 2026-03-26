@@ -7,7 +7,9 @@
 			"!test-results",
 			"!.claude",
 			"!.worktrees",
-			"!docs/**/*.html"
+			"!docs/**/*.html",
+			"!.opencode",
+			"!test/e2e/fixtures/recorded/*.json"
 		]
 	},
 	"css": {

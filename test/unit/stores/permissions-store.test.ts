@@ -1,27 +1,28 @@
 // ─── Permissions Store Tests ─────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	addRemoteQuestion,
+	dispatch,
+	getNotifState,
+	resetNotifState,
+} from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
+import {
 	buildAnswerPayload,
 	clearAll,
+	clearAllPermissions,
 	clearSessionLocal,
 	formatQuestionHeader,
 	getDescendantSessionIds,
 	getLocalPermissions,
 	getRemotePermissions,
-	getSessionIndicator,
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
-	handleNotificationEvent,
 	handlePermissionRequest,
 	handlePermissionResolved,
 	isValidSubmission,
-	onSessionSwitch,
 	permissionsState,
 	removePermission,
 	removeQuestion,
-	removeRemoteQuestion,
 	shouldAutoSubmit,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -49,11 +50,10 @@ beforeEach(() => {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	permissionsState.remoteQuestionCounts = new Map();
-	permissionsState.doneNotViewedSessions = new Set();
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;
+	resetNotifState();
 });
 
 // ─── Pure helper: buildAnswerPayload ────────────────────────────────────────
@@ -494,6 +494,63 @@ describe("clearAll", () => {
 		permissionsState.questionErrors.set("t1", "Some error");
 		clearAll();
 		expect(permissionsState.questionErrors.size).toBe(0);
+	});
+
+	it("resets the notification reducer state", () => {
+		dispatch({ type: "permission_appeared", sessionId: "sess-1" });
+		dispatch({ type: "question_appeared", sessionId: "sess-2" });
+		expect(getNotifState("sess-1").kind).toBe("attention");
+		expect(getNotifState("sess-2").kind).toBe("attention");
+
+		clearAll();
+
+		expect(getNotifState("sess-1").kind).toBe("none");
+		expect(getNotifState("sess-2").kind).toBe("none");
+	});
+});
+
+// ─── clearAllPermissions ────────────────────────────────────────────────────
+
+describe("clearAllPermissions", () => {
+	it("clears all pending items", () => {
+		handlePermissionRequest({
+			type: "permission_request",
+			sessionId: "ses-1",
+			requestId: pid("r1"),
+			toolName: "Write",
+			toolInput: {},
+		});
+		handleAskUser({
+			type: "ask_user",
+			toolId: "t1",
+			questions: [
+				{
+					question: "Q",
+					header: "H",
+					options: [{ label: "A" }],
+					multiSelect: false,
+				},
+			],
+		});
+		permissionsState.questionErrors.set("t1", "Some error");
+
+		clearAllPermissions();
+
+		expect(permissionsState.pendingPermissions).toHaveLength(0);
+		expect(permissionsState.pendingQuestions).toHaveLength(0);
+		expect(permissionsState.questionErrors.size).toBe(0);
+	});
+
+	it("resets the notification reducer state", () => {
+		dispatch({ type: "permission_appeared", sessionId: "sess-1" });
+		dispatch({ type: "question_appeared", sessionId: "sess-2" });
+		expect(getNotifState("sess-1").kind).toBe("attention");
+		expect(getNotifState("sess-2").kind).toBe("attention");
+
+		clearAllPermissions();
+
+		expect(getNotifState("sess-1").kind).toBe("none");
+		expect(getNotifState("sess-2").kind).toBe("none");
 	});
 });
 
@@ -995,238 +1052,5 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 		expect(remote).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(remote[0]!.requestId).toBe("r2");
-	});
-});
-
-// ─── handleAskUserResolved — remoteQuestionCounts cleanup ─────────────────
-
-describe("handleAskUserResolved — remoteQuestionCounts cleanup", () => {
-	it("removes sessionId from remoteQuestionCounts when resolving", () => {
-		permissionsState.remoteQuestionCounts = new Map([
-			["s1", 1],
-			["s2", 1],
-		]);
-		permissionsState.pendingQuestions = [
-			{ toolId: "q1", sessionId: "s1", questions: [] },
-		];
-		handleAskUserResolved(
-			msg({ type: "ask_user_resolved", toolId: "q1", sessionId: "s1" }),
-		);
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-		expect(permissionsState.remoteQuestionCounts.has("s2")).toBe(true);
-	});
-
-	it("cleans up remoteQuestionCounts even without matching pendingQuestion", () => {
-		permissionsState.remoteQuestionCounts = new Map([["s1", 1]]);
-		handleAskUserResolved(
-			msg({ type: "ask_user_resolved", toolId: "q1", sessionId: "s1" }),
-		);
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-	});
-
-	it("force-evicts session even when ref-count is inflated (duplicate notification_events)", () => {
-		// Simulate inflated count from duplicate notification_events
-		permissionsState.remoteQuestionCounts = new Map([["s1", 3]]);
-		handleAskUserResolved(
-			msg({ type: "ask_user_resolved", toolId: "q1", sessionId: "s1" }),
-		);
-		// Should be fully deleted, not decremented to 2
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-	});
-
-	it("handles missing sessionId gracefully (no remote cleanup)", () => {
-		permissionsState.remoteQuestionCounts = new Map([["s1", 1]]);
-		permissionsState.pendingQuestions = [
-			{ toolId: "q1", sessionId: "s1", questions: [] },
-		];
-		handleAskUserResolved(msg({ type: "ask_user_resolved", toolId: "q1" }));
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-		// Without sessionId, can't clean remote — this is backward compat
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(true);
-	});
-});
-
-// ─── handleNotificationEvent ────────────────────────────────────────────────
-
-describe("handleNotificationEvent", () => {
-	it("adds remote question for ask_user notification", () => {
-		handleNotificationEvent({ eventType: "ask_user", sessionId: "s1" });
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(true);
-	});
-
-	it("removes remote question for ask_user_resolved notification", () => {
-		permissionsState.remoteQuestionCounts = new Map([["s1", 1]]);
-		handleNotificationEvent({
-			eventType: "ask_user_resolved",
-			sessionId: "s1",
-		});
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-	});
-
-	it("tracks done events in doneNotViewedSessions", () => {
-		handleNotificationEvent({ eventType: "done", sessionId: "s1" });
-		expect(permissionsState.doneNotViewedSessions.has("s1")).toBe(true);
-		expect(permissionsState.remoteQuestionCounts.size).toBe(0);
-	});
-
-	it("done event evicts stale question counts for that session", () => {
-		// Simulate stale question count (e.g., from inflated ref-count)
-		permissionsState.remoteQuestionCounts = new Map([
-			["s1", 2],
-			["s2", 1],
-		]);
-		handleNotificationEvent({ eventType: "done", sessionId: "s1" });
-		// s1 fully evicted, s2 untouched
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-		expect(permissionsState.remoteQuestionCounts.has("s2")).toBe(true);
-		expect(permissionsState.doneNotViewedSessions.has("s1")).toBe(true);
-	});
-
-	it("no-ops when sessionId is missing", () => {
-		handleNotificationEvent({ eventType: "ask_user" });
-		expect(permissionsState.remoteQuestionCounts.size).toBe(0);
-	});
-});
-
-// ─── onSessionSwitch ────────────────────────────────────────────────────────
-
-describe("onSessionSwitch", () => {
-	it("clears previous session permissions and all pending questions", () => {
-		permissionsState.pendingPermissions = [
-			{
-				id: "p1",
-				requestId: pid("p1"),
-				sessionId: "old-session",
-				toolName: "bash",
-				toolInput: {},
-			},
-			{
-				id: "p2",
-				requestId: pid("p2"),
-				sessionId: "other-session",
-				toolName: "edit",
-				toolInput: {},
-			},
-		];
-		permissionsState.pendingQuestions = [
-			{ toolId: "q1", sessionId: "old-session", questions: [] },
-		];
-		permissionsState.questionErrors.set("q1", "error");
-		permissionsState.remoteQuestionCounts = new Map([
-			["new-session", 1],
-			["other", 1],
-		]);
-
-		onSessionSwitch("old-session", "new-session");
-
-		// Previous session permissions removed, other session kept
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		expect(permissionsState.pendingPermissions[0]?.sessionId).toBe(
-			"other-session",
-		);
-		// All pending questions cleared (they belong to the previous session view)
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-		// Question errors cleared
-		expect(permissionsState.questionErrors.size).toBe(0);
-		// New session removed from remote tracking (now viewing it)
-		expect(permissionsState.remoteQuestionCounts.has("new-session")).toBe(
-			false,
-		);
-		expect(permissionsState.remoteQuestionCounts.has("other")).toBe(true);
-	});
-
-	it("clears doneNotViewedSessions for the target session", () => {
-		permissionsState.doneNotViewedSessions = new Set(["new-session", "other"]);
-		onSessionSwitch(null, "new-session");
-		expect(permissionsState.doneNotViewedSessions.has("new-session")).toBe(
-			false,
-		);
-		expect(permissionsState.doneNotViewedSessions.has("other")).toBe(true);
-	});
-});
-
-// ─── Ref-counting (addRemoteQuestion / removeRemoteQuestion) ────────────────
-
-describe("ref-counting for remoteQuestionCounts", () => {
-	it("increments count when adding questions for the same session", () => {
-		addRemoteQuestion("s1");
-		addRemoteQuestion("s1");
-		expect(permissionsState.remoteQuestionCounts.get("s1")).toBe(2);
-	});
-
-	it("decrements count when removing, keeps session with remaining count", () => {
-		addRemoteQuestion("s1");
-		addRemoteQuestion("s1");
-		removeRemoteQuestion("s1");
-		expect(permissionsState.remoteQuestionCounts.get("s1")).toBe(1);
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(true);
-	});
-
-	it("deletes session from map when count reaches zero", () => {
-		addRemoteQuestion("s1");
-		removeRemoteQuestion("s1");
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-	});
-
-	it("deletes session when removing more than added (defensive)", () => {
-		addRemoteQuestion("s1");
-		removeRemoteQuestion("s1");
-		removeRemoteQuestion("s1");
-		expect(permissionsState.remoteQuestionCounts.has("s1")).toBe(false);
-	});
-});
-
-// ─── getSessionIndicator ────────────────────────────────────────────────────
-
-describe("getSessionIndicator", () => {
-	it("returns 'attention' when session has pending questions", () => {
-		addRemoteQuestion("s1");
-		expect(getSessionIndicator("s1", "other")).toBe("attention");
-	});
-
-	it("returns 'attention' when session has pending permissions", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			requestId: pid("r1"),
-			sessionId: "s1",
-			toolName: "Write",
-			toolInput: {},
-		});
-		expect(getSessionIndicator("s1", "other")).toBe("attention");
-	});
-
-	it("returns 'done-unviewed' when session is in doneNotViewedSessions", () => {
-		permissionsState.doneNotViewedSessions = new Set(["s1"]);
-		expect(getSessionIndicator("s1", "other")).toBe("done-unviewed");
-	});
-
-	it("returns null when session has no indicators", () => {
-		expect(getSessionIndicator("s1", "other")).toBeNull();
-	});
-
-	it("attention takes priority over done-unviewed", () => {
-		addRemoteQuestion("s1");
-		permissionsState.doneNotViewedSessions = new Set(["s1"]);
-		expect(getSessionIndicator("s1", "other")).toBe("attention");
-	});
-
-	it("does not return 'attention' for permissions of the current session", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			requestId: pid("r1"),
-			sessionId: "s1",
-			toolName: "Write",
-			toolInput: {},
-		});
-		// When s1 is the current session, its permissions don't trigger attention
-		expect(getSessionIndicator("s1", "s1")).toBeNull();
-	});
-
-	it("returns null for the currently-viewed session (clears dot instantly on click)", () => {
-		// Even with done-unviewed and questions, current session gets no indicator
-		addRemoteQuestion("s1");
-		permissionsState.doneNotViewedSessions = new Set(["s1"]);
-		expect(getSessionIndicator("s1", "s1")).toBeNull();
 	});
 });

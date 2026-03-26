@@ -21,7 +21,8 @@ test.describe("Session Management", () => {
 			await expect(app.sidebar).toBeVisible();
 		}
 
-		// Should have at least one session
+		// Wait for sessions to render (auto-retrying, avoids race with WS data)
+		await sidebar.waitForSessions();
 		const count = await sidebar.getSessionCount();
 		expect(count).toBeGreaterThan(0);
 	});
@@ -37,6 +38,8 @@ test.describe("Session Management", () => {
 			await expect(app.sidebar).toBeVisible();
 		}
 
+		// Wait for sessions to render before counting
+		await sidebar.waitForSessions();
 		const countBefore = await sidebar.getSessionCount();
 
 		// Click "New session" button
@@ -78,7 +81,8 @@ test.describe("Session Management", () => {
 			await expect(app.sidebar).toBeVisible();
 		}
 
-		// Verify we start with sessions
+		// Wait for sessions to render (auto-retrying, avoids race with WS data)
+		await sidebar.waitForSessions();
 		const countBefore = await sidebar.getSessionCount();
 		expect(countBefore).toBeGreaterThan(0);
 
