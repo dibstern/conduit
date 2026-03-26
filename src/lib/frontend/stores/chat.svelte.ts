@@ -44,12 +44,20 @@ export function findMessage<T extends ChatMessage["type"]>(
  *  Impossible boolean combinations are unrepresentable. */
 export type ChatPhase = "idle" | "processing" | "streaming" | "replaying";
 
+export type LoadLifecycle = "empty" | "loading" | "committed" | "ready";
+
 export const chatState = $state({
 	messages: [] as ChatMessage[],
 	/** Raw text of the currently streaming assistant message. */
 	currentAssistantText: "",
 	/** Single source of truth for the chat pipeline phase. */
 	phase: "idle" as ChatPhase,
+	/** Tracks the lifecycle of loading session data into the chat store. */
+	loadLifecycle: "empty" as LoadLifecycle,
+	/** True after clearQueuedFlags() is called, reset when processing starts.
+	 *  Used by the unified rendering pipeline to know that the LLM has started
+	 *  responding to a previously-queued message (so the queued shimmer should be removed). */
+	queuedFlagsCleared: false,
 	/** Monotonically increasing counter, bumped on each `done` event.
 	 *  Provides an explicit, reliable turn-boundary signal for logic that
 	 *  needs to distinguish "same turn" from "new turn" (e.g. queued-flag
@@ -67,6 +75,7 @@ const _isProcessing = $derived(
 );
 const _isStreaming = $derived(chatState.phase === "streaming");
 const _isReplaying = $derived(chatState.phase === "replaying");
+const _isLoading = $derived(chatState.loadLifecycle === "loading");
 
 /** LLM is active (processing or streaming). */
 export function isProcessing(): boolean {
@@ -79,6 +88,10 @@ export function isStreaming(): boolean {
 /** Event replay in progress. */
 export function isReplaying(): boolean {
 	return _isReplaying;
+}
+/** Session data is being loaded into the chat store. */
+export function isLoading(): boolean {
+	return _isLoading;
 }
 
 // ─── Phase Transitions ─────────────────────────────────────────────────────

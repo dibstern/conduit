@@ -42,6 +42,7 @@ import {
 	handleDelta,
 	handleDone,
 	handleStatus,
+	isLoading,
 	isProcessing,
 	isReplaying,
 	isStreaming,
@@ -64,6 +65,21 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
+});
+
+// ─── LoadLifecycle ──────────────────────────────────────────────────────────
+
+describe("LoadLifecycle", () => {
+	it("defaults to 'empty'", () => {
+		expect(chatState.loadLifecycle).toBe("empty");
+	});
+
+	it("isLoading() returns true only when loading", () => {
+		chatState.loadLifecycle = "loading";
+		expect(isLoading()).toBe(true);
+		chatState.loadLifecycle = "empty";
+		expect(isLoading()).toBe(false);
+	});
 });
 
 // ─── Phase field exists and defaults correctly ──────────────────────────────
