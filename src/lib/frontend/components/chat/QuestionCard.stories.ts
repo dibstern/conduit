@@ -6,6 +6,7 @@ import QuestionCard from "./QuestionCard.svelte";
 
 const mockSingleSelect: QuestionRequest = {
 	toolId: "q-001",
+	sessionId: "test-session",
 	questions: [
 		{
 			header: "model selection",
@@ -32,6 +33,7 @@ const mockSingleSelect: QuestionRequest = {
 
 const mockMultiSelect: QuestionRequest = {
 	toolId: "q-002",
+	sessionId: "test-session",
 	questions: [
 		{
 			header: "file selection",
@@ -50,6 +52,7 @@ const mockMultiSelect: QuestionRequest = {
 
 const mockWithCustomInput: QuestionRequest = {
 	toolId: "q-003",
+	sessionId: "test-session",
 	questions: [
 		{
 			header: "deployment target",
@@ -67,6 +70,7 @@ const mockWithCustomInput: QuestionRequest = {
 
 const mockMultiQuestion: QuestionRequest = {
 	toolId: "q-004",
+	sessionId: "test-session",
 	questions: [
 		{
 			header: "language",

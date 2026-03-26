@@ -254,6 +254,22 @@ export function handleSSEEvent(
 	// ── Session updated (title change, etc.) → refresh session list ──────
 
 	if (event.type === "session.updated") {
+		// Eagerly update parent map from SSE event to eliminate the race
+		// between subagent creation and the async listSessions() refresh.
+		// Without this, a fast subagent could complete before getSessionParentMap()
+		// knows about it, causing its "done" to be treated as a root session event.
+		if (hasInfoWithSessionID(event.properties)) {
+			const info = event.properties.info;
+			const childId = info.sessionID ?? info.id;
+			const parentId =
+				typeof (info as Record<string, unknown>)["parentID"] === "string"
+					? ((info as Record<string, unknown>)["parentID"] as string)
+					: undefined;
+			if (childId && parentId) {
+				sessionMgr.addToParentMap(childId, parentId);
+			}
+		}
+
 		const statuses = deps.getSessionStatuses?.();
 		sessionMgr
 			.sendDualSessionLists((msg) => wsHandler.broadcast(msg), { statuses })

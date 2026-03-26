@@ -157,7 +157,7 @@ export async function handleAskUserResponse(
 
 	try {
 		await deps.client.replyQuestion({ id: toolId, answers: formatted });
-		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId });
+		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId, sessionId });
 		restartProcessingTimeout(deps, sessionId);
 	} catch (err) {
 		deps.log.warn(
@@ -175,7 +175,11 @@ export async function handleAskUserResponse(
 					`client=${clientId} session=${sessionId} API fallback: ${toolId} → ${queId}`,
 				);
 				await deps.client.replyQuestion({ id: queId, answers: formatted });
-				deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId: queId });
+				deps.wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId: queId,
+					sessionId,
+				});
 				restartProcessingTimeout(deps, sessionId);
 				return;
 			}
@@ -214,7 +218,7 @@ export async function handleQuestionReject(
 
 	try {
 		await deps.client.rejectQuestion(toolId);
-		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId });
+		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId, sessionId });
 		restartProcessingTimeout(deps, sessionId);
 	} catch (err) {
 		deps.log.warn(
@@ -234,6 +238,7 @@ export async function handleQuestionReject(
 				deps.wsHandler.broadcast({
 					type: "ask_user_resolved",
 					toolId: queId,
+					sessionId,
 				});
 				restartProcessingTimeout(deps, sessionId);
 				return;

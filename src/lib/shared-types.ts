@@ -293,7 +293,7 @@ export type RelayMessage =
 			questions: AskUserQuestion[];
 			toolUseId?: string;
 	  }
-	| { type: "ask_user_resolved"; toolId: string }
+	| { type: "ask_user_resolved"; toolId: string; sessionId?: string }
 	| { type: "ask_user_error"; toolId: string; message: string }
 	// ── Session lifecycle ──────────────────────────────────────────────────
 	| {

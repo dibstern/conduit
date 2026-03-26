@@ -59,6 +59,7 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_abc123",
+			sessionId: "ses_test_001",
 		});
 	});
 
@@ -92,6 +93,7 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_fallback_001",
+			sessionId: "ses_test_001",
 		});
 	});
 
@@ -201,6 +203,7 @@ describe("handleQuestionReject: bridge-less flow", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_reject_001",
+			sessionId: "ses_test_001",
 		});
 	});
 
@@ -227,6 +230,7 @@ describe("handleQuestionReject: bridge-less flow", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_pending_001",
+			sessionId: "ses_test_001",
 		});
 	});
 

@@ -120,6 +120,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		return this.cachedParentMap;
 	}
 
+	/**
+	 * Eagerly add a child→parent mapping.
+	 * Called from SSE wiring on `session.updated` to eliminate the race
+	 * between subagent creation and the async listSessions() refresh.
+	 */
+	addToParentMap(childId: string, parentId: string): void {
+		this.cachedParentMap.set(childId, parentId);
+	}
+
 	/** List sessions sorted by last message time first (falling back to creation time) */
 	async listSessions(options?: {
 		statuses?: Record<string, SessionStatus> | undefined;

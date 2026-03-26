@@ -107,6 +107,7 @@
 		if (!questionDataFromInput) return null;
 		return {
 			toolId: message.id,
+			sessionId: "",
 			toolUseId: message.id,
 			questions: questionDataFromInput,
 		};

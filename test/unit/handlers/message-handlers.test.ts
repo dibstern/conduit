@@ -623,6 +623,7 @@ describe("handleAskUserResponse", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "q-1",
+			sessionId: "",
 		});
 	});
 
@@ -661,6 +662,7 @@ describe("handleAskUserResponse", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_fallback",
+			sessionId: "",
 		});
 	});
 
@@ -703,6 +705,7 @@ describe("handleQuestionReject", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "q-1",
+			sessionId: "",
 		});
 	});
 
@@ -732,6 +735,7 @@ describe("handleQuestionReject", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_from_api",
+			sessionId: "",
 		});
 	});
 

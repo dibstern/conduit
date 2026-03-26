@@ -197,6 +197,8 @@ export interface PermissionRequest {
 
 export interface QuestionRequest {
 	toolId: string;
+	/** Which session owns this question. */
+	sessionId: string;
 	/** The tool-use callID (toolu_ ID) that triggered this question.
 	 *  Matches the ToolMessage.id in the chat timeline, allowing the frontend
 	 *  to reliably link a pending question to its ToolItem. */

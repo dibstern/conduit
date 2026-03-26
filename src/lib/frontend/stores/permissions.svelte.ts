@@ -216,6 +216,7 @@ export function handlePermissionResolved(
 
 export function handleAskUser(
 	msg: Extract<RelayMessage, { type: "ask_user" }>,
+	sessionId?: string,
 ): void {
 	const { toolId, questions, toolUseId } = msg;
 
@@ -238,6 +239,7 @@ export function handleAskUser(
 
 	const request: QuestionRequest = {
 		toolId,
+		sessionId: sessionId ?? "",
 		...(toolUseId != null && { toolUseId }),
 		questions,
 	};
@@ -253,9 +255,16 @@ export function handleAskUserResolved(
 	const { toolId } = msg;
 	if (!toolId) return;
 
+	// Remove from pending questions
 	permissionsState.pendingQuestions = permissionsState.pendingQuestions.filter(
 		(q) => q.toolId !== toolId,
 	);
+
+	// Also clean up remote tracking (fixes stale AttentionBanner)
+	const sessionId = msg.sessionId;
+	if (sessionId) {
+		removeRemoteQuestion(sessionId);
+	}
 }
 
 /**
@@ -270,6 +279,42 @@ export function handleAskUserError(
 
 	// Store the error keyed by toolId so components can react
 	permissionsState.questionErrors.set(toolId, message);
+}
+
+// ─── Cross-session notification state ───────────────────────────────────────
+
+/** Notification event state parameters. */
+export interface NotificationEventParams {
+	eventType: string;
+	sessionId?: string;
+}
+
+/**
+ * Handle notification_event state effects.
+ * Single entry point for all remote question tracking from cross-session broadcasts.
+ */
+export function handleNotificationEvent(params: NotificationEventParams): void {
+	if (!params.sessionId) return;
+	if (params.eventType === "ask_user") {
+		addRemoteQuestion(params.sessionId);
+	} else if (params.eventType === "ask_user_resolved") {
+		removeRemoteQuestion(params.sessionId);
+	}
+}
+
+/**
+ * Consolidate all notification state cleanup for a session switch.
+ * - Clears previous session's permissions from pending
+ * - Clears all pending questions (they belong to previous session view)
+ * - Clears question errors
+ * - Removes new session from remote tracking (now viewing it)
+ */
+export function onSessionSwitch(
+	previousSessionId: string | null,
+	newSessionId: string,
+): void {
+	clearSessionLocal(previousSessionId);
+	removeRemoteQuestion(newSessionId);
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────

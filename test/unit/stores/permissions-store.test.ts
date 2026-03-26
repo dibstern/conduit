@@ -11,9 +11,11 @@ import {
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
+	handleNotificationEvent,
 	handlePermissionRequest,
 	handlePermissionResolved,
 	isValidSubmission,
+	onSessionSwitch,
 	permissionsState,
 	removePermission,
 	removeQuestion,
@@ -44,6 +46,7 @@ beforeEach(() => {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
+	permissionsState.remoteQuestionSessions = new Set();
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;
@@ -988,5 +991,114 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 		expect(remote).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(remote[0]!.requestId).toBe("r2");
+	});
+});
+
+// ─── handleAskUserResolved — remoteQuestionSessions cleanup ─────────────────
+
+describe("handleAskUserResolved — remoteQuestionSessions cleanup", () => {
+	it("removes sessionId from remoteQuestionSessions when resolving", () => {
+		permissionsState.remoteQuestionSessions = new Set(["s1", "s2"]);
+		permissionsState.pendingQuestions = [
+			{ toolId: "q1", sessionId: "s1", questions: [] },
+		];
+		handleAskUserResolved(
+			msg({ type: "ask_user_resolved", toolId: "q1", sessionId: "s1" }),
+		);
+		expect(permissionsState.pendingQuestions).toHaveLength(0);
+		expect(permissionsState.remoteQuestionSessions.has("s1")).toBe(false);
+		expect(permissionsState.remoteQuestionSessions.has("s2")).toBe(true);
+	});
+
+	it("cleans up remoteQuestionSessions even without matching pendingQuestion", () => {
+		permissionsState.remoteQuestionSessions = new Set(["s1"]);
+		handleAskUserResolved(
+			msg({ type: "ask_user_resolved", toolId: "q1", sessionId: "s1" }),
+		);
+		expect(permissionsState.remoteQuestionSessions.has("s1")).toBe(false);
+	});
+
+	it("handles missing sessionId gracefully (no remote cleanup)", () => {
+		permissionsState.remoteQuestionSessions = new Set(["s1"]);
+		permissionsState.pendingQuestions = [
+			{ toolId: "q1", sessionId: "s1", questions: [] },
+		];
+		handleAskUserResolved(msg({ type: "ask_user_resolved", toolId: "q1" }));
+		expect(permissionsState.pendingQuestions).toHaveLength(0);
+		// Without sessionId, can't clean remote — this is backward compat
+		expect(permissionsState.remoteQuestionSessions.has("s1")).toBe(true);
+	});
+});
+
+// ─── handleNotificationEvent ────────────────────────────────────────────────
+
+describe("handleNotificationEvent", () => {
+	it("adds remote question for ask_user notification", () => {
+		handleNotificationEvent({ eventType: "ask_user", sessionId: "s1" });
+		expect(permissionsState.remoteQuestionSessions.has("s1")).toBe(true);
+	});
+
+	it("removes remote question for ask_user_resolved notification", () => {
+		permissionsState.remoteQuestionSessions = new Set(["s1"]);
+		handleNotificationEvent({
+			eventType: "ask_user_resolved",
+			sessionId: "s1",
+		});
+		expect(permissionsState.remoteQuestionSessions.has("s1")).toBe(false);
+	});
+
+	it("no-ops for non-question event types", () => {
+		handleNotificationEvent({ eventType: "done", sessionId: "s1" });
+		expect(permissionsState.remoteQuestionSessions.size).toBe(0);
+	});
+
+	it("no-ops when sessionId is missing", () => {
+		handleNotificationEvent({ eventType: "ask_user" });
+		expect(permissionsState.remoteQuestionSessions.size).toBe(0);
+	});
+});
+
+// ─── onSessionSwitch ────────────────────────────────────────────────────────
+
+describe("onSessionSwitch", () => {
+	it("clears previous session permissions and all pending questions", () => {
+		permissionsState.pendingPermissions = [
+			{
+				id: "p1",
+				requestId: pid("p1"),
+				sessionId: "old-session",
+				toolName: "bash",
+				toolInput: {},
+			},
+			{
+				id: "p2",
+				requestId: pid("p2"),
+				sessionId: "other-session",
+				toolName: "edit",
+				toolInput: {},
+			},
+		];
+		permissionsState.pendingQuestions = [
+			{ toolId: "q1", sessionId: "old-session", questions: [] },
+		];
+		permissionsState.questionErrors.set("q1", "error");
+		permissionsState.remoteQuestionSessions = new Set(["new-session", "other"]);
+
+		onSessionSwitch("old-session", "new-session");
+
+		// Previous session permissions removed, other session kept
+		expect(permissionsState.pendingPermissions).toHaveLength(1);
+		expect(permissionsState.pendingPermissions[0]?.sessionId).toBe(
+			"other-session",
+		);
+		// All pending questions cleared (they belong to the previous session view)
+		expect(permissionsState.pendingQuestions).toHaveLength(0);
+		// Question errors cleared
+		expect(permissionsState.questionErrors.size).toBe(0);
+		// New session removed from remote tracking (now viewing it)
+		expect(permissionsState.remoteQuestionSessions.has("new-session")).toBe(
+			false,
+		);
+		expect(permissionsState.remoteQuestionSessions.has("other")).toBe(true);
 	});
 });
