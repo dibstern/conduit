@@ -377,6 +377,9 @@ export function handleMessage(msg: RelayMessage): void {
 							seedRegistryFromMessages(chatMsgs);
 							historyState.hasMore = hasMore;
 							historyState.messageCount = msgCount;
+							// Transition loadLifecycle so the scroll controller
+							// exits "loading" state and scrolls to bottom.
+							chatState.loadLifecycle = "ready";
 						}
 					})
 					.catch((err) => {
@@ -385,6 +388,9 @@ export function handleMessage(msg: RelayMessage): void {
 			} else {
 				// Empty session (neither events nor history) — hasMore stays false
 				// so "Beginning of session" marker shows immediately.
+				// Transition loadLifecycle to "ready" so the scroll controller
+				// exits "loading" state and can handle live events normally.
+				chatState.loadLifecycle = "ready";
 			}
 
 			// Apply server-provided input draft for this session.
