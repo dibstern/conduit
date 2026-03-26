@@ -1,0 +1,1159 @@
+{
+	"name": "chat-result-bar",
+	"model": "opencode/big-pickle",
+	"recordedAt": "2026-03-26T04:26:39.300Z",
+	"initMessages": [
+		{
+			"type": "client_count",
+			"count": 2
+		},
+		{
+			"type": "client_count",
+			"count": 1
+		},
+		{
+			"type": "session_switched",
+			"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+			"events": [
+				{
+					"type": "user_message",
+					"text": "Write a single JavaScript function called greet that returns 'hello'. Reply with ONLY the code block, no explanation."
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "delta",
+					"text": "\n\n```javascript\nfunction greet()",
+					"messageId": "msg_d28649b7c001ED3D36AJ0I50BC"
+				},
+				{
+					"type": "delta",
+					"text": " {\n  return 'hello';\n}\n```",
+					"messageId": "msg_d28649b7c001ED3D36AJ0I50BC"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 23,
+						"cache_read": 17817,
+						"cache_creation": 344
+					},
+					"cost": 0.0116485,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 23,
+						"cache_read": 17817,
+						"cache_creation": 344
+					},
+					"cost": 0.0116485,
+					"duration": 3000,
+					"sessionId": ""
+				},
+				{
+					"type": "done",
+					"code": 0
+				},
+				{
+					"type": "user_message",
+					"text": "Read the file package.json and tell me the exact value of the \"version\" field."
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "thinking_start"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The user",
+					"messageId": "msg_d2864b354001EDJLiWoEhGA4l7"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " wants me to read the package.json file and find the version field. Let me do that.",
+					"messageId": "msg_d2864b354001EDJLiWoEhGA4l7"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "",
+					"messageId": "msg_d2864b354001EDJLiWoEhGA4l7"
+				},
+				{
+					"type": "thinking_stop"
+				},
+				{
+					"type": "tool_start",
+					"id": "call_function_uve0qe5vje63_1",
+					"name": "Read"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_function_uve0qe5vje63_1",
+					"name": "Read",
+					"input": {
+						"filePath": "/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "call_function_uve0qe5vje63_1",
+					"content": "<path>/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json</path>\n<type>file</type>\n<content>1: {\n2: \t\"name\": \"conduit-code\",\n3: \t\"version\": \"0.1.0\",\n4: \t\"type\": \"module\",\n5: \t\"license\": \"MIT\",\n6: \t\"description\": \"Web UI relay for OpenCode. Access your OpenCode sessions from any device.\",\n7: \t\"bin\": {\n8: \t\t\"conduit\": \"dist/src/bin/cli.js\"\n9: \t},\n10: \t\"files\": [\n11: \t\t\"dist/src/\",\n12: \t\t\"dist/frontend/\"\n13: \t],\n14: \t\"publishConfig\": {\n15: \t\t\"access\": \"public\"\n16: \t},\n17: \t\"scripts\": {\n18: \t\t\"dev\": \"tsx watch src/bin/cli.ts -- --foreground\",\n19: \t\t\"dev:frontend\": \"vite\",\n20: \t\t\"dev:all\": \"trap 'kill 0' EXIT; tsx watch --ignore 'src/lib/frontend/**' src/bin/cli.ts -- --foreground --restart-daemon & vite & wait\",\n21: \t\t\"build\": \"tsgo && pnpm copy:assets && vite build\",\n22: \t\t\"build:server\": \"tsgo && pnpm copy:assets\",\n23: \t\t\"build:frontend\": \"vite build\",\n24: \t\t\"copy:assets\": \"rm -rf dist/src/lib/themes && cp -r src/lib/themes dist/src/lib/themes\",\n25: \t\t\"preview:frontend\": \"vite preview\",\n26: \t\t\"preview:server\": \"pnpm build && node dist/src/bin/cli.js\",\n27: \t\t\"check\": \"tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json\",\n28: \t\t\"check:frontend\": \"tsgo --noEmit --project src/lib/frontend/tsconfig.json\",\n29: \t\t\"lint\": \"biome check .\",\n30: \t\t\"format\": \"biome check --write .\",\n31: \t\t\"test\": \"vitest run\",\n32: \t\t\"test:unit\": \"vitest run test/unit\",\n33: \t\t\"test:fixture\": \"vitest run test/fixture\",\n34: \t\t\"test:pbt\": \"vitest run test/unit --testNamePattern 'property|PBT|fc\\\\.'\",\n35: \t\t\"test:watch\": \"vitest\",\n36: \t\t\"test:integration\": \"vitest run --config vitest.integration.config.ts\",\n37: \t\t\"test:contract\": \"vitest run --config vitest.contract.config.ts\",\n38: \t\t\"test:e2e\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts\",\n39: \t\t\"test:e2e:ui\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --ui\",\n40: \t\t\"test:e2e:headed\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --headed\",\n41: \t\t\"test:e2e:debug\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-replay.config.ts --debug\",\n42: \t\t\"test:multi-instance\": \"npx playwright test --config test/e2e/playwright-multi-instance.config.ts\",\n43: \t\t\"test:project-management\": \"npx playwright test --config test/e2e/playwright-project-management.config.ts\",\n44: \t\t\"test:subagent-e2e\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-subagent.config.ts\",\n45: \t\t\"test:daemon\": \"npx playwright test --config test/e2e/playwright-daemon.config.ts\",\n46: \t\t\"test:e2e:live\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-live.config.ts\",\n47: \t\t\"test:visual\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-visual.config.ts\",\n48: \t\t\"test:visual:update\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-visual.config.ts --update-snapshots\",\n49: \t\t\"test:visual:headed\": \"pnpm build:frontend && npx playwright test --config test/e2e/playwright-visual.config.ts --headed\",\n50: \t\t\"storybook\": \"storybook dev -p 6006\",\n51: \t\t\"storybook:build\": \"storybook build -o dist/storybook\",\n52: \t\t\"test:storybook-visual\": \"pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts\",\n53: \t\t\"test:storybook-visual:update\": \"pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts --update-snapshots\",\n54: \t\t\"generate:media\": \"tsx scripts/generate-media/index.ts\",\n55: \t\t\"check:storybook\": \"node scripts/check-storybook-health.mjs\",\n56: \t\t\"test:all\": \"pnpm check && pnpm lint && pnpm build && vitest run && vitest run --config vitest.integration.config.ts && vitest run --config vitest.contract.config.ts && npx playwright test --config test/e2e/playwright-replay.config.ts && npx playwright test --config test/e2e/playwright-daemon.config.ts && npx playwright test --config test/e2e/playwright-multi-instance.config.ts && npx playwright test --config test/e2e/playwright-subagent.config.ts && npx playwright test --config test/e2e/playwright-visual.config.ts && pnpm storybook:build && npx playwright test --config test/visual/playwright.config.ts\",\n57: \t\t\"test:coverage\": \"vitest run --coverage\",\n58: \t\t\"test:record-snapshots\": \"tsx test/e2e/scripts/record-snapshots.ts\",\n59: \t\t\"prepublishOnly\": \"pnpm test:all\",\n60: \t\t\"prepare\": \"lefthook install || true\"\n61: \t},\n62: \t\"dependencies\": {\n63: \t\t\"dompurify\": \"^3.3.1\",\n64: \t\t\"ignore\": \"^7.0.5\",\n65: \t\t\"jsdom\": \"^28.1.0\",\n66: \t\t\"marked\": \"^17.0.3\",\n67: \t\t\"pino\": \"^10.3.1\",\n68: \t\t\"pino-pretty\": \"^13.1.3\",\n69: \t\t\"qrcode-terminal\": \"^0.12.0\",\n70: \t\t\"web-push\": \"^3.6.7\",\n71: \t\t\"ws\": \"^8.18.0\"\n72: \t},\n73: \t\"devDependencies\": {\n74: \t\t\"@biomejs/biome\": \"^2.4.4\",\n75: \t\t\"@castlenine/svelte-qrcode\": \"^2.3.0\",\n76: \t\t\"@evilmartians/lefthook\": \"^2.1.3\",\n77: \t\t\"@lucide/svelte\": \"^0.575.0\",\n78: \t\t\"@playwright/test\": \"^1.58.2\",\n79: \t\t\"@storybook/addon-a11y\": \"^10.2.13\",\n80: \t\t\"@storybook/addon-docs\": \"^10.2.13\",\n81: \t\t\"@storybook/svelte\": \"^10.2.13\",\n82: \t\t\"@storybook/svelte-vite\": \"^10.2.13\",\n83: \t\t\"@sveltejs/vite-plugin-svelte\": \"^5.1.1\",\n84: \t\t\"@tailwindcss/vite\": \"^4.2.0\",\n85: \t\t\"@testing-library/svelte\": \"^5.3.1\",\n86: \t\t\"@types/jsdom\": \"^28.0.0\",\n87: \t\t\"@types/node\": \"^22.0.0\",\n88: \t\t\"@types/pngjs\": \"^6.0.5\",\n89: \t\t\"@types/ws\": \"^8.5.0\",\n90: \t\t\"@typescript/native-preview\": \"7.0.0-dev.20260317.1\",\n91: \t\t\"@vitest/coverage-v8\": \"^3.2.4\",\n92: \t\t\"@xterm/addon-fit\": \"^0.11.0\",\n93: \t\t\"@xterm/xterm\": \"^6.0.0\",\n94: \t\t\"fast-check\": \"^4.0.0\",\n95: \t\t\"highlight.js\": \"^11.11.1\",\n96: \t\t\"mermaid\": \"^11.12.3\",\n97: \t\t\"pixelmatch\": \"^7.1.0\",\n98: \t\t\"pngjs\": \"^7.0.0\",\n99: \t\t\"sharp\": \"^0.34.5\",\n100: \t\t\"storybook\": \"^10.2.13\",\n101: \t\t\"svelte\": \"^5.53.3\",\n102: \t\t\"tailwindcss\": \"^4.2.0\",\n103: \t\t\"tsx\": \"^4.19.0\",\n104: \t\t\"typescript\": \"^5.8.2\",\n105: \t\t\"vite\": \"^6.0.0\",\n106: \t\t\"vitest\": \"^3.0.0\"\n107: \t},\n108: \t\"engines\": {\n109: \t\t\"node\": \">=20.19.0\"\n110: \t},\n111: \t\"pnpm\": {\n112: \t\t\"onlyBuiltDependencies\": [\n113: \t\t\t\"@evilmartians/lefthook\"\n114: \t\t],\n115: \t\t\"ignoredBuiltDependencies\": [\n116: \t\t\t\"sharp\"\n117: \t\t]\n118: \t}\n119: }\n\n(End of file - total 119 lines)\n</content>",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 70,
+						"output": 72,
+						"cache_read": 510,
+						"cache_creation": 16504
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 70,
+						"output": 72,
+						"cache_read": 510,
+						"cache_creation": 16504
+					},
+					"cost": 0,
+					"duration": 4162,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "thinking_start"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The user",
+					"messageId": "msg_d2864c397001Mj1rVeiju2Llyu"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " asked for the exact value of the \"version\" field in package.json. Looking at the file, I can see on line 3: `\"version\": \"",
+					"messageId": "msg_d2864c397001Mj1rVeiju2Llyu"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "0.1.0\",`.\n\nThe exact value is \"0.1.0\".",
+					"messageId": "msg_d2864c397001Mj1rVeiju2Llyu"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "",
+					"messageId": "msg_d2864c397001Mj1rVeiju2Llyu"
+				},
+				{
+					"type": "thinking_stop"
+				},
+				{
+					"type": "delta",
+					"text": "0.1.0",
+					"messageId": "msg_d2864c397001Mj1rVeiju2Llyu"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 2319,
+						"output": 61,
+						"cache_read": 16972,
+						"cache_creation": 119
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 2319,
+						"output": 61,
+						"cache_read": 16972,
+						"cache_creation": 119
+					},
+					"cost": 0,
+					"duration": 6595,
+					"sessionId": ""
+				},
+				{
+					"type": "done",
+					"code": 0
+				}
+			]
+		},
+		{
+			"type": "status",
+			"status": "idle"
+		},
+		{
+			"type": "model_info",
+			"model": "claude-opus-4-6",
+			"provider": "anthropic"
+		},
+		{
+			"type": "session_list",
+			"sessions": [
+				{
+					"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+					"title": "Greet function implementation",
+					"updatedAt": 1774499192175,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+					"title": "Greeting",
+					"updatedAt": 1774499173761,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+					"title": "ok",
+					"updatedAt": 1774499168700,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+					"title": "Pong response",
+					"updatedAt": 1774499164940,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+					"title": "Greeting",
+					"updatedAt": 1774499160714,
+					"messageCount": 0
+				}
+			],
+			"roots": true
+		},
+		{
+			"type": "session_list",
+			"sessions": [
+				{
+					"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+					"title": "Greet function implementation",
+					"updatedAt": 1774499192175,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+					"title": "Greeting",
+					"updatedAt": 1774499173761,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+					"title": "ok",
+					"updatedAt": 1774499168700,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+					"title": "Pong response",
+					"updatedAt": 1774499164940,
+					"messageCount": 0
+				},
+				{
+					"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+					"title": "Greeting",
+					"updatedAt": 1774499160714,
+					"messageCount": 0
+				}
+			],
+			"roots": false
+		},
+		{
+			"type": "agent_list",
+			"agents": [
+				{
+					"id": "build",
+					"name": "build",
+					"description": "The default agent. Executes tools based on configured permissions."
+				},
+				{
+					"id": "plan",
+					"name": "plan",
+					"description": "Plan mode. Disallows all edit tools."
+				}
+			]
+		},
+		{
+			"type": "model_list",
+			"providers": [
+				{
+					"id": "opencode",
+					"name": "OpenCode Zen",
+					"configured": true,
+					"models": [
+						{
+							"id": "nemotron-3-super-free",
+							"name": "Nemotron 3 Super Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "mimo-v2-omni-free",
+							"name": "MiMo V2 Omni Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 262144,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "mimo-v2-pro-free",
+							"name": "MiMo V2 Pro Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1048576,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "big-pickle",
+							"name": "Big Pickle",
+							"provider": "opencode",
+							"limit": {
+								"context": 200000,
+								"output": 128000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "minimax-m2.5-free",
+							"name": "MiniMax M2.5 Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 204800,
+								"output": 131072
+							}
+						},
+						{
+							"id": "gpt-5-nano",
+							"name": "GPT-5 Nano",
+							"provider": "opencode",
+							"limit": {
+								"context": 400000,
+								"input": 272000,
+								"output": 128000
+							},
+							"variants": [
+								"minimal",
+								"low",
+								"medium",
+								"high"
+							]
+						}
+					]
+				},
+				{
+					"id": "anthropic",
+					"name": "Anthropic",
+					"configured": true,
+					"models": [
+						{
+							"id": "claude-opus-4-5-20251101",
+							"name": "Claude Opus 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-5-haiku-latest",
+							"name": "Claude Haiku 3.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-opus-4-1",
+							"name": "Claude Opus 4.1 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-5-sonnet-20241022",
+							"name": "Claude Sonnet 3.5 v2",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-3-sonnet-20240229",
+							"name": "Claude Sonnet 3",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 4096
+							}
+						},
+						{
+							"id": "claude-opus-4-6",
+							"name": "Claude Opus 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-6",
+							"name": "Claude Sonnet 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-0",
+							"name": "Claude Sonnet 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-20250514",
+							"name": "Claude Opus 4",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5-20250929",
+							"name": "Claude Sonnet 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-0",
+							"name": "Claude Opus 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-5-haiku-20241022",
+							"name": "Claude Haiku 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-3-5-sonnet-20240620",
+							"name": "Claude Sonnet 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-3-7-sonnet-latest",
+							"name": "Claude Sonnet 3.7 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-7-sonnet-20250219",
+							"name": "Claude Sonnet 3.7",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-haiku-20240307",
+							"name": "Claude Haiku 3",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 4096
+							}
+						},
+						{
+							"id": "claude-haiku-4-5-20251001",
+							"name": "Claude Haiku 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-haiku-4-5",
+							"name": "Claude Haiku 4.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-5",
+							"name": "Claude Opus 4.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-opus-20240229",
+							"name": "Claude Opus 3",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 4096
+							}
+						},
+						{
+							"id": "claude-sonnet-4-5",
+							"name": "Claude Sonnet 4.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-20250514",
+							"name": "Claude Sonnet 4",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-1-20250805",
+							"name": "Claude Opus 4.1",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						}
+					]
+				}
+			]
+		},
+		{
+			"type": "variant_info",
+			"variant": "max",
+			"variants": [
+				"low",
+				"medium",
+				"high",
+				"max"
+			]
+		},
+		{
+			"type": "default_model_info",
+			"model": "claude-opus-4-6",
+			"provider": "anthropic"
+		},
+		{
+			"type": "model_info",
+			"model": "claude-opus-4-6",
+			"provider": "anthropic"
+		}
+	],
+	"turns": [
+		{
+			"prompt": "Reply with just the word 'ok'. Nothing else.",
+			"events": [
+				{
+					"type": "status",
+					"status": "processing"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499195977,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499195977,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499195977,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499195977,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499195977,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "status",
+					"status": "processing"
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499195977,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "thinking_start"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The user",
+					"messageId": "msg_d2864ec3d001IU2UPXaeHMaplt"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " wants me to reply with just the word 'ok' and nothing else.",
+					"messageId": "msg_d2864ec3d001IU2UPXaeHMaplt"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "",
+					"messageId": "msg_d2864ec3d001IU2UPXaeHMaplt"
+				},
+				{
+					"type": "thinking_stop"
+				},
+				{
+					"type": "delta",
+					"text": "ok",
+					"messageId": "msg_d2864ec3d001IU2UPXaeHMaplt"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 70,
+						"output": 22,
+						"cache_read": 17014,
+						"cache_creation": 2327
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 70,
+						"output": 22,
+						"cache_read": 17014,
+						"cache_creation": 2327
+					},
+					"cost": 0,
+					"duration": 2822,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198790,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "done",
+					"code": 0
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198790,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198801,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198801,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				}
+			]
+		}
+	]
+}

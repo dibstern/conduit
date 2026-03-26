@@ -1,7 +1,7 @@
 {
-	"name": "fork-session",
+	"name": "advanced-diff",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T04:30:34.327Z",
+	"recordedAt": "2026-03-26T04:28:21.617Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,11 +13,11 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d79944d1ffepEvVQscn2tf72h",
+			"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
 			"events": [
 				{
 					"type": "user_message",
-					"text": "Reply with just the number 1. Nothing else."
+					"text": "Remember the word 'banana'. Reply with only: ok, remembered."
 				},
 				{
 					"type": "result",
@@ -33,18 +33,23 @@
 				},
 				{
 					"type": "delta",
-					"text": "1",
-					"messageId": "msg_d2866bf28001jwjG4mQzCr4cEN"
+					"text": "ok",
+					"messageId": "msg_d286509b3001FJFYxQbQXoOjCI"
+				},
+				{
+					"type": "delta",
+					"text": ", remembered.",
+					"messageId": "msg_d286509b3001FJFYxQbQXoOjCI"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 5,
+						"output": 7,
 						"cache_read": 17817,
-						"cache_creation": 330
+						"cache_creation": 334
 					},
-					"cost": 0.011111,
+					"cost": 0.011186,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -52,12 +57,12 @@
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 5,
+						"output": 7,
 						"cache_read": 17817,
-						"cache_creation": 330
+						"cache_creation": 334
 					},
-					"cost": 0.011111,
-					"duration": 3142,
+					"cost": 0.011186,
+					"duration": 2793,
 					"sessionId": ""
 				},
 				{
@@ -66,7 +71,7 @@
 				},
 				{
 					"type": "user_message",
-					"text": "Reply with just the number 2. Nothing else."
+					"text": "What word did I ask you to remember? Reply with just the word."
 				},
 				{
 					"type": "result",
@@ -82,18 +87,18 @@
 				},
 				{
 					"type": "delta",
-					"text": "2",
-					"messageId": "msg_d2866cd7e00160IXNe1Zdy16zF"
+					"text": "banana",
+					"messageId": "msg_d286516b300165zwltenaMhLSZ"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 5,
-						"cache_read": 18147,
-						"cache_creation": 19
+						"output": 4,
+						"cache_read": 18151,
+						"cache_creation": 25
 					},
-					"cost": 0.00933225,
+					"cost": 0.00934675,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -101,12 +106,12 @@
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 5,
-						"cache_read": 18147,
-						"cache_creation": 19
+						"output": 4,
+						"cache_read": 18151,
+						"cache_creation": 25
 					},
-					"cost": 0.00933225,
-					"duration": 12913,
+					"cost": 0.00934675,
+					"duration": 6289,
 					"sessionId": ""
 				},
 				{
@@ -115,7 +120,7 @@
 				},
 				{
 					"type": "user_message",
-					"text": "Reply with just the number 3. Nothing else."
+					"text": "Write a paragraph explaining why automated testing is important for software quality."
 				},
 				{
 					"type": "result",
@@ -131,18 +136,58 @@
 				},
 				{
 					"type": "delta",
-					"text": "3",
-					"messageId": "msg_d286701f4001rR60B5GrdA5dRc"
+					"text": "\n\nAutomated testing is a",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " cornerstone of software quality because it provides fast, repeatable, and reliable verification that code",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " behaves as intended. Unlike manual testing, automated tests can be run on",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " every change — catching regressions the moment they're",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " introduced rather than days or weeks later. They serve as living documentation of expected behavior, making it safer for",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " developers to refactor and evolve a codebase with confidence. A well-maintained test suite reduces",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " the feedback loop between writing code and discovering defects, which lowers the cost of fixing bugs and prevents",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " them from compounding. Ultimately, automated testing shifts quality assurance from a",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
+				},
+				{
+					"type": "delta",
+					"text": " reactive gatekeeping activity into a continuous, integrated part of the development process.",
+					"messageId": "msg_d28653dc8001puBT5H5vp6DoMc"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 5,
-						"cache_read": 18166,
-						"cache_creation": 19
+						"output": 148,
+						"cache_read": 18176,
+						"cache_creation": 20
 					},
-					"cost": 0.00934175,
+					"cost": 0.012928,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -150,12 +195,12 @@
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 5,
-						"cache_read": 18166,
-						"cache_creation": 19
+						"output": 148,
+						"cache_read": 18176,
+						"cache_creation": 20
 					},
-					"cost": 0.00934175,
-					"duration": 2938,
+					"cost": 0.012928,
+					"duration": 6365,
 					"sessionId": ""
 				},
 				{
@@ -164,7 +209,308 @@
 				},
 				{
 					"type": "user_message",
-					"text": "Reply with just the number 4. Nothing else."
+					"text": "Go away and think for a bit to plan how you'll write this, considering the best possible style, and write a 300 word essay on agentic ai context management"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "thinking_start"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The user wants me to think carefully about style and then write a 300-word essay on agentic AI context management. Let me plan",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " this out mentally first, then write it.\n\nLet me think about:\n1. What \"",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "agentic AI context management\" means\n2. The key aspects worth covering\n3. Style considerations\n4. Structure",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "\n\nKey topics:\n- Context windows are finite resources",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "\n- Agentic AI systems (like coding agents) operate over",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " long sessions with many tool calls\n- Managing what's",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " in context vs. what's delegated/summarized is critical\n- Strategies:",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " delegation to sub-agents, summarization, selective retrieval, forgetting\n",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "\n\n- The tension between having enough context to",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " make good decisions and not overwhelming the model\n- How context management affects quality of output\n- This is an emerging engineering discipline\n\nI'm settling on a structure that opens with the core problem,",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " explores the key tradeoffs and strategies in the middle, and closes with why this matters.",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " I want to keep the prose clear and direct, grounded in concrete examples rather",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " than abstract concepts, and maintain a technical but accessible tone without any unnecessary jargon or filler.",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "thinking_stop"
+				},
+				{
+					"type": "delta",
+					"text": "**",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": "Agentic AI Context Management**\n\nEvery AI agent operates within a finite context window — a hard",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " ceiling on how much information it can hold in working memory at once. For a chat",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": "bot answering a single question, this constraint rarely matters. For",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " an agentic system performing multi-step tasks across large codebases, databases, or document collections",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": ", it becomes the central engineering challenge. How an agent manages its context determines",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " whether it produces coherent, well-informed work or quietly loses",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " the thread.\n\nThe core tension is simple: agents need broad awareness to make good decisions, but they cannot hold",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " everything at once. A coding agent working on a feature might need to understand the project's architecture, the specific files",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " it's modifying, the test infrastructure, the user's intent, and the results of its",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " previous actions — all simultaneously. Naive approaches that dump everything into the prompt quickly",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " exhaust the window, leaving no room for reasoning about the actual",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " task.\n\nEffective context management employs several strategies in combination. Selective retrieval pulls in",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " only the information relevant to the current step, using search and targeted file reads rather",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " than wholesale ingestion. Delegation offloads independent subtasks to separate agent instances",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": ", each with their own focused context. Summarization compresses prior work into compact",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " representations that preserve essential decisions without retaining every detail. Structured task tracking",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " externalizes state into todo lists and plans, freeing the agent from",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " needing to remember procedural progress internally.\n\nThe tradeoffs are real. Aggressive compression",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " loses nuance. Over-delegation fragments understanding. Insufficient retrieval leads to decisions",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " made on incomplete information. The discipline lies in knowing what to hold close,",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " what to look up on demand, and what to let go entirely.\n\nAs agents take on increasingly",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " complex work — managing infrastructure, writing software across repositories, coordinating multi-phase",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " projects — context management will quietly become one of the most consequential problems in applied AI. The agents that handle",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "delta",
+					"text": " it well will be the ones worth trusting with real work.",
+					"messageId": "msg_d2865652e001XuG2kHtbO0GuT5"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 707,
+						"cache_read": 18196,
+						"cache_creation": 188
+					},
+					"cost": 0.027963,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 707,
+						"cache_read": 18196,
+						"cache_creation": 188
+					},
+					"cost": 0.027963,
+					"duration": 20016,
+					"sessionId": ""
+				},
+				{
+					"type": "done",
+					"code": 0
+				},
+				{
+					"type": "user_message",
+					"text": "Read the file package.json and tell me the name field"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01XWRNpF4DRCRrvBEoZMpLUY",
+					"name": "Read"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01XWRNpF4DRCRrvBEoZMpLUY",
+					"name": "Read",
+					"input": {
+						"filePath": "/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json",
+						"limit": 5
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01XWRNpF4DRCRrvBEoZMpLUY",
+					"content": "<path>/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json</path>\n<type>file</type>\n<content>1: {\n2: \t\"name\": \"conduit-code\",\n3: \t\"version\": \"0.1.0\",\n4: \t\"type\": \"module\",\n5: \t\"license\": \"MIT\",\n\n(Showing lines 1-5 of 119. Use offset=6 to continue.)\n</content>",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 101,
+						"cache_read": 18384,
+						"cache_creation": 721
+					},
+					"cost": 0.01623825,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 101,
+						"cache_read": 18384,
+						"cache_creation": 721
+					},
+					"cost": 0.01623825,
+					"duration": 4379,
+					"sessionId": ""
 				},
 				{
 					"type": "result",
@@ -180,31 +526,36 @@
 				},
 				{
 					"type": "delta",
-					"text": "4",
-					"messageId": "msg_d28670f7c001iOcPUA2dNmZX8g"
+					"text": "The name",
+					"messageId": "msg_d2865d32f001mVXZeKu47sDA2v"
+				},
+				{
+					"type": "delta",
+					"text": " field is `conduit-code`.",
+					"messageId": "msg_d2865d32f001mVXZeKu47sDA2v"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18185,
-						"cache_creation": 19
+						"input": 1,
+						"output": 13,
+						"cache_read": 19105,
+						"cache_creation": 242
 					},
-					"cost": 0.00935125,
+					"cost": 0.011395,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18185,
-						"cache_creation": 19
+						"input": 1,
+						"output": 13,
+						"cache_read": 19105,
+						"cache_creation": 242
 					},
-					"cost": 0.00935125,
-					"duration": 2597,
+					"cost": 0.011395,
+					"duration": 2502,
 					"sessionId": ""
 				},
 				{
@@ -213,7 +564,76 @@
 				},
 				{
 					"type": "user_message",
-					"text": "Reply with just the number 5. Nothing else."
+					"text": "List the files in the current directory using bash: ls -la"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01YAH8QxedE9G8ryPASGtcvJ",
+					"name": "Bash"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01YAH8QxedE9G8ryPASGtcvJ",
+					"name": "Bash",
+					"input": {
+						"command": "ls -la",
+						"description": "List files in current directory"
+					}
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01YAH8QxedE9G8ryPASGtcvJ",
+					"name": "Bash",
+					"input": {
+						"command": "ls -la",
+						"description": "List files in current directory"
+					},
+					"metadata": {
+						"output": "total 928\ndrwxr-xr-x@ 32 dstern  staff    1024 26 Mar 15:04 .\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 ..\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:47 .conduit\n-rw-r--r--@  1 dstern  staff      95 26 Mar 14:45 .git\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:45 .github\n-rw-r--r--@  1 dstern  staff     200 26 Mar 14:45 .gitignore\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:58 .opencode\n-rw-r--r--@  1 dstern  staff       6 26 Mar 14:45 .opencode-version\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 .storybook\n-rw-r--r--@  1 dstern  staff    3267 26 Mar 14:45 AGENTS.md\n-rw-r--r--@  1 dstern  staff     859 26 Mar 14:45 biome.json\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:47 dist\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:45 docs\n-rw-r--r--@  1 dstern  staff     156 26 Mar 14:45 lefthook.yml\n-rw-r--r--@  1 dstern  staff    1065 26 Mar 14:45 LICENSE\ndrwxr-xr-x@  8 dstern  staff     256 26 Mar 14:45 media\ndrwxr-xr-x@ 43 dstern  staff    1376 26 Mar 14:47 node_modules\n-rw-r--r--@  1 dstern  staff     103 26 Mar 14:45 opencode.jsonc\n-rw-r--r--@  1 dstern  staff  223161 26 Mar 14:45 package-lock.json\n-rw-r--r--@  1 dstern  staff    5552 26 Mar 14:45 package.json\n-rw-r--r--@  1 dstern  staff  171949 26 Mar 14:45 pnpm-lock.yaml\n-rw-r--r--@  1 dstern  staff   11411 26 Mar 14:45 README.md\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 14:45 scripts\ndrwxr-xr-x@  4 dstern  staff     128 26 Mar 14:45 src\n-rw-r--r--@  1 dstern  staff     296 26 Mar 14:45 svelte.config.js\ndrwxr-xr-x@ 12 dstern  staff     384 26 Mar 14:45 test\ndrwxr-xr-x@ 11 dstern  staff     352 26 Mar 15:09 test-results\n-rw-r--r--@  1 dstern  staff     765 26 Mar 14:45 tsconfig.json\n-rw-r--r--@  1 dstern  staff    2986 26 Mar 14:45 vite.config.ts\n-rw-r--r--@  1 dstern  staff    1713 26 Mar 14:45 vitest.config.ts\n-rw-r--r--@  1 dstern  staff     424 26 Mar 14:45 vitest.contract.config.ts\n-rw-r--r--@  1 dstern  staff     322 26 Mar 14:45 vitest.integration.config.ts\n",
+						"description": "List files in current directory"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01YAH8QxedE9G8ryPASGtcvJ",
+					"content": "total 928\ndrwxr-xr-x@ 32 dstern  staff    1024 26 Mar 15:04 .\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 ..\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:47 .conduit\n-rw-r--r--@  1 dstern  staff      95 26 Mar 14:45 .git\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:45 .github\n-rw-r--r--@  1 dstern  staff     200 26 Mar 14:45 .gitignore\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:58 .opencode\n-rw-r--r--@  1 dstern  staff       6 26 Mar 14:45 .opencode-version\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 .storybook\n-rw-r--r--@  1 dstern  staff    3267 26 Mar 14:45 AGENTS.md\n-rw-r--r--@  1 dstern  staff     859 26 Mar 14:45 biome.json\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:47 dist\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:45 docs\n-rw-r--r--@  1 dstern  staff     156 26 Mar 14:45 lefthook.yml\n-rw-r--r--@  1 dstern  staff    1065 26 Mar 14:45 LICENSE\ndrwxr-xr-x@  8 dstern  staff     256 26 Mar 14:45 media\ndrwxr-xr-x@ 43 dstern  staff    1376 26 Mar 14:47 node_modules\n-rw-r--r--@  1 dstern  staff     103 26 Mar 14:45 opencode.jsonc\n-rw-r--r--@  1 dstern  staff  223161 26 Mar 14:45 package-lock.json\n-rw-r--r--@  1 dstern  staff    5552 26 Mar 14:45 package.json\n-rw-r--r--@  1 dstern  staff  171949 26 Mar 14:45 pnpm-lock.yaml\n-rw-r--r--@  1 dstern  staff   11411 26 Mar 14:45 README.md\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 14:45 scripts\ndrwxr-xr-x@  4 dstern  staff     128 26 Mar 14:45 src\n-rw-r--r--@  1 dstern  staff     296 26 Mar 14:45 svelte.config.js\ndrwxr-xr-x@ 12 dstern  staff     384 26 Mar 14:45 test\ndrwxr-xr-x@ 11 dstern  staff     352 26 Mar 15:09 test-results\n-rw-r--r--@  1 dstern  staff     765 26 Mar 14:45 tsconfig.json\n-rw-r--r--@  1 dstern  staff    2986 26 Mar 14:45 vite.config.ts\n-rw-r--r--@  1 dstern  staff    1713 26 Mar 14:45 vitest.config.ts\n-rw-r--r--@  1 dstern  staff     424 26 Mar 14:45 vitest.contract.config.ts\n-rw-r--r--@  1 dstern  staff     322 26 Mar 14:45 vitest.integration.config.ts\n",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 75,
+						"cache_read": 19347,
+						"cache_creation": 27
+					},
+					"cost": 0.01173225,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 75,
+						"cache_read": 19347,
+						"cache_creation": 27
+					},
+					"cost": 0.01173225,
+					"duration": 5830,
+					"sessionId": ""
 				},
 				{
 					"type": "result",
@@ -229,1060 +649,51 @@
 				},
 				{
 					"type": "delta",
-					"text": "5",
-					"messageId": "msg_d28671baf001BtwuAOM9NLnZMa"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18204,
-						"cache_creation": 19
-					},
-					"cost": 0.00936075,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18204,
-						"cache_creation": 19
-					},
-					"cost": 0.00936075,
-					"duration": 2824,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 6. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
+					"text": "Here's",
+					"messageId": "msg_d28660289001aahhdIRtRxLK6J"
 				},
 				{
 					"type": "delta",
-					"text": "6",
-					"messageId": "msg_d286728bf001lqIU8C7H28V1To"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18223,
-						"cache_creation": 19
-					},
-					"cost": 0.00937025,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18223,
-						"cache_creation": 19
-					},
-					"cost": 0.00937025,
-					"duration": 2444,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 7. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
+					"text": " the directory listing. It's a Node.js/SvelteKit project with ",
+					"messageId": "msg_d28660289001aahhdIRtRxLK6J"
 				},
 				{
 					"type": "delta",
-					"text": "7",
-					"messageId": "msg_d286734540017yxDoQO1PReaLR"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18242,
-						"cache_creation": 19
-					},
-					"cost": 0.00937975,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18242,
-						"cache_creation": 19
-					},
-					"cost": 0.00937975,
-					"duration": 2551,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 8. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
+					"text": "32 entries including source code (`src/`), tests (`test/`), documentation (`docs/`), build",
+					"messageId": "msg_d28660289001aahhdIRtRxLK6J"
 				},
 				{
 					"type": "delta",
-					"text": "8",
-					"messageId": "msg_d2867404b001rvPNyEu0NXIEvo"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18261,
-						"cache_creation": 19
-					},
-					"cost": 0.00938925,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18261,
-						"cache_creation": 19
-					},
-					"cost": 0.00938925,
-					"duration": 3681,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 9. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
+					"text": " output (`dist/`), Storybook config (`.storybook/`), and various config files for",
+					"messageId": "msg_d28660289001aahhdIRtRxLK6J"
 				},
 				{
 					"type": "delta",
-					"text": "9",
-					"messageId": "msg_d286750b7001GPlkDdIFFOZLIc"
+					"text": " Vite, Vitest, TypeScript, Biome, and Svelte.",
+					"messageId": "msg_d28660289001aahhdIRtRxLK6J"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18280,
-						"cache_creation": 19
+						"input": 1,
+						"output": 91,
+						"cache_read": 19374,
+						"cache_creation": 1125
 					},
-					"cost": 0.00939875,
+					"cost": 0.01899825,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18280,
-						"cache_creation": 19
+						"input": 1,
+						"output": 91,
+						"cache_read": 19374,
+						"cache_creation": 1125
 					},
-					"cost": 0.00939875,
-					"duration": 4790,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 10. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "10",
-					"messageId": "msg_d2867657c0017qeUYee5XaYwEX"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18299,
-						"cache_creation": 19
-					},
-					"cost": 0.00940825,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18299,
-						"cache_creation": 19
-					},
-					"cost": 0.00940825,
-					"duration": 3154,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 11. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "11",
-					"messageId": "msg_d286773d00016gxaj6CwZtZ7AI"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18304,
-						"cache_creation": 33
-					},
-					"cost": 0.00949825,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18304,
-						"cache_creation": 33
-					},
-					"cost": 0.00949825,
-					"duration": 2839,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 12. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "12",
-					"messageId": "msg_d286780e7001Adatmt7j3mXQEJ"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18318,
-						"cache_creation": 38
-					},
-					"cost": 0.0095365,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18318,
-						"cache_creation": 38
-					},
-					"cost": 0.0095365,
-					"duration": 3394,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 13. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "13",
-					"messageId": "msg_d2867902d001WYAhWoR0ljeVAH"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18342,
-						"cache_creation": 33
-					},
-					"cost": 0.00951725,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18342,
-						"cache_creation": 33
-					},
-					"cost": 0.00951725,
-					"duration": 2564,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 14. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "14",
-					"messageId": "msg_d28679c34001JC60w4Un4aUnMT"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18361,
-						"cache_creation": 33
-					},
-					"cost": 0.00952675,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18361,
-						"cache_creation": 33
-					},
-					"cost": 0.00952675,
-					"duration": 3770,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 15. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "15",
-					"messageId": "msg_d2867ad02001TlT5yB5n7LhN15"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18394,
-						"cache_creation": 19
-					},
-					"cost": 0.00945575,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18394,
-						"cache_creation": 19
-					},
-					"cost": 0.00945575,
-					"duration": 2597,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 16. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "16",
-					"messageId": "msg_d2867b92c001M7ME9BaL6m41Io"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18413,
-						"cache_creation": 19
-					},
-					"cost": 0.00946525,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18413,
-						"cache_creation": 19
-					},
-					"cost": 0.00946525,
-					"duration": 3334,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 17. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "17",
-					"messageId": "msg_d2867c837001jUVIpgOi5yyn1q"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18432,
-						"cache_creation": 19
-					},
-					"cost": 0.00947475,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18432,
-						"cache_creation": 19
-					},
-					"cost": 0.00947475,
-					"duration": 2284,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 18. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "18",
-					"messageId": "msg_d2867d323001cLIaAx14w3EsKo"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18437,
-						"cache_creation": 33
-					},
-					"cost": 0.00956475,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18437,
-						"cache_creation": 33
-					},
-					"cost": 0.00956475,
-					"duration": 2716,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 19. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "19",
-					"messageId": "msg_d2867dfc3001urx1bWKqQ4OYOm"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18470,
-						"cache_creation": 19
-					},
-					"cost": 0.00949375,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18470,
-						"cache_creation": 19
-					},
-					"cost": 0.00949375,
-					"duration": 2527,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 20. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "20",
-					"messageId": "msg_d2867ebae001D5ZQol5dCG9thS"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18489,
-						"cache_creation": 19
-					},
-					"cost": 0.00950325,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18489,
-						"cache_creation": 19
-					},
-					"cost": 0.00950325,
-					"duration": 3450,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 21. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "21",
-					"messageId": "msg_d2867fb2b001EscOM2FEVInj3i"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18508,
-						"cache_creation": 19
-					},
-					"cost": 0.00951275,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18508,
-						"cache_creation": 19
-					},
-					"cost": 0.00951275,
-					"duration": 3088,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 22. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "22",
-					"messageId": "msg_d28680941001EShA4n5SWAdW9x"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18513,
-						"cache_creation": 33
-					},
-					"cost": 0.00960275,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18513,
-						"cache_creation": 33
-					},
-					"cost": 0.00960275,
-					"duration": 4446,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 23. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "23",
-					"messageId": "msg_d28681ca7001gMLIAU9cbzBNdc"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18546,
-						"cache_creation": 19
-					},
-					"cost": 0.00953175,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18546,
-						"cache_creation": 19
-					},
-					"cost": 0.00953175,
-					"duration": 2826,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 24. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "24",
-					"messageId": "msg_d286829b3001zryc13nLlr7Bnj"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18565,
-						"cache_creation": 19
-					},
-					"cost": 0.00954125,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18565,
-						"cache_creation": 19
-					},
-					"cost": 0.00954125,
-					"duration": 2757,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 25. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "25",
-					"messageId": "msg_d2868367c001I0bU1TawiXR4fO"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18584,
-						"cache_creation": 19
-					},
-					"cost": 0.00955075,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18584,
-						"cache_creation": 19
-					},
-					"cost": 0.00955075,
-					"duration": 3116,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "user_message",
-					"text": "Reply with just the number 26. Nothing else."
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "delta",
-					"text": "26",
-					"messageId": "msg_d286844ab0017ZvlFNurHLWfoP"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18603,
-						"cache_creation": 19
-					},
-					"cost": 0.00956025,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 5,
-						"cache_read": 18603,
-						"cache_creation": 19
-					},
-					"cost": 0.00956025,
-					"duration": 1696,
+					"cost": 0.01899825,
+					"duration": 4142,
 					"sessionId": ""
 				},
 				{
@@ -1303,18 +714,6 @@
 		{
 			"type": "session_list",
 			"sessions": [
-				{
-					"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-					"title": "Number 1 response",
-					"updatedAt": 1774499416921,
-					"messageCount": 0
-				},
-				{
-					"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-					"title": "Create /tmp/e2e-test-diff.txt file",
-					"updatedAt": 1774499310710,
-					"messageCount": 0
-				},
 				{
 					"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
 					"title": "Memory test: banana",
@@ -1357,18 +756,6 @@
 		{
 			"type": "session_list",
 			"sessions": [
-				{
-					"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-					"title": "Number 1 response",
-					"updatedAt": 1774499416921,
-					"messageCount": 0
-				},
-				{
-					"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-					"title": "Create /tmp/e2e-test-diff.txt file",
-					"updatedAt": 1774499310710,
-					"messageCount": 0
-				},
 				{
 					"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
 					"title": "Memory test: banana",
@@ -1820,7 +1207,7 @@
 	],
 	"turns": [
 		{
-			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"prompt": "Create a file called /tmp/e2e-test-diff.txt with the text 'hello world'",
 			"events": [
 				{
 					"type": "status",
@@ -1842,21 +1229,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "New session - 2026-03-26T04:30:20.031Z",
-							"updatedAt": 1774499421066,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"title": "New session - 2026-03-26T04:27:55.136Z",
+							"updatedAt": 1774499276174,
 							"messageCount": 0
 						},
 						{
@@ -1902,21 +1277,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "New session - 2026-03-26T04:30:20.031Z",
-							"updatedAt": 1774499421066,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"title": "New session - 2026-03-26T04:27:55.136Z",
+							"updatedAt": 1774499276174,
 							"messageCount": 0
 						},
 						{
@@ -1962,21 +1325,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "New session - 2026-03-26T04:30:20.031Z",
-							"updatedAt": 1774499421066,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"title": "New session - 2026-03-26T04:27:55.136Z",
+							"updatedAt": 1774499276174,
 							"messageCount": 0
 						},
 						{
@@ -2022,21 +1373,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "New session - 2026-03-26T04:30:20.031Z",
-							"updatedAt": 1774499421066,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"title": "New session - 2026-03-26T04:27:55.136Z",
+							"updatedAt": 1774499276174,
 							"messageCount": 0
 						},
 						{
@@ -2082,23 +1421,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "New session - 2026-03-26T04:30:20.031Z",
-							"updatedAt": 1774499421066,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "New session - 2026-03-26T04:27:55.136Z",
+							"updatedAt": 1774499276174,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
-							"messageCount": 0
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -2147,23 +1474,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "New session - 2026-03-26T04:30:20.031Z",
-							"updatedAt": 1774499421066,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "New session - 2026-03-26T04:27:55.136Z",
+							"updatedAt": 1774499276174,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
-							"messageCount": 0
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -2208,23 +1523,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499421066,
-							"messageCount": 0,
-							"processing": true
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
-							"messageCount": 0
+							"updatedAt": 1774499276174,
+							"messageCount": 0,
+							"processing": true
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -2269,23 +1572,472 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499421066,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499276174,
 							"messageCount": 0,
 							"processing": true
 						},
 						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
 							"messageCount": 0
 						},
 						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01VX1tqaM9GPfzQEjT4pxdNB",
+					"name": "Write"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01VX1tqaM9GPfzQEjT4pxdNB",
+					"name": "Write",
+					"input": {
+						"filePath": "/tmp/e2e-test-diff.txt",
+						"content": "hello world"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01VX1tqaM9GPfzQEjT4pxdNB",
+					"content": "You must read file /tmp/e2e-test-diff.txt before overwriting it. Use the Read tool first",
+					"is_error": true
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 82,
+						"cache_read": 17817,
+						"cache_creation": 343
+					},
+					"cost": 0.01311725,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 82,
+						"cache_read": 17817,
+						"cache_creation": 343
+					},
+					"cost": 0.01311725,
+					"duration": 3915,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499280089,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
 							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499280089,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01QPWspaW4UPvBSgKd5DNtaq",
+					"name": "Read"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01QPWspaW4UPvBSgKd5DNtaq",
+					"name": "Read",
+					"input": {
+						"filePath": "/tmp/e2e-test-diff.txt"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01QPWspaW4UPvBSgKd5DNtaq",
+					"content": "<path>/tmp/e2e-test-diff.txt</path>\n<type>file</type>\n<content>1: goodbye world\n\n(End of file - total 1 lines)\n</content>",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 1,
+						"output": 63,
+						"cache_read": 18160,
+						"cache_creation": 130
+					},
+					"cost": 0.0114725,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 1,
+						"output": 63,
+						"cache_read": 18160,
+						"cache_creation": 130
+					},
+					"cost": 0.0114725,
+					"duration": 2446,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499282534,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499282534,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01LhRorZT36SdkG9Tj2LbAo5",
+					"name": "Write"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01LhRorZT36SdkG9Tj2LbAo5",
+					"name": "Write",
+					"input": {
+						"filePath": "/tmp/e2e-test-diff.txt",
+						"content": "hello world"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01LhRorZT36SdkG9Tj2LbAo5",
+					"content": "Wrote file successfully.",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 1,
+						"output": 81,
+						"cache_read": 18290,
+						"cache_creation": 122
+					},
+					"cost": 0.0119375,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 1,
+						"output": 81,
+						"cache_read": 18290,
+						"cache_creation": 122
+					},
+					"cost": 0.0119375,
+					"duration": 3598,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499286135,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499286135,
+							"messageCount": 0,
+							"processing": true
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -2328,57 +2080,45 @@
 				},
 				{
 					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d28685b82001HuYvamqirc3RdA"
+					"text": "Done",
+					"messageId": "msg_d28664c6700127KkWwoP05IB6a"
 				},
 				{
 					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d28685b82001HuYvamqirc3RdA"
+					"text": ". `/tmp/e2e-test-diff.txt` now contains `hello world`.",
+					"messageId": "msg_d28664c6700127KkWwoP05IB6a"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 17817,
-						"cache_creation": 334
+						"input": 1,
+						"output": 24,
+						"cache_read": 18290,
+						"cache_creation": 219
 					},
-					"cost": 0.011186,
+					"cost": 0.01111875,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 17817,
-						"cache_creation": 334
+						"input": 1,
+						"output": 24,
+						"cache_read": 18290,
+						"cache_creation": 219
 					},
-					"cost": 0.011186,
-					"duration": 2919,
+					"cost": 0.01111875,
+					"duration": 2383,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499423979,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499288504,
 							"messageCount": 0
 						},
 						{
@@ -2428,21 +2168,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499423979,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499288504,
 							"messageCount": 0
 						},
 						{
@@ -2488,21 +2216,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499423990,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499288517,
 							"messageCount": 0
 						},
 						{
@@ -2548,21 +2264,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499423990,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499288517,
 							"messageCount": 0
 						},
 						{
@@ -2607,7 +2311,7 @@
 			]
 		},
 		{
-			"prompt": "Now remember 'beta' too. Reply with only: ok, remembered.",
+			"prompt": "Edit the file /tmp/e2e-test-diff.txt and change 'hello' to 'goodbye'",
 			"events": [
 				{
 					"type": "status",
@@ -2629,21 +2333,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499424500,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499289041,
 							"messageCount": 0
 						},
 						{
@@ -2689,21 +2381,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499424500,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499289041,
 							"messageCount": 0
 						},
 						{
@@ -2749,21 +2429,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499424500,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499289041,
 							"messageCount": 0
 						},
 						{
@@ -2809,21 +2477,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499424500,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499289041,
 							"messageCount": 0
 						},
 						{
@@ -2869,23 +2525,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499424500,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499289041,
 							"messageCount": 0,
 							"processing": true
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
-							"messageCount": 0
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -2934,23 +2578,187 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499424500,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499289041,
 							"messageCount": 0,
 							"processing": true
 						},
 						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
 							"messageCount": 0
 						},
 						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01MGj76JbKfaopyKCau9H4NF",
+					"name": "Edit"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01MGj76JbKfaopyKCau9H4NF",
+					"name": "Edit",
+					"input": {
+						"filePath": "/tmp/e2e-test-diff.txt",
+						"oldString": "hello",
+						"newString": "goodbye"
+					}
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01MGj76JbKfaopyKCau9H4NF",
+					"name": "Edit",
+					"input": {
+						"filePath": "/tmp/e2e-test-diff.txt",
+						"oldString": "hello",
+						"newString": "goodbye"
+					},
+					"metadata": {
+						"diff": "Index: /tmp/e2e-test-diff.txt\n===================================================================\n--- /tmp/e2e-test-diff.txt\n+++ /tmp/e2e-test-diff.txt\n@@ -1,1 +1,1 @@\n-hello world\n\\ No newline at end of file\n+goodbye world\n\\ No newline at end of file\n",
+						"filediff": {
+							"file": "/tmp/e2e-test-diff.txt",
+							"before": "hello world",
+							"after": "goodbye world",
+							"additions": 1,
+							"deletions": 1
+						},
+						"diagnostics": {}
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01MGj76JbKfaopyKCau9H4NF",
+					"content": "Edit applied successfully.",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 100,
+						"cache_read": 18509,
+						"cache_creation": 51
+					},
+					"cost": 0.01208825,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 100,
+						"cache_read": 18509,
+						"cache_creation": 51
+					},
+					"cost": 0.01208825,
+					"duration": 2875,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499291918,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
 							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499291918,
+							"messageCount": 0,
+							"processing": true
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -2993,57 +2801,45 @@
 				},
 				{
 					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d286868ee001ypIGwDXBZ8zE79"
+					"text": "Done. The",
+					"messageId": "msg_d286662fe0019ZWms9R9iUh345"
 				},
 				{
 					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d286868ee001ypIGwDXBZ8zE79"
+					"text": " file now contains `goodbye world`.",
+					"messageId": "msg_d286662fe0019ZWms9R9iUh345"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 18151,
-						"cache_creation": 26
+						"input": 1,
+						"output": 13,
+						"cache_read": 18560,
+						"cache_creation": 117
 					},
-					"cost": 0.009428,
+					"cost": 0.01034125,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 18151,
-						"cache_creation": 26
+						"input": 1,
+						"output": 13,
+						"cache_read": 18560,
+						"cache_creation": 117
 					},
-					"cost": 0.009428,
-					"duration": 3584,
+					"cost": 0.01034125,
+					"duration": 2650,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428080,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499294554,
 							"messageCount": 0
 						},
 						{
@@ -3093,21 +2889,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428080,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499294554,
 							"messageCount": 0
 						},
 						{
@@ -3153,21 +2937,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499294565,
 							"messageCount": 0
 						},
 						{
@@ -3213,21 +2985,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499294565,
 							"messageCount": 0
 						},
 						{
@@ -3272,7 +3032,7 @@
 			]
 		},
 		{
-			"prompt": "What words did I ask you to remember? Reply with just the words.",
+			"prompt": "Read the file /tmp/e2e-test-diff.txt and tell me its contents",
 			"events": [
 				{
 					"type": "status",
@@ -3294,29 +3054,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499430143,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499295097,
 							"messageCount": 0
 						},
 						{
@@ -3362,29 +3102,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499430143,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499295097,
 							"messageCount": 0
 						},
 						{
@@ -3430,29 +3150,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499430143,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499295097,
 							"messageCount": 0
 						},
 						{
@@ -3498,29 +3198,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499430143,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499295097,
 							"messageCount": 0
 						},
 						{
@@ -3566,31 +3246,11 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499430143,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499295097,
 							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8",
 							"processing": true
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
-							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
-							"messageCount": 0
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -3639,31 +3299,164 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499430143,
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499295097,
 							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8",
 							"processing": true
 						},
 						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
 							"messageCount": 0
 						},
 						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
 							"messageCount": 0
 						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "tool_start",
+					"id": "toolu_01V4LCqWa4KCdf15E9vUfcSo",
+					"name": "Read"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01V4LCqWa4KCdf15E9vUfcSo",
+					"name": "Read",
+					"input": {
+						"filePath": "/tmp/e2e-test-diff.txt"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01V4LCqWa4KCdf15E9vUfcSo",
+					"content": "<path>/tmp/e2e-test-diff.txt</path>\n<type>file</type>\n<content>1: goodbye world\n\n(End of file - total 1 lines)\n</content>",
+					"is_error": false
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 64,
+						"cache_read": 18677,
+						"cache_creation": 34
+					},
+					"cost": 0.011166,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3,
+						"output": 64,
+						"cache_read": 18677,
+						"cache_creation": 34
+					},
+					"cost": 0.011166,
+					"duration": 3099,
+					"sessionId": ""
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cache_read": 0,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 0,
+					"sessionId": ""
+				},
+				{
+					"type": "session_list",
+					"sessions": [
 						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499298196,
+							"messageCount": 0,
+							"processing": true
+						},
+						{
+							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
+							"title": "Memory test: banana",
+							"updatedAt": 1774499271395,
 							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b6887ffeoKDfwmvGCBzTZn",
+							"title": "Greet function implementation",
+							"updatedAt": 1774499198814,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b7c4effemrmUXXS02lp3FD",
+							"title": "Greeting",
+							"updatedAt": 1774499173761,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b8afbffe8D3k2yRTx8o1va",
+							"title": "ok",
+							"updatedAt": 1774499168700,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79b9b79ffej8g4E0UrVXNL01",
+							"title": "Pong response",
+							"updatedAt": 1774499164940,
+							"messageCount": 0
+						},
+						{
+							"id": "ses_2d79bb4e2ffeohCp3OvPPkZXfM",
+							"title": "Greeting",
+							"updatedAt": 1774499160714,
+							"messageCount": 0
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
+							"title": "Create /tmp/e2e-test-diff.txt file",
+							"updatedAt": 1774499298196,
+							"messageCount": 0,
+							"processing": true
 						},
 						{
 							"id": "ses_2d79afa42ffe3W3RsfM9Kukm2U",
@@ -3706,65 +3499,45 @@
 				},
 				{
 					"type": "delta",
-					"text": "alpha",
-					"messageId": "msg_d28687ef1001mRo72kVldLjK57"
+					"text": "The",
+					"messageId": "msg_d28667b86001TPaZ25EImgpy1R"
 				},
 				{
 					"type": "delta",
-					"text": ", beta",
-					"messageId": "msg_d28687ef1001mRo72kVldLjK57"
+					"text": " file contains `goodbye world`.",
+					"messageId": "msg_d28667b86001TPaZ25EImgpy1R"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
+						"input": 1,
+						"output": 10,
+						"cache_read": 18711,
+						"cache_creation": 125
 					},
-					"cost": 0.00940975,
+					"cost": 0.01039175,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
+						"input": 1,
+						"output": 10,
+						"cache_read": 18711,
+						"cache_creation": 125
 					},
-					"cost": 0.00940975,
-					"duration": 3683,
+					"cost": 0.01039175,
+					"duration": 2921,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499433814,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499301106,
 							"messageCount": 0
 						},
 						{
@@ -3814,29 +3587,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499433826,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499301106,
 							"messageCount": 0
 						},
 						{
@@ -3882,29 +3635,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499433826,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499301118,
 							"messageCount": 0
 						},
 						{
@@ -3950,29 +3683,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d7978710ffeIhe5vUYxhIrM1a",
-							"title": "Remembering alpha (fork #1)",
-							"updatedAt": 1774499433826,
-							"messageCount": 0,
-							"parentID": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"forkMessageId": "msg_d286878f0007BpBMWYagzKIYX8"
-						},
-						{
-							"id": "ses_2d797a880ffecTCzrs3cP1tLSb",
-							"title": "Remembering alpha",
-							"updatedAt": 1774499428091,
-							"messageCount": 0
-						},
-						{
-							"id": "ses_2d79944d1ffepEvVQscn2tf72h",
-							"title": "Number 1 response",
-							"updatedAt": 1774499416921,
-							"messageCount": 0
-						},
-						{
 							"id": "ses_2d799de7fffeL2pOrSUe0LB7Yj",
 							"title": "Create /tmp/e2e-test-diff.txt file",
-							"updatedAt": 1774499310710,
+							"updatedAt": 1774499301118,
 							"messageCount": 0
 						},
 						{
