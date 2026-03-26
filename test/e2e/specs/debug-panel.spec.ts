@@ -225,7 +225,7 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Count events in throttled mode
 		const logContainer = panel.locator(".overflow-y-auto");
-		const throttledCount = await logContainer.locator("> div.flex").count();
+		const throttledCount = await logContainer.locator("> div").count();
 		expect(throttledCount).toBeGreaterThan(0);
 
 		// Get total events from snapshot (includes throttled messages)
@@ -239,7 +239,7 @@ test.describe("Debug Panel — Panel Content", () => {
 		await expect(verboseBtn).toHaveText("verbose:on");
 
 		// Verbose count should be >= throttled count
-		const verboseCount = await logContainer.locator("> div.flex").count();
+		const verboseCount = await logContainer.locator("> div").count();
 		expect(verboseCount).toBeGreaterThanOrEqual(throttledCount);
 
 		// If there were non-sampled messages in the buffer, verbose shows more
@@ -250,7 +250,7 @@ test.describe("Debug Panel — Panel Content", () => {
 		// Toggle back should restore original count
 		await verboseBtn.click();
 		await expect(verboseBtn).toHaveText("verbose:off");
-		const restoredCount = await logContainer.locator("> div.flex").count();
+		const restoredCount = await logContainer.locator("> div").count();
 		expect(restoredCount).toBe(throttledCount);
 	});
 });
