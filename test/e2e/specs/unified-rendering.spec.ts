@@ -32,25 +32,17 @@ test.describe("Unified Rendering: No Duplication", () => {
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
 
-		// The recording starts by loading the latest session via events cache.
-		// The replayed events include a user_message, so wait for it to render
-		// before establishing the baseline count.
-		await page.locator(".msg-user").first().waitFor({
-			state: "visible",
-			timeout: 10_000,
-		});
+		// Baseline: no messages before first prompt
+		const usersBefore = await chat.userMessages.count();
+		const assistantsBefore = await chat.assistantMessages.count();
 
-		const usersBefore = await chat.getUserMessageCount();
-		const assistantsBefore = await page.locator(".msg-assistant").count();
-
-		// Send a prompt — triggers mock's SSE events for the next response
-		await app.sendMessage("Ping");
+		// Send a single message
+		await app.sendMessage("Show me a tool call");
 		await chat.waitForAssistantMessage();
 		await chat.waitForStreamingComplete();
 
-		// Exactly +1 user message and +1 assistant message — no duplicates
-		const usersAfter = await chat.getUserMessageCount();
-		const assistantsAfter = await page.locator(".msg-assistant").count();
+		const usersAfter = await chat.userMessages.count();
+		const assistantsAfter = await chat.assistantMessages.count();
 
 		expect(usersAfter).toBe(usersBefore + 1);
 		expect(assistantsAfter).toBe(assistantsBefore + 1);
@@ -68,11 +60,10 @@ test.describe("Unified Rendering: No Duplication", () => {
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
 
-		// Wait for session to load (user message from events replay)
-		await page.locator(".msg-user").first().waitFor({
-			state: "visible",
-			timeout: 10_000,
-		});
+		// Send a message to populate the DOM
+		await app.sendMessage("Show me a tool call");
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
 
 		// Send a prompt to add more content
 		await app.sendMessage("Ping");

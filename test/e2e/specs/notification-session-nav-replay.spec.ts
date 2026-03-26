@@ -8,7 +8,20 @@
 // Uses the `chat-simple` recording with `injectSSEEvents()` to inject
 // events that trigger notification broadcasts for unwatched sessions.
 
+import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
+import { loadOpenCodeRecording } from "../helpers/recorded-loader.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+
+/** Extract the session ID used in prompt_async calls from a recording. */
+function findTargetSessionId(recording: OpenCodeRecording): string | undefined {
+	for (const ix of recording.interactions) {
+		if (ix.kind === "rest" && ix.method === "POST") {
+			const match = /\/session\/([^/]+)\/prompt_async/.exec(ix.path);
+			if (match?.[1]) return match[1];
+		}
+	}
+	return undefined;
+}
 
 test.use({ recording: "chat-simple" });
 
@@ -135,7 +148,8 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		// The browser IS currently viewing this session (the target session
 		// from the chat-simple recording).
-		const watchedSession = mockServer.targetSessionId;
+		const recording = loadOpenCodeRecording("chat-simple");
+		const watchedSession = findTargetSessionId(recording);
 		expect(watchedSession).toBeTruthy();
 		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
 		const watchedId = watchedSession!;

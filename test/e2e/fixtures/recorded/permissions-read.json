@@ -1,7 +1,7 @@
 {
-	"name": "fork-session",
+	"name": "permissions-read",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T11:06:51.738Z",
+	"recordedAt": "2026-03-26T11:01:15.415Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,7 +13,7 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+			"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
 			"history": {
 				"messages": [],
 				"hasMore": false,
@@ -33,9 +33,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-					"title": "New session - 2026-03-26T11:06:32.746Z",
-					"updatedAt": 1774523192746,
+					"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+					"title": "New session - 2026-03-26T11:00:59.078Z",
+					"updatedAt": 1774522859078,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +45,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-					"title": "New session - 2026-03-26T11:06:32.746Z",
-					"updatedAt": 1774523192746,
+					"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+					"title": "New session - 2026-03-26T11:00:59.078Z",
+					"updatedAt": 1774522859078,
 					"messageCount": 0
 				}
 			],
@@ -465,7 +465,7 @@
 	],
 	"turns": [
 		{
-			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"prompt": "Read the file package.json and tell me the name field",
 			"events": [
 				{
 					"type": "status",
@@ -487,9 +487,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "New session - 2026-03-26T11:00:59.078Z",
+							"updatedAt": 1774522861432,
 							"messageCount": 0
 						}
 					],
@@ -499,9 +499,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "New session - 2026-03-26T11:00:59.078Z",
+							"updatedAt": 1774522861432,
 							"messageCount": 0
 						}
 					],
@@ -511,9 +511,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "New session - 2026-03-26T11:00:59.078Z",
+							"updatedAt": 1774522861432,
 							"messageCount": 0
 						}
 					],
@@ -523,9 +523,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "New session - 2026-03-26T11:00:59.078Z",
+							"updatedAt": 1774522861432,
 							"messageCount": 0
 						}
 					],
@@ -535,9 +535,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "New session - 2026-03-26T11:00:59.078Z",
+							"updatedAt": 1774522861432,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -552,9 +552,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "New session - 2026-03-26T11:00:59.078Z",
+							"updatedAt": 1774522861432,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -565,9 +565,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522861432,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -578,9 +578,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522861432,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -588,24 +588,54 @@
 					"roots": false
 				},
 				{
-					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
+					"type": "tool_start",
+					"id": "toolu_018J8TMSx7gn871BUFV97tXS",
+					"name": "Read"
 				},
 				{
-					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
+					"type": "permission_request",
+					"sessionId": "ses_2d63201b9ffemvRtQeMiTShsXV",
+					"requestId": "per_d29ce1541001dWrxHGv5AItoYg",
+					"toolName": "read",
+					"toolInput": {
+						"patterns": [
+							"/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json"
+						],
+						"metadata": {}
+					},
+					"always": [
+						"*"
+					]
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_018J8TMSx7gn871BUFV97tXS",
+					"name": "Read",
+					"input": {
+						"filePath": "/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json",
+						"limit": 5
+					}
+				},
+				{
+					"type": "permission_resolved",
+					"requestId": "per_d29ce1541001dWrxHGv5AItoYg",
+					"decision": "once"
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_018J8TMSx7gn871BUFV97tXS",
+					"content": "<path>/Users/dstern/src/personal/opencode-relay/conduit/.worktrees/remove-mock-fallbacks/package.json</path>\n<type>file</type>\n<content>1: {\n2: \t\"name\": \"conduit-code\",\n3: \t\"version\": \"0.1.0\",\n4: \t\"type\": \"module\",\n5: \t\"license\": \"MIT\",\n\n(Showing lines 1-5 of 119. Use offset=6 to continue.)\n</content>",
+					"is_error": false
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 7,
-						"cache_read": 17817,
-						"cache_creation": 334
+						"output": 101,
+						"cache_read": 18148,
+						"cache_creation": 0
 					},
-					"cost": 0.011186,
+					"cost": 0.011614,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -613,74 +643,13 @@
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 7,
-						"cache_read": 17817,
-						"cache_creation": 334
+						"output": 101,
+						"cache_read": 18148,
+						"cache_creation": 0
 					},
-					"cost": 0.011186,
-					"duration": 3523,
+					"cost": 0.011614,
+					"duration": 6658,
 					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198597,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "Now remember 'beta' too. Reply with only: ok, remembered.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
 				},
 				{
 					"type": "result",
@@ -698,57 +667,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522868112,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -756,16 +677,12 @@
 					"roots": true
 				},
 				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522868112,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -774,286 +691,45 @@
 				},
 				{
 					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
+					"text": "The `",
+					"messageId": "msg_d29ce2161001hZOi8LXRDS1puB"
 				},
 				{
 					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
+					"text": "name` field is `\"conduit-code\"`.",
+					"messageId": "msg_d29ce2161001hZOi8LXRDS1puB"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 18151,
-						"cache_creation": 26
-					},
-					"cost": 0.009428,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 18151,
-						"cache_creation": 26
-					},
-					"cost": 0.009428,
-					"duration": 6025,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "What words did I ask you to remember? Reply with just the words.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
+						"input": 1,
+						"output": 17,
+						"cache_read": 18390,
 						"cache_creation": 0
 					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
-							"processing": true
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
-							"processing": true
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "delta",
-					"text": "alpha",
-					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
-				},
-				{
-					"type": "delta",
-					"text": ", beta",
-					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
-					},
-					"cost": 0.00940975,
+					"cost": 0.009625,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
+						"input": 1,
+						"output": 17,
+						"cache_read": 18390,
+						"cache_creation": 0
 					},
-					"cost": 0.00940975,
-					"duration": 4007,
+					"cost": 0.009625,
+					"duration": 6824,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211214,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522874892,
 							"messageCount": 0
 						}
 					],
@@ -1067,17 +743,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522874911,
 							"messageCount": 0
 						}
 					],
@@ -1087,17 +755,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522874911,
 							"messageCount": 0
 						}
 					],
@@ -1107,17 +767,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63201b9ffemvRtQeMiTShsXV",
+							"title": "package.json name field",
+							"updatedAt": 1774522874911,
 							"messageCount": 0
 						}
 					],

@@ -1,7 +1,7 @@
 {
-	"name": "fork-session",
+	"name": "chat-multi-turn",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T11:06:51.738Z",
+	"recordedAt": "2026-03-26T11:06:14.217Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,7 +13,7 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+			"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
 			"history": {
 				"messages": [],
 				"hasMore": false,
@@ -33,9 +33,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-					"title": "New session - 2026-03-26T11:06:32.746Z",
-					"updatedAt": 1774523192746,
+					"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+					"title": "New session - 2026-03-26T11:06:01.316Z",
+					"updatedAt": 1774523161316,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +45,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-					"title": "New session - 2026-03-26T11:06:32.746Z",
-					"updatedAt": 1774523192746,
+					"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+					"title": "New session - 2026-03-26T11:06:01.316Z",
+					"updatedAt": 1774523161316,
 					"messageCount": 0
 				}
 			],
@@ -465,7 +465,7 @@
 	],
 	"turns": [
 		{
-			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"prompt": "Remember the word 'banana'. Reply with only: ok, remembered.",
 			"events": [
 				{
 					"type": "status",
@@ -487,9 +487,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "New session - 2026-03-26T11:06:01.316Z",
+							"updatedAt": 1774523163668,
 							"messageCount": 0
 						}
 					],
@@ -499,9 +499,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "New session - 2026-03-26T11:06:01.316Z",
+							"updatedAt": 1774523163668,
 							"messageCount": 0
 						}
 					],
@@ -511,9 +511,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "New session - 2026-03-26T11:06:01.316Z",
+							"updatedAt": 1774523163668,
 							"messageCount": 0
 						}
 					],
@@ -523,9 +523,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "New session - 2026-03-26T11:06:01.316Z",
+							"updatedAt": 1774523163668,
 							"messageCount": 0
 						}
 					],
@@ -535,9 +535,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "New session - 2026-03-26T11:06:01.316Z",
+							"updatedAt": 1774523163668,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -552,9 +552,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "New session - 2026-03-26T11:06:01.316Z",
+							"updatedAt": 1774523163668,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -565,9 +565,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523163668,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -578,9 +578,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523163668,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -590,12 +590,12 @@
 				{
 					"type": "delta",
 					"text": "ok",
-					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
+					"messageId": "msg_d29d2a3fb0015yPLvr79y0oixP"
 				},
 				{
 					"type": "delta",
 					"text": ", remembered.",
-					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
+					"messageId": "msg_d29d2a3fb0015yPLvr79y0oixP"
 				},
 				{
 					"type": "result",
@@ -618,16 +618,16 @@
 						"cache_creation": 334
 					},
 					"cost": 0.011186,
-					"duration": 3523,
+					"duration": 4747,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198597,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168393,
 							"messageCount": 0
 						}
 					],
@@ -641,9 +641,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168406,
 							"messageCount": 0
 						}
 					],
@@ -653,9 +653,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168406,
 							"messageCount": 0
 						}
 					],
@@ -665,9 +665,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168406,
 							"messageCount": 0
 						}
 					],
@@ -676,7 +676,7 @@
 			]
 		},
 		{
-			"prompt": "Now remember 'beta' too. Reply with only: ok, remembered.",
+			"prompt": "What word did I ask you to remember? Reply with just the word.",
 			"events": [
 				{
 					"type": "status",
@@ -698,9 +698,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168918,
 							"messageCount": 0
 						}
 					],
@@ -710,9 +710,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168918,
 							"messageCount": 0
 						}
 					],
@@ -722,9 +722,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168918,
 							"messageCount": 0
 						}
 					],
@@ -734,9 +734,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168918,
 							"messageCount": 0
 						}
 					],
@@ -746,9 +746,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168918,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -763,9 +763,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523168918,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -774,23 +774,18 @@
 				},
 				{
 					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
-				},
-				{
-					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
+					"text": "banana",
+					"messageId": "msg_d29d2b891001Sdx6ZfMno2sW1f"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 7,
+						"output": 4,
 						"cache_read": 18151,
-						"cache_creation": 26
+						"cache_creation": 25
 					},
-					"cost": 0.009428,
+					"cost": 0.00934675,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -798,21 +793,21 @@
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 7,
+						"output": 4,
 						"cache_read": 18151,
-						"cache_creation": 26
+						"cache_creation": 25
 					},
-					"cost": 0.009428,
-					"duration": 6025,
+					"cost": 0.00934675,
+					"duration": 4772,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205143,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523173689,
 							"messageCount": 0
 						}
 					],
@@ -826,9 +821,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523173689,
 							"messageCount": 0
 						}
 					],
@@ -838,9 +833,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523173709,
 							"messageCount": 0
 						}
 					],
@@ -850,274 +845,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "What words did I ask you to remember? Reply with just the words.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
-							"processing": true
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
-							"processing": true
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "delta",
-					"text": "alpha",
-					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
-				},
-				{
-					"type": "delta",
-					"text": ", beta",
-					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
-					},
-					"cost": 0.00940975,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
-					},
-					"cost": 0.00940975,
-					"duration": 4007,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211214,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d62d651bffeRQyj6FB9dB4qs3",
+							"title": "Remember banana word",
+							"updatedAt": 1774523173709,
 							"messageCount": 0
 						}
 					],

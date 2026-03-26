@@ -1,7 +1,7 @@
 {
-	"name": "fork-session",
+	"name": "permissions-bash",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T11:06:51.738Z",
+	"recordedAt": "2026-03-26T11:02:20.335Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,7 +13,7 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
+			"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
 			"history": {
 				"messages": [],
 				"hasMore": false,
@@ -33,9 +33,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-					"title": "New session - 2026-03-26T11:06:32.746Z",
-					"updatedAt": 1774523192746,
+					"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+					"title": "New session - 2026-03-26T11:02:03.275Z",
+					"updatedAt": 1774522923275,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +45,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-					"title": "New session - 2026-03-26T11:06:32.746Z",
-					"updatedAt": 1774523192746,
+					"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+					"title": "New session - 2026-03-26T11:02:03.275Z",
+					"updatedAt": 1774522923275,
 					"messageCount": 0
 				}
 			],
@@ -465,7 +465,7 @@
 	],
 	"turns": [
 		{
-			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"prompt": "List the files in the current directory using bash: ls -la",
 			"events": [
 				{
 					"type": "status",
@@ -487,9 +487,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "New session - 2026-03-26T11:02:03.275Z",
+							"updatedAt": 1774522925623,
 							"messageCount": 0
 						}
 					],
@@ -499,9 +499,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "New session - 2026-03-26T11:02:03.275Z",
+							"updatedAt": 1774522925623,
 							"messageCount": 0
 						}
 					],
@@ -511,9 +511,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "New session - 2026-03-26T11:02:03.275Z",
+							"updatedAt": 1774522925623,
 							"messageCount": 0
 						}
 					],
@@ -523,9 +523,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "New session - 2026-03-26T11:02:03.275Z",
+							"updatedAt": 1774522925623,
 							"messageCount": 0
 						}
 					],
@@ -535,9 +535,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "New session - 2026-03-26T11:02:03.275Z",
+							"updatedAt": 1774522925623,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -552,9 +552,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "New session - 2026-03-26T11:06:32.746Z",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "New session - 2026-03-26T11:02:03.275Z",
+							"updatedAt": 1774522925623,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -565,9 +565,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522925623,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -578,9 +578,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523195097,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522925623,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -588,24 +588,80 @@
 					"roots": false
 				},
 				{
-					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
+					"type": "permission_request",
+					"sessionId": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+					"requestId": "per_d29cf1392001FjVN9rKVTeUULm",
+					"toolName": "bash",
+					"toolInput": {
+						"patterns": [
+							"ls -la"
+						],
+						"metadata": {}
+					},
+					"always": [
+						"ls *"
+					]
 				},
 				{
-					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d29d31ebf001oKpNqqbBvjigLa"
+					"type": "tool_start",
+					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"name": "Bash"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"name": "Bash",
+					"input": {
+						"command": "ls -la",
+						"description": "Lists files in current directory"
+					}
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"name": "Bash",
+					"input": {
+						"command": "ls -la",
+						"description": "Lists files in current directory"
+					},
+					"metadata": {
+						"output": "",
+						"description": "Lists files in current directory"
+					}
+				},
+				{
+					"type": "permission_resolved",
+					"requestId": "per_d29cf1392001FjVN9rKVTeUULm",
+					"decision": "once"
+				},
+				{
+					"type": "tool_executing",
+					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"name": "Bash",
+					"input": {
+						"command": "ls -la",
+						"description": "Lists files in current directory"
+					},
+					"metadata": {
+						"output": "total 936\ndrwxr-xr-x@ 33 dstern  staff    1056 26 Mar 22:02 .\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 17:35 ..\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:47 .conduit\n-rw-r--r--@  1 dstern  staff      95 26 Mar 14:45 .git\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:45 .github\n-rw-r--r--@  1 dstern  staff     200 26 Mar 14:45 .gitignore\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:58 .opencode\n-rw-r--r--@  1 dstern  staff       6 26 Mar 14:45 .opencode-version\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 .storybook\n-rw-r--r--@  1 dstern  staff    3267 26 Mar 14:45 AGENTS.md\n-rw-r--r--@  1 dstern  staff     917 26 Mar 15:31 biome.json\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:47 dist\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:45 docs\n-rw-r--r--@  1 dstern  staff     156 26 Mar 14:45 lefthook.yml\n-rw-r--r--@  1 dstern  staff    1065 26 Mar 14:45 LICENSE\ndrwxr-xr-x@  8 dstern  staff     256 26 Mar 14:45 media\ndrwxr-xr-x@ 43 dstern  staff    1376 26 Mar 14:47 node_modules\n-rw-r--r--@  1 dstern  staff     138 26 Mar 22:02 opencode.json\n-rw-r--r--@  1 dstern  staff     103 26 Mar 14:45 opencode.jsonc\n-rw-r--r--@  1 dstern  staff  223161 26 Mar 14:45 package-lock.json\n-rw-r--r--@  1 dstern  staff    5552 26 Mar 14:45 package.json\n-rw-r--r--@  1 dstern  staff  171949 26 Mar 14:45 pnpm-lock.yaml\n-rw-r--r--@  1 dstern  staff   11411 26 Mar 14:45 README.md\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 14:45 scripts\ndrwxr-xr-x@  4 dstern  staff     128 26 Mar 14:45 src\n-rw-r--r--@  1 dstern  staff     296 26 Mar 14:45 svelte.config.js\ndrwxr-xr-x@ 12 dstern  staff     384 26 Mar 14:45 test\ndrwxr-xr-x@ 10 dstern  staff     320 26 Mar 21:20 test-results\n-rw-r--r--@  1 dstern  staff     765 26 Mar 14:45 tsconfig.json\n-rw-r--r--@  1 dstern  staff    2986 26 Mar 14:45 vite.config.ts\n-rw-r--r--@  1 dstern  staff    1713 26 Mar 14:45 vitest.config.ts\n-rw-r--r--@  1 dstern  staff     424 26 Mar 14:45 vitest.contract.config.ts\n-rw-r--r--@  1 dstern  staff     322 26 Mar 14:45 vitest.integration.config.ts\n",
+						"description": "Lists files in current directory"
+					}
+				},
+				{
+					"type": "tool_result",
+					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"content": "total 936\ndrwxr-xr-x@ 33 dstern  staff    1056 26 Mar 22:02 .\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 17:35 ..\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:47 .conduit\n-rw-r--r--@  1 dstern  staff      95 26 Mar 14:45 .git\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:45 .github\n-rw-r--r--@  1 dstern  staff     200 26 Mar 14:45 .gitignore\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:58 .opencode\n-rw-r--r--@  1 dstern  staff       6 26 Mar 14:45 .opencode-version\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 .storybook\n-rw-r--r--@  1 dstern  staff    3267 26 Mar 14:45 AGENTS.md\n-rw-r--r--@  1 dstern  staff     917 26 Mar 15:31 biome.json\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:47 dist\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:45 docs\n-rw-r--r--@  1 dstern  staff     156 26 Mar 14:45 lefthook.yml\n-rw-r--r--@  1 dstern  staff    1065 26 Mar 14:45 LICENSE\ndrwxr-xr-x@  8 dstern  staff     256 26 Mar 14:45 media\ndrwxr-xr-x@ 43 dstern  staff    1376 26 Mar 14:47 node_modules\n-rw-r--r--@  1 dstern  staff     138 26 Mar 22:02 opencode.json\n-rw-r--r--@  1 dstern  staff     103 26 Mar 14:45 opencode.jsonc\n-rw-r--r--@  1 dstern  staff  223161 26 Mar 14:45 package-lock.json\n-rw-r--r--@  1 dstern  staff    5552 26 Mar 14:45 package.json\n-rw-r--r--@  1 dstern  staff  171949 26 Mar 14:45 pnpm-lock.yaml\n-rw-r--r--@  1 dstern  staff   11411 26 Mar 14:45 README.md\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 14:45 scripts\ndrwxr-xr-x@  4 dstern  staff     128 26 Mar 14:45 src\n-rw-r--r--@  1 dstern  staff     296 26 Mar 14:45 svelte.config.js\ndrwxr-xr-x@ 12 dstern  staff     384 26 Mar 14:45 test\ndrwxr-xr-x@ 10 dstern  staff     320 26 Mar 21:20 test-results\n-rw-r--r--@  1 dstern  staff     765 26 Mar 14:45 tsconfig.json\n-rw-r--r--@  1 dstern  staff    2986 26 Mar 14:45 vite.config.ts\n-rw-r--r--@  1 dstern  staff    1713 26 Mar 14:45 vitest.config.ts\n-rw-r--r--@  1 dstern  staff     424 26 Mar 14:45 vitest.contract.config.ts\n-rw-r--r--@  1 dstern  staff     322 26 Mar 14:45 vitest.integration.config.ts\n",
+					"is_error": false
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 7,
+						"output": 75,
 						"cache_read": 17817,
-						"cache_creation": 334
+						"cache_creation": 332
 					},
-					"cost": 0.011186,
+					"cost": 0.0128735,
 					"duration": 0,
 					"sessionId": ""
 				},
@@ -613,74 +669,13 @@
 					"type": "result",
 					"usage": {
 						"input": 3,
-						"output": 7,
+						"output": 75,
 						"cache_read": 17817,
-						"cache_creation": 334
+						"cache_creation": 332
 					},
-					"cost": 0.011186,
-					"duration": 3523,
+					"cost": 0.0128735,
+					"duration": 7562,
 					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198597,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523198617,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "Now remember 'beta' too. Reply with only: ok, remembered.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
 				},
 				{
 					"type": "result",
@@ -698,57 +693,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522933168,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -756,16 +703,12 @@
 					"roots": true
 				},
 				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523199120,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522933193,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -774,45 +717,70 @@
 				},
 				{
 					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
+					"text": "Here's",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
 				},
 				{
 					"type": "delta",
-					"text": ", remembered.",
-					"messageId": "msg_d29d32e8b0016hxz3lTflIbkne"
+					"text": " the directory listing. This is a Node.js/TypeScript project (cond",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+				},
+				{
+					"type": "delta",
+					"text": "uit) with:\n\n- **Source code** in `src/` and `test/`",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+				},
+				{
+					"type": "delta",
+					"text": "\n- **Config files**: `package.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `biome.json`, `sv",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+				},
+				{
+					"type": "delta",
+					"text": "elte.config.js`\n- **Documentation** in `docs/` and `AGENTS.md`\n- **Build output** in `dist/`\n- **Dependencies",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+				},
+				{
+					"type": "delta",
+					"text": "** in `node_modules/`\n- **OpenCode config** in `.opencode/`, `opencode.json`, `opencode.jsonc`",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+				},
+				{
+					"type": "delta",
+					"text": "\n- **Scripts** in `scripts/`\n- **Storybook** config in `.storybook/`\n- **Test results** in `test-results/`",
+					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 18151,
-						"cache_creation": 26
+						"input": 1,
+						"output": 193,
+						"cache_read": 18149,
+						"cache_creation": 1157
 					},
-					"cost": 0.009428,
+					"cost": 0.02113575,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 7,
-						"cache_read": 18151,
-						"cache_creation": 26
+						"input": 1,
+						"output": 193,
+						"cache_read": 18149,
+						"cache_creation": 1157
 					},
-					"cost": 0.009428,
-					"duration": 6025,
+					"cost": 0.02113575,
+					"duration": 6656,
 					"sessionId": ""
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205143,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522939822,
 							"messageCount": 0
 						}
 					],
@@ -826,9 +794,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522939822,
 							"messageCount": 0
 						}
 					],
@@ -838,9 +806,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522939822,
 							"messageCount": 0
 						}
 					],
@@ -850,274 +818,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "What words did I ask you to remember? Reply with just the words.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
-							"processing": true
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523207209,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d",
-							"processing": true
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "delta",
-					"text": "alpha",
-					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
-				},
-				{
-					"type": "delta",
-					"text": ", beta",
-					"messageId": "msg_d29d34e25001TjDYgWLYWK8y0W"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
-					},
-					"cost": 0.00940975,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 3,
-						"output": 6,
-						"cache_read": 18177,
-						"cache_creation": 25
-					},
-					"cost": 0.00940975,
-					"duration": 4007,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211214,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d62cb7d8ffeJfYsbyskKeraQO",
-							"title": "Memory test: alpha (fork #1)",
-							"updatedAt": 1774523211229,
-							"messageCount": 0,
-							"parentID": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"forkMessageId": "msg_d29d34829008Tb0q8inARnEU8d"
-						},
-						{
-							"id": "ses_2d62cea55ffeNSexrzpRxUaLdw",
-							"title": "Memory test: alpha",
-							"updatedAt": 1774523205164,
+							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+							"title": "Listing directory files with ls",
+							"updatedAt": 1774522939822,
 							"messageCount": 0
 						}
 					],

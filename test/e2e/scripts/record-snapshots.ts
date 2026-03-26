@@ -11,7 +11,7 @@
 //   E2E_PROVIDER  — provider ID to use (default: opencode)
 //   E2E_ALLOW_PAID — set to "1" to allow non-opencode providers (paid models)
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import WebSocket from "ws";
@@ -123,6 +123,12 @@ const SCENARIOS: ScenarioDefinition[] = [
 			"Write a single JavaScript function called greet that returns 'hello'. Reply with ONLY the code block, no explanation.",
 		],
 		multiTurn: false,
+	},
+	{
+		name: "chat-code-block",
+		prompts: [
+			"Write a single JavaScript function called greet that takes a name parameter and returns a greeting string. Reply with ONLY the code block, no explanation.",
+		],
 	},
 	{
 		name: "chat-tool-call",
@@ -283,16 +289,20 @@ function recordTurn(
 				const msg = JSON.parse(String(data)) as MockMessage;
 				events.push(msg);
 
-				// Auto-approve permission requests
+				// Auto-approve permission requests after a short delay.
+				// The delay allows OpenCode's permission.asked SSE event to be
+				// captured in the recording before the approval clears it.
 				if (autoApprovePermissions && msg.type === "permission_request") {
 					const requestId = msg["requestId"] as string;
-					ws.send(
-						JSON.stringify({
-							type: "permission_response",
-							requestId,
-							decision: "allow",
-						}),
-					);
+					setTimeout(() => {
+						ws.send(
+							JSON.stringify({
+								type: "permission_response",
+								requestId,
+								decision: "allow",
+							}),
+						);
+					}, 3_000);
 				}
 
 				// Auto-approve ask_user questions (answer all with first option or "yes")
@@ -453,13 +463,40 @@ async function main(): Promise<void> {
 	}
 	console.log();
 
-	// 1. Spawn ephemeral OpenCode
+	// 1. Spawn ephemeral OpenCode with tool permissions set to "ask"
+	// so that permission.asked SSE events are captured in recordings.
+	// Non-permission scenarios send simple prompts that don't trigger
+	// tool calls, so this doesn't affect them.
+	const needsPermissions = scenarios.some((s) => s.needsPermissionApproval);
+	const permConfigPath = needsPermissions
+		? path.join(process.cwd(), "opencode.json")
+		: undefined;
+	if (permConfigPath) {
+		writeFileSync(
+			permConfigPath,
+			JSON.stringify(
+				{
+					$schema: "https://opencode.ai/config.json",
+					permission: {
+						read: "ask",
+						write: "ask",
+						edit: "ask",
+						bash: "ask",
+					},
+				},
+				null,
+				"\t",
+			),
+		);
+		console.log("Created temporary opencode.json with permission: ask");
+	}
+
 	console.log("Spawning ephemeral OpenCode...");
 	const opencode = await spawnOpenCode({ timeoutMs: 60_000 });
 	console.log(`  OpenCode running on port ${opencode.port}`);
 
-	let relayStack: Awaited<ReturnType<typeof createRelayStack>> | undefined;
 	const proxy = new RecordingProxy(opencode.url);
+	const verbose = process.env["VERBOSE"] === "1";
 
 	try {
 		// 2. Start recording proxy in front of OpenCode
@@ -467,175 +504,241 @@ async function main(): Promise<void> {
 		await proxy.start();
 		console.log(`  Proxy forwarding to OpenCode via ${proxy.url}`);
 
-		// 3. Create RelayStack (pointed at proxy, not OpenCode directly)
-		console.log("Creating RelayStack...");
-		const verbose = process.env["VERBOSE"] === "1";
-		relayStack = await createRelayStack({
-			port: 0, // Ephemeral port
-			opencodeUrl: proxy.url,
-			projectDir: process.cwd(),
-			slug: "e2e-record",
-			log: verbose ? createLogger("e2e-record") : createSilentLogger(),
-		});
-		const relayPort = relayStack.getPort();
-		console.log(`  Relay listening on port ${relayPort}`);
-
-		// 4. Switch to the recording model
-		console.log(`  Switching model to ${providerId}/${modelId}...`);
-		await switchModelViaWs(relayPort, modelId, providerId);
-		console.log("  Model switched.");
-
-		// 5. Ensure output directory exists
+		// 3. Ensure output directory exists
 		mkdirSync(FIXTURES_DIR, { recursive: true });
 
-		// 6. Record each scenario
+		// 4. Record each scenario (fresh relay per scenario to capture init sequence)
 		for (const scenario of scenarios) {
 			console.log(`\nRecording: ${scenario.name}`);
 			console.log(`  Prompts: ${scenario.prompts.length}`);
 
-			const ws = await connectWs(relayPort);
+			// Reset proxy BEFORE relay creation so the recording captures the
+			// full init sequence (GET /path, GET /config, GET /command, etc.)
+			proxy.reset();
 
+			let relayStack: Awaited<ReturnType<typeof createRelayStack>> | undefined;
 			try {
-				// Collect init messages
-				const initMessages = await collectMessages(ws, INIT_SETTLE_MS);
-				console.log(`  Init messages: ${initMessages.length}`);
+				// Create a fresh RelayStack for this scenario
+				console.log("  Creating RelayStack...");
+				relayStack = await createRelayStack({
+					port: 0, // Ephemeral port
+					opencodeUrl: proxy.url,
+					projectDir: process.cwd(),
+					slug: "e2e-record",
+					log: verbose ? createLogger("e2e-record") : createSilentLogger(),
+				});
+				const relayPort = relayStack.getPort();
+				console.log(`  Relay listening on port ${relayPort}`);
 
-				const turns: RecordedTurn[] = [];
+				// Switch to the recording model
+				console.log(`  Switching model to ${providerId}/${modelId}...`);
+				await switchModelViaWs(relayPort, modelId, providerId);
+				console.log("  Model switched.");
 
-				if (scenario.multiTurn) {
-					// Multi-turn: all prompts in the same session
-					// Request a fresh session for this scenario
-					await requestNewSession(ws);
+				const ws = await connectWs(relayPort);
 
-					// Wait for the new session's init to settle
-					await collectMessages(ws, 1_000);
+				try {
+					// Collect init messages
+					const initMessages = await collectMessages(ws, INIT_SETTLE_MS);
+					console.log(`  Init messages: ${initMessages.length}`);
 
-					for (let i = 0; i < scenario.prompts.length; i++) {
-						// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
-						const prompt = scenario.prompts[i]!;
-						console.log(
-							`  Turn ${i + 1}: "${prompt.slice(0, 50)}${prompt.length > 50 ? "..." : ""}"`,
-						);
-						const turn = await recordTurn(
-							ws,
-							prompt,
-							scenario.needsPermissionApproval === true,
-						);
-						console.log(`    Events: ${turn.events.length}`);
-						turns.push(turn);
-					}
+					const turns: RecordedTurn[] = [];
 
-					// Handle fork scenario: fork the session and send one more prompt
-					if (scenario.forkAfterPrompts && scenario.forkPrompt) {
-						console.log("  Forking session...");
-						const forkedId = await requestForkSession(ws);
-						console.log(`  Forked to: ${forkedId}`);
+					if (scenario.multiTurn) {
+						// Multi-turn: all prompts in the same session.
+						// The relay's init session is guaranteed fresh by
+						// inter-scenario session cleanup — no need to create
+						// a second session.
 
-						// Wait for fork to settle (session switch, list updates)
-						await collectMessages(ws, 1_500);
-
-						console.log(
-							`  Fork turn: "${scenario.forkPrompt.slice(0, 50)}${scenario.forkPrompt.length > 50 ? "..." : ""}"`,
-						);
-						const forkTurn = await recordTurn(
-							ws,
-							scenario.forkPrompt,
-							scenario.needsPermissionApproval === true,
-						);
-						console.log(`    Events: ${forkTurn.events.length}`);
-						turns.push(forkTurn);
-					}
-				} else {
-					// Single-turn: each prompt gets its own session
-					for (let i = 0; i < scenario.prompts.length; i++) {
-						// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
-						const prompt = scenario.prompts[i]!;
-
-						if (i > 0) {
-							// Create a new session for each prompt after the first
-							await requestNewSession(ws);
-							// Wait for init to settle
-							await collectMessages(ws, 1_000);
+						for (let i = 0; i < scenario.prompts.length; i++) {
+							// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
+							const prompt = scenario.prompts[i]!;
+							console.log(
+								`  Turn ${i + 1}: "${prompt.slice(0, 50)}${prompt.length > 50 ? "..." : ""}"`,
+							);
+							const turn = await recordTurn(
+								ws,
+								prompt,
+								scenario.needsPermissionApproval === true,
+							);
+							console.log(`    Events: ${turn.events.length}`);
+							turns.push(turn);
 						}
 
-						console.log(
-							`  Turn ${i + 1}: "${prompt.slice(0, 50)}${prompt.length > 50 ? "..." : ""}"`,
-						);
-						const turn = await recordTurn(
-							ws,
-							prompt,
-							scenario.needsPermissionApproval === true,
-						);
-						console.log(`    Events: ${turn.events.length}`);
-						turns.push(turn);
-					}
-				}
+						// Handle fork scenario: fork the session and send one more prompt
+						if (scenario.forkAfterPrompts && scenario.forkPrompt) {
+							console.log("  Forking session...");
+							const forkedId = await requestForkSession(ws);
+							console.log(`  Forked to: ${forkedId}`);
 
-				// Build and save fixture
-				const recorded: RecordedScenario = {
-					name: scenario.name,
-					model: `${providerId}/${modelId}`,
-					recordedAt: new Date().toISOString(),
-					initMessages,
-					turns,
-				};
+							// Wait for fork to settle (session switch, list updates)
+							await collectMessages(ws, 1_500);
 
-				const outPath = path.join(FIXTURES_DIR, `${scenario.name}.json`);
-				writeFileSync(outPath, `${JSON.stringify(recorded, null, "\t")}\n`);
-				console.log(`  Saved: ${outPath}`);
+							console.log(
+								`  Fork turn: "${scenario.forkPrompt.slice(0, 50)}${scenario.forkPrompt.length > 50 ? "..." : ""}"`,
+							);
+							const forkTurn = await recordTurn(
+								ws,
+								scenario.forkPrompt,
+								scenario.needsPermissionApproval === true,
+							);
+							console.log(`    Events: ${forkTurn.events.length}`);
+							turns.push(forkTurn);
+						}
+					} else {
+						// Single-turn: each prompt gets its own session
+						for (let i = 0; i < scenario.prompts.length; i++) {
+							// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
+							const prompt = scenario.prompts[i]!;
 
-				// Save OpenCode HTTP-level recording
-				const interactions = proxy.getRecording();
-				trimProviderResponse(interactions);
+							if (i > 0) {
+								// Create a new session for each prompt after the first.
+								// The first prompt uses the relay's init session, which is
+								// guaranteed fresh by inter-scenario session cleanup.
+								await requestNewSession(ws);
+								await collectMessages(ws, 1_000);
+							}
 
-				// Try to extract OpenCode version from the first REST response
-				let opencodeVersion = "unknown";
-				for (const ix of interactions) {
-					if (ix.kind === "rest") {
-						const body = ix.responseBody;
-						if (
-							body &&
-							typeof body === "object" &&
-							"version" in body &&
-							typeof (body as { version: unknown }).version === "string"
-						) {
-							opencodeVersion = (body as { version: string }).version;
-							break;
+							console.log(
+								`  Turn ${i + 1}: "${prompt.slice(0, 50)}${prompt.length > 50 ? "..." : ""}"`,
+							);
+							const turn = await recordTurn(
+								ws,
+								prompt,
+								scenario.needsPermissionApproval === true,
+							);
+							console.log(`    Events: ${turn.events.length}`);
+							turns.push(turn);
 						}
 					}
+
+					// For multi-turn scenarios, fetch message history through the
+					// proxy so the recording contains non-empty GET /session/:id/message
+					// responses. This is needed for pagination E2E tests that load
+					// history via REST instead of the SSE events cache.
+					if (scenario.multiTurn) {
+						const sessions = await fetch(`${proxy.url}/session`).then(
+							(r) => r.json() as Promise<Array<{ id: string }>>,
+						);
+						if (sessions.length > 0) {
+							// biome-ignore lint/style/noNonNullAssertion: checked length
+							const sid = sessions[sessions.length - 1]!.id;
+							await fetch(`${proxy.url}/session/${sid}/message`);
+							console.log(`  Captured message history for ${sid}`);
+						}
+					}
+
+					// Build and save fixture
+					const recorded: RecordedScenario = {
+						name: scenario.name,
+						model: `${providerId}/${modelId}`,
+						recordedAt: new Date().toISOString(),
+						initMessages,
+						turns,
+					};
+
+					const outPath = path.join(FIXTURES_DIR, `${scenario.name}.json`);
+					writeFileSync(outPath, `${JSON.stringify(recorded, null, "\t")}\n`);
+					console.log(`  Saved: ${outPath}`);
+
+					// Save OpenCode HTTP-level recording BEFORE stopping the relay —
+					// stop generates teardown HTTP traffic (SSE disconnect) that
+					// would pollute the recording.
+					const interactions = proxy.getRecording();
+					trimProviderResponse(interactions);
+
+					// Try to extract OpenCode version from the first REST response
+					let opencodeVersion = "unknown";
+					for (const ix of interactions) {
+						if (ix.kind === "rest") {
+							const body = ix.responseBody;
+							if (
+								body &&
+								typeof body === "object" &&
+								"version" in body &&
+								typeof (body as { version: unknown }).version === "string"
+							) {
+								opencodeVersion = (body as { version: string }).version;
+								break;
+							}
+						}
+					}
+
+					const openCodeRecording: OpenCodeRecording = {
+						name: scenario.name,
+						recordedAt: new Date().toISOString(),
+						opencodeVersion,
+						interactions,
+					};
+
+					const openCodeJson = JSON.stringify(openCodeRecording, null, "\t");
+					const ocOutPath = path.join(
+						FIXTURES_DIR,
+						`${scenario.name}.opencode.json.gz`,
+					);
+					writeFileSync(ocOutPath, gzipSync(Buffer.from(openCodeJson)));
+					console.log(`  Saved: ${ocOutPath}`);
+				} finally {
+					ws.close();
 				}
-
-				const openCodeRecording: OpenCodeRecording = {
-					name: scenario.name,
-					recordedAt: new Date().toISOString(),
-					opencodeVersion,
-					interactions,
-				};
-
-				const openCodeJson = JSON.stringify(openCodeRecording, null, "\t");
-				const ocOutPath = path.join(
-					FIXTURES_DIR,
-					`${scenario.name}.opencode.json.gz`,
-				);
-				writeFileSync(ocOutPath, gzipSync(Buffer.from(openCodeJson)));
-				console.log(`  Saved: ${ocOutPath}`);
-
-				// Reset proxy for next scenario
-				proxy.reset();
 			} finally {
-				ws.close();
+				// Stop relay with timeout to prevent hangs from lingering keep-alive connections
+				if (relayStack) {
+					console.log("  Stopping relay...");
+					const stopPromise = relayStack.stop();
+					await Promise.race([
+						stopPromise,
+						new Promise<void>((resolve) =>
+							setTimeout(() => {
+								console.warn("  Relay stop timed out after 10s, moving on.");
+								resolve();
+							}, 10_000),
+						),
+					]);
+					// Prevent unhandled rejection if stop() rejects after timeout
+					stopPromise.catch((err: unknown) =>
+						console.warn("  Relay stop eventually failed:", err),
+					);
+				}
+			}
+
+			// Clean up all sessions from the ephemeral OpenCode instance
+			// so the next scenario starts with a clean session list.
+			// Use the raw OpenCode URL (not the proxy) to keep cleanup
+			// traffic out of the recording.
+			try {
+				const res = await fetch(`${opencode.url}/session`);
+				if (res.ok) {
+					const sessions = (await res.json()) as { id: string }[];
+					if (sessions.length > 0) {
+						console.log(`  Cleaning up ${sessions.length} session(s)...`);
+						await Promise.all(
+							sessions.map((s) =>
+								fetch(`${opencode.url}/session/${s.id}`, {
+									method: "DELETE",
+								}),
+							),
+						);
+					}
+				}
+			} catch (err) {
+				console.warn("  Session cleanup failed:", err);
 			}
 		}
 
 		console.log("\n=== Recording Complete ===");
 		console.log(`Fixtures saved to: ${FIXTURES_DIR}`);
 	} finally {
-		// 7. Cleanup
-		if (relayStack) {
-			console.log("\nStopping relay...");
-			await relayStack.stop();
+		// 5. Cleanup
+		if (permConfigPath) {
+			try {
+				unlinkSync(permConfigPath);
+				console.log("Removed temporary opencode.json");
+			} catch {
+				// Ignore if already removed
+			}
 		}
-		console.log("Stopping recording proxy...");
+		console.log("\nStopping recording proxy...");
 		await proxy.stop();
 		console.log("Stopping OpenCode...");
 		opencode.stop();

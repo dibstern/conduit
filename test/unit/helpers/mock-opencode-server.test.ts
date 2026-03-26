@@ -234,9 +234,6 @@ describe("MockOpenCodeServer", () => {
 		const events: Array<{ type: string }> = [];
 		const collecting = collectSseEvents(sseRes.body?.getReader(), events);
 
-		await new Promise((r) => setTimeout(r, 50));
-		expect(events.some((e) => e.type === "server.connected")).toBe(true);
-
 		await fetch(`${mock.url}/session/ses_1/prompt_async`, {
 			method: "POST",
 			body: "{}",
@@ -246,13 +243,12 @@ describe("MockOpenCodeServer", () => {
 		controller.abort();
 		await collecting;
 
-		const batchEvents = events.filter((e) => e.type !== "server.connected");
-		expect(batchEvents.length).toBe(5);
-		expect(batchEvents[0]).toMatchObject({ type: "session.status" });
-		expect(batchEvents[1]).toMatchObject({ type: "message.part.delta" });
-		expect(batchEvents[2]).toMatchObject({ type: "session.status" });
-		expect(batchEvents[3]).toMatchObject({ type: "message.part.delta" });
-		expect(batchEvents[4]).toMatchObject({ type: "session.status" });
+		expect(events.length).toBe(5);
+		expect(events[0]).toMatchObject({ type: "session.status" });
+		expect(events[1]).toMatchObject({ type: "message.part.delta" });
+		expect(events[2]).toMatchObject({ type: "session.status" });
+		expect(events[3]).toMatchObject({ type: "message.part.delta" });
+		expect(events[4]).toMatchObject({ type: "session.status" });
 	});
 
 	it("emits all post-prompt SSE events when prompt fires (including permission-adjacent)", async () => {
@@ -265,8 +261,6 @@ describe("MockOpenCodeServer", () => {
 		const events: Array<{ type: string }> = [];
 		const collecting = collectSseEvents(sseRes.body?.getReader(), events);
 
-		await new Promise((r) => setTimeout(r, 50));
-
 		await fetch(`${mock.url}/session/ses_1/prompt_async`, {
 			method: "POST",
 			body: "{}",
@@ -275,13 +269,12 @@ describe("MockOpenCodeServer", () => {
 		controller.abort();
 		await collecting;
 
-		const allBatchEvents = events.filter((e) => e.type !== "server.connected");
-		expect(allBatchEvents.length).toBe(5);
-		expect(allBatchEvents[0]).toMatchObject({ type: "session.status" });
-		expect(allBatchEvents[1]).toMatchObject({ type: "message.part.delta" });
-		expect(allBatchEvents[2]).toMatchObject({ type: "session.status" });
-		expect(allBatchEvents[3]).toMatchObject({ type: "message.part.delta" });
-		expect(allBatchEvents[4]).toMatchObject({ type: "session.status" });
+		expect(events.length).toBe(5);
+		expect(events[0]).toMatchObject({ type: "session.status" });
+		expect(events[1]).toMatchObject({ type: "message.part.delta" });
+		expect(events[2]).toMatchObject({ type: "session.status" });
+		expect(events[3]).toMatchObject({ type: "message.part.delta" });
+		expect(events[4]).toMatchObject({ type: "session.status" });
 	});
 
 	it("emits post-prompt SSE events independently of REST consumption", async () => {
@@ -293,8 +286,6 @@ describe("MockOpenCodeServer", () => {
 
 		const events: Array<{ type: string }> = [];
 		const collecting = collectSseEvents(sseRes.body?.getReader(), events);
-
-		await new Promise((r) => setTimeout(r, 50));
 
 		await fetch(`${mock.url}/session/ses_1/prompt_async`, {
 			method: "POST",
@@ -308,13 +299,12 @@ describe("MockOpenCodeServer", () => {
 		// The FIXTURE has 5 SSE events after prompt_async — 3 before
 		// the permission reply REST entry + 2 after it — all in segment 1
 		// since permission reply is NOT a prompt boundary
-		const batchEvents = events.filter((e) => e.type !== "server.connected");
-		expect(batchEvents.length).toBe(5);
-		expect(batchEvents[0]).toMatchObject({ type: "session.status" });
-		expect(batchEvents[1]).toMatchObject({ type: "message.part.delta" });
-		expect(batchEvents[2]).toMatchObject({ type: "session.status" });
-		expect(batchEvents[3]).toMatchObject({ type: "message.part.delta" });
-		expect(batchEvents[4]).toMatchObject({ type: "session.status" });
+		expect(events.length).toBe(5);
+		expect(events[0]).toMatchObject({ type: "session.status" });
+		expect(events[1]).toMatchObject({ type: "message.part.delta" });
+		expect(events[2]).toMatchObject({ type: "session.status" });
+		expect(events[3]).toMatchObject({ type: "message.part.delta" });
+		expect(events[4]).toMatchObject({ type: "session.status" });
 	});
 
 	it("segments SSE events by prompt boundary for multi-turn", async () => {
@@ -383,7 +373,6 @@ describe("MockOpenCodeServer", () => {
 				properties?: Record<string, unknown>;
 			}> = [];
 			const collecting = collectSseEvents(sseRes.body?.getReader(), events);
-			await new Promise((r) => setTimeout(r, 50));
 
 			await fetch(`${multiMock.url}/session/ses_1/prompt_async`, {
 				method: "POST",
@@ -391,11 +380,10 @@ describe("MockOpenCodeServer", () => {
 			});
 			await new Promise((r) => setTimeout(r, 100));
 
-			const afterPrompt1 = events.filter((e) => e.type !== "server.connected");
-			expect(afterPrompt1).toHaveLength(3);
-			expect(afterPrompt1[0]).toMatchObject({ type: "session.created" });
-			expect(afterPrompt1[1]).toMatchObject({ type: "message.part.delta" });
-			expect(afterPrompt1[2]).toMatchObject({ type: "session.idle" });
+			expect(events).toHaveLength(3);
+			expect(events[0]).toMatchObject({ type: "session.created" });
+			expect(events[1]).toMatchObject({ type: "message.part.delta" });
+			expect(events[2]).toMatchObject({ type: "session.idle" });
 
 			await fetch(`${multiMock.url}/session/ses_1/prompt_async`, {
 				method: "POST",
@@ -405,10 +393,9 @@ describe("MockOpenCodeServer", () => {
 			controller.abort();
 			await collecting;
 
-			const allBatch = events.filter((e) => e.type !== "server.connected");
-			expect(allBatch).toHaveLength(5);
-			expect(allBatch[3]).toMatchObject({ type: "message.part.delta" });
-			expect(allBatch[4]).toMatchObject({ type: "session.idle" });
+			expect(events).toHaveLength(5);
+			expect(events[3]).toMatchObject({ type: "message.part.delta" });
+			expect(events[4]).toMatchObject({ type: "session.idle" });
 		} finally {
 			await multiMock.stop();
 		}
@@ -422,15 +409,13 @@ describe("MockOpenCodeServer", () => {
 		});
 		const events: Array<{ type: string }> = [];
 		const collecting = collectSseEvents(sseRes.body?.getReader(), events);
-		await new Promise((r) => setTimeout(r, 50));
 
 		mock.flushPendingSse();
 		await new Promise((r) => setTimeout(r, 200));
 		controller.abort();
 		await collecting;
 
-		const batchEvents = events.filter((e) => e.type !== "server.connected");
-		expect(batchEvents.length).toBe(5);
+		expect(events.length).toBe(5);
 	});
 
 	it("reset() re-initializes all queues", async () => {

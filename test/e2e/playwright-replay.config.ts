@@ -26,10 +26,10 @@ export default defineConfig({
 		"notification-session-nav-replay.spec.ts",
 		"fork-session.spec.ts",
 	],
-	fullyParallel: false,
+	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: process.env["CI"] ? 1 : 0,
-	workers: 1,
+	workers: process.env["CI"] ? 4 : "50%",
 	reporter: process.env["CI"]
 		? [["github"], ["html", { open: "never" }]]
 		: "list",

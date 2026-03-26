@@ -103,9 +103,14 @@ async function setupForkSession(
 	// ── Fork: whole-session fork (no messageId) ──
 	await sendWsMessage(page, { type: "fork_session" });
 
-	// Wait for the fork to process — URL should update to forked session.
+	// Wait for the fork to process — URL should update to a different session.
+	const currentPath = new URL(page.url()).pathname;
 	await page.waitForFunction(
-		() => window.location.pathname.includes("ses_2e74c3e15ffe38E0OlzucTmvvU"),
+		(prevPath) => {
+			const p = window.location.pathname;
+			return p !== prevPath && /\/s\/ses_/.test(p);
+		},
+		currentPath,
 		{ timeout: 15_000 },
 	);
 
