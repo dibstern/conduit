@@ -604,7 +604,14 @@ export function handleStatus(
 	msg: Extract<RelayMessage, { type: "status" }>,
 ): void {
 	if (msg.status === "processing") {
-		phaseToProcessing();
+		// Don't downgrade from "streaming" — it's a more specific phase.
+		// status:processing from a queued message send (prompt.ts) arrives
+		// while deltas are still flowing; overriding to "processing" would
+		// cause handleDelta to create a new assistant message, splitting
+		// the response around the queued user message.
+		if (chatState.phase !== "streaming") {
+			phaseToProcessing();
+		}
 		// Fallback ONLY for REST history loads — the one path where messages
 		// don't go through addUserMessage and sentDuringEpoch can't be set
 		// from event ordering.  Events replay and live sends both go through
