@@ -88,14 +88,6 @@ export class MockOpenCodeServer {
 	private sseClients = new Set<ServerResponse>();
 	private keepaliveIntervals = new Set<ReturnType<typeof setInterval>>();
 
-	/**
-	 * When set, GET /session/status returns this response instead of the
-	 * queued entry. Set when an SSE batch containing session.idle fires,
-	 * ensuring subsequent status polls see idle state regardless of what
-	 * the queue contains. Cleared on reset() for multi-test reuse.
-	 */
-	private statusOverride: { status: number; responseBody: unknown } | undefined;
-
 	/** Counter for generating unique PTY IDs when no recording exists. */
 	private ptyCounter = 0;
 
@@ -193,7 +185,6 @@ export class MockOpenCodeServer {
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
 		this.sseSegments = [[]];
-		this.statusOverride = undefined;
 		this.promptsFired = 0;
 		this.ptyCounter = 0;
 		this.dynamicPtyIds.clear();
@@ -288,17 +279,12 @@ export class MockOpenCodeServer {
 	/**
 	 * Reset response queues without disconnecting SSE clients.
 	 * For multi-test reuse within a shared relay.
-	 *
-	 * Preserves `statusOverride` so that background status pollers
-	 * continue to see the correct idle/busy state between tests.
-	 * The override is cleared naturally when the next prompt_async fires.
 	 */
 	resetQueues(): void {
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
 		this.promptsFired = 0;
-		// Preserve statusOverride — cleared when next prompt_async fires
 		this.ptyCounter = 0;
 		this.dynamicPtyIds.clear();
 		this.injectedSessions.clear();
@@ -405,17 +391,6 @@ export class MockOpenCodeServer {
 
 		const exact = exactKey(method, path);
 		const normalized = normalizedKey(method, path);
-
-		// If session.idle has fired, return the idle override for status polls
-		// instead of consuming from the queue. This ensures the relay's status
-		// poller sees idle state immediately, avoiding a race where the queue
-		// still has stale "busy" entries or the message poller re-injects busy.
-		if (this.statusOverride && exact === "GET /session/status") {
-			const override = this.statusOverride;
-			res.writeHead(override.status, { "Content-Type": "application/json" });
-			res.end(JSON.stringify(override.responseBody));
-			return;
-		}
 
 		// ── Stateful PTY endpoints ──────────────────────────────────────────
 		const basePath = path.split("?")[0] ?? path;
@@ -656,12 +631,8 @@ export class MockOpenCodeServer {
 		}
 
 		// Detect prompt_async — emit the corresponding SSE segment.
-		// Clear the statusOverride so the status queue is used again (the next
-		// turn's busy status needs to come from the queue, not the stale idle
-		// override from the previous turn's session.idle).
 		if (method === "POST" && path.includes("/prompt_async")) {
 			this.promptsFired++;
-			this.statusOverride = undefined;
 			const sseClientCount = this.sseClients.size;
 			if (this.promptsFired === 1) {
 				const combined = [
@@ -701,8 +672,9 @@ export class MockOpenCodeServer {
 			Connection: "keep-alive",
 		});
 
-		// Immediately emit server.connected
-		res.write('data: {"type":"server.connected","properties":{}}\n\n');
+		// Flush headers so the client's body reader starts streaming.
+		// SSE comments (lines starting with ':') are ignored by clients.
+		res.write(": ok\n\n");
 
 		// Keepalive every 15 seconds
 		const interval = setInterval(() => {
@@ -752,13 +724,6 @@ export class MockOpenCodeServer {
 				const delay = Math.min(event.delayMs, 5);
 				if (delay > 0) {
 					await new Promise<void>((r) => setTimeout(r, delay));
-				}
-
-				// Set statusOverride when session.idle is actually emitted,
-				// not before — the relay's status poller needs to see busy
-				// from the queue before idle for correct monitoring behavior.
-				if (event.type === "session.idle") {
-					this.statusOverride = { status: 200, responseBody: {} };
 				}
 
 				const payload = JSON.stringify({
