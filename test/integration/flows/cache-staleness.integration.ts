@@ -46,7 +46,8 @@ describe("Integration: Cache Staleness Detection", () => {
 		// Verify the cache has events for this session
 		const cachedEvents = await harness.stack.messageCache.getEvents(sessionA);
 		expect(cachedEvents).toBeTruthy();
-		expect(cachedEvents?.some((e) => e.type === "user_message")).toBe(true);
+		if (!cachedEvents) throw new Error("expected cached events");
+		expect(cachedEvents.some((e) => e.type === "user_message")).toBe(true);
 
 		// Now inject a mock response that reports MORE messages than the cache
 		// has, simulating messages that arrived while the daemon was down.
@@ -57,7 +58,7 @@ describe("Integration: Cache Staleness Detection", () => {
 		const { countUniqueMessages } = await import(
 			"../../../src/lib/session/session-switch.js"
 		);
-		const cachedUniqueCount = countUniqueMessages(cachedEvents!);
+		const cachedUniqueCount = countUniqueMessages(cachedEvents);
 		const fakeCount = cachedUniqueCount + 100;
 		const fakeMessages = Array.from({ length: fakeCount }, (_, i) => ({
 			id: `msg_fake_${i}`,

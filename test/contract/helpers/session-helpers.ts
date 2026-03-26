@@ -1,7 +1,12 @@
 // ─── Session Helpers ───────────────────────────────────────────────────────
 // Create and clean up test sessions for contract tests.
 
-import { apiDelete, apiGet, apiPost } from "./server-connection.js";
+import {
+	apiDelete,
+	apiGet,
+	apiPost,
+	OPENCODE_BASE_URL,
+} from "./server-connection.js";
 
 export interface TestSession {
 	id: string;
@@ -103,7 +108,7 @@ export async function collectSSEEvents(
 	const deadline = setTimeout(() => controller.abort(), timeoutMs);
 
 	try {
-		const res = await fetch(`${new URL(path, "http://localhost:4096").href}`, {
+		const res = await fetch(`${new URL(path, OPENCODE_BASE_URL).href}`, {
 			signal: controller.signal,
 			headers: { Accept: "text/event-stream" },
 		});

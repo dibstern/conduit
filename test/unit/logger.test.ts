@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	_getOutputStream,
 	createLogger,
@@ -41,6 +41,13 @@ describe("createLogger", () => {
 	beforeEach(() => {
 		// Reset to known state before each test
 		setLogLevel("debug");
+		setLogFormat("json");
+	});
+
+	afterAll(() => {
+		// Restore suppressed level so subsequent tests in the same process
+		// don't inherit "debug" and spam the console.
+		setLogLevel("error");
 		setLogFormat("json");
 	});
 

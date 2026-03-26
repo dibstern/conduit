@@ -8,6 +8,14 @@ import { resolve } from "node:path";
 export const OPENCODE_BASE_URL =
 	process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
+/** Build auth headers if OPENCODE_SERVER_PASSWORD is set. */
+function authHeaders(): Record<string, string> {
+	const pw = process.env["OPENCODE_SERVER_PASSWORD"];
+	if (!pw) return {};
+	const encoded = Buffer.from(`opencode:${pw}`).toString("base64");
+	return { Authorization: `Basic ${encoded}` };
+}
+
 /**
  * Read the pinned version from .opencode-version file.
  */
@@ -32,6 +40,7 @@ export async function checkServerHealth(): Promise<{
 		const timer = setTimeout(() => controller.abort(), 5_000);
 		const res = await fetch(`${OPENCODE_BASE_URL}/global/health`, {
 			signal: controller.signal,
+			headers: { ...authHeaders() },
 		});
 		clearTimeout(timer);
 		if (!res.ok) return null;
@@ -46,7 +55,7 @@ export async function checkServerHealth(): Promise<{
  */
 export async function apiGet<T = unknown>(path: string): Promise<T> {
 	const res = await fetch(`${OPENCODE_BASE_URL}${path}`, {
-		headers: { Accept: "application/json" },
+		headers: { Accept: "application/json", ...authHeaders() },
 	});
 	if (!res.ok) {
 		throw new Error(`API GET ${path} failed: ${res.status} ${res.statusText}`);
@@ -66,6 +75,7 @@ export async function apiPost<T = unknown>(
 		headers: {
 			"Content-Type": "application/json",
 			Accept: "application/json",
+			...authHeaders(),
 		},
 		body: JSON.stringify(body),
 	});
@@ -94,6 +104,7 @@ export async function apiPatch<T = unknown>(
 		headers: {
 			"Content-Type": "application/json",
 			Accept: "application/json",
+			...authHeaders(),
 		},
 		body: JSON.stringify(body),
 	});
@@ -111,7 +122,7 @@ export async function apiPatch<T = unknown>(
 export async function apiDelete(path: string): Promise<void> {
 	const res = await fetch(`${OPENCODE_BASE_URL}${path}`, {
 		method: "DELETE",
-		headers: { Accept: "application/json" },
+		headers: { Accept: "application/json", ...authHeaders() },
 	});
 	if (!res.ok) {
 		throw new Error(
@@ -132,7 +143,7 @@ export function connectSSE(
 	const ready = new Promise<void>((resolve, reject) => {
 		fetch(`${OPENCODE_BASE_URL}${path}`, {
 			signal: controller.signal,
-			headers: { Accept: "text/event-stream" },
+			headers: { Accept: "text/event-stream", ...authHeaders() },
 		})
 			.then(async (res) => {
 				if (!res.ok || !res.body) {

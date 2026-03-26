@@ -32,6 +32,7 @@ import fc from "fast-check";
 import {
 	afterAll,
 	afterEach,
+	beforeAll,
 	beforeEach,
 	describe,
 	expect,
@@ -45,10 +46,6 @@ import {
 import { Daemon } from "../../../src/lib/daemon/daemon.js";
 import { DEFAULT_CONFIG_DIR } from "../../../src/lib/env.js";
 import { setLogLevel } from "../../../src/lib/logger.js";
-
-// Suppress info-level pino JSON output during tests — prevents log noise from drowning
-// test results. Keep warn/error so tests that inspect pino warn output still work.
-setLogLevel("warn");
 
 const SEED = 42;
 const NUM_RUNS = 30;
@@ -3046,6 +3043,10 @@ describe("backward compatibility", () => {
 
 describe("instance rehydration on daemon restart", () => {
 	let tmpDir: string;
+
+	// This block inspects pino warn output — temporarily lower the level.
+	beforeAll(() => setLogLevel("warn"));
+	afterAll(() => setLogLevel("error"));
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir("daemon-rehydrate-");

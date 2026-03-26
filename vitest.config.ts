@@ -5,6 +5,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	plugins: [svelte()],
 	test: {
+		// Suppress pino log noise across all test projects.
+		setupFiles: ["test/setup.ts"],
 		// Component tests need jsdom + browser resolve condition so
 		// Svelte resolves to its client bundle (which provides mount()).
 		// All other tests run in the default node environment.
