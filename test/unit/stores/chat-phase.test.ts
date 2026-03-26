@@ -52,6 +52,7 @@ import {
 	phaseToIdle,
 	phaseToProcessing,
 	phaseToStreaming,
+	renderDeferredMarkdown,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -260,5 +261,39 @@ describe("Phase split: replaying removed from ChatPhase", () => {
 		expect(chatState.phase).toBe("streaming");
 		expect(isStreaming()).toBe(true);
 		expect(isProcessing()).toBe(true);
+	});
+});
+
+// ─── LoadLifecycle 'ready' transition ───────────────────────────────────────
+
+describe("LoadLifecycle 'ready' transition", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	it("renderDeferredMarkdown sets loadLifecycle to 'ready' after all messages rendered", () => {
+		chatState.loadLifecycle = "committed";
+		chatState.messages = [
+			{ type: "assistant", uuid: "1", rawText: "hello", html: "hello", needsRender: true, finalized: true },
+		];
+		renderDeferredMarkdown();
+		vi.runAllTimers();
+		expect(chatState.loadLifecycle).toBe("ready");
+	});
+
+	it("loadLifecycle stays 'committed' while deferred markdown is still processing", () => {
+		chatState.loadLifecycle = "committed";
+		chatState.messages = Array.from({ length: 10 }, (_, i) => ({
+			type: "assistant" as const,
+			uuid: String(i),
+			rawText: `msg ${i}`,
+			html: `msg ${i}`,
+			needsRender: true as const,
+			finalized: true,
+		}));
+		renderDeferredMarkdown();
+		vi.runOnlyPendingTimers();
+		// First batch processed (5 messages), but 5 more remain
+		expect(chatState.loadLifecycle).toBe("committed");
 	});
 });

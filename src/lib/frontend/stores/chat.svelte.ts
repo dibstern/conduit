@@ -857,6 +857,8 @@ export function renderDeferredMarkdown(): void {
 		);
 		if (hasMore) {
 			setTimeout(processBatch, 0);
+		} else if (chatState.loadLifecycle === "committed") {
+			chatState.loadLifecycle = "ready";
 		}
 	}
 

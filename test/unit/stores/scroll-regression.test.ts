@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -30,8 +30,8 @@ vi.mock("dompurify", () => ({
 	default: { sanitize: (html: string) => html },
 }));
 
-import { createScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
 import type { LoadLifecycle } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { createScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
 
 describe("Scroll behavior regression suite", () => {
 	let lifecycle: LoadLifecycle;
