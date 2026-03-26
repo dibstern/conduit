@@ -647,6 +647,31 @@ async function main(): Promise<void> {
 					);
 				}
 			}
+
+			// Clean up all sessions from the ephemeral OpenCode instance
+			// so the next scenario starts with a clean session list.
+			// Use the raw OpenCode URL (not the proxy) to keep cleanup
+			// traffic out of the recording.
+			try {
+				const res = await fetch(`${opencode.url}/session`);
+				if (res.ok) {
+					const sessions = (await res.json()) as { id: string }[];
+					if (sessions.length > 0) {
+						console.log(
+							`  Cleaning up ${sessions.length} session(s)...`,
+						);
+						await Promise.all(
+							sessions.map((s) =>
+								fetch(`${opencode.url}/session/${s.id}`, {
+									method: "DELETE",
+								}),
+							),
+						);
+					}
+				}
+			} catch (err) {
+				console.warn("  Session cleanup failed:", err);
+			}
 		}
 
 		console.log("\n=== Recording Complete ===");
