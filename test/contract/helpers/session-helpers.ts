@@ -59,7 +59,9 @@ export async function sendPrompt(
 	sessionId: string,
 	text: string,
 ): Promise<void> {
-	await apiPost(`/session/${sessionId}/prompt_async`, { text });
+	await apiPost(`/session/${sessionId}/prompt_async`, {
+		parts: [{ type: "text", text }],
+	});
 }
 
 /**
