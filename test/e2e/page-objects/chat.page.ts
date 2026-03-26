@@ -86,12 +86,12 @@ export class ChatPage {
 		return tool;
 	}
 
-	/** Wait for a tool to reach completed state (subtitle shows "Done" or "Answered") */
+	/** Wait for a tool to reach a terminal state (completed or error) */
 	async waitForToolCompleted(timeout = 60_000): Promise<void> {
-		const completedSubtitle = this.page.locator(".tool-subtitle-text", {
-			hasText: /^Done$|^Answered/,
-		});
-		await completedSubtitle.first().waitFor({ state: "visible", timeout });
+		const completed = this.page.locator(
+			'.tool-item[data-tool-status="completed"], .tool-item[data-tool-status="error"]',
+		);
+		await completed.first().waitFor({ state: "visible", timeout });
 	}
 
 	/** Get count of tool blocks */

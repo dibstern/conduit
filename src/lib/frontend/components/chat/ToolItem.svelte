@@ -53,6 +53,7 @@
 	class:mb-0.5={!isLastInGroup}
 	class:mb-1={isLastInGroup}
 	data-tool-id={message.id}
+	data-tool-status={message.status}
 >
 {#if isQuestion}
 	<ToolQuestionCard {message} {groupRadius} />
