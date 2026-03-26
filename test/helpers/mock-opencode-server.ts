@@ -117,6 +117,13 @@ export class MockOpenCodeServer {
 	/** Number of prompt_async calls processed so far. */
 	private promptsFired = 0;
 
+	/**
+	 * Session IDs from the recording's prompt_async URLs, in order.
+	 * Used to rewrite SSE event session IDs to match the actual session
+	 * used by the test, enabling correct per-session routing in the relay.
+	 */
+	private recordedPromptSessionIds: string[] = [];
+
 	constructor(recording: OpenCodeRecording) {
 		this.recording = recording;
 		this.buildQueues();
@@ -192,6 +199,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sessionCounter = 0;
+		this.recordedPromptSessionIds = [];
 		this.buildQueues();
 	}
 
@@ -291,6 +299,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sessionCounter = 0;
+		this.recordedPromptSessionIds = [];
 		this.buildQueues();
 	}
 
@@ -300,6 +309,7 @@ export class MockOpenCodeServer {
 		const { interactions } = this.recording;
 
 		this.sseSegments = [[]];
+		this.recordedPromptSessionIds = [];
 		let currentSegment = 0;
 
 		for (const ix of interactions) {
@@ -307,6 +317,11 @@ export class MockOpenCodeServer {
 				if (ix.method === "POST" && ix.path.includes("/prompt_async")) {
 					currentSegment++;
 					this.sseSegments[currentSegment] = [];
+					// Extract the recording's session ID from the prompt URL
+					const match = /\/session\/([^/]+)\/prompt_async/.exec(ix.path);
+					if (match?.[1]) {
+						this.recordedPromptSessionIds.push(match[1]);
+					}
 				}
 
 				const queued: QueuedRestResponse = {
@@ -423,6 +438,52 @@ export class MockOpenCodeServer {
 			res.writeHead(204);
 			res.end();
 			return;
+		}
+
+		// ── Synthetic fallbacks for endpoints not in every recording ────────
+		// These endpoints are called by relay handlers but may not appear in
+		// the recorded interactions. Return empty arrays so the relay doesn't
+		// crash with 404 errors during integration tests.
+		if (method === "GET" && basePath === "/command") {
+			const queue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			if (!queue) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify([]));
+				return;
+			}
+		}
+
+		if (method === "GET" && basePath === "/file") {
+			const queue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			if (!queue) {
+				// Return a minimal project directory listing so integration
+				// tests that check for common project files can pass.
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(
+					JSON.stringify([
+						{ name: "package.json", type: "file" },
+						{ name: "tsconfig.json", type: "file" },
+						{ name: "src", type: "directory" },
+						{ name: "test", type: "directory" },
+					]),
+				);
+				return;
+			}
+		}
+
+		if (method === "GET" && basePath === "/file/content") {
+			const queue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			if (!queue) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ content: "", binary: false }));
+				return;
+			}
 		}
 
 		// ── Stateful session endpoints ──────────────────────────────────────
@@ -631,9 +692,29 @@ export class MockOpenCodeServer {
 		}
 
 		// Detect prompt_async — emit the corresponding SSE segment.
+		// Rewrite session IDs in SSE events so that the relay routes them
+		// to the session the test is actually using (not the recording's).
 		if (method === "POST" && path.includes("/prompt_async")) {
 			this.promptsFired++;
 			const sseClientCount = this.sseClients.size;
+
+			// Extract the actual session ID the test is prompting
+			const promptMatch = /\/session\/([^/]+)\/prompt_async/.exec(path);
+			const actualSessionId = promptMatch?.[1];
+
+			// Determine which recorded session ID to replace:
+			// promptsFired=1 → recordedPromptSessionIds[0], etc.
+			const recordedSessionId =
+				this.recordedPromptSessionIds[this.promptsFired - 1];
+
+			// Build the session ID mapping for rewriting
+			const sessionIdMap =
+				actualSessionId &&
+				recordedSessionId &&
+				actualSessionId !== recordedSessionId
+					? { from: recordedSessionId, to: actualSessionId }
+					: undefined;
+
 			if (this.promptsFired === 1) {
 				const combined = [
 					...(this.sseSegments[0] ?? []),
@@ -641,16 +722,16 @@ export class MockOpenCodeServer {
 				];
 				this.diag(
 					"prompt_async",
-					`#${this.promptsFired} seg0=${this.sseSegments[0]?.length ?? 0} seg1=${this.sseSegments[1]?.length ?? 0} combined=${combined.length} sseClients=${sseClientCount}`,
+					`#${this.promptsFired} seg0=${this.sseSegments[0]?.length ?? 0} seg1=${this.sseSegments[1]?.length ?? 0} combined=${combined.length} sseClients=${sseClientCount}${sessionIdMap ? ` rewrite=${sessionIdMap.from.slice(0, 12)}→${sessionIdMap.to.slice(0, 12)}` : ""}`,
 				);
-				this.emitEvents(combined);
+				this.emitEvents(combined, sessionIdMap);
 			} else {
 				const segment = this.sseSegments[this.promptsFired] ?? [];
 				this.diag(
 					"prompt_async",
-					`#${this.promptsFired} segment=${segment.length} sseClients=${sseClientCount}`,
+					`#${this.promptsFired} segment=${segment.length} sseClients=${sseClientCount}${sessionIdMap ? ` rewrite=${sessionIdMap.from.slice(0, 12)}→${sessionIdMap.to.slice(0, 12)}` : ""}`,
 				);
-				this.emitEvents(segment);
+				this.emitEvents(segment, sessionIdMap);
 			}
 		}
 
@@ -711,7 +792,39 @@ export class MockOpenCodeServer {
 		this.emitEvents(batch);
 	}
 
-	private emitEvents(events: SseEvent[]): void {
+	/**
+	 * Rewrite session IDs in SSE event properties.
+	 * Only replaces occurrences of `map.from` with `map.to` so that
+	 * events for other sessions (e.g. session.created for the NEXT session)
+	 * are left untouched.
+	 */
+	private rewriteSessionIds(
+		properties: Record<string, unknown>,
+		map: { from: string; to: string },
+	): Record<string, unknown> {
+		const props = structuredClone(properties);
+		// Top-level sessionID (most common: message.part.delta, session.status, etc.)
+		if (props["sessionID"] === map.from) {
+			props["sessionID"] = map.to;
+		}
+		// Nested in part (message.part.updated)
+		const part = props["part"] as Record<string, unknown> | undefined;
+		if (part && part["sessionID"] === map.from) {
+			part["sessionID"] = map.to;
+		}
+		// Nested in info (session.updated, message.updated)
+		const info = props["info"] as Record<string, unknown> | undefined;
+		if (info) {
+			if (info["id"] === map.from) info["id"] = map.to;
+			if (info["sessionID"] === map.from) info["sessionID"] = map.to;
+		}
+		return props;
+	}
+
+	private emitEvents(
+		events: SseEvent[],
+		sessionIdMap?: { from: string; to: string },
+	): void {
 		if (events.length === 0) return;
 		this.diag(
 			"emit_start",
@@ -726,9 +839,13 @@ export class MockOpenCodeServer {
 					await new Promise<void>((r) => setTimeout(r, delay));
 				}
 
+				const properties = sessionIdMap
+					? this.rewriteSessionIds(event.properties, sessionIdMap)
+					: event.properties;
+
 				const payload = JSON.stringify({
 					type: event.type,
-					properties: event.properties,
+					properties,
 				});
 				const frame = `data: ${payload}\n\n`;
 
