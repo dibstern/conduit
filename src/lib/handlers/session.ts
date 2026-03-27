@@ -343,6 +343,9 @@ export async function handleForkSession(
 	});
 
 	deps.overrides.clearSession(sessionId);
+	// Clear stale pagination cursor — fork creates a new session with
+	// potentially different message IDs.
+	deps.sessionMgr.clearPaginationCursor(sessionId);
 
 	// Determine the fork-point messageId
 	let forkMessageId: string | undefined = messageId;

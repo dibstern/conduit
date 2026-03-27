@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ToolStatus } from "../../src/lib/shared-types.js";
 import {
+	authHeaders,
 	checkServerHealth,
 	OPENCODE_BASE_URL,
 } from "./helpers/server-connection.js";
@@ -369,7 +370,7 @@ describe("Tool SSE Transition Validation (live)", () => {
 				try {
 					const statuses = (await (
 						await fetch(`${OPENCODE_BASE_URL}/session/status`, {
-							headers: { Accept: "application/json" },
+							headers: { Accept: "application/json", ...authHeaders() },
 						})
 					).json()) as Record<string, { type: string }>;
 					const sessionStatus = statuses[testSession.id];

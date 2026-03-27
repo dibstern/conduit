@@ -54,6 +54,7 @@ describe("handleForkSession (ticket 5.3)", () => {
 						send({ type: "session_list", sessions: [], roots: true });
 						send({ type: "session_list", sessions: [], roots: false });
 					}),
+				clearPaginationCursor: vi.fn(),
 			} as unknown as HandlerDeps["sessionMgr"],
 		});
 	});
@@ -296,6 +297,7 @@ describe("handleViewSession — per-tab session viewing", () => {
 					hasMore: false,
 					total: 0,
 				}),
+				clearPaginationCursor: vi.fn(),
 			} as unknown as HandlerDeps["sessionMgr"],
 			statusPoller: {
 				isProcessing: vi.fn().mockReturnValue(false),

@@ -122,6 +122,7 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 		incrementPendingQuestionCount: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
 		setPendingQuestionCounts: vi.fn(),
+		clearPaginationCursor: vi.fn(),
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 

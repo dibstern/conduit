@@ -222,15 +222,36 @@ describe("Subagent fixture capture", () => {
 			? allSessions
 			: Object.values(allSessions as Record<string, OpenCodeSession>);
 
-		// 2. Find a session with parentID (subagent/child session)
-		const childRaw = sessions.find((s) => s.parentID);
-		if (!childRaw) {
+		// 2. Find a child session whose parent is idle (not actively being modified).
+		// This prevents snapshot churn when a parent session is still streaming.
+		const children = sessions.filter((s) => s.parentID);
+		if (children.length === 0) {
 			console.warn(
 				"SKIP: No subagent sessions found in OpenCode. " +
 					"Create one by using the Task tool, then re-run.",
 			);
 			return;
 		}
+
+		// Fetch session statuses to identify busy sessions
+		let busySessionIds: Set<string>;
+		try {
+			const statuses =
+				await apiGet<Record<string, { type: string }>>("/session/status");
+			busySessionIds = new Set(
+				Object.entries(statuses)
+					.filter(([, v]) => v.type !== "idle")
+					.map(([k]) => k),
+			);
+		} catch {
+			busySessionIds = new Set();
+		}
+
+		// Prefer a child whose parent is idle; fall back to any child
+		const childRaw =
+			children.find((c) => c.parentID && !busySessionIds.has(c.parentID)) ??
+			children[0];
+		if (!childRaw) return; // TS narrowing
 
 		const parentRaw = sessions.find((s) => s.id === childRaw.parentID);
 		expect(parentRaw).toBeDefined();

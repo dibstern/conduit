@@ -138,8 +138,10 @@ export async function handleRewind(
 	const activeId = resolveSession(deps, clientId);
 	if (messageId && activeId) {
 		await deps.client.revertSession(activeId, messageId);
-		// Invalidate cache — revert changes message history
+		// Invalidate cache and pagination cursor — revert deletes messages,
+		// so the old cursor would point to a non-existent message ID.
 		deps.messageCache.remove(activeId);
+		deps.sessionMgr.clearPaginationCursor(activeId);
 		deps.log.info(
 			`client=${clientId} session=${activeId} Reverted to message: ${messageId}`,
 		);

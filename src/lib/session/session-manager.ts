@@ -9,6 +9,7 @@ import {
 	loadForkMetadata,
 	saveForkMetadata,
 } from "../daemon/fork-metadata.js";
+import { OpenCodeApiError } from "../errors.js";
 import type {
 	OpenCodeClient,
 	SessionDetail,
@@ -190,6 +191,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	}
 
 	/**
+	 * Clear the stored pagination cursor for a session.
+	 * Must be called after rewind/fork — those operations delete messages,
+	 * invalidating any cursor that pointed to a now-deleted message ID.
+	 */
+	clearPaginationCursor(sessionId: string): void {
+		this.paginationCursors.delete(sessionId);
+	}
+
+	/**
 	 * Load a page of message history for a session using paginated API.
 	 *
 	 * Messages are returned in chronological order (oldest first).
@@ -210,10 +220,31 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			return { messages: [], hasMore: false };
 		}
 
-		const page = await this.client.getMessagesPage(sessionId, {
-			limit: this.historyPageSize,
-			...(before ? { before } : {}),
-		});
+		let page: Awaited<ReturnType<typeof this.client.getMessagesPage>>;
+		try {
+			page = await this.client.getMessagesPage(sessionId, {
+				limit: this.historyPageSize,
+				...(before ? { before } : {}),
+			});
+		} catch (err: unknown) {
+			// Stale cursor (rewind/fork deleted the message) → clear and retry without cursor.
+			// OpenCode returns 400 "Invalid cursor" when the before ID doesn't exist.
+			if (
+				before &&
+				err instanceof OpenCodeApiError &&
+				err.responseStatus === 400
+			) {
+				this.log.warn(
+					`Stale pagination cursor for ${sessionId.slice(0, 12)} — clearing and retrying`,
+				);
+				this.paginationCursors.delete(sessionId);
+				page = await this.client.getMessagesPage(sessionId, {
+					limit: this.historyPageSize,
+				});
+			} else {
+				throw err;
+			}
+		}
 
 		// Track the oldest message ID for cursor-based "load more"
 		const oldest = page[0];

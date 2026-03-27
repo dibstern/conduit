@@ -5,6 +5,7 @@ import {
 	apiDelete,
 	apiGet,
 	apiPost,
+	authHeaders,
 	OPENCODE_BASE_URL,
 } from "./server-connection.js";
 
@@ -112,7 +113,7 @@ export async function collectSSEEvents(
 	try {
 		const res = await fetch(`${new URL(path, OPENCODE_BASE_URL).href}`, {
 			signal: controller.signal,
-			headers: { Accept: "text/event-stream" },
+			headers: { Accept: "text/event-stream", ...authHeaders() },
 		});
 
 		if (!res.ok || !res.body) return events;
