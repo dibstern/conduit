@@ -1,7 +1,7 @@
 {
 	"name": "chat-result-bar",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T10:13:12.215Z",
+	"recordedAt": "2026-03-27T04:03:04.143Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,11 +13,10 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d65dd187ffeoM764u43aElxhZ",
+			"id": "ses_2d28a5d5effel1llfLkOXkrugF",
 			"history": {
 				"messages": [],
-				"hasMore": false,
-				"total": 0
+				"hasMore": false
 			}
 		},
 		{
@@ -26,16 +25,16 @@
 		},
 		{
 			"type": "model_info",
-			"model": "big-pickle",
-			"provider": "opencode"
+			"model": "claude-opus-4-6",
+			"provider": "anthropic"
 		},
 		{
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-					"title": "New session - 2026-03-26T10:13:07.832Z",
-					"updatedAt": 1774519987832,
+					"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+					"title": "New session - 2026-03-27T04:02:57.313Z",
+					"updatedAt": 1774584177313,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +44,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-					"title": "New session - 2026-03-26T10:13:07.832Z",
-					"updatedAt": 1774519987832,
+					"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+					"title": "New session - 2026-03-27T04:02:57.313Z",
+					"updatedAt": 1774584177313,
 					"messageCount": 0
 				}
 			],
@@ -72,93 +71,6 @@
 			"type": "model_list",
 			"providers": [
 				{
-					"id": "opencode",
-					"name": "OpenCode Zen",
-					"configured": true,
-					"models": [
-						{
-							"id": "nemotron-3-super-free",
-							"name": "Nemotron 3 Super Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "mimo-v2-omni-free",
-							"name": "MiMo V2 Omni Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 262144,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "mimo-v2-pro-free",
-							"name": "MiMo V2 Pro Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1048576,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "big-pickle",
-							"name": "Big Pickle",
-							"provider": "opencode",
-							"limit": {
-								"context": 200000,
-								"output": 128000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "minimax-m2.5-free",
-							"name": "MiniMax M2.5 Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 204800,
-								"output": 131072
-							}
-						},
-						{
-							"id": "gpt-5-nano",
-							"name": "GPT-5 Nano",
-							"provider": "opencode",
-							"limit": {
-								"context": 400000,
-								"input": 272000,
-								"output": 128000
-							},
-							"variants": [
-								"minimal",
-								"low",
-								"medium",
-								"high"
-							]
-						}
-					]
-				},
-				{
 					"id": "anthropic",
 					"name": "Anthropic",
 					"configured": true,
@@ -166,89 +78,6 @@
 						{
 							"id": "claude-opus-4-5-20251101",
 							"name": "Claude Opus 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-latest",
-							"name": "Claude Haiku 3.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-opus-4-1",
-							"name": "Claude Opus 4.1 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-sonnet-20241022",
-							"name": "Claude Sonnet 3.5 v2",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-sonnet-20240229",
-							"name": "Claude Sonnet 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-opus-4-6",
-							"name": "Claude Opus 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-6",
-							"name": "Claude Sonnet 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-0",
-							"name": "Claude Sonnet 4 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -273,52 +102,8 @@
 							]
 						},
 						{
-							"id": "claude-sonnet-4-5-20250929",
-							"name": "Claude Sonnet 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-0",
-							"name": "Claude Opus 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-20241022",
-							"name": "Claude Haiku 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20240620",
-							"name": "Claude Sonnet 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-7-sonnet-latest",
-							"name": "Claude Sonnet 3.7 (latest)",
+							"id": "claude-opus-4-5",
+							"name": "Claude Opus 4.5 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -343,6 +128,71 @@
 							]
 						},
 						{
+							"id": "claude-opus-4-6",
+							"name": "Claude Opus 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5-20250929",
+							"name": "Claude Sonnet 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-6",
+							"name": "Claude Sonnet 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-5-haiku-20241022",
+							"name": "Claude Haiku 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-sonnet-4-0",
+							"name": "Claude Sonnet 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
 							"id": "claude-3-haiku-20240307",
 							"name": "Claude Haiku 3",
 							"provider": "anthropic",
@@ -352,8 +202,113 @@
 							}
 						},
 						{
+							"id": "claude-sonnet-4-20250514",
+							"name": "Claude Sonnet 4",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-1",
+							"name": "Claude Opus 4.1 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-opus-20240229",
+							"name": "Claude Opus 3",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 4096
+							}
+						},
+						{
+							"id": "claude-3-5-haiku-latest",
+							"name": "Claude Haiku 3.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-3-5-sonnet-20240620",
+							"name": "Claude Sonnet 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-opus-4-1-20250805",
+							"name": "Claude Opus 4.1",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-0",
+							"name": "Claude Opus 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
 							"id": "claude-haiku-4-5-20251001",
 							"name": "Claude Haiku 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5",
+							"name": "Claude Sonnet 4.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-7-sonnet-latest",
+							"name": "Claude Sonnet 3.7 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -378,21 +333,8 @@
 							]
 						},
 						{
-							"id": "claude-opus-4-5",
-							"name": "Claude Opus 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-opus-20240229",
-							"name": "Claude Opus 3",
+							"id": "claude-3-sonnet-20240229",
+							"name": "Claude Sonnet 3",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -400,12 +342,28 @@
 							}
 						},
 						{
-							"id": "claude-sonnet-4-5",
-							"name": "Claude Sonnet 4.5 (latest)",
+							"id": "claude-3-5-sonnet-20241022",
+							"name": "Claude Sonnet 3.5 v2",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
-								"output": 64000
+								"output": 8192
+							}
+						}
+					]
+				},
+				{
+					"id": "opencode",
+					"name": "OpenCode Zen",
+					"configured": true,
+					"models": [
+						{
+							"id": "big-pickle",
+							"name": "Big Pickle",
+							"provider": "opencode",
+							"limit": {
+								"context": 200000,
+								"output": 128000
 							},
 							"variants": [
 								"high",
@@ -413,29 +371,70 @@
 							]
 						},
 						{
-							"id": "claude-sonnet-4-20250514",
-							"name": "Claude Sonnet 4",
-							"provider": "anthropic",
+							"id": "mimo-v2-omni-free",
+							"name": "MiMo V2 Omni Free",
+							"provider": "opencode",
 							"limit": {
-								"context": 200000,
+								"context": 262144,
 								"output": 64000
 							},
 							"variants": [
-								"high",
-								"max"
+								"low",
+								"medium",
+								"high"
 							]
 						},
 						{
-							"id": "claude-opus-4-1-20250805",
-							"name": "Claude Opus 4.1",
-							"provider": "anthropic",
+							"id": "gpt-5-nano",
+							"name": "GPT-5 Nano",
+							"provider": "opencode",
 							"limit": {
-								"context": 200000,
-								"output": 32000
+								"context": 400000,
+								"input": 272000,
+								"output": 128000
 							},
 							"variants": [
-								"high",
-								"max"
+								"minimal",
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "nemotron-3-super-free",
+							"name": "Nemotron 3 Super Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "minimax-m2.5-free",
+							"name": "MiniMax M2.5 Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 204800,
+								"output": 131072
+							}
+						},
+						{
+							"id": "mimo-v2-pro-free",
+							"name": "MiMo V2 Pro Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1048576,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
 							]
 						}
 					]
@@ -444,8 +443,10 @@
 		},
 		{
 			"type": "variant_info",
-			"variant": "",
+			"variant": "high",
 			"variants": [
+				"low",
+				"medium",
 				"high",
 				"max"
 			]
@@ -485,9 +486,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "New session - 2026-03-26T10:13:07.832Z",
-							"updatedAt": 1774519990150,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "New session - 2026-03-27T04:02:57.313Z",
+							"updatedAt": 1774584179652,
 							"messageCount": 0
 						}
 					],
@@ -497,9 +498,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "New session - 2026-03-26T10:13:07.832Z",
-							"updatedAt": 1774519990150,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "New session - 2026-03-27T04:02:57.313Z",
+							"updatedAt": 1774584179652,
 							"messageCount": 0
 						}
 					],
@@ -509,9 +510,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "New session - 2026-03-26T10:13:07.832Z",
-							"updatedAt": 1774519990150,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "New session - 2026-03-27T04:02:57.313Z",
+							"updatedAt": 1774584179652,
 							"messageCount": 0
 						}
 					],
@@ -521,9 +522,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "New session - 2026-03-26T10:13:07.832Z",
-							"updatedAt": 1774519990150,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "New session - 2026-03-27T04:02:57.313Z",
+							"updatedAt": 1774584179652,
 							"messageCount": 0
 						}
 					],
@@ -533,9 +534,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "New session - 2026-03-26T10:13:07.832Z",
-							"updatedAt": 1774519990150,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "New session - 2026-03-27T04:02:57.313Z",
+							"updatedAt": 1774584179652,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -550,9 +551,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "New session - 2026-03-26T10:13:07.832Z",
-							"updatedAt": 1774519990150,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "New session - 2026-03-27T04:02:57.313Z",
+							"updatedAt": 1774584179652,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -560,38 +561,12 @@
 					"roots": false
 				},
 				{
-					"type": "thinking_start"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "The",
-					"messageId": "msg_d29a2377f001nsAqNOUQMufgBH"
-				},
-				{
-					"type": "thinking_delta",
-					"text": " user is asking me to reply with just the word 'ok'. This is a simple request that doesn't require any tool usage.",
-					"messageId": "msg_d29a2377f001nsAqNOUQMufgBH"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "",
-					"messageId": "msg_d29a2377f001nsAqNOUQMufgBH"
-				},
-				{
-					"type": "thinking_stop"
-				},
-				{
-					"type": "delta",
-					"text": "ok",
-					"messageId": "msg_d29a2377f001nsAqNOUQMufgBH"
-				},
-				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "Reply: respond with only 'ok'",
-							"updatedAt": 1774519991610,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "Acknowledgment request",
+							"updatedAt": 1774584179652,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -602,9 +577,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "Reply: respond with only 'ok'",
-							"updatedAt": 1774519991610,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "Acknowledgment request",
+							"updatedAt": 1774584179652,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -612,36 +587,45 @@
 					"roots": false
 				},
 				{
+					"type": "delta",
+					"text": "ok",
+					"messageId": "msg_d2d75abb2001Umf3BnQjhpEYL0"
+				},
+				{
 					"type": "result",
 					"usage": {
-						"input": 70,
-						"output": 31,
-						"cache_read": 510,
-						"cache_creation": 16450
+						"input": 3,
+						"output": 4,
+						"cache_read": 17686,
+						"cache_creation": 331
 					},
-					"cost": 0,
+					"cost": 0.01102675,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 70,
-						"output": 31,
-						"cache_read": 510,
-						"cache_creation": 16450
+						"input": 3,
+						"output": 4,
+						"cache_read": 17686,
+						"cache_creation": 331
 					},
-					"cost": 0,
-					"duration": 1562,
+					"cost": 0.01102675,
+					"duration": 4002,
 					"sessionId": ""
+				},
+				{
+					"type": "done",
+					"code": 0
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "Reply: respond with only 'ok'",
-							"updatedAt": 1774519991707,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "Acknowledgment request",
+							"updatedAt": 1774584183638,
 							"messageCount": 0
 						}
 					],
@@ -655,9 +639,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "Reply: respond with only 'ok'",
-							"updatedAt": 1774519991707,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "Acknowledgment request",
+							"updatedAt": 1774584183650,
 							"messageCount": 0
 						}
 					],
@@ -667,9 +651,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "Reply: respond with only 'ok'",
-							"updatedAt": 1774519991719,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "Acknowledgment request",
+							"updatedAt": 1774584183650,
 							"messageCount": 0
 						}
 					],
@@ -679,9 +663,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65dd187ffeoM764u43aElxhZ",
-							"title": "Reply: respond with only 'ok'",
-							"updatedAt": 1774519991719,
+							"id": "ses_2d28a5d5effel1llfLkOXkrugF",
+							"title": "Acknowledgment request",
+							"updatedAt": 1774584183650,
 							"messageCount": 0
 						}
 					],

@@ -1,7 +1,7 @@
 {
 	"name": "permissions-bash",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T11:02:20.335Z",
+	"recordedAt": "2026-03-27T04:04:12.258Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,11 +13,10 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
+			"id": "ses_2d2896029ffed7ai135Ey72hkh",
 			"history": {
 				"messages": [],
-				"hasMore": false,
-				"total": 0
+				"hasMore": false
 			}
 		},
 		{
@@ -26,16 +25,16 @@
 		},
 		{
 			"type": "model_info",
-			"model": "claude-opus-4-6",
-			"provider": "anthropic"
+			"model": "big-pickle",
+			"provider": "opencode"
 		},
 		{
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-					"title": "New session - 2026-03-26T11:02:03.275Z",
-					"updatedAt": 1774522923275,
+					"id": "ses_2d2896029ffed7ai135Ey72hkh",
+					"title": "New session - 2026-03-27T04:04:02.134Z",
+					"updatedAt": 1774584242134,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +44,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-					"title": "New session - 2026-03-26T11:02:03.275Z",
-					"updatedAt": 1774522923275,
+					"id": "ses_2d2896029ffed7ai135Ey72hkh",
+					"title": "New session - 2026-03-27T04:04:02.134Z",
+					"updatedAt": 1774584242134,
 					"messageCount": 0
 				}
 			],
@@ -72,93 +71,6 @@
 			"type": "model_list",
 			"providers": [
 				{
-					"id": "opencode",
-					"name": "OpenCode Zen",
-					"configured": true,
-					"models": [
-						{
-							"id": "nemotron-3-super-free",
-							"name": "Nemotron 3 Super Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "mimo-v2-omni-free",
-							"name": "MiMo V2 Omni Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 262144,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "mimo-v2-pro-free",
-							"name": "MiMo V2 Pro Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1048576,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "big-pickle",
-							"name": "Big Pickle",
-							"provider": "opencode",
-							"limit": {
-								"context": 200000,
-								"output": 128000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "minimax-m2.5-free",
-							"name": "MiniMax M2.5 Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 204800,
-								"output": 131072
-							}
-						},
-						{
-							"id": "gpt-5-nano",
-							"name": "GPT-5 Nano",
-							"provider": "opencode",
-							"limit": {
-								"context": 400000,
-								"input": 272000,
-								"output": 128000
-							},
-							"variants": [
-								"minimal",
-								"low",
-								"medium",
-								"high"
-							]
-						}
-					]
-				},
-				{
 					"id": "anthropic",
 					"name": "Anthropic",
 					"configured": true,
@@ -166,89 +78,6 @@
 						{
 							"id": "claude-opus-4-5-20251101",
 							"name": "Claude Opus 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-latest",
-							"name": "Claude Haiku 3.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-opus-4-1",
-							"name": "Claude Opus 4.1 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-sonnet-20241022",
-							"name": "Claude Sonnet 3.5 v2",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-sonnet-20240229",
-							"name": "Claude Sonnet 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-opus-4-6",
-							"name": "Claude Opus 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-6",
-							"name": "Claude Sonnet 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-0",
-							"name": "Claude Sonnet 4 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -273,52 +102,8 @@
 							]
 						},
 						{
-							"id": "claude-sonnet-4-5-20250929",
-							"name": "Claude Sonnet 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-0",
-							"name": "Claude Opus 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-20241022",
-							"name": "Claude Haiku 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20240620",
-							"name": "Claude Sonnet 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-7-sonnet-latest",
-							"name": "Claude Sonnet 3.7 (latest)",
+							"id": "claude-opus-4-5",
+							"name": "Claude Opus 4.5 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -343,6 +128,71 @@
 							]
 						},
 						{
+							"id": "claude-opus-4-6",
+							"name": "Claude Opus 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5-20250929",
+							"name": "Claude Sonnet 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-6",
+							"name": "Claude Sonnet 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-5-haiku-20241022",
+							"name": "Claude Haiku 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-sonnet-4-0",
+							"name": "Claude Sonnet 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
 							"id": "claude-3-haiku-20240307",
 							"name": "Claude Haiku 3",
 							"provider": "anthropic",
@@ -352,8 +202,113 @@
 							}
 						},
 						{
+							"id": "claude-sonnet-4-20250514",
+							"name": "Claude Sonnet 4",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-1",
+							"name": "Claude Opus 4.1 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-opus-20240229",
+							"name": "Claude Opus 3",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 4096
+							}
+						},
+						{
+							"id": "claude-3-5-haiku-latest",
+							"name": "Claude Haiku 3.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-3-5-sonnet-20240620",
+							"name": "Claude Sonnet 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-opus-4-1-20250805",
+							"name": "Claude Opus 4.1",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-0",
+							"name": "Claude Opus 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
 							"id": "claude-haiku-4-5-20251001",
 							"name": "Claude Haiku 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5",
+							"name": "Claude Sonnet 4.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-7-sonnet-latest",
+							"name": "Claude Sonnet 3.7 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -378,21 +333,8 @@
 							]
 						},
 						{
-							"id": "claude-opus-4-5",
-							"name": "Claude Opus 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-opus-20240229",
-							"name": "Claude Opus 3",
+							"id": "claude-3-sonnet-20240229",
+							"name": "Claude Sonnet 3",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -400,12 +342,28 @@
 							}
 						},
 						{
-							"id": "claude-sonnet-4-5",
-							"name": "Claude Sonnet 4.5 (latest)",
+							"id": "claude-3-5-sonnet-20241022",
+							"name": "Claude Sonnet 3.5 v2",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
-								"output": 64000
+								"output": 8192
+							}
+						}
+					]
+				},
+				{
+					"id": "opencode",
+					"name": "OpenCode Zen",
+					"configured": true,
+					"models": [
+						{
+							"id": "big-pickle",
+							"name": "Big Pickle",
+							"provider": "opencode",
+							"limit": {
+								"context": 200000,
+								"output": 128000
 							},
 							"variants": [
 								"high",
@@ -413,29 +371,70 @@
 							]
 						},
 						{
-							"id": "claude-sonnet-4-20250514",
-							"name": "Claude Sonnet 4",
-							"provider": "anthropic",
+							"id": "mimo-v2-omni-free",
+							"name": "MiMo V2 Omni Free",
+							"provider": "opencode",
 							"limit": {
-								"context": 200000,
+								"context": 262144,
 								"output": 64000
 							},
 							"variants": [
-								"high",
-								"max"
+								"low",
+								"medium",
+								"high"
 							]
 						},
 						{
-							"id": "claude-opus-4-1-20250805",
-							"name": "Claude Opus 4.1",
-							"provider": "anthropic",
+							"id": "gpt-5-nano",
+							"name": "GPT-5 Nano",
+							"provider": "opencode",
 							"limit": {
-								"context": 200000,
-								"output": 32000
+								"context": 400000,
+								"input": 272000,
+								"output": 128000
 							},
 							"variants": [
-								"high",
-								"max"
+								"minimal",
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "nemotron-3-super-free",
+							"name": "Nemotron 3 Super Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "minimax-m2.5-free",
+							"name": "MiniMax M2.5 Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 204800,
+								"output": 131072
+							}
+						},
+						{
+							"id": "mimo-v2-pro-free",
+							"name": "MiMo V2 Pro Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1048576,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
 							]
 						}
 					]
@@ -444,10 +443,8 @@
 		},
 		{
 			"type": "variant_info",
-			"variant": "max",
+			"variant": "",
 			"variants": [
-				"low",
-				"medium",
 				"high",
 				"max"
 			]
@@ -487,9 +484,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "New session - 2026-03-26T11:02:03.275Z",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "New session - 2026-03-27T04:04:02.134Z",
+							"updatedAt": 1774584244487,
 							"messageCount": 0
 						}
 					],
@@ -499,9 +496,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "New session - 2026-03-26T11:02:03.275Z",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "New session - 2026-03-27T04:04:02.134Z",
+							"updatedAt": 1774584244487,
 							"messageCount": 0
 						}
 					],
@@ -511,9 +508,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "New session - 2026-03-26T11:02:03.275Z",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "New session - 2026-03-27T04:04:02.134Z",
+							"updatedAt": 1774584244487,
 							"messageCount": 0
 						}
 					],
@@ -523,9 +520,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "New session - 2026-03-26T11:02:03.275Z",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "New session - 2026-03-27T04:04:02.134Z",
+							"updatedAt": 1774584244487,
 							"messageCount": 0
 						}
 					],
@@ -535,9 +532,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "New session - 2026-03-26T11:02:03.275Z",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "New session - 2026-03-27T04:04:02.134Z",
+							"updatedAt": 1774584244487,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -552,9 +549,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "New session - 2026-03-26T11:02:03.275Z",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "New session - 2026-03-27T04:04:02.134Z",
+							"updatedAt": 1774584244487,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -565,9 +562,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584244487,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -578,9 +575,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522925623,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584244487,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -589,8 +586,8 @@
 				},
 				{
 					"type": "permission_request",
-					"sessionId": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-					"requestId": "per_d29cf1392001FjVN9rKVTeUULm",
+					"sessionId": "ses_2d2896029ffed7ai135Ey72hkh",
+					"requestId": "per_d2d76b0d30019T5B71J70nMstk",
 					"toolName": "bash",
 					"toolInput": {
 						"patterns": [
@@ -603,78 +600,94 @@
 					]
 				},
 				{
+					"type": "thinking_start"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The user wants me to list files in the current directory using bash. This is a straightforward command.",
+					"messageId": "msg_d2d76a8f5001o7ycMAum9JScRi"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "",
+					"messageId": "msg_d2d76a8f5001o7ycMAum9JScRi"
+				},
+				{
+					"type": "thinking_stop"
+				},
+				{
 					"type": "tool_start",
-					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"id": "call_function_hnr6fzeko9se_1",
 					"name": "Bash"
 				},
 				{
 					"type": "tool_executing",
-					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"id": "call_function_hnr6fzeko9se_1",
 					"name": "Bash",
 					"input": {
 						"command": "ls -la",
-						"description": "Lists files in current directory"
+						"description": "List files in current directory"
 					}
 				},
 				{
 					"type": "tool_executing",
-					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"id": "call_function_hnr6fzeko9se_1",
 					"name": "Bash",
 					"input": {
 						"command": "ls -la",
-						"description": "Lists files in current directory"
+						"description": "List files in current directory"
 					},
 					"metadata": {
 						"output": "",
-						"description": "Lists files in current directory"
+						"description": "List files in current directory"
 					}
 				},
 				{
 					"type": "permission_resolved",
-					"requestId": "per_d29cf1392001FjVN9rKVTeUULm",
+					"requestId": "per_d2d76b0d30019T5B71J70nMstk",
 					"decision": "once"
 				},
 				{
 					"type": "tool_executing",
-					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
+					"id": "call_function_hnr6fzeko9se_1",
 					"name": "Bash",
 					"input": {
 						"command": "ls -la",
-						"description": "Lists files in current directory"
+						"description": "List files in current directory"
 					},
 					"metadata": {
-						"output": "total 936\ndrwxr-xr-x@ 33 dstern  staff    1056 26 Mar 22:02 .\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 17:35 ..\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:47 .conduit\n-rw-r--r--@  1 dstern  staff      95 26 Mar 14:45 .git\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:45 .github\n-rw-r--r--@  1 dstern  staff     200 26 Mar 14:45 .gitignore\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:58 .opencode\n-rw-r--r--@  1 dstern  staff       6 26 Mar 14:45 .opencode-version\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 .storybook\n-rw-r--r--@  1 dstern  staff    3267 26 Mar 14:45 AGENTS.md\n-rw-r--r--@  1 dstern  staff     917 26 Mar 15:31 biome.json\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:47 dist\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:45 docs\n-rw-r--r--@  1 dstern  staff     156 26 Mar 14:45 lefthook.yml\n-rw-r--r--@  1 dstern  staff    1065 26 Mar 14:45 LICENSE\ndrwxr-xr-x@  8 dstern  staff     256 26 Mar 14:45 media\ndrwxr-xr-x@ 43 dstern  staff    1376 26 Mar 14:47 node_modules\n-rw-r--r--@  1 dstern  staff     138 26 Mar 22:02 opencode.json\n-rw-r--r--@  1 dstern  staff     103 26 Mar 14:45 opencode.jsonc\n-rw-r--r--@  1 dstern  staff  223161 26 Mar 14:45 package-lock.json\n-rw-r--r--@  1 dstern  staff    5552 26 Mar 14:45 package.json\n-rw-r--r--@  1 dstern  staff  171949 26 Mar 14:45 pnpm-lock.yaml\n-rw-r--r--@  1 dstern  staff   11411 26 Mar 14:45 README.md\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 14:45 scripts\ndrwxr-xr-x@  4 dstern  staff     128 26 Mar 14:45 src\n-rw-r--r--@  1 dstern  staff     296 26 Mar 14:45 svelte.config.js\ndrwxr-xr-x@ 12 dstern  staff     384 26 Mar 14:45 test\ndrwxr-xr-x@ 10 dstern  staff     320 26 Mar 21:20 test-results\n-rw-r--r--@  1 dstern  staff     765 26 Mar 14:45 tsconfig.json\n-rw-r--r--@  1 dstern  staff    2986 26 Mar 14:45 vite.config.ts\n-rw-r--r--@  1 dstern  staff    1713 26 Mar 14:45 vitest.config.ts\n-rw-r--r--@  1 dstern  staff     424 26 Mar 14:45 vitest.contract.config.ts\n-rw-r--r--@  1 dstern  staff     322 26 Mar 14:45 vitest.integration.config.ts\n",
-						"description": "Lists files in current directory"
+						"output": "total 960\ndrwxr-xr-x@  37 dstern  staff    1184 27 Mar 15:02 .\ndrwxr-xr-x@  13 dstern  staff     416 18 Mar 16:43 ..\ndrwxr-xr-x@   3 dstern  staff      96 18 Mar 15:54 .conduit\n-rw-r--r--@   1 dstern  staff   14340 26 Mar 22:23 .DS_Store\ndrwxr-xr-x@  15 dstern  staff     480 27 Mar 14:56 .git\ndrwxr-xr-x@   4 dstern  staff     128 18 Mar 13:15 .github\n-rw-r--r--@   1 dstern  staff     220 26 Mar 23:46 .gitignore\ndrwxr-xr-x   10 dstern  staff     320 24 Mar 12:31 .opencode\n-rw-r--r--@   1 dstern  staff       6 27 Mar 07:30 .opencode-version\ndrwxr-xr-x@ 111 dstern  staff    3552 26 Mar 16:51 .playwright-cli\ndrwxr-xr-x@   5 dstern  staff     160 24 Mar 14:22 .storybook\ndrwxr-xr-x@   3 dstern  staff      96 27 Mar 11:05 .worktrees\n-rw-r--r--@   1 dstern  staff    3267 18 Mar 15:51 AGENTS.md\n-rw-r--r--@   1 dstern  staff     917 26 Mar 22:16 biome.json\ndrwxr-xr-x@   8 dstern  staff     256 27 Mar 12:34 dist\ndrwxr-xr-x@  10 dstern  staff     320 24 Mar 13:57 docs\n-rw-r--r--@   1 dstern  staff     156 18 Mar 15:51 lefthook.yml\n-rw-r--r--@   1 dstern  staff    1065 23 Mar 15:11 LICENSE\ndrwxr-xr-x@   9 dstern  staff     288 27 Mar 12:33 media\ndrwxr-xr-x@ 104 dstern  staff    3328 24 Mar 14:11 node_modules\n-rw-r--r--@   1 dstern  staff     138 27 Mar 15:02 opencode.json\n-rw-r--r--@   1 dstern  staff     103 21 Mar 15:44 opencode.jsonc\n-rw-r--r--@   1 dstern  staff  223161 18 Mar 15:52 package-lock.json\n-rw-r--r--@   1 dstern  staff    5552 26 Mar 09:49 package.json\n-rw-r--r--@   1 dstern  staff  171949 24 Mar 14:11 pnpm-lock.yaml\n-rw-r--r--@   1 dstern  staff   11411 26 Mar 10:36 README.md\ndrwxr-xr-x@   6 dstern  staff     192 26 Mar 09:49 scripts\ndrwxr-xr-x@   5 dstern  staff     160 18 Mar 13:15 src\n-rw-r--r--@   1 dstern  staff     296 18 Mar 15:51 svelte.config.js\ndrwxr-xr-x@  13 dstern  staff     416 27 Mar 13:44 test\ndrwxr-xr-x@   4 dstern  staff     128 20 Mar 11:06 test-debug\ndrwxr-xr-x@   5 dstern  staff     160 27 Mar 14:54 test-results\n-rw-r--r--@   1 dstern  staff     765 23 Mar 19:55 tsconfig.json\n-rw-r--r--@   1 dstern  staff    2986 23 Mar 22:09 vite.config.ts\n-rw-r--r--@   1 dstern  staff    1713 26 Mar 11:04 vitest.config.ts\n-rw-r--r--@   1 dstern  staff     424 18 Mar 15:51 vitest.contract.config.ts\n-rw-r--r--@   1 dstern  staff     322 26 Mar 11:05 vitest.integration.config.ts\n",
+						"description": "List files in current directory"
 					}
 				},
 				{
 					"type": "tool_result",
-					"id": "toolu_01HsEbABJTJ7fy5d65Pp17S1",
-					"content": "total 936\ndrwxr-xr-x@ 33 dstern  staff    1056 26 Mar 22:02 .\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 17:35 ..\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:47 .conduit\n-rw-r--r--@  1 dstern  staff      95 26 Mar 14:45 .git\ndrwxr-xr-x@  3 dstern  staff      96 26 Mar 14:45 .github\n-rw-r--r--@  1 dstern  staff     200 26 Mar 14:45 .gitignore\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:58 .opencode\n-rw-r--r--@  1 dstern  staff       6 26 Mar 14:45 .opencode-version\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:45 .storybook\n-rw-r--r--@  1 dstern  staff    3267 26 Mar 14:45 AGENTS.md\n-rw-r--r--@  1 dstern  staff     917 26 Mar 15:31 biome.json\ndrwxr-xr-x@  5 dstern  staff     160 26 Mar 14:47 dist\ndrwxr-xr-x@  9 dstern  staff     288 26 Mar 14:45 docs\n-rw-r--r--@  1 dstern  staff     156 26 Mar 14:45 lefthook.yml\n-rw-r--r--@  1 dstern  staff    1065 26 Mar 14:45 LICENSE\ndrwxr-xr-x@  8 dstern  staff     256 26 Mar 14:45 media\ndrwxr-xr-x@ 43 dstern  staff    1376 26 Mar 14:47 node_modules\n-rw-r--r--@  1 dstern  staff     138 26 Mar 22:02 opencode.json\n-rw-r--r--@  1 dstern  staff     103 26 Mar 14:45 opencode.jsonc\n-rw-r--r--@  1 dstern  staff  223161 26 Mar 14:45 package-lock.json\n-rw-r--r--@  1 dstern  staff    5552 26 Mar 14:45 package.json\n-rw-r--r--@  1 dstern  staff  171949 26 Mar 14:45 pnpm-lock.yaml\n-rw-r--r--@  1 dstern  staff   11411 26 Mar 14:45 README.md\ndrwxr-xr-x@  6 dstern  staff     192 26 Mar 14:45 scripts\ndrwxr-xr-x@  4 dstern  staff     128 26 Mar 14:45 src\n-rw-r--r--@  1 dstern  staff     296 26 Mar 14:45 svelte.config.js\ndrwxr-xr-x@ 12 dstern  staff     384 26 Mar 14:45 test\ndrwxr-xr-x@ 10 dstern  staff     320 26 Mar 21:20 test-results\n-rw-r--r--@  1 dstern  staff     765 26 Mar 14:45 tsconfig.json\n-rw-r--r--@  1 dstern  staff    2986 26 Mar 14:45 vite.config.ts\n-rw-r--r--@  1 dstern  staff    1713 26 Mar 14:45 vitest.config.ts\n-rw-r--r--@  1 dstern  staff     424 26 Mar 14:45 vitest.contract.config.ts\n-rw-r--r--@  1 dstern  staff     322 26 Mar 14:45 vitest.integration.config.ts\n",
+					"id": "call_function_hnr6fzeko9se_1",
+					"content": "total 960\ndrwxr-xr-x@  37 dstern  staff    1184 27 Mar 15:02 .\ndrwxr-xr-x@  13 dstern  staff     416 18 Mar 16:43 ..\ndrwxr-xr-x@   3 dstern  staff      96 18 Mar 15:54 .conduit\n-rw-r--r--@   1 dstern  staff   14340 26 Mar 22:23 .DS_Store\ndrwxr-xr-x@  15 dstern  staff     480 27 Mar 14:56 .git\ndrwxr-xr-x@   4 dstern  staff     128 18 Mar 13:15 .github\n-rw-r--r--@   1 dstern  staff     220 26 Mar 23:46 .gitignore\ndrwxr-xr-x   10 dstern  staff     320 24 Mar 12:31 .opencode\n-rw-r--r--@   1 dstern  staff       6 27 Mar 07:30 .opencode-version\ndrwxr-xr-x@ 111 dstern  staff    3552 26 Mar 16:51 .playwright-cli\ndrwxr-xr-x@   5 dstern  staff     160 24 Mar 14:22 .storybook\ndrwxr-xr-x@   3 dstern  staff      96 27 Mar 11:05 .worktrees\n-rw-r--r--@   1 dstern  staff    3267 18 Mar 15:51 AGENTS.md\n-rw-r--r--@   1 dstern  staff     917 26 Mar 22:16 biome.json\ndrwxr-xr-x@   8 dstern  staff     256 27 Mar 12:34 dist\ndrwxr-xr-x@  10 dstern  staff     320 24 Mar 13:57 docs\n-rw-r--r--@   1 dstern  staff     156 18 Mar 15:51 lefthook.yml\n-rw-r--r--@   1 dstern  staff    1065 23 Mar 15:11 LICENSE\ndrwxr-xr-x@   9 dstern  staff     288 27 Mar 12:33 media\ndrwxr-xr-x@ 104 dstern  staff    3328 24 Mar 14:11 node_modules\n-rw-r--r--@   1 dstern  staff     138 27 Mar 15:02 opencode.json\n-rw-r--r--@   1 dstern  staff     103 21 Mar 15:44 opencode.jsonc\n-rw-r--r--@   1 dstern  staff  223161 18 Mar 15:52 package-lock.json\n-rw-r--r--@   1 dstern  staff    5552 26 Mar 09:49 package.json\n-rw-r--r--@   1 dstern  staff  171949 24 Mar 14:11 pnpm-lock.yaml\n-rw-r--r--@   1 dstern  staff   11411 26 Mar 10:36 README.md\ndrwxr-xr-x@   6 dstern  staff     192 26 Mar 09:49 scripts\ndrwxr-xr-x@   5 dstern  staff     160 18 Mar 13:15 src\n-rw-r--r--@   1 dstern  staff     296 18 Mar 15:51 svelte.config.js\ndrwxr-xr-x@  13 dstern  staff     416 27 Mar 13:44 test\ndrwxr-xr-x@   4 dstern  staff     128 20 Mar 11:06 test-debug\ndrwxr-xr-x@   5 dstern  staff     160 27 Mar 14:54 test-results\n-rw-r--r--@   1 dstern  staff     765 23 Mar 19:55 tsconfig.json\n-rw-r--r--@   1 dstern  staff    2986 23 Mar 22:09 vite.config.ts\n-rw-r--r--@   1 dstern  staff    1713 26 Mar 11:04 vitest.config.ts\n-rw-r--r--@   1 dstern  staff     424 18 Mar 15:51 vitest.contract.config.ts\n-rw-r--r--@   1 dstern  staff     322 26 Mar 11:05 vitest.integration.config.ts\n",
 					"is_error": false
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 75,
-						"cache_read": 17817,
-						"cache_creation": 332
+						"input": 15160,
+						"output": 61,
+						"cache_read": 1824,
+						"cache_creation": 0
 					},
-					"cost": 0.0128735,
+					"cost": 0,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 3,
-						"output": 75,
-						"cache_read": 17817,
-						"cache_creation": 332
+						"input": 15160,
+						"output": 61,
+						"cache_read": 1824,
+						"cache_creation": 0
 					},
-					"cost": 0.0128735,
-					"duration": 7562,
+					"cost": 0,
+					"duration": 5082,
 					"sessionId": ""
 				},
 				{
@@ -693,9 +706,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522933168,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584249568,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -706,9 +719,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522933193,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584249568,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -716,71 +729,61 @@
 					"roots": false
 				},
 				{
-					"type": "delta",
-					"text": "Here's",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+					"type": "thinking_start"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The user asked me to list files using ls -la, which I've done. The output shows the directory contents. Now I should provide a concise response as per my instructions.\n",
+					"messageId": "msg_d2d76bccf0014sXalvyavabkjs"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "",
+					"messageId": "msg_d2d76bccf0014sXalvyavabkjs"
+				},
+				{
+					"type": "thinking_stop"
 				},
 				{
 					"type": "delta",
-					"text": " the directory listing. This is a Node.js/TypeScript project (cond",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
-				},
-				{
-					"type": "delta",
-					"text": "uit) with:\n\n- **Source code** in `src/` and `test/`",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
-				},
-				{
-					"type": "delta",
-					"text": "\n- **Config files**: `package.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `biome.json`, `sv",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
-				},
-				{
-					"type": "delta",
-					"text": "elte.config.js`\n- **Documentation** in `docs/` and `AGENTS.md`\n- **Build output** in `dist/`\n- **Dependencies",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
-				},
-				{
-					"type": "delta",
-					"text": "** in `node_modules/`\n- **OpenCode config** in `.opencode/`, `opencode.json`, `opencode.jsonc`",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
-				},
-				{
-					"type": "delta",
-					"text": "\n- **Scripts** in `scripts/`\n- **Storybook** config in `.storybook/`\n- **Test results** in `test-results/`",
-					"messageId": "msg_d29cf1fab001HjHCXYxSzSQ2iu"
+					"text": "\n\nFiles listed. This is a Node.js/TypeScript project with Svelte, Playwright, and pnpm as the package manager. Key directories include `src/`, `docs/`, `test/`, and `media/`.",
+					"messageId": "msg_d2d76bccf0014sXalvyavabkjs"
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 1,
-						"output": 193,
-						"cache_read": 18149,
-						"cache_creation": 1157
+						"input": 1092,
+						"output": 85,
+						"cache_read": 16960,
+						"cache_creation": 0
 					},
-					"cost": 0.02113575,
+					"cost": 0,
 					"duration": 0,
 					"sessionId": ""
 				},
 				{
 					"type": "result",
 					"usage": {
-						"input": 1,
-						"output": 193,
-						"cache_read": 18149,
-						"cache_creation": 1157
+						"input": 1092,
+						"output": 85,
+						"cache_read": 16960,
+						"cache_creation": 0
 					},
-					"cost": 0.02113575,
-					"duration": 6656,
+					"cost": 0,
+					"duration": 2199,
 					"sessionId": ""
+				},
+				{
+					"type": "done",
+					"code": 0
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522939822,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584251753,
 							"messageCount": 0
 						}
 					],
@@ -794,9 +797,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522939822,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584251765,
 							"messageCount": 0
 						}
 					],
@@ -806,9 +809,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522939822,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584251765,
 							"messageCount": 0
 						}
 					],
@@ -818,9 +821,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d63106f4ffevZFGY5yvFPQ10D",
-							"title": "Listing directory files with ls",
-							"updatedAt": 1774522939822,
+							"id": "ses_2d2896029ffed7ai135Ey72hkh",
+							"title": "List current dir files with ls -la bash command",
+							"updatedAt": 1774584251765,
 							"messageCount": 0
 						}
 					],

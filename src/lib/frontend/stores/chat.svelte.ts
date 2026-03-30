@@ -678,7 +678,11 @@ export function handleDone(
 	}
 
 	chatState.turnEpoch++;
-	chatState.currentMessageId = null;
+	// NOTE: currentMessageId is intentionally NOT reset here. It must
+	// persist so that advanceTurnIfNewMessage can compare the next turn's
+	// messageId against it. Resetting to null makes every post-done turn
+	// look like the first message in a fresh session, skipping turnEpoch++.
+	// Only clearMessages (session switch) should reset it.
 	phaseToIdle();
 }
 

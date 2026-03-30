@@ -205,12 +205,23 @@ import {
 describe("ChatLayout WS lifecycle", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		// Stub localStorage — the component reads terminal panel height from it
+		// on mount, but the test environment may not provide a full Storage impl.
+		vi.stubGlobal("localStorage", {
+			getItem: vi.fn(() => null),
+			setItem: vi.fn(),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+			length: 0,
+			key: vi.fn(() => null),
+		});
 		routerState.path = "/p/test-project/";
 		syncSlugState(routerState.path);
 	});
 
 	afterEach(() => {
 		cleanup();
+		vi.unstubAllGlobals();
 		// Reset router state so it doesn't leak between tests
 		routerState.path = "/";
 		syncSlugState("/");

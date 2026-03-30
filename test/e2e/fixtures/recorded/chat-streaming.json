@@ -1,7 +1,7 @@
 {
 	"name": "chat-streaming",
 	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-26T10:13:25.680Z",
+	"recordedAt": "2026-03-27T04:03:20.867Z",
 	"initMessages": [
 		{
 			"type": "client_count",
@@ -13,11 +13,10 @@
 		},
 		{
 			"type": "session_switched",
-			"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
+			"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
 			"history": {
 				"messages": [],
-				"hasMore": false,
-				"total": 0
+				"hasMore": false
 			}
 		},
 		{
@@ -33,9 +32,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-					"title": "New session - 2026-03-26T10:13:19.311Z",
-					"updatedAt": 1774519999311,
+					"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+					"title": "New session - 2026-03-27T04:03:13.623Z",
+					"updatedAt": 1774584193623,
 					"messageCount": 0
 				}
 			],
@@ -45,9 +44,9 @@
 			"type": "session_list",
 			"sessions": [
 				{
-					"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-					"title": "New session - 2026-03-26T10:13:19.311Z",
-					"updatedAt": 1774519999311,
+					"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+					"title": "New session - 2026-03-27T04:03:13.623Z",
+					"updatedAt": 1774584193623,
 					"messageCount": 0
 				}
 			],
@@ -72,93 +71,6 @@
 			"type": "model_list",
 			"providers": [
 				{
-					"id": "opencode",
-					"name": "OpenCode Zen",
-					"configured": true,
-					"models": [
-						{
-							"id": "nemotron-3-super-free",
-							"name": "Nemotron 3 Super Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "mimo-v2-omni-free",
-							"name": "MiMo V2 Omni Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 262144,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "mimo-v2-pro-free",
-							"name": "MiMo V2 Pro Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1048576,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "big-pickle",
-							"name": "Big Pickle",
-							"provider": "opencode",
-							"limit": {
-								"context": 200000,
-								"output": 128000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "minimax-m2.5-free",
-							"name": "MiniMax M2.5 Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 204800,
-								"output": 131072
-							}
-						},
-						{
-							"id": "gpt-5-nano",
-							"name": "GPT-5 Nano",
-							"provider": "opencode",
-							"limit": {
-								"context": 400000,
-								"input": 272000,
-								"output": 128000
-							},
-							"variants": [
-								"minimal",
-								"low",
-								"medium",
-								"high"
-							]
-						}
-					]
-				},
-				{
 					"id": "anthropic",
 					"name": "Anthropic",
 					"configured": true,
@@ -166,89 +78,6 @@
 						{
 							"id": "claude-opus-4-5-20251101",
 							"name": "Claude Opus 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-latest",
-							"name": "Claude Haiku 3.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-opus-4-1",
-							"name": "Claude Opus 4.1 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-sonnet-20241022",
-							"name": "Claude Sonnet 3.5 v2",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-sonnet-20240229",
-							"name": "Claude Sonnet 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-opus-4-6",
-							"name": "Claude Opus 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-6",
-							"name": "Claude Sonnet 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-0",
-							"name": "Claude Sonnet 4 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -273,52 +102,8 @@
 							]
 						},
 						{
-							"id": "claude-sonnet-4-5-20250929",
-							"name": "Claude Sonnet 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-0",
-							"name": "Claude Opus 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-20241022",
-							"name": "Claude Haiku 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20240620",
-							"name": "Claude Sonnet 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-7-sonnet-latest",
-							"name": "Claude Sonnet 3.7 (latest)",
+							"id": "claude-opus-4-5",
+							"name": "Claude Opus 4.5 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -343,6 +128,71 @@
 							]
 						},
 						{
+							"id": "claude-opus-4-6",
+							"name": "Claude Opus 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5-20250929",
+							"name": "Claude Sonnet 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-6",
+							"name": "Claude Sonnet 4.6",
+							"provider": "anthropic",
+							"limit": {
+								"context": 1000000,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-5-haiku-20241022",
+							"name": "Claude Haiku 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-sonnet-4-0",
+							"name": "Claude Sonnet 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
 							"id": "claude-3-haiku-20240307",
 							"name": "Claude Haiku 3",
 							"provider": "anthropic",
@@ -352,8 +202,113 @@
 							}
 						},
 						{
+							"id": "claude-sonnet-4-20250514",
+							"name": "Claude Sonnet 4",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-1",
+							"name": "Claude Opus 4.1 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-opus-20240229",
+							"name": "Claude Opus 3",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 4096
+							}
+						},
+						{
+							"id": "claude-3-5-haiku-latest",
+							"name": "Claude Haiku 3.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-3-5-sonnet-20240620",
+							"name": "Claude Sonnet 3.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						},
+						{
+							"id": "claude-opus-4-1-20250805",
+							"name": "Claude Opus 4.1",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-opus-4-0",
+							"name": "Claude Opus 4 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 32000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
 							"id": "claude-haiku-4-5-20251001",
 							"name": "Claude Haiku 4.5",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-sonnet-4-5",
+							"name": "Claude Sonnet 4.5 (latest)",
+							"provider": "anthropic",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"high",
+								"max"
+							]
+						},
+						{
+							"id": "claude-3-7-sonnet-latest",
+							"name": "Claude Sonnet 3.7 (latest)",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -378,21 +333,8 @@
 							]
 						},
 						{
-							"id": "claude-opus-4-5",
-							"name": "Claude Opus 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-opus-20240229",
-							"name": "Claude Opus 3",
+							"id": "claude-3-sonnet-20240229",
+							"name": "Claude Sonnet 3",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
@@ -400,12 +342,28 @@
 							}
 						},
 						{
-							"id": "claude-sonnet-4-5",
-							"name": "Claude Sonnet 4.5 (latest)",
+							"id": "claude-3-5-sonnet-20241022",
+							"name": "Claude Sonnet 3.5 v2",
 							"provider": "anthropic",
 							"limit": {
 								"context": 200000,
-								"output": 64000
+								"output": 8192
+							}
+						}
+					]
+				},
+				{
+					"id": "opencode",
+					"name": "OpenCode Zen",
+					"configured": true,
+					"models": [
+						{
+							"id": "big-pickle",
+							"name": "Big Pickle",
+							"provider": "opencode",
+							"limit": {
+								"context": 200000,
+								"output": 128000
 							},
 							"variants": [
 								"high",
@@ -413,29 +371,70 @@
 							]
 						},
 						{
-							"id": "claude-sonnet-4-20250514",
-							"name": "Claude Sonnet 4",
-							"provider": "anthropic",
+							"id": "mimo-v2-omni-free",
+							"name": "MiMo V2 Omni Free",
+							"provider": "opencode",
 							"limit": {
-								"context": 200000,
+								"context": 262144,
 								"output": 64000
 							},
 							"variants": [
-								"high",
-								"max"
+								"low",
+								"medium",
+								"high"
 							]
 						},
 						{
-							"id": "claude-opus-4-1-20250805",
-							"name": "Claude Opus 4.1",
-							"provider": "anthropic",
+							"id": "gpt-5-nano",
+							"name": "GPT-5 Nano",
+							"provider": "opencode",
 							"limit": {
-								"context": 200000,
-								"output": 32000
+								"context": 400000,
+								"input": 272000,
+								"output": 128000
 							},
 							"variants": [
-								"high",
-								"max"
+								"minimal",
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "nemotron-3-super-free",
+							"name": "Nemotron 3 Super Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1000000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
+							]
+						},
+						{
+							"id": "minimax-m2.5-free",
+							"name": "MiniMax M2.5 Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 204800,
+								"output": 131072
+							}
+						},
+						{
+							"id": "mimo-v2-pro-free",
+							"name": "MiMo V2 Pro Free",
+							"provider": "opencode",
+							"limit": {
+								"context": 1048576,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high"
 							]
 						}
 					]
@@ -485,9 +484,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "New session - 2026-03-26T10:13:19.311Z",
-							"updatedAt": 1774520001625,
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "New session - 2026-03-27T04:03:13.623Z",
+							"updatedAt": 1774584195967,
 							"messageCount": 0
 						}
 					],
@@ -497,9 +496,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "New session - 2026-03-26T10:13:19.311Z",
-							"updatedAt": 1774520001625,
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "New session - 2026-03-27T04:03:13.623Z",
+							"updatedAt": 1774584195967,
 							"messageCount": 0
 						}
 					],
@@ -509,9 +508,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "New session - 2026-03-26T10:13:19.311Z",
-							"updatedAt": 1774520001625,
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "New session - 2026-03-27T04:03:13.623Z",
+							"updatedAt": 1774584195967,
 							"messageCount": 0
 						}
 					],
@@ -521,9 +520,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "New session - 2026-03-26T10:13:19.311Z",
-							"updatedAt": 1774520001625,
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "New session - 2026-03-27T04:03:13.623Z",
+							"updatedAt": 1774584195967,
 							"messageCount": 0
 						}
 					],
@@ -533,9 +532,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "New session - 2026-03-26T10:13:19.311Z",
-							"updatedAt": 1774520001625,
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "New session - 2026-03-27T04:03:13.623Z",
+							"updatedAt": 1774584195967,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -550,9 +549,35 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "New session - 2026-03-26T10:13:19.311Z",
-							"updatedAt": 1774520001625,
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "New session - 2026-03-27T04:03:13.623Z",
+							"updatedAt": 1774584195967,
+							"messageCount": 0,
+							"processing": true
+						}
+					],
+					"roots": false
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "Automated testing importance for software quality",
+							"updatedAt": 1774584195967,
+							"messageCount": 0,
+							"processing": true
+						}
+					],
+					"roots": true
+				},
+				{
+					"type": "session_list",
+					"sessions": [
+						{
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
+							"title": "Automated testing importance for software quality",
+							"updatedAt": 1774584195967,
 							"messageCount": 0,
 							"processing": true
 						}
@@ -565,79 +590,53 @@
 				{
 					"type": "thinking_delta",
 					"text": "The",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "thinking_delta",
-					"text": " user is asking me to write a paragraph about automated testing. This is a general knowledge question that doesn't require any tools - I can answer this directly based on",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "Automated testing importance for software quality",
-							"updatedAt": 1774520003489,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
-							"title": "Automated testing importance for software quality",
-							"updatedAt": 1774520003489,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": false
+					"text": " user is asking for a straightforward explanation about why automated testing is important for software quality. This is a general knowledge question that doesn't require any tools or code changes. I should provide",
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "thinking_delta",
-					"text": " my knowledge.",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"text": " a concise, direct answer.",
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "thinking_delta",
 					"text": "",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "thinking_stop"
 				},
 				{
 					"type": "delta",
-					"text": "Automated testing is essential for software quality because it ensures code correctness is continuously verified rather than relying on sporadic",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"text": "Automated testing is crucial for software quality because it provides fast, repeatable validation that",
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "delta",
-					"text": " manual checks. It catches regressions early, allowing developers to refactor with confidence and ship changes",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"text": " code changes work correctly and don't introduce regressions. It catches bugs early in the development cycle when they're cheaper to fix, enables confident refactoring, and",
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "delta",
-					"text": " faster. Tests serve as living documentation of expected behavior, making codebases easier to understand and maintain. They also reduce human error in repetitive",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"text": " serves as documentation of expected behavior. Automated tests also scale with projects—manual testing becomes impractical",
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "delta",
-					"text": " validation tasks and enable teams to iterate quickly without sacrificing reliability.",
-					"messageId": "msg_d29a26455001lyWL0CebgxyZdM"
+					"text": " as codebases grow, but test suites can run continuously in CI/CD pipelines to ensure every change meets quality standards before deployment.",
+					"messageId": "msg_d2d75eb69001zkqOWlmG0nDHPq"
 				},
 				{
 					"type": "result",
 					"usage": {
 						"input": 70,
-						"output": 116,
-						"cache_read": 510,
-						"cache_creation": 16452
+						"output": 133,
+						"cache_read": 16824,
+						"cache_creation": 18
 					},
 					"cost": 0,
 					"duration": 0,
@@ -647,21 +646,25 @@
 					"type": "result",
 					"usage": {
 						"input": 70,
-						"output": 116,
-						"cache_read": 510,
-						"cache_creation": 16452
+						"output": 133,
+						"cache_read": 16824,
+						"cache_creation": 18
 					},
 					"cost": 0,
-					"duration": 3546,
+					"duration": 4414,
 					"sessionId": ""
+				},
+				{
+					"type": "done",
+					"code": 0
 				},
 				{
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
 							"title": "Automated testing importance for software quality",
-							"updatedAt": 1774520005168,
+							"updatedAt": 1774584200361,
 							"messageCount": 0
 						}
 					],
@@ -675,9 +678,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
 							"title": "Automated testing importance for software quality",
-							"updatedAt": 1774520005168,
+							"updatedAt": 1774584200374,
 							"messageCount": 0
 						}
 					],
@@ -687,9 +690,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
 							"title": "Automated testing importance for software quality",
-							"updatedAt": 1774520005182,
+							"updatedAt": 1774584200374,
 							"messageCount": 0
 						}
 					],
@@ -699,9 +702,9 @@
 					"type": "session_list",
 					"sessions": [
 						{
-							"id": "ses_2d65da4b0ffe5oIdsThilLfz5a",
+							"id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
 							"title": "Automated testing importance for software quality",
-							"updatedAt": 1774520005182,
+							"updatedAt": 1774584200374,
 							"messageCount": 0
 						}
 					],

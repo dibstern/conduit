@@ -222,8 +222,10 @@ describe("Subagent fixture capture", () => {
 			? allSessions
 			: Object.values(allSessions as Record<string, OpenCodeSession>);
 
-		// 2. Find a child session whose parent is idle (not actively being modified).
-		// This prevents snapshot churn when a parent session is still streaming.
+		// 2. Find a child session whose parent is idle AND whose session ID
+		// appears in the parent's Task tool metadata. The subagent E2E test
+		// clicks a .subagent-link and expects the child's session ID in the
+		// switch_session message, so the fixture must have a matching pair.
 		const children = sessions.filter((s) => s.parentID);
 		if (children.length === 0) {
 			console.warn(
@@ -247,25 +249,87 @@ describe("Subagent fixture capture", () => {
 			busySessionIds = new Set();
 		}
 
-		// Prefer a child whose parent is idle; fall back to any child
-		const childRaw =
-			children.find((c) => c.parentID && !busySessionIds.has(c.parentID)) ??
-			children[0];
-		if (!childRaw) return; // TS narrowing
+		// Group children by parent
+		const childrenByParent = new Map<string, OpenCodeSession[]>();
+		for (const c of children) {
+			if (!c.parentID) continue;
+			const list = childrenByParent.get(c.parentID) ?? [];
+			list.push(c);
+			childrenByParent.set(c.parentID, list);
+		}
 
-		const parentRaw = sessions.find((s) => s.id === childRaw.parentID);
-		expect(parentRaw).toBeDefined();
-		if (!parentRaw) return; // for TS narrowing
+		// Helper: extract session IDs from Task tool metadata, in order
+		function extractTaskSessionIds(msgs: OpenCodeMessage[]): string[] {
+			const ids: string[] = [];
+			for (const msg of msgs) {
+				for (const part of msg.parts ?? []) {
+					const meta = part.state?.metadata as
+						| Record<string, unknown>
+						| undefined;
+					if (
+						part.type === "tool" &&
+						part.tool === "task" &&
+						typeof meta?.["sessionId"] === "string"
+					) {
+						ids.push(meta["sessionId"]);
+					}
+				}
+			}
+			return ids;
+		}
+
+		// Find a parent/child pair where:
+		// 1. Parent is idle
+		// 2. Parent's history contains a Task tool referencing the child
+		let parentRaw: OpenCodeSession | undefined;
+		let childRaw: OpenCodeSession | undefined;
+		let parentMsgs: OpenCodeMessage[] = [];
+
+		// Try idle parents first, then any parent
+		const parentCandidates = [
+			...new Set([
+				...sessions.filter(
+					(s) => !busySessionIds.has(s.id) && childrenByParent.has(s.id),
+				),
+				...sessions.filter((s) => childrenByParent.has(s.id)),
+			]),
+		];
+
+		for (const candidate of parentCandidates) {
+			const candidateMsgs = (await getSessionMessages(
+				candidate.id,
+			)) as OpenCodeMessage[];
+			const taskSessionIds = extractTaskSessionIds(candidateMsgs);
+			const candidateChildren = childrenByParent.get(candidate.id) ?? [];
+			// Pick the child that appears FIRST in the parent's Task tools,
+			// so the E2E test's `.subagentLinks.first()` click matches.
+			for (const taskSid of taskSessionIds) {
+				const match = candidateChildren.find((c) => c.id === taskSid);
+				if (match) {
+					parentRaw = candidate;
+					childRaw = match;
+					parentMsgs = candidateMsgs;
+					break;
+				}
+			}
+			if (parentRaw && childRaw) break;
+		}
+
+		if (!parentRaw || !childRaw) {
+			console.warn(
+				"SKIP: No parent/child pair found where parent history " +
+					"references the child's Task tool. " +
+					"Create a session using the Task tool, then re-run.",
+			);
+			return;
+		}
 
 		// 3. Build stable ID map
 		const idMap = new Map<string, string>();
 		idMap.set(parentRaw.id, "ses_parent001");
 		idMap.set(childRaw.id, "ses_child001");
 
-		// 4. Fetch histories
-		const parentMsgs = (await getSessionMessages(
-			parentRaw.id,
-		)) as OpenCodeMessage[];
+		// 4. Fetch child history (parent already fetched above)
 		const childMsgs = (await getSessionMessages(
 			childRaw.id,
 		)) as OpenCodeMessage[];

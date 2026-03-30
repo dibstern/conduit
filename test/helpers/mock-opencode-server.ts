@@ -229,6 +229,25 @@ export class MockOpenCodeServer {
 	}
 
 	/**
+	 * Replace the message queue for a session with paginated responses.
+	 * The first call returns `page1`, subsequent calls return `page2`.
+	 * Clears both exact and normalized queues to prevent stale entries
+	 * from the recording taking precedence.
+	 */
+	setMessagePages(sessionId: string, page1: unknown[], page2: unknown[]): void {
+		const pages = [
+			{ status: 200, responseBody: page1 },
+			{ status: 200, responseBody: page2 },
+		];
+		// Set exact key (matched first by handleRequest)
+		const ek = `GET /session/${sessionId}/message`;
+		this.exactQueues.set(ek, pages);
+		// Also set normalized key as fallback
+		const nk = "GET /session/:param/message";
+		this.normalizedQueues.set(nk, [...pages]);
+	}
+
+	/**
 	 * Emit a synthetic SSE event to all connected SSE clients.
 	 * Use in tests that need a specific event without depending on
 	 * the recording's SSE batch associations.
