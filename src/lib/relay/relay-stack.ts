@@ -332,6 +332,11 @@ export async function createProjectRelay(
 
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
 
+	// Late-binding: SSE wiring is set up before monitoring wiring, but SSE
+	// events arrive asynchronously (after connect). The ref is bound after
+	// wireMonitoring completes.
+	const doneDeliveredRef = { fn: (_sid: string) => {} };
+
 	wireSSEConsumer(
 		{
 			translator,
@@ -351,6 +356,7 @@ export async function createProjectRelay(
 			listPendingPermissions: () => client.listPendingPermissions(),
 			statusPoller,
 			slug: config.slug,
+			onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
 		},
 		sseConsumer,
 	);
@@ -359,29 +365,37 @@ export async function createProjectRelay(
 	await sseConsumer.connect();
 
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
-	const { pipelineDeps, sseTracker, getMonitoringState, setMonitoringState } =
-		wireMonitoring({
-			client,
-			wsHandler,
-			sessionMgr,
-			overrides,
-			toolContentStore,
-			messageCache,
-			statusPoller,
-			pollerManager,
-			registry,
-			sseConsumer,
-			config: {
-				...(config.pollerGatingConfig != null && {
-					pollerGatingConfig: config.pollerGatingConfig,
-				}),
-				...(config.pushManager != null && { pushManager: config.pushManager }),
-				slug: config.slug,
-			},
-			statusLog,
-			sseLog,
-			pipelineLog,
-		});
+	const {
+		pipelineDeps,
+		sseTracker,
+		getMonitoringState,
+		setMonitoringState,
+		recordDoneDelivered: bindDoneDelivered,
+	} = wireMonitoring({
+		client,
+		wsHandler,
+		sessionMgr,
+		overrides,
+		toolContentStore,
+		messageCache,
+		statusPoller,
+		pollerManager,
+		registry,
+		sseConsumer,
+		config: {
+			...(config.pollerGatingConfig != null && {
+				pollerGatingConfig: config.pollerGatingConfig,
+			}),
+			...(config.pushManager != null && { pushManager: config.pushManager }),
+			slug: config.slug,
+		},
+		statusLog,
+		sseLog,
+		pipelineLog,
+	});
+
+	// Bind the late-binding done-dedup callback now that monitoring wiring exists.
+	doneDeliveredRef.fn = bindDoneDelivered;
 
 	// ── Session lifecycle wiring (G4: broadcast + session_lifecycle) ─────────
 	wireSessionLifecycle({
@@ -412,6 +426,7 @@ export async function createProjectRelay(
 			slug: config.slug,
 		},
 		pollerLog,
+		onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
 	});
 
 	// ── Timer wiring (G5: permission timeouts + rate limiter cleanup) ────────

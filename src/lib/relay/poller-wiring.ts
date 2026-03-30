@@ -39,6 +39,8 @@ export interface PollerWiringDeps {
 		slug: string;
 	};
 	pollerLog: Logger;
+	/** Optional: record that a "done" was delivered via poller (for dedup with status-poller) */
+	onDoneProcessed?: (sessionId: string) => void;
 }
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
@@ -99,6 +101,11 @@ export function wirePollers(deps: PollerWiringDeps): void {
 				"message-poller",
 			);
 			applyPipelineResult(pollerResult, polledSessionId, pipelineDeps);
+
+			// Record done delivery for dedup with status-poller synthetic done
+			if (msg.type === "done" && polledSessionId) {
+				deps.onDoneProcessed?.(polledSessionId);
+			}
 
 			// Notification routing: push + cross-session broadcast
 			const isSubagentPoller =

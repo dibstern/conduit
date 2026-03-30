@@ -69,6 +69,12 @@ export interface MonitoringWiringResult {
 	pollerGatingCfg: PollerGatingConfig;
 	getMonitoringState: () => MonitoringState;
 	setMonitoringState: (state: MonitoringState) => void;
+	/**
+	 * Record that a "done" event was delivered via SSE or message poller.
+	 * Prevents the status-poller's processAndApplyDone from synthesizing
+	 * a duplicate "done" for the same busy→idle cycle.
+	 */
+	recordDoneDelivered: (sessionId: string) => void;
 }
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
@@ -101,6 +107,12 @@ export function wireMonitoring(
 		...config.pollerGatingConfig,
 	};
 
+	// ── Done dedup tracking ──────────────────────────────────────────────────
+	// Tracks sessions that received a "done" via SSE or message poller in the
+	// current busy cycle. processAndApplyDone consumes (check + delete) entries
+	// to avoid synthesizing a duplicate "done" when SSE already delivered one.
+	const doneDeliveredByPrimary = new Set<string>();
+
 	// ── Shared pipeline deps (used by status poller + message poller) ──────
 	const pipelineDeps: PipelineDeps = {
 		toolContentStore,
@@ -126,6 +138,17 @@ export function wireMonitoring(
 		sendStatusToSession: (sessionId, msg) =>
 			wsHandler.sendToSession(sessionId, msg),
 		processAndApplyDone: (sessionId, isSubagent) => {
+			// Dedup: if SSE or message poller already delivered a "done" for
+			// this session in the current busy cycle, skip the synthetic
+			// safety-net done. Consume the entry so the next cycle works.
+			if (doneDeliveredByPrimary.has(sessionId)) {
+				doneDeliveredByPrimary.delete(sessionId);
+				statusLog.info(
+					`Skipping synthetic done for ${sessionId.slice(0, 12)} — already delivered by primary path`,
+				);
+				return;
+			}
+
 			const doneMsg = { type: "done" as const, code: 0 };
 			const doneViewers = wsHandler.getClientsForSession(sessionId);
 			const doneResult = processEvent(
@@ -229,6 +252,9 @@ export function wireMonitoring(
 		getMonitoringState: () => monitoringState,
 		setMonitoringState: (state: MonitoringState) => {
 			monitoringState = state;
+		},
+		recordDoneDelivered: (sessionId: string) => {
+			doneDeliveredByPrimary.add(sessionId);
 		},
 	};
 }

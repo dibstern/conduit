@@ -254,8 +254,32 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 	// a new turn has started.  This single check replaces per-handler
 	// new-turn detection and handles all response shapes (text-first,
 	// tool-first, thinking-first).
-	if ("messageId" in event && event.messageId != null) {
-		advanceTurnIfNewMessage(event.messageId as string);
+	const hasMessageId = "messageId" in event;
+	const msgId = hasMessageId
+		? (event as Record<string, unknown>)["messageId"]
+		: undefined;
+	if (hasMessageId && msgId != null) {
+		advanceTurnIfNewMessage(msgId as string);
+	} else {
+		const LLM_TYPES = new Set([
+			"delta",
+			"thinking_start",
+			"thinking_delta",
+			"thinking_stop",
+			"tool_start",
+			"tool_executing",
+			"tool_result",
+			"result",
+		]);
+		if (LLM_TYPES.has(event.type)) {
+			console.debug(
+				"[dispatch] LLM event %s has NO messageId (hasKey=%s val=%s) replay=%s",
+				event.type,
+				hasMessageId,
+				msgId,
+				ctx.isReplay,
+			);
+		}
 	}
 
 	switch (event.type) {

@@ -88,6 +88,8 @@ export interface SSEWiringDeps {
 	getSessionParentMap?: () => Map<string, string>;
 	/** Project slug for push notification routing */
 	slug?: string;
+	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
+	onDoneProcessed?: (sessionId: string) => void;
 }
 
 // ─── Push notification helper ────────────────────────────────────────────────
@@ -385,6 +387,11 @@ export function handleSSEEvent(
 			wsHandler,
 			log: pipelineLog,
 		});
+
+		// Record done delivery for dedup with status-poller synthetic done
+		if (msg.type === "done" && targetSessionId) {
+			deps.onDoneProcessed?.(targetSessionId);
+		}
 
 		// Notification routing: push + cross-session broadcast
 		const isSubagent =

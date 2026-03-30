@@ -403,11 +403,24 @@ function setMessages(msgs: ChatMessage[]): void {
  *  and the new messageId is recorded.
  *
  *  No-op when the messageId is the same as the current one. */
+/** All messageIds seen in the current session. Prevents the message
+ *  poller's re-synthesized events (which alternate between messageIds)
+ *  from spuriously bumping turnEpoch on every poll cycle. */
+const seenMessageIds = new Set<string>();
+
 export function advanceTurnIfNewMessage(messageId: string | undefined): void {
 	if (messageId == null) return;
-	if (messageId === chatState.currentMessageId) return;
 
-	// ── First event of a new turn ──────────────────────────────────────
+	// Already seen this messageId — just update currentMessageId (it may
+	// have changed back from a different message) but don't bump epoch.
+	if (seenMessageIds.has(messageId)) {
+		chatState.currentMessageId = messageId;
+		return;
+	}
+
+	// ── First event of a genuinely new message ─────────────────────────
+	seenMessageIds.add(messageId);
+
 	// Finalize any in-progress assistant streaming from the previous turn.
 	if (chatState.phase === "streaming") {
 		const finalizedId = flushAndFinalizeAssistant();
@@ -420,8 +433,22 @@ export function advanceTurnIfNewMessage(messageId: string | undefined): void {
 	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
 	// during the previous turn (sentDuringEpoch < turnEpoch).
 	// Only bump if this isn't the very first message in the session.
-	if (chatState.currentMessageId != null) {
+	const prevId = chatState.currentMessageId;
+	if (prevId != null) {
 		chatState.turnEpoch++;
+		console.debug(
+			"[advanceTurn] NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
+			messageId,
+			prevId,
+			chatState.turnEpoch,
+			chatState.phase,
+		);
+	} else {
+		console.debug(
+			"[advanceTurn] FIRST messageId=%s (no bump, turnEpoch=%d)",
+			messageId,
+			chatState.turnEpoch,
+		);
 	}
 
 	chatState.currentMessageId = messageId;
@@ -678,6 +705,12 @@ export function handleDone(
 	}
 
 	chatState.turnEpoch++;
+	console.debug(
+		"[handleDone] turnEpoch=%d currentMessageId=%s phase=%s",
+		chatState.turnEpoch,
+		chatState.currentMessageId,
+		chatState.phase,
+	);
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
 	// messageId against it. Resetting to null makes every post-done turn
@@ -815,6 +848,15 @@ export function addUserMessage(
 		...(images != null && { images }),
 		...(sentWhileProcessing ? { sentDuringEpoch: chatState.turnEpoch } : {}),
 	};
+	if (sentWhileProcessing) {
+		console.debug(
+			"[addUserMessage] queued msg sentDuringEpoch=%d turnEpoch=%d currentMessageId=%s phase=%s",
+			chatState.turnEpoch,
+			chatState.turnEpoch,
+			chatState.currentMessageId,
+			chatState.phase,
+		);
+	}
 	setMessages([...getMessages(), msg]);
 }
 
@@ -896,6 +938,7 @@ export function clearMessages(): void {
 	_pendingHistoryQueuedFallback = false;
 	registry.clear();
 	doneMessageIds.clear();
+	seenMessageIds.clear();
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
 		renderTimer = null;

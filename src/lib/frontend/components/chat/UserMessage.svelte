@@ -18,6 +18,19 @@
 		message.sentDuringEpoch != null &&
 		chatState.turnEpoch <= message.sentDuringEpoch,
 	);
+
+	// DEBUG: track all reactive inputs driving the shimmer
+	$inspect(
+		"[UserMessage shimmer]",
+		{
+			isQueued,
+			turnEpoch: chatState.turnEpoch,
+			sentDuringEpoch: message.sentDuringEpoch,
+			currentMessageId: chatState.currentMessageId,
+			phase: chatState.phase,
+			text: message.text.slice(0, 40),
+		},
+	);
 </script>
 
 <div
