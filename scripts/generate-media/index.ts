@@ -14,6 +14,7 @@ import path from "node:path";
 import type { SceneDefinition } from "./scene-runner.js";
 import {
 	buildFrontend,
+	killPreviewGroup,
 	MEDIA_DIR,
 	runScenes,
 	startPreview,
@@ -95,7 +96,7 @@ async function main(): Promise<void> {
 	try {
 		await runScenes(scenes);
 	} finally {
-		previewProc.kill();
+		killPreviewGroup(previewProc);
 		// Clean video temp dir
 		rmSync(path.join(MEDIA_DIR, "_video_tmp"), {
 			recursive: true,

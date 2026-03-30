@@ -67,8 +67,50 @@ export function buildFrontend(): void {
 	execSync("pnpm build:frontend", { cwd: PROJECT_ROOT, stdio: "pipe" });
 }
 
+/** Kill any process listening on PREVIEW_PORT (orphan from a previous run). */
+function killStalePreview(): void {
+	try {
+		const out = execSync(`lsof -ti :${PREVIEW_PORT}`, { stdio: "pipe" })
+			.toString()
+			.trim();
+		if (out) {
+			for (const pid of out.split("\n")) {
+				try {
+					process.kill(Number(pid), "SIGTERM");
+				} catch {
+					/* already exited */
+				}
+			}
+			// Brief pause for the port to be released
+			execSync("sleep 0.5", { stdio: "pipe" });
+			console.log(
+				`  Killed stale process(es) on port ${PREVIEW_PORT}: ${out.replace(/\n/g, ", ")}`,
+			);
+		}
+	} catch {
+		/* No process on port — expected path */
+	}
+}
+
+/**
+ * Kill a preview server process group.
+ * The process is spawned with `detached: true`, making it a process group
+ * leader. Killing the negative PID sends SIGTERM to the entire group
+ * (npx + vite + any children), preventing orphaned Vite servers.
+ */
+export function killPreviewGroup(proc: ChildProcess): void {
+	if (proc.pid != null) {
+		try {
+			process.kill(-proc.pid, "SIGTERM");
+		} catch {
+			/* already exited */
+		}
+	}
+}
+
 /** Start vite preview and wait for it to be ready. */
 export async function startPreview(): Promise<ChildProcess> {
+	killStalePreview();
 	console.log("  Starting preview server...");
 	const proc = spawn(
 		"npx",
@@ -76,24 +118,39 @@ export async function startPreview(): Promise<ChildProcess> {
 		{
 			cwd: PROJECT_ROOT,
 			stdio: "pipe",
+			detached: true,
 			env: { ...process.env },
 		},
 	);
 
 	await new Promise<void>((resolve, reject) => {
 		const timeout = setTimeout(
-			() => reject(new Error("Preview server timeout")),
+			() => reject(new Error("Preview server timeout (15s)")),
 			15_000,
 		);
+		let stderrChunks = "";
 		proc.stdout?.on("data", (data: Buffer) => {
 			if (data.toString().includes(String(PREVIEW_PORT))) {
 				clearTimeout(timeout);
 				resolve();
 			}
 		});
+		proc.stderr?.on("data", (data: Buffer) => {
+			stderrChunks += data.toString();
+		});
 		proc.on("error", (err) => {
 			clearTimeout(timeout);
 			reject(err);
+		});
+		proc.on("close", (code) => {
+			if (code !== 0) {
+				clearTimeout(timeout);
+				reject(
+					new Error(
+						`Preview server exited with code ${code}: ${stderrChunks.trim() || "(no stderr)"}`,
+					),
+				);
+			}
 		});
 	});
 
