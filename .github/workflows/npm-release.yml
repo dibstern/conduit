@@ -28,6 +28,30 @@ jobs:
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install and start OpenCode server
+        run: |
+          OPENCODE_VERSION=$(cat .opencode-version)
+          npm install -g "opencode-ai@${OPENCODE_VERSION}"
+          export OPENCODE_DATA_DIR=$(mktemp -d)
+          opencode serve --port 4096 &
+          # Wait for OpenCode to become healthy
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4096/global/health > /dev/null 2>&1; then
+              echo "OpenCode server healthy on port 4096"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "OpenCode server failed to start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+        env:
+          XDG_DATA_HOME: /tmp/opencode-ci-data
+          XDG_CONFIG_HOME: /tmp/opencode-ci-config
+          OPENCODE_SERVER_PASSWORD: ""
+
       - run: pnpm test:all
 
   publish:
