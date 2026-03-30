@@ -48,7 +48,21 @@ async function getSwitcherSlugs(
 	const hamburger = page.locator("#hamburger-btn");
 	if (await hamburger.isVisible()) {
 		await hamburger.click();
-		await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
+		// The sidebar slides in with a 0.25s CSS transition. Elements inside
+		// pass Playwright's "visible" check immediately (non-zero bounding box
+		// at negative coordinates due to overflow:visible), but remain outside
+		// the viewport until the animation completes. Wait for the button's
+		// bounding rect to actually be within the viewport.
+		await page.waitForFunction(
+			() => {
+				const el = document.getElementById("project-switcher-btn");
+				if (!el) return false;
+				const r = el.getBoundingClientRect();
+				return r.left >= 0 && r.right <= window.innerWidth;
+			},
+			null,
+			{ timeout: 5_000 },
+		);
 	}
 
 	// Click the project switcher button to open the dropdown
