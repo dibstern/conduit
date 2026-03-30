@@ -51,7 +51,10 @@
 		}
 	});
 
-	// Cache the current instance id, status, and whether multi-instance is active
+	// Cache the current instance id, status, and whether multi-instance is active.
+	// Only update cached values when the store has real data — NOT when cleared
+	// on WS disconnect. This lets the overlay show "Start Instance" / "Switch
+	// Instance" buttons even after clearInstanceState() empties the store.
 	$effect(() => {
 		const slug = projectState.currentSlug;
 		if (!slug) return;
@@ -64,7 +67,10 @@
 				cachedInstanceStatus = instance.status;
 			}
 		}
-		cachedMultiInstance = instanceState.instances.length > 1;
+		// Only update when instances are loaded (not after clearInstanceState)
+		if (instanceState.instances.length > 0) {
+			cachedMultiInstance = instanceState.instances.length > 1;
+		}
 	});
 
 	// Show instance action buttons when overlay is visible, instance was unhealthy/stopped,

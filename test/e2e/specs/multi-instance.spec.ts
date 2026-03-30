@@ -964,11 +964,12 @@ test.describe("Settings: Instance Status Updates", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 
-		// Open settings
+		// Open settings and navigate to Instances tab
 		const gearBtn = page.locator("#settings-btn, [title='Settings']");
 		await gearBtn.click();
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
+		await settingsPanel.getByText("Instances").click();
 
 		// "Work" instance should show red dot (unhealthy status from fixture)
 		const instanceList = page.locator("#instance-settings-list");
@@ -1041,7 +1042,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		// Should show terminal commands
 		await expect(page.getByText("opencode serve --port 4098")).toBeVisible();
 		await expect(
-			page.getByText("It will appear here automatically"),
+			page.getByText("It will appear here automatically.", { exact: true }),
 		).toBeVisible();
 	});
 
