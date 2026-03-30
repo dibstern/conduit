@@ -12,6 +12,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      OPENCODE_SERVER_PASSWORD: ci-test-password
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -35,9 +37,9 @@ jobs:
           npm install -g "opencode-ai@${OPENCODE_VERSION}"
           export OPENCODE_DATA_DIR=$(mktemp -d)
           opencode serve --port 4096 &
-          # Wait for OpenCode to become healthy
+          # Wait for OpenCode to become healthy (auth required)
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:4096/global/health > /dev/null 2>&1; then
+            if curl -sf -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://localhost:4096/global/health > /dev/null 2>&1; then
               echo "OpenCode server healthy on port 4096"
               break
             fi
@@ -50,7 +52,6 @@ jobs:
         env:
           XDG_DATA_HOME: /tmp/opencode-ci-data
           XDG_CONFIG_HOME: /tmp/opencode-ci-config
-          OPENCODE_SERVER_PASSWORD: ""
 
       - run: pnpm test:all
 
