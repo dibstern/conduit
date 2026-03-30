@@ -82,11 +82,16 @@ export async function handleGetFileTree(
 
 	try {
 		const ig = await loadGitignore(deps);
-		const queue: string[] = ["."];
+		const MAX_DEPTH = 10;
+		const MAX_ENTRIES = 5_000;
+		const queue: Array<{ dir: string; depth: number }> = [
+			{ dir: ".", depth: 0 },
+		];
 
-		while (queue.length > 0) {
-			const dir = queue.shift();
-			if (dir === undefined) break;
+		while (queue.length > 0 && entries.length < MAX_ENTRIES) {
+			const next = queue.shift();
+			if (next === undefined) break;
+			const { dir, depth } = next;
 			const items = await deps.client.listDirectory(dir);
 
 			for (const item of items) {
@@ -96,7 +101,9 @@ export async function handleGetFileTree(
 
 				if (item.type === "directory") {
 					entries.push(`${path}/`);
-					queue.push(path);
+					if (depth < MAX_DEPTH) {
+						queue.push({ dir: path, depth: depth + 1 });
+					}
 				} else {
 					entries.push(path);
 				}
