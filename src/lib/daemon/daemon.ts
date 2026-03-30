@@ -232,8 +232,8 @@ export class Daemon {
 	// Crash counter
 	private readonly crashCounter = new CrashCounter();
 
-	// Structured logger
-	private readonly log: Logger = createLogger("daemon");
+	// Structured logger — initialised in the constructor after setLogLevel()
+	private readonly log: Logger;
 
 	// ── Async lifecycle management ──────────────────────────────────────
 	private serviceRegistry = new ServiceRegistry();
@@ -241,6 +241,12 @@ export class Daemon {
 	private shutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(options?: DaemonOptions) {
+		// Apply log configuration first so every logger created below uses the
+		// requested level/format (including this.log).
+		if (options?.logLevel) setLogLevel(options.logLevel);
+		if (options?.logFormat) setLogFormat(options.logFormat);
+		this.log = createLogger("daemon");
+
 		const configDir = options?.configDir ?? DEFAULT_CONFIG_DIR;
 		this.port = options?.port ?? DEFAULT_PORT;
 		this.hostExplicit = options?.host != null;
@@ -358,10 +364,6 @@ export class Daemon {
 		}
 
 		this.staticDir = options?.staticDir ?? DEFAULT_STATIC_DIR;
-
-		// Apply log configuration before any logging occurs
-		if (options?.logLevel) setLogLevel(options.logLevel);
-		if (options?.logFormat) setLogFormat(options.logFormat);
 	}
 
 	// ─── Lifecycle ──────────────────────────────────────────────────────────

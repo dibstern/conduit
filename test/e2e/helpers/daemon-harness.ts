@@ -94,6 +94,7 @@ export async function createDaemonHarness(
 		logPath: join(tmpDir, "daemon.log"),
 		opencodeUrl,
 		staticDir,
+		logLevel: "error",
 	});
 
 	await daemon.start();

@@ -110,6 +110,7 @@ test.beforeAll(async () => {
 		logPath: join(tmpDir, "daemon.log"),
 		opencodeUrl: OPENCODE_URL,
 		staticDir,
+		logLevel: "error",
 	});
 
 	await daemon.start();

@@ -60,6 +60,7 @@ const test = base.extend<
 				pidPath: join(tmpDir, "daemon.pid"),
 				logPath: join(tmpDir, "daemon.log"),
 				staticDir,
+				logLevel: "error",
 				// No opencodeUrl! Smart default should auto-detect.
 			});
 
