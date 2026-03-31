@@ -183,31 +183,53 @@ describe("handleForkSession (ticket 5.3)", () => {
 		expect(deps.client.forkSession).toHaveBeenCalledWith("ses_explicit", {});
 	});
 
-	it("stores forkMessageId from messageId payload", async () => {
+	it("stores forkMessageId and forkPointTimestamp from messageId payload", async () => {
 		let storedSessionId: string | undefined;
-		let storedMessageId: string | undefined;
+		let storedEntry:
+			| { forkMessageId: string; parentID: string; forkPointTimestamp?: number }
+			| undefined;
 		const forkMeta = {
 			setForkEntry: (
 				sid: string,
-				entry: { forkMessageId: string; parentID: string },
+				entry: {
+					forkMessageId: string;
+					parentID: string;
+					forkPointTimestamp?: number;
+				},
 			) => {
 				storedSessionId = sid;
-				storedMessageId = entry.forkMessageId;
+				storedEntry = entry;
 			},
+			getForkEntry: () => undefined,
 		};
-		const depsWithMeta = { ...deps, forkMeta };
+		// Mock getMessage to return the fork-point message with a timestamp
+		const getMessageMock = vi.fn().mockResolvedValue({
+			id: "msg_42",
+			role: "assistant",
+			time: { created: 1000 },
+		});
+		const depsWithMeta = {
+			...deps,
+			client: {
+				...deps.client,
+				getMessage: getMessageMock,
+			} as unknown as HandlerDeps["client"],
+			forkMeta,
+		};
 		await handleForkSession(depsWithMeta, "client-1", {
 			sessionId: "ses_original",
 			messageId: "msg_42",
 		});
 		expect(storedSessionId).toBe("ses_forked");
-		expect(storedMessageId).toBe("msg_42");
+		expect(storedEntry?.forkMessageId).toBe("msg_42");
+		expect(storedEntry?.forkPointTimestamp).toBe(1000);
+		expect(getMessageMock).toHaveBeenCalledWith("ses_original", "msg_42");
 	});
 
 	it("includes forkMessageId in session_forked broadcast", async () => {
 		const depsWithMeta = {
 			...deps,
-			forkMeta: { setForkEntry: () => {} },
+			forkMeta: { setForkEntry: () => {}, getForkEntry: () => undefined },
 		};
 		await handleForkSession(depsWithMeta, "client-1", {
 			sessionId: "ses_original",
@@ -230,6 +252,7 @@ describe("handleForkSession (ticket 5.3)", () => {
 			) => {
 				storedMessageId = entry.forkMessageId;
 			},
+			getForkEntry: () => undefined,
 		};
 		// Re-create deps with a client that includes getMessagesPage
 		const getMessagesPageMock = vi.fn().mockResolvedValue([{ id: "msg_last" }]);

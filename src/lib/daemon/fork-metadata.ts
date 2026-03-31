@@ -9,6 +9,9 @@ import { DEFAULT_CONFIG_DIR } from "../env.js";
 export interface ForkEntry {
 	forkMessageId: string;
 	parentID: string;
+	/** Unix-ms timestamp of the fork-point message. Messages with
+	 *  time.created < this value are inherited from the parent session. */
+	forkPointTimestamp?: number;
 }
 
 const FILENAME = "fork-metadata.json";

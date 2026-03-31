@@ -136,6 +136,7 @@ export function wireHandlerDeps(
 		pollerManager,
 		forkMeta: {
 			setForkEntry: (sid, entry) => sessionMgr.setForkEntry(sid, entry),
+			getForkEntry: (sid) => sessionMgr.getForkEntry(sid),
 		},
 		...(config.getInstances != null &&
 			config.addInstance != null &&

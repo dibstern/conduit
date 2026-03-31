@@ -81,6 +81,8 @@ export interface UserMessage {
 	 *    `sentDuringEpoch != null && turnEpoch <= sentDuringEpoch`
 	 *  The shimmer clears automatically when `handleDone` increments `turnEpoch`. */
 	sentDuringEpoch?: number;
+	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
+	createdAt?: number;
 }
 
 export interface AssistantMessage {
@@ -91,6 +93,8 @@ export interface AssistantMessage {
 	finalized: boolean;
 	messageId?: string;
 	needsRender?: boolean;
+	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
+	createdAt?: number;
 }
 
 export interface ThinkingMessage {
@@ -100,6 +104,8 @@ export interface ThinkingMessage {
 	duration?: number;
 	done: boolean;
 	messageId?: string;
+	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
+	createdAt?: number;
 }
 
 export interface ToolMessage {
@@ -117,6 +123,8 @@ export interface ToolMessage {
 	/** Tool part metadata — carries sessionId for Task/subagent tools. */
 	metadata?: Record<string, unknown>;
 	messageId?: string;
+	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
+	createdAt?: number;
 }
 
 export interface ResultMessage {
@@ -129,6 +137,8 @@ export interface ResultMessage {
 	cacheRead?: number;
 	cacheWrite?: number;
 	messageId?: string;
+	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
+	createdAt?: number;
 }
 
 export type SystemMessageVariant = "info" | "error";

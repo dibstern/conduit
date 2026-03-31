@@ -141,6 +141,9 @@ function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 		pollerManager: deps.pollerManager,
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,
+		forkMeta: {
+			getForkEntry: (sid: string) => deps.forkMeta.getForkEntry(sid),
+		},
 	};
 }
 
@@ -347,11 +350,31 @@ export async function handleForkSession(
 	// potentially different message IDs.
 	deps.sessionMgr.clearPaginationCursor(sessionId);
 
-	// Determine the fork-point messageId
+	// Determine fork-point metadata.
+	// forkPointTimestamp is the primary split anchor (reliable across ID changes).
+	// forkMessageId is kept for backward compat / debugging.
 	let forkMessageId: string | undefined = messageId;
-	if (!forkMessageId) {
-		// Whole-session fork: get the most recent message to use as fork point.
-		// Uses limit=1 to avoid fetching the entire message history.
+	let forkPointTimestamp: number | undefined;
+
+	if (messageId) {
+		// Specific-message fork: look up the fork-point message's timestamp from the parent.
+		// getMessage fetches exactly one message by ID (no pagination needed).
+		try {
+			const forkMsg = await deps.client.getMessage(sessionId, messageId);
+			if (forkMsg?.time?.created) {
+				forkPointTimestamp = forkMsg.time.created;
+			}
+		} catch {
+			deps.log.warn(
+				`Could not look up fork-point message ${messageId} in ${sessionId}`,
+			);
+		}
+	} else {
+		// Whole-session fork: use the forked session's creation time as the boundary.
+		// All inherited messages have time.created < this value.
+		forkPointTimestamp = forked.time?.created ?? forked.time?.updated;
+
+		// Also capture the last message ID for backward compat.
 		try {
 			const msgs = await deps.client.getMessagesPage(forked.id, { limit: 1 });
 			if (msgs.length > 0) {
@@ -363,11 +386,12 @@ export async function handleForkSession(
 		}
 	}
 
-	// Persist fork-point metadata (forkMessageId + parentID)
-	if (forkMessageId) {
+	// Persist fork-point metadata
+	if (forkMessageId || forkPointTimestamp) {
 		deps.forkMeta.setForkEntry(forked.id, {
-			forkMessageId,
+			forkMessageId: forkMessageId ?? "",
 			parentID: sessionId,
+			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		});
 	}
 
@@ -384,6 +408,7 @@ export async function handleForkSession(
 			updatedAt: forked.time?.updated ?? forked.time?.created ?? 0,
 			parentID: sessionId,
 			...(forkMessageId && { forkMessageId }),
+			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		},
 		parentId: sessionId,
 		parentTitle: parent?.title ?? "Unknown",

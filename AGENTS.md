@@ -61,3 +61,5 @@ Read `docs/agent-guide/testing.md` before choosing broader verification. Use the
     - Or just open `http://localhost:4096` in a browser and use dev
         tools to inspect requests, responses, and WebSocket messages.
 - Check the daemon logs in `~/.opencode/daemon.log` for errors or unexpected behavior.
+- You can use `playwright-cli console` (see the playwright-cli skill) to inspect the console logs to help debug the frontend.
+- Don't remove temporary debug logging until you're confident you've fixed the issue.

@@ -334,9 +334,7 @@ export function handleSSEEvent(
 			targetSessionId &&
 			deps.pendingUserMessages.consume(targetSessionId, msg.text)
 		) {
-			log.debug(
-				`Suppressed relay-originated user_message echo for session=${targetSessionId}`,
-			);
+			log.debug(`Suppressed user_message echo: session=${targetSessionId}`);
 			continue;
 		}
 

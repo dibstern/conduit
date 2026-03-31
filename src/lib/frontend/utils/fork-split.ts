@@ -12,19 +12,46 @@ export interface ForkSplit {
 }
 
 /**
- * Split messages at the fork point identified by forkMessageId.
- * Scans for the last ChatMessage whose messageId matches forkMessageId.
- * Returns all messages up to and including that point as "inherited",
- * and the rest as "current".
+ * Split messages at the fork boundary using the fork-point timestamp.
  *
- * If forkMessageId is not found in the messages (e.g. messages haven't
- * loaded yet), all messages are returned as "inherited" (conservative).
+ * Messages with `createdAt < forkPointTimestamp` are inherited from the parent.
+ * Messages with `createdAt >= forkPointTimestamp` (or no `createdAt`, e.g. live
+ * messages from SSE) are current (new in the fork).
+ *
+ * Falls back to forkMessageId matching for sessions without forkPointTimestamp.
  */
 export function splitAtForkPoint(
 	messages: ChatMessage[],
-	forkMessageId: string,
+	forkMessageId?: string,
+	forkPointTimestamp?: number,
 ): ForkSplit {
-	// Find the last index where any message has this messageId.
+	// Primary: timestamp-based split (reliable — each message self-identifies).
+	if (forkPointTimestamp != null) {
+		// Find the last message that is inherited (createdAt < forkPointTimestamp).
+		// Messages without createdAt (live SSE messages) are always current.
+		let splitIndex = 0;
+		for (let i = 0; i < messages.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: index within bounds
+			const msg = messages[i]!;
+			if (
+				"createdAt" in msg &&
+				typeof msg.createdAt === "number" &&
+				msg.createdAt < forkPointTimestamp
+			) {
+				splitIndex = i + 1; // include this message in inherited
+			}
+		}
+		return {
+			inherited: messages.slice(0, splitIndex),
+			current: messages.slice(splitIndex),
+		};
+	}
+
+	// Fallback: ID-based matching for sessions created before timestamp tracking.
+	if (!forkMessageId) {
+		return { inherited: messages, current: [] };
+	}
+
 	let splitIndex = -1;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		// biome-ignore lint/style/noNonNullAssertion: index within bounds
@@ -36,21 +63,15 @@ export function splitAtForkPoint(
 	}
 
 	if (splitIndex === -1) {
-		// Fork point not found — treat all as inherited (conservative).
-		// This is a data integrity issue: the forkMessageId should always
-		// appear in the messages. Common cause: historyToChatMessages not
-		// propagating messageId from HistoryMessage to ChatMessage.
 		if (messages.length > 0) {
 			console.warn(
-				`[fork-split] forkMessageId "${forkMessageId}" not found in ${messages.length} messages. ` +
-					"All messages will render as inherited. Check that historyToChatMessages sets messageId.",
+				`[fork-split] forkMessageId "${forkMessageId}" not found — all messages treated as inherited`,
 			);
 		}
 		return { inherited: messages, current: [] };
 	}
 
-	// Include all messages in the same "turn" after the matched message.
-	// A turn ends when we hit the next user message or the end of the array.
+	// Include the full turn (up to next user message).
 	let endOfTurn = splitIndex;
 	for (let i = splitIndex + 1; i < messages.length; i++) {
 		if (messages[i]?.type === "user") break;

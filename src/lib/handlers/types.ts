@@ -2,6 +2,7 @@
 // Shared types used by all handler modules.
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
+import type { ForkEntry } from "../daemon/fork-metadata.js";
 import type {
 	OpenCodeClient,
 	PromptOptions,
@@ -86,10 +87,8 @@ export interface HandlerDeps {
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;
 	/** Fork-point metadata store — used to persist forkMessageId and parentID */
 	forkMeta: {
-		setForkEntry: (
-			sessionId: string,
-			entry: { forkMessageId: string; parentID: string },
-		) => void;
+		setForkEntry: (sessionId: string, entry: ForkEntry) => void;
+		getForkEntry: (sessionId: string) => ForkEntry | undefined;
 	};
 	/** Instance management capability group (optional — only available in daemon mode) */
 	instanceMgmt?: InstanceManagementDeps;

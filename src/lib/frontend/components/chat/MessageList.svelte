@@ -179,12 +179,30 @@
 
 	// Fork context: detect if current session is a user fork
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
-	const isFork = $derived(!!activeSession?.forkMessageId);
+	const isFork = $derived(!!activeSession?.forkMessageId || !!activeSession?.forkPointTimestamp);
 	const forkSplit = $derived(
-		isFork && activeSession?.forkMessageId
-			? splitAtForkPoint(chatState.messages, activeSession.forkMessageId)
+		isFork
+			? splitAtForkPoint(
+					chatState.messages,
+					activeSession?.forkMessageId,
+					activeSession?.forkPointTimestamp,
+				)
 			: null,
 	);
+	// DEBUG: trace fork data flow
+	$effect(() => {
+		if (activeSession?.parentID || activeSession?.forkMessageId || activeSession?.forkPointTimestamp) {
+			console.debug(
+				`[fork-diag] MessageList activeSession: id=${activeSession?.id?.slice(0, 16)} ` +
+				`parentID=${activeSession?.parentID?.slice(0, 16) ?? "none"} ` +
+				`forkMessageId=${activeSession?.forkMessageId?.slice(0, 20) ?? "none"} ` +
+				`forkPointTimestamp=${activeSession?.forkPointTimestamp ?? "none"} ` +
+				`isFork=${isFork} totalMessages=${chatState.messages.length} ` +
+				`inherited=${forkSplit?.inherited.length ?? "N/A"} current=${forkSplit?.current.length ?? "N/A"}`,
+			);
+		}
+	});
+
 	const parentSession = $derived(
 		activeSession?.parentID ? findSession(activeSession.parentID) : null,
 	);

@@ -439,6 +439,110 @@ describe("historyToChatMessages — messageId propagation", () => {
 	});
 });
 
+// ─── createdAt propagation ───────────────────────────────────────────────────
+
+describe("historyToChatMessages — createdAt propagation", () => {
+	test("user messages carry time.created as createdAt", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_u1",
+				role: "user",
+				parts: [{ id: "p1", type: "text", text: "hello" }],
+				time: { created: 1000 },
+			},
+		];
+		const result = historyToChatMessages(history);
+		expect(result[0]).toHaveProperty("createdAt", 1000);
+	});
+
+	test("assistant text messages carry createdAt", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_a1",
+				role: "assistant",
+				parts: [{ id: "p1", type: "text", text: "hi" }],
+				time: { created: 2000, completed: 2500 },
+				cost: 0.01,
+				tokens: { input: 10, output: 5 },
+			},
+		];
+		const result = historyToChatMessages(history);
+		const assistantMsg = result.find((m) => m.type === "assistant");
+		expect(assistantMsg).toHaveProperty("createdAt", 2000);
+	});
+
+	test("thinking messages carry createdAt", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_a1",
+				role: "assistant",
+				parts: [{ id: "p1", type: "reasoning", text: "thinking..." }],
+				time: { created: 3000 },
+			},
+		];
+		const result = historyToChatMessages(history);
+		const thinkingMsg = result.find((m) => m.type === "thinking");
+		expect(thinkingMsg).toHaveProperty("createdAt", 3000);
+	});
+
+	test("tool messages carry createdAt", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_a1",
+				role: "assistant",
+				parts: [
+					{
+						id: "p1",
+						type: "tool",
+						callID: "toolu_1",
+						tool: "read",
+						state: { status: "completed", output: "file contents" },
+					},
+				],
+				time: { created: 4000 },
+			},
+		];
+		const result = historyToChatMessages(history);
+		const toolMsg = result.find((m) => m.type === "tool");
+		expect(toolMsg).toHaveProperty("createdAt", 4000);
+	});
+
+	test("result messages carry createdAt", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_a1",
+				role: "assistant",
+				parts: [{ id: "p1", type: "text", text: "done" }],
+				time: { created: 5000, completed: 5500 },
+				cost: 0.02,
+				tokens: { input: 20, output: 10 },
+			},
+		];
+		const result = historyToChatMessages(history);
+		const resultMsg = result.find((m) => m.type === "result");
+		expect(resultMsg).toHaveProperty("createdAt", 5000);
+	});
+
+	test("messages without time.created do not have createdAt", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_u1",
+				role: "user",
+				parts: [{ id: "p1", type: "text", text: "hello" }],
+			},
+			{
+				id: "msg_a1",
+				role: "assistant",
+				parts: [{ id: "p2", type: "text", text: "hi" }],
+			},
+		];
+		const result = historyToChatMessages(history);
+		for (const msg of result) {
+			expect(msg).not.toHaveProperty("createdAt");
+		}
+	});
+});
+
 describe("fork split with history-loaded messages", () => {
 	test("splitAtForkPoint finds fork point in history-converted messages", () => {
 		const history: HistoryMessage[] = [

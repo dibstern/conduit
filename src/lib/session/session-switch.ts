@@ -75,6 +75,12 @@ export interface SessionSwitchDeps {
 		warn(...args: unknown[]): void;
 	};
 	readonly getInputDraft: (sessionId: string) => string | undefined;
+	/** Fork metadata — used to force REST for fork sessions (SSE cache lacks inherited messages). */
+	readonly forkMeta?: {
+		getForkEntry(
+			sessionId: string,
+		): { forkMessageId: string; parentID: string } | undefined;
+	};
 }
 
 // ─── Pure functions ─────────────────────────────────────────────────────────
@@ -228,12 +234,34 @@ export function buildSessionSwitchedMessage(
  */
 export async function resolveSessionHistory(
 	sessionId: string,
-	deps: Pick<SessionSwitchDeps, "messageCache" | "sessionMgr" | "log">,
+	deps: Pick<
+		SessionSwitchDeps,
+		"messageCache" | "sessionMgr" | "log" | "forkMeta"
+	>,
 ): Promise<SessionHistorySource> {
 	const events = await deps.messageCache.getEvents(sessionId);
 	const classification = classifyHistorySource(events);
 
 	if (classification === "cached-events" && events) {
+		// Fork sessions: the SSE cache only has events from after the fork was
+		// opened — it never contains the inherited parent messages. Force REST
+		// so the frontend gets the full history with timestamps for splitting.
+		const isFork = !!deps.forkMeta?.getForkEntry(sessionId);
+		if (isFork) {
+			deps.log.info(
+				`Fork session ${sessionId.slice(0, 16)}: SSE cache has ${events.length} events but lacks inherited messages — using REST`,
+			);
+			try {
+				const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
+				return { kind: "rest-history", history };
+			} catch (err) {
+				deps.log.warn(
+					`Failed to load history for fork ${sessionId}: ${err instanceof Error ? err.message : err}`,
+				);
+				return { kind: "empty" };
+			}
+		}
+
 		// Heuristic: if the first event is a user_message, the cache starts
 		// from session creation and covers the full session. If the first
 		// event is mid-conversation (delta, tool_*, etc.), the cache was

@@ -465,6 +465,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		return this.lastMessageAt;
 	}
 
+	/** Look up fork-point metadata for a session. Returns undefined if not a fork. */
+	getForkEntry(sessionId: string): ForkEntry | undefined {
+		return this.forkMeta.get(sessionId);
+	}
+
 	/** Record fork-point metadata for a forked session and persist to disk. */
 	setForkEntry(sessionId: string, entry: ForkEntry): void {
 		this.forkMeta.set(sessionId, entry);
@@ -576,6 +581,9 @@ function toSessionInfoList(
 				messageCount: 0, // OpenCode doesn't include this in list; frontend can fetch if needed
 				...(parentID != null && { parentID }),
 				...(forkEntry != null && { forkMessageId: forkEntry.forkMessageId }),
+				...(forkEntry?.forkPointTimestamp != null && {
+					forkPointTimestamp: forkEntry.forkPointTimestamp,
+				}),
 			};
 			if (statuses) {
 				const status = statuses[s.id];

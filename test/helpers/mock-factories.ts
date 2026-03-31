@@ -42,6 +42,9 @@ function createMockClient(): HandlerDeps["client"] {
 			.fn()
 			.mockResolvedValue({ id: "s1", modelID: "gpt-4", providerID: "openai" }),
 		getMessages: vi.fn().mockResolvedValue([]),
+		getMessage: vi
+			.fn()
+			.mockResolvedValue({ id: "msg-1", time: { created: 0 } }),
 		getMessagesPage: vi.fn().mockResolvedValue([]),
 		listSessions: vi.fn().mockResolvedValue([]),
 		listAgents: vi.fn().mockResolvedValue([]),
@@ -123,6 +126,7 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 		decrementPendingQuestionCount: vi.fn(),
 		setPendingQuestionCounts: vi.fn(),
 		clearPaginationCursor: vi.fn(),
+		getForkEntry: vi.fn().mockReturnValue(undefined),
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
@@ -233,7 +237,10 @@ export function createMockHandlerDeps(
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),
 		},
-		forkMeta: { setForkEntry: vi.fn() },
+		forkMeta: {
+			setForkEntry: vi.fn(),
+			getForkEntry: vi.fn().mockReturnValue(undefined),
+		},
 		...overrides,
 	};
 }

@@ -147,6 +147,9 @@ export interface SessionInfo {
 	parentID?: string;
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId?: string;
+	/** Unix-ms timestamp of the fork-point message. Messages created before
+	 *  this time are inherited context from the parent session. */
+	forkPointTimestamp?: number;
 	/** Number of pending questions on this session (from server). */
 	pendingQuestionCount?: number;
 }

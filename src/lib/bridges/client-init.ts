@@ -106,6 +106,9 @@ export async function handleClientConnected(
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
+				forkMeta: {
+					getForkEntry: (sid: string) => sessionMgr.getForkEntry(sid),
+				},
 			} satisfies SessionSwitchDeps,
 			clientId,
 			activeId,

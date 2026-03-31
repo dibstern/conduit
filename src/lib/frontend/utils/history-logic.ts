@@ -155,6 +155,7 @@ function convertAssistantParts(
 	parts: HistoryMessagePart[],
 	renderHtml?: (text: string) => string,
 	messageId?: string,
+	createdAt?: number,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];
 	let firstTextSeen = false;
@@ -174,6 +175,7 @@ function convertAssistantParts(
 					html,
 					finalized: true,
 					...(messageId != null && !firstTextSeen && { messageId }),
+					...(createdAt != null && { createdAt }),
 				} satisfies AssistantMessage);
 				firstTextSeen = true;
 				break;
@@ -191,6 +193,7 @@ function convertAssistantParts(
 					text,
 					done: true,
 					...(duration != null && { duration }),
+					...(createdAt != null && { createdAt }),
 				} satisfies ThinkingMessage);
 				break;
 			}
@@ -225,6 +228,7 @@ function convertAssistantParts(
 						isError,
 						...(toolInput !== undefined && { input: toolInput }),
 						...(toolMetadata !== undefined && { metadata: toolMetadata }),
+						...(createdAt != null && { createdAt }),
 					}),
 				);
 				break;
@@ -267,11 +271,19 @@ export function historyToChatMessages(
 				type: "user",
 				uuid: generateUuid(),
 				text: extractDisplayText(text),
+				...(msg.time?.created != null && { createdAt: msg.time.created }),
 			} satisfies UserMessage);
 		} else if (msg.role === "assistant") {
 			// Assistant messages: convert each part to the appropriate ChatMessage
 			if (msg.parts && msg.parts.length > 0) {
-				result.push(...convertAssistantParts(msg.parts, renderHtml, msg.id));
+				result.push(
+					...convertAssistantParts(
+						msg.parts,
+						renderHtml,
+						msg.id,
+						msg.time?.created,
+					),
+				);
 			}
 
 			// Append a ResultMessage if cost/token metadata is present
@@ -301,6 +313,7 @@ export function historyToChatMessages(
 					...(msg.tokens?.cache?.write != null && {
 						cacheWrite: msg.tokens.cache.write,
 					}),
+					...(msg.time?.created != null && { createdAt: msg.time.created }),
 				} satisfies ResultMessage);
 			}
 		}

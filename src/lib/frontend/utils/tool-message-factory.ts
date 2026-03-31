@@ -19,6 +19,7 @@ export interface ToolMessageInit {
 	messageId?: string;
 	isTruncated?: boolean;
 	fullContentLength?: number;
+	createdAt?: number;
 }
 
 /**
@@ -43,5 +44,6 @@ export function createToolMessage(init: ToolMessageInit): ToolMessage {
 		...(init.fullContentLength !== undefined && {
 			fullContentLength: init.fullContentLength,
 		}),
+		...(init.createdAt !== undefined && { createdAt: init.createdAt }),
 	};
 }

@@ -412,6 +412,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_forked": {
+			console.debug(
+				`[fork-diag] session_forked: id=${msg.session?.id} forkMessageId=${msg.session?.forkMessageId ?? "none"} forkPointTimestamp=${msg.session?.forkPointTimestamp ?? "none"} parentId=${msg.parentId}`,
+			);
 			handleSessionForked(msg);
 			const parentTitle = msg.parentTitle ?? "session";
 			showToast(`Forked from "${parentTitle}"`);
