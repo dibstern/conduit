@@ -111,20 +111,47 @@ interface SessionBackend {
 }
 ```
 
-## Session Mapping Between Backends
+## Session Model
 
-Both backends group sessions by project directory:
+### Each Session Belongs to One Backend
+
+Sessions are backend-owned. Each session has a `backendType` that identifies which backend manages it. The UI shows a merged list of sessions from all backends, tagged with their type.
 
 | | OpenCode | Claude Agent SDK |
 |---|---|---|
 | **Grouping** | One server instance per project dir, or `x-opencode-directory` header | Sessions at `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` |
 | **List** | `GET /session` on the scoped instance | `listSessions({ dir: projectDir })` |
-| **Resume** | `POST /session/{id}/message` | `query({ prompt, options: { resume: sessionId } })` |
-| **Create** | `POST /session` | Implicit — `query()` without `resume` creates a new session |
+| **Resume** | `POST /session/{id}/message` | `query({ prompt, options: { resume: cliSessionId } })` |
+| **Create** | `POST /session` | Implicit — first `query()` without `resume` creates a new session; SDK assigns `cliSessionId` |
+| **Multi-turn within query** | N/A (each message is a separate REST call) | Async message queue — `pushMessage()` feeds additional prompts to a live `query()` stream |
 
-Each project already has a `directory` in its config. The OpenCode backend passes it as `x-opencode-directory`. The Claude Agent SDK backend passes it as `cwd` to `query()` and `dir` to `listSessions()`.
+### Session Resume (from Clay reference implementation)
 
-**Lazy session creation**: The Claude Agent SDK creates sessions implicitly on first `query()`. When the user clicks "New Session" in the UI, the backend creates a local placeholder. The actual Agent SDK session is created when the first message is sent.
+The Claude Agent SDK backend uses **SDK-native `resume`** for session continuity. It never reconstructs or prepends conversation history for same-backend turns:
+
+1. **New session**: First `query()` has no `resume`. SDK assigns a `cliSessionId`. Backend stores it.
+2. **Follow-up while query is live**: `pushMessage()` into the async message queue (no new `query()`).
+3. **Follow-up after query ends**: New `query()` with `resume: cliSessionId`. SDK loads its own transcript.
+4. **After daemon restart**: `cliSessionId` persisted; next `query()` resumes normally.
+
+### Cross-Backend Conversation Continuity
+
+When the user switches backends mid-conversation (e.g., OpenCode → Claude or vice versa), the relay:
+
+1. Gets the conversation history from the source backend's session.
+2. Creates a new session on the target backend.
+3. **On the first message only**, prepends the history as structured conversation turns.
+4. On subsequent messages, uses the target backend's native session resume.
+
+The relay tracks a "continuation chain" linking sessions across backends. The frontend shows it as one logical conversation.
+
+### Lazy Session Creation
+
+The Claude Agent SDK creates sessions implicitly on first `query()`. When the user clicks "New Session", the backend creates a local placeholder (kept until explicitly deleted). The actual SDK session materializes when the first message is sent.
+
+### Unsupported Operations
+
+`forkSession`, `revertSession`, `unrevertSession` are optional on the `SessionBackend` interface. The Claude Agent SDK has no equivalent. Callers check if the method exists before calling. The frontend hides the corresponding buttons when the active backend doesn't support them.
 
 ## Event Translation
 
@@ -175,41 +202,38 @@ The two backends handle permissions differently:
 
 ### Deferred Promise Bridge
 
+The `canUseTool` callback uses the correct SDK return format (`{ behavior: "allow" | "deny" }`, NOT the hooks `hookSpecificOutput` format):
+
 ```typescript
 class ClaudeAgentBackend {
-  private pendingPermissions = new Map<string, Deferred<string>>();
+  private pendingPermissions = new Map<string, { deferred: Deferred<string>; metadata: PermissionMetadata }>();
 
-  private canUseTool = async (toolName, toolInput) => {
+  // canUseTool receives 3 args: toolName, toolInput, options (with signal)
+  private canUseTool = async (toolName: string, toolInput: unknown, options?: { signal?: AbortSignal }) => {
     const id = crypto.randomUUID();
     const deferred = createDeferred<string>();
-    this.pendingPermissions.set(id, deferred);
+    this.pendingPermissions.set(id, { deferred, metadata: { id, tool: toolName, input: toolInput } });
 
-    // Push to event channel → relay → browser
     this.channel.push({
       type: "permission.created",
       properties: { id, tool: toolName, input: toolInput }
     });
 
-    // Blocks until browser user responds via replyPermission()
     const decision = await deferred.promise;
     this.pendingPermissions.delete(id);
-    return { hookSpecificOutput: { permissionDecision: decision } };
+
+    // SDK canUseTool return format — NOT hookSpecificOutput
+    if (decision === "allow" || decision === "once" || decision === "always") {
+      return { behavior: "allow" as const };
+    }
+    return { behavior: "deny" as const, message: "User denied" };
   };
-
-  async replyPermission(options: { id: string; decision: string }) {
-    const deferred = this.pendingPermissions.get(options.id);
-    if (deferred) deferred.resolve(options.decision);
-  }
-
-  async listPendingPermissions() {
-    return [...this.pendingPermissions.entries()].map(([id, d]) => ({
-      id, ...d.metadata
-    }));
-  }
 }
 ```
 
-Same pattern for questions — `AskUserQuestion` tool fires through `canUseTool`, creates a deferred, pushes a question event, waits for `replyQuestion()`.
+For `AskUserQuestion`: detected as a specific tool name in `canUseTool`. The response format differs — the answer is returned via `{ behavior: "allow", updatedInput: { answers: structuredAnswers } }`. This requires its own handling path separate from simple allow/deny permissions.
+
+On `shutdown()`, all pending deferreds are rejected to unblock any blocked `canUseTool` callbacks.
 
 ### No Timeout on Deferreds
 
@@ -246,9 +270,19 @@ Wire into relay stack alongside `OpenCodeBackend`. Add per-project backend confi
 
 **Delivers**: Claude subscription account support via Agent SDK.
 
-### Phase 4: Model-Level Switching
+### Phase 4: Model-Level Backend Switching
 
-Add UI/config for selecting backend per model. Implement backend switching in relay stack when user changes models. Handle session list switching (sessions are backend-specific — changing backends shows different session lists).
+Backend routing is **provider-based**: if the provider is `anthropic` and auth type is `subscription`, use the Claude Agent SDK backend. Otherwise use OpenCode.
+
+Switching backends within a project uses a **BackendProxy** pattern — all components (SessionManager, pollers, handlers) hold a reference to a proxy object that indirects through the currently active backend. Swapping the active backend updates the proxy, and all existing references see the new backend immediately. This avoids tearing down and rebuilding the component graph.
+
+On backend switch:
+- Active `query()` on the old backend is aborted
+- Pending permissions/questions on the old backend are rejected
+- Frontend receives a `backend_switched` event, clears stale caches, reloads session list
+- If the user sends a message to a session from the other backend, cross-backend history prepending kicks in
+
+Frontend shows a merged session list from all backends. Sessions are tagged with their backend type. The Claude Agent SDK backend uses `setModel()` for within-backend model switches (e.g., Sonnet → Opus). Cross-backend switches (e.g., GPT-4 → Claude) create a new session with history prepending.
 
 **Delivers**: Seamless model switching between OpenCode and Claude Agent SDK within a single project.
 
@@ -260,11 +294,20 @@ Add UI/config for selecting backend per model. Implement backend switching in re
 4. **PTY**: Model-agnostic, stays on OpenCode regardless of active backend.
 5. **Share/Summarize/Diff**: Dropped — relay doesn't use them.
 6. **Session grouping**: Both backends group by project directory. Natural mapping.
-7. **Lazy session creation**: Claude Agent SDK creates sessions implicitly on first `query()`. Frontend shows placeholder until then.
-8. **Event streaming**: AsyncEventChannel bridges per-query generators to continuous relay stream.
-9. **Permissions**: Deferred promise bridge. No timeout on deferreds — matches relay's existing behavior.
-10. **V2 Agent SDK**: Use stable V1 `query()` API. V2 `createSession()`/`send()`/`stream()` is unstable preview — future simplification.
-11. **Backend selection**: Model-level switching (Phase 4). Per-project config for credentials.
+7. **Session resume**: SDK-native `resume` for Claude Agent SDK (from Clay reference). Never reconstruct history for same-backend turns.
+8. **Cross-backend switching**: Prepend conversation history on first message to new backend. Native resume for subsequent messages.
+9. **Lazy session creation**: Local placeholder kept until explicit delete. SDK session materializes on first message.
+10. **Event streaming**: AsyncEventChannel bridges per-query generators to continuous relay stream.
+11. **Permissions**: Deferred promise bridge with correct `canUseTool` return format (`{ behavior: "allow"|"deny" }`). No timeout on deferreds. Rejected on shutdown.
+12. **V2 Agent SDK**: Use stable V1 `query()` API. V2 is unstable preview — future simplification.
+13. **Backend selection**: Provider-based. Anthropic subscription → Agent SDK, everything else → OpenCode.
+14. **Session list**: Merged from all backends, tagged with backend type.
+15. **Unsupported ops**: `forkSession`/`revertSession`/`unrevertSession` optional on interface. Frontend hides buttons.
+16. **Backend proxy**: Components hold proxy reference, not direct backend. Swap is non-disruptive.
+
+## Reference Implementations
+
+- **Clay (`claude-relay`)**: Full-featured Claude Agent SDK relay at `~/src/personal/opencode-relay/claude-relay`. Key patterns adopted: SDK-native session resume, async message queue for multi-turn within a live query, `canUseTool` permission bridging. See `lib/sdk-bridge.js` for the core SDK integration.
 
 ## SDK References
 
