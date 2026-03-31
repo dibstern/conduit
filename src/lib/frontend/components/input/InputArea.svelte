@@ -17,7 +17,7 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, extractSlashQuery } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState } from "../../stores/session.svelte.js";
@@ -86,18 +86,15 @@
 
 	// ─── Command menu state ────────────────────────────────────────────────────
 
-	const commandMenuVisible = $derived(
-		inputText.startsWith("/") && !inputText.includes(" ") && !isProcessing(),
-	);
-	const commandQuery = $derived(
-		commandMenuVisible ? inputText.slice(1) : "",
-	);
+	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
+	const commandMenuVisible = $derived(slashQuery !== null);
+	const commandQuery = $derived(slashQuery?.query ?? "");
 
 	// ─── File menu state ──────────────────────────────────────────────────────
 
 	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
 	const fileMenuVisible = $derived(
-		!commandMenuVisible && atQuery !== null && !isProcessing(),
+		!commandMenuVisible && atQuery !== null,
 	);
 	const fileQuery = $derived(atQuery?.query ?? "");
 	const filteredFiles = $derived(
@@ -158,7 +155,7 @@
 		}
 		if (commandMenuVisible && e.key === "Escape") {
 			e.preventDefault();
-			inputText = "";
+			handleCommandClose();
 			return;
 		}
 		if (e.key === "Enter" && !e.shiftKey) {
@@ -305,24 +302,39 @@
 	// ─── Command menu handlers ─────────────────────────────────────────────────
 
 	function handleCommandSelect(command: string) {
-		// Fill the input with the command text (e.g. "/skill ") instead of sending.
+		// Replace the slash query region with the selected command text (e.g. "/skill ").
 		// User can then type arguments and press Enter to send.
-		inputText = command;
-		// Move cursor to end and focus the textarea
+		let newCursorPos: number;
+		if (slashQuery) {
+			const before = inputText.slice(0, slashQuery.start);
+			const after = inputText.slice(slashQuery.end);
+			newCursorPos = slashQuery.start + command.length;
+			inputText = before + command + after;
+		} else {
+			inputText = command;
+			newCursorPos = command.length;
+		}
+		// Move cursor to end of inserted command and focus the textarea
 		if (textareaEl) {
 			textareaEl.focus();
-			// Use tick-like scheduling to set selection after Svelte updates the DOM
 			requestAnimationFrame(() => {
 				if (textareaEl) {
-					textareaEl.selectionStart = textareaEl.value.length;
-					textareaEl.selectionEnd = textareaEl.value.length;
+					textareaEl.selectionStart = newCursorPos;
+					textareaEl.selectionEnd = newCursorPos;
+					cursorPos = newCursorPos;
 				}
 			});
 		}
 	}
 
 	function handleCommandClose() {
-		inputText = "";
+		if (slashQuery) {
+			const before = inputText.slice(0, slashQuery.start);
+			const after = inputText.slice(slashQuery.end);
+			inputText = before + after;
+		} else {
+			inputText = "";
+		}
 	}
 
 	// ─── File menu handlers ───────────────────────────────────────────────────

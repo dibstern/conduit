@@ -85,18 +85,27 @@ export function filterCommands(
 	return commands.filter((c) => c.name.toLowerCase().startsWith(lower));
 }
 
+export interface SlashQuery {
+	query: string;
+	start: number;
+	end: number;
+}
+
 /** Extract slash command query from input text at cursor position. */
 export function extractSlashQuery(
 	text: string,
 	cursorPos: number,
-): string | null {
+): SlashQuery | null {
 	// Look backwards from cursor for a '/' at the start of the line or after whitespace
 	const before = text.slice(0, cursorPos);
-	const match = before.match(/(?:^|\s)\/(\S*)$/);
-	if (match) {
-		return match[1] ?? null;
-	}
-	return null;
+	const match = before.match(/(?:^|[\s\n])\/(\S*)$/);
+	if (!match) return null;
+
+	const query = match[1] ?? "";
+	const matchStart = before.length - match[0].length;
+	const slashStart = match[0].startsWith("/") ? matchStart : matchStart + 1;
+
+	return { query, start: slashStart, end: cursorPos };
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────

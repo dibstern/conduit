@@ -112,15 +112,23 @@ describe("filterCommands", () => {
 
 describe("extractSlashQuery", () => {
 	it("extracts query after slash at start of text", () => {
-		expect(extractSlashQuery("/hel", 4)).toBe("hel");
+		expect(extractSlashQuery("/hel", 4)).toEqual({
+			query: "hel",
+			start: 0,
+			end: 4,
+		});
 	});
 
 	it("extracts query after slash preceded by space", () => {
-		expect(extractSlashQuery("text /cmd", 9)).toBe("cmd");
+		expect(extractSlashQuery("text /cmd", 9)).toEqual({
+			query: "cmd",
+			start: 5,
+			end: 9,
+		});
 	});
 
-	it("returns empty string for slash with nothing after", () => {
-		expect(extractSlashQuery("/", 1)).toBe("");
+	it("returns empty query for slash with nothing after", () => {
+		expect(extractSlashQuery("/", 1)).toEqual({ query: "", start: 0, end: 1 });
 	});
 
 	it("returns null when no slash found", () => {
