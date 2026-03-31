@@ -15,11 +15,10 @@ import {
 function collectLines(): string[] {
 	const dest = _getOutputStream();
 	const lines: string[] = [];
-	const origWrite = dest.write.bind(dest) as (chunk: unknown) => boolean;
 	dest.write = ((chunk: Buffer | string) => {
 		const str = chunk.toString().trim();
 		if (str) lines.push(str);
-		return origWrite(chunk);
+		return true;
 	}) as typeof dest.write;
 	return lines;
 }
