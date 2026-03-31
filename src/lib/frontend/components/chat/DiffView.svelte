@@ -148,9 +148,10 @@
 		<div
 			class={"diff-split-view overflow-x-auto bg-code-bg border border-border-subtle" + (filename ? " rounded-b-lg" : " rounded-lg")}
 		>
-			<table class="diff-table w-full font-mono text-xs leading-normal border-collapse">
-				{#each splitRows as row, idx (row.type + "-" + idx)}
-					<tr class={splitRowClass(row.type)}>
+		<table class="diff-table w-full font-mono text-xs leading-normal border-collapse">
+			<tbody>
+			{#each splitRows as row, idx (row.type + "-" + idx)}
+				<tr class={splitRowClass(row.type)}>
 						<!-- Old side -->
 						<td
 							class="diff-ln text-right text-text-dimmer select-none px-2 text-sm w-[40px]"
@@ -192,9 +193,10 @@
 								&nbsp;
 							{/if}
 						</td>
-					</tr>
-				{/each}
-			</table>
+				</tr>
+			{/each}
+			</tbody>
+		</table>
 		</div>
 	{/if}
 </div>

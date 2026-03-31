@@ -105,13 +105,24 @@ if (stories.length > 0) {
 		"overlays-connectoverlay--connected",
 	]);
 
-	// Stories with non-deterministic rendering (e.g. Mermaid SVGs whose dimensions
-	// depend on font metrics) need a relaxed diff threshold compared to the global
-	// 0.01 default.  The SVG viewBox is computed from text measurements that vary
-	// slightly between environments (Docker emulation vs native CI runners), which
-	// causes consistent ~6 px height differences (≈ 0.06-0.07 ratio).
-	const RELAXED_THRESHOLD_STORIES: Record<string, number> = {
-		"chat-assistantmessage--with-mermaid": 0.1,
+	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs
+	// whose viewBox is computed from font metrics that differ between Docker
+	// emulation and native CI Linux).  Two fixes applied:
+	//
+	// 1. min-height pins the element's bounding box so screenshot dimensions
+	//    are identical everywhere (Playwright rejects size mismatches before
+	//    any pixel comparison).
+	// 2. maxDiffPixelRatio tolerates the remaining pixel-level differences
+	//    caused by different font metrics between Docker-emulated and native
+	//    CI Linux (measured at 0.03–0.04 in CI as of 2026-03-31).
+	const SIZE_NORMALIZED_STORIES: Record<
+		string,
+		{ minHeight: number; maxDiffPixelRatio: number }
+	> = {
+		"chat-assistantmessage--with-mermaid": {
+			minHeight: 320,
+			maxDiffPixelRatio: 0.05,
+		},
 	};
 
 	for (const [title, componentStories] of byTitle) {
@@ -132,11 +143,20 @@ if (stories.length > 0) {
 					// Detect zero-height root (fixed-position content escapes flow)
 					const root = page.locator("#storybook-root");
 					const box = await root.boundingBox();
-					const relaxedRatio = RELAXED_THRESHOLD_STORIES[story.id];
-					const screenshotOpts =
-						relaxedRatio !== undefined
-							? { maxDiffPixelRatio: relaxedRatio }
-							: {};
+
+					// Pin element height for size-variable stories so screenshots
+					// have identical dimensions across platforms.
+					const sizeNorm = SIZE_NORMALIZED_STORIES[story.id];
+					if (sizeNorm) {
+						await page.addStyleTag({
+							content: `#storybook-root { min-height: ${sizeNorm.minHeight}px; }`,
+						});
+						await page.waitForTimeout(50);
+					}
+
+					const screenshotOpts = sizeNorm
+						? { maxDiffPixelRatio: sizeNorm.maxDiffPixelRatio }
+						: {};
 					if (box && box.height > 0) {
 						await expect(root).toHaveScreenshot(
 							`${story.id}.png`,
