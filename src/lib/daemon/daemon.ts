@@ -240,6 +240,10 @@ export class Daemon {
 	private tracker = new AsyncTracker();
 	private shutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// Process error handlers — stored so stop() can remove them (prevents listener leak)
+	private _onUnhandledRejection: ((err: unknown) => void) | null = null;
+	private _onUncaughtException: ((err: Error) => void) | null = null;
+
 	constructor(options?: DaemonOptions) {
 		// Apply log configuration first so every logger created below uses the
 		// requested level/format (including this.log).
@@ -849,18 +853,21 @@ export class Daemon {
 
 		// Prevent unhandled rejections and uncaught exceptions from crashing
 		// the daemon. Log the error and continue — the daemon should be resilient.
-		process.on("unhandledRejection", (err) => {
+		// Handlers are stored so stop() can remove them (avoids listener leak).
+		this._onUnhandledRejection = (err) => {
 			this.log.error(
 				{ error: err instanceof Error ? err.message : String(err) },
 				"Unhandled rejection (daemon kept alive)",
 			);
-		});
-		process.on("uncaughtException", (err) => {
+		};
+		this._onUncaughtException = (err) => {
 			this.log.error(
 				{ error: err.message, stack: err.stack },
 				"Uncaught exception (daemon kept alive)",
 			);
-		});
+		};
+		process.on("unhandledRejection", this._onUnhandledRejection);
+		process.on("uncaughtException", this._onUncaughtException);
 
 		// Mark start time (resets crash window on success)
 		this.startTime = Date.now();
@@ -961,6 +968,16 @@ export class Daemon {
 
 		// Remove signal handlers
 		removeSignalHandlers();
+
+		// Remove process error handlers (prevents listener leak across start/stop cycles)
+		if (this._onUnhandledRejection) {
+			process.removeListener("unhandledRejection", this._onUnhandledRejection);
+			this._onUnhandledRejection = null;
+		}
+		if (this._onUncaughtException) {
+			process.removeListener("uncaughtException", this._onUncaughtException);
+			this._onUncaughtException = null;
+		}
 
 		// Stop event loop monitor
 		if (this._eventLoopTimer) clearInterval(this._eventLoopTimer);
