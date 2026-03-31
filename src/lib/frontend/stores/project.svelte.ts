@@ -33,4 +33,20 @@ export function handleProjectList(
 			navigate(`/p/${addedSlug}/`);
 		});
 	}
+
+	// If the current route's project was removed, escape to the dashboard.
+	// Without this, deleting the active project from the project picker
+	// leaves the user on a stale /p/<slug>/ route with a connect overlay
+	// that never connects.
+	if (Array.isArray(projects)) {
+		import("./router.svelte.js").then(({ getCurrentRoute, navigate }) => {
+			const route = getCurrentRoute();
+			if (
+				route.page === "chat" &&
+				!projects.some((p) => p.slug === route.slug)
+			) {
+				navigate("/");
+			}
+		});
+	}
 }
