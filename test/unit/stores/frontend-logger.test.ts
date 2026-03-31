@@ -1,5 +1,6 @@
 // ─── Frontend Logger Tests ───────────────────────────────────────────────────
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { featureFlags } from "../../../src/lib/frontend/stores/feature-flags.svelte.js";
 import {
 	createFrontendLogger,
 	createSilentFrontendLogger,
@@ -22,6 +23,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	featureFlags.debug = false;
 });
 
 // ─── createFrontendLogger ───────────────────────────────────────────────────
@@ -48,7 +50,8 @@ describe("createFrontendLogger", () => {
 		expect(warnSpy).toHaveBeenCalledWith("[ws]", "parse failed:", err);
 	});
 
-	it("debug and verbose map to console.debug in DEV mode", () => {
+	it("debug and verbose map to console.debug when debug flag is enabled", () => {
+		featureFlags.debug = true;
 		const log = createFrontendLogger("test");
 
 		log.debug("dbg msg");
@@ -57,6 +60,15 @@ describe("createFrontendLogger", () => {
 		debugSpy.mockClear();
 		log.verbose("verbose msg");
 		expect(debugSpy).toHaveBeenCalledWith("[test]", "verbose msg");
+	});
+
+	it("debug and verbose are silent when debug flag is disabled", () => {
+		featureFlags.debug = false;
+		const log = createFrontendLogger("test");
+
+		log.debug("dbg msg");
+		log.verbose("verbose msg");
+		expect(debugSpy).not.toHaveBeenCalled();
 	});
 
 	it("info always fires (not DEV-gated)", () => {

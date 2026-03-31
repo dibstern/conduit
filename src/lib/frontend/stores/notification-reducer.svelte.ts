@@ -7,6 +7,10 @@
 // 2. Typed reducer (single dispatch, exhaustive handling)
 // 3. Server reconciliation (drift self-corrects on session list refresh)
 
+import { createFrontendLogger } from "../utils/logger.js";
+
+const log = createFrontendLogger("notif");
+
 // ─── Per-Session State (discriminated union) ────────────────────────────────
 
 export type SessionNotifState =
@@ -152,11 +156,9 @@ const NONE: SessionNotifState = { kind: "none" } as const;
 
 let _state = $state<NotifMap>(new Map());
 
-/** Dispatch an action through the reducer. In dev mode, log all actions. */
+/** Dispatch an action through the reducer. Logs when debug flag is enabled. */
 export function dispatch(action: NotifAction): void {
-	if (import.meta.env.DEV) {
-		console.debug("[notif]", action.type, action);
-	}
+	log.debug(action.type, action);
 	_state = reduce(_state, action);
 }
 

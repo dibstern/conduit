@@ -1,7 +1,9 @@
 // ─── Frontend Logger ─────────────────────────────────────────────────────────
 // Lightweight browser-side logger matching the backend Logger interface shape.
-// Maps levels to console.* methods; debug/verbose are DEV-only (tree-shaken
-// by Vite in production builds via import.meta.env.DEV dead-code elimination).
+// Maps levels to console.* methods; debug/verbose only emit when the "debug"
+// feature flag is active (?feats=debug / Settings toggle / Ctrl+Shift+D).
+
+import { featureFlags } from "../stores/feature-flags.svelte.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,10 +38,10 @@ export function createFrontendLogger(
 
 	return {
 		debug(...args: unknown[]) {
-			if (import.meta.env.DEV) console.debug(prefix, ...args);
+			if (featureFlags.debug) console.debug(prefix, ...args);
 		},
 		verbose(...args: unknown[]) {
-			if (import.meta.env.DEV) console.debug(prefix, ...args);
+			if (featureFlags.debug) console.debug(prefix, ...args);
 		},
 		info(...args: unknown[]) {
 			console.info(prefix, ...args);

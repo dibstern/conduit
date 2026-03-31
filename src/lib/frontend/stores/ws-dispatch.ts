@@ -272,8 +272,8 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 			"result",
 		]);
 		if (LLM_TYPES.has(event.type)) {
-			console.debug(
-				"[dispatch] LLM event %s has NO messageId (hasKey=%s val=%s) replay=%s",
+			log.debug(
+				"LLM event %s has NO messageId (hasKey=%s val=%s) replay=%s",
 				event.type,
 				hasMessageId,
 				msgId,

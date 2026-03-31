@@ -190,6 +190,8 @@ export function getMessageCount(): number {
 let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let thinkingStartTime = 0;
 
+const log = createFrontendLogger("chat");
+
 /** Centralized tool lifecycle state machine. Enforces forward-only transitions. */
 const registryLog = createFrontendLogger("ToolRegistry", {
 	onError(...args: unknown[]) {
@@ -436,16 +438,16 @@ export function advanceTurnIfNewMessage(messageId: string | undefined): void {
 	const prevId = chatState.currentMessageId;
 	if (prevId != null) {
 		chatState.turnEpoch++;
-		console.debug(
-			"[advanceTurn] NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
+		log.debug(
+			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
 			messageId,
 			prevId,
 			chatState.turnEpoch,
 			chatState.phase,
 		);
 	} else {
-		console.debug(
-			"[advanceTurn] FIRST messageId=%s (no bump, turnEpoch=%d)",
+		log.debug(
+			"advanceTurn FIRST messageId=%s (no bump, turnEpoch=%d)",
 			messageId,
 			chatState.turnEpoch,
 		);
@@ -705,8 +707,8 @@ export function handleDone(
 	}
 
 	chatState.turnEpoch++;
-	console.debug(
-		"[handleDone] turnEpoch=%d currentMessageId=%s phase=%s",
+	log.debug(
+		"handleDone turnEpoch=%d currentMessageId=%s phase=%s",
 		chatState.turnEpoch,
 		chatState.currentMessageId,
 		chatState.phase,
@@ -849,8 +851,8 @@ export function addUserMessage(
 		...(sentWhileProcessing ? { sentDuringEpoch: chatState.turnEpoch } : {}),
 	};
 	if (sentWhileProcessing) {
-		console.debug(
-			"[addUserMessage] queued msg sentDuringEpoch=%d turnEpoch=%d currentMessageId=%s phase=%s",
+		log.debug(
+			"addUserMessage queued msg sentDuringEpoch=%d turnEpoch=%d currentMessageId=%s phase=%s",
 			chatState.turnEpoch,
 			chatState.turnEpoch,
 			chatState.currentMessageId,
