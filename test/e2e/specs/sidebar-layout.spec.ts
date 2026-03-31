@@ -105,8 +105,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await app.hamburgerBtn.click();
 		await expect(app.sidebarOverlay).toBeVisible();
 
-		// Tap the overlay to close
-		await app.sidebarOverlay.click({ force: true });
+		// Tap the overlay to close — click to the right of the 260px sidebar
+		// (which sits at z-400 above the z-350 overlay) so the click
+		// actually reaches the overlay element, not the sidebar.
+		await app.sidebarOverlay.click({ position: { x: 320, y: 333 } });
 
 		// Sidebar overlay should be hidden again
 		await expect(app.sidebarOverlay).toBeHidden();
