@@ -16,7 +16,7 @@ export default defineConfig({
 		colorScheme: "dark",
 	},
 	webServer: {
-		command: "npx http-server dist/storybook -p 6007 -s",
+		command: "pnpm exec http-server dist/storybook -p 6007 -s",
 		port: 6007,
 		reuseExistingServer: !process.env["CI"],
 		cwd: process.cwd().replace(/\/test\/visual$/, ""),

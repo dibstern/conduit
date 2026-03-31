@@ -39,7 +39,7 @@ build_storybook() {
 update_macos() {
   echo ""
   echo "━━━ Updating macOS (darwin) snapshots ━━━"
-  npx playwright test "$SCREENSHOT_SPEC" \
+  pnpm exec playwright test "$SCREENSHOT_SPEC" \
     --config "$VISUAL_CONFIG" \
     --update-snapshots
   echo "✓ macOS snapshots updated"

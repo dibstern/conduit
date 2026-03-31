@@ -46,7 +46,7 @@ export default defineConfig({
 
 	// Serve the built frontend with Vite preview (WS is mocked, no relay needed)
 	webServer: {
-		command: "npx vite preview --port 4173 --strictPort",
+		command: "pnpm exec vite preview --port 4173 --strictPort",
 		cwd: "../../",
 		port: 4173,
 		reuseExistingServer: !process.env["CI"],

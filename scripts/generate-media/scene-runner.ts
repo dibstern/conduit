@@ -96,7 +96,7 @@ function killStalePreview(): void {
  * Kill a preview server process group.
  * The process is spawned with `detached: true`, making it a process group
  * leader. Killing the negative PID sends SIGTERM to the entire group
- * (npx + vite + any children), preventing orphaned Vite servers.
+ * (pnpm exec + vite + any children), preventing orphaned Vite servers.
  */
 export function killPreviewGroup(proc: ChildProcess): void {
 	if (proc.pid != null) {
@@ -113,8 +113,8 @@ export async function startPreview(): Promise<ChildProcess> {
 	killStalePreview();
 	console.log("  Starting preview server...");
 	const proc = spawn(
-		"npx",
-		["vite", "preview", "--port", String(PREVIEW_PORT), "--strictPort"],
+		"pnpm",
+		["exec", "vite", "preview", "--port", String(PREVIEW_PORT), "--strictPort"],
 		{
 			cwd: PROJECT_ROOT,
 			stdio: "pipe",

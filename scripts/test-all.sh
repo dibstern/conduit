@@ -33,13 +33,13 @@ run "Build"            pnpm build
 run "Unit tests"               vitest run
 run "Integration tests"        vitest run --config vitest.integration.config.ts
 run "Contract tests"           vitest run --config vitest.contract.config.ts
-run "E2E replay tests"         npx playwright test --config test/e2e/playwright-replay.config.ts
-run "E2E daemon tests"         npx playwright test --config test/e2e/playwright-daemon.config.ts
-run "E2E multi-instance tests" npx playwright test --config test/e2e/playwright-multi-instance.config.ts
-run "E2E subagent tests"       npx playwright test --config test/e2e/playwright-subagent.config.ts
-run "E2E visual tests"         npx playwright test --config test/e2e/playwright-visual.config.ts
+run "E2E replay tests"         pnpm exec playwright test --config test/e2e/playwright-replay.config.ts
+run "E2E daemon tests"         pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
+run "E2E multi-instance tests" pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts
+run "E2E subagent tests"       pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts
+run "E2E visual tests"         pnpm exec playwright test --config test/e2e/playwright-visual.config.ts
 run "Storybook build"          pnpm storybook:build
-run "Storybook visual tests"   npx playwright test --config test/visual/playwright.config.ts
+run "Storybook visual tests"   pnpm exec playwright test --config test/visual/playwright.config.ts
 
 # --- Summary ---
 echo ""
