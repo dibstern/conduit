@@ -40,6 +40,29 @@ describe("Scroll behavior regression suite", () => {
 		return createScrollController(() => lifecycle);
 	}
 
+	function createScrollableDiv(): HTMLDivElement {
+		const div = document.createElement("div");
+		Object.defineProperty(div, "scrollHeight", {
+			value: 2000,
+			configurable: true,
+		});
+		Object.defineProperty(div, "clientHeight", {
+			value: 500,
+			configurable: true,
+		});
+		Object.defineProperty(div, "scrollTop", {
+			value: 1500,
+			writable: true,
+			configurable: true,
+		});
+		return div;
+	}
+
+	function simulateScrollUp(div: HTMLDivElement): void {
+		div.scrollTop = 200;
+		div.dispatchEvent(new Event("scroll"));
+	}
+
 	describe("Scroll-to-bottom button visibility", () => {
 		it("isDetached is false when no user scroll-up has occurred", () => {
 			const ctrl = makeCtrl();
@@ -49,20 +72,64 @@ describe("Scroll behavior regression suite", () => {
 			ctrl.detach();
 		});
 
-		it("isDetached becomes true after wheel-up event", () => {
+		it("does NOT detach on wheel-up when container has no overflow", () => {
 			const ctrl = makeCtrl();
 			const div = document.createElement("div");
+			Object.defineProperty(div, "scrollHeight", {
+				value: 500,
+				configurable: true,
+			});
+			Object.defineProperty(div, "clientHeight", {
+				value: 500,
+				configurable: true,
+			});
+			Object.defineProperty(div, "scrollTop", {
+				value: 0,
+				writable: true,
+				configurable: true,
+			});
 			ctrl.attach(div);
-			div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+			div.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+			expect(ctrl.isDetached).toBe(false);
+			ctrl.detach();
+		});
+
+		it("does NOT detach on wheel-up when already at the bottom", () => {
+			const ctrl = makeCtrl();
+			const div = document.createElement("div");
+			Object.defineProperty(div, "scrollHeight", {
+				value: 1000,
+				configurable: true,
+			});
+			Object.defineProperty(div, "clientHeight", {
+				value: 500,
+				configurable: true,
+			});
+			Object.defineProperty(div, "scrollTop", {
+				value: 500,
+				writable: true,
+				configurable: true,
+			});
+			ctrl.attach(div);
+			div.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+			expect(ctrl.isDetached).toBe(false);
+			ctrl.detach();
+		});
+
+		it("isDetached becomes true after scrolling away from bottom", () => {
+			const ctrl = makeCtrl();
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			simulateScrollUp(div);
 			expect(ctrl.isDetached).toBe(true);
 			ctrl.detach();
 		});
 
 		it("isDetached becomes false after requestFollow()", () => {
 			const ctrl = makeCtrl();
-			const div = document.createElement("div");
+			const div = createScrollableDiv();
 			ctrl.attach(div);
-			div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+			simulateScrollUp(div);
 			expect(ctrl.isDetached).toBe(true);
 			ctrl.requestFollow();
 			expect(ctrl.isDetached).toBe(false);
@@ -73,9 +140,9 @@ describe("Scroll behavior regression suite", () => {
 	describe("Session switch clears detached state", () => {
 		it("resetForSession clears userDetached", () => {
 			const ctrl = makeCtrl();
-			const div = document.createElement("div");
+			const div = createScrollableDiv();
 			ctrl.attach(div);
-			div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+			simulateScrollUp(div);
 			expect(ctrl.isDetached).toBe(true);
 			ctrl.resetForSession();
 			expect(ctrl.isDetached).toBe(false);
@@ -116,20 +183,12 @@ describe("Scroll behavior regression suite", () => {
 	describe("Detached state prevents auto-scroll", () => {
 		it("onNewContent does not scroll when detached", () => {
 			const ctrl = makeCtrl();
-			const div = document.createElement("div");
-			Object.defineProperty(div, "scrollHeight", {
-				value: 1000,
-				writable: true,
-			});
-			Object.defineProperty(div, "scrollTop", {
-				value: 0,
-				writable: true,
-			});
+			const div = createScrollableDiv();
 			ctrl.attach(div);
-			div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+			simulateScrollUp(div);
 			expect(ctrl.isDetached).toBe(true);
 			ctrl.onNewContent();
-			expect(div.scrollTop).toBe(0);
+			expect(div.scrollTop).toBe(200);
 			ctrl.detach();
 		});
 	});

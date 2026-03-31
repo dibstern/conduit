@@ -64,8 +64,21 @@ describe("Scroll lifecycle integration", () => {
 		chatState.loadLifecycle = "ready";
 		expect(ctrl.state).toBe("following");
 
-		// 5. User scrolls up
-		div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+		// 5. User scrolls up (position-based detach)
+		Object.defineProperty(div, "scrollHeight", {
+			value: 2000,
+			configurable: true,
+		});
+		Object.defineProperty(div, "clientHeight", {
+			value: 500,
+			configurable: true,
+		});
+		Object.defineProperty(div, "scrollTop", {
+			value: 200,
+			writable: true,
+			configurable: true,
+		});
+		div.dispatchEvent(new Event("scroll"));
 		expect(ctrl.state).toBe("detached");
 		expect(ctrl.isDetached).toBe(true);
 
@@ -84,7 +97,20 @@ describe("Scroll lifecycle integration", () => {
 
 		// Get to following + detached
 		chatState.loadLifecycle = "ready";
-		div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+		Object.defineProperty(div, "scrollHeight", {
+			value: 2000,
+			configurable: true,
+		});
+		Object.defineProperty(div, "clientHeight", {
+			value: 500,
+			configurable: true,
+		});
+		Object.defineProperty(div, "scrollTop", {
+			value: 200,
+			writable: true,
+			configurable: true,
+		});
+		div.dispatchEvent(new Event("scroll"));
 		expect(ctrl.isDetached).toBe(true);
 
 		// Session switch
@@ -101,9 +127,22 @@ describe("Scroll lifecycle integration", () => {
 		const div = document.createElement("div");
 		ctrl.attach(div);
 
-		// During loading, wheel events shouldn't cause detach
+		// During loading, scroll events shouldn't cause detach
 		chatState.loadLifecycle = "loading";
-		div.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+		Object.defineProperty(div, "scrollHeight", {
+			value: 2000,
+			configurable: true,
+		});
+		Object.defineProperty(div, "clientHeight", {
+			value: 500,
+			configurable: true,
+		});
+		Object.defineProperty(div, "scrollTop", {
+			value: 200,
+			writable: true,
+			configurable: true,
+		});
+		div.dispatchEvent(new Event("scroll"));
 		// State should still be loading (not detached)
 		expect(ctrl.state).toBe("loading");
 

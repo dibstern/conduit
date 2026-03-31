@@ -87,30 +87,6 @@ export function createScrollController(
 		}
 	}
 
-	let lastTouchY = 0;
-
-	function onTouchStart(e: TouchEvent): void {
-		if (e.touches.length > 0 && e.touches[0]) {
-			lastTouchY = e.touches[0].clientY;
-		}
-	}
-
-	function onTouchMove(e: TouchEvent): void {
-		if (e.touches.length > 0 && e.touches[0] && getState() === "following") {
-			const currentY = e.touches[0].clientY;
-			if (currentY > lastTouchY + 5) {
-				userDetached = true;
-			}
-			lastTouchY = currentY;
-		}
-	}
-
-	function onWheel(e: WheelEvent): void {
-		if (e.deltaY < 0 && getState() === "following") {
-			userDetached = true;
-		}
-	}
-
 	function onScroll(): void {
 		if (!container) return;
 
@@ -124,16 +100,21 @@ export function createScrollController(
 			return;
 		}
 
+		// Skip detach/re-follow logic if content doesn't overflow the
+		// container. Without this guard, edge cases (e.g. browser firing a
+		// scroll event on a non-overflowing container) could falsely detach.
+		if (container.scrollHeight <= container.clientHeight) return;
+
 		const distFromBottom =
 			container.scrollHeight - container.scrollTop - container.clientHeight;
 		// Re-follow only when scrolled to the very bottom.
-		// Uses a tight threshold (5px) to avoid undoing wheel/touch detach
-		// for small scrolls. The user must scroll all the way back down.
+		// Uses a tight threshold (5px) to avoid undoing detach for small
+		// scrolls. The user must scroll all the way back down.
 		if (distFromBottom < REFOLLOW_THRESHOLD && userDetached) {
 			userDetached = false;
 		}
-		// Detach when scrolled away from bottom (catches keyboard scroll,
-		// page search, etc. — not wheel/touch which have their own handlers).
+		// Detach when scrolled away from bottom (catches all user-initiated
+		// scroll: wheel, touch, keyboard, page search, etc.).
 		if (
 			distFromBottom > DETACH_THRESHOLD &&
 			!userDetached &&
@@ -156,18 +137,12 @@ export function createScrollController(
 
 		attach(el: HTMLElement): void {
 			container = el;
-			el.addEventListener("wheel", onWheel, { passive: true });
-			el.addEventListener("touchstart", onTouchStart, { passive: true });
-			el.addEventListener("touchmove", onTouchMove, { passive: true });
 			el.addEventListener("scroll", onScroll, { passive: true });
 		},
 
 		detach(): void {
 			stopSettle();
 			if (container) {
-				container.removeEventListener("wheel", onWheel);
-				container.removeEventListener("touchstart", onTouchStart);
-				container.removeEventListener("touchmove", onTouchMove);
 				container.removeEventListener("scroll", onScroll);
 				container = null;
 			}
