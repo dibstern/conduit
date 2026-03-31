@@ -11,6 +11,8 @@ import {
 	isBasicTerm,
 	log,
 	sym,
+	truncateToWidth,
+	visibleLength,
 	wrapColor,
 } from "../../../src/lib/cli/terminal-render.js";
 
@@ -245,5 +247,77 @@ describe("gradient — ANSI awareness", () => {
 		// Visible characters X and Y should get gradient colors
 		const stripped = stripAnsi(result);
 		expect(stripped).toBe("XY");
+	});
+});
+
+// ─── visibleLength ───────────────────────────────────────────────────────────
+
+describe("visibleLength", () => {
+	it("returns length for plain text", () => {
+		expect(visibleLength("hello")).toBe(5);
+	});
+
+	it("excludes ANSI escape sequences from count", () => {
+		expect(visibleLength("\x1b[1mhello\x1b[0m")).toBe(5);
+	});
+
+	it("handles text with multiple ANSI sequences", () => {
+		expect(visibleLength("\x1b[32m\x1b[1mhi\x1b[0m there")).toBe(8);
+	});
+
+	it("returns 0 for empty string", () => {
+		expect(visibleLength("")).toBe(0);
+	});
+
+	it("returns 0 for ANSI-only string", () => {
+		expect(visibleLength("\x1b[1m\x1b[0m")).toBe(0);
+	});
+});
+
+// ─── truncateToWidth ─────────────────────────────────────────────────────────
+
+describe("truncateToWidth", () => {
+	it("returns text unchanged when within width", () => {
+		expect(truncateToWidth("hello", 10)).toBe("hello");
+	});
+
+	it("returns text unchanged when exactly at width", () => {
+		expect(truncateToWidth("hello", 5)).toBe("hello");
+	});
+
+	it("truncates plain text with ellipsis", () => {
+		const result = truncateToWidth("hello world", 8);
+		const stripped = stripAnsi(result);
+		// 7 chars + ellipsis = 8 visible chars
+		expect(stripped).toBe("hello w\u2026");
+	});
+
+	it("preserves ANSI sequences when truncating", () => {
+		const result = truncateToWidth("\x1b[1mhello world\x1b[0m", 8);
+		// Should contain the bold escape
+		expect(result).toContain("\x1b[1m");
+		// Visible text should be truncated
+		const stripped = stripAnsi(result);
+		expect(stripped).toBe("hello w\u2026");
+	});
+
+	it("handles text with embedded ANSI not needing truncation", () => {
+		const input = `\x1b[1mhi\x1b[0m`;
+		expect(truncateToWidth(input, 10)).toBe(input);
+	});
+
+	it("returns empty string for maxWidth 0", () => {
+		expect(truncateToWidth("hello", 0)).toBe("");
+	});
+
+	it("returns empty string for negative maxWidth", () => {
+		expect(truncateToWidth("hello", -5)).toBe("");
+	});
+
+	it("handles maxWidth of 1 (just ellipsis)", () => {
+		const result = truncateToWidth("hello", 1);
+		const stripped = stripAnsi(result);
+		// 0 chars + ellipsis = 1 visible char
+		expect(stripped).toBe("\u2026");
 	});
 });

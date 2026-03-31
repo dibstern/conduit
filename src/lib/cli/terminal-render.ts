@@ -41,7 +41,7 @@ export function isBasicTerm(
 	return env["TERM_PROGRAM"] === "Apple_Terminal";
 }
 
-// ─── Gradient ────────────────────────────────────────────────────────────────
+// ─── ANSI Regex ──────────────────────────────────────────────────────────────
 
 /** ESC character as a string constant (avoids control-char-in-regex lint). */
 const ESC = "\x1b";
@@ -52,6 +52,57 @@ const ANSI_SGR_RE = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
 
 /** Matches an SGR sequence at the start of a string. */
 const ANSI_SGR_START_RE = new RegExp(`^${ESC}\\[[0-9;]*m`);
+
+// ─── Width Utilities ─────────────────────────────────────────────────────────
+
+/**
+ * Count the number of visible (non-ANSI-escape) characters in a string.
+ *
+ * @example
+ * visibleLength("hello")                   // => 5
+ * visibleLength("\x1b[1mhello\x1b[0m")     // => 5
+ */
+export function visibleLength(text: string): number {
+	return text.replace(ANSI_SGR_RE, "").length;
+}
+
+/**
+ * Truncate text so it occupies at most `maxWidth` visible characters.
+ * ANSI escape sequences are preserved and do not count toward the width.
+ * When truncated, a trailing `…` and ANSI reset are appended.
+ *
+ * @example
+ * truncateToWidth("Hello, world!", 8) // => "Hello, …" + reset
+ */
+export function truncateToWidth(text: string, maxWidth: number): string {
+	if (maxWidth <= 0) return "";
+
+	const stripped = text.replace(ANSI_SGR_RE, "");
+	if (stripped.length <= maxWidth) return text;
+
+	// Walk through the original text, counting visible characters.
+	// Stop at maxWidth - 1 to leave room for the ellipsis.
+	let visible = 0;
+	let i = 0;
+	const truncAt = maxWidth - 1;
+
+	while (i < text.length && visible < truncAt) {
+		if (text.charCodeAt(i) === ESC_CODE) {
+			const remaining = text.slice(i);
+			const match = remaining.match(ANSI_SGR_START_RE);
+			if (match) {
+				i += match[0].length;
+				continue;
+			}
+		}
+		visible++;
+		i++;
+	}
+
+	return `${text.slice(0, i)}\u2026${a.reset}`;
+}
+
+// ─── Gradient ────────────────────────────────────────────────────────────────
 
 /**
  * Render text with a cyan-to-blue gradient using 24-bit ANSI color.

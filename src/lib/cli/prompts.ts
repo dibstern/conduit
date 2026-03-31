@@ -12,6 +12,7 @@ import {
 	gradient,
 	log,
 	sym,
+	truncateToWidth,
 	type Writable,
 } from "./terminal-render.js";
 
@@ -485,7 +486,25 @@ export function promptSelect<T = string>(
 	const { stdin, stdout, exit } = opts;
 	let idx = Math.min(opts.defaultIndex ?? 0, items.length - 1);
 
+	// Read terminal width on every render — handles live resizes.
+	// Visible prefix widths per line type (indent + bar + bullet/spaces):
+	//   item line  "  │  ● label"  → 7 visible chars before the label
+	//   keyhint    "  │  hint"     → 5 visible chars before the key-hint text
+	//   hint line  "     text"     → 5 visible chars (2 from log + 3 inline spaces)
+	function getCols(): number {
+		return (
+			(stdout as { columns?: number }).columns ??
+			(typeof process !== "undefined"
+				? (process.stdout as { columns?: number })?.columns
+				: undefined) ??
+			80
+		);
+	}
+
 	function render(): string {
+		const cols = getCols();
+		const maxLabelWidth = Math.max(cols - 7, 10);
+		const maxHintTextWidth = Math.max(cols - 5, 10);
 		let out = "";
 		for (let i = 0; i < items.length; i++) {
 			const pfx =
@@ -493,13 +512,20 @@ export function promptSelect<T = string>(
 					? `${a.green}${a.bold}  \u25CF ${a.reset}`
 					: `${a.dim}  \u25CB ${a.reset}`;
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			out += `  ${sym.bar}${pfx}${items[i]!.label}\n`;
+			const label = truncateToWidth(items[i]!.label, maxLabelWidth);
+			out += `  ${sym.bar}${pfx}${label}\n`;
 		}
 		const keyHint = opts.backItem
 			? `\u2191\u2193: navigate \u00B7 enter: select \u00B7 esc: back`
 			: `\u2191\u2193: navigate \u00B7 enter: select`;
-		out += `  ${sym.bar}  ${a.dim}${keyHint}${a.reset}\n`;
+		out += `  ${sym.bar}  ${a.dim}${truncateToWidth(keyHint, maxHintTextWidth)}${a.reset}\n`;
 		return out;
+	}
+
+	/** Render a single hint line, truncated to terminal width. */
+	function renderHintLine(text: string): void {
+		const maxHintTextWidth = Math.max(getCols() - 5, 10);
+		log(`   ${gradient(truncateToWidth(text, maxHintTextWidth))}`, stdout);
 	}
 
 	log(`${sym.pointer}  ${a.bold}${title}${a.reset}`, stdout);
@@ -511,7 +537,7 @@ export function promptSelect<T = string>(
 		log(sym.end, stdout);
 		for (let h = 0; h < opts.hint.length; h++) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			log(`   ${gradient(opts.hint[h]!)}`, stdout);
+			renderHintLine(opts.hint[h]!);
 		}
 		hintBoxLines = 1 + opts.hint.length;
 	}
@@ -590,13 +616,17 @@ export function promptSelect<T = string>(
 
 		// Redraw
 		clearUp(items.length + 1 + hintBoxLines, stdout);
+		// Defense-in-depth: clear from cursor to end of screen so any
+		// stale content from prior renders (e.g. from line wrapping in
+		// a narrow terminal) is wiped before we repaint.
+		stdout.write("\x1b[0J");
 		stdout.write(render());
 		// Re-render hint lines
 		if (opts.hint && opts.hint.length > 0) {
 			log(sym.end, stdout);
 			for (let rh = 0; rh < opts.hint.length; rh++) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-				log(`   ${gradient(opts.hint[rh]!)}`, stdout);
+				renderHintLine(opts.hint[rh]!);
 			}
 		}
 	}
@@ -620,6 +650,17 @@ export function promptMultiSelect<T = string>(
 ): void {
 	const { stdin, stdout, exit } = opts;
 
+	// Read terminal width on every render — handles live resizes.
+	function getCols(): number {
+		return (
+			(stdout as { columns?: number }).columns ??
+			(typeof process !== "undefined"
+				? (process.stdout as { columns?: number })?.columns
+				: undefined) ??
+			80
+		);
+	}
+
 	const selected: boolean[] = [];
 	for (let si = 0; si < items.length; si++) {
 		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
@@ -628,6 +669,9 @@ export function promptMultiSelect<T = string>(
 	let idx = 0;
 
 	function render(): string {
+		const cols = getCols();
+		const maxLabelWidth = Math.max(cols - 8, 10);
+		const maxKeyHintWidth = Math.max(cols - 5, 10);
 		let out = "";
 		for (let i = 0; i < items.length; i++) {
 			const cursor = i === idx ? `${a.cyan}>${a.reset}` : " ";
@@ -635,9 +679,12 @@ export function promptMultiSelect<T = string>(
 				? `${a.green}${a.bold}\u25A0${a.reset}`
 				: `${a.dim}\u25A1${a.reset}`;
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			out += `  ${sym.bar} ${cursor} ${check} ${items[i]!.label}\n`;
+			const label = truncateToWidth(items[i]!.label, maxLabelWidth);
+			out += `  ${sym.bar} ${cursor} ${check} ${label}\n`;
 		}
-		out += `  ${sym.bar}  ${a.dim}\u2191\u2193: navigate \u00B7 space: toggle \u00B7 a: all \u00B7 enter: confirm \u00B7 esc: skip${a.reset}\n`;
+		const keyHint =
+			"\u2191\u2193: navigate \u00B7 space: toggle \u00B7 a: all \u00B7 enter: confirm \u00B7 esc: skip";
+		out += `  ${sym.bar}  ${a.dim}${truncateToWidth(keyHint, maxKeyHintWidth)}${a.reset}\n`;
 		return out;
 	}
 
