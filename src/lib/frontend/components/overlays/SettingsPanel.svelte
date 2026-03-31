@@ -5,6 +5,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import Icon from "../shared/Icon.svelte";
+	import ToggleSetting from "../shared/ToggleSetting.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import type { Base16Theme } from "../../stores/theme-compute.js";
 
@@ -157,22 +158,25 @@
 				saveNotifSettings(notifSettings);
 				setPushActive(true);
 				try {
-					const swReg = await navigator.serviceWorker.ready;
-					await swReg.showNotification("Push Enabled", { body: "Push notifications are now active.", tag: "opencode-push-enabled" });
+					const swReg = await navigator.serviceWorker.getRegistration();
+					if (swReg?.active) await swReg.showNotification("Push Enabled", { body: "Push notifications are now active.", tag: "opencode-push-enabled" });
 				} catch { /* non-fatal */ }
 			} else {
 				notifSettings.push = false;
 				saveNotifSettings(notifSettings);
 				setPushActive(false);
-				const swReg = await navigator.serviceWorker.ready;
-				await swReg.showNotification("Push Disabled", { body: "Browser alerts will be used instead.", tag: "opencode-push-disabled" });
-				const sub = await swReg.pushManager.getSubscription();
-				if (sub) {
-					const endpoint = sub.endpoint;
-					await sub.unsubscribe();
-					await fetch("/api/push/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint }) });
+				// Use getRegistration() — never hangs, unlike .ready which
+				// blocks forever if the SW was evicted by the OS.
+				const swReg = await navigator.serviceWorker.getRegistration();
+				if (swReg?.active) {
+					try { await swReg.showNotification("Push Disabled", { body: "Browser alerts will be used instead.", tag: "opencode-push-disabled" }); } catch { /* non-fatal */ }
+					const sub = await swReg.pushManager.getSubscription();
+					if (sub) {
+						const endpoint = sub.endpoint;
+						await sub.unsubscribe();
+						await fetch("/api/push/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint }) });
+					}
 				}
-				await swReg.unregister();
 			}
 		} catch (err) {
 			log.warn("Toggle failed:", err);
@@ -226,22 +230,6 @@
 	</div>
 {/snippet}
 
-<!-- ─── Toggle switch snippet ────────────────────────────────────────────── -->
-{#snippet toggleSwitch(checked: boolean, onclick: () => void, disabled?: boolean, dimmed?: boolean, label?: string)}
-	<button
-		type="button"
-		role="switch"
-		aria-checked={checked}
-		aria-label={label}
-		class="relative w-9 h-5 rounded-full transition-[background,box-shadow] cursor-pointer border-none shrink-0 {checked ? 'bg-brand-a' : 'bg-text-dimmer'} {dimmed ? 'opacity-40' : ''}"
-		style={checked ? "box-shadow: 0 0 8px rgba(255,45,123,0.4);" : ""}
-		{disabled}
-		{onclick}
-	>
-		<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform {checked ? 'translate-x-4' : ''}"></span>
-	</button>
-{/snippet}
-
 {#if visible}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -279,27 +267,32 @@
 				<!-- ═══ Notifications ═══ -->
 				{#if activeTab === "notifications"}
 					<div class="space-y-2">
-					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
-						<div class="flex items-center gap-3 flex-1 min-w-0">
-							<Icon name="smartphone" size={16} class="text-text-muted shrink-0" />
-							<div><div class="text-sm font-medium text-text">Push notifications</div><div class="text-xs text-text-muted mt-0.5">Receive push notifications even when the tab is closed</div></div>
-						</div>
-						{@render toggleSwitch(notifSettings.push, togglePush, pushBusy || pushUnavailable, pushUnavailable, "Push notifications")}
-					</div>
-					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
-						<div class="flex items-center gap-3 flex-1 min-w-0">
-							<Icon name="bell" size={16} class="text-text-muted shrink-0" />
-							<div><div class="text-sm font-medium text-text">Browser alerts</div><div class="text-xs text-text-muted mt-0.5">Show desktop notifications when tasks complete</div></div>
-						</div>
-						{@render toggleSwitch(notifSettings.browser, toggleBrowser, undefined, undefined, "Browser alerts")}
-					</div>
-					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
-							<div class="flex items-center gap-3 flex-1 min-w-0">
-								<Icon name="volume-2" size={16} class="text-text-muted shrink-0" />
-								<div><div class="text-sm font-medium text-text">Sound</div><div class="text-xs text-text-muted mt-0.5">Play a sound when notifications are triggered</div></div>
-							</div>
-							{@render toggleSwitch(notifSettings.sound, toggleSound, undefined, undefined, "Sound")}
-						</div>
+						<ToggleSetting
+							icon="smartphone"
+							label="Push notifications"
+							description="Receive push notifications even when the tab is closed"
+							checked={notifSettings.push}
+							onchange={togglePush}
+							disabled={pushBusy || pushUnavailable}
+							dimmed={pushUnavailable}
+							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
+						/>
+						<ToggleSetting
+							icon="bell"
+							label="Browser alerts"
+							description="Show desktop notifications when tasks complete"
+							checked={notifSettings.browser}
+							onchange={toggleBrowser}
+							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+						/>
+						<ToggleSetting
+							icon="volume-2"
+							label="Sound"
+							description="Play a sound when notifications are triggered"
+							checked={notifSettings.sound}
+							onchange={toggleSound}
+							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+						/>
 						{#if pushUnavailable}
 							<div class="px-2 py-1.5 text-xs text-text-muted">Push notifications require HTTPS. Enable a certificate in the CLI settings.</div>
 						{:else if pushError}
@@ -476,13 +469,13 @@
 				<!-- ═══ Debug ═══ -->
 				{:else if activeTab === "debug"}
 					<div class="space-y-2">
-					<div class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 flex items-center justify-between gap-4 font-brand">
-						<div class="flex-1 min-w-0">
-							<div class="text-sm font-medium text-text">Connection debug panel</div>
-								<div class="text-xs text-text-muted mt-0.5">Shows WebSocket state transitions, timing, and lifecycle events.</div>
-							</div>
-							{@render toggleSwitch(featureFlags.debug, () => toggleFeature("debug"), undefined, undefined, "Connection debug panel")}
-						</div>
+						<ToggleSetting
+							label="Connection debug panel"
+							description="Shows WebSocket state transitions, timing, and lifecycle events."
+							checked={featureFlags.debug}
+							onchange={() => toggleFeature("debug")}
+							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+						/>
 						<div class="text-xs text-text-dimmer space-y-1.5 px-1 font-brand">
 							<div>URL param: <code class="px-1 py-0.5 bg-white/[0.08] rounded text-text-muted">?feats=debug</code></div>
 							<div>Keyboard: <kbd class="px-1.5 py-0.5 bg-white/[0.08] rounded text-text-muted border border-border/50">Ctrl+Shift+D</kbd></div>

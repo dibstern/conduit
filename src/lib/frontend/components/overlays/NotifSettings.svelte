@@ -77,15 +77,15 @@
 				setPushActive(true);
 
 				// Show a confirmation notification via the SW — validates the
-				// full push path end-to-end. Uses navigator.serviceWorker.ready
-				// (not getRegistration()) to ensure the SW is active and
-				// controlling the page before calling showNotification().
+				// full push path end-to-end.
 				try {
-					const swReg = await navigator.serviceWorker.ready;
-					await swReg.showNotification("Push Enabled ✓", {
-						body: "Push notifications are now active on this device.",
-						tag: "opencode-push-enabled",
-					});
+					const swReg = await navigator.serviceWorker.getRegistration();
+					if (swReg?.active) {
+						await swReg.showNotification("Push Enabled", {
+							body: "Push notifications are now active on this device.",
+							tag: "opencode-push-enabled",
+						});
+					}
 				} catch {
 					// Non-fatal
 				}
@@ -97,30 +97,37 @@
 				saveNotifSettings(settings);
 				setPushActive(false);
 
+				// Use getRegistration() — never hangs, unlike .ready which
+				// blocks forever if the SW was evicted by the OS.
 				const swReg =
-					await navigator.serviceWorker.ready;
+					await navigator.serviceWorker.getRegistration();
 
-				// Confirm via the SW before we tear it down
-				await swReg.showNotification("Push Disabled", {
-					body: "Browser alerts will be used instead.",
-					tag: "opencode-push-disabled",
-				});
+				if (swReg?.active) {
+					// Confirm via the SW before cleanup
+					try {
+						await swReg.showNotification("Push Disabled", {
+							body: "Browser alerts will be used instead.",
+							tag: "opencode-push-disabled",
+						});
+					} catch {
+						// Non-fatal
+					}
 
-				// Unsubscribe from push
-				const sub =
-					await swReg.pushManager.getSubscription();
-				if (sub) {
-					const endpoint = sub.endpoint;
-					await sub.unsubscribe();
-					await fetch("/api/push/unsubscribe", {
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ endpoint }),
-					});
+					// Unsubscribe from push — but keep the SW registered so
+					// re-enabling doesn't require a full re-registration cycle
+					// (which fails on some browsers, especially iOS).
+					const sub =
+						await swReg.pushManager.getSubscription();
+					if (sub) {
+						const endpoint = sub.endpoint;
+						await sub.unsubscribe();
+						await fetch("/api/push/unsubscribe", {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ endpoint }),
+						});
+					}
 				}
-
-				// Unregister the service worker
-				await swReg.unregister();
 			}
 		} catch (err) {
 			pushLog.warn("Toggle failed:", err);
