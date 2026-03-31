@@ -208,6 +208,24 @@ test.describe("Fork Session Rendering", () => {
 		// This proves the response rendered below the fork divider.
 		await chat.waitForStreamingComplete(30_000);
 
+		// The assistant response may arrive via REST polling slightly after
+		// the stop button hides.  Wait for it to render in the DOM.
+		await page.waitForFunction(
+			() => {
+				const msgs = document.querySelector("#messages");
+				if (!msgs) return false;
+				const div = msgs.querySelector(".fork-divider");
+				if (!div) return false;
+				let el = div.nextElementSibling;
+				while (el) {
+					if (el.querySelector(".msg-assistant")) return true;
+					el = el.nextElementSibling;
+				}
+				return false;
+			},
+			{ timeout: 10_000 },
+		);
+
 		// The fork divider separates inherited from current messages.
 		// Walk siblings after the divider to find user + assistant messages.
 		const result = await page.evaluate(() => {

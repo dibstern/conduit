@@ -919,28 +919,33 @@ export class MockOpenCodeServer {
 					? this.rewriteSessionIds(event.properties, sessionIdMap)
 					: event.properties;
 
-				// Track session.status:idle events so GET /session/status
-				// stays consistent with SSE (prevents stale "busy" queue
-				// entries from re-injecting processing state).
-				if (event.type === "session.status") {
-					const status = properties["status"] as { type?: string } | undefined;
-					const sid = properties["sessionID"] as string | undefined;
-					if (status?.type === "idle" && sid) {
-						this.sseIdleSessions.add(sid);
-					} else if (status?.type === "busy" && sid) {
-						this.sseIdleSessions.delete(sid);
-					}
-				}
-
 				const payload = JSON.stringify({
 					type: event.type,
 					properties,
 				});
 				const frame = `data: ${payload}\n\n`;
 
+				let delivered = false;
 				for (const client of this.sseClients) {
 					if (!client.writableEnded) {
 						client.write(frame);
+						delivered = true;
+					}
+				}
+
+				// Track session.status:idle events so GET /session/status
+				// stays consistent with SSE (prevents stale "busy" queue
+				// entries from re-injecting processing state).
+				// Only update when the event was actually delivered — if the
+				// SSE consumer hasn't connected yet, the status poller's
+				// secondary done-delivery path must remain functional.
+				if (delivered && event.type === "session.status") {
+					const status = properties["status"] as { type?: string } | undefined;
+					const sid = properties["sessionID"] as string | undefined;
+					if (status?.type === "idle" && sid) {
+						this.sseIdleSessions.add(sid);
+					} else if (status?.type === "busy" && sid) {
+						this.sseIdleSessions.delete(sid);
 					}
 				}
 				emitCount++;
