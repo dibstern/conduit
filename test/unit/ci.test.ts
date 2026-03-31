@@ -29,25 +29,25 @@ describe("Ticket 0.6 — CI/CD Pipeline", () => {
 			expect(content).toContain("pull_request:");
 		});
 
-		it("ci.yml uses actions/checkout@v4", () => {
+		it("ci.yml uses actions/checkout@v6", () => {
 			const content = readFile(".github/workflows/ci.yml");
-			expect(content).toContain("actions/checkout@v4");
+			expect(content).toContain("actions/checkout@v6");
 		});
 
-		it("ci.yml uses actions/setup-node@v4 with node 22", () => {
+		it("ci.yml uses actions/setup-node@v6 with node 22", () => {
 			const content = readFile(".github/workflows/ci.yml");
-			expect(content).toContain("actions/setup-node@v4");
+			expect(content).toContain("actions/setup-node@v6");
 			expect(content).toContain("node-version: '22'");
 		});
 
-		it("ci.yml uses pnpm/action-setup@v4", () => {
+		it("ci.yml uses pnpm/action-setup@v5", () => {
 			const content = readFile(".github/workflows/ci.yml");
-			expect(content).toContain("pnpm/action-setup@v4");
+			expect(content).toContain("pnpm/action-setup@v5");
 		});
 
 		it("ci.yml caches pnpm store", () => {
 			const content = readFile(".github/workflows/ci.yml");
-			expect(content).toContain("actions/cache@v4");
+			expect(content).toContain("actions/cache@v5");
 			expect(content).toContain("~/.pnpm-store");
 			expect(content).toContain("pnpm-lock.yaml");
 		});
