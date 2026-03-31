@@ -28,19 +28,15 @@ export default defineConfig({
 				extends: true,
 				test: {
 					name: "unit",
-					include: ["test/unit/**/*.test.ts", "test/fixture/**/*.test.ts"],
+					include: [
+						"test/unit/**/*.test.ts",
+						"test/fixture/**/*.test.ts",
+						"test/build/**/*.test.ts",
+					],
 					exclude: ["test/unit/components/**/*.test.ts"],
 					testTimeout: 10_000,
 					hookTimeout: 10_000,
-				},
-			},
-			{
-				extends: true,
-				test: {
-					name: "build",
-					include: ["test/build/**/*.test.ts"],
-					testTimeout: 10_000,
-					hookTimeout: 10_000,
+					pool: "threads",
 				},
 			},
 		],

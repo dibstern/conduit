@@ -95,9 +95,9 @@ function sendKey(stdin: EventEmitter, key: string): void {
 	queueMicrotask(() => stdin.emit("data", key));
 }
 
-/** Wait for next event loop iteration. */
+/** Yield one event-loop tick so the prompt processes the preceding input. */
 function tick(): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, 5));
+	return new Promise((resolve) => setTimeout(resolve, 1));
 }
 
 /**

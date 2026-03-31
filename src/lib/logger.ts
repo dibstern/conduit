@@ -62,8 +62,15 @@ let currentFormat: LogFormat = "json";
  */
 let outputStream: Writable;
 
-/** The root pino instance. Recreated when level or format changes. */
-let rootPino: PinoInstance = buildPino(currentLevel, currentFormat);
+/** The root pino instance. Lazy-initialized on first use to avoid paying
+ *  pino + pino-pretty startup cost (~50-100ms) at module load time.
+ *  Recreated when level or format changes via setLogLevel/setLogFormat. */
+let rootPino: PinoInstance | null = null;
+
+function getRootPino(): PinoInstance {
+	if (!rootPino) rootPino = buildPino(currentLevel, currentFormat);
+	return rootPino;
+}
 
 function padTag(tag: string): string {
 	return tag.length >= TAG_COLUMN_WIDTH
@@ -155,6 +162,7 @@ function wrapPino(p: PinoInstance): Logger {
  * Recreates the root pino instance so all future loggers use the new level.
  */
 export function setLogLevel(level: LogLevel): void {
+	if (level === currentLevel && rootPino) return;
 	currentLevel = level;
 	rootPino = buildPino(currentLevel, currentFormat);
 }
@@ -170,6 +178,7 @@ export function getLogLevel(): LogLevel {
  * - "json": structured JSON lines for daemon/machine use.
  */
 export function setLogFormat(format: LogFormat): void {
+	if (format === currentFormat && rootPino) return;
 	currentFormat = format;
 	rootPino = buildPino(currentLevel, currentFormat);
 }
@@ -196,7 +205,7 @@ export function createLogger(tag: string, parent?: Logger): Logger {
 		};
 	}
 
-	const pinoChild = rootPino.child({ component: [tag] });
+	const pinoChild = getRootPino().child({ component: [tag] });
 	return wrapPino(pinoChild);
 }
 

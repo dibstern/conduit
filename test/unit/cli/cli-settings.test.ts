@@ -108,8 +108,8 @@ function createMockIO() {
 	};
 }
 
-/** Wait for a given number of milliseconds. */
-function tick(ms = 15): Promise<void> {
+/** Yield one event-loop tick so the menu processes the preceding input. */
+function tick(ms = 1): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -117,7 +117,7 @@ function tick(ms = 15): Promise<void> {
 async function sendKeys(
 	stdin: EventEmitter,
 	keys: string[],
-	delay = 15,
+	delay = 1,
 ): Promise<void> {
 	for (const key of keys) {
 		stdin.emit("data", key);

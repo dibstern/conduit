@@ -16,7 +16,6 @@ import type {
 	SessionStatus,
 } from "../instance/opencode-client.js";
 import { createSilentLogger, type Logger } from "../logger.js";
-import { preRenderHistoryMessages } from "../relay/markdown-renderer.js";
 import type { HistoryMessage } from "../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
 
@@ -332,6 +331,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		offset?: number,
 	): Promise<HistoryPage> {
 		const page = await this.loadHistory(sessionId, offset);
+		// Dynamic import avoids pulling jsdom/dompurify/marked into every
+		// module that imports session-manager (saves ~300-500ms at load time).
+		const { preRenderHistoryMessages } = await import(
+			"../relay/markdown-renderer.js"
+		);
 		preRenderHistoryMessages(page.messages);
 		return page;
 	}

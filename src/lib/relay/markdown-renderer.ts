@@ -14,36 +14,43 @@ import { Marked, Renderer } from "marked";
 
 import type { HistoryMessage } from "../shared-types.js";
 
-// Create a single JSDOM window for DOMPurify — reused across all calls.
-// This is safe because DOMPurify is synchronous and single-threaded in Node.
-// Cast: jsdom's DOMWindow has all properties DOMPurify needs at runtime,
-// but the TypeScript types don't structurally match WindowLike.
-const jsdomWindow = new JSDOM("").window;
-const purify = createDOMPurify(jsdomWindow as unknown as WindowLike);
+// Lazy-initialized JSDOM + DOMPurify — avoids ~300-500ms of jsdom startup
+// at module load time. The first call to renderMarkdownServer() pays the
+// cost; subsequent calls reuse the cached instances.
+let _purify: ReturnType<typeof createDOMPurify> | undefined;
+let _serverMarked: Marked | undefined;
 
-// Use a dedicated Marked instance (not the global singleton) to avoid
-// shared-state conflicts if other server-side code imports marked.
-// Config mirrors the frontend's marked.use({ gfm: true, breaks: false })
-// plus the custom table renderer that wraps tables in scroll containers
-// (must match the frontend's markdown.ts renderer for visual parity).
-const serverMarked = new Marked({
-	gfm: true,
-	breaks: false,
-	renderer: {
-		table(token) {
-			const tableHtml = Renderer.prototype.table.call(this, token);
-			return (
-				'<div class="table-scroll-container">' +
-				'<div class="table-scroll">' +
-				tableHtml +
-				"</div>" +
-				'<div class="table-shadow table-shadow-left"></div>' +
-				'<div class="table-shadow table-shadow-right"></div>' +
-				"</div>"
-			);
-		},
-	},
-});
+function getPurify(): ReturnType<typeof createDOMPurify> {
+	if (!_purify) {
+		const jsdomWindow = new JSDOM("").window;
+		_purify = createDOMPurify(jsdomWindow as unknown as WindowLike);
+	}
+	return _purify;
+}
+
+function getServerMarked(): Marked {
+	if (!_serverMarked) {
+		_serverMarked = new Marked({
+			gfm: true,
+			breaks: false,
+			renderer: {
+				table(token) {
+					const tableHtml = Renderer.prototype.table.call(this, token);
+					return (
+						'<div class="table-scroll-container">' +
+						'<div class="table-scroll">' +
+						tableHtml +
+						"</div>" +
+						'<div class="table-shadow table-shadow-left"></div>' +
+						'<div class="table-shadow table-shadow-right"></div>' +
+						"</div>"
+					);
+				},
+			},
+		});
+	}
+	return _serverMarked;
+}
 
 /**
  * Render markdown text to sanitized HTML.
@@ -57,8 +64,8 @@ export function renderMarkdownServer(text: string): string {
 	// { async: false } ensures synchronous return (Marked.parse returns
 	// string | Promise<string> — without this flag, TypeScript can't
 	// narrow the return type to string).
-	const html = serverMarked.parse(text, { async: false }) as string;
-	return purify.sanitize(html);
+	const html = getServerMarked().parse(text, { async: false }) as string;
+	return getPurify().sanitize(html);
 }
 
 /**
