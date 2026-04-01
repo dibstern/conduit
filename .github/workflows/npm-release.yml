@@ -99,9 +99,9 @@ jobs:
         env:
           XDG_DATA_HOME: /tmp/opencode-ci-data
           XDG_CONFIG_HOME: /tmp/opencode-ci-config
-      - run: vitest run
-      - run: vitest run --config vitest.integration.config.ts
-      - run: vitest run --config vitest.contract.config.ts
+      - run: pnpm exec vitest run
+      - run: pnpm exec vitest run --config vitest.integration.config.ts
+      - run: pnpm exec vitest run --config vitest.contract.config.ts
 
   # ── Job 3: E2E Playwright tests ────────────────────────────────────────────
   # Needs dist/frontend/ from build. Daemon tests need OpenCode.
