@@ -20,7 +20,7 @@ export interface ScrollController {
 
 const SETTLE_MAX_FRAMES = 60;
 const SETTLE_STABLE_THRESHOLD = 2;
-const DETACH_THRESHOLD = 100; // px from bottom to trigger detach via scroll position
+const DETACH_THRESHOLD = 50; // px from bottom to trigger detach via scroll position
 const REFOLLOW_THRESHOLD = 5; // px from bottom to re-follow (tight to prevent accidental re-follow from casual scrolling)
 
 export function createScrollController(
@@ -90,14 +90,10 @@ export function createScrollController(
 	function onScroll(): void {
 		if (!container) return;
 
-		// If we triggered this scroll via scrollToBottom(), skip the detach
-		// check. Uses a counter instead of a boolean so that multiple
-		// scrollToBottom() calls in the same frame (e.g. content-change
-		// effect + "ready" effect) each consume one slot instead of the
-		// second scroll event bypassing the guard entirely.
-		if (programmaticScrollCount > 0) {
+		// Track whether this was a programmatic scroll (from scrollToBottom).
+		const isProgrammatic = programmaticScrollCount > 0;
+		if (isProgrammatic) {
 			programmaticScrollCount--;
-			return;
 		}
 
 		// Skip detach/re-follow logic if content doesn't overflow the
@@ -107,14 +103,21 @@ export function createScrollController(
 
 		const distFromBottom =
 			container.scrollHeight - container.scrollTop - container.clientHeight;
-		// Re-follow only when scrolled to the very bottom (within 5px).
-		// Tight threshold prevents accidental re-follow from casual scrolling
-		// near the bottom. The "↓ Latest" button provides an explicit re-follow.
-		if (distFromBottom < REFOLLOW_THRESHOLD && userDetached) {
+
+		// Re-follow only when scrolled to the very bottom (within 5px) AND
+		// the scroll was user-initiated. Skip for programmatic scrolls so
+		// that scrollToBottom() doesn't accidentally clear userDetached.
+		if (
+			!isProgrammatic &&
+			distFromBottom < REFOLLOW_THRESHOLD &&
+			userDetached
+		) {
 			userDetached = false;
 		}
-		// Detach when scrolled away from bottom (catches all user-initiated
-		// scroll: wheel, touch, keyboard, page search, etc.).
+		// Detach when scrolled away from bottom — ALWAYS checked, even for
+		// programmatic scrolls. If the user scrolled up while a
+		// scrollToBottom() was in-flight, the final position may be far from
+		// bottom and we must honor the user's intent.
 		if (
 			distFromBottom > DETACH_THRESHOLD &&
 			!userDetached &&

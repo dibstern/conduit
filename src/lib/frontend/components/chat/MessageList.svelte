@@ -75,8 +75,8 @@
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
 	// - The scroll controller's own state machine (following/detached) provides
-	//   protection against unwanted scrolling: user must scroll >100px from
-	//   bottom to detach, and must scroll back within 50px to re-follow.
+	//   protection against unwanted scrolling: user must scroll >50px from
+	//   bottom to detach, and must scroll back within 5px to re-follow.
 	//   No additional processing/settling guard is needed — error messages,
 	//   session switches to idle sessions, and background events all scroll
 	//   correctly as long as the user is "following".

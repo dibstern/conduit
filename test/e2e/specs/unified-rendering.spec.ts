@@ -205,7 +205,7 @@ test.describe("Unified Rendering: Scroll", () => {
 		test.skip(!isDesktop, "Unified rendering tests run on desktop only");
 
 		// Use 300px height to guarantee content overflows well past the
-		// 100px SCROLL_THRESHOLD — simulates a split-screen or short display
+		// 50px SCROLL_THRESHOLD — simulates a split-screen or short display
 		await page.setViewportSize({ width: 1440, height: 300 });
 
 		const app = new AppPage(page);
@@ -218,7 +218,7 @@ test.describe("Unified Rendering: Scroll", () => {
 		await chat.waitForStreamingComplete();
 
 		// Verify content overflows enough to trigger the scroll button.
-		// SCROLL_THRESHOLD is 100px — content must overflow by more than that.
+		// SCROLL_THRESHOLD is 50px — content must overflow by more than that.
 		// If this fails, the recording doesn't produce enough content or the
 		// viewport is too tall.
 		const messagesEl = page.locator("#messages");

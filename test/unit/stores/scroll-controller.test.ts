@@ -171,7 +171,7 @@ describe("ScrollController", () => {
 		ctrl.detach();
 	});
 
-	it("does NOT detach when distFromBottom is exactly at DETACH_THRESHOLD (100px)", () => {
+	it("does NOT detach when distFromBottom is exactly at DETACH_THRESHOLD (50px)", () => {
 		const ctrl = makeController();
 		lifecycle = "ready";
 		const div = document.createElement("div");
@@ -183,8 +183,9 @@ describe("ScrollController", () => {
 			value: 500,
 			configurable: true,
 		});
+		// distFromBottom = 2000 - 1450 - 500 = 50 (exactly at threshold → NOT detach)
 		Object.defineProperty(div, "scrollTop", {
-			value: 1400,
+			value: 1450,
 			writable: true,
 			configurable: true,
 		});
@@ -206,8 +207,9 @@ describe("ScrollController", () => {
 			value: 500,
 			configurable: true,
 		});
+		// distFromBottom = 2000 - 1449 - 500 = 51 (past threshold → detach)
 		Object.defineProperty(div, "scrollTop", {
-			value: 1399,
+			value: 1449,
 			writable: true,
 			configurable: true,
 		});
