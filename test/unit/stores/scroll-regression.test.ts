@@ -192,4 +192,46 @@ describe("Scroll behavior regression suite", () => {
 			ctrl.detach();
 		});
 	});
+
+	describe("Programmatic scroll does not falsely detach", () => {
+		it("stays following when onNewContent scrolls to a stale position due to content growth", () => {
+			// Simulates the race condition: onNewContent() calls scrollToBottom(),
+			// but content grows before the scroll event fires, leaving the
+			// scroll position >50px from the new bottom.
+			const ctrl = makeCtrl();
+			const div = createScrollableDiv();
+			// scrollHeight=2000, clientHeight=500, scrollTop=1500 → at bottom
+			ctrl.attach(div);
+			expect(ctrl.isDetached).toBe(false);
+
+			// 1. onNewContent triggers scrollToBottom (programmaticScrollCount++)
+			ctrl.onNewContent();
+
+			// 2. Content grows — scrollHeight increases
+			Object.defineProperty(div, "scrollHeight", {
+				value: 3000,
+				configurable: true,
+			});
+
+			// 3. Scroll event fires at the OLD position (1500) — stale.
+			//    distFromBottom = 3000 - 1500 - 500 = 1000 (>>50)
+			//    Without the fix, this would falsely set userDetached=true.
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.isDetached).toBe(false);
+			ctrl.detach();
+		});
+
+		it("user scroll-up still detaches correctly (non-programmatic)", () => {
+			const ctrl = makeCtrl();
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			expect(ctrl.isDetached).toBe(false);
+
+			// User scrolls up — this is NOT preceded by scrollToBottom()
+			div.scrollTop = 200;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.isDetached).toBe(true);
+			ctrl.detach();
+		});
+	});
 });

@@ -114,11 +114,14 @@ export function createScrollController(
 		) {
 			userDetached = false;
 		}
-		// Detach when scrolled away from bottom — ALWAYS checked, even for
-		// programmatic scrolls. If the user scrolled up while a
-		// scrollToBottom() was in-flight, the final position may be far from
-		// bottom and we must honor the user's intent.
+		// Detach when scrolled away from bottom — only for user-initiated
+		// scrolls. Programmatic scrolls can land with a stale position when
+		// content grows between the scrollToBottom() call and the scroll
+		// event, causing false detach. If the user scrolls up while a
+		// programmatic scroll is in-flight, the user's own scroll generates
+		// a separate non-programmatic event that will trigger detach.
 		if (
+			!isProgrammatic &&
 			distFromBottom > DETACH_THRESHOLD &&
 			!userDetached &&
 			getState() === "following"
