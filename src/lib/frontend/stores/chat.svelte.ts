@@ -718,6 +718,12 @@ export function handleDone(
 	// messageId against it. Resetting to null makes every post-done turn
 	// look like the first message in a fresh session, skipping turnEpoch++.
 	// Only clearMessages (session switch) should reset it.
+
+	// Request scroll before phaseToIdle so the content-change effect scrolls
+	// for the finalized assistant message. Without this, phaseToIdle sets
+	// phase to "idle" synchronously, so when the batched effect fires,
+	// isProcessing() is false and the guard skips the scroll.
+	requestScrollOnNextContent();
 	phaseToIdle();
 }
 
