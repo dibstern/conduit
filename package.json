@@ -1,6 +1,6 @@
 {
 	"name": "conduit-code",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"type": "module",
 	"license": "MIT",
 	"description": "Web UI relay for OpenCode. Access your OpenCode sessions from any device.",
