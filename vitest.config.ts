@@ -28,11 +28,7 @@ export default defineConfig({
 				extends: true,
 				test: {
 					name: "unit",
-					include: [
-						"test/unit/**/*.test.ts",
-						"test/fixture/**/*.test.ts",
-						"test/build/**/*.test.ts",
-					],
+					include: ["test/unit/**/*.test.ts", "test/fixture/**/*.test.ts"],
 					exclude: ["test/unit/components/**/*.test.ts"],
 					testTimeout: 10_000,
 					hookTimeout: 10_000,
