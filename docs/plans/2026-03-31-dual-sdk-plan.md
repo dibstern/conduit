@@ -119,7 +119,11 @@ The 45 `RelayClient` methods split into two groups:
 
 **Files:**
 - Create: `src/lib/backend/types.ts`
-- Create: `src/lib/backend/types.test.ts`
+- Create: `test/unit/backend/types.test.ts`
+
+**Step 0: Verify Phase 1 status**
+
+Check if `src/lib/instance/sdk-client.ts` exists. If Phase 1 is complete, import from `"../instance/relay-types.js"`. If not, import from `"../instance/opencode-client.js"` and substitute `OpenCodeClient` for `RelayClient` throughout.
 
 **Step 1: Write the interface**
 
@@ -129,7 +133,7 @@ import type {
     SessionDetail, SessionStatus, SessionCreateOptions, SessionListOptions,
     Message, PromptOptions, PermissionReplyOptions, QuestionReplyOptions,
     Agent, ProviderListResult, PtyCreateOptions, HealthResponse,
-} from "../instance/relay-types.js";
+} from "../instance/opencode-client.js";
 
 /**
  * Session-centric operations that differ between backends.
@@ -164,7 +168,7 @@ export interface SessionBackend {
     abortSession(id: string): Promise<void>;
 
     // Permissions & Questions
-    listPendingPermissions(): Promise<Array<{ id: string; [key: string]: unknown }>>;
+    listPendingPermissions(): Promise<Array<{ id: string; permission: string; [key: string]: unknown }>>;
     replyPermission(options: PermissionReplyOptions): Promise<void>;
     listPendingQuestions(): Promise<Array<{ id: string; [key: string]: unknown }>>;
     replyQuestion(options: QuestionReplyOptions): Promise<void>;
@@ -221,47 +225,50 @@ export interface InfraClient {
 
 /**
  * Unified event type emitted by all backends.
- * Structurally matches OpenCodeEvent so existing EventTranslator works.
+ * Re-exported from types.ts — structurally matches OpenCodeEvent
+ * so existing EventTranslator works.
  */
-export interface BackendEvent {
-    type: string;
-    properties: Record<string, unknown>;
-}
+export type { OpenCodeEvent as BackendEvent } from "../types.js";
 ```
 
 **Step 2: Write a structural test**
 
 ```typescript
-// src/lib/backend/types.test.ts
+// test/unit/backend/types.test.ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { SessionBackend, InfraClient } from "./types.js";
-import type { RelayClient } from "../instance/sdk-client.js";
+import type { SessionBackend, InfraClient } from "../../../src/lib/backend/types.js";
+import type { OpenCodeClient } from "../../../src/lib/instance/opencode-client.js";
 
 describe("SessionBackend interface", () => {
-    it("every required SessionBackend method exists on RelayClient", () => {
-        // Excluded: type, initialize, shutdown, subscribeEvents (backend-only lifecycle),
-        // sendMessage (renamed from sendMessageAsync), and the 3 optional methods
-        // (forkSession, revertSession, unrevertSession — exist on RelayClient but
-        // optional on interface).
-        type BackendMethods = Exclude<
+    it("SessionBackend methods have compatible signatures with OpenCodeClient", () => {
+        // Verify method-level assignability, not just name membership.
+        // Excluded: type, initialize, shutdown, subscribeEvents (backend-only),
+        // sendMessage (renamed from sendMessageAsync), and the 3 optional methods.
+        type SharedMethods = Exclude<
             keyof SessionBackend,
             "type" | "initialize" | "shutdown" | "subscribeEvents" | "sendMessage"
             | "forkSession" | "revertSession" | "unrevertSession"
         >;
-        type ClientMethods = keyof RelayClient;
-        expectTypeOf<BackendMethods>().toMatchTypeOf<ClientMethods>();
+        // Pick the shared methods from both types and verify assignability
+        expectTypeOf<Pick<OpenCodeClient, SharedMethods>>().toMatchTypeOf<Pick<SessionBackend, SharedMethods>>();
     });
 
-    it("optional operations also exist on RelayClient", () => {
-        // The optional methods DO exist on RelayClient (OpenCode supports them).
+    it("sendMessage is compatible with sendMessageAsync", () => {
+        // SessionBackend.sendMessage maps to OpenCodeClient.sendMessageAsync
+        type SendFn = OpenCodeClient["sendMessageAsync"];
+        type BackendSendFn = SessionBackend["sendMessage"];
+        expectTypeOf<SendFn>().toMatchTypeOf<BackendSendFn>();
+    });
+
+    it("optional operations exist on OpenCodeClient", () => {
         type OptionalMethods = "forkSession" | "revertSession" | "unrevertSession";
-        type ClientMethods = keyof RelayClient;
-        expectTypeOf<OptionalMethods>().toMatchTypeOf<ClientMethods>();
+        expectTypeOf<Pick<OpenCodeClient, OptionalMethods>>().toMatchTypeOf<Required<Pick<SessionBackend, OptionalMethods>>>();
     });
 
-    it("every InfraClient method exists on RelayClient", () => {
+    it("every InfraClient method exists on OpenCodeClient", () => {
+        // Name-only check is sufficient — direct assignment catches type mismatches
         type InfraMethods = keyof InfraClient;
-        type ClientMethods = keyof RelayClient;
+        type ClientMethods = keyof OpenCodeClient;
         expectTypeOf<InfraMethods>().toMatchTypeOf<ClientMethods>();
     });
 });
@@ -270,13 +277,13 @@ describe("SessionBackend interface", () => {
 **Step 3: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/types.test.ts
+pnpm vitest run test/unit/backend/types.test.ts
 ```
 
 **Step 4: Commit**
 
 ```bash
-git add src/lib/backend/types.ts src/lib/backend/types.test.ts
+git add src/lib/backend/types.ts test/unit/backend/types.test.ts
 git commit -m "feat: define SessionBackend and InfraClient interfaces
 
 Optional forkSession/revertSession/unrevertSession for backends
@@ -291,16 +298,16 @@ Shared utilities used by both `OpenCodeBackend` (SSE -> AsyncIterable bridge) an
 
 **Files:**
 - Create: `src/lib/backend/async-event-channel.ts`
-- Create: `src/lib/backend/async-event-channel.test.ts`
+- Create: `test/unit/backend/async-event-channel.test.ts`
 - Create: `src/lib/backend/deferred.ts`
-- Create: `src/lib/backend/deferred.test.ts`
+- Create: `test/unit/backend/deferred.test.ts`
 
 **Step 1: Write failing tests for AsyncEventChannel**
 
 ```typescript
-// src/lib/backend/async-event-channel.test.ts
+// test/unit/backend/async-event-channel.test.ts
 import { describe, it, expect } from "vitest";
-import { AsyncEventChannel } from "./async-event-channel.js";
+import { AsyncEventChannel } from "../../../src/lib/backend/async-event-channel.js";
 
 describe("AsyncEventChannel", () => {
     it("delivers pushed events in order", async () => {
@@ -366,9 +373,38 @@ describe("AsyncEventChannel", () => {
         const { value } = await iter.next();
         expect(value).toBe(1);
 
-        await iter.return!(undefined as any);
+        await iter.return!();
         const { done } = await iter.next();
         expect(done).toBe(true);
+    });
+
+    it("throws if two consumers call next() concurrently", async () => {
+        const ch = new AsyncEventChannel<number>();
+        const iter = ch[Symbol.asyncIterator]();
+
+        // First consumer blocks
+        const p1 = iter.next();
+        // Second consumer should throw
+        expect(() => iter.next()).toThrow("AsyncEventChannel supports only one concurrent consumer");
+
+        ch.push(1);
+        ch.close();
+        await p1;
+    });
+
+    it("delivers buffered items before done on close", async () => {
+        const ch = new AsyncEventChannel<number>();
+        ch.push(1);
+        ch.push(2);
+        ch.close();
+
+        const iter = ch[Symbol.asyncIterator]();
+        const r1 = await iter.next();
+        expect(r1).toEqual({ value: 1, done: false });
+        const r2 = await iter.next();
+        expect(r2).toEqual({ value: 2, done: false });
+        const r3 = await iter.next();
+        expect(r3.done).toBe(true);
     });
 });
 ```
@@ -376,7 +412,7 @@ describe("AsyncEventChannel", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/async-event-channel.test.ts
+pnpm vitest run test/unit/backend/async-event-channel.test.ts
 ```
 
 Expected: FAIL — module doesn't exist yet.
@@ -419,7 +455,7 @@ export class AsyncEventChannel<T> {
         if (this.resolver) {
             const resolve = this.resolver;
             this.resolver = null;
-            resolve({ value: undefined as any, done: true });
+            resolve({ value: undefined, done: true as const });
         }
     }
 
@@ -431,17 +467,20 @@ export class AsyncEventChannel<T> {
         const self = this;
         return {
             next(): Promise<IteratorResult<T>> {
+                if (self.resolver) {
+                    throw new Error("AsyncEventChannel supports only one concurrent consumer");
+                }
                 if (self.queue.length > 0) {
                     return Promise.resolve({ value: self.queue.shift()!, done: false as const });
                 }
                 if (self.closed) {
-                    return Promise.resolve({ value: undefined as any, done: true as const });
+                    return Promise.resolve({ value: undefined, done: true as const });
                 }
                 return new Promise(resolve => { self.resolver = resolve; });
             },
             return(): Promise<IteratorResult<T>> {
                 self.close();
-                return Promise.resolve({ value: undefined as any, done: true as const });
+                return Promise.resolve({ value: undefined, done: true as const });
             },
             [Symbol.asyncIterator]() { return this; },
         };
@@ -452,15 +491,15 @@ export class AsyncEventChannel<T> {
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/async-event-channel.test.ts
+pnpm vitest run test/unit/backend/async-event-channel.test.ts
 ```
 
 **Step 5: Write failing tests for Deferred**
 
 ```typescript
-// src/lib/backend/deferred.test.ts
+// test/unit/backend/deferred.test.ts
 import { describe, it, expect } from "vitest";
-import { createDeferred } from "./deferred.js";
+import { createDeferred } from "../../../src/lib/backend/deferred.js";
 
 describe("Deferred", () => {
     it("resolves with a value", async () => {
@@ -505,14 +544,14 @@ export function createDeferred<T>(): Deferred<T> {
 **Step 7: Run all tests**
 
 ```bash
-pnpm vitest run src/lib/backend/async-event-channel.test.ts src/lib/backend/deferred.test.ts
+pnpm vitest run test/unit/backend/async-event-channel.test.ts test/unit/backend/deferred.test.ts
 ```
 
 **Step 8: Commit**
 
 ```bash
-git add src/lib/backend/async-event-channel.ts src/lib/backend/async-event-channel.test.ts \
-        src/lib/backend/deferred.ts src/lib/backend/deferred.test.ts
+git add src/lib/backend/async-event-channel.ts test/unit/backend/async-event-channel.test.ts \
+        src/lib/backend/deferred.ts test/unit/backend/deferred.test.ts
 git commit -m "feat: add AsyncEventChannel and Deferred utilities for backend bridging"
 ```
 
@@ -524,14 +563,18 @@ The first `SessionBackend` implementation. Wraps `RelayClient` for session-centr
 
 **Files:**
 - Create: `src/lib/backend/opencode-backend.ts`
-- Create: `src/lib/backend/opencode-backend.test.ts`
+- Create: `test/unit/backend/opencode-backend.test.ts`
+
+**Step 0: Verify Phase 1 status**
+
+Check if `src/lib/instance/sdk-client.ts` exists. If Phase 1 is complete, import from `"../instance/relay-types.js"`. If not, import from `"../instance/opencode-client.js"` and substitute `OpenCodeClient` for `RelayClient` throughout.
 
 **Step 1: Write failing tests**
 
 ```typescript
-// src/lib/backend/opencode-backend.test.ts
+// test/unit/backend/opencode-backend.test.ts
 import { describe, it, expect, vi } from "vitest";
-import { OpenCodeBackend } from "./opencode-backend.js";
+import { OpenCodeBackend } from "../../../src/lib/backend/opencode-backend.js";
 
 function createMockRelayClient() {
     return {
@@ -608,7 +651,7 @@ describe("OpenCodeBackend", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/opencode-backend.test.ts
+pnpm vitest run test/unit/backend/opencode-backend.test.ts
 ```
 
 Expected: FAIL — `OpenCodeBackend` doesn't exist yet.
@@ -617,15 +660,19 @@ Expected: FAIL — `OpenCodeBackend` doesn't exist yet.
 
 ```typescript
 // src/lib/backend/opencode-backend.ts
-import type { SessionBackend, InfraClient, BackendEvent } from "./types.js";
-import type { RelayClient } from "../instance/sdk-client.js";
-import type { SSEConsumer } from "../relay/sse-consumer.js";
-import type { ServiceRegistry } from "../relay/service-registry.js";
-import type { Logger } from "../logging.js";
+import type { SessionBackend, BackendEvent } from "./types.js";
+import type { OpenCodeClient } from "../instance/opencode-client.js";
+import type {
+    SessionCreateOptions, SessionListOptions, PromptOptions,
+    PermissionReplyOptions, QuestionReplyOptions,
+} from "../instance/opencode-client.js";
+import { SSEConsumer } from "../relay/sse-consumer.js";
+import type { ServiceRegistry } from "../daemon/service-registry.js";
+import type { Logger } from "../logger.js";
 import { AsyncEventChannel } from "./async-event-channel.js";
 
 export interface OpenCodeBackendOptions {
-    client: RelayClient;
+    client: OpenCodeClient;
     sseConfig?: {
         registry: ServiceRegistry;
         baseUrl: string;
@@ -636,7 +683,7 @@ export interface OpenCodeBackendOptions {
 
 /**
  * SessionBackend wrapping OpenCode's REST API + SSE event stream.
- * Every session-centric method delegates directly to RelayClient.
+ * Every session-centric method delegates directly to OpenCodeClient.
  * SSEConsumer events are bridged to AsyncIterable via AsyncEventChannel.
  *
  * OpenCode supports all operations including the optional ones
@@ -644,7 +691,7 @@ export interface OpenCodeBackendOptions {
  */
 export class OpenCodeBackend implements SessionBackend {
     readonly type = "opencode" as const;
-    private readonly client: RelayClient;
+    private readonly client: OpenCodeClient;
     private readonly sseConfig?: OpenCodeBackendOptions["sseConfig"];
     private sseConsumer?: SSEConsumer;
 
@@ -655,11 +702,10 @@ export class OpenCodeBackend implements SessionBackend {
 
     async initialize(): Promise<void> {
         if (this.sseConfig) {
-            const { SSEConsumer: SSEConsumerClass } = await import("../relay/sse-consumer.js");
-            this.sseConsumer = new SSEConsumerClass(this.sseConfig.registry, {
+            this.sseConsumer = new SSEConsumer(this.sseConfig.registry, {
                 baseUrl: this.sseConfig.baseUrl,
-                authHeaders: this.sseConfig.authHeaders,
-                log: this.sseConfig.log,
+                ...(this.sseConfig.authHeaders && { authHeaders: this.sseConfig.authHeaders }),
+                ...(this.sseConfig.log && { log: this.sseConfig.log }),
             });
             await this.sseConsumer.connect();
         }
@@ -674,35 +720,35 @@ export class OpenCodeBackend implements SessionBackend {
         return this.sseConsumer;
     }
 
-    // --- Direct delegation to RelayClient ---
+    // --- Direct delegation to OpenCodeClient ---
 
     getHealth() { return this.client.getHealth(); }
-    listSessions(options?: any) { return this.client.listSessions(options); }
+    listSessions(options?: SessionListOptions) { return this.client.listSessions(options); }
     getSession(id: string) { return this.client.getSession(id); }
-    createSession(options?: any) { return this.client.createSession(options); }
+    createSession(options?: SessionCreateOptions) { return this.client.createSession(options); }
     deleteSession(id: string) { return this.client.deleteSession(id); }
-    updateSession(id: string, updates: any) { return this.client.updateSession(id, updates); }
+    updateSession(id: string, updates: { title?: string; archived?: boolean }) { return this.client.updateSession(id, updates); }
     getSessionStatuses() { return this.client.getSessionStatuses(); }
     getMessages(sessionId: string) { return this.client.getMessages(sessionId); }
     getMessage(sessionId: string, messageId: string) { return this.client.getMessage(sessionId, messageId); }
-    getMessagesPage(sessionId: string, options?: any) { return this.client.getMessagesPage(sessionId, options); }
-    sendMessage(sessionId: string, prompt: any) { return this.client.sendMessageAsync(sessionId, prompt); }
+    getMessagesPage(sessionId: string, options?: { limit?: number; before?: string }) { return this.client.getMessagesPage(sessionId, options); }
+    sendMessage(sessionId: string, prompt: PromptOptions) { return this.client.sendMessageAsync(sessionId, prompt); }
     abortSession(id: string) { return this.client.abortSession(id); }
     listPendingPermissions() { return this.client.listPendingPermissions(); }
-    replyPermission(options: any) { return this.client.replyPermission(options); }
+    replyPermission(options: PermissionReplyOptions) { return this.client.replyPermission(options); }
     listPendingQuestions() { return this.client.listPendingQuestions(); }
-    replyQuestion(options: any) { return this.client.replyQuestion(options); }
+    replyQuestion(options: QuestionReplyOptions) { return this.client.replyQuestion(options); }
     rejectQuestion(id: string) { return this.client.rejectQuestion(id); }
     listAgents() { return this.client.listAgents(); }
     listProviders() { return this.client.listProviders(); }
     listCommands() { return this.client.listCommands(); }
     listSkills() { return this.client.listSkills(); }
     getConfig() { return this.client.getConfig(); }
-    updateConfig(config: any) { return this.client.updateConfig(config); }
+    updateConfig(config: Record<string, unknown>) { return this.client.updateConfig(config); }
 
     // --- Optional operations (OpenCode supports all of these) ---
 
-    forkSession(id: string, options: any) { return this.client.forkSession(id, options); }
+    forkSession(id: string, options: { messageID?: string; title?: string }) { return this.client.forkSession(id, options); }
     revertSession(id: string, messageId: string) { return this.client.revertSession(id, messageId); }
     unrevertSession(id: string) { return this.client.unrevertSession(id); }
 
@@ -730,14 +776,14 @@ export class OpenCodeBackend implements SessionBackend {
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/opencode-backend.test.ts
+pnpm vitest run test/unit/backend/opencode-backend.test.ts
 ```
 
 **Step 5: Commit**
 
 ```bash
-git add src/lib/backend/opencode-backend.ts src/lib/backend/opencode-backend.test.ts
-git commit -m "feat: implement OpenCodeBackend wrapping RelayClient + SSEConsumer"
+git add src/lib/backend/opencode-backend.ts test/unit/backend/opencode-backend.test.ts
+git commit -m "feat: implement OpenCodeBackend wrapping OpenCodeClient + SSEConsumer"
 ```
 
 ---
@@ -747,17 +793,21 @@ git commit -m "feat: implement OpenCodeBackend wrapping RelayClient + SSEConsume
 Replace the single `client: OpenCodeClient` (now `RelayClient`) field on `HandlerDeps` and `ClientInitDeps` with `sessionBackend: SessionBackend` and `infraClient: InfraClient`. Update all 8 handler files and the mock factory.
 
 **Files:**
-- Modify: `src/lib/handlers/types.ts:71` — split `client` field
-- Modify: `src/lib/handlers/session.ts` — use `deps.sessionBackend`
-- Modify: `src/lib/handlers/prompt.ts` — use `deps.sessionBackend`
-- Modify: `src/lib/handlers/permissions.ts` — use `deps.sessionBackend`
-- Modify: `src/lib/handlers/model.ts` — use `deps.sessionBackend`
-- Modify: `src/lib/handlers/agent.ts` — use `deps.sessionBackend`
-- Modify: `src/lib/handlers/settings.ts` — use both (`listCommands` -> `sessionBackend`, `listProjects` -> `infraClient`)
-- Modify: `src/lib/handlers/files.ts` — use `deps.infraClient`
-- Modify: `src/lib/handlers/terminal.ts` — use `deps.infraClient`
-- Modify: `src/lib/bridges/client-init.ts:35` — split `client` field on `ClientInitDeps`
-- Modify: `test/helpers/mock-factories.ts` — split `createMockClient()` into `createMockSessionBackend()` + `createMockInfraClient()`
+- Modify: `src/lib/handlers/types.ts` — split `client` field into `sessionBackend` + `infraClient`
+- Modify: `src/lib/bridges/client-init.ts` — split `client` to `sessionBackend` only (no infraClient needed)
+- Modify: `src/lib/handlers/session.ts` — `deps.client` → `deps.sessionBackend`
+- Modify: `src/lib/handlers/prompt.ts` — `deps.client` → `deps.sessionBackend`
+- Modify: `src/lib/handlers/permissions.ts` — `deps.client` → `deps.sessionBackend`
+- Modify: `src/lib/handlers/model.ts` — `deps.client` → `deps.sessionBackend`
+- Modify: `src/lib/handlers/agent.ts` — `deps.client` → `deps.sessionBackend`
+- Modify: `src/lib/handlers/settings.ts` — both (`listCommands` → sessionBackend, `listProjects` → infraClient)
+- Modify: `src/lib/handlers/files.ts` — `deps.client` → `deps.infraClient`
+- Modify: `src/lib/handlers/terminal.ts` — `deps.client` → `deps.infraClient`
+- Modify: `src/lib/relay/handler-deps-wiring.ts:37` — `HandlerDepsWiringDeps.client` → split
+- Modify: `src/lib/relay/monitoring-wiring.ts:44,128` — `MonitoringWiringDeps.client` → `sessionBackend: Pick<SessionBackend, "getMessages">`
+- Modify: `src/lib/relay/session-lifecycle-wiring.ts:24,68` — same pattern
+- Modify: `src/lib/relay/relay-stack.ts:355-356` — SSE lambdas → `sessionBackend.listPendingQuestions()` / `sessionBackend.listPendingPermissions()`
+- Modify: `test/helpers/mock-factories.ts` — split mock, remove phantom `switchModel`
 
 **Step 1: Update `HandlerDeps` interface**
 
@@ -775,7 +825,9 @@ Update imports from `../instance/opencode-client.js` (or post-Phase-1 `../instan
 
 **Step 2: Update `ClientInitDeps` interface**
 
-In `src/lib/bridges/client-init.ts`, same split. Update `handleClientConnected` to use `deps.sessionBackend` for calls to `getSession`, `listPendingPermissions`, `listPendingQuestions`, `listAgents`, `listProviders`.
+In `src/lib/bridges/client-init.ts`, replace `client: OpenCodeClient` with `sessionBackend: SessionBackend`.
+No `infraClient` needed — all 5 calls in `handleClientConnected` are session-backend methods:
+`getSession`, `listPendingPermissions`, `listPendingQuestions`, `listAgents`, `listProviders`.
 
 **Step 3: Update each handler file (mechanical replacements)**
 
@@ -825,9 +877,25 @@ export function createMockSessionBackend(): SessionBackend {
         listSessions: vi.fn().mockResolvedValue([]),
         getSession: vi.fn().mockResolvedValue({ id: "s1" }),
         createSession: vi.fn().mockResolvedValue({ id: "s2" }),
-        // ... all required methods ...
+        deleteSession: vi.fn().mockResolvedValue(undefined),
+        updateSession: vi.fn().mockResolvedValue({ id: "s1" }),
+        getSessionStatuses: vi.fn().mockResolvedValue({}),
+        getMessages: vi.fn().mockResolvedValue([]),
+        getMessage: vi.fn().mockResolvedValue({ id: "m1" }),
+        getMessagesPage: vi.fn().mockResolvedValue([]),
         sendMessage: vi.fn().mockResolvedValue(undefined),
-        // Optional operations present for OpenCode mock
+        abortSession: vi.fn().mockResolvedValue(undefined),
+        listPendingPermissions: vi.fn().mockResolvedValue([]),
+        replyPermission: vi.fn().mockResolvedValue(undefined),
+        listPendingQuestions: vi.fn().mockResolvedValue([]),
+        replyQuestion: vi.fn().mockResolvedValue(undefined),
+        rejectQuestion: vi.fn().mockResolvedValue(undefined),
+        listAgents: vi.fn().mockResolvedValue([]),
+        listProviders: vi.fn().mockResolvedValue({ providers: [], defaults: {}, connected: [] }),
+        listCommands: vi.fn().mockResolvedValue([]),
+        listSkills: vi.fn().mockResolvedValue([]),
+        getConfig: vi.fn().mockResolvedValue({}),
+        updateConfig: vi.fn().mockResolvedValue({}),
         forkSession: vi.fn().mockResolvedValue({ id: "s3" }),
         revertSession: vi.fn().mockResolvedValue(undefined),
         unrevertSession: vi.fn().mockResolvedValue(undefined),
@@ -849,6 +917,8 @@ export function createMockInfraClient(): InfraClient {
 ```
 
 Update `createMockHandlerDeps()` and `createMockClientInitDeps()` to use both.
+
+> **Note:** Keep `pty-upstream.ts` narrow: it only needs `{ getAuthHeaders(): Record<string, string> }`, not the full InfraClient.
 
 **Step 5: Run verification**
 
@@ -885,14 +955,15 @@ Guard optional ops (forkSession, revertSession) behind existence check."
 The relay stack currently constructs a single `RelayClient` and passes it everywhere. Refactor to construct `OpenCodeBackend` (wrapping `RelayClient` + SSEConsumer) for session-centric operations, and pass `RelayClient` directly as `InfraClient`.
 
 **Files:**
-- Modify: `src/lib/relay/relay-stack.ts:127-475` — construct `OpenCodeBackend`, pass `sessionBackend` + `infraClient`
-- Modify: `src/lib/relay/handler-deps-wiring.ts` — accept `sessionBackend` + `infraClient`
+- Modify: `src/lib/relay/relay-stack.ts:96-113,127-475` — update `RelayStack`/`ProjectRelay` interface, construct `OpenCodeBackend`, pass `sessionBackend` + `infraClient`
+- Modify: `src/lib/relay/handler-deps-wiring.ts` — passes both `sessionBackend` and `infraClient` to handler deps
+- Modify: `src/lib/relay/monitoring-wiring.ts:44,128` — uses `Pick<SessionBackend, "getMessages">`
+- Modify: `src/lib/relay/session-lifecycle-wiring.ts:24,68` — same pattern
 - Modify: `src/lib/session/session-manager.ts:26,109` — change `client` to `backend: SessionBackend`
 - Modify: `src/lib/session/session-status-poller.ts:39,60` — change `Pick<OpenCodeClient, ...>` to `Pick<SessionBackend, ...>`
 - Modify: `src/lib/relay/message-poller.ts:441` — change `Pick<OpenCodeClient, "getMessages">` to `Pick<SessionBackend, "getMessages">`
 - Modify: `src/lib/relay/message-poller-manager.ts:27` — same
-- Modify: `src/lib/relay/session-lifecycle-wiring.ts` — use `SessionBackend`
-- Modify: `src/lib/relay/monitoring-wiring.ts` — use `SessionBackend`
+- Modify: `test/helpers/mock-factories.ts:302-323` — update `createMockProjectRelay()` to use `sessionBackend` + `infraClient`
 
 **Step 1: Update relay-stack.ts**
 
@@ -912,8 +983,8 @@ const sessionBackend = new OpenCodeBackend({
     },
 });
 
-// client also serves as infraClient (has all InfraClient methods)
-const infraClient = client as unknown as InfraClient;
+// Direct assignment — all 16 InfraClient method signatures verified compatible
+const infraClient: InfraClient = client;
 ```
 
 Pass `sessionBackend` to SessionManager, SessionStatusPoller, MessagePollerManager, handler deps wiring. Pass `infraClient` to handler deps wiring and PTY upstream.
@@ -922,6 +993,8 @@ Replace direct SSEConsumer construction (line ~327) with `await sessionBackend.i
 
 Update `ProjectRelay` interface to expose `sessionBackend: SessionBackend` and `infraClient: InfraClient` instead of (or alongside) `client: OpenCodeClient`.
 
+> **Note:** The `client.getConfig()` call at relay startup (line ~252) stays as direct `client.getConfig()` — backend is not yet initialized at this point.
+
 **Step 2: Update SessionManager constructor**
 
 Change `SessionManagerOptions.client: OpenCodeClient` to `SessionManagerOptions.backend: SessionBackend`. Update internal references:
@@ -929,7 +1002,8 @@ Change `SessionManagerOptions.client: OpenCodeClient` to `SessionManagerOptions.
 - `this.client.getMessagesPage()` -> `this.backend.getMessagesPage()`
 - `this.client.createSession()` -> `this.backend.createSession()`
 - `this.client.deleteSession()` -> `this.backend.deleteSession()`
-- `this.client.updateSession()` -> `this.backend.updateSession()`
+- `this.client.updateSession()` -> `this.backend.updateSession()` (called via `renameSession()`)
+- `this.client.getMessagesPage(limit:10000)` -> `this.backend.getMessagesPage(limit:10000)` (called via `loadHistoryByCursorScan()`)
 
 **Step 3: Update poller `Pick<>` types**
 
@@ -1005,7 +1079,7 @@ git commit -m "refactor: Phase 2 complete — SessionBackend abstraction in plac
 **Files:**
 - Modify: `package.json`
 - Create: `src/lib/backend/message-queue.ts`
-- Create: `src/lib/backend/message-queue.test.ts`
+- Create: `test/unit/backend/message-queue.test.ts`
 
 **Step 1: Install the SDK**
 
@@ -1018,9 +1092,9 @@ pnpm add @anthropic-ai/claude-agent-sdk
 The MessageQueue is an async iterable that Clay uses as the `prompt` parameter to `query()`. It allows feeding messages into a live query. The SDK consumes from it; the relay pushes into it.
 
 ```typescript
-// src/lib/backend/message-queue.test.ts
+// test/unit/backend/message-queue.test.ts
 import { describe, it, expect } from "vitest";
-import { MessageQueue } from "./message-queue.js";
+import { MessageQueue } from "../../../src/lib/backend/message-queue.js";
 
 describe("MessageQueue", () => {
     it("yields pushed messages in order", async () => {
@@ -1071,25 +1145,24 @@ describe("MessageQueue", () => {
 **Step 3: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/message-queue.test.ts
+pnpm vitest run test/unit/backend/message-queue.test.ts
 ```
 
 **Step 4: Implement MessageQueue**
 
+MessageQueue is a thin wrapper around AsyncEventChannel per D5 directive — NOT a copy-paste of the channel internals. This eliminates `undefined as any` (D6) since AsyncEventChannel (fixed in Task 2) handles iterator termination correctly.
+
 ```typescript
 // src/lib/backend/message-queue.ts
+import { AsyncEventChannel } from "./async-event-channel.js";
 
 /**
  * Async iterable message queue used as the `prompt` parameter to the
- * Claude Agent SDK's query() function. Follows the pattern from Clay's
- * sdk-bridge.js createMessageQueue().
+ * Claude Agent SDK's query() function. Thin wrapper around AsyncEventChannel
+ * per D5 directive.
  *
  * - push(): feeds a user message into the live query
  * - end(): signals no more messages (terminates the query's input)
- *
- * The SDK's query() iterates this to get user messages. Between messages,
- * the SDK finishes the current agentic turn. When a new message arrives
- * via push(), the SDK starts a new turn.
  */
 export interface SDKUserMessage {
     type: "user";
@@ -1100,53 +1173,22 @@ export interface SDKUserMessage {
 }
 
 export class MessageQueue {
-    private queue: SDKUserMessage[] = [];
-    private resolver: ((value: IteratorResult<SDKUserMessage>) => void) | null = null;
-    private ended = false;
+    private readonly channel = new AsyncEventChannel<SDKUserMessage>();
 
     push(msg: SDKUserMessage): void {
-        if (this.ended) return;
-        if (this.resolver) {
-            const resolve = this.resolver;
-            this.resolver = null;
-            resolve({ value: msg, done: false });
-        } else {
-            this.queue.push(msg);
-        }
+        this.channel.push(msg);
     }
 
     end(): void {
-        if (this.ended) return;
-        this.ended = true;
-        if (this.resolver) {
-            const resolve = this.resolver;
-            this.resolver = null;
-            resolve({ value: undefined as any, done: true });
-        }
+        this.channel.close();
     }
 
     get isEnded(): boolean {
-        return this.ended;
+        return this.channel.isClosed;
     }
 
     [Symbol.asyncIterator](): AsyncIterableIterator<SDKUserMessage> {
-        const self = this;
-        return {
-            next(): Promise<IteratorResult<SDKUserMessage>> {
-                if (self.queue.length > 0) {
-                    return Promise.resolve({ value: self.queue.shift()!, done: false as const });
-                }
-                if (self.ended) {
-                    return Promise.resolve({ value: undefined as any, done: true as const });
-                }
-                return new Promise(resolve => { self.resolver = resolve; });
-            },
-            return(): Promise<IteratorResult<SDKUserMessage>> {
-                self.end();
-                return Promise.resolve({ value: undefined as any, done: true as const });
-            },
-            [Symbol.asyncIterator]() { return this; },
-        };
+        return this.channel[Symbol.asyncIterator]();
     }
 }
 ```
@@ -1154,14 +1196,14 @@ export class MessageQueue {
 **Step 5: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/message-queue.test.ts
+pnpm vitest run test/unit/backend/message-queue.test.ts
 ```
 
 **Step 6: Commit**
 
 ```bash
 git add package.json pnpm-lock.yaml \
-        src/lib/backend/message-queue.ts src/lib/backend/message-queue.test.ts
+        src/lib/backend/message-queue.ts test/unit/backend/message-queue.test.ts
 git commit -m "feat: add Claude Agent SDK and MessageQueue for multi-turn queries"
 ```
 
@@ -1173,67 +1215,103 @@ Translates Claude Agent SDK message types into `BackendEvent` matching the exist
 
 **Files:**
 - Create: `src/lib/backend/sdk-message-translator.ts`
-- Create: `src/lib/backend/sdk-message-translator.test.ts`
+- Create: `test/unit/backend/sdk-message-translator.test.ts`
 
 **Step 1: Write failing tests**
 
 ```typescript
-// src/lib/backend/sdk-message-translator.test.ts
+// test/unit/backend/sdk-message-translator.test.ts
 import { describe, it, expect } from "vitest";
-import { translateSdkMessage } from "./sdk-message-translator.js";
+import { translateSdkMessage } from "../../../src/lib/backend/sdk-message-translator.js";
 
 describe("translateSdkMessage", () => {
-    it("translates assistant message to message.updated", () => {
-        const event = translateSdkMessage({
+    it("translates assistant message to message.updated with cost/tokens", () => {
+        const result = translateSdkMessage({
             type: "assistant",
             uuid: "uuid-1",
             session_id: "sess-1",
-            message: { id: "msg-1", role: "assistant", content: [{ type: "text", text: "hello" }] },
-            parent_tool_use_id: null,
+            message: {
+                id: "msg-1",
+                role: "assistant",
+                content: [{ type: "text", text: "hello" }],
+                usage: { input_tokens: 100, output_tokens: 50, cost: 0.005 },
+            },
         });
-        expect(event).not.toBeNull();
-        expect(event!.type).toBe("message.updated");
-        expect(event!.properties.sessionID).toBe("sess-1");
+        expect(result).not.toBeNull();
+        const event = result as any;
+        expect(event.type).toBe("message.updated");
+        expect(event.properties.sessionID).toBe("sess-1");
+        expect(event.properties.message.cost).toBe(0.005);
+        expect(event.properties.message.tokens.input).toBe(100);
     });
 
-    it("translates user message to message.updated", () => {
-        const event = translateSdkMessage({
+    it("drops user messages (relay tracks via PendingUserMessages)", () => {
+        const result = translateSdkMessage({
             type: "user",
             session_id: "sess-1",
             message: { role: "user", content: "hello" },
         });
-        expect(event).not.toBeNull();
-        expect(event!.type).toBe("message.updated");
+        expect(result).toBeNull();
     });
 
-    it("translates stream_event to message.part.updated", () => {
-        const event = translateSdkMessage({
+    it("translates text stream_event to message.part.delta", () => {
+        const result = translateSdkMessage({
             type: "stream_event",
             session_id: "sess-1",
-            event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
-            parent_tool_use_id: null,
             uuid: "uuid-1",
+            event: {
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "text_delta", text: "hi" },
+            },
         });
-        expect(event).not.toBeNull();
-        expect(event!.type).toBe("message.part.updated");
+        expect(result).not.toBeNull();
+        const event = result as any;
+        expect(event.type).toBe("message.part.delta");
+        expect(event.properties.field).toBe("text");
+        expect(event.properties.delta).toBe("hi");
+        expect(event.properties.partID).toBe("part-0");
     });
 
-    it("translates result to session.updated", () => {
-        const event = translateSdkMessage({
+    it("translates tool_use start to message.part.updated", () => {
+        const result = translateSdkMessage({
+            type: "stream_event",
+            session_id: "sess-1",
+            uuid: "uuid-1",
+            event: {
+                type: "content_block_start",
+                content_block: { type: "tool_use", id: "tu-1", name: "Bash" },
+            },
+        });
+        expect(result).not.toBeNull();
+        const event = result as any;
+        expect(event.type).toBe("message.part.updated");
+        expect(event.properties.part.tool).toBe("Bash");
+        expect(event.properties.part.state.status).toBe("pending");
+    });
+
+    it("translates success result to BOTH session.status + message.updated", () => {
+        const result = translateSdkMessage({
             type: "result",
             subtype: "success",
             session_id: "sess-1",
             result: "done",
             total_cost_usd: 0.01,
-            usage: {},
+            usage: { input_tokens: 200, output_tokens: 100 },
         });
-        expect(event).not.toBeNull();
-        expect(event!.type).toBe("session.updated");
-        expect(event!.properties.status).toBe("completed");
+        expect(Array.isArray(result)).toBe(true);
+        const events = result as any[];
+        expect(events).toHaveLength(2);
+        // First event: session.status with idle → produces "done"
+        expect(events[0].type).toBe("session.status");
+        expect(events[0].properties.status.type).toBe("idle");
+        // Second event: message.updated with cost data → produces "result"
+        expect(events[1].type).toBe("message.updated");
+        expect(events[1].properties.message.cost).toBe(0.01);
     });
 
-    it("translates result with error subtype to session.updated with error status", () => {
-        const event = translateSdkMessage({
+    it("translates error result to session.status + session.error", () => {
+        const result = translateSdkMessage({
             type: "result",
             subtype: "error_during_execution",
             session_id: "sess-1",
@@ -1241,13 +1319,13 @@ describe("translateSdkMessage", () => {
             total_cost_usd: 0.005,
             usage: {},
         });
-        expect(event).not.toBeNull();
-        expect(event!.type).toBe("session.updated");
-        expect(event!.properties.status).toBe("error");
+        const events = result as any[];
+        expect(events.some((e: any) => e.type === "session.status")).toBe(true);
+        expect(events.some((e: any) => e.type === "session.error")).toBe(true);
     });
 
-    it("translates system init to session.initialized", () => {
-        const event = translateSdkMessage({
+    it("translates system init to session.status with busy", () => {
+        const result = translateSdkMessage({
             type: "system",
             subtype: "init",
             session_id: "sess-1",
@@ -1255,13 +1333,15 @@ describe("translateSdkMessage", () => {
             model: "claude-sonnet-4-20250514",
             mcp_servers: [],
         });
-        expect(event).not.toBeNull();
-        expect(event!.type).toBe("session.initialized");
+        expect(result).not.toBeNull();
+        const event = result as any;
+        expect(event.type).toBe("session.status");
+        expect(event.properties.status.type).toBe("busy");
     });
 
     it("returns null for unknown message types", () => {
-        const event = translateSdkMessage({ type: "unknown_type" });
-        expect(event).toBeNull();
+        const result = translateSdkMessage({ type: "unknown_type" });
+        expect(result).toBeNull();
     });
 });
 ```
@@ -1269,10 +1349,20 @@ describe("translateSdkMessage", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/sdk-message-translator.test.ts
+pnpm vitest run test/unit/backend/sdk-message-translator.test.ts
 ```
 
 **Step 3: Implement translator**
+
+The translator must produce BackendEvent types that match what the downstream
+EventTranslator expects via its type guards. Key corrections from v1:
+- User messages are DROPPED (relay tracks via PendingUserMessages, per D8/audit)
+- `stream_event` with text_delta → `message.part.delta` (NOT `message.part.updated`)
+- `result` → produces MULTIPLE events (array): `session.status` + `message.updated` and/or `session.error`
+- `system` init → `session.status` with `{ type: "busy" }` (NOT `session.initialized`)
+- Uses `sessionID` (capital ID) throughout per D8
+- No `...msg` spread (no leaking raw SDK properties)
+- Uses `SDKMessage` structural interface, not `Record<string, any>` per D2
 
 ```typescript
 // src/lib/backend/sdk-message-translator.ts
@@ -1280,119 +1370,277 @@ import type { BackendEvent } from "./types.js";
 
 /**
  * Translates Claude Agent SDK messages into BackendEvent objects matching
- * the OpenCode SSE event structure. This lets the downstream EventTranslator,
- * caches, and pollers work unchanged.
+ * the OpenCode SSE event structure. The downstream EventTranslator validates
+ * specific property shapes via type guards — we must match them exactly.
  *
- * SDK message types (from docs/claude-agent-sdk/):
+ * SDK message types:
  * - assistant: complete assistant message (after tool execution)
- * - user: complete user message (including tool_result blocks)
+ * - user: DROPPED (relay tracks via PendingUserMessages)
  * - stream_event: raw Anthropic API streaming delta
  * - result: query completed (success or error)
  * - system: init metadata, status changes
  */
-export function translateSdkMessage(msg: Record<string, any>): BackendEvent | null {
+
+/**
+ * @returns One or more BackendEvents, or null if the message should be dropped.
+ */
+export function translateSdkMessage(msg: SDKMessage): BackendEvent | BackendEvent[] | null {
     switch (msg.type) {
         case "assistant":
-            return {
-                type: "message.updated",
-                properties: {
-                    sessionID: msg.session_id,
-                    message: normalizeAssistantMessage(msg),
-                },
-            };
+            return translateAssistant(msg);
 
         case "user":
-            return {
-                type: "message.updated",
-                properties: {
-                    sessionID: msg.session_id,
-                    message: normalizeUserMessage(msg),
-                },
-            };
+            // DROP — relay tracks user messages via PendingUserMessages
+            return null;
 
         case "stream_event":
-            return {
-                type: "message.part.updated",
-                properties: {
-                    sessionID: msg.session_id,
-                    event: msg.event,
-                    parentToolUseId: msg.parent_tool_use_id ?? undefined,
-                    uuid: msg.uuid,
-                },
-            };
+            return translateStreamEvent(msg);
 
         case "result":
-            return {
-                type: "session.updated",
-                properties: {
-                    sessionID: msg.session_id,
-                    status: msg.subtype === "success" ? "completed" : "error",
-                    result: msg.result,
-                    cost: msg.total_cost_usd,
-                    usage: msg.usage,
-                    modelUsage: msg.modelUsage,
-                    subtype: msg.subtype,
-                },
-            };
+            return translateResult(msg);
 
         case "system":
-            if (msg.subtype === "init") {
-                return {
-                    type: "session.initialized",
-                    properties: {
-                        sessionID: msg.session_id,
-                        tools: msg.tools,
-                        model: msg.model,
-                        mcpServers: msg.mcp_servers,
-                    },
-                };
-            }
-            // Other system subtypes (status changes, compacting, etc.)
-            return {
-                type: "session.updated",
-                properties: {
-                    sessionID: msg.session_id,
-                    subtype: msg.subtype,
-                    ...msg,
-                },
-            };
+            return translateSystem(msg);
 
         default:
             return null;
     }
 }
 
-function normalizeAssistantMessage(msg: Record<string, any>) {
+function translateAssistant(msg: SDKMessage & { type: "assistant" }): BackendEvent {
+    const usage = msg.message?.usage;
     return {
-        id: msg.uuid ?? msg.message?.id,
-        role: "assistant",
-        content: msg.message?.content,
-        sessionId: msg.session_id,
-        parentToolUseId: msg.parent_tool_use_id ?? undefined,
+        type: "message.updated",
+        properties: {
+            sessionID: msg.session_id,
+            message: {
+                id: msg.uuid ?? msg.message?.id,
+                role: "assistant",
+                cost: usage?.cost ?? 0,
+                tokens: {
+                    input: usage?.input_tokens ?? 0,
+                    output: usage?.output_tokens ?? 0,
+                    cache: {
+                        read: usage?.cache_read_input_tokens ?? 0,
+                        write: usage?.cache_creation_input_tokens ?? 0,
+                    },
+                },
+                time: {
+                    created: msg.message?.created_at ?? Date.now(),
+                    completed: Date.now(),
+                },
+            },
+        },
     };
 }
 
-function normalizeUserMessage(msg: Record<string, any>) {
+function translateStreamEvent(msg: SDKMessage & { type: "stream_event" }): BackendEvent | null {
+    const event = msg.event;
+    if (!event) return null;
+
+    // Text deltas → message.part.delta
+    if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        return {
+            type: "message.part.delta",
+            properties: {
+                sessionID: msg.session_id,
+                messageID: msg.uuid,
+                partID: `part-${event.index}`,
+                field: "text",
+                delta: event.delta.text,
+            },
+        };
+    }
+
+    // Thinking block start → register reasoning part so deltas can find it
+    if (event.type === "content_block_start" && event.content_block?.type === "thinking") {
+        return {
+            type: "message.part.updated",
+            properties: {
+                messageID: msg.uuid,
+                partID: `part-${event.index}`,
+                part: {
+                    id: `part-${event.index}`,
+                    type: "reasoning",
+                },
+            },
+        };
+    }
+
+    // Thinking deltas → message.part.delta with field "thinking"
+    if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta") {
+        return {
+            type: "message.part.delta",
+            properties: {
+                sessionID: msg.session_id,
+                messageID: msg.uuid,
+                partID: `part-${event.index}`,
+                field: "thinking",
+                delta: event.delta.thinking,
+            },
+        };
+    }
+
+    // Tool use start → message.part.updated
+    if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+        return {
+            type: "message.part.updated",
+            properties: {
+                messageID: msg.uuid,
+                partID: event.content_block.id,
+                part: {
+                    id: event.content_block.id,
+                    type: "tool",
+                    callID: event.content_block.id,
+                    tool: event.content_block.name,
+                    state: { status: "pending" },
+                    time: { start: Date.now() },
+                },
+            },
+        };
+    }
+
+    // Tool use delta (input accumulation)
+    if (event.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+        return {
+            type: "message.part.delta",
+            properties: {
+                sessionID: msg.session_id,
+                messageID: msg.uuid,
+                partID: `part-${event.index}`,
+                field: "input",
+                delta: event.delta.partial_json,
+            },
+        };
+    }
+
+    return null;
+}
+
+function translateResult(msg: SDKMessage & { type: "result" }): BackendEvent[] {
+    const isSuccess = msg.subtype === "success";
+    const isLimitReached = msg.subtype === "error_max_turns" || msg.subtype === "error_max_budget_usd";
+    const isError = msg.subtype === "error_during_execution";
+
+    const events: BackendEvent[] = [];
+
+    // 1. session.status with idle type → produces "done" RelayMessage
+    events.push({
+        type: "session.status",
+        properties: {
+            sessionID: msg.session_id,
+            status: { type: "idle" },
+        },
+    });
+
+    // 2. message.updated with cost/token data → produces "result" RelayMessage
+    if (isSuccess || isLimitReached) {
+        events.push({
+            type: "message.updated",
+            properties: {
+                sessionID: msg.session_id,
+                message: {
+                    role: "assistant",
+                    cost: msg.total_cost_usd ?? 0,
+                    tokens: {
+                        input: msg.usage?.input_tokens ?? 0,
+                        output: msg.usage?.output_tokens ?? 0,
+                        cache: {
+                            read: msg.usage?.cache_read_input_tokens ?? 0,
+                            write: msg.usage?.cache_creation_input_tokens ?? 0,
+                        },
+                    },
+                    time: { completed: Date.now() },
+                },
+            },
+        });
+    }
+
+    // 3. session.error for actual errors
+    if (isError) {
+        events.push({
+            type: "session.error",
+            properties: {
+                sessionID: msg.session_id,
+                error: {
+                    name: "QueryError",
+                    data: { message: String(msg.result ?? "Query failed") },
+                },
+            },
+        });
+    }
+
+    return events;
+}
+
+function translateSystem(msg: SDKMessage & { type: "system" }): BackendEvent | null {
+    if (msg.subtype === "init") {
+        // Forward init data to frontend — tools, model, MCP servers
+        return {
+            type: "session.status",
+            properties: {
+                sessionID: msg.session_id,
+                status: { type: "busy" },
+                tools: msg.tools,
+                model: msg.model,
+                mcpServers: msg.mcp_servers,
+            },
+        };
+    }
+
+    // Other system subtypes — extract specific fields only (no ...msg spread)
     return {
-        id: msg.uuid,
-        role: "user",
-        content: msg.message?.content,
-        sessionId: msg.session_id,
+        type: "session.status",
+        properties: {
+            sessionID: msg.session_id,
+            status: { type: "busy" },
+            subtype: msg.subtype,
+        },
     };
+}
+
+/**
+ * SDK message type. Until the SDK exports a proper discriminated union,
+ * use this structural type.
+ */
+interface SDKMessage {
+    type: string;
+    subtype?: string;
+    session_id?: string;
+    uuid?: string;
+    message?: Record<string, any>;
+    event?: Record<string, any>;
+    result?: unknown;
+    total_cost_usd?: number;
+    usage?: Record<string, number>;
+    tools?: unknown[];
+    model?: string;
+    mcp_servers?: unknown[];
+    parent_tool_use_id?: string | null;
+    [key: string]: unknown;
 }
 ```
 
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/sdk-message-translator.test.ts
+pnpm vitest run test/unit/backend/sdk-message-translator.test.ts
 ```
 
 **Step 5: Commit**
 
 ```bash
-git add src/lib/backend/sdk-message-translator.ts src/lib/backend/sdk-message-translator.test.ts
-git commit -m "feat: SDKMessage to BackendEvent translator for Claude Agent SDK"
+git add src/lib/backend/sdk-message-translator.ts test/unit/backend/sdk-message-translator.test.ts
+git commit -m "feat: SDKMessage to BackendEvent translator for Claude Agent SDK
+
+Produces event types matching downstream EventTranslator type guards:
+- message.part.delta (text, thinking, input deltas)
+- message.part.updated (tool use start)
+- message.updated (assistant cost/tokens, result summary)
+- session.status (idle=done, busy=init)
+- session.error (query failures)
+Drops user messages (relay tracks via PendingUserMessages).
+Uses sessionID (capital ID) per D8."
 ```
 
 ---
@@ -1403,12 +1651,12 @@ The first slice: session CRUD, discovery, and lazy session creation. No messagin
 
 **Files:**
 - Create: `src/lib/backend/claude-agent-backend.ts`
-- Create: `src/lib/backend/claude-agent-backend.test.ts`
+- Create: `test/unit/backend/claude-agent-backend.test.ts`
 
 **Step 1: Write failing tests**
 
 ```typescript
-// src/lib/backend/claude-agent-backend.test.ts
+// test/unit/backend/claude-agent-backend.test.ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the SDK module
@@ -1419,7 +1667,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     query: vi.fn(),
 }));
 
-import { ClaudeAgentBackend } from "./claude-agent-backend.js";
+import { ClaudeAgentBackend } from "../../../src/lib/backend/claude-agent-backend.js";
 import { listSessions, getSessionMessages } from "@anthropic-ai/claude-agent-sdk";
 
 describe("ClaudeAgentBackend — session management", () => {
@@ -1489,20 +1737,20 @@ describe("ClaudeAgentBackend — session management", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/claude-agent-backend.test.ts
+pnpm vitest run test/unit/backend/claude-agent-backend.test.ts
 ```
 
 **Step 3: Implement ClaudeAgentBackend (session management slice)**
 
 ```typescript
 // src/lib/backend/claude-agent-backend.ts
-import { listSessions, getSessionMessages, getSessionInfo } from "@anthropic-ai/claude-agent-sdk";
-import type { SessionBackend, BackendEvent } from "./types.js";
+import { listSessions, getSessionMessages, getSessionInfo, query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import type { SessionBackend, BackendEvent, SessionDetail, SessionStatus, Agent, PromptOptions } from "./types.js";
 import { AsyncEventChannel } from "./async-event-channel.js";
 import { MessageQueue, type SDKUserMessage } from "./message-queue.js";
 import { createDeferred, type Deferred } from "./deferred.js";
 import { translateSdkMessage } from "./sdk-message-translator.js";
-import type { Logger } from "../logging.js";
+import type { Logger } from "../logger.js";
 
 export interface ClaudeAgentBackendOptions {
     cwd: string;
@@ -1514,8 +1762,12 @@ export interface ClaudeAgentBackendOptions {
 
 interface PermissionEntry {
     deferred: Deferred<PermissionDecision>;
-    metadata: { id: string; tool: string; input: unknown; timestamp: number };
+    metadata: { id: string; permission: string; input: unknown; timestamp: number };
 }
+
+// Type aliases for permission/question reply options
+type PermissionReplyOptions = { id: string; decision: "once" | "always" | "reject" };
+type QuestionReplyOptions = { id: string; answers: string[][] };
 
 interface QuestionEntry {
     deferred: Deferred<QuestionAnswer>;
@@ -1528,7 +1780,15 @@ interface PermissionDecision {
 }
 
 interface QuestionAnswer {
-    answers: Record<string, string>;
+    answers: string[][]; // string[][] per SDK handler format
+}
+
+interface QueryState {
+    query: import("@anthropic-ai/claude-agent-sdk").Query;
+    messageQueue: MessageQueue;
+    abortController: AbortController;
+    streamPromise: Promise<void>;
+    cliSessionId: string | null;
 }
 
 interface LocalSession {
@@ -1546,6 +1806,7 @@ interface LocalSession {
  * - AsyncEventChannel bridging per-query events to continuous relay stream
  * - SDK-native resume via cliSessionId (never reconstruct history)
  * - Lazy session creation (local placeholder until first message)
+ * - Per-session concurrent queries via Map<string, QueryState> (D7)
  *
  * Does NOT implement forkSession, revertSession, unrevertSession
  * (no Claude Agent SDK equivalent).
@@ -1559,11 +1820,8 @@ export class ClaudeAgentBackend implements SessionBackend {
     private readonly allowedTools: string[];
     private readonly log?: Logger;
 
-    // Active query state (one per project, from design doc constraint)
-    private activeQuery: any | null = null;
-    private messageQueue: MessageQueue | null = null;
-    private abortController: AbortController | null = null;
-    private streamPromise: Promise<void> | null = null;
+    // Per-session query state (D7: concurrent queries via Map, NOT single fields)
+    private readonly queries = new Map<string, QueryState>();
 
     // Event channel — continuous stream consumed by relay
     private readonly channel = new AsyncEventChannel<BackendEvent>();
@@ -1591,9 +1849,11 @@ export class ClaudeAgentBackend implements SessionBackend {
     }
 
     async shutdown(): Promise<void> {
-        // 1. Abort active query
-        this.abortController?.abort();
-        this.messageQueue?.end();
+        // 1. Abort all active queries (per-session Map)
+        for (const [, state] of this.queries) {
+            state.abortController.abort();
+            state.messageQueue.end();
+        }
 
         // 2. Reject all pending deferreds to unblock blocked canUseTool callbacks
         for (const [id, entry] of this.pendingPermissions) {
@@ -1605,25 +1865,24 @@ export class ClaudeAgentBackend implements SessionBackend {
             this.pendingQuestions.delete(id);
         }
 
-        // 3. Close event channel
-        this.channel.close();
+        // 3. Wait for all streams to finish
+        const promises = [...this.queries.values()].map(s => s.streamPromise.catch(() => {}));
+        await Promise.all(promises);
 
-        // 4. Wait for stream to finish
-        await this.streamPromise?.catch(() => {});
-        this.activeQuery = null;
-        this.messageQueue = null;
-        this.abortController = null;
+        // 4. Close event channel (backend lifetime is over)
+        this.channel.close();
+        this.queries.clear();
     }
 
     async getHealth() {
-        return { ok: true } as any;
+        return { ok: true };
     }
 
     // --- Session CRUD ---
 
-    async listSessions(options?: any) {
+    async listSessions(options?: { limit?: number }) {
         const sdkSessions = await listSessions({ dir: this.cwd, limit: options?.limit ?? 50 });
-        const sdkMapped = (sdkSessions as any[]).map((s: any) => this.toSessionDetail(s));
+        const sdkMapped = (sdkSessions as Record<string, unknown>[]).map((s) => this.toSessionDetail(s));
 
         // Include local placeholders that haven't materialized yet
         const locals = [...this.localSessions.values()].map((s) => this.localToSessionDetail(s));
@@ -1636,11 +1895,11 @@ export class ClaudeAgentBackend implements SessionBackend {
         if (local) return this.localToSessionDetail(local);
 
         const cliId = this.cliSessionIds.get(id) ?? id;
-        const info = await getSessionInfo(cliId);
-        return this.toSessionDetail(info as any);
+        const info = await getSessionInfo(cliId, { dir: this.cwd });
+        return this.toSessionDetail(info);
     }
 
-    async createSession(options?: any) {
+    async createSession(options?: { title?: string }) {
         // Lazy — create local placeholder, real SDK session on first message
         const id = `local-${crypto.randomUUID()}`;
         const session: LocalSession = {
@@ -1668,17 +1927,10 @@ export class ClaudeAgentBackend implements SessionBackend {
         return this.getSession(id);
     }
 
-    async getSessionStatuses() {
-        const statuses: Record<string, any> = {};
-        // Active query session is "processing"
-        if (this.activeQuery) {
-            // Find which session is active — the one with the active query
-            for (const [relayId, cliId] of this.cliSessionIds) {
-                if (this.activeQuery) {
-                    statuses[relayId] = { status: "processing" };
-                    break;
-                }
-            }
+    async getSessionStatuses(): Promise<Record<string, SessionStatus>> {
+        const statuses: Record<string, SessionStatus> = {};
+        for (const [sessionId] of this.queries) {
+            statuses[sessionId] = { type: "busy" };
         }
         return statuses;
     }
@@ -1689,12 +1941,15 @@ export class ClaudeAgentBackend implements SessionBackend {
         if (this.localSessions.has(sessionId)) return [];
         const cliId = this.cliSessionIds.get(sessionId) ?? sessionId;
         const msgs = await getSessionMessages(cliId, { dir: this.cwd });
-        return (msgs as any[]).map((m: any) => this.toMessage(m));
+        // Filter through toMessage (returns null for non-conversation types)
+        return (msgs as Record<string, unknown>[])
+            .map((m) => this.toMessage(m))
+            .filter((m): m is NonNullable<typeof m> => m !== null);
     }
 
     async getMessage(sessionId: string, messageId: string) {
         const msgs = await this.getMessages(sessionId);
-        const found = msgs.find((m: any) => m.id === messageId);
+        const found = msgs.find((m) => m.id === messageId);
         if (!found) throw new Error(`Message ${messageId} not found`);
         return found;
     }
@@ -1704,24 +1959,47 @@ export class ClaudeAgentBackend implements SessionBackend {
         const all = await this.getMessages(sessionId);
         const limit = options?.limit ?? 50;
         if (options?.before) {
-            const idx = all.findIndex((m: any) => m.id === options.before);
+            const idx = all.findIndex((m) => m.id === options.before);
             if (idx > 0) return all.slice(Math.max(0, idx - limit), idx);
         }
         return all.slice(-limit);
     }
 
-    // sendMessage, abortSession — implemented in Task 10
+    // --- Stubs (implemented in later tasks) ---
 
-    // --- Permissions & Questions ---
-    // listPendingPermissions, replyPermission, etc. — implemented in Task 11
+    // Implemented in Task 10
+    async sendMessage(_sessionId: string, _prompt: PromptOptions): Promise<void> {
+        throw new Error("Not yet implemented — see Task 10");
+    }
+    async abortSession(_id: string): Promise<void> {
+        throw new Error("Not yet implemented — see Task 10");
+    }
+
+    // Implemented in Task 11
+    async listPendingPermissions(): Promise<Array<{ id: string; permission: string; [key: string]: unknown }>> {
+        throw new Error("Not yet implemented — see Task 11");
+    }
+    async replyPermission(_options: PermissionReplyOptions): Promise<void> {
+        throw new Error("Not yet implemented — see Task 11");
+    }
+    async listPendingQuestions(): Promise<Array<{ id: string; [key: string]: unknown }>> {
+        throw new Error("Not yet implemented — see Task 11");
+    }
+    async replyQuestion(_options: QuestionReplyOptions): Promise<void> {
+        throw new Error("Not yet implemented — see Task 11");
+    }
+    async rejectQuestion(_id: string): Promise<void> {
+        throw new Error("Not yet implemented — see Task 11");
+    }
 
     // --- Discovery ---
 
-    async listAgents() {
-        // Agent discovery requires an active query. Return empty if none.
-        if (this.activeQuery) {
-            const agents = await this.activeQuery.supportedAgents();
-            return agents as any[];
+    async listAgents(): Promise<Agent[]> {
+        // Return agents from first active query, or empty
+        for (const [, state] of this.queries) {
+            if (state.query) {
+                return await state.query.supportedAgents() as Agent[];
+            }
         }
         return [];
     }
@@ -1732,12 +2010,15 @@ export class ClaudeAgentBackend implements SessionBackend {
             providers: [{ id: "anthropic", name: "Anthropic" }],
             defaults: { provider: "anthropic", model: this.model },
             connected: ["anthropic"],
-        } as any;
+        };
     }
 
     async listCommands() {
-        if (this.activeQuery) {
-            return await this.activeQuery.supportedCommands() as any[];
+        // Return commands from first active query, or empty
+        for (const [, state] of this.queries) {
+            if (state.query) {
+                return await state.query.supportedCommands();
+            }
         }
         return [];
     }
@@ -1753,9 +2034,9 @@ export class ClaudeAgentBackend implements SessionBackend {
     async updateConfig(config: Record<string, unknown>) {
         if (config.model && typeof config.model === "string") {
             this.model = config.model;
-            // If we have an active query, use setModel() for live switching
-            if (this.activeQuery) {
-                await this.activeQuery.setModel(config.model);
+            // If we have active queries, use setModel() for live switching
+            for (const [, state] of this.queries) {
+                await state.query.setModel(config.model);
             }
         }
         return this.getConfig();
@@ -1767,23 +2048,35 @@ export class ClaudeAgentBackend implements SessionBackend {
     // --- Events ---
 
     async *subscribeEvents(signal: AbortSignal): AsyncIterable<BackendEvent> {
-        signal.addEventListener("abort", () => this.channel.close(), { once: true });
-        yield* this.channel;
+        // Per-subscriber wrapper — breaks iteration on abort WITHOUT closing
+        // the shared channel. The channel lives for the backend's lifetime.
+        const iter = this.channel[Symbol.asyncIterator]();
+        const aborted = new Promise<IteratorResult<BackendEvent>>(resolve => {
+            signal.addEventListener("abort", () => {
+                resolve({ value: undefined, done: true as const });
+            }, { once: true });
+        });
+
+        while (!signal.aborted) {
+            const result = await Promise.race([iter.next(), aborted]);
+            if (result.done) return;
+            yield result.value;
+        }
     }
 
     // --- Helpers ---
 
-    private toSessionDetail(sdkSession: any) {
+    private toSessionDetail(sdkSession: Record<string, unknown>): SessionDetail {
         return {
-            id: sdkSession.id ?? sdkSession.session_id,
-            title: sdkSession.title ?? sdkSession.name ?? "Untitled",
-            created: sdkSession.created ?? sdkSession.createdAt ?? Date.now(),
-            updated: sdkSession.updated ?? sdkSession.lastActivity ?? Date.now(),
+            id: (sdkSession.id ?? sdkSession.session_id) as string,
+            title: (sdkSession.title ?? sdkSession.name ?? "Untitled") as string,
+            created: (sdkSession.created ?? sdkSession.createdAt ?? Date.now()) as number,
+            updated: (sdkSession.updated ?? sdkSession.lastActivity ?? Date.now()) as number,
             backendType: "claude-agent" as const,
-        } as any;
+        };
     }
 
-    private localToSessionDetail(local: LocalSession) {
+    private localToSessionDetail(local: LocalSession): SessionDetail {
         return {
             id: local.id,
             title: local.title,
@@ -1791,16 +2084,18 @@ export class ClaudeAgentBackend implements SessionBackend {
             updated: local.created,
             backendType: "claude-agent" as const,
             isPlaceholder: true,
-        } as any;
+        };
     }
 
-    private toMessage(sdkMsg: any) {
+    private toMessage(sdkMsg: Record<string, unknown>) {
+        // Only include assistant and user message types
+        if (sdkMsg.type !== "assistant" && sdkMsg.type !== "user") return null;
         return {
-            id: sdkMsg.uuid ?? sdkMsg.id ?? crypto.randomUUID(),
+            id: (sdkMsg as any).uuid ?? (sdkMsg as any).id ?? crypto.randomUUID(),
             role: sdkMsg.type === "assistant" ? "assistant" : "user",
-            content: sdkMsg.message?.content,
-            sessionId: sdkMsg.session_id,
-        } as any;
+            content: (sdkMsg as any).message?.content,
+            sessionID: (sdkMsg as any).session_id,  // capital ID per D8
+        };
     }
 }
 ```
@@ -1808,13 +2103,13 @@ export class ClaudeAgentBackend implements SessionBackend {
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/claude-agent-backend.test.ts
+pnpm vitest run test/unit/backend/claude-agent-backend.test.ts
 ```
 
 **Step 5: Commit**
 
 ```bash
-git add src/lib/backend/claude-agent-backend.ts src/lib/backend/claude-agent-backend.test.ts
+git add src/lib/backend/claude-agent-backend.ts test/unit/backend/claude-agent-backend.test.ts
 git commit -m "feat: ClaudeAgentBackend session management with lazy creation
 
 No forkSession/revertSession/unrevertSession (optional on interface).
@@ -1829,12 +2124,12 @@ The core: `sendMessage()` starts a `query()` or pushes into the message queue, p
 
 **Files:**
 - Modify: `src/lib/backend/claude-agent-backend.ts`
-- Create: `src/lib/backend/claude-agent-messaging.test.ts`
+- Create: `test/unit/backend/claude-agent-messaging.test.ts`
 
 **Step 1: Write failing tests**
 
 ```typescript
-// src/lib/backend/claude-agent-messaging.test.ts
+// test/unit/backend/claude-agent-messaging.test.ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockQueryInstance = {
@@ -1854,7 +2149,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     getSessionInfo: vi.fn().mockResolvedValue({}),
 }));
 
-import { ClaudeAgentBackend } from "./claude-agent-backend.js";
+import { ClaudeAgentBackend } from "../../../src/lib/backend/claude-agent-backend.js";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 
 describe("ClaudeAgentBackend — messaging", () => {
@@ -1923,7 +2218,7 @@ describe("ClaudeAgentBackend — messaging", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/claude-agent-messaging.test.ts
+pnpm vitest run test/unit/backend/claude-agent-messaging.test.ts
 ```
 
 **Step 3: Add sendMessage and abortSession to ClaudeAgentBackend**
@@ -1933,56 +2228,64 @@ Add these methods to the class in `claude-agent-backend.ts`:
 ```typescript
     // --- Messaging ---
 
-    async sendMessage(sessionId: string, prompt: any): Promise<void> {
-        const text = prompt.text ?? prompt.content ?? "";
-        const isLocal = this.localSessions.has(sessionId);
-        const cliId = isLocal ? undefined : (this.cliSessionIds.get(sessionId) ?? sessionId);
+    async sendMessage(sessionId: string, prompt: PromptOptions): Promise<void> {
+        if (!prompt.text && (!prompt.images || prompt.images.length === 0)) {
+            throw new Error("Message must have text or images");
+        }
 
-        // If query is already running, push message into the queue (multi-turn)
-        if (this.activeQuery && this.messageQueue && !this.messageQueue.isEnded) {
-            this.pushMessage(text, prompt.images);
+        const existing = this.queries.get(sessionId);
+        if (existing && !existing.messageQueue.isEnded) {
+            // Push into existing query (multi-turn)
+            this.pushMessage(existing.messageQueue, prompt.text, prompt.images);
             return;
         }
 
-        // Start a new query
-        await this.startQuery(sessionId, text, prompt.images, cliId);
+        // Start new query
+        await this.startQuery(sessionId, prompt.text, prompt.images);
     }
 
-    async abortSession(_id: string): Promise<void> {
-        if (this.abortController) {
-            this.abortController.abort();
+    async abortSession(id: string): Promise<void> {
+        const state = this.queries.get(id);
+        if (state) {
+            state.abortController.abort();
         }
     }
 
     /**
      * Start a new SDK query. Follows Clay's sdk-bridge.js startQuery() pattern.
+     * Uses static import (D3: no dynamic imports).
      */
     private async startQuery(
         relaySessionId: string,
         text: string,
-        images?: any[],
-        resumeId?: string,
+        images?: string[],
     ): Promise<void> {
-        const { query: sdkQuery } = await import("@anthropic-ai/claude-agent-sdk");
+        const isLocal = this.localSessions.has(relaySessionId);
+        const resumeId = isLocal ? undefined : (this.cliSessionIds.get(relaySessionId) ?? relaySessionId);
 
         // Create message queue and push initial user message
-        this.messageQueue = new MessageQueue();
-        this.messageQueue.push(this.buildUserMessage(text, images));
+        const messageQueue = new MessageQueue();
+        messageQueue.push(this.buildUserMessage(text, images));
 
         // Create abort controller
-        this.abortController = new AbortController();
+        const abortController = new AbortController();
 
-        // Build query options
-        const queryOptions: Record<string, any> = {
+        // Emit session.status busy
+        this.channel.push({
+            type: "session.status",
+            properties: { sessionID: relaySessionId, status: { type: "busy" } },
+        });
+
+        // Build query options (no systemPrompt — removed per audit Fix 5)
+        const queryOptions: Record<string, unknown> = {
             cwd: this.cwd,
             model: this.model,
             allowedTools: this.allowedTools,
             canUseTool: this.handleCanUseTool,
             includePartialMessages: true,
             enableFileCheckpointing: true,
-            systemPrompt: { type: "preset", preset: "claude_code" },
             settingSources: ["user", "project"],
-            abortController: this.abortController,
+            abortController,
         };
 
         if (this.apiKey) {
@@ -1994,42 +2297,61 @@ Add these methods to the class in `claude-agent-backend.ts`:
             queryOptions.resume = resumeId;
         }
 
-        // Start the query
-        this.activeQuery = sdkQuery({
-            prompt: this.messageQueue,
-            options: queryOptions,
-        });
+        // Start the query (static import at top of file, per D3)
+        let activeQuery: import("@anthropic-ai/claude-agent-sdk").Query;
+        try {
+            activeQuery = sdkQuery({
+                prompt: messageQueue,
+                options: queryOptions,
+            });
+        } catch (err) {
+            this.channel.push({
+                type: "session.status",
+                properties: { sessionID: relaySessionId, status: { type: "idle" } },
+            });
+            throw err;
+        }
 
-        // Consume the stream in the background
-        const isLocal = this.localSessions.has(relaySessionId);
-        this.streamPromise = this.processQueryStream(relaySessionId, isLocal);
+        // Store QueryState in per-session Map (D7)
+        const streamPromise = this.processQueryStream(relaySessionId, activeQuery, isLocal);
+        this.queries.set(relaySessionId, {
+            query: activeQuery,
+            messageQueue,
+            abortController,
+            streamPromise,
+            cliSessionId: resumeId ?? null,
+        });
     }
 
     /**
      * Push a follow-up message into the live query's message queue.
      * From Clay's sdk-bridge.js pushMessage() pattern.
      */
-    private pushMessage(text: string, images?: any[]): void {
-        if (!this.messageQueue || this.messageQueue.isEnded) return;
-        this.messageQueue.push(this.buildUserMessage(text, images));
+    private pushMessage(messageQueue: MessageQueue, text: string, images?: string[]): void {
+        if (messageQueue.isEnded) return;
+        messageQueue.push(this.buildUserMessage(text, images));
     }
 
-    private buildUserMessage(text: string, images?: any[]): SDKUserMessage {
-        const content: any[] = [];
+    private buildUserMessage(text: string, images?: string[]): SDKUserMessage {
+        const content: Array<{ type: string; [key: string]: unknown }> = [];
         if (images?.length) {
             for (const img of images) {
+                // Parse data URL: "data:image/png;base64,..."
+                const [header, data] = img.split(",");
+                const mediaType = header.match(/data:(.*?);/)?.[1] ?? "image/png";
                 content.push({
                     type: "image",
-                    source: { type: "base64", media_type: img.mediaType, data: img.data },
+                    source: { type: "base64", media_type: mediaType, data },
                 });
             }
         }
         if (text) {
             content.push({ type: "text", text });
         }
+        // Always return content as array — no ternary optimization
         return {
             type: "user",
-            message: { role: "user", content: content.length === 1 && typeof content[0] === "object" && content[0].type === "text" ? text : content },
+            message: { role: "user", content },
         };
     }
 
@@ -2037,15 +2359,22 @@ Add these methods to the class in `claude-agent-backend.ts`:
      * Consume the SDK query's async generator and pipe translated events
      * to the relay channel. Follows Clay's processQueryStream() pattern.
      */
-    private async processQueryStream(relaySessionId: string, isLocal: boolean): Promise<void> {
+    private async processQueryStream(
+        relaySessionId: string,
+        activeQuery: import("@anthropic-ai/claude-agent-sdk").Query,
+        isLocal: boolean,
+    ): Promise<void> {
         try {
-            for await (const msg of this.activeQuery!) {
+            for await (const msg of activeQuery) {
                 // Capture cliSessionId on first message (lazy session materialization)
                 if (msg.session_id && isLocal) {
                     const localId = relaySessionId;
                     this.cliSessionIds.set(localId, msg.session_id);
                     this.sessionIdMap.set(localId, msg.session_id);
                     this.localSessions.delete(localId);
+                    // Update QueryState with cliSessionId
+                    const state = this.queries.get(relaySessionId);
+                    if (state) state.cliSessionId = msg.session_id;
                     isLocal = false;
                     this.log?.info("Session materialized", { localId, cliSessionId: msg.session_id });
                 } else if (msg.session_id) {
@@ -2054,38 +2383,67 @@ Add these methods to the class in `claude-agent-backend.ts`:
                 }
 
                 // Translate and push to channel
-                const event = translateSdkMessage(msg);
-                if (event) {
-                    this.channel.push(event);
+                const translated = translateSdkMessage(msg);
+                if (translated) {
+                    if (Array.isArray(translated)) {
+                        for (const event of translated) {
+                            this.channel.push(event);
+                        }
+                    } else {
+                        this.channel.push(translated);
+                    }
                 }
             }
-        } catch (err: any) {
-            if (err?.name === "AbortError") {
+        } catch (err: unknown) {
+            const error = err as Error;
+            if (error?.name === "AbortError") {
                 this.log?.info("Query aborted");
-                // Push a session.updated event so relay knows query ended
+                // Push a session.error event so relay knows query was interrupted
                 this.channel.push({
-                    type: "session.updated",
+                    type: "session.error",
                     properties: {
                         sessionID: relaySessionId,
-                        status: "interrupted",
+                        error: {
+                            name: "AbortError",
+                            data: { message: "Query was interrupted" },
+                        },
                     },
                 });
             } else {
-                this.log?.error("Query stream error", { error: err?.message });
+                this.log?.error("Query stream error", { error: error?.message });
                 this.channel.push({
-                    type: "session.updated",
+                    type: "session.error",
                     properties: {
                         sessionID: relaySessionId,
-                        status: "error",
-                        error: err?.message,
+                        error: {
+                            name: "QueryError",
+                            data: { message: error?.message ?? "Unknown error" },
+                        },
                     },
                 });
             }
         } finally {
-            // Clean up query state but NOT the channel (it persists between queries)
-            this.activeQuery = null;
-            this.messageQueue = null;
-            this.abortController = null;
+            // Clean up query state
+            this.queries.delete(relaySessionId);
+
+            // Reject pending deferreds for this session to prevent deadlocks
+            for (const [id, entry] of this.pendingPermissions) {
+                entry.deferred.resolve({ decision: "deny" });
+                this.pendingPermissions.delete(id);
+            }
+            for (const [id, entry] of this.pendingQuestions) {
+                entry.deferred.resolve({ rejected: true });
+                this.pendingQuestions.delete(id);
+            }
+
+            // Emit idle status
+            this.channel.push({
+                type: "session.status",
+                properties: {
+                    sessionID: relaySessionId,
+                    status: { type: "idle" },
+                },
+            });
         }
     }
 ```
@@ -2093,19 +2451,19 @@ Add these methods to the class in `claude-agent-backend.ts`:
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/claude-agent-messaging.test.ts
+pnpm vitest run test/unit/backend/claude-agent-messaging.test.ts
 ```
 
 **Step 5: Run full backend tests**
 
 ```bash
-pnpm vitest run src/lib/backend/
+pnpm vitest run test/unit/backend/
 ```
 
 **Step 6: Commit**
 
 ```bash
-git add src/lib/backend/claude-agent-backend.ts src/lib/backend/claude-agent-messaging.test.ts
+git add src/lib/backend/claude-agent-backend.ts test/unit/backend/claude-agent-messaging.test.ts
 git commit -m "feat: ClaudeAgentBackend messaging with MessageQueue multi-turn
 
 SDK-native resume via cliSessionId. pushMessage() for follow-ups
@@ -2120,12 +2478,12 @@ during active query. Session materializes on first SDK message."
 
 **Files:**
 - Modify: `src/lib/backend/claude-agent-backend.ts`
-- Create: `src/lib/backend/permission-bridge.test.ts`
+- Create: `test/unit/backend/permission-bridge.test.ts`
 
 **Step 1: Write failing tests**
 
 ```typescript
-// src/lib/backend/permission-bridge.test.ts
+// test/unit/backend/permission-bridge.test.ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
@@ -2135,7 +2493,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     getSessionInfo: vi.fn().mockResolvedValue({}),
 }));
 
-import { ClaudeAgentBackend } from "./claude-agent-backend.js";
+import { ClaudeAgentBackend } from "../../../src/lib/backend/claude-agent-backend.js";
 
 describe("ClaudeAgentBackend — permission bridge", () => {
     let backend: ClaudeAgentBackend;
@@ -2156,10 +2514,10 @@ describe("ClaudeAgentBackend — permission bridge", () => {
         // Should now have a pending permission
         const pending = await backend.listPendingPermissions();
         expect(pending).toHaveLength(1);
-        expect(pending[0].tool).toBe("Bash");
+        expect(pending[0].permission).toBe("Bash");
 
-        // Resolve it
-        await backend.replyPermission({ id: pending[0].id, decision: "allow" } as any);
+        // Resolve it — OpenCode vocabulary: "once" maps to allow
+        await backend.replyPermission({ id: pending[0].id, decision: "once" });
 
         // canUseTool should return { behavior: "allow" }
         const result = await promise;
@@ -2171,7 +2529,8 @@ describe("ClaudeAgentBackend — permission bridge", () => {
         const promise = handler("Write", { path: "/etc/passwd" }, {});
 
         const pending = await backend.listPendingPermissions();
-        await backend.replyPermission({ id: pending[0].id, decision: "deny" } as any);
+        // OpenCode vocabulary: "reject" maps to deny
+        await backend.replyPermission({ id: pending[0].id, decision: "reject" });
 
         const result = await promise;
         expect(result).toEqual({ behavior: "deny", message: "User denied permission" });
@@ -2194,13 +2553,12 @@ describe("ClaudeAgentBackend — permission bridge", () => {
 
         const questions = await backend.listPendingQuestions();
         expect(questions).toHaveLength(1);
-        expect(questions[0].input).toEqual(input);
 
-        // Answer the question
+        // Answer the question — string[][] format
         await backend.replyQuestion({
             id: questions[0].id,
-            answers: { "How should I format the output?": "JSON" },
-        } as any);
+            answers: [["How should I format the output?", "JSON"]],
+        });
 
         // canUseTool returns allow with updatedInput containing answers
         const result = await promise;
@@ -2208,12 +2566,12 @@ describe("ClaudeAgentBackend — permission bridge", () => {
             behavior: "allow",
             updatedInput: {
                 ...input,
-                answers: { "How should I format the output?": "JSON" },
+                answers: [["How should I format the output?", "JSON"]],
             },
         });
     });
 
-    it("rejectQuestion returns deny", async () => {
+    it("rejectQuestion returns deny (resolve, not reject)", async () => {
         const handler = (backend as any).handleCanUseTool;
         const promise = handler("AskUserQuestion", { question: "What?" }, { toolUseID: "tu-456" });
 
@@ -2222,6 +2580,26 @@ describe("ClaudeAgentBackend — permission bridge", () => {
 
         const result = await promise;
         expect(result).toEqual({ behavior: "deny", message: "User rejected question" });
+    });
+
+    it("concurrent permissions are tracked independently", async () => {
+        const handler = (backend as any).handleCanUseTool;
+
+        // Start two concurrent permission requests
+        const promise1 = handler("Bash", { command: "ls" }, {});
+        const promise2 = handler("Write", { path: "/tmp/file" }, {});
+
+        const pending = await backend.listPendingPermissions();
+        expect(pending).toHaveLength(2);
+
+        // Resolve them in reverse order
+        await backend.replyPermission({ id: pending[1].id, decision: "once" });
+        await backend.replyPermission({ id: pending[0].id, decision: "reject" });
+
+        const result1 = await promise1;
+        const result2 = await promise2;
+        expect(result1.behavior).toBe("deny");
+        expect(result2.behavior).toBe("allow");
     });
 
     it("shutdown rejects all pending deferreds", async () => {
@@ -2258,7 +2636,7 @@ describe("ClaudeAgentBackend — permission bridge", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/permission-bridge.test.ts
+pnpm vitest run test/unit/backend/permission-bridge.test.ts
 ```
 
 **Step 3: Add permission and question bridging to ClaudeAgentBackend**
@@ -2291,21 +2669,22 @@ pnpm vitest run src/lib/backend/permission-bridge.test.ts
 
         this.pendingPermissions.set(id, {
             deferred,
-            metadata: { id, tool: toolName, input: toolInput, timestamp: Date.now() },
+            metadata: { id, permission: toolName, input: toolInput, timestamp: Date.now() },
         });
 
-        // Notify relay of new permission request
+        // Notify relay of new permission request (event type: permission.asked per EventTranslator)
         this.channel.push({
-            type: "permission.created",
-            properties: { id, tool: toolName, input: toolInput },
+            type: "permission.asked",
+            properties: { id, permission: toolName, tool: { callID: options?.toolUseID } },
         });
 
-        // Handle abort signal (tool use cancelled by SDK)
+        // Handle abort signal (tool use cancelled by SDK) — resolve with deny, never reject (Clay pattern)
         if (options?.signal) {
             options.signal.addEventListener("abort", () => {
                 const entry = this.pendingPermissions.get(id);
                 if (entry) {
-                    entry.deferred.reject(new Error("Tool use cancelled"));
+                    // Resolve with deny, never reject
+                    entry.deferred.resolve({ decision: "deny" });
                     this.pendingPermissions.delete(id);
                 }
             }, { once: true });
@@ -2324,78 +2703,88 @@ pnpm vitest run src/lib/backend/permission-bridge.test.ts
     /**
      * Handle AskUserQuestion tool — separate from regular permissions.
      * Returns { behavior: "allow", updatedInput: { ...input, answers } }.
+     * Uses toolUseId as key (not random UUID) per Fix 2.
      */
     private async handleAskUserQuestion(
         toolInput: unknown,
         options?: { toolUseID?: string; signal?: AbortSignal },
     ): Promise<{ behavior: "allow" | "deny"; updatedInput?: unknown; message?: string }> {
-        const id = crypto.randomUUID();
-        const toolUseId = options?.toolUseID ?? id;
+        const id = options?.toolUseID ?? crypto.randomUUID();
         const deferred = createDeferred<QuestionAnswer>();
 
         this.pendingQuestions.set(id, {
             deferred,
-            metadata: { id, toolUseId, input: toolInput, timestamp: Date.now() },
+            metadata: { id, toolUseId: id, input: toolInput, timestamp: Date.now() },
         });
 
-        // Push question event — frontend renders question UI
+        // Push question event (event type: question.asked per EventTranslator)
         this.channel.push({
-            type: "question.created",
-            properties: { id, toolUseId, input: toolInput },
+            type: "question.asked",
+            properties: {
+                id,
+                questions: Array.isArray((toolInput as Record<string, unknown>).questions)
+                    ? (toolInput as Record<string, unknown>).questions
+                    : [toolInput],
+                tool: { callID: options?.toolUseID },
+            },
         });
 
+        // Handle abort signal — resolve with deny, never reject (Clay pattern)
         if (options?.signal) {
             options.signal.addEventListener("abort", () => {
                 const entry = this.pendingQuestions.get(id);
                 if (entry) {
-                    entry.deferred.reject(new Error("Question cancelled"));
+                    // Resolve with deny, never reject
+                    entry.deferred.resolve({ rejected: true } as unknown as QuestionAnswer);
                     this.pendingQuestions.delete(id);
                 }
             }, { once: true });
         }
 
-        try {
-            const answer = await deferred.promise;
-            return {
-                behavior: "allow",
-                updatedInput: { ...(toolInput as object), answers: answer.answers },
-            };
-        } catch {
+        const answer = await deferred.promise;
+
+        // Check if rejected
+        if ((answer as unknown as { rejected?: boolean }).rejected) {
             return { behavior: "deny", message: "User rejected question" };
         }
+
+        return {
+            behavior: "allow",
+            updatedInput: { ...(toolInput as object), answers: answer.answers },
+        };
     }
 
-    async listPendingPermissions() {
+    async listPendingPermissions(): Promise<Array<{ id: string; permission: string; [key: string]: unknown }>> {
         return [...this.pendingPermissions.values()].map((p) => p.metadata);
     }
 
-    async replyPermission(options: { id: string; decision: string; feedback?: string }) {
+    async replyPermission(options: PermissionReplyOptions): Promise<void> {
         const entry = this.pendingPermissions.get(options.id);
         if (entry) {
-            entry.deferred.resolve({
-                decision: options.decision === "deny" ? "deny" : "allow",
-                feedback: options.feedback,
-            });
+            // OpenCode vocabulary: "reject" = deny, "once"/"always" = allow
+            const decision = options.decision === "reject" ? "deny" : "allow";
+            entry.deferred.resolve({ decision, feedback: undefined });
             this.pendingPermissions.delete(options.id);
         }
     }
 
-    async listPendingQuestions() {
+    async listPendingQuestions(): Promise<Array<{ id: string; [key: string]: unknown }>> {
         return [...this.pendingQuestions.values()].map((q) => q.metadata);
     }
 
-    async replyQuestion(options: { id: string; answers: Record<string, string> }) {
+    async replyQuestion(options: QuestionReplyOptions): Promise<void> {
         const entry = this.pendingQuestions.get(options.id);
         if (entry) {
-            entry.deferred.resolve({ answers: options.answers });
+            entry.deferred.resolve({ answers: options.answers }); // string[][]
             this.pendingQuestions.delete(options.id);
         }
     }
 
-    async rejectQuestion(id: string) {
+    async rejectQuestion(id: string): Promise<void> {
         const entry = this.pendingQuestions.get(id);
         if (entry) {
-            entry.deferred.reject(new Error("User rejected question"));
+            // Resolve with deny, not reject — never throw from canUseTool (Clay pattern)
+            entry.deferred.resolve({ rejected: true } as unknown as QuestionAnswer);
             this.pendingQuestions.delete(id);
         }
     }
@@ -2404,19 +2793,19 @@ pnpm vitest run src/lib/backend/permission-bridge.test.ts
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/permission-bridge.test.ts
+pnpm vitest run test/unit/backend/permission-bridge.test.ts
 ```
 
 **Step 5: Run all backend tests**
 
 ```bash
-pnpm vitest run src/lib/backend/
+pnpm vitest run test/unit/backend/
 ```
 
 **Step 6: Commit**
 
 ```bash
-git add src/lib/backend/claude-agent-backend.ts src/lib/backend/permission-bridge.test.ts
+git add src/lib/backend/claude-agent-backend.ts test/unit/backend/permission-bridge.test.ts
 git commit -m "feat: ClaudeAgentBackend permission and question bridging
 
 canUseTool returns { behavior: 'allow'|'deny' } (v2 audit fix).
@@ -2429,8 +2818,8 @@ No timeout on deferreds. Rejected on shutdown. Re-shown on reconnect."
 ### Task 12: Phase 3 Integration and Verification
 
 **Files:**
-- Modify: `src/lib/relay/relay-stack.ts` — add backend factory
 - Modify: `src/lib/backend/index.ts` — barrel export
+- Modify: `src/lib/types.ts` — add backend config fields to `ProjectRelayConfig`
 - Create: `test/integration/flows/claude-agent-backend.integration.ts`
 
 **Step 1: Create barrel export**
@@ -2446,37 +2835,17 @@ export { createDeferred } from "./deferred.js";
 export type { Deferred } from "./deferred.js";
 ```
 
-**Step 2: Add backend factory to relay stack**
+**Step 2: Add backend config fields to ProjectRelayConfig**
+
+In `src/lib/types.ts`, add to `ProjectRelayConfig`:
 
 ```typescript
-// In relay-stack.ts, add a factory function:
-import { OpenCodeBackend, ClaudeAgentBackend, type SessionBackend } from "../backend/index.js";
-
-function createSessionBackend(
-    config: ProjectRelayConfig,
-    client: RelayClient,
-    registry: ServiceRegistry,
-    log: Logger,
-): SessionBackend {
-    if (config.backendType === "claude-agent") {
-        return new ClaudeAgentBackend({
-            cwd: config.projectDir,
-            apiKey: config.anthropicApiKey,
-            model: config.defaultModel,
-            allowedTools: config.allowedTools,
-            log,
-        });
-    }
-    return new OpenCodeBackend({
-        client,
-        sseConfig: {
-            registry,
-            baseUrl: config.opencodeUrl,
-            authHeaders: client.getAuthHeaders(),
-            log,
-        },
-    });
-}
+// Backend selection
+backendType?: "opencode" | "claude-agent";
+anthropicApiKey?: string;
+defaultModel?: string;
+allowedTools?: string[];
+authType?: "api-key" | "subscription";
 ```
 
 **Step 3: Write integration tests (conditional on API key)**
@@ -2484,7 +2853,7 @@ function createSessionBackend(
 ```typescript
 // test/integration/flows/claude-agent-backend.integration.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { ClaudeAgentBackend } from "../../../src/lib/backend/claude-agent-backend.js";
+import { ClaudeAgentBackend } from "../../../src/lib/backend/index.js";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -2528,7 +2897,7 @@ pnpm test:unit
 **Step 5: Commit**
 
 ```bash
-git commit -am "feat: Phase 3 complete — ClaudeAgentBackend with backend factory
+git commit -am "feat: Phase 3 complete — barrel export, config fields, integration tests
 
 Integration tests conditional on ANTHROPIC_API_KEY."
 ```
@@ -2543,15 +2912,15 @@ Instead of swapping a field on every component when the backend changes, all com
 
 **Files:**
 - Create: `src/lib/backend/backend-proxy.ts`
-- Create: `src/lib/backend/backend-proxy.test.ts`
+- Create: `test/unit/backend/backend-proxy.test.ts`
 
 **Step 1: Write failing tests**
 
 ```typescript
-// src/lib/backend/backend-proxy.test.ts
+// test/unit/backend/backend-proxy.test.ts
 import { describe, it, expect, vi } from "vitest";
-import { BackendProxy } from "./backend-proxy.js";
-import type { SessionBackend } from "./types.js";
+import { BackendProxy } from "../../../src/lib/backend/backend-proxy.js";
+import type { SessionBackend } from "../../../src/lib/backend/types.js";
 
 function mockBackend(type: "opencode" | "claude-agent"): SessionBackend {
     return {
@@ -2611,7 +2980,7 @@ describe("BackendProxy", () => {
         const ca = mockBackend("claude-agent");
         const proxy = new BackendProxy(oc);
 
-        proxy.swap(ca);
+        await proxy.swap(ca);  // async now
 
         expect(proxy.type).toBe("claude-agent");
         await proxy.listSessions();
@@ -2627,7 +2996,7 @@ describe("BackendProxy", () => {
         // Simulate a handler holding a reference
         const handler = { backend: proxy as SessionBackend };
 
-        proxy.swap(ca);
+        await proxy.swap(ca);
 
         // The handler's reference now sees the new backend
         await handler.backend.listSessions();
@@ -2646,26 +3015,51 @@ describe("BackendProxy", () => {
         expect(proxy.forkSession).toBeUndefined();
     });
 
-    it("optional methods update after swap", () => {
+    it("optional methods update after swap", async () => {
         const oc = mockBackend("opencode");
         const ca = mockBackend("claude-agent");
         const proxy = new BackendProxy(oc);
 
         expect(proxy.forkSession).toBeDefined();
-        proxy.swap(ca);
+        await proxy.swap(ca);
         expect(proxy.forkSession).toBeUndefined();
     });
 
-    it("emits swap event", () => {
+    it("emits swap event", async () => {
         const oc = mockBackend("opencode");
         const ca = mockBackend("claude-agent");
         const proxy = new BackendProxy(oc);
 
-        const handler = vi.fn();
+        const handler = vi.fn().mockResolvedValue(undefined);  // async handler
         proxy.onSwap(handler);
-        proxy.swap(ca);
+        await proxy.swap(ca);
 
         expect(handler).toHaveBeenCalledWith(ca, oc);
+    });
+
+    it("onSwap returns unsubscribe function", async () => {
+        const oc = mockBackend("opencode");
+        const ca = mockBackend("claude-agent");
+        const proxy = new BackendProxy(oc);
+
+        const handler = vi.fn().mockResolvedValue(undefined);
+        const unsubscribe = proxy.onSwap(handler);
+        unsubscribe();
+        await proxy.swap(ca);
+        expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("methods have correct this context through proxy", async () => {
+        let capturedThis: unknown;
+        const oc = mockBackend("opencode");
+        (oc as any).listSessions = vi.fn(function(this: unknown) {
+            capturedThis = this;
+            return Promise.resolve([]);
+        });
+        const proxy = new BackendProxy(oc);
+        
+        await proxy.listSessions();
+        expect(capturedThis).toBe(oc);
     });
 });
 ```
@@ -2673,7 +3067,7 @@ describe("BackendProxy", () => {
 **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm vitest run src/lib/backend/backend-proxy.test.ts
+pnpm vitest run test/unit/backend/backend-proxy.test.ts
 ```
 
 **Step 3: Implement BackendProxy**
@@ -2682,7 +3076,7 @@ pnpm vitest run src/lib/backend/backend-proxy.test.ts
 // src/lib/backend/backend-proxy.ts
 import type { SessionBackend, BackendEvent } from "./types.js";
 
-type SwapHandler = (newBackend: SessionBackend, oldBackend: SessionBackend) => void;
+type SwapHandler = (newBackend: SessionBackend, oldBackend: SessionBackend) => Promise<void>;
 
 /**
  * Proxy that indirects through the currently active SessionBackend.
@@ -2695,11 +3089,26 @@ type SwapHandler = (newBackend: SessionBackend, oldBackend: SessionBackend) => v
  *
  * Uses a JavaScript Proxy for transparent delegation. The proxy
  * intercepts property access and delegates to the current target.
+ * The constructor returns the proxy, so `new BackendProxy(oc)` IS the proxy
+ * and can be used directly as a SessionBackend (via declaration merging).
+ *
+ * IMPORTANT: Consumers of subscribeEvents() must re-subscribe after a backend swap.
+ * Long-lived async iterables are bound at call time. The onSwap handler should
+ * restart event subscription on the new backend.
  */
+/**
+ * BackendProxy implements SessionBackend via JS Proxy delegation.
+ * Declaration merging ensures TypeScript knows the proxy has SessionBackend members.
+ */
+export interface BackendProxy extends SessionBackend {}
+
 export class BackendProxy {
     private target: SessionBackend;
     private swapHandlers: SwapHandler[] = [];
+    private swapping = false;
     private readonly proxy: SessionBackend;
+
+    private static readonly OWN_METHODS = new Set(["swap", "onSwap", "getTarget"]);
 
     constructor(initial: SessionBackend) {
         this.target = initial;
@@ -2707,8 +3116,8 @@ export class BackendProxy {
         // Create a JS Proxy that delegates all property access to this.target
         this.proxy = new Proxy(this as unknown as SessionBackend, {
             get: (_, prop: string | symbol) => {
-                // BackendProxy's own methods
-                if (prop === "swap" || prop === "onSwap" || prop === "getTarget" || prop === "getProxy") {
+                // BackendProxy's own methods — detected via explicit Set
+                if (typeof prop === "string" && BackendProxy.OWN_METHODS.has(prop)) {
                     return (this as any)[prop].bind(this);
                 }
                 // Delegate to active backend
@@ -2722,11 +3131,9 @@ export class BackendProxy {
                 return prop in this.target;
             },
         });
-    }
 
-    /** Get the transparent proxy that implements SessionBackend. */
-    getProxy(): SessionBackend {
-        return this.proxy;
+        // Return the proxy so `new BackendProxy(oc)` IS the proxy
+        return this.proxy as unknown as BackendProxy;
     }
 
     /** Get the current underlying backend (for direct access). */
@@ -2735,37 +3142,41 @@ export class BackendProxy {
     }
 
     /** Swap the active backend. All existing proxy references see the new backend. */
-    swap(newBackend: SessionBackend): void {
-        const old = this.target;
-        this.target = newBackend;
-        for (const handler of this.swapHandlers) {
-            handler(newBackend, old);
+    async swap(newBackend: SessionBackend): Promise<void> {
+        if (this.swapping) throw new Error("Swap already in progress");
+        this.swapping = true;
+        try {
+            const old = this.target;
+            this.target = newBackend;
+            for (const handler of this.swapHandlers) {
+                await handler(newBackend, old);
+            }
+        } finally {
+            this.swapping = false;
         }
     }
 
-    /** Register a handler called on every backend swap. */
-    onSwap(handler: SwapHandler): void {
+    /** Register a handler called on every backend swap. Returns unsubscribe function. */
+    onSwap(handler: SwapHandler): () => void {
         this.swapHandlers.push(handler);
+        return () => {
+            const idx = this.swapHandlers.indexOf(handler);
+            if (idx >= 0) this.swapHandlers.splice(idx, 1);
+        };
     }
-
-    // Convenience accessors that forward to the proxy
-    get type() { return this.target.type; }
-    get forkSession() { return this.target.forkSession; }
-    get revertSession() { return this.target.revertSession; }
-    get unrevertSession() { return this.target.unrevertSession; }
 }
 ```
 
 **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm vitest run src/lib/backend/backend-proxy.test.ts
+pnpm vitest run test/unit/backend/backend-proxy.test.ts
 ```
 
 **Step 5: Commit**
 
 ```bash
-git add src/lib/backend/backend-proxy.ts src/lib/backend/backend-proxy.test.ts
+git add src/lib/backend/backend-proxy.ts test/unit/backend/backend-proxy.test.ts
 git commit -m "feat: BackendProxy for non-disruptive backend switching
 
 Components hold proxy reference. Swap updates target, all existing
@@ -2779,17 +3190,39 @@ references see new backend immediately. Emits swap event."
 Wire the BackendProxy into the relay stack. Implement provider-based backend routing. Handle active query abort, pending permission rejection, and `backend_switched` event on switch. Cross-backend history prepending on first message.
 
 **Files:**
+- Modify: `src/lib/shared-types.ts` — add `backend_switched` to `RelayMessage` union
+- Modify: `src/lib/handlers/types.ts` — add `backendProxy` and `backendRegistry` to `HandlerDeps`
 - Modify: `src/lib/relay/relay-stack.ts` — hold both backends + BackendProxy, switch on model change
 - Modify: `src/lib/handlers/model.ts` — trigger backend switch based on provider detection
 - Create: `src/lib/backend/backend-router.ts` — provider-based backend selection
-- Create: `src/lib/backend/backend-router.test.ts`
+- Create: `test/unit/backend/backend-router.test.ts`
+
+**Step 0a: Add `backend_switched` to RelayMessage union**
+
+In `src/lib/shared-types.ts`, add to the `RelayMessage` union:
+
+```typescript
+| { type: "backend_switched"; backendType: "opencode" | "claude-agent" }
+```
+
+**Step 0b: Add `backendProxy` and `backendRegistry` to HandlerDeps**
+
+In `src/lib/handlers/types.ts`, add:
+
+```typescript
+import type { BackendProxy } from "../backend/backend-proxy.js";
+
+// Add to HandlerDeps interface:
+backendProxy: BackendProxy;
+backendRegistry: Map<string, SessionBackend>;
+```
 
 **Step 1: Write failing tests for backend router**
 
 ```typescript
-// src/lib/backend/backend-router.test.ts
+// test/unit/backend/backend-router.test.ts
 import { describe, it, expect } from "vitest";
-import { selectBackendType } from "./backend-router.js";
+import { selectBackendType } from "../../../src/lib/backend/backend-router.js";
 
 describe("selectBackendType", () => {
     it("returns claude-agent for anthropic subscription", () => {
@@ -2852,53 +3285,80 @@ const claudeAgentBackend = new ClaudeAgentBackend({
 });
 
 // BackendProxy starts with OpenCode as default
+// Constructor returns the proxy — backendProxy IS the SessionBackend
 const backendProxy = new BackendProxy(opencodeBackend);
-const sessionBackend = backendProxy.getProxy();
 
 // Pass proxy to all consumers — they hold this reference permanently
-const sessionMgr = new SessionManager({ backend: sessionBackend, log: loggers.session, ... });
-// handler deps, pollers, etc. all receive sessionBackend (the proxy)
+const sessionMgr = new SessionManager({ backend: backendProxy, log: loggers.session, ... });
+// handler deps, pollers, etc. all receive backendProxy (which IS the proxy)
 ```
 
 Register swap handler to broadcast `backend_switched`:
 
 ```typescript
 backendProxy.onSwap(async (newBackend, oldBackend) => {
-    // 1. Abort active query on old backend
-    await oldBackend.abortSession("*").catch(() => {});
+    // 1. Shut down old backend (aborts queries, rejects deferreds, closes channel)
+    await oldBackend.shutdown();
 
-    // 2. Shut down old backend's event stream
-    // (new backend's events will flow through the proxy)
-
-    // 3. Initialize new backend if needed
+    // 2. Initialize new backend
     await newBackend.initialize();
 
-    // 4. Broadcast backend_switched to all connected browsers
-    wsHandler.broadcast({
-        type: "backend_switched",
-        backendType: newBackend.type,
-    });
+    // 3. Broadcast to all connected browsers
+    wsHandler.broadcast({ type: "backend_switched", backendType: newBackend.type });
 });
 ```
 
-**Step 4: Add backend switch to model handler**
+> **Note on backend reusability:** After `shutdown()`, a backend is NOT reusable. If the user switches back, a new instance must be constructed. Use factory functions, not pre-constructed instances:
+
+```typescript
+const backendFactories = new Map<string, () => SessionBackend>([
+    ["opencode", () => new OpenCodeBackend({ client, sseConfig: { ... } })],
+    ["claude-agent", () => new ClaudeAgentBackend({ cwd, apiKey, ... })],
+]);
+```
+
+**Step 4: Define `maybeSwapBackend` helper**
+
+Extract shared helper used by both `handleSwitchModel` and `handleSetDefaultModel`:
+
+```typescript
+async function maybeSwapBackend(
+    backendProxy: BackendProxy,
+    backendFactories: Map<string, () => SessionBackend>,
+    requiredType: "opencode" | "claude-agent",
+): Promise<void> {
+    if (backendProxy.type === requiredType) return;
+    const factory = backendFactories.get(requiredType);
+    if (!factory) return;
+    const newBackend = factory();
+    await backendProxy.swap(newBackend);
+}
+```
+
+**Step 5: Add backend switch to model handler**
 
 In `src/lib/handlers/model.ts`, when the user selects a model:
 
 ```typescript
 // After determining the new model's provider:
 const requiredBackend = selectBackendType({ provider, authType });
-if (requiredBackend !== deps.sessionBackend.type) {
-    // Backend switch needed
-    const backends = deps.backendRegistry; // Map of available backends
-    const target = backends.get(requiredBackend);
-    if (target) {
-        deps.backendProxy.swap(target);
-    }
-}
+await maybeSwapBackend(deps.backendProxy, deps.backendFactories, requiredBackend);
 ```
 
-**Step 5: Run verification**
+**Step 6: Add capabilities to session_list response**
+
+In the session handler, when sending `session_list`:
+
+```typescript
+const capabilities = {
+    fork: typeof deps.sessionBackend.forkSession === "function",
+    revert: typeof deps.sessionBackend.revertSession === "function",
+    unrevert: typeof deps.sessionBackend.unrevertSession === "function",
+};
+// Include in session_list message
+```
+
+**Step 7: Run verification**
 
 ```bash
 pnpm check
@@ -2906,13 +3366,13 @@ pnpm lint
 pnpm test:unit
 ```
 
-**Step 6: Commit**
+**Step 8: Commit**
 
 ```bash
 git commit -am "feat: provider-based backend switching via BackendProxy
 
 Anthropic subscription -> Claude Agent SDK, all else -> OpenCode.
-Aborts old backend, broadcasts backend_switched to frontends."
+Factory-based construction, shutdown old backend, broadcasts backend_switched."
 ```
 
 ---
@@ -2922,8 +3382,13 @@ Aborts old backend, broadcasts backend_switched to frontends."
 Handle `backend_switched` message. Merge session lists from all backends. Tag sessions with backend type. Hide unsupported operations.
 
 **Files:**
-- Modify: `src/lib/frontend/src/stores/` — handle `backend_switched`, refresh sessions
-- Modify: `src/lib/frontend/src/components/` — hide fork/revert buttons when backend doesn't support them
+- Modify: `src/lib/shared-types.ts` — add `backendType` to `SessionInfo` (if not done in Task 14)
+- Modify: `src/lib/frontend/stores/ws-dispatch.ts` — handle `backend_switched` dispatch case
+- Modify: `src/lib/frontend/stores/` — add backend state store (Svelte 5 `$state` pattern)
+- Modify: `src/lib/frontend/components/chat/AssistantMessage.svelte` — gate fork-from-here button
+- Modify: `src/lib/frontend/components/session/SessionContextMenu.svelte` — gate Fork menu item
+- Modify: `src/lib/frontend/components/session/SessionList.svelte` — gate fork handler
+- Modify: `src/lib/frontend/components/overlays/RewindBanner.svelte` — gate revert/rewind
 
 **Step 1: Handle backend_switched in WebSocket message store**
 
@@ -2932,45 +3397,74 @@ When the frontend receives `backend_switched`:
 2. Request a fresh session list from the server
 3. Update the active backend type in the store
 
+**Step 1a: Add `backendType` to `SessionInfo`**
+
+In `src/lib/shared-types.ts`, add to `SessionInfo`:
+
 ```typescript
-// In the message handler switch:
+backendType?: "opencode" | "claude-agent";
+```
+
+> Note: `backend_switched` was already added to `RelayMessage` union in Task 14.
+
+```typescript
+// In handleMessage() switch in src/lib/frontend/stores/ws-dispatch.ts:
 case "backend_switched":
-    activeBackendType.set(msg.backendType);
-    // Clear stale caches
-    sessions.set([]);
-    // Re-request session list
-    ws.send(JSON.stringify({ type: "get_sessions" }));
+    backendState.backendType = msg.backendType;
+    // Clear stale session cache and re-request
+    sessionState.rootSessions = [];
+    sessionState.allSessions = [];
+    wsSend({ type: "list_sessions" });
     break;
 ```
 
-**Step 2: Tag sessions with backend type**
+**Step 2: Add backend state store (Svelte 5 `$state` pattern)**
 
-Sessions from the server should include a `backendType` field. The session list merges sessions from all backends. Display a subtle indicator (e.g., "via Claude" or "via OpenCode") on each session.
+```typescript
+// In discovery.svelte.ts or new backend.svelte.ts:
+export const backendState = $state({
+    backendType: "opencode" as "opencode" | "claude-agent",
+    capabilities: { fork: true, revert: true, unrevert: true },
+});
+```
 
-**Step 3: Hide unsupported operations**
+> Uses `wsSend()` from `ws-send.svelte.ts`, NOT raw `ws.send()`.
+> Uses Svelte 5 `$state` pattern (`.svelte.ts` files), NOT Svelte 4 `writable`.
+
+**Step 3: Tag sessions with backend type**
+
+Sessions from the server include a `backendType` field. Display a subtle indicator (e.g., "via Claude" or "via OpenCode") on each session.
+
+> **Server-side session merge:** Session list merging happens server-side via BackendProxy (delegates to active backend's `listSessions`). No frontend merge logic needed.
+
+**Step 4: Hide unsupported operations (capability-gated)**
+
+Use the capabilities object from `session_list` response. Gate each fork/revert UI touchpoint:
+
+- `AssistantMessage.svelte` — fork-from-here button
+- `SessionContextMenu.svelte` — Fork menu item
+- `SessionList.svelte` — fork handler
+- `RewindBanner.svelte` — revert/rewind
 
 ```svelte
-<!-- In session actions component -->
-{#if activeBackendType !== "claude-agent"}
-    <button on:click={handleFork}>Fork</button>
-    <button on:click={handleRevert}>Revert</button>
+<!-- Uses Svelte 5 onclick syntax, NOT on:click -->
+{#if backendState.capabilities.fork}
+    <button onclick={handleFork}>Fork</button>
+{/if}
+{#if backendState.capabilities.revert}
+    <button onclick={handleRevert}>Revert</button>
 {/if}
 ```
 
-Or more robustly, the server can send a `capabilities` object with the session list:
-```typescript
-{
-    type: "session_list",
-    sessions: [...],
-    capabilities: {
-        fork: true,
-        revert: true,
-        unrevert: true,
-    }
-}
-```
+**Step 5: Add tests**
 
-**Step 4: Run verification**
+Test specifications:
+- `backend_switched` handler updates `backendState.backendType`
+- `backend_switched` handler clears session list and re-requests
+- Capability-based UI gating: fork button hidden when `capabilities.fork === false`
+- Capability-based UI gating: revert button hidden when `capabilities.revert === false`
+
+**Step 6: Run verification**
 
 ```bash
 pnpm check
@@ -2978,12 +3472,13 @@ pnpm lint
 pnpm test:unit
 ```
 
-**Step 5: Commit**
+**Step 7: Commit**
 
 ```bash
 git commit -am "feat: frontend handles backend switching
 
-Merged session list, backend type tags, hide unsupported ops."
+Svelte 5 $state pattern for backend state. Capability-gated UI.
+Server-side session merge via BackendProxy. wsSend for WS dispatch."
 ```
 
 ---
@@ -3092,45 +3587,48 @@ Merged session list, backend type tags, hide unsupported ops."
 6. **Use existing event types** for permission/question notifications: match the format the existing frontend/EventTranslator expects (e.g., existing permission relay message format), or document that new handling is needed in Task 15.
 7. **Add test for concurrent permissions** (SDK calls `canUseTool` in parallel for parallel tool execution).
 
-### Task 12 Amendments
+### Task 12 Amendments (**APPLIED** — incorporated into task code blocks above)
 
-1. **Remove backend factory function.** It conflicts with Task 14's dual-construction + BackendProxy pattern. Task 12 keeps: barrel export + integration test only.
-2. **Add `ProjectRelayConfig` fields:** `backendType?: "opencode" | "claude-agent"`, `anthropicApiKey?: string`, `allowedTools?: string[]` to `src/lib/types.ts`.
+1. ~~**Remove backend factory function.**~~ Done — Step 2 replaced with config fields.
+2. ~~**Add `ProjectRelayConfig` fields.**~~ Done — Step 2 now adds `backendType`, `anthropicApiKey`, `defaultModel`, `allowedTools`, `authType`.
 
-### Task 13 Amendments (BackendProxy)
+### Task 13 Amendments (BackendProxy) (**APPLIED** — incorporated into task code blocks above)
 
-1. **Constructor must return the proxy:** Add `return this.proxy as unknown as BackendProxy;` at end of constructor. Or restructure so `new BackendProxy(oc)` IS the proxy.
-2. **Remove dead convenience getters** (`get type()`, `get forkSession()`, etc.) — unreachable through the Proxy trap.
-3. **Use prototype-based method detection** instead of hardcoded string list: `if (prop in BackendProxy.prototype) return (this as any)[prop].bind(this);`.
-4. **Make `SwapHandler` async:** `type SwapHandler = (newBackend, oldBackend) => Promise<void>`. Make `swap()` async and await each handler.
-5. **Document: `subscribeEvents` consumers must re-subscribe on swap.** Long-lived async iterables are bound at call time. The `onSwap` handler should restart event subscription on the new backend.
-6. **Add `onSwap` unsubscribe:** Return a cleanup function from `onSwap()`.
-7. **Clarify dual-reference pattern:** `BackendProxy` for swap-aware consumers (model handler, relay-stack), `getProxy()` as `SessionBackend` for operation-only consumers (SessionManager, pollers, handlers).
+1. ~~**Constructor must return the proxy.**~~ Done — constructor ends with `return this.proxy as unknown as BackendProxy;`.
+2. ~~**Remove dead convenience getters.**~~ Done — `get type()`, `get forkSession()`, etc. removed.
+3. ~~**Use explicit Set for own method detection.**~~ Done — `OWN_METHODS = new Set(["swap", "onSwap", "getTarget"])` with `typeof prop === "string"` guard. (Changed from prototype-based per audit re-review: prototype check is fragile with Proxy target mismatch.)
+4. ~~**Make `SwapHandler` async.**~~ Done — `=> Promise<void>`, `swap()` is `async`, handlers are `await`ed.
+5. ~~**Document `subscribeEvents` re-subscription.**~~ Done — JSDoc added to class.
+6. ~~**Add `onSwap` unsubscribe.**~~ Done — returns `() => void`.
+7. ~~**Clarify proxy-as-SessionBackend pattern.**~~ Done — declaration merging + constructor returns proxy.
+8. **Added:** `this`-binding test (destructured methods work through proxy).
+9. **Added:** concurrent-swap guard (`this.swapping` flag).
 
-### Task 14 Amendments
+### Task 14 Amendments (**APPLIED** — incorporated into task code blocks above)
 
-1. **Add to `HandlerDeps`:** `backendProxy: BackendProxy` and `backendRegistry: Map<string, SessionBackend>`.
-2. **Add to `RelayMessage` union:** `{ type: "backend_switched"; backendType: "opencode" | "claude-agent" }` in `src/lib/shared-types.ts`.
-3. **Replace `abortSession("*")`** with `await oldBackend.shutdown()` (handles abort + deferred cleanup + channel close).
-4. **Add `authType` to `ProjectRelayConfig`:** Detected server-side from env/config. `ANTHROPIC_API_KEY` present + no `OPENCODE_*` config = subscription.
-5. **Swap handler must call `oldBackend.shutdown()`** before `newBackend.initialize()`.
-6. **Add backend-switch logic to `handleSetDefaultModel`** as well (not just `handleSwitchModel`). Extract shared helper `maybeSwapBackend()`.
-7. **Monitoring/lifecycle wiring uses OpenCode backend directly** (not proxy) for poller seeding. Pollers are OpenCode-specific.
-8. **Add `capabilities` to session_list response:** `{ fork: boolean; revert: boolean; unrevert: boolean }`. Derived from `typeof backend.forkSession === "function"`.
+1. ~~**Add to `HandlerDeps`.**~~ Done — Step 0b adds `backendProxy` and `backendRegistry`.
+2. ~~**Add to `RelayMessage` union.**~~ Done — Step 0a adds `backend_switched`.
+3. ~~**Replace `abortSession("*")`.**~~ Done — swap handler uses `oldBackend.shutdown()`.
+4. ~~**Add `authType` to `ProjectRelayConfig`.**~~ Done — covered by Task 12 config fields.
+5. ~~**Swap handler: shutdown before initialize.**~~ Done.
+6. ~~**Extract `maybeSwapBackend()` helper.**~~ Done — Step 4 defines it.
+7. **Monitoring/lifecycle wiring uses OpenCode backend directly** (not proxy) for poller seeding. Pollers are OpenCode-specific. (Note in prose, not in code block.)
+8. ~~**Add `capabilities` to session_list.**~~ Done — Step 6.
+9. **Added:** Backend factory pattern for reusability after shutdown.
 
-### Task 15 Amendments (MAJOR — near-complete rewrite needed)
+### Task 15 Amendments (**APPLIED** — incorporated into task code blocks above)
 
-1. **Fix directory paths:** `src/lib/frontend/stores/` (NOT `src/lib/frontend/src/stores/`).
-2. **Add `backend_switched` to `RelayMessage` union** in `src/lib/shared-types.ts`.
-3. **Add `backendType` to `SessionInfo`** in `src/lib/shared-types.ts`.
-4. **Add dispatch case** in `src/lib/frontend/stores/ws-dispatch.ts` `handleMessage()` switch.
-5. **Use Svelte 5 `$state` pattern:** Add `backendType` field to existing `discoveryState` (or new backend store). NOT `writable` store.
-6. **Use `wsSend()`** (from `ws-send.svelte.ts`), NOT raw `ws.send()`.
-7. **Use Svelte 5 `onclick`** syntax, NOT `on:click`.
-8. **Use capabilities object** (per design decision): `{#if capabilities.fork}` not `{#if backendType !== "claude-agent"}`.
-9. **Enumerate all fork/revert UI touchpoints:** `AssistantMessage.svelte:393-401` (fork-from-here), `SessionContextMenu.svelte:112-122` (Fork menu), `SessionList.svelte:186` (fork handler), `RewindBanner.svelte:46-54` (revert/rewind).
-10. **Merged session list:** Server-side merge in session handler (via BackendProxy which delegates to active backend's `listSessions`). No frontend merge.
-11. **Add tests** for `backend_switched` handler, session clearing, capability-based UI gating.
+1. ~~**Fix directory paths.**~~ Done — all paths use `src/lib/frontend/stores/`.
+2. ~~**Add `backend_switched` to `RelayMessage`.**~~ Done — covered by Task 14.
+3. ~~**Add `backendType` to `SessionInfo`.**~~ Done — Step 1a.
+4. ~~**Add dispatch case.**~~ Done — Step 1a code block.
+5. ~~**Use Svelte 5 `$state` pattern.**~~ Done — Step 2.
+6. ~~**Use `wsSend()`.**~~ Done — dispatch code uses `wsSend()`.
+7. ~~**Use Svelte 5 `onclick`.**~~ Done — Step 4 code block.
+8. ~~**Use capabilities object.**~~ Done — Step 4 uses `backendState.capabilities.fork`.
+9. ~~**Enumerate all fork/revert UI touchpoints.**~~ Done — Files list + Step 4.
+10. ~~**Server-side session merge.**~~ Done — Step 3 note.
+11. ~~**Add tests.**~~ Done — Step 5.
 
 ---
 
