@@ -3673,3 +3673,490 @@ BackendProxy pattern for non-disruptive switching.
 Provider-based routing (Anthropic subscription -> Agent SDK).
 Merged session list. Frontend hides unsupported ops."
 ```
+
+---
+
+## Audit Amendments v3 (Re-audit Fixes)
+
+Synthesis: `docs/plans/2026-03-31-dual-sdk-v2-reaudit.md`
+
+These amendments **override** task code where they conflict. Apply before implementing each task.
+
+### Cross-Cutting Directives v3
+
+**D9 — SDK API verified.** Package is `@anthropic-ai/claude-agent-sdk` (confirmed on npm). SDK exports: `query()`, `listSessions()`, `getSessionMessages()`, `getSessionInfo()`, `renameSession()`, `tagSession()`. All planned imports are valid.
+
+**D10 — SDK type mappings.** The SDK uses these types:
+- `listSessions({ dir?, limit?, includeWorktrees? })` → returns `SDKSessionInfo[]` with `sessionId` (not `id`), `summary`, `lastModified`, `createdAt`, `cwd`
+- `getSessionMessages(sessionId, { dir?, limit?, offset? })` → returns `SessionMessage[]` with `type`, `uuid`, `session_id`, `message`
+- `getSessionInfo(sessionId, { dir? })` → returns `SDKSessionInfo | undefined`
+- `query({ prompt, options })` → returns `Query extends AsyncGenerator<SDKMessage, void>` with extra methods
+- `CanUseTool` signature: `(toolName, input, { signal, suggestions?, blockedPath?, decisionReason?, toolUseID, agentID? })` → `Promise<PermissionResult>`
+- `PermissionResult`: `{ behavior: "allow", updatedInput? } | { behavior: "deny", message }`
+- `SDKResultMessage.usage`: `NonNullableUsage` (has `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` — NO `cost` field)
+
+**D11 — Auth type detection.** `authType` is determined via: (1) UI toggle on instance/project settings (primary), (2) env var `CONDUIT_AUTH_TYPE`, (3) config file field in `conduit.jsonc`, (4) auto-detection from API key characteristics. Store in `ProjectRelayConfig.authType`.
+
+**D12 — Session list merge strategy.** Keep both backends alive (do NOT shut down on swap). Override `listSessions` at the relay-stack level to call BOTH backends and merge results, tagging each with `backendType`. The BackendProxy delegates the "active" backend for messaging, but both remain alive for session listing.
+
+**D13 — Warmup query for discovery.** `ClaudeAgentBackend.initialize()` must start a warmup query (empty or minimal prompt) to capture agent/command/model lists from the SDK. Close the warmup query after receiving the `system/init` message. Cache the results for `listAgents()`, `listCommands()`, `supportedModels()`.
+
+---
+
+### Task 1 Amendment (v3)
+
+**A1.1 — InfraClient structural test.** Replace name-only check with signature check:
+```typescript
+it("every InfraClient method has compatible signature on OpenCodeClient", () => {
+    expectTypeOf<Pick<OpenCodeClient, keyof InfraClient>>().toMatchTypeOf<InfraClient>();
+});
+```
+
+---
+
+### Task 2 Amendment (v3)
+
+No additional amendments.
+
+---
+
+### Task 3 Amendments (v3)
+
+**A3.1 — Event listener cleanup via try/finally.** In `subscribeEvents()`, wrap `yield* channel` to ensure the SSEConsumer listener is removed on all exit paths (not just abort signal):
+```typescript
+async *subscribeEvents(signal: AbortSignal): AsyncIterable<BackendEvent> {
+    if (!this.sseConsumer) return;
+    const channel = new AsyncEventChannel<BackendEvent>();
+    const handler = (event: OpenCodeEvent) => { channel.push(event); };
+    this.sseConsumer.on("event", handler);
+    signal.addEventListener("abort", () => { channel.close(); }, { once: true });
+    try {
+        yield* channel;
+    } finally {
+        this.sseConsumer.off("event", handler);
+        channel.close();
+    }
+}
+```
+
+**A3.2 — Push event directly.** The handler should push the original event (`channel.push(event)`), NOT reconstruct a new object. Preserves discriminated union narrowing.
+
+**A3.3 — Add `subscribeEvents` tests.** Task 3 must include tests for:
+1. `subscribeEvents()` yields events from SSEConsumer
+2. `subscribeEvents()` stops yielding when signal aborts
+3. `subscribeEvents()` returns immediately when SSEConsumer not configured
+4. Event listener is removed after generator exits
+
+---
+
+### Task 8 Amendments (v3) — CRITICAL
+
+**A8.1 — Add `role: "assistant"` to translateResult.** The `message.updated` event in `translateResult()` MUST include `role: "assistant"` or the downstream EventTranslator will discard it:
+```typescript
+message: {
+    role: "assistant",  // REQUIRED — EventTranslator checks this
+    cost: msg.total_cost_usd ?? 0,
+    tokens: { ... },
+    time: { completed: Date.now() },
+}
+```
+
+**A8.2 — Standardize all partIDs to `part-${event.index}`.** The tool_use `content_block_start` handler MUST use `part-${event.index}` as partID (NOT `event.content_block.id`). Store `content_block.id` in `callID` only:
+```typescript
+// Tool use start
+if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+    return {
+        type: "message.part.updated",
+        properties: {
+            messageID: msg.uuid,
+            partID: `part-${event.index}`,
+            part: {
+                id: `part-${event.index}`,
+                type: "tool",
+                callID: event.content_block.id,
+                tool: event.content_block.name,
+                state: { status: "pending" },
+                time: { start: Date.now() },
+            },
+        },
+    };
+}
+```
+
+**A8.3 — Remove `session.status` idle from `translateResult`.** The `processQueryStream` finally block (Task 10) already emits `session.status` idle for ALL exit paths. Having it in both places causes duplicate `done` events. Remove the `session.status` push from `translateResult()` — only keep the `message.updated` (cost data) and `session.error` (for errors).
+
+**A8.4 — Add `content_block_stop` translation for tool completion.** On `content_block_stop`, emit `message.part.updated` with `state: { status: "running" }` for tool_use blocks:
+```typescript
+if (event.type === "content_block_stop") {
+    return {
+        type: "message.part.updated",
+        properties: {
+            messageID: msg.uuid,
+            partID: `part-${event.index}`,
+            part: { state: { status: "running" }, time: { start: Date.now() } },
+        },
+    };
+}
+```
+
+**A8.5 — Replace `Record<string, any>` in SDKMessage.** Use typed sub-interfaces:
+```typescript
+interface SDKMessage {
+    type: string;
+    subtype?: string;
+    session_id?: string;
+    uuid?: string;
+    message?: {
+        id?: string; role?: string; content?: unknown[];
+        usage?: {
+            input_tokens?: number; output_tokens?: number;
+            cache_read_input_tokens?: number; cache_creation_input_tokens?: number;
+        };
+        created_at?: number;
+    };
+    event?: {
+        type?: string; index?: number;
+        delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+        content_block?: { type?: string; id?: string; name?: string };
+    };
+    result?: unknown;
+    total_cost_usd?: number;
+    usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+    tools?: unknown[];
+    model?: string;
+    mcp_servers?: unknown[];
+    parent_tool_use_id?: string | null;
+}
+```
+Remove the `[key: string]: unknown` index signature.
+
+**A8.6 — Remove `usage.cost` from translateAssistant.** The Anthropic API `BetaMessage.usage` has no `cost` field. Use `cost: 0` for intermediate messages. The final cost comes from `translateResult` via `msg.total_cost_usd`.
+
+**A8.7 — Add EventTranslator integration tests.** Add tests piping `translateSdkMessage()` output through `createTranslator().translate()` to verify the full BackendEvent → RelayMessage pipeline.
+
+**A8.8 — Add `busy` handler to EventTranslator.** In `src/lib/relay/event-translator.ts`, add handling for `session.status` with `type: "busy"`:
+- Emit a `status` RelayMessage with `processing: true`
+- Include init metadata (tools, model, MCP servers) when present in properties
+This makes `system/init` SDK events visible to the frontend.
+
+---
+
+### Task 9 Amendments (v3) — CRITICAL
+
+**A9.1 — Fix `SessionDetail` shape.** The `toSessionDetail()` and `localToSessionDetail()` helpers must produce the correct nested structure:
+```typescript
+private toSessionDetail(sdk: SDKSessionInfo): SessionDetail {
+    return {
+        id: sdk.sessionId,       // SDK uses sessionId, not id
+        title: sdk.summary ?? sdk.customTitle ?? "Untitled",
+        time: {
+            created: sdk.createdAt,
+            updated: sdk.lastModified,
+        },
+        // No backendType on SessionDetail — tag via separate mechanism
+    };
+}
+```
+Note: `SDKSessionInfo` uses `sessionId` (not `id`), `summary` (not `title`), `lastModified` (not `updated`), `createdAt` (not `created`).
+
+**A9.2 — Fix `subscribeEvents` multi-consumer crash.** Replace the single shared channel with a fan-out pattern. Each `subscribeEvents()` call creates its own `AsyncEventChannel`. The backend maintains a subscriber set:
+```typescript
+private readonly subscribers = new Set<AsyncEventChannel<BackendEvent>>();
+
+/** Called internally when pushing events (replaces direct this.channel.push) */
+private broadcastEvent(event: BackendEvent): void {
+    for (const ch of this.subscribers) {
+        ch.push(event);
+    }
+}
+
+async *subscribeEvents(signal: AbortSignal): AsyncIterable<BackendEvent> {
+    const ch = new AsyncEventChannel<BackendEvent>();
+    this.subscribers.add(ch);
+    signal.addEventListener("abort", () => {
+        this.subscribers.delete(ch);
+        ch.close();
+    }, { once: true });
+    try {
+        yield* ch;
+    } finally {
+        this.subscribers.delete(ch);
+        ch.close();
+    }
+}
+```
+Update ALL `this.channel.push(...)` calls in the class to use `this.broadcastEvent(...)`.
+
+**A9.3 — Remove duplicate session ID map.** Remove `sessionIdMap`. Keep only `cliSessionIds` (`relaySessionId → cliSessionId`).
+
+**A9.4 — Fix `toMessage` to produce valid `Message` shape.** The helper must return the correct structure with `parts` (not `content`), proper typing, and `sessionID`:
+```typescript
+private toMessage(sdkMsg: SessionMessage): Message | null {
+    if (sdkMsg.type !== "assistant" && sdkMsg.type !== "user") return null;
+    const raw = sdkMsg.message as { role?: string; content?: unknown[] };
+    return {
+        id: sdkMsg.uuid,
+        role: sdkMsg.type,
+        sessionID: sdkMsg.session_id,
+        parts: this.contentToParts(raw?.content),
+        time: { created: Date.now() },
+    };
+}
+```
+
+**A9.5 — Add `handleCanUseTool` stub in Task 9.** Define the arrow function as a stub that denies all tool use until Task 11 implements real handling:
+```typescript
+private handleCanUseTool = async (
+    _toolName: string, _input: unknown, _options?: unknown
+): Promise<{ behavior: "deny"; message: string }> => {
+    return { behavior: "deny", message: "Permission handling not yet initialized" };
+};
+```
+
+**A9.6 — Warmup query for `listAgents`/`listCommands`/`supportedModels`.** Per D13, `initialize()` should start a warmup query, capture init metadata from the `system/init` message, cache it, then close the query. Use cached data for `listAgents()`, `listCommands()`, etc.
+
+---
+
+### Task 10 Amendments (v3) — CRITICAL
+
+**A10.1 — Scope deferred cleanup to current session.** The `processQueryStream` finally block must NOT reject ALL global pending permissions/questions. Add `sessionId` to each `PermissionEntry` and `QuestionEntry`, then filter:
+```typescript
+// In finally block — only clean up THIS session's deferreds
+for (const [id, entry] of this.pendingPermissions) {
+    if (entry.sessionId === relaySessionId) {
+        entry.deferred.resolve({ decision: "deny" });
+        this.pendingPermissions.delete(id);
+    }
+}
+for (const [id, entry] of this.pendingQuestions) {
+    if (entry.sessionId === relaySessionId) {
+        entry.deferred.resolve({ rejected: true } as unknown as QuestionAnswer);
+        this.pendingQuestions.delete(id);
+    }
+}
+```
+
+**A10.2 — Add `sessionId` field to PermissionEntry and QuestionEntry.**
+```typescript
+interface PermissionEntry {
+    sessionId: string;  // ADD THIS
+    deferred: Deferred<PermissionDecision>;
+    metadata: { id: string; permission: string; input: unknown; timestamp: number };
+}
+interface QuestionEntry {
+    sessionId: string;  // ADD THIS
+    deferred: Deferred<QuestionResult>;
+    metadata: { id: string; toolUseId: string; input: unknown; timestamp: number };
+}
+```
+
+**A10.3 — Improve AbortError detection.** Check both `err.name` and the abort controller signal:
+```typescript
+} catch (err: unknown) {
+    const error = err as Error;
+    const isAbort = error?.name === "AbortError" ||
+        this.queries.get(relaySessionId)?.abortController.signal.aborted;
+    if (isAbort) {
+        // ... handle abort
+    } else {
+        // ... handle error
+    }
+}
+```
+
+**A10.4 — Use `broadcastEvent` instead of `this.channel.push`.** Per A9.2, all event pushes use the fan-out pattern.
+
+---
+
+### Task 11 Amendments (v3)
+
+**A11.1 — Add "always" permission caching.** Add a per-session `Set<string>` tracking always-allowed tools:
+```typescript
+private readonly alwaysAllowedTools = new Map<string, Set<string>>(); // sessionId -> toolNames
+
+// In handleCanUseTool, check before creating deferred:
+const sessionId = this.getActiveSessionForPermission();
+const allowed = this.alwaysAllowedTools.get(sessionId);
+if (allowed?.has(toolName)) {
+    return { behavior: "allow", updatedInput: toolInput };
+}
+
+// In replyPermission, when decision === "always":
+if (options.decision === "always") {
+    // ... resolve deferred as allow ...
+    const allowed = this.alwaysAllowedTools.get(sessionId) ?? new Set();
+    allowed.add(toolName);
+    this.alwaysAllowedTools.set(sessionId, allowed);
+}
+```
+
+**A11.2 — Replace `{ rejected: true }` type hack.** Use a discriminated union for question answers:
+```typescript
+type QuestionResult =
+    | { type: "answered"; answers: string[][] }
+    | { type: "rejected" };
+```
+Update `Deferred<QuestionResult>` and all resolution/checking sites.
+
+**A11.3 — Add `sessionId` to permission/question creation.** Per A10.2, when creating `PermissionEntry` or `QuestionEntry`, include the current session ID so cleanup can be scoped.
+
+---
+
+### Task 13 Amendments (v3)
+
+No additional amendments. Task 13 code was already updated in the v2 amendments.
+
+---
+
+### Task 14 Amendments (v3) — CRITICAL
+
+**A14.1 — Initialize before swap, shutdown after.** Change `BackendProxy.swap()` to initialize the new backend before changing the target, and shut down the old backend after:
+```typescript
+async swap(newBackend: SessionBackend): Promise<void> {
+    if (this.swapping) throw new Error("Swap already in progress");
+    this.swapping = true;
+    try {
+        await newBackend.initialize(); // Initialize FIRST — if this fails, old backend stays active
+        const old = this.target;
+        this.target = newBackend;       // Swap target AFTER successful init
+        for (const handler of this.swapHandlers) {
+            await handler(newBackend, old);
+        }
+        await old.shutdown();           // Shutdown old AFTER handlers complete
+    } finally {
+        this.swapping = false;
+    }
+}
+```
+Remove `initialize()` and `shutdown()` from swap handlers — they're now handled by `swap()` itself.
+
+**A14.2 — Wire server-side event consumption restart on swap.** Add an event consumer function that subscribes to the active backend's `subscribeEvents()` and pipes events through the EventTranslator → session filter → message cache → WS broadcast pipeline. Register as a swap handler:
+```typescript
+// In relay-stack setup
+let eventAbort = new AbortController();
+
+async function startEventConsumer(backend: SessionBackend) {
+    eventAbort.abort(); // Stop previous consumer
+    eventAbort = new AbortController();
+    const signal = eventAbort.signal;
+    for await (const event of backend.subscribeEvents(signal)) {
+        const result = translator.translate(event);
+        if (result.ok) {
+            for (const msg of result.messages) {
+                wsHandler.broadcast(msg);
+            }
+        }
+    }
+}
+
+// Start initial consumer
+startEventConsumer(backendProxy.getTarget());
+
+// Restart on swap
+backendProxy.onSwap(async (newBackend) => {
+    startEventConsumer(newBackend);
+    wsHandler.broadcast({ type: "backend_switched", backendType: newBackend.type });
+});
+```
+
+**A14.3 — Do NOT shut down backends on swap (D12).** Since session list merge requires both backends alive, `swap()` should NOT call `old.shutdown()`. Instead, it should call `old.deactivate()` or simply stop event consumption. Revise A14.1: remove `await old.shutdown()` — just stop the old event consumer (handled by `eventAbort.abort()` in A14.2).
+
+**A14.4 — Session list merge.** Override `listSessions` at the relay-stack level:
+```typescript
+async function mergedListSessions(options?: SessionListOptions): Promise<SessionDetail[]> {
+    const [ocSessions, caSessions] = await Promise.allSettled([
+        opencodeBackend.listSessions(options),
+        claudeAgentBackend.listSessions(options),
+    ]);
+    const results: SessionDetail[] = [];
+    if (ocSessions.status === "fulfilled") {
+        results.push(...ocSessions.value.map(s => ({ ...s, backendType: "opencode" as const })));
+    }
+    if (caSessions.status === "fulfilled") {
+        results.push(...caSessions.value.map(s => ({ ...s, backendType: "claude-agent" as const })));
+    }
+    return results.sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0));
+}
+```
+This is called by the session handler instead of `deps.sessionBackend.listSessions()`.
+
+**A14.5 — Fix `backendFactories` vs `backendRegistry` mismatch.** Pass a closure on HandlerDeps:
+```typescript
+// In HandlerDeps:
+maybeSwapBackend: (requiredType: "opencode" | "claude-agent") => Promise<void>;
+
+// In relay-stack, when building handler deps:
+maybeSwapBackend: async (requiredType) => {
+    if (backendProxy.type === requiredType) return;
+    const newBackend = requiredType === "opencode" ? opencodeBackend : claudeAgentBackend;
+    await backendProxy.swap(newBackend);
+}
+```
+Remove `backendRegistry` and `backendFactories` from HandlerDeps.
+
+**A14.6 — Stop/restart pollers on swap.** Add to swap handler:
+```typescript
+backendProxy.onSwap(async (newBackend) => {
+    if (newBackend.type === "claude-agent") {
+        statusPoller.stop();
+        pollerManager.stopAll();
+    } else if (newBackend.type === "opencode") {
+        statusPoller.start();
+        // Pollers restart naturally on next session activity
+    }
+});
+```
+
+**A14.7 — Add `capabilities` to `session_list` RelayMessage.** Add to the `session_list` variant in shared-types.ts:
+```typescript
+| { type: "session_list"; sessions: SessionInfo[]; roots: boolean; search?: boolean;
+    capabilities?: { fork: boolean; revert: boolean; unrevert: boolean } }
+```
+In the session handler, populate from the active backend:
+```typescript
+const capabilities = {
+    fork: typeof deps.sessionBackend.forkSession === "function",
+    revert: typeof deps.sessionBackend.revertSession === "function",
+    unrevert: typeof deps.sessionBackend.unrevertSession === "function",
+};
+```
+
+**A14.8 — Auth type detection wiring.** Add to `ProjectRelayConfig`:
+```typescript
+authType?: "api-key" | "subscription"; // from UI, env, config, or auto-detect
+```
+In the daemon's project registration, populate from:
+1. Explicit UI setting (stored in daemon config per project)
+2. Env var `CONDUIT_AUTH_TYPE`
+3. Config file `conduit.jsonc` field `authType`
+4. Auto-detection (attempt API key validation against Anthropic API)
+
+**A14.9 — Cross-backend history prepending: defer.** Explicitly deferred to a future plan. Document as known limitation: when switching backends mid-conversation, the new backend starts fresh. Users should create a new session when switching backends.
+
+---
+
+### Task 15 Amendments (v3)
+
+**A15.1 — Wire capabilities from server.** In `ws-dispatch.ts`, when handling `session_list`:
+```typescript
+if (msg.capabilities) {
+    backendState.capabilities = msg.capabilities;
+}
+```
+
+**A15.2 — Session list displays merged list.** Since session merge is server-side (A14.4), the frontend just renders whatever sessions the server sends. Tag sessions with a backend indicator.
+
+---
+
+### Design Decisions v3 (from Ask User questions)
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| SDK package name | `@anthropic-ai/claude-agent-sdk` | Confirmed on npm and official docs |
+| Auth type detection | UI toggle + env + config + auto-detect | Maximum flexibility |
+| System/init events | Add `busy` handler to EventTranslator | Makes init metadata available to frontend |
+| `content_block_stop` | Translate now | Prevents tools stuck in "pending" |
+| Session list merge | Merged from both backends | Both backends stay alive, merge server-side |
+| SDK API fallback | Verified — SDK exports exist; JSONL fallback if functions change | Belt and suspenders |
+| Discovery before query | Warmup query | Captures agent/command/model lists at init |
+| Per-message cost | Use `result.total_cost_usd` only | Accurate; intermediate messages show 0 |
