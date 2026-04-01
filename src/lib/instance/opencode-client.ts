@@ -427,13 +427,23 @@ export class OpenCodeClient {
 		return { providers, defaults, connected };
 	}
 
-	async listCommands(): Promise<Array<{ name: string; description?: string }>> {
-		const res = await this.get("/command");
+	async listCommands(
+		directory?: string,
+	): Promise<Array<{ name: string; description?: string }>> {
+		const path = directory
+			? `/command?directory=${encodeURIComponent(directory)}`
+			: "/command";
+		const res = await this.get(path);
 		return Array.isArray(res) ? res : [];
 	}
 
-	async listSkills(): Promise<Array<{ name: string; description?: string }>> {
-		const res = await this.get("/skill");
+	async listSkills(
+		directory?: string,
+	): Promise<Array<{ name: string; description?: string }>> {
+		const path = directory
+			? `/skill?directory=${encodeURIComponent(directory)}`
+			: "/skill";
+		const res = await this.get(path);
 		return Array.isArray(res) ? res : [];
 	}
 

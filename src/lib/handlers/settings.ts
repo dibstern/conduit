@@ -12,7 +12,7 @@ export async function handleGetCommands(
 	clientId: string,
 	_payload: PayloadMap["get_commands"],
 ): Promise<void> {
-	const commands = await deps.client.listCommands();
+	const commands = await deps.client.listCommands(deps.config.projectDir);
 	deps.wsHandler.sendTo(clientId, { type: "command_list", commands });
 }
 

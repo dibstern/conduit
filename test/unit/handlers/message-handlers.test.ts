@@ -1032,6 +1032,15 @@ describe("handleGetCommands", () => {
 			commands: [{ name: "/help", description: "Get help" }],
 		});
 	});
+
+	it("passes projectDir to listCommands for per-project skill scoping", async () => {
+		const deps = createMockHandlerDeps();
+		vi.mocked(deps.client.listCommands).mockResolvedValue([]);
+		await handleGetCommands(deps, "client-1", {});
+		expect(deps.client.listCommands).toHaveBeenCalledWith(
+			deps.config.projectDir,
+		);
+	});
 });
 
 // ─── handleGetProjects ───────────────────────────────────────────────────────
