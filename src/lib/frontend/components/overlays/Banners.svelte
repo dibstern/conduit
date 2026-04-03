@@ -77,10 +77,17 @@
 				</span>
 				<span class="banner-text flex-1 min-w-0">
 					{banner.text}
-					{#if banner.version}
-						<span class="font-semibold">{banner.version}</span>
-					{/if}
 				</span>
+				{#if banner.link}
+					<a
+						href={banner.link}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="shrink-0 text-current underline cursor-pointer hover:opacity-80"
+					>
+						npm
+					</a>
+				{/if}
 				{#if banner.dismissible}
 					<button
 						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 cursor-pointer bg-transparent border-none p-0 leading-none"

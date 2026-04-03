@@ -256,7 +256,7 @@ export interface BannerConfig {
 	icon: string;
 	text: string;
 	dismissible: boolean;
-	version?: string;
+	link?: string;
 }
 
 // ─── Info Panel Types ────────────────────────────────────────────────────────

@@ -1356,6 +1356,12 @@ export class Daemon {
 					this.setProjectInstance(slug, instanceId),
 				...(this.pushManager != null && { pushManager: this.pushManager }),
 				configDir: this.configDir,
+				...(this.versionChecker != null && {
+					getCachedUpdate: () =>
+						this.versionChecker?.isUpdateAvailable()
+							? this.versionChecker.getLatestVersion()
+							: null,
+				}),
 			});
 		};
 	}

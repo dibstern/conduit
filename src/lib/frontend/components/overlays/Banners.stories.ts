@@ -22,10 +22,10 @@ export const UpdateBanner: Story = {
 			{
 				id: "update-1",
 				variant: "update",
-				icon: "circle-arrow-up",
-				text: "A new version is available:",
+				icon: "arrow-up-circle",
+				text: "Update available: v1.2.3",
 				dismissible: true,
-				version: "v1.2.3",
+				link: "https://www.npmjs.com/package/conduit-code",
 			},
 		];
 	},
@@ -65,10 +65,10 @@ export const MultipleBanners: Story = {
 			{
 				id: "update-1",
 				variant: "update",
-				icon: "circle-arrow-up",
-				text: "A new version is available:",
+				icon: "arrow-up-circle",
+				text: "Update available: v1.2.3",
 				dismissible: true,
-				version: "v1.2.3",
+				link: "https://www.npmjs.com/package/conduit-code",
 			},
 			{
 				id: "skip-perms-1",

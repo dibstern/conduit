@@ -258,6 +258,8 @@ export interface ProjectRelayConfig {
 		lost: number[];
 		active: number[];
 	}>;
+	/** Return cached update version if one is available (for replaying to new clients). */
+	getCachedUpdate?: () => string | null;
 	/** Optional push notification manager for server-side push delivery */
 	pushManager?: PushNotificationManager;
 	/** Config directory for cache storage (default: projectDir/.conduit) */

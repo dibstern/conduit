@@ -45,6 +45,8 @@ export interface ClientInitDeps {
 	>;
 	/** Optional supplier of the current OpenCode instance list */
 	getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
+	/** Optional supplier of cached update version (for replaying to new clients) */
+	getCachedUpdate?: () => string | null;
 	log: Logger;
 }
 
@@ -397,5 +399,13 @@ export async function handleClientConnected(
 	if (deps.getInstances) {
 		const instances = deps.getInstances();
 		wsHandler.sendTo(clientId, { type: "instance_list", instances });
+	}
+
+	// ── Cached update notification ───────────────────────────────────────
+	if (deps.getCachedUpdate) {
+		const version = deps.getCachedUpdate();
+		if (version) {
+			wsHandler.sendTo(clientId, { type: "update_available", version });
+		}
 	}
 }

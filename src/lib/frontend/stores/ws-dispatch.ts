@@ -102,7 +102,7 @@ import {
 	showToast,
 	updateContextPercent,
 } from "./ui.svelte.js";
-import { setLatestVersion } from "./version.svelte.js";
+
 import {
 	directoryListeners,
 	fileBrowserListeners,
@@ -901,14 +901,10 @@ function handleBannerMessage(msg: RelayMessage): void {
 				id: "update-available",
 				variant: "update",
 				icon: "arrow-up-circle",
-				text: `Update available: ${ver}`,
+				text: `Update available: v${ver}`,
 				dismissible: true,
-				...(msg.version != null && { version: msg.version }),
+				link: "https://www.npmjs.com/package/conduit-code",
 			});
-			// Also track in version store for sidebar footer
-			if (msg.version) {
-				setLatestVersion(msg.version);
-			}
 			break;
 		}
 		case "skip_permissions":

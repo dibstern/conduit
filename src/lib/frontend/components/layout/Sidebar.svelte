@@ -240,17 +240,6 @@
 		id="sidebar-footer"
 		class="px-3.5 py-2.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+12px)] border-t border-border-subtle shrink-0"
 	>
-		{#if versionState.latest}
-			<a
-				href="https://www.npmjs.com/package/conduit-code"
-				target="_blank"
-				rel="noopener noreferrer"
-			class="flex items-center gap-2 px-2 py-1.5 mb-1.5 rounded-md bg-brand-a/10 text-brand-a text-sm font-medium no-underline hover:bg-brand-a/15 transition-colors font-brand"
-			>
-				<Icon name="arrow-up-circle" size={13} />
-				<span>Update available: v{versionState.latest}</span>
-			</a>
-		{/if}
 		{#if versionState.current}
 			<div class="text-xs text-text-dimmer px-2 font-brand">
 				conduit v{versionState.current}

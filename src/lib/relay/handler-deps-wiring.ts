@@ -96,6 +96,9 @@ export function wireHandlerDeps(
 		permissionBridge,
 		statusPoller,
 		...(config.getInstances != null && { getInstances: config.getInstances }),
+		...(config.getCachedUpdate != null && {
+			getCachedUpdate: config.getCachedUpdate,
+		}),
 		log: wsLog,
 	};
 
