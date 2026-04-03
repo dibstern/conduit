@@ -89,14 +89,15 @@ The daemon stays running after the terminal closes — sessions survive.
 
 ## Why Conduit?
 
-| | tmux / SSH | ntfy / Pushover hooks | ngrok / tunnel | **Conduit** |
-|---|---|---|---|---|
-| Mobile UI | ❌ Raw terminal | ❌ Alert only | ❌ Raw terminal | ✅ Full GUI |
-| Push notifications | ❌ | ✅ | ❌ | ✅ |
-| One-tap approval | ❌ | ❌ No action UI | ❌ | ✅ |
-| Stays on your network | ✅ | ✅ | ❌ Third-party relay | ✅ |
-| Multi-project | ❌ | ❌ | ❌ | ✅ |
-| PWA / home screen | ❌ | ❌ | ❌ | ✅ |
+| | tmux / SSH | ntfy / Pushover hooks | ngrok / tunnel | Clay | **Conduit** |
+|---|---|---|---|---|---|
+| Mobile UI | ❌ Raw terminal | ❌ Alert only | ❌ Raw terminal | ✅ Full GUI | ✅ Full GUI |
+| Push notifications | ❌ | ✅ | ❌ | ✅ | ✅ |
+| One-tap approval | ❌ | ❌ No action UI | ❌ | ✅ | ✅ |
+| Stays on your network | ✅ | ✅ | ❌ Third-party relay | ✅ | ✅ |
+| Multi-project | ❌ | ❌ | ❌ | ❌ | ✅ |
+| PWA / home screen | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Works with any model | ❌ | ❌ | ❌ | ❌ Claude only | ✅ |
 
 <details>
 <summary>Detailed comparisons</summary>
@@ -119,7 +120,7 @@ Raw terminal, no approval UI, no push notifications, no mobile-optimised
 interface. You end up checking manually instead of getting notified.
 
 **What about Clay (claude-relay)?**
-Conduit exists because of [Clay](htWHtps://github.com/chadbyte/clay). I loved
+Conduit exists because of [Clay](https://github.com/chadbyte/clay). I loved
 what Clay did for Claude Code — a browser UI on any device, push
 notifications, mobile approvals — and wanted the same experience for
 [OpenCode](https://opencode.ai), where I could use any model and provider.
@@ -150,7 +151,6 @@ using OAuth.
 **Sessions**
 - Session persistence across reconnects, terminal closes, and daemon restarts
 - Session forking — branch from any assistant message
-- Rewind — revert session state from the browser
 - Draft persistence — unsent messages restored when you switch back
 
 **Rendering**
@@ -166,11 +166,11 @@ using OAuth.
 
 **File and terminal**
 - File browser with breadcrumbs, preview modal, and live reload on external changes
-- xterm.js terminal tabs — multi-tab, rename, resize-aware, mobile special-key toolbar
+- xterm.js terminal tabs — multi-tab, rename, resize-aware, font resizing for easier mobile viewing, mobile special-key toolbar
 
 **OpenCode-specific**
 - Agent selector (Claude, custom agents)
-- Model and provider picker
+- Model and provider picker with thinking level selector
 - Question/ask-user response UI
 
 **Mobile**
@@ -333,6 +333,20 @@ If you're using Conduit, let us know how in Discussions:
 Independent project. Not affiliated with the OpenCode project or its authors. 
 
 Conduit is provided "as is" without warranty of any kind. Users are responsible for complying with the terms of service of underlying AI providers (e.g., Anthropic, OpenAI) and all applicable terms of any third-party services. Features such as multi-user mode are experimental and may involve sharing access to API-based services. Before enabling such features, review your provider's usage policies regarding account sharing, acceptable use, and any applicable rate limits or restrictions. The authors assume no liability for misuse or violations arising from the use of this software.
+
+## Future plans
+
+- Automated version updates in the UI
+- UI design improvements
+- Claude Agent SDK integration (removing the need for Claude-specific workarounds)
+- Edited-files UI with split and unified diff views
+- Quota usage info panel
+- Keyboard shortcuts
+- Session rewind support - revert session state from the browser
+- Automatic certificate download
+- Code quality improvements and performance optimisations
+
+---
 
 ## License
 
