@@ -118,6 +118,21 @@ or Tailscale — nothing routes through an external service.
 Raw terminal, no approval UI, no push notifications, no mobile-optimised
 interface. You end up checking manually instead of getting notified.
 
+**What about Clay (claude-relay)?**
+Conduit exists because of [Clay](htWHtps://github.com/chadbyte/clay). I loved
+what Clay did for Claude Code — a browser UI on any device, push
+notifications, mobile approvals — and wanted the same experience for
+[OpenCode](https://opencode.ai), where I could use any model and provider.
+Much of Conduit's original implementation was built on Clay's approach, and
+that foundation made this project possible.
+
+Where the two diverge: Clay embeds the Claude Agent SDK and drives Claude Code
+directly, while Conduit is a relay for `opencode serve`. If you use Claude
+Code, Clay is the project you want. If you use OpenCode, Conduit brings that
+same vision to your setup. I do plan, however, to add support for Claude Code
+now that opencode doesn't officially support Claude subscription accounts
+using OAuth.
+
 </details>
 
 ---
@@ -299,6 +314,17 @@ graph LR
 - Node.js 20.19+
 - [mkcert](https://github.com/FiloSottile/mkcert) — push notifications (optional)
 - [Tailscale](https://tailscale.com) — remote access beyond LAN (optional)
+
+---
+
+## Contributing
+
+Bug fixes and typo corrections are welcome. For feature suggestions, please
+open an issue first:
+[github.com/dibstern/conduit/issues](https://github.com/dibstern/conduit/issues)
+
+If you're using Conduit, let us know how in Discussions:
+[github.com/dibstern/conduit/discussions](https://github.com/dibstern/conduit/discussions)
 
 ---
 
