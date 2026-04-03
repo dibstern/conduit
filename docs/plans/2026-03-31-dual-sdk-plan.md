@@ -1,6 +1,8 @@
-# Dual SDK Implementation Plan v2
+# Dual SDK Implementation Plan v3
 
 > **For Agent:** REQUIRED SUB-SKILL: Use executing-plans to implement this plan task-by-task.
+>
+> **IMPORTANT:** Read the "Audit Amendments v3" section at the bottom of this file BEFORE implementing any task. Those amendments override inline task code where they conflict.
 
 **Goal:** Refactor conduit to support both the OpenCode SDK and the Claude Agent SDK side-by-side, enabling Claude subscription account users to work through conduit via the Agent SDK while keeping OpenCode for all other providers.
 
@@ -8,13 +10,18 @@
 
 **Design doc:** `docs/plans/2026-03-31-dual-sdk-design.md`
 
+**Audit history:**
+- v1 → v2: 57 amendments (see "Audit Amendments v1 → v2" below)
+- v2 audit: 117 findings (see "Audit Amendments v2 audit" below)
+- v2 → v3: 30 amendments from re-audit (see "Audit Amendments v3" at bottom)
+
 **Reference impl:** `~/src/personal/opencode-relay/claude-relay/lib/sdk-bridge.js` (Clay)
 
 **Tech Stack:** TypeScript, `@opencode-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, Vitest
 
 ---
 
-## Audit Amendments (v1 -> v2)
+## Audit Amendments (v1 → v2)
 
 Key corrections incorporated from the 57-amendment audit:
 
@@ -32,7 +39,7 @@ Key corrections incorporated from the 57-amendment audit:
 12. **No deferred timeout**: Permissions stay pending until explicitly resolved. Re-shown on reconnect.
 13. **AsyncEventChannel**: Moved earlier (Task 2) — shared by both backends.
 
-## Audit Amendments (v2 audit — 117 findings)
+## Audit Amendments (v2 audit — 117 findings, incorporated inline)
 
 Synthesis: `docs/plans/2026-03-31-dual-sdk-v2-audit.md`
 Individual reports: `docs/plans/audits/dual-sdk-v2-task-*.md`
