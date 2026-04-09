@@ -9,6 +9,7 @@ import type {
 } from "../instance/opencode-client.js";
 import type { Logger } from "../logger.js";
 import type { ReadAdapter } from "../persistence/read-adapter.js";
+import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { MessageCache } from "../relay/message-cache.js";
 import type { MessagePollerManager } from "../relay/message-poller-manager.js";
 import type { PendingUserMessages } from "../relay/pending-user-messages.js";
@@ -99,6 +100,13 @@ export interface HandlerDeps {
 	scanDeps?: ScanDeps;
 	/** Phase 4: Read adapter for SQLite read switchover (optional — only available when persistence is configured) */
 	readAdapter?: ReadAdapter;
+	/**
+	 * Phase 5: OrchestrationEngine for routing prompts through provider adapters.
+	 * When set, handleMessage() dispatches through the engine instead of calling
+	 * client.sendMessageAsync() directly. Optional — tests may omit it; production
+	 * always provides it via relay-stack.ts.
+	 */
+	orchestrationEngine?: OrchestrationEngine;
 }
 
 export type MessageHandler<K extends keyof PayloadMap = keyof PayloadMap> = (

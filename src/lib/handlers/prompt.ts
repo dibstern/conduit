@@ -1,9 +1,19 @@
 // ─── Prompt Handlers ─────────────────────────────────────────────────────────
 
 import { formatErrorDetail, RelayError } from "../errors.js";
+import type { SendTurnInput } from "../provider/types.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSession } from "./resolve-session.js";
 import type { HandlerDeps, PromptOptions } from "./types.js";
+
+// ─── Minimal no-op EventSink for OpenCodeAdapter (which ignores it) ──────────
+// OpenCodeAdapter routes messages via REST + SSE, not EventSink. The sink is
+// required by the SendTurnInput interface but unused on the OpenCode path.
+const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
+	push: () => Promise.resolve(),
+	requestPermission: () => Promise.resolve({ decision: "once" as const }),
+	requestQuestion: () => Promise.resolve({}),
+};
 
 // ─── Per-session input draft store ──────────────────────────────────────────
 // Stores the last input_sync text per session so that newly connecting clients
@@ -99,23 +109,88 @@ export async function handleMessage(
 		);
 		deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
 	});
-	try {
-		await deps.client.sendMessageAsync(activeId, prompt);
-	} catch (sendErr) {
-		deps.log.warn(
-			`client=${clientId} session=${activeId} Failed to send message:`,
-			formatErrorDetail(sendErr),
-		);
-		deps.overrides.clearProcessingTimeout(activeId);
-		deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
-		deps.wsHandler.sendTo(
-			clientId,
-			RelayError.fromCaught(
-				sendErr,
-				"SEND_FAILED",
-				"Failed to send message",
-			).toMessage(),
-		);
+	// Phase 5: Route through OrchestrationEngine when available; fall back to
+	// direct REST call for legacy paths (e.g. tests that don't provide the engine).
+	if (deps.orchestrationEngine) {
+		const model = deps.overrides.getModel(activeId);
+		const sendTurnInput: SendTurnInput = {
+			sessionId: activeId,
+			turnId: crypto.randomUUID(),
+			prompt: text,
+			history: [],
+			providerState: {},
+			// Only pass model when user has explicitly selected one
+			...(model && deps.overrides.isModelUserSelected(activeId)
+				? {
+						model: {
+							providerId: model.providerID,
+							modelId: model.modelID,
+						},
+					}
+				: {}),
+			workspaceRoot: deps.config.projectDir ?? "",
+			eventSink: NOOP_EVENT_SINK,
+			abortSignal: new AbortController().signal,
+			...(images && images.length > 0 ? { images } : {}),
+			...(sessionAgent ? { agent: sessionAgent } : {}),
+			...(variant ? { variant } : {}),
+		};
+		const providerId =
+			deps.orchestrationEngine.getProviderForSession(activeId) ?? "opencode";
+		// Fire-and-forget: the engine manages the turn lifecycle asynchronously.
+		// Errors are surfaced via the .then() handler below.
+		void deps.orchestrationEngine
+			.dispatch({ type: "send_turn", providerId, input: sendTurnInput })
+			.then((result) => {
+				if (result.status === "error") {
+					const msg = result.error?.message ?? "Send failed";
+					deps.log.warn(
+						`client=${clientId} session=${activeId} engine dispatch error: ${msg}`,
+					);
+					deps.overrides.clearProcessingTimeout(activeId);
+					deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+					deps.wsHandler.sendTo(
+						clientId,
+						new RelayError(msg, { code: "SEND_FAILED" }).toMessage(),
+					);
+				}
+			})
+			.catch((sendErr) => {
+				deps.log.warn(
+					`client=${clientId} session=${activeId} Failed to send message:`,
+					formatErrorDetail(sendErr),
+				);
+				deps.overrides.clearProcessingTimeout(activeId);
+				deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+				deps.wsHandler.sendTo(
+					clientId,
+					RelayError.fromCaught(
+						sendErr,
+						"SEND_FAILED",
+						"Failed to send message",
+					).toMessage(),
+				);
+			});
+	} else {
+		// Legacy path: direct REST call (used when engine is not wired, e.g. tests)
+		try {
+			await deps.client.sendMessageAsync(activeId, prompt);
+		} catch (sendErr) {
+			deps.log.warn(
+				`client=${clientId} session=${activeId} Failed to send message:`,
+				formatErrorDetail(sendErr),
+			);
+			deps.overrides.clearProcessingTimeout(activeId);
+			deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+			deps.wsHandler.sendTo(
+				clientId,
+				RelayError.fromCaught(
+					sendErr,
+					"SEND_FAILED",
+					"Failed to send message",
+				).toMessage(),
+			);
+		}
 	}
 }
 

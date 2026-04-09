@@ -15,6 +15,7 @@ import type { OpenCodeClient } from "../instance/opencode-client.js";
 import type { Logger } from "../logger.js";
 import { type LogLevel, setLogLevel } from "../logger.js";
 import type { ReadAdapter } from "../persistence/read-adapter.js";
+import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { ClientMessageQueue } from "../server/client-message-queue.js";
 import { RateLimiter } from "../server/rate-limiter.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
@@ -52,6 +53,8 @@ export interface HandlerDepsWiringDeps {
 	ptyDeps: PtyUpstreamDeps;
 	/** Phase 4: Read adapter for SQLite read switchover (optional). */
 	readAdapter?: ReadAdapter;
+	/** Phase 5: Orchestration layer for provider adapter routing (optional). */
+	orchestrationLayer?: OrchestrationLayer;
 }
 
 // ─── Return type ─────────────────────────────────────────────────────────────
@@ -85,6 +88,7 @@ export function wireHandlerDeps(
 		pollerManager,
 		ptyDeps,
 		readAdapter,
+		orchestrationLayer,
 	} = deps;
 
 	// Per-client sliding-window rate limiter for chat messages
@@ -173,6 +177,9 @@ export function wireHandlerDeps(
 			scanDeps: { triggerScan: config.triggerScan },
 		}),
 		...(readAdapter != null && { readAdapter }),
+		...(orchestrationLayer != null && {
+			orchestrationEngine: orchestrationLayer.engine,
+		}),
 	};
 
 	const clientQueue = new ClientMessageQueue({

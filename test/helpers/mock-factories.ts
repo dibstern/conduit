@@ -9,6 +9,7 @@ import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
 import type { HandlerDeps } from "../../src/lib/handlers/types.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
+import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import { PendingUserMessages } from "../../src/lib/relay/pending-user-messages.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
@@ -318,6 +319,25 @@ export function createMockProjectRelay(
 			createMockPermissionBridge() as unknown as ProjectRelay["permissionBridge"],
 		messageCache:
 			createMockMessageCache() as unknown as ProjectRelay["messageCache"],
+		orchestration: {
+			engine: {
+				dispatch: vi.fn().mockResolvedValue({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				}),
+				bindSession: vi.fn(),
+				unbindSession: vi.fn(),
+				getProviderForSession: vi.fn().mockReturnValue(undefined),
+				listBoundSessions: vi.fn().mockReturnValue([]),
+				shutdown: vi.fn().mockResolvedValue(undefined),
+			},
+			registry: {} as OrchestrationLayer["registry"],
+			adapter: {} as OrchestrationLayer["adapter"],
+			wireSSEToAdapter: vi.fn(),
+		} as unknown as OrchestrationLayer,
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,

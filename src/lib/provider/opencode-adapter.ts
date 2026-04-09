@@ -115,7 +115,10 @@ export class OpenCodeAdapter implements ProviderAdapter {
 		// Build the prompt options for OpenCode REST
 		const promptOptions: PromptOptions = {
 			text: prompt,
-			model: { providerID: model.providerId, modelID: model.modelId },
+			// Only include model if explicitly selected (both ids must be non-empty)
+			...(model?.providerId && model?.modelId
+				? { model: { providerID: model.providerId, modelID: model.modelId } }
+				: {}),
 			...(images && images.length > 0 ? { images: [...images] } : {}),
 			...(agent ? { agent } : {}),
 			...(variant ? { variant } : {}),

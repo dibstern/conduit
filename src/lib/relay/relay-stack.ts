@@ -18,6 +18,10 @@ import { DualWriteHook } from "../persistence/dual-write-hook.js";
 import { ReadAdapter } from "../persistence/read-adapter.js";
 import { createReadFlags } from "../persistence/read-flags.js";
 import { ReadQueryService } from "../persistence/read-query-service.js";
+import {
+	createOrchestrationLayer,
+	type OrchestrationLayer,
+} from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { RelayServer } from "../server/server.js";
@@ -58,6 +62,8 @@ export interface ProjectRelay {
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
 	messageCache: MessageCache;
+	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
+	orchestration: OrchestrationLayer;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -153,6 +159,13 @@ export async function createProjectRelay(
 				directory: config.projectDir,
 			}),
 	});
+
+	// ── Orchestration layer (Phase 5: provider adapter routing) ─────────────
+	const orchestration = createOrchestrationLayer({
+		client,
+		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+	});
+
 	const translator = createTranslator();
 	const permissionBridge = new PermissionBridge();
 	const sessionMgr: SessionManager = new SessionManager({
@@ -336,6 +349,7 @@ export async function createProjectRelay(
 		pollerManager,
 		ptyDeps,
 		...(readAdapter != null && { readAdapter }),
+		orchestrationLayer: orchestration,
 	});
 
 	// ── SSE consumer ────────────────────────────────────────────────────────
@@ -390,6 +404,13 @@ export async function createProjectRelay(
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	await sseConsumer.connect();
+
+	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
+	// Resolves the deferred promise in OpenCodeAdapter.sendTurn() when a
+	// session transitions to idle, allowing the engine dispatch to complete.
+	orchestration.wireSSEToAdapter((event, handler) => {
+		sseConsumer.on(event, handler);
+	});
 
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
 	const {
@@ -473,6 +494,7 @@ export async function createProjectRelay(
 		translator,
 		permissionBridge,
 		messageCache,
+		orchestration,
 
 		isAnySessionProcessing() {
 			const statuses = statusPoller.getCurrentStatuses();
@@ -486,11 +508,13 @@ export async function createProjectRelay(
 			await sseConsumer.disconnect();
 			pollerManager.stopAll();
 			statusPoller.stop();
+			// 2. Shut down orchestration engine (rejects pending turns)
+			await orchestration.engine.shutdown();
 			try {
-				// 2. Flush all pending cache writes to disk
+				// 3. Flush all pending cache writes to disk
 				await messageCache.flush();
 			} finally {
-				// 3. Clean up remaining resources (must run even if flush fails)
+				// 4. Clean up remaining resources (must run even if flush fails)
 				clearInterval(timeoutTimer);
 				clearInterval(rateLimitCleanupTimer);
 				overrides.dispose();
