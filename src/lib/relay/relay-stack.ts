@@ -8,13 +8,14 @@
 import { stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
 import { createLogger, type Logger } from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
+import type { PersistenceLayer } from "../persistence/persistence-layer.js";
 import { ReadAdapter } from "../persistence/read-adapter.js";
 import { createReadFlags } from "../persistence/read-flags.js";
 import { ReadQueryService } from "../persistence/read-query-service.js";
@@ -34,10 +35,8 @@ import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 import { createTranslator } from "./event-translator.js";
 import { wireHandlerDeps } from "./handler-deps-wiring.js";
-import { MessageCache } from "./message-cache.js";
 import { MessagePollerManager } from "./message-poller-manager.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
-import { PendingUserMessages } from "./pending-user-messages.js";
 import { wirePollers } from "./poller-wiring.js";
 import { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
@@ -46,7 +45,6 @@ import { wireSessionLifecycle } from "./session-lifecycle-wiring.js";
 import { SSEConsumer } from "./sse-consumer.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { wireTimers } from "./timer-wiring.js";
-import { ToolContentStore } from "./tool-content-store.js";
 
 // ─── WebSocket library for upstream PTY connections ─────────────────────────
 const requireWs = createRequire(import.meta.url);
@@ -61,9 +59,10 @@ export interface ProjectRelay {
 	sessionMgr: SessionManager;
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
-	messageCache: MessageCache;
 	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
 	orchestration: OrchestrationLayer;
+	/** SQLite persistence layer — present when the relay was configured with a db path. */
+	persistence?: PersistenceLayer;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -111,8 +110,6 @@ export interface RelayStack {
 	sessionMgr: SessionManager;
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
-	/** Exposed for test access (clear cache to force REST fallback). */
-	messageCache: MessageCache;
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;
@@ -181,21 +178,6 @@ export async function createProjectRelay(
 		...(config.configDir != null && { configDir: config.configDir }),
 	});
 
-	// ── Per-session event cache ──
-	const cacheDir = config.configDir
-		? join(config.configDir, "cache", config.slug, "sessions")
-		: join(config.projectDir ?? process.cwd(), ".conduit", "sessions");
-	const messageCache = new MessageCache(cacheDir);
-	await messageCache.loadFromDisk();
-	messageCache.loadMeta();
-	// Fire-and-forget: in-memory repair is synchronous (runs before yielding),
-	// only the disk flush is async. No need to block startup.
-	messageCache
-		.repairColdSessions()
-		.catch((err) => log.warn(`Cold cache repair flush failed: ${err}`));
-
-	const toolContentStore = new ToolContentStore();
-
 	// Per-session overrides (agent, model, processing timeout)
 	const overrides = new SessionOverrides(serviceRegistry);
 
@@ -252,7 +234,6 @@ export async function createProjectRelay(
 	// pty_close (tab X button) or upstream disconnect.
 
 	const ptyManager = new PtyManager({ log: ptyLog });
-	const pendingUserMessages = new PendingUserMessages();
 
 	// ── Health check ────────────────────────────────────────────────────────
 
@@ -335,12 +316,9 @@ export async function createProjectRelay(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
-		pendingUserMessages,
 		permissionBridge,
 		overrides,
 		ptyManager,
-		toolContentStore,
 		config,
 		log,
 		wsLog,
@@ -381,11 +359,8 @@ export async function createProjectRelay(
 		{
 			translator,
 			sessionMgr,
-			messageCache,
-			pendingUserMessages,
 			permissionBridge,
 			overrides,
-			toolContentStore,
 			wsHandler,
 			...(config.pushManager != null && { pushManager: config.pushManager }),
 			log: sseLog,
@@ -424,8 +399,6 @@ export async function createProjectRelay(
 		wsHandler,
 		sessionMgr,
 		overrides,
-		toolContentStore,
-		messageCache,
 		statusPoller,
 		pollerManager,
 		registry,
@@ -464,7 +437,6 @@ export async function createProjectRelay(
 		pollerManager,
 		sseConsumer,
 		statusPoller,
-		pendingUserMessages,
 		wsHandler,
 		sessionMgr,
 		pipelineDeps,
@@ -493,8 +465,8 @@ export async function createProjectRelay(
 		sessionMgr,
 		translator,
 		permissionBridge,
-		messageCache,
 		orchestration,
+		...(config.persistence ? { persistence: config.persistence } : {}),
 
 		isAnySessionProcessing() {
 			const statuses = statusPoller.getCurrentStatuses();
@@ -504,23 +476,18 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
-			// 1. Stop event sources (prevents new events from being cached)
+			// 1. Stop event sources
 			await sseConsumer.disconnect();
 			pollerManager.stopAll();
 			statusPoller.stop();
 			// 2. Shut down orchestration engine (rejects pending turns)
 			await orchestration.engine.shutdown();
-			try {
-				// 3. Flush all pending cache writes to disk
-				await messageCache.flush();
-			} finally {
-				// 4. Clean up remaining resources (must run even if flush fails)
-				clearInterval(timeoutTimer);
-				clearInterval(rateLimitCleanupTimer);
-				overrides.dispose();
-				ptyManager.closeAll();
-				wsHandler.close();
-			}
+			// 3. Clean up remaining resources
+			clearInterval(timeoutTimer);
+			clearInterval(rateLimitCleanupTimer);
+			overrides.dispose();
+			ptyManager.closeAll();
+			wsHandler.close();
 		},
 	};
 }
@@ -755,7 +722,6 @@ export async function createRelayStack(
 		sessionMgr: relay.sessionMgr,
 		translator: relay.translator,
 		permissionBridge: relay.permissionBridge,
-		messageCache: relay.messageCache,
 
 		getPort() {
 			const addr = httpServer.address();

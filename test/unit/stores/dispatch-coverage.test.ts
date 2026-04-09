@@ -1,11 +1,11 @@
 // ─── Dispatch Coverage ───────────────────────────────────────────────────────
-// Verifies that every CACHEABLE_EVENT_TYPE has a fixture and is handled by
+// Verifies that every PERSISTED_EVENT_TYPE has a fixture and is handled by
 // replayEvents() without error. This is the safety net for the dispatch
-// deduplication refactor: if a new cacheable type is added but not handled
+// deduplication refactor: if a new persisted type is added but not handled
 // by dispatchChatEvent(), this test will fail.
 //
 // Approach:
-//   1. Build a minimal fixture for each CACHEABLE_EVENT_TYPE
+//   1. Build a minimal fixture for each PERSISTED_EVENT_TYPE
 //   2. Replay the full fixture array
 //   3. Verify no errors and that all fixtures were processed
 //
@@ -51,8 +51,8 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
-	CACHEABLE_EVENT_TYPES,
-	type CacheableEventType,
+	PERSISTED_EVENT_TYPES,
+	type PersistedEventType,
 } from "../../../src/lib/relay/event-pipeline.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
@@ -79,7 +79,7 @@ async function replayValidated(events: RelayMessage[]): Promise<void> {
 }
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
-// Minimal fixture for each CACHEABLE_EVENT_TYPE. Sequenced to form a
+// Minimal fixture for each PERSISTED_EVENT_TYPE. Sequenced to form a
 // realistic session: user sends message → LLM thinks → streams text →
 // calls a tool → gets result → produces final result → completes.
 // Includes an error and a retry error for coverage.
@@ -129,18 +129,18 @@ const FIXTURE_EVENTS: RelayMessage[] = [
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("Dispatch coverage: every CACHEABLE_EVENT_TYPE handled by replay", () => {
-	it("fixture array covers every CACHEABLE_EVENT_TYPE", () => {
+describe("Dispatch coverage: every PERSISTED_EVENT_TYPE handled by replay", () => {
+	it("fixture array covers every PERSISTED_EVENT_TYPE", () => {
 		const fixtureTypes = new Set(FIXTURE_EVENTS.map((e) => e.type));
 		const missing: string[] = [];
-		for (const cacheableType of CACHEABLE_EVENT_TYPES) {
+		for (const cacheableType of PERSISTED_EVENT_TYPES) {
 			if (!fixtureTypes.has(cacheableType)) {
 				missing.push(cacheableType);
 			}
 		}
 		expect(
 			missing,
-			`Missing fixture for CACHEABLE_EVENT_TYPES: ${missing.join(", ")}`,
+			`Missing fixture for PERSISTED_EVENT_TYPES: ${missing.join(", ")}`,
 		).toHaveLength(0);
 	});
 
@@ -200,7 +200,7 @@ describe("Dispatch coverage: every CACHEABLE_EVENT_TYPE handled by replay", () =
 		// Test each type in isolation to catch type-specific handler crashes.
 		// Some types need a preceding event to be meaningful (e.g. thinking_delta
 		// needs thinking_start), so we wrap each in a minimal valid sequence.
-		const isolatedSequences: Record<CacheableEventType, RelayMessage[]> = {
+		const isolatedSequences: Record<PersistedEventType, RelayMessage[]> = {
 			user_message: [{ type: "user_message", text: "hi" }],
 			delta: [
 				{ type: "delta", text: "hello" },

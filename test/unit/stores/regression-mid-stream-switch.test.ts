@@ -109,9 +109,9 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			id: "session-a",
 			events: [
 				{ type: "user_message", text: "What is TypeScript?" },
-				// Note: "status" events are NOT cacheable (excluded from
-				// CACHEABLE_EVENT_TYPES in event-pipeline.ts), so they never
-				// appear in real cached event arrays.
+				// Note: "status" events are NOT persisted (excluded from
+				// PERSISTED_EVENT_TYPES in event-pipeline.ts), so they never
+				// appear in real persisted event arrays.
 				{ type: "delta", text: "TypeScript is " },
 				{ type: "delta", text: "a typed superset " },
 				// These arrived while viewing session B:

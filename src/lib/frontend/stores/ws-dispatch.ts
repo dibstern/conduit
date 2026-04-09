@@ -222,7 +222,7 @@ async function convertHistoryAsync(
 }
 
 // ─── Shared chat-event dispatch ─────────────────────────────────────────────
-// Single dispatch function for ALL chat event types (CACHEABLE_EVENT_TYPES
+// Single dispatch function for ALL chat event types (PERSISTED_EVENT_TYPES
 // plus `status`). Used by both handleMessage (live) and replayEvents (replay)
 // to eliminate the parallel switch statements that previously diverged subtly.
 
