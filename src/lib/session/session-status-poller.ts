@@ -1,12 +1,19 @@
-// ─── Session Status Poller ───────────────────────────────────────────────────
-// Polls OpenCode's GET /session/status endpoint at a fixed interval, diffs
-// against previous state, and emits a "changed" event when any session's
-// status transitions. Exposes getCurrentStatuses() for on-demand reads.
+// ─── Session Status Poller (Reconciliation Loop) ─────────────────────────────
+// Background reconciliation loop that detects and corrects status mismatches
+// between the projected SQLite state and OpenCode's REST API.
 //
-// Subagent propagation: when a subagent session is busy, the parent session
-// is also marked busy. This is needed because OpenCode's API only reports
-// the subagent as busy — the parent appears idle even though it's waiting
-// for subagent results.
+// The SessionProjector is *passive* — it only updates status from SSE
+// `session.status` events. If SSE drops while a session is "busy", the
+// corrective "idle" event may never arrive (OpenCode doesn't replay on
+// reconnect). This reconciliation loop catches those cases by:
+//
+// 1. Reading projected status from SQLite (primary source).
+// 2. Fetching REST status from OpenCode for comparison.
+// 3. Injecting corrective `session.status` events when they disagree.
+// 4. Detecting stale sessions (busy >30min with no events).
+//
+// Also maintains in-memory augmentation (subagent propagation, message
+// activity) for the legacy consumer interface.
 
 import type { ServiceRegistry } from "../daemon/service-registry.js";
 import { TrackedService } from "../daemon/tracked-service.js";
@@ -15,9 +22,26 @@ import type {
 	SessionStatus,
 } from "../instance/opencode-client.js";
 import { createSilentLogger, type Logger } from "../logger.js";
+import type { EventStore } from "../persistence/event-store.js";
+import {
+	canonicalEvent,
+	type SessionStatusValue,
+} from "../persistence/events.js";
+import type { ProjectionRunner } from "../persistence/projection-runner.js";
+import type {
+	ReadQueryService,
+	SessionRow,
+} from "../persistence/read-query-service.js";
 import { computeAugmentedStatuses } from "./status-augmentation.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
+
+/**
+ * Default reconciliation interval. This is a background job, not a
+ * real-time data source — 7 seconds is frequent enough to catch stuck
+ * statuses without adding meaningful load.
+ */
+const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
 /**
  * How long a message-activity busy flag stays valid after the last
@@ -34,11 +58,25 @@ import { computeAugmentedStatuses } from "./status-augmentation.js";
  */
 const MESSAGE_ACTIVITY_TTL_MS = 10_000;
 
+/**
+ * If a session has been "busy" for longer than this with no events,
+ * it is flagged as stale and forcibly transitioned to idle. Safety net
+ * for the case where both SSE and REST reconciliation miss the idle
+ * transition.
+ */
+const SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+/** Corrective event injection: EventStore + ProjectionRunner. */
+export interface ReconciliationPersistence {
+	eventStore: EventStore;
+	projectionRunner: ProjectionRunner;
+}
 
 export interface SessionStatusPollerOptions {
 	client: Pick<OpenCodeClient, "getSessionStatuses" | "getSession">;
-	/** Polling interval in milliseconds (default: 500) */
+	/** Polling interval in milliseconds (default: 7000). */
 	interval?: number;
 	log?: Logger;
 	/**
@@ -49,6 +87,10 @@ export interface SessionStatusPollerOptions {
 	getSessionParentMap?: () => Map<string, string>;
 	/** Optional SQLite status reader — replaces REST polling when available */
 	sqliteReader?: { getSessionStatuses(): Record<string, SessionStatus> };
+	/** Optional SQLite read query service — for reconciliation reads. */
+	readQuery?: ReadQueryService;
+	/** Optional persistence — enables corrective event injection. */
+	persistence?: ReconciliationPersistence;
 }
 
 export type SessionStatusPollerEvents = {
@@ -56,7 +98,7 @@ export type SessionStatusPollerEvents = {
 	changed: [statuses: Record<string, SessionStatus>, statusesChanged: boolean];
 };
 
-// ─── Poller ──────────────────────────────────────────────────────────────────
+// ─── Reconciliation Loop ─────────────────────────────────────────────────────
 
 export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvents> {
 	private readonly client: Pick<
@@ -69,6 +111,8 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	private readonly sqliteReader:
 		| { getSessionStatuses(): Record<string, SessionStatus> }
 		| undefined;
+	private readonly readQuery: ReadQueryService | undefined;
+	private readonly persistence: ReconciliationPersistence | undefined;
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private previous: Record<string, SessionStatus> = {};
 	private previousRaw: Record<string, SessionStatus> = {};
@@ -105,10 +149,12 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	constructor(registry: ServiceRegistry, options: SessionStatusPollerOptions) {
 		super(registry);
 		this.client = options.client;
-		this.interval = options.interval ?? 500;
+		this.interval = options.interval ?? DEFAULT_RECONCILIATION_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
 		this.getSessionParentMap = options.getSessionParentMap;
 		this.sqliteReader = options.sqliteReader;
+		this.readQuery = options.readQuery;
+		this.persistence = options.persistence;
 	}
 
 	/**
@@ -151,7 +197,7 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	 * sets an SSE-idle override to prevent the message poller from
 	 * re-injecting busy, and triggers an immediate re-poll so idle
 	 * transitions are detected within ~10ms instead of waiting for the
-	 * next 500ms cycle.
+	 * next reconciliation cycle.
 	 *
 	 * Clearing the activity flag is essential: the message poller may have
 	 * recently detected content and injected a synthetic busy status via
@@ -199,6 +245,24 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 		return status.type === "busy" || status.type === "retry";
 	}
 
+	/**
+	 * Run a one-shot reconciliation against the REST API. Used by
+	 * SSE reconnect handler to immediately correct stuck statuses
+	 * without waiting for the next reconciliation tick.
+	 *
+	 * Only operates when persistence + readQuery are configured.
+	 */
+	async reconcileNow(): Promise<void> {
+		if (!this.persistence || !this.readQuery) return;
+		try {
+			const restStatuses = await this.client.getSessionStatuses();
+			this.reconcileStatuses(restStatuses);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.log.warn(`reconcileNow failed: ${msg}`);
+		}
+	}
+
 	// ─── Internal ──────────────────────────────────────────────────────────
 
 	private async poll(): Promise<void> {
@@ -224,6 +288,9 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 				if (busySessions.length > 0) {
 					this.log.info(`INIT busy=[${busySessions.join(", ")}]`);
 				}
+				// Run initial reconciliation to catch any stuck statuses from
+				// before the relay started.
+				await this.runReconciliation();
 				return;
 			}
 
@@ -247,12 +314,134 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 			this.previous = current;
 			this.previousRaw = raw;
 			this.emit("changed", current, statusesChanged);
+
+			// Run reconciliation after emitting the status change
+			await this.runReconciliation();
 		} catch (err) {
 			// Keep last known state (stale > empty). Log and retry next tick.
 			const msg = err instanceof Error ? err.message : String(err);
 			this.log.warn(`poll failed: ${msg}`);
 		} finally {
 			this.polling = false;
+		}
+	}
+
+	// ─── Reconciliation ───────────────────────────────────────────────────
+
+	/**
+	 * Run REST reconciliation and staleness checks. Called on each poll
+	 * tick when persistence is configured. REST reconciliation and
+	 * staleness checks run independently — a REST failure does not
+	 * prevent staleness detection.
+	 */
+	private async runReconciliation(): Promise<void> {
+		if (!this.persistence || !this.readQuery) return;
+
+		// REST reconciliation: compare REST vs projected statuses
+		try {
+			const restStatuses = await this.client.getSessionStatuses();
+			this.reconcileStatuses(restStatuses);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.log.warn(`reconciliation check failed: ${msg}`);
+		}
+
+		// Staleness check: independent of REST success
+		try {
+			this.checkStaleSessions();
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.log.warn(`staleness check failed: ${msg}`);
+		}
+	}
+
+	/**
+	 * Compare REST statuses against projected SQLite statuses. When they
+	 * disagree (e.g., REST says "idle" but projection says "busy"),
+	 * synthesize a corrective `session.status` event and feed it through
+	 * the normal append → project pipeline.
+	 */
+	private reconcileStatuses(restStatuses: Record<string, SessionStatus>): void {
+		if (!this.persistence || !this.readQuery) return;
+
+		const sessions = this.readQuery.listSessions();
+		const projectedMap = new Map<string, string>();
+		for (const session of sessions) {
+			projectedMap.set(session.id, session.status);
+		}
+
+		for (const [sessionId, restStatus] of Object.entries(restStatuses)) {
+			const projectedStatus = projectedMap.get(sessionId);
+			if (!projectedStatus) continue; // Session not in projection — skip
+
+			const restType = restStatus.type;
+			if (restType !== projectedStatus) {
+				this.log.warn(
+					`reconciliation: status mismatch for session=${sessionId.slice(0, 12)}: REST=${restType} projected=${projectedStatus} — injecting corrective event`,
+				);
+				this.injectCorrectiveStatusEvent(
+					sessionId,
+					restType as SessionStatusValue,
+				);
+			}
+		}
+	}
+
+	/**
+	 * Check for sessions that have been "busy" for longer than
+	 * SESSION_STALE_THRESHOLD_MS with no events. Flag them as stale
+	 * and inject a corrective idle event.
+	 */
+	private checkStaleSessions(): void {
+		if (!this.persistence || !this.readQuery) return;
+
+		const sessions = this.readQuery.listSessions();
+		const now = Date.now();
+
+		for (const session of sessions) {
+			if (isSessionStatusStale(session, now)) {
+				const minutesStale = ((now - session.updated_at) / 60_000).toFixed(1);
+				this.log.warn(
+					`Session ${session.id.slice(0, 12)} has been busy for ${minutesStale}min — marking stale (idle)`,
+				);
+				this.injectCorrectiveStatusEvent(session.id, "idle");
+			}
+		}
+	}
+
+	/**
+	 * Create a corrective `session.status` canonical event and feed it
+	 * through the event store → projection pipeline.
+	 */
+	private injectCorrectiveStatusEvent(
+		sessionId: string,
+		status: SessionStatusValue,
+	): void {
+		if (!this.persistence) return;
+
+		const event = canonicalEvent(
+			"session.status",
+			sessionId,
+			{
+				sessionId,
+				status,
+			},
+			{
+				metadata: {
+					synthetic: true,
+					source: "reconciliation-loop",
+				},
+			},
+		);
+
+		try {
+			const stored = this.persistence.eventStore.append(event);
+			this.persistence.projectionRunner.projectEvent(stored);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.log.warn(
+				`Failed to inject corrective event for session=${sessionId.slice(0, 12)}: ${msg}`,
+			);
 		}
 	}
 
@@ -353,4 +542,16 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 
 		return false;
 	}
+}
+
+// ─── Staleness Detection ─────────────────────────────────────────────────────
+
+/**
+ * Check if a session's "busy" status is stale based on its updated_at
+ * timestamp. A session is stale if it has been "busy" for longer than
+ * SESSION_STALE_THRESHOLD_MS with no events updating it.
+ */
+function isSessionStatusStale(session: SessionRow, now: number): boolean {
+	if (session.status !== "busy") return false;
+	return now - session.updated_at > SESSION_STALE_THRESHOLD_MS;
 }

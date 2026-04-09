@@ -29,6 +29,7 @@ import { SessionManager } from "../session/session-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import { SessionStatusPoller } from "../session/session-status-poller.js";
+import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 import { createTranslator } from "./event-translator.js";
@@ -197,15 +198,36 @@ export async function createProjectRelay(
 		}
 	}
 
-	// ── Session status poller (polls GET /session/status for processing indicators) ──
+	// ── SQLite read query service (reads from projected tables) ──
+	// Created early so it can be shared with the status poller and handler deps.
+	const readQuery = config.persistence
+		? new ReadQueryService(config.persistence.db)
+		: undefined;
+
+	// ── Session status reconciliation loop ──────────────────────────────────
+	// Background job that detects and corrects status mismatches between
+	// the projected SQLite state and OpenCode's REST API. Default interval
+	// is 7s (was 500ms when this was a real-time polling source).
 	const statusPoller: SessionStatusPoller = new SessionStatusPoller(
 		serviceRegistry,
 		{
 			client,
-			interval: config.statusPollerInterval ?? 500,
+			...(config.statusPollerInterval != null && {
+				interval: config.statusPollerInterval,
+			}),
 			log: statusLog,
 			getSessionParentMap: (): Map<string, string> =>
 				sessionMgr.getSessionParentMap(),
+			...(readQuery != null && {
+				readQuery,
+				sqliteReader: new SessionStatusSqliteReader(readQuery),
+			}),
+			...(config.persistence != null && {
+				persistence: {
+					eventStore: config.persistence.eventStore,
+					projectionRunner: config.persistence.projectionRunner,
+				},
+			}),
 		},
 	);
 
@@ -298,11 +320,6 @@ export async function createProjectRelay(
 		log: ptyLog,
 		WebSocketClass,
 	};
-
-	// ── SQLite read query service (reads from projected tables) ──
-	const readQuery = config.persistence
-		? new ReadQueryService(config.persistence.db)
-		: undefined;
 
 	// ── Handler deps wiring (G1: client init, message queue, rate limiter) ──
 	const { rateLimiter } = wireHandlerDeps({

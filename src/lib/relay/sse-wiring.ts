@@ -78,7 +78,11 @@ export interface SSEWiringDeps {
 		Array<{ id: string; permission: string; [key: string]: unknown }>
 	>;
 	/** Optional: notify status poller of SSE idle events for fast transition detection */
-	statusPoller?: { notifySSEIdle(sessionId: string): void };
+	statusPoller?: {
+		notifySSEIdle(sessionId: string): void;
+		/** One-shot reconciliation on SSE reconnect — corrects stuck statuses. */
+		reconcileNow?(): Promise<void>;
+	};
 	/** Optional: session parent map for subagent detection in notification routing */
 	getSessionParentMap?: () => Map<string, string>;
 	/** Project slug for push notification routing */
@@ -430,6 +434,18 @@ export function wireSSEConsumer(
 			type: "connection_status",
 			status: "connected",
 		});
+
+		// SSE reconnect reconciliation: immediately compare REST vs projected
+		// statuses and inject corrective events for any mismatches. This catches
+		// the most common case: SSE dropped during a turn, reconnected after
+		// completion — the "idle" event was never received.
+		if (deps.statusPoller?.reconcileNow) {
+			deps.statusPoller
+				.reconcileNow()
+				.catch((err: unknown) =>
+					log.warn(`SSE reconnect reconciliation failed: ${err}`),
+				);
+		}
 
 		// Rehydrate pending permissions from OpenCode API on (re)connect.
 		// Broadcast each recovered permission to all connected clients.
