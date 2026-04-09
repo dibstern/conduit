@@ -778,3 +778,21 @@
 - **Two timing scenarios both work**: (1) Effect fires before proactive data → resets and requests via loadMore, proactive data arrives and is applied. (2) Proactive data arrives first → handleHistoryPage resets and applies data, effect runs later and sees data is already loaded → no-op.
 - **Regression tests**: 5 new tests in `regression-session-switch-history.test.ts` (wrong session dispatch, normalized format verification, switch-back-and-forth scenario) + 2 new tests in `svelte-history-logic.test.ts` (groupIntoTurns with OpenCode normalized format)
 - All 1481 unit tests passing (57 test files), type-check clean, lint clean
+
+### 2026-04-09 — Orchestrator Task 50.5 (Strip MessageCache/ToolContentStore/PendingUserMessages from all dependency interfaces)
+- **Goal**: Make Phase 7 a pure deletion exercise by removing all references to the three in-memory stores from test fixtures and test assertions before deleting the implementation files
+- **Files deleted**: `test/unit/relay/regression-user-message-echo.test.ts` — echo suppression tests made irrelevant by Task 50 (relay no longer POSTs to OpenCode REST, so no echo arrives)
+- **Files modified** (12 test files):
+  - `test/unit/session/session-switch.test.ts` — removed `messageCache`/`forkMeta` from `createMinimalDeps`; deleted all `cached-events`-path tests (stale cache tail detection, cold cache repair regression, fork cache bypass); replaced with REST-history tests
+  - `test/unit/relay/sse-wiring.test.ts` — removed ~6 `messageCache.recordEvent` assertions, removed `toolContentStore` truncation test, removed echo suppression tests, replaced with unified REST path test
+  - `test/unit/handlers/message-handlers.test.ts` — removed `messageCache.recordEvent` and `messageCache.remove` assertions, deleted pending-user-message echo test, replaced cache-hit/REST-fallback tests with single REST history test
+  - `test/unit/bridges/client-init.test.ts` — replaced `messageCache.getEvents` mocks with `sessionMgr.loadPreRenderedHistory`, converted "cached events on connect" → "REST history on connect" describe blocks
+  - `test/unit/handlers/get-tool-content-handler.test.ts` — rewrote to use `readAdapter.getToolContent()` only (removed ToolContentStore fallback tests)
+  - `test/unit/daemon/project-registry.test.ts` — replaced evict tests (that used messageCache mock) with simple no-op test
+  - `test/unit/relay/regression-server-cache-pipeline.test.ts` — removed messageCache from resolveSessionHistory call
+  - `test/unit/handlers/regression-question-on-session-view.test.ts` — removed messageCache overrides
+  - `test/unit/regression-question-session-scoping.test.ts` — removed messageCache override
+  - `test/unit/relay/event-pipeline.test.ts` — removed toolContentStore/messageCache from `makeDeps()`, deleted tests for applyPipelineResult caching/store behavior (no longer part of PipelineDeps)
+  - `test/unit/relay/per-tab-routing-e2e.test.ts` — removed "SSE events are cached even when no client views that session" test
+  - `test/e2e/specs/unified-rendering.spec.ts` — replaced messageCache.getEvents() with direct REST fetch via client.getMessages()
+- **All 243 test files, 4389 tests passing**, type-check clean, lint clean

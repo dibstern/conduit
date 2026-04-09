@@ -23230,8 +23230,7 @@ Expect **zero matches**. Also read through both files for narrative consistency.
 | Total deleted files | ~15–20 (expanded in Phase 7 audit) |
 | Phases | 7 |
 
-**Key architectural change**: conduit moves from stateless relay to independent
-orchestrator.
+**Key architectural change**: conduit moves from stateless relay to independent orchestrator.
 
 - The SQLite event store + projections are the new source of truth.
 - Two provider adapters: OpenCode (legacy) and Claude (direct SDK).
