@@ -1,6 +1,8 @@
 import { CommandReceiptRepository } from "./command-receipts.js";
 import { EventStore } from "./event-store.js";
 import { runMigrations } from "./migrations.js";
+import { createAllProjectors, ProjectionRunner } from "./projection-runner.js";
+import { ProjectorCursorRepository } from "./projector-cursor-repository.js";
 import { schemaMigrations } from "./schema.js";
 import { SqliteClient } from "./sqlite-client.js";
 
@@ -8,6 +10,8 @@ export class PersistenceLayer {
 	readonly db: SqliteClient;
 	readonly eventStore: EventStore;
 	readonly commandReceipts: CommandReceiptRepository;
+	readonly cursorRepo: ProjectorCursorRepository;
+	readonly projectionRunner: ProjectionRunner;
 	private closed = false;
 
 	private constructor(db: SqliteClient) {
@@ -15,6 +19,13 @@ export class PersistenceLayer {
 		runMigrations(db, schemaMigrations);
 		this.eventStore = new EventStore(db);
 		this.commandReceipts = new CommandReceiptRepository(db);
+		this.cursorRepo = new ProjectorCursorRepository(db);
+		this.projectionRunner = new ProjectionRunner({
+			projectors: createAllProjectors(),
+			db,
+			cursorRepo: this.cursorRepo,
+			eventStore: this.eventStore,
+		});
 	}
 
 	static open(

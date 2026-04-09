@@ -149,10 +149,26 @@ export class DualWriteHook {
 			batch.push(...translated);
 
 			// Append all events to the store
-			this.persistence.eventStore.appendBatch(batch);
+			const storedEvents = this.persistence.eventStore.appendBatch(batch);
 
 			const written = batch.length;
 			this.stats.eventsWritten += written;
+
+			// Project stored events into read model tables.
+			// Projection errors are logged but never break the relay pipeline.
+			try {
+				if (storedEvents.length === 1 && storedEvents[0]) {
+					this.persistence.projectionRunner.projectEvent(storedEvents[0]);
+				} else if (storedEvents.length > 1) {
+					this.persistence.projectionRunner.projectBatch(storedEvents);
+				}
+			} catch (projErr: unknown) {
+				this.log.warn("dual-write: projection failed (non-fatal)", {
+					eventType: event.type,
+					sessionId,
+					error: formatErrorDetail(projErr),
+				});
+			}
 
 			this.log.debug("dual-write: appended events", {
 				sessionId,
