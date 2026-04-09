@@ -8,10 +8,14 @@ import type {
 } from "../events.js";
 import type { SqliteClient } from "../sqlite-client.js";
 
+export interface ProjectionContext {
+	readonly replaying?: boolean;
+}
+
 export interface Projector {
 	readonly name: string;
 	readonly handles: readonly CanonicalEventType[];
-	project(event: StoredEvent, db: SqliteClient): void;
+	project(event: StoredEvent, db: SqliteClient, ctx?: ProjectionContext): void;
 }
 
 export function assertHandledOrIgnored(
