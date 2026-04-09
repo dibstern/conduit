@@ -8,6 +8,7 @@ import type {
 	PromptOptions,
 } from "../instance/opencode-client.js";
 import type { Logger } from "../logger.js";
+import type { ReadAdapter } from "../persistence/read-adapter.js";
 import type { MessageCache } from "../relay/message-cache.js";
 import type { MessagePollerManager } from "../relay/message-poller-manager.js";
 import type { PendingUserMessages } from "../relay/pending-user-messages.js";
@@ -96,6 +97,8 @@ export interface HandlerDeps {
 	projectMgmt?: ProjectManagementDeps;
 	/** Port scan capability (optional — only available in daemon mode) */
 	scanDeps?: ScanDeps;
+	/** Phase 4: Read adapter for SQLite read switchover (optional — only available when persistence is configured) */
+	readAdapter?: ReadAdapter;
 }
 
 export type MessageHandler<K extends keyof PayloadMap = keyof PayloadMap> = (

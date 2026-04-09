@@ -15,6 +15,9 @@ import { formatErrorDetail } from "../errors.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
 import { createLogger, type Logger } from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
+import { ReadAdapter } from "../persistence/read-adapter.js";
+import { createReadFlags } from "../persistence/read-flags.js";
+import { ReadQueryService } from "../persistence/read-query-service.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { RelayServer } from "../server/server.js";
@@ -304,6 +307,16 @@ export async function createProjectRelay(
 		WebSocketClass,
 	};
 
+	// ── Phase 4: Read switchover (ReadQueryService + ReadFlags + ReadAdapter) ──
+	const readQuery = config.persistence
+		? new ReadQueryService(config.persistence.db)
+		: undefined;
+	const readFlags = config.persistence
+		? createReadFlags(config.readFlags)
+		: undefined;
+	const readAdapter =
+		readQuery && readFlags ? new ReadAdapter(readQuery, readFlags) : undefined;
+
 	// ── Handler deps wiring (G1: client init, message queue, rate limiter) ──
 	const { rateLimiter } = wireHandlerDeps({
 		wsHandler,
@@ -322,6 +335,7 @@ export async function createProjectRelay(
 		registry,
 		pollerManager,
 		ptyDeps,
+		...(readAdapter != null && { readAdapter }),
 	});
 
 	// ── SSE consumer ────────────────────────────────────────────────────────

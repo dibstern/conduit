@@ -14,6 +14,7 @@ import { dispatchMessage, type HandlerDeps } from "../handlers/index.js";
 import type { OpenCodeClient } from "../instance/opencode-client.js";
 import type { Logger } from "../logger.js";
 import { type LogLevel, setLogLevel } from "../logger.js";
+import type { ReadAdapter } from "../persistence/read-adapter.js";
 import { ClientMessageQueue } from "../server/client-message-queue.js";
 import { RateLimiter } from "../server/rate-limiter.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
@@ -49,6 +50,8 @@ export interface HandlerDepsWiringDeps {
 	registry: SessionRegistry;
 	pollerManager: MessagePollerManager;
 	ptyDeps: PtyUpstreamDeps;
+	/** Phase 4: Read adapter for SQLite read switchover (optional). */
+	readAdapter?: ReadAdapter;
 }
 
 // ─── Return type ─────────────────────────────────────────────────────────────
@@ -81,6 +84,7 @@ export function wireHandlerDeps(
 		registry,
 		pollerManager,
 		ptyDeps,
+		readAdapter,
 	} = deps;
 
 	// Per-client sliding-window rate limiter for chat messages
@@ -168,6 +172,7 @@ export function wireHandlerDeps(
 		...(config.triggerScan != null && {
 			scanDeps: { triggerScan: config.triggerScan },
 		}),
+		...(readAdapter != null && { readAdapter }),
 	};
 
 	const clientQueue = new ClientMessageQueue({
