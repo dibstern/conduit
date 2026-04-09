@@ -4,8 +4,14 @@
 // of constructing session_switched messages manually.
 
 import { isLastTurnActive } from "../event-classify.js";
+import type { ReadFlagMode, ReadFlags } from "../persistence/read-flags.js";
+import { isActive } from "../persistence/read-flags.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
+import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import type { HistoryMessage, RequestId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
+// Re-export for callers that need the mode type without a separate import.
+export type { ReadFlagMode };
 
 // ─── Pure data types ────────────────────────────────────────────────────────
 
@@ -85,6 +91,10 @@ export interface SessionSwitchDeps {
 			sessionId: string,
 		): { forkMessageId: string; parentID: string } | undefined;
 	};
+	/** Phase 4e: SQLite read query service (optional, for gradual rollout). */
+	readonly readQuery?: ReadQueryService;
+	/** Phase 4e: Read path feature flags (optional, for gradual rollout). */
+	readonly readFlags?: ReadFlags;
 }
 
 // ─── Pure functions ─────────────────────────────────────────────────────────
@@ -225,6 +235,37 @@ export function buildSessionSwitchedMessage(
 	}
 }
 
+// ─── SQLite history path (Phase 4e) ─────────────────────────────────────────
+
+/**
+ * Resolve session history from the SQLite projection.
+ * Synchronous — all data comes from the local database.
+ *
+ * Returns a `SessionHistorySource` compatible with `buildSessionSwitchedMessage()`.
+ * Uses the same `"rest-history"` kind as the REST path so the frontend cannot
+ * tell whether data came from REST or SQLite.
+ */
+export function resolveSessionHistoryFromSqlite(
+	sessionId: string,
+	readQuery: ReadQueryService,
+	opts: { pageSize: number },
+): SessionHistorySource {
+	const rows = readQuery.getSessionMessagesWithParts(sessionId);
+
+	if (rows.length === 0) {
+		return { kind: "empty" };
+	}
+
+	const { messages, hasMore } = messageRowsToHistory(rows, {
+		pageSize: opts.pageSize,
+	});
+
+	return {
+		kind: "rest-history",
+		history: { messages, hasMore },
+	};
+}
+
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
 /**
@@ -239,14 +280,32 @@ export function buildSessionSwitchedMessage(
  * When the cache is fresh, it is served directly WITHOUT a full REST fetch.
  * This avoids fetching all messages (which can be 40MB+ for large sessions)
  * and prevents OOM when many project relays are loaded.
+ *
+ * Phase 4e: When `readFlags.sessionHistory` is active ("shadow" or "sqlite")
+ * and `readQuery` is available, reads from SQLite instead of the legacy cache.
  */
 export async function resolveSessionHistory(
 	sessionId: string,
 	deps: Pick<
 		SessionSwitchDeps,
-		"messageCache" | "sessionMgr" | "log" | "forkMeta"
+		| "messageCache"
+		| "sessionMgr"
+		| "log"
+		| "forkMeta"
+		| "readQuery"
+		| "readFlags"
 	>,
 ): Promise<SessionHistorySource> {
+	// Phase 4e: Read from SQLite when flag is active (shadow or sqlite mode).
+	// (C1) CRITICAL: use isActive(), not truthy check — "legacy" is a non-empty
+	// string and would activate the SQLite path with a plain `if (flags.xxx)`.
+	if (isActive(deps.readFlags?.sessionHistory) && deps.readQuery) {
+		return resolveSessionHistoryFromSqlite(sessionId, deps.readQuery, {
+			pageSize: 50,
+		});
+	}
+
+	// Legacy path (unchanged) ─────────────────────────────────────────────────
 	const events = await deps.messageCache.getEvents(sessionId);
 	const classification = classifyHistorySource(events);
 
