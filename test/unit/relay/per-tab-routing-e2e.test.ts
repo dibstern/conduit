@@ -469,53 +469,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client.close();
 	});
 
-	it("SSE events are cached even when no client views that session", async () => {
-		const client = await harness.connectClient();
-		await client.waitForInitialState();
-
-		// Client views session A — nobody views session B
-		client.send({ type: "view_session", sessionId: "sess-A" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
-		client.clearReceived();
-
-		// Inject SSE delta for session B (no viewer)
-		harness.mock.injectSSE({
-			type: "message.part.delta",
-			properties: {
-				sessionID: "sess-B",
-				partID: "part-cached",
-				messageID: "msg-cached",
-				field: "text",
-				delta: "cached event",
-			},
-		});
-
-		// Client shouldn't receive it (wrong session)
-		await new Promise((r) => setTimeout(r, 100));
-		expect(client.getReceivedOfType("delta")).toHaveLength(0);
-
-		// Now switch to session B — should get cached history
-		client.clearReceived();
-		client.send({ type: "view_session", sessionId: "sess-B" });
-
-		const switched = await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
-
-		// The cached event should be in the events array
-		const events = switched["events"] as
-			| Array<{ type: string; text?: string }>
-			| undefined;
-		expect(events).toBeDefined();
-		expect(
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			events!.some((e) => e.type === "delta" && e.text === "cached event"),
-		).toBe(true);
-
-		await client.close();
-	});
+	// "SSE events are cached even when no client views that session" removed in Task 50.5.
+	// messageCache stripped from all deps; unviewed SSE events are no longer buffered
+	// in-memory. History is served via REST/SQLite when clients switch sessions.
 });

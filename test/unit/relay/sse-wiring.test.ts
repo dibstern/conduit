@@ -128,10 +128,6 @@ describe("handleSSEEvent", () => {
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
 		});
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
 			"active-session",
 			translated,
@@ -153,10 +149,6 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledWith(
-			"other-session",
-			translated,
-		);
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
 			"other-session",
 			translated,
@@ -164,7 +156,7 @@ describe("handleSSEEvent", () => {
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("caches but does NOT send when no clients are viewing the session", () => {
+	it("does NOT send when no clients are viewing the session", () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = { type: "delta", text: "hello" };
@@ -179,10 +171,6 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledWith(
-			"other-session",
-			translated,
-		);
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
@@ -443,18 +431,15 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.messageCache.recordEvent).not.toHaveBeenCalled();
-		// But it should still route to session viewers
+		// Non-cacheable events should still route to session viewers
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
 	});
 
-	it("suppresses relay-originated user_message echo when pending was recorded", () => {
+	it("routes user_message events normally (echo suppression removed in Task 50.5)", () => {
 		const deps = createMockSSEWiringDeps();
-		// Simulate: relay sent a message via prompt handler → pending was recorded
-		deps.pendingUserMessages.record("active-session", "Hello world");
 
 		const translated: RelayMessage = {
 			type: "user_message",
@@ -471,36 +456,8 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// The user_message should be suppressed — NOT sent or cached
-		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
-		expect(deps.messageCache.recordEvent).not.toHaveBeenCalled();
-	});
-
-	it("allows TUI-originated user_message through when no pending was recorded", () => {
-		const deps = createMockSSEWiringDeps();
-		// No pendingUserMessages.record() call → message came from TUI/CLI
-
-		const translated: RelayMessage = {
-			type: "user_message",
-			text: "Hello from TUI",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.created",
-			properties: { sessionID: "active-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		// TUI-originated messages should pass through normally
+		// user_message events are routed normally — no suppression
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
@@ -520,7 +477,6 @@ describe("handleSSEEvent", () => {
 		handleSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-		expect(deps.messageCache.recordEvent).not.toHaveBeenCalled();
 	});
 
 	it("handles array of translated messages", () => {
@@ -554,11 +510,9 @@ describe("handleSSEEvent", () => {
 			"active-session",
 			messages[1],
 		);
-		// Both are cacheable types
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledTimes(2);
 	});
 
-	it("does not cache or route events with no sessionID", () => {
+	it("does not route events with no sessionID", () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = { type: "delta", text: "hello" };
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -572,8 +526,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// No sessionID means we can't determine which session to cache/route to
-		expect(deps.messageCache.recordEvent).not.toHaveBeenCalled();
+		// No sessionID means we can't determine which session to route to
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
@@ -1093,36 +1046,6 @@ describe("handleSSEEvent – tool_result truncation", () => {
 			expect(sendArg.isTruncated).toBe(true);
 			expect(sendArg.fullContentLength).toBe(largeContent.length);
 		}
-
-		// Cache should also receive the truncated version
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const cacheArg = vi.mocked(deps.messageCache.recordEvent).mock.calls[0]![1];
-		if (cacheArg.type === "tool_result") {
-			expect(cacheArg.isTruncated).toBe(true);
-		}
-	});
-
-	it("stores full content in toolContentStore when truncated", () => {
-		const deps = createMockSSEWiringDeps();
-		const largeContent = "x".repeat(TRUNCATION_THRESHOLD + 500);
-		const translated: RelayMessage = {
-			type: "tool_result",
-			id: "tool-2",
-			content: largeContent,
-			is_error: false,
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.updated",
-			properties: { sessionID: "active-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		expect(deps.toolContentStore.get("tool-2")).toBe(largeContent);
 	});
 
 	it("passes through tool_result under threshold unchanged", () => {
@@ -1150,8 +1073,6 @@ describe("handleSSEEvent – tool_result truncation", () => {
 			"active-session",
 			translated,
 		);
-		// Nothing stored in content store
-		expect(deps.toolContentStore.get("tool-3")).toBeUndefined();
 	});
 });
 

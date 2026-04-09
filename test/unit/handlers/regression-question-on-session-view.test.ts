@@ -73,9 +73,6 @@ describe("handleViewSession — pending question delivery", () => {
 				}),
 				sendDualSessionLists: vi.fn().mockResolvedValue(undefined),
 			} as unknown as HandlerDeps["sessionMgr"],
-			messageCache: {
-				getEvents: vi.fn().mockReturnValue(null),
-			} as unknown as HandlerDeps["messageCache"],
 			overrides: { clear: vi.fn() } as unknown as HandlerDeps["overrides"],
 			statusPoller: {
 				isProcessing: vi.fn().mockReturnValue(false),
@@ -230,9 +227,6 @@ describe("handleViewSession — pending permission delivery", () => {
 				listSessions: vi.fn().mockResolvedValue([]),
 				sendDualSessionLists: vi.fn().mockResolvedValue(undefined),
 			} as unknown as HandlerDeps["sessionMgr"],
-			messageCache: {
-				getEvents: vi.fn().mockReturnValue(null),
-			} as unknown as HandlerDeps["messageCache"],
 			overrides: { clear: vi.fn() } as unknown as HandlerDeps["overrides"],
 			permissionBridge: {
 				getPending: vi.fn().mockReturnValue([]),

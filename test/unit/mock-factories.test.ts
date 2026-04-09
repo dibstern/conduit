@@ -18,11 +18,9 @@ describe("mock-factories", () => {
 			expect(deps.wsHandler.sendToSession).toBeDefined();
 			expect(deps.client).toBeDefined();
 			expect(deps.sessionMgr).toBeDefined();
-			expect(deps.messageCache).toBeDefined();
 			expect(deps.permissionBridge).toBeDefined();
 			expect(deps.overrides).toBeDefined();
 			expect(deps.ptyManager).toBeDefined();
-			expect(deps.toolContentStore).toBeDefined();
 			expect(deps.config).toBeDefined();
 			expect(deps.log).toBeDefined();
 			expect(deps.connectPtyUpstream).toBeDefined();
@@ -58,10 +56,8 @@ describe("mock-factories", () => {
 			expect(deps.wsHandler.broadcast).toBeDefined();
 			expect(deps.wsHandler.sendToSession).toBeDefined();
 			expect(deps.sessionMgr).toBeDefined();
-			expect(deps.messageCache).toBeDefined();
 			expect(deps.permissionBridge).toBeDefined();
 			expect(deps.overrides).toBeDefined();
-			expect(deps.toolContentStore).toBeDefined();
 			expect(deps.log).toBeDefined();
 		});
 
@@ -80,7 +76,6 @@ describe("mock-factories", () => {
 			expect(deps.wsHandler.setClientSession).toBeDefined();
 			expect(deps.client).toBeDefined();
 			expect(deps.sessionMgr).toBeDefined();
-			expect(deps.messageCache).toBeDefined();
 			expect(deps.overrides).toBeDefined();
 			expect(deps.ptyManager).toBeDefined();
 			expect(deps.permissionBridge.getPending).toBeDefined();

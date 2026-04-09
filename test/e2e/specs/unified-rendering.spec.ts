@@ -290,23 +290,12 @@ test.describe("Unified Rendering: Paginated History", () => {
 		expect(sessionId).toBeDefined();
 		if (!sessionId) return; // TS narrowing (expect above catches test failures)
 
-		// Get full message cache (populated by SSE during harness creation)
-		const cachedEvents =
-			(await harness.stack.messageCache.getEvents(sessionId)) ?? [];
-		// Fall back to mock REST for the full list if no cached events
-		const allMsgs =
-			cachedEvents.length > 0
-				? await harness.stack.client.getMessages(sessionId)
-				: [];
+		// Fetch messages from mock REST for pagination setup
+		const allMsgs = await harness.stack.client.getMessages(sessionId);
 		if (allMsgs.length > 50) {
 			const page1 = allMsgs.slice(-50); // most recent 50
 			const page2 = allMsgs.slice(0, allMsgs.length - 50);
 			harness.mock.setMessagePages(sessionId, page1, page2);
-		}
-
-		// Clear cache so resolveSessionHistory falls back to REST
-		for (const s of sessions) {
-			harness.stack.messageCache.remove(s.id);
 		}
 
 		const app = new AppPage(page);

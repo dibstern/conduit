@@ -226,12 +226,10 @@ describe("processEvent (composed pipeline)", () => {
 // ─── applyPipelineResult ─────────────────────────────────────────────────────
 
 function makeDeps(): PipelineDeps & {
-	toolContentStore: { store: ReturnType<typeof vi.fn> };
 	overrides: {
 		clearProcessingTimeout: ReturnType<typeof vi.fn>;
 		resetProcessingTimeout: ReturnType<typeof vi.fn>;
 	};
-	messageCache: { recordEvent: ReturnType<typeof vi.fn> };
 	wsHandler: { sendToSession: ReturnType<typeof vi.fn> };
 	log: ReturnType<typeof createSilentLogger> & {
 		debug: ReturnType<typeof vi.fn>;
@@ -243,12 +241,10 @@ function makeDeps(): PipelineDeps & {
 	const verboseSpy = vi.fn();
 	const infoSpy = vi.fn();
 	return {
-		toolContentStore: { store: vi.fn() },
 		overrides: {
 			clearProcessingTimeout: vi.fn(),
 			resetProcessingTimeout: vi.fn(),
 		},
-		messageCache: { recordEvent: vi.fn() },
 		wsHandler: { sendToSession: vi.fn() },
 		log: {
 			...createSilentLogger(),
@@ -260,44 +256,8 @@ function makeDeps(): PipelineDeps & {
 }
 
 describe("applyPipelineResult", () => {
-	it("stores full content when truncated", () => {
-		const deps = makeDeps();
-		const result: PipelineResult = {
-			msg: {
-				type: "tool_result",
-				id: "t1",
-				content: "short",
-				is_error: false,
-				isTruncated: true,
-				fullContentLength: 60000,
-			},
-			fullContent: "x".repeat(60000),
-			route: { action: "send", sessionId: "ses_abc" },
-			cache: true,
-			timeout: "reset",
-			source: "sse",
-		};
-		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.toolContentStore.store).toHaveBeenCalledWith(
-			"t1",
-			result.fullContent,
-			"ses_abc",
-		);
-	});
-
-	it("skips fullContent storage when no sessionId", () => {
-		const deps = makeDeps();
-		const result: PipelineResult = {
-			msg: { type: "tool_result", id: "t1", content: "short", is_error: false },
-			fullContent: "full content here",
-			route: { action: "drop", reason: "no session ID" },
-			cache: false,
-			timeout: "none",
-			source: "sse",
-		};
-		applyPipelineResult(result, undefined, deps);
-		expect(deps.toolContentStore.store).not.toHaveBeenCalled();
-	});
+	// toolContentStore removed in Task 50.5 — applyPipelineResult no longer stores
+	// full tool content; that responsibility moved to the SQLite write adapter.
 
 	it("clears timeout for done events", () => {
 		const deps = makeDeps();
@@ -333,34 +293,8 @@ describe("applyPipelineResult", () => {
 		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
 	});
 
-	it("caches cacheable messages", () => {
-		const deps = makeDeps();
-		const msg: RelayMessage = { type: "delta", text: "hi" };
-		const result: PipelineResult = {
-			msg,
-			fullContent: undefined,
-			route: { action: "send", sessionId: "ses_abc" },
-			cache: true,
-			timeout: "reset",
-			source: "sse",
-		};
-		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledWith("ses_abc", msg);
-	});
-
-	it("does not cache non-cacheable messages", () => {
-		const deps = makeDeps();
-		const result: PipelineResult = {
-			msg: { type: "file_changed", path: "/foo.ts", changeType: "edited" },
-			fullContent: undefined,
-			route: { action: "send", sessionId: "ses_abc" },
-			cache: false,
-			timeout: "reset",
-			source: "sse",
-		};
-		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.messageCache.recordEvent).not.toHaveBeenCalled();
-	});
+	// messageCache removed in Task 50.5 — applyPipelineResult no longer records
+	// events; the cache field on PipelineResult is now consumed by the SSE wiring layer.
 
 	it("sends to session when route action is send", () => {
 		const deps = makeDeps();
@@ -394,20 +328,6 @@ describe("applyPipelineResult", () => {
 		expect(deps.log.info).toHaveBeenCalledWith(
 			"no viewers for session ses_abc — delta (sse)",
 		);
-	});
-
-	it("does not store fullContent when msg is not a tool_result", () => {
-		const deps = makeDeps();
-		const result: PipelineResult = {
-			msg: { type: "delta", text: "hi" },
-			fullContent: "some content that somehow got set",
-			route: { action: "send", sessionId: "ses_abc" },
-			cache: true,
-			timeout: "reset",
-			source: "sse",
-		};
-		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.toolContentStore.store).not.toHaveBeenCalled();
 	});
 
 	it("skips timeout actions when no sessionId", () => {

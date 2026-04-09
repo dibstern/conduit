@@ -327,18 +327,19 @@ describe("Server cache pipeline: events survive session switch", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by hasChatContent assertion above
 		expect(countUniqueMessages(events!)).toBe(2);
 
-		// resolveSessionHistory serves cache directly — no validation fetch needed
+		// resolveSessionHistory now uses REST path (MessageCache removed in Task 50.5)
 		const result = await resolveSessionHistory("session-a", {
-			messageCache: cache,
 			sessionMgr: {
-				loadPreRenderedHistory: vi.fn(),
+				loadPreRenderedHistory: vi
+					.fn()
+					.mockResolvedValue({ messages: [], hasMore: false }),
 				seedPaginationCursor: vi.fn(),
 			},
 			log: { info: vi.fn(), warn: vi.fn() },
 		});
 
-		// Cache has chat content → served as cached-events
-		expect(result.kind).toBe("cached-events");
+		// Cache removed — resolveSessionHistory falls back to REST
+		expect(result.kind).toBe("rest-history");
 	});
 
 	it("session.status idle translates to done event (cached immediately)", async () => {

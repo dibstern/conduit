@@ -10,10 +10,8 @@ import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
 import type { HandlerDeps } from "../../src/lib/handlers/types.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
-import { PendingUserMessages } from "../../src/lib/relay/pending-user-messages.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
-import { ToolContentStore } from "../../src/lib/relay/tool-content-store.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
 
@@ -131,18 +129,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
-function createMockMessageCache(): HandlerDeps["messageCache"] {
-	return {
-		recordEvent: vi.fn(),
-		getEvents: vi.fn().mockReturnValue(null),
-		remove: vi.fn(),
-		evictOldestSession: vi.fn().mockReturnValue(null),
-		sessionCount: vi.fn().mockReturnValue(0),
-		setOpenCodeUpdatedAt: vi.fn(),
-		getOpenCodeUpdatedAt: vi.fn().mockReturnValue(undefined),
-	} as unknown as HandlerDeps["messageCache"];
-}
-
 function createMockPermissionBridge(): HandlerDeps["permissionBridge"] {
 	return {
 		onPermissionResponse: vi.fn().mockReturnValue(null),
@@ -221,12 +207,9 @@ export function createMockHandlerDeps(
 		wsHandler: createMockWsHandlerFull(),
 		client: createMockClient(),
 		sessionMgr: createMockSessionMgr(),
-		messageCache: createMockMessageCache(),
-		pendingUserMessages: new PendingUserMessages(),
 		permissionBridge: createMockPermissionBridge(),
 		overrides: createMockOverrides(),
 		ptyManager: createMockPtyManager(),
-		toolContentStore: new ToolContentStore(),
 		config: createMockConfig(),
 		log: createSilentLogger(),
 		connectPtyUpstream: vi.fn().mockResolvedValue(undefined),
@@ -255,13 +238,9 @@ export function createMockSSEWiringDeps(
 		translator: createMockTranslator(),
 		sessionMgr:
 			createMockSessionMgr() as unknown as SSEWiringDeps["sessionMgr"],
-		messageCache:
-			createMockMessageCache() as unknown as SSEWiringDeps["messageCache"],
-		pendingUserMessages: new PendingUserMessages(),
 		permissionBridge:
 			createMockPermissionBridge() as unknown as SSEWiringDeps["permissionBridge"],
 		overrides: createMockOverrides() as unknown as SSEWiringDeps["overrides"],
-		toolContentStore: new ToolContentStore(),
 		wsHandler: {
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),
@@ -286,8 +265,6 @@ export function createMockClientInitDeps(
 		client: createMockClient() as unknown as ClientInitDeps["client"],
 		sessionMgr:
 			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
-		messageCache:
-			createMockMessageCache() as unknown as ClientInitDeps["messageCache"],
 		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
 		ptyManager:
 			createMockPtyManager() as unknown as ClientInitDeps["ptyManager"],
@@ -317,8 +294,6 @@ export function createMockProjectRelay(
 		translator: {} as unknown as ProjectRelay["translator"],
 		permissionBridge:
 			createMockPermissionBridge() as unknown as ProjectRelay["permissionBridge"],
-		messageCache:
-			createMockMessageCache() as unknown as ProjectRelay["messageCache"],
 		orchestration: {
 			engine: {
 				dispatch: vi.fn().mockResolvedValue({

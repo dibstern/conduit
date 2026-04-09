@@ -338,14 +338,10 @@ describe("handleNewSession", () => {
 // ─── handleMessage ───────────────────────────────────────────────────────────
 
 describe("handleMessage", () => {
-	it("sends message to active session and records user_message", async () => {
+	it("sends message to active session and routes to session", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
 		await handleMessage(deps, "client-1", { text: "Hello" });
-		expect(deps.messageCache.recordEvent).toHaveBeenCalledWith("session-1", {
-			type: "user_message",
-			text: "Hello",
-		});
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
 			type: "status",
 			status: "processing",
@@ -391,15 +387,6 @@ describe("handleMessage", () => {
 			agent: "coder",
 			model: { providerID: "openai", modelID: "gpt-4" },
 		});
-	});
-
-	it("records pending user message so SSE echo is suppressed", async () => {
-		const deps = createMockHandlerDeps();
-		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
-		await handleMessage(deps, "client-1", { text: "Hello" });
-		// pendingUserMessages.record() should have been called so that
-		// sse-wiring can later consume() the echo and suppress it.
-		expect(deps.pendingUserMessages.consume("session-1", "Hello")).toBe(true);
 	});
 
 	it("sends user_message to other clients viewing the same session", async () => {
@@ -804,25 +791,8 @@ describe("handleSwitchSession", () => {
 		expect(deps.wsHandler.setClientSession).not.toHaveBeenCalled();
 	});
 
-	it("uses cached events when available with chat content", async () => {
+	it("serves REST history on session switch", async () => {
 		const deps = createMockHandlerDeps();
-		const cachedEvents: RelayMessage[] = [
-			{ type: "user_message", text: "hi" },
-			{ type: "delta", text: "hello" },
-		];
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(cachedEvents);
-		await handleSwitchSession(deps, "client-1", { sessionId: "s2" });
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "session_switched",
-			id: "s2",
-			// Session is idle and cache has no done — synthetic done is appended
-			events: [...cachedEvents, { type: "done", code: 0 }],
-		});
-	});
-
-	it("falls back to REST history when cache is empty", async () => {
-		const deps = createMockHandlerDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(null);
 		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockResolvedValue({
 			messages: [{ role: "user", content: "hi" }] as unknown[],
 			hasMore: false,
@@ -843,10 +813,9 @@ describe("handleSwitchSession", () => {
 // ─── handleDeleteSession ─────────────────────────────────────────────────────
 
 describe("handleDeleteSession", () => {
-	it("removes cache and deletes session with silent mode", async () => {
+	it("deletes session with silent mode", async () => {
 		const deps = createMockHandlerDeps();
 		await handleDeleteSession(deps, "client-1", { sessionId: "s2" });
-		expect(deps.messageCache.remove).toHaveBeenCalledWith("s2");
 		expect(deps.sessionMgr.deleteSession).toHaveBeenCalledWith("s2", {
 			silent: true,
 		});
@@ -1209,7 +1178,7 @@ describe("handleGetFileContent", () => {
 // ─── handleRewind ────────────────────────────────────────────────────────────
 
 describe("handleRewind", () => {
-	it("reverts session and invalidates cache", async () => {
+	it("reverts session and clears pagination cursor", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
 		await handleRewind(deps, "client-1", { messageId: "msg-1" });
@@ -1217,7 +1186,6 @@ describe("handleRewind", () => {
 			"session-1",
 			"msg-1",
 		);
-		expect(deps.messageCache.remove).toHaveBeenCalledWith("session-1");
 	});
 
 	it("also supports uuid field (legacy)", async () => {

@@ -84,9 +84,6 @@ describe("Regression: handleViewSession only sends questions for viewed session"
 					total: 0,
 				}),
 			} as unknown as HandlerDeps["sessionMgr"],
-			messageCache: {
-				getEvents: vi.fn().mockReturnValue(null),
-			} as unknown as HandlerDeps["messageCache"],
 			overrides: { clear: vi.fn() } as unknown as HandlerDeps["overrides"],
 			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
 			log: createSilentLogger(),

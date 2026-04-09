@@ -5,7 +5,7 @@ import {
 } from "../../../src/lib/bridges/client-init.js";
 import { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
-import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
+import type { OpenCodeEvent } from "../../../src/lib/types.js";
 import { createMockClientInitDeps } from "../../helpers/mock-factories.js";
 
 /** Cast a plain string to PermissionId for test data. */
@@ -55,34 +55,29 @@ function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 	return deps;
 }
 
-// ─── Session with cached events ──────────────────────────────────────────────
+// ─── Session with REST history ───────────────────────────────────────────────
+// MessageCache has been removed (Task 50.5). resolveSessionHistory now always
+// uses the REST path (sessionMgr.loadPreRenderedHistory) or SQLite.
 
-describe("handleClientConnected — session with cached events", () => {
-	it("sends session_switched with cached events when cache has chat content", async () => {
-		const cachedEvents: RelayMessage[] = [
-			{ type: "user_message", text: "hi" },
-			{ type: "delta", text: "hello" },
-		];
-		const deps = createMockClientInitDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(cachedEvents);
+describe("handleClientConnected — session with REST history", () => {
+	it("sends session_switched with REST history on connect", async () => {
+		const deps = applyTestDefaults(createMockClientInitDeps());
 
 		await handleClientConnected(deps, "client-1");
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
-			// Session is idle and cache has no done — synthetic done is appended
-			events: [...cachedEvents, { type: "done", code: 0 }],
+			history: {
+				messages: [{ role: "user", content: "hi" }],
+				hasMore: false,
+				total: 1,
+			},
 		});
 	});
 
 	it("sends status idle after session_switched", async () => {
-		const cachedEvents: RelayMessage[] = [
-			{ type: "user_message", text: "hi" },
-			{ type: "delta", text: "hello" },
-		];
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(cachedEvents);
 
 		await handleClientConnected(deps, "client-1");
 
@@ -99,13 +94,11 @@ describe("handleClientConnected — session with cached events", () => {
 	});
 });
 
-// ─── Session with REST API fallback ──────────────────────────────────────────
+// ─── Session history — REST fallback and error handling ──────────────────────
 
-describe("handleClientConnected — REST API history fallback", () => {
-	it("sends session_switched with REST API history when cache misses", async () => {
+describe("handleClientConnected — REST API history", () => {
+	it("sends session_switched with REST API history", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
-		// Cache returns null — no events
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(null);
 
 		await handleClientConnected(deps, "client-1");
 
@@ -120,9 +113,8 @@ describe("handleClientConnected — REST API history fallback", () => {
 		});
 	});
 
-	it("sends session_switched without data when REST API also fails", async () => {
+	it("sends session_switched without data when REST API fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(null);
 		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockRejectedValue(
 			new Error("REST fail"),
 		);
@@ -133,31 +125,6 @@ describe("handleClientConnected — REST API history fallback", () => {
 			type: "session_switched",
 			id: "session-1",
 		});
-	});
-
-	it("uses REST fallback when cache has events but no chat content", async () => {
-		const deps = createMockClientInitDeps();
-		// Events exist but only non-chat types (e.g., status, done)
-		const nonChatEvents: RelayMessage[] = [
-			{ type: "status", status: "processing" },
-			{ type: "done", code: 0 },
-		];
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(nonChatEvents);
-
-		await handleClientConnected(deps, "client-1");
-
-		// Should NOT include events (no chat content), should use REST fallback
-		expect(deps.sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
-			"session-1",
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "session_switched",
-				id: "session-1",
-				history: expect.any(Object),
-			}),
-		);
 	});
 });
 
