@@ -38,6 +38,15 @@ export interface DualWriteStats {
 	errors: number;
 }
 
+// ─── Hook Options ───────────────────────────────────────────────────────────
+
+export interface DualWriteHookOptions {
+	persistence: PersistenceLayer;
+	log: DualWriteLog;
+	/** Set to false to disable the hook without removing it. Defaults to true. */
+	enabled?: boolean;
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
 export class DualWriteHook {
@@ -59,11 +68,14 @@ export class DualWriteHook {
 
 	private statsIntervalId: ReturnType<typeof setInterval> | undefined;
 
-	constructor(persistence: PersistenceLayer, log: DualWriteLog) {
-		this.persistence = persistence;
-		this.log = log;
+	constructor(opts: DualWriteHookOptions) {
+		this.persistence = opts.persistence;
+		this.log = opts.log;
+		if (opts.enabled !== undefined) {
+			this.enabled = opts.enabled;
+		}
 		this.translator = new CanonicalEventTranslator();
-		this.seeder = new SessionSeeder(persistence.db);
+		this.seeder = new SessionSeeder(opts.persistence.db);
 	}
 
 	// ─── Main Entry Point ─────────────────────────────────────────────────

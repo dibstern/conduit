@@ -7,6 +7,7 @@ import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
+import type { DualWriteHook } from "../persistence/dual-write-hook.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
@@ -90,6 +91,8 @@ export interface SSEWiringDeps {
 	slug?: string;
 	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
+	/** Optional: dual-write hook for SQLite event store persistence */
+	dualWriteHook?: DualWriteHook;
 }
 
 // ─── Push notification helper ────────────────────────────────────────────────
@@ -177,6 +180,11 @@ export function handleSSEEvent(
 
 	const eventSessionId = extractSessionId(event);
 	log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
+
+	// ── Dual-write to SQLite event store (Phase 2) ─────────────────────
+	if (deps.dualWriteHook) {
+		deps.dualWriteHook.onSSEEvent(event, eventSessionId);
+	}
 
 	// ── Track message activity for session ordering ──────────────────────
 	// Record the timestamp of any message-related event so sessions are
@@ -443,6 +451,12 @@ export function wireSSEConsumer(
 	consumer.on("connected", () => {
 		const gen = ++rehydrationGen;
 		log.info("Connected to OpenCode event stream");
+
+		// Reset dual-write translator state on reconnect so part tracking
+		// starts fresh (avoids stale first-seen flags from the previous
+		// connection producing incorrect event sequences).
+		deps.dualWriteHook?.onReconnect();
+
 		deps.wsHandler.broadcast({
 			type: "connection_status",
 			status: "connected",

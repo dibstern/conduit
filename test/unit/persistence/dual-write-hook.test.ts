@@ -31,7 +31,7 @@ describe("DualWriteHook", () => {
 	beforeEach(() => {
 		layer = PersistenceLayer.memory();
 		log = makeLogger();
-		hook = new DualWriteHook(layer, log);
+		hook = new DualWriteHook({ persistence: layer, log });
 	});
 
 	afterEach(() => {
