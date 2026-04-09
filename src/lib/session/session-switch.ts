@@ -54,11 +54,6 @@ export interface SwitchClientOptions {
 
 /** Narrowed deps for switchClientToSession — only what's needed, nothing more. */
 export interface SessionSwitchDeps {
-	readonly messageCache: {
-		getEvents(sessionId: string): Promise<RelayMessage[] | null>;
-		getOpenCodeUpdatedAt?(sessionId: string): number | undefined;
-		setOpenCodeUpdatedAt?(sessionId: string, timestamp: number): void;
-	};
 	readonly sessionMgr: {
 		loadPreRenderedHistory(
 			sessionId: string,
@@ -85,12 +80,6 @@ export interface SessionSwitchDeps {
 		warn(...args: unknown[]): void;
 	};
 	readonly getInputDraft: (sessionId: string) => string | undefined;
-	/** Fork metadata — used to force REST for fork sessions (SSE cache lacks inherited messages). */
-	readonly forkMeta?: {
-		getForkEntry(
-			sessionId: string,
-		): { forkMessageId: string; parentID: string } | undefined;
-	};
 	/** Phase 4e: SQLite read query service (optional, for gradual rollout). */
 	readonly readQuery?: ReadQueryService;
 	/** Phase 4e: Read path feature flags (optional, for gradual rollout). */
@@ -269,31 +258,21 @@ export function resolveSessionHistoryFromSqlite(
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
 /**
- * Resolve session history from cache or REST API.
- * Impure — reads from cache and may call REST.
- *
- * When the cache has chat content, it is validated against OpenCode's
- * session.time.updated timestamp. If OpenCode updated the session after
- * the cache was last written (e.g. session continued while conduit was
- * down), the cache is stale and we fall through to REST for full history.
- *
- * When the cache is fresh, it is served directly WITHOUT a full REST fetch.
- * This avoids fetching all messages (which can be 40MB+ for large sessions)
- * and prevents OOM when many project relays are loaded.
+ * Resolve session history from SQLite or REST API.
+ * Impure — may call REST.
  *
  * Phase 4e: When `readFlags.sessionHistory` is active ("shadow" or "sqlite")
- * and `readQuery` is available, reads from SQLite instead of the legacy cache.
+ * and `readQuery` is available, reads from SQLite (synchronous, always fresh).
+ * Otherwise falls back to REST API via loadPreRenderedHistory.
+ *
+ * The in-memory MessageCache path has been removed — SQLite is the source of
+ * truth for history. See Task 50.5 in the implementation plan.
  */
 export async function resolveSessionHistory(
 	sessionId: string,
 	deps: Pick<
 		SessionSwitchDeps,
-		| "messageCache"
-		| "sessionMgr"
-		| "log"
-		| "forkMeta"
-		| "readQuery"
-		| "readFlags"
+		"sessionMgr" | "log" | "readQuery" | "readFlags"
 	>,
 ): Promise<SessionHistorySource> {
 	// Phase 4e: Read from SQLite when flag is active (shadow or sqlite mode).
@@ -305,85 +284,7 @@ export async function resolveSessionHistory(
 		});
 	}
 
-	// Legacy path (unchanged) ─────────────────────────────────────────────────
-	const events = await deps.messageCache.getEvents(sessionId);
-	const classification = classifyHistorySource(events);
-
-	if (classification === "cached-events" && events) {
-		// Fork sessions: the SSE cache only has events from after the fork was
-		// opened — it never contains the inherited parent messages. Force REST
-		// so the frontend gets the full history with timestamps for splitting.
-		const isFork = !!deps.forkMeta?.getForkEntry(sessionId);
-		if (isFork) {
-			deps.log.info(
-				`Fork session ${sessionId.slice(0, 16)}: SSE cache has ${events.length} events but lacks inherited messages — using REST`,
-			);
-			try {
-				const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
-				return { kind: "rest-history", history };
-			} catch (err) {
-				deps.log.warn(
-					`Failed to load history for fork ${sessionId}: ${err instanceof Error ? err.message : err}`,
-				);
-				return { kind: "empty" };
-			}
-		}
-
-		// Stale-tail detection: compare the session.time.updated stored when
-		// the cache was last active against the fresh value from OpenCode
-		// (fetched during sessionMgr.initialize()). The stored value is set
-		// by the SSE wiring (Date.now() at event receipt, always >= OpenCode's
-		// time.updated). If the fresh value is greater, events happened while
-		// conduit was down → cache is stale.
-		//
-		// When no stored timestamp exists (first run with this feature, or
-		// new session), treat as potentially stale — one-time REST validation
-		// to establish the baseline.
-		const cachedUpdatedAt = deps.messageCache.getOpenCodeUpdatedAt?.(sessionId);
-		const freshUpdatedAt = deps.sessionMgr
-			.getLastMessageAtMap?.()
-			?.get(sessionId);
-		const cacheIsStale =
-			freshUpdatedAt != null &&
-			(cachedUpdatedAt == null || freshUpdatedAt > cachedUpdatedAt);
-		if (cacheIsStale) {
-			deps.log.info(
-				`Session ${sessionId.slice(0, 16)}: cache stale (cached updatedAt ${cachedUpdatedAt}, fresh ${freshUpdatedAt}) — using REST`,
-			);
-			try {
-				const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
-				// Update stored timestamp so subsequent switches to this session
-				// don't re-detect staleness and re-fetch REST.
-				deps.messageCache.setOpenCodeUpdatedAt?.(sessionId, freshUpdatedAt);
-				return { kind: "rest-history", history };
-			} catch (err) {
-				deps.log.warn(
-					`Failed to load fresh history for ${sessionId}: ${err instanceof Error ? err.message : err} — falling back to stale cache`,
-				);
-				// Fall through to serve stale cache rather than showing nothing
-			}
-		}
-
-		// Heuristic: if the first event is a user_message, the cache starts
-		// from session creation and covers the full session. If the first
-		// event is mid-conversation (delta, tool_*, etc.), the cache was
-		// truncated (eviction or late relay start) and older messages exist.
-		const cacheAppearsComplete = events[0]?.type === "user_message";
-
-		// Update stored timestamp with the fresh value for the NEXT restart.
-		// This ensures that if the session has new activity before the next
-		// restart, the stored value will be older than the new time.updated.
-		if (freshUpdatedAt != null) {
-			deps.messageCache.setOpenCodeUpdatedAt?.(sessionId, freshUpdatedAt);
-		}
-
-		return {
-			kind: "cached-events",
-			events,
-			hasMore: !cacheAppearsComplete,
-		};
-	}
-
+	// Fallback: REST API
 	try {
 		const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
 		return { kind: "rest-history", history };

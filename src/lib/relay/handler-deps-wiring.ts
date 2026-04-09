@@ -24,13 +24,10 @@ import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { ProjectRelayConfig } from "../types.js";
-import type { MessageCache } from "./message-cache.js";
 import type { MessagePollerManager } from "./message-poller-manager.js";
-import type { PendingUserMessages } from "./pending-user-messages.js";
 import type { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
 import { connectPtyUpstream as connectPtyUpstreamImpl } from "./pty-upstream.js";
-import type { ToolContentStore } from "./tool-content-store.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
@@ -38,12 +35,9 @@ export interface HandlerDepsWiringDeps {
 	wsHandler: WebSocketHandler;
 	client: OpenCodeClient;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
-	pendingUserMessages: PendingUserMessages;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
-	toolContentStore: ToolContentStore;
 	config: ProjectRelayConfig;
 	log: Logger;
 	wsLog: Logger;
@@ -74,12 +68,9 @@ export function wireHandlerDeps(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
-		pendingUserMessages,
 		permissionBridge,
 		overrides,
 		ptyManager,
-		toolContentStore,
 		config,
 		log,
 		wsLog,
@@ -98,7 +89,6 @@ export function wireHandlerDeps(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
 		overrides,
 		ptyManager,
 		permissionBridge,
@@ -132,12 +122,9 @@ export function wireHandlerDeps(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
-		pendingUserMessages,
 		permissionBridge,
 		overrides,
 		ptyManager,
-		toolContentStore,
 		config,
 		log,
 		connectPtyUpstream: (ptyId: string, cursor?: number) =>

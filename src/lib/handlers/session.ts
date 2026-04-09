@@ -134,16 +134,12 @@ async function sendSessionMetadata(
  */
 function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 	return {
-		messageCache: deps.messageCache,
 		sessionMgr: deps.sessionMgr,
 		wsHandler: deps.wsHandler,
 		statusPoller: deps.statusPoller,
 		pollerManager: deps.pollerManager,
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,
-		forkMeta: {
-			getForkEntry: (sid: string) => deps.forkMeta.getForkEntry(sid),
-		},
 	};
 }
 
@@ -240,7 +236,6 @@ export async function handleDeleteSession(
 	// Find ALL clients viewing this session before deletion
 	const viewers = deps.wsHandler.getClientsForSession(id);
 
-	deps.messageCache.remove(id);
 	await deps.sessionMgr.deleteSession(id, { silent: true });
 
 	const sessions = await deps.sessionMgr.listSessions();

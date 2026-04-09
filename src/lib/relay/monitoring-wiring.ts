@@ -19,7 +19,6 @@ import {
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
-import type { MessageCache } from "./message-cache.js";
 import type { MessagePollerManager } from "./message-poller-manager.js";
 import {
 	assembleContext,
@@ -36,7 +35,6 @@ import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEConsumer } from "./sse-consumer.js";
 import { sendPushForEvent } from "./sse-wiring.js";
-import type { ToolContentStore } from "./tool-content-store.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
@@ -45,8 +43,6 @@ export interface MonitoringWiringDeps {
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
 	overrides: SessionOverrides;
-	toolContentStore: ToolContentStore;
-	messageCache: MessageCache;
 	statusPoller: SessionStatusPoller;
 	pollerManager: MessagePollerManager;
 	registry: SessionRegistry;
@@ -87,8 +83,6 @@ export function wireMonitoring(
 		wsHandler,
 		sessionMgr,
 		overrides,
-		toolContentStore,
-		messageCache,
 		statusPoller,
 		pollerManager,
 		registry,
@@ -115,9 +109,7 @@ export function wireMonitoring(
 
 	// ── Shared pipeline deps (used by status poller + message poller) ──────
 	const pipelineDeps: PipelineDeps = {
-		toolContentStore,
 		overrides,
-		messageCache,
 		wsHandler,
 		log: pipelineLog,
 	};

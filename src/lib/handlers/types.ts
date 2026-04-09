@@ -10,11 +10,8 @@ import type {
 import type { Logger } from "../logger.js";
 import type { ReadAdapter } from "../persistence/read-adapter.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { MessageCache } from "../relay/message-cache.js";
 import type { MessagePollerManager } from "../relay/message-poller-manager.js";
-import type { PendingUserMessages } from "../relay/pending-user-messages.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { ToolContentStore } from "../relay/tool-content-store.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
@@ -72,12 +69,9 @@ export interface HandlerDeps {
 	};
 	client: OpenCodeClient;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
-	pendingUserMessages: PendingUserMessages;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
-	toolContentStore: ToolContentStore;
 	config: ProjectRelayConfig;
 	log: Logger;
 	/** Session status poller for processing state */

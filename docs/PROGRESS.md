@@ -798,3 +798,12 @@
 - **Test files deleted** (5): `message-cache.test.ts`, `cold-cache-repair.test.ts`, `cache-replay-contract.test.ts`, `regression-server-cache-pipeline.test.ts`, `daemon-eviction-chain.test.ts`
 - **New test file**: `test/unit/persistence/eviction.test.ts` — 12 tests covering sync/async batching, yield counts, receipt cleanup, cascade projections
 - **Commit**: `d7c7042` — 19 files changed (+ 2 new, 7 deleted); 239 test files, 4330 tests passing
+
+### 2026-04-10 — Orchestrator Task 52 (Remove ToolContentStore + PendingUserMessages — replaced by SQLite tables)
+- **Source files deleted**: `src/lib/relay/tool-content-store.ts` (77 lines), `src/lib/relay/pending-user-messages.ts` (82 lines)
+- **Test files deleted**: `test/unit/relay/tool-content-store.test.ts`, `test/unit/relay/pending-user-messages.test.ts`
+- **Comments updated**: `src/lib/handlers/tool-content.ts` and `src/lib/relay/truncate-content.ts` — "ToolContentStore" → "SQLite tool_content table"
+- **Handler already rewritten** (Task 50.5): `handleGetToolContent` uses `deps.readAdapter?.getToolContent(toolId)` — no further changes needed
+- **Handler test kept**: `test/unit/handlers/get-tool-content-handler.test.ts` (7 tests) — already tests SQLite ReadAdapter path
+- **Snapshot harmless**: `test/e2e/fixtures/subagent-snapshot.json` references old filenames in historical traces — no test failures
+- **Verification**: `pnpm check` clean, `pnpm lint` clean (warnings only), 237 test files, 4304 tests passing

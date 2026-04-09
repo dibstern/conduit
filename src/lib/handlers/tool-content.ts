@@ -1,5 +1,5 @@
 // ─── Tool Content Handler ────────────────────────────────────────────────────
-// Returns full (pre-truncation) tool result content stored in ToolContentStore.
+// Returns full (pre-truncation) tool result content from the SQLite tool_content table.
 
 import type { PayloadMap } from "./payloads.js";
 import type { HandlerDeps } from "./types.js";
@@ -19,13 +19,9 @@ export async function handleGetToolContent(
 		return;
 	}
 
-	// Phase 4a: Check SQLite via ReadAdapter when toolContent flag is "sqlite".
-	// Falls through to ToolContentStore when readAdapter is absent or returns undefined.
-	const sqliteContent = deps.readAdapter?.getToolContent(toolId);
-	const content =
-		sqliteContent !== undefined
-			? sqliteContent
-			: deps.toolContentStore.get(toolId);
+	// Read tool content from SQLite via ReadAdapter.
+	// Returns NOT_FOUND when readAdapter is absent (persistence not configured).
+	const content = deps.readAdapter?.getToolContent(toolId);
 	if (content !== undefined) {
 		deps.wsHandler.sendTo(clientId, {
 			type: "tool_content",

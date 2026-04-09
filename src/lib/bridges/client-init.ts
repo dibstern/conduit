@@ -11,7 +11,6 @@ import { formatErrorDetail, RelayError } from "../errors.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeClient } from "../instance/opencode-client.js";
 import type { Logger } from "../logger.js";
-import type { MessageCache } from "../relay/message-cache.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
@@ -34,7 +33,6 @@ export interface ClientInitDeps {
 	};
 	client: OpenCodeClient;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
 	permissionBridge: Pick<PermissionBridge, "getPending" | "recoverPending">;
@@ -76,7 +74,6 @@ export async function handleClientConnected(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
 		overrides,
 		ptyManager,
 		permissionBridge,
@@ -102,15 +99,11 @@ export async function handleClientConnected(
 		// adds new required fields that this object doesn't provide.
 		await switchClientToSession(
 			{
-				messageCache,
 				sessionMgr,
 				wsHandler,
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
-				forkMeta: {
-					getForkEntry: (sid: string) => sessionMgr.getForkEntry(sid),
-				},
 			} satisfies SessionSwitchDeps,
 			clientId,
 			activeId,

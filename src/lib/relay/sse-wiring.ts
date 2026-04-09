@@ -15,7 +15,6 @@ import type { PermissionId } from "../shared-types.js";
 import type { OpenCodeEvent, RelayMessage } from "../types.js";
 import { applyPipelineResult, processEvent } from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
-import type { MessageCache } from "./message-cache.js";
 import { resolveNotifications } from "./notification-policy.js";
 import {
 	hasInfoWithSessionID,
@@ -24,9 +23,7 @@ import {
 	isPermissionRepliedEvent,
 	isSessionErrorEvent,
 } from "./opencode-events.js";
-import type { PendingUserMessages } from "./pending-user-messages.js";
 import type { SSEConsumer } from "./sse-consumer.js";
-import type { ToolContentStore } from "./tool-content-store.js";
 
 // ─── Session ID extraction ────────────────────────────────────────────────────
 // OpenCode SSE events store sessionID in different locations by event type:
@@ -57,11 +54,8 @@ export function extractSessionId(event: OpenCodeEvent): string | undefined {
 export interface SSEWiringDeps {
 	translator: Translator;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
-	pendingUserMessages: PendingUserMessages;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
-	toolContentStore: ToolContentStore;
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
@@ -168,10 +162,8 @@ export function handleSSEEvent(
 	const {
 		translator,
 		sessionMgr,
-		messageCache,
 		permissionBridge,
 		overrides,
-		toolContentStore,
 		wsHandler,
 		pushManager,
 		pipelineLog,
@@ -190,13 +182,7 @@ export function handleSSEEvent(
 	// Record the timestamp of any message-related event so sessions are
 	// ordered by actual conversation activity, not metadata updates.
 	if (eventSessionId && event.type.startsWith("message.")) {
-		const now = Date.now();
-		sessionMgr.recordMessageActivity(eventSessionId, now);
-		// Keep openCodeUpdatedAt in sync with lastMessageAt. Both use
-		// Date.now() during live operation. On next restart, the stored
-		// openCodeUpdatedAt is compared against the fresh session.time.updated
-		// from OpenCode — if they differ, the cache is stale.
-		messageCache.setOpenCodeUpdatedAt(eventSessionId, now);
+		sessionMgr.recordMessageActivity(eventSessionId, Date.now());
 	}
 	// ── Permission / question bridge routing ──────────────────────────────
 
@@ -337,21 +323,6 @@ export function handleSSEEvent(
 
 	const toSend = translateResult.messages;
 	for (let msg of toSend) {
-		// ── Suppress relay-originated user messages ──────────────────────
-		// When we send a message via the relay, the frontend already adds it
-		// locally. OpenCode fires a `message.created` SSE event for the same
-		// message, which the translator converts to `user_message`. Without
-		// this check the message appears twice (once from local add, once
-		// from SSE echo). The pending tracker was populated by prompt.ts.
-		if (
-			msg.type === "user_message" &&
-			targetSessionId &&
-			deps.pendingUserMessages.consume(targetSessionId, msg.text)
-		) {
-			log.debug(`Suppressed user_message echo: session=${targetSessionId}`);
-			continue;
-		}
-
 		// Permission events: broadcast to all clients (not session-scoped)
 		if (
 			msg.type === "permission_request" ||
@@ -393,9 +364,7 @@ export function handleSSEEvent(
 		msg = pipeResult.msg;
 
 		applyPipelineResult(pipeResult, targetSessionId, {
-			toolContentStore,
 			overrides,
-			messageCache,
 			wsHandler,
 			log: pipelineLog,
 		});

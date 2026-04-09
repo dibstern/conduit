@@ -1,6 +1,6 @@
 // ─── Content Truncation ──────────────────────────────────────────────────────
 // Utilities for truncating large tool result content before relay to clients.
-// Full content is preserved separately in ToolContentStore for on-demand fetch.
+// Full content is preserved in the SQLite tool_content table for on-demand fetch.
 
 import type { RelayMessage } from "../shared-types.js";
 

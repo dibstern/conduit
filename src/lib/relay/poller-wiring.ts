@@ -17,7 +17,6 @@ import {
 } from "./event-pipeline.js";
 import type { MessagePollerManager } from "./message-poller-manager.js";
 import { resolveNotifications } from "./notification-policy.js";
-import type { PendingUserMessages } from "./pending-user-messages.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEConsumer } from "./sse-consumer.js";
@@ -29,7 +28,6 @@ export interface PollerWiringDeps {
 	pollerManager: MessagePollerManager;
 	sseConsumer: SSEConsumer;
 	statusPoller: SessionStatusPoller;
-	pendingUserMessages: PendingUserMessages;
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
 	pipelineDeps: PipelineDeps;
@@ -50,7 +48,6 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		pollerManager,
 		sseConsumer,
 		statusPoller,
-		pendingUserMessages,
 		wsHandler,
 		sessionMgr,
 		pipelineDeps,
@@ -80,17 +77,6 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		}
 
 		for (const msg of events) {
-			// Suppress relay-originated user messages from poller (same as SSE path)
-			if (
-				msg.type === "user_message" &&
-				polledSessionId &&
-				pendingUserMessages.consume(polledSessionId, msg.text)
-			) {
-				pollerLog.debug(
-					`Suppressed relay-originated user_message echo for session=${polledSessionId}`,
-				);
-				continue;
-			}
 			const pollerViewers = polledSessionId
 				? wsHandler.getClientsForSession(polledSessionId)
 				: [];

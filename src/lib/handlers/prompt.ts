@@ -55,16 +55,10 @@ export async function handleMessage(
 		`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 	);
 
-	// Record user message to cache (identical to claude-relay pattern)
-	deps.messageCache.recordEvent(activeId, { type: "user_message", text });
-
 	// Clear the input draft — the user's draft is now a sent message.
 	// Without this, the stale draft would be re-applied on reconnect or
 	// session switch (session_switched includes inputText from the draft store).
 	clearSessionInputDraft(activeId);
-
-	// Record pending user message so SSE echo can be suppressed
-	deps.pendingUserMessages.record(activeId, text);
 
 	// Send user_message to OTHER clients viewing this session.
 	// The sending client already added the message locally in the frontend,
@@ -224,9 +218,8 @@ export async function handleRewind(
 	const activeId = resolveSession(deps, clientId);
 	if (messageId && activeId) {
 		await deps.client.revertSession(activeId, messageId);
-		// Invalidate cache and pagination cursor — revert deletes messages,
-		// so the old cursor would point to a non-existent message ID.
-		deps.messageCache.remove(activeId);
+		// Invalidate pagination cursor — revert deletes messages, so the old
+		// cursor would point to a non-existent message ID.
 		deps.sessionMgr.clearPaginationCursor(activeId);
 		deps.log.info(
 			`client=${clientId} session=${activeId} Reverted to message: ${messageId}`,
