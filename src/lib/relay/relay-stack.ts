@@ -14,6 +14,7 @@ import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
 import { createLogger, type Logger } from "../logger.js";
+import { DualWriteHook } from "../persistence/dual-write-hook.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { RelayServer } from "../server/server.js";
@@ -331,6 +332,16 @@ export async function createProjectRelay(
 		log: sseLog,
 	});
 
+	// ── Dual-write hook (Phase 2) ────────────────────────────────────────
+	let dualWriteHook: DualWriteHook | undefined;
+	if (config.persistence && config.dualWriteEnabled !== false) {
+		dualWriteHook = new DualWriteHook({
+			persistence: config.persistence,
+			log: log.child("dual-write"),
+			enabled: true,
+		});
+	}
+
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
 
 	// Late-binding: SSE wiring is set up before monitoring wiring, but SSE
@@ -358,6 +369,7 @@ export async function createProjectRelay(
 			statusPoller,
 			slug: config.slug,
 			onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
+			...(dualWriteHook != null && { dualWriteHook }),
 		},
 		sseConsumer,
 	);
