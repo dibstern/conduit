@@ -501,6 +501,62 @@ Expected: All pass
 
 ---
 
+## Task 3.5: E2E Test with Real Claude Agent SDK
+
+Add an E2E test that calls the real Claude Agent SDK with a live API key, verifying the full `sendTurn()` → SDK `query()` → stream consumer → canonical events pipeline works against the real service.
+
+**Files:**
+- Create: `test/e2e/provider/claude-adapter-real-sdk.test.ts`
+- Modify: `package.json` (add `test:e2e:expensive-real-prompts` script)
+
+**Gating:** This test is expensive (real API calls, real money). It runs ONLY via `pnpm test:e2e:expensive-real-prompts`, never in `pnpm test` or `pnpm test:unit`. Gate with:
+
+```typescript
+import { describe, it, expect } from "vitest";
+
+const RUN_EXPENSIVE = process.env.RUN_EXPENSIVE_E2E === "1";
+
+describe.skipIf(!RUN_EXPENSIVE)("ClaudeAdapter E2E (real SDK)", () => {
+```
+
+**Step 1: Add the npm script**
+
+In `package.json`, add:
+```json
+"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run test/e2e/provider/"
+```
+
+**Step 2: Write the E2E test**
+
+Test case:
+
+1. **Full turn with Haiku**: Create a real `ClaudeAdapter` with NO `queryFactory` override (uses real SDK). Create a real `EventSink` that collects pushed canonical events into an array. Call `sendTurn()` with:
+   - `prompt: "Reply with exactly: hello world"`
+   - `model: { providerId: "claude", modelId: "claude-haiku-3-5" }` (cheapest model)
+   - `workspaceRoot: process.cwd()`
+   - A real `AbortSignal`
+   - `eventSink` that collects events
+
+   Verify:
+   - `sendTurn()` resolves with a `TurnResult` with `status: "completed"`
+   - `TurnResult.tokens.input > 0` and `TurnResult.tokens.output > 0`
+   - The collected events include at least one `text.delta` event
+   - The collected events include a `turn.completed` event
+   - Total cost is under $0.01 (sanity check)
+
+   Set a 60-second timeout for the test.
+
+**Step 3: Verify**
+
+Run: `pnpm test:e2e:expensive-real-prompts` (requires `ANTHROPIC_API_KEY` in env)
+Expected: Pass (1 test, ~5-15 seconds, ~$0.001 cost)
+
+Without the env var, verify: `pnpm test:unit` still passes and the E2E test is skipped.
+
+**Commit:** `test: add real-SDK E2E test for ClaudeAdapter.sendTurn() (gated behind RUN_EXPENSIVE_E2E)`
+
+---
+
 ## Task 4: Update PROGRESS.md and Clean Up
 
 **Files:**
@@ -537,6 +593,7 @@ Expected: All pass
 | 1 | Rewrite ClaudeEventTranslator for real SDK types | 16+ test cases |
 | 2 | Implement sendTurn() on ClaudeAdapter (with queryFactory DI seam) | 9 test cases |
 | 3 | Wire into orchestration + integration tests (shared mock helper) | 5 test cases |
+| 3.5 | E2E test with real SDK (Haiku, gated behind `RUN_EXPENSIVE_E2E`) | 1 test case |
 | 4 | Update progress, clean up | Verification grep |
 
 ---
