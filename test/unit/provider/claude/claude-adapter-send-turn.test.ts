@@ -439,6 +439,36 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(errorEvents.length).toBeGreaterThanOrEqual(1);
 	});
 
+	// ── Test 6b: SDK error result yields TurnResult with error details ───────
+
+	it("SDK error result yields TurnResult with status error and error details", async () => {
+		const errorResult = makeErrorResult();
+		const mockQuery = createMockQuery([errorResult]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sink = createMockEventSink();
+		const input = makeBaseSendTurnInput({
+			sessionId: "session-error-result",
+			eventSink: sink,
+		});
+
+		const result = await adapter.sendTurn(input);
+
+		expect(result.status).toBe("error");
+		expect(result.error).toBeDefined();
+		expect(result.error!.code).toBe("error_during_execution");
+		expect(result.error!.message).toBe("Something went wrong");
+		expect(result.cost).toBe(0.01);
+		expect(result.tokens.input).toBe(50);
+		expect(result.tokens.output).toBe(10);
+		expect(result.durationMs).toBe(500);
+	});
+
 	// ── Test 7: Concurrent sendTurn() for same session is serialized ──────
 
 	it("concurrent sendTurn() for same session creates only one query()", async () => {

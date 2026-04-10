@@ -30,7 +30,10 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import { ClaudeEventTranslator } from "./claude-event-translator.js";
+import {
+	ClaudeEventTranslator,
+	isInterruptedResult,
+} from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { PromptQueue } from "./prompt-queue.js";
 import type {
@@ -166,19 +169,6 @@ function enumerateSkills(
 		}
 	}
 	return out;
-}
-
-// ─── Result classification ─────────────────────────────────────────────────
-
-function isInterruptedResult(result: SDKResultMessage): boolean {
-	if (result.subtype === "success") return false;
-	const errors = result.errors.join(" ").toLowerCase();
-	if (errors.includes("interrupt") || errors.includes("aborted")) return true;
-	return (
-		result.subtype === "error_during_execution" &&
-		!result.is_error &&
-		(errors.includes("cancel") || errors.includes("user"))
-	);
 }
 
 // ─── Turn deferred ─────────────────────────────────────────────────────────
@@ -377,7 +367,6 @@ export class ClaudeAdapter implements ProviderAdapter {
 			ctx.streamConsumer = this.runStreamConsumer(ctx, translator);
 		} catch (err) {
 			// Clean up on failure
-			this.sessionLocks.delete(sessionId);
 			this.turnDeferredQueues.delete(sessionId);
 			throw err;
 		} finally {
@@ -422,7 +411,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 			}
 		} catch (err) {
 			await translator.translateError(ctx, err);
-			this.rejectTurn(ctx, err);
+			this.resolveErrorTurn(ctx, err);
 		} finally {
 			this.rejectTurnIfPending(
 				ctx,
@@ -462,7 +451,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		deferred.resolve(this.sdkResultToTurnResult(ctx, result));
 	}
 
-	private rejectTurn(ctx: ClaudeSessionContext, err: unknown): void {
+	private resolveErrorTurn(ctx: ClaudeSessionContext, err: unknown): void {
 		const deferred = this.shiftTurnDeferred(ctx.sessionId);
 		if (!deferred) return;
 

@@ -151,7 +151,7 @@ function titleForItemType(t: CanonicalItemType): string {
 	}
 }
 
-function isInterruptedResult(result: SDKResultMessage): boolean {
+export function isInterruptedResult(result: SDKResultMessage): boolean {
 	if (result.subtype === "success") return false;
 	const errors = result.errors.join(" ").toLowerCase();
 	if (errors.includes("interrupt") || errors.includes("aborted")) return true;
