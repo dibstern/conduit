@@ -152,10 +152,8 @@ function titleForItemType(t: CanonicalItemType): string {
 }
 
 function isInterruptedResult(result: SDKResultMessage): boolean {
-	const errors =
-		result.errors && Array.isArray(result.errors)
-			? result.errors.join(" ").toLowerCase()
-			: "";
+	if (result.subtype === "success") return false;
+	const errors = result.errors.join(" ").toLowerCase();
 	if (errors.includes("interrupt") || errors.includes("aborted")) return true;
 	return (
 		result.subtype === "error_during_execution" &&
@@ -537,10 +535,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		result: SDKResultMessage,
 	): Promise<void> {
-		const interrupted = isInterruptedResult(result);
-		const isError = result.subtype !== "success" && !interrupted;
-
-		if (interrupted) {
+		if (isInterruptedResult(result)) {
 			await this.push(
 				makeCanonicalEvent("turn.interrupted", ctx.sessionId, {
 					messageId:
@@ -550,11 +545,8 @@ export class ClaudeEventTranslator {
 			return;
 		}
 
-		if (isError) {
-			const errors =
-				result.errors && Array.isArray(result.errors)
-					? result.errors.join("; ")
-					: "Unknown error";
+		if (result.subtype !== "success") {
+			const errors = result.errors.join("; ") || "Unknown error";
 			await this.push(
 				makeCanonicalEvent("turn.error", ctx.sessionId, {
 					messageId:

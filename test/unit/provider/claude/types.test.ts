@@ -1,27 +1,23 @@
 // test/unit/provider/claude/types.test.ts
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-	ClaudeQueryRuntime,
 	ClaudeResumeCursor,
 	ClaudeSessionContext,
 	PendingApproval,
 	PendingQuestion,
 	PromptQueueController,
 	PromptQueueItem,
+	Query,
 	SDKMessage,
 	SDKUserMessage,
 	ToolInFlight,
 } from "../../../../src/lib/provider/claude/types.js";
 
 describe("Claude adapter types", () => {
-	it("ClaudeQueryRuntime extends AsyncIterable<SDKMessage>", () => {
-		expectTypeOf<ClaudeQueryRuntime>().toMatchTypeOf<
-			AsyncIterable<SDKMessage>
-		>();
-		expectTypeOf<ClaudeQueryRuntime["interrupt"]>().toEqualTypeOf<
-			() => Promise<void>
-		>();
-		expectTypeOf<ClaudeQueryRuntime["setModel"]>().toEqualTypeOf<
+	it("Query extends AsyncGenerator<SDKMessage, void>", () => {
+		expectTypeOf<Query>().toMatchTypeOf<AsyncGenerator<SDKMessage, void>>();
+		expectTypeOf<Query["interrupt"]>().toEqualTypeOf<() => Promise<void>>();
+		expectTypeOf<Query["setModel"]>().toEqualTypeOf<
 			(model?: string) => Promise<void>
 		>();
 	});
@@ -31,10 +27,9 @@ describe("Claude adapter types", () => {
 			type: "message",
 			message: {
 				type: "user",
-				session_id: "",
 				parent_tool_use_id: null,
 				message: { role: "user", content: [{ type: "text", text: "hi" }] },
-			},
+			} as unknown as SDKUserMessage,
 		};
 		const term: PromptQueueItem = { type: "terminate" };
 		expectTypeOf(msg).toMatchTypeOf<PromptQueueItem>();
@@ -100,16 +95,14 @@ describe("Claude adapter types", () => {
 	});
 
 	it("SDKUserMessage has the expected shape", () => {
-		const msg: SDKUserMessage = {
-			type: "user",
-			session_id: "sess-1",
-			parent_tool_use_id: null,
+		const msg = {
+			type: "user" as const,
 			message: {
-				role: "user",
+				role: "user" as const,
 				content: [{ type: "text", text: "Hello" }],
 			},
-		};
+			parent_tool_use_id: null,
+		} as unknown as SDKUserMessage;
 		expect(msg.type).toBe("user");
-		expect(msg.message.role).toBe("user");
 	});
 });

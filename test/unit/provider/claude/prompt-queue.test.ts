@@ -6,10 +6,9 @@ import type { SDKUserMessage } from "../../../../src/lib/provider/claude/types.j
 function msg(text: string): SDKUserMessage {
 	return {
 		type: "user",
-		session_id: "",
 		parent_tool_use_id: null,
 		message: { role: "user", content: [{ type: "text", text }] },
-	};
+	} as unknown as SDKUserMessage;
 }
 
 async function takeN<T>(iter: AsyncIterable<T>, n: number): Promise<T[]> {
