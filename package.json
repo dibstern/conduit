@@ -60,7 +60,7 @@
 		"generate:media": "tsx scripts/generate-media/index.ts",
 		"check:storybook": "node scripts/check-storybook-health.mjs",
 		"test:all": "bash scripts/test-all.sh",
-		"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run test/e2e/provider/",
+		"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run --config vitest.e2e.config.ts",
 		"test:coverage": "vitest run --coverage",
 		"test:record-snapshots": "tsx test/e2e/scripts/record-snapshots.ts",
 		"prepublishOnly": "pnpm test:all",

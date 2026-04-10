@@ -327,6 +327,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 				cwd: input.workspaceRoot,
 				abortController,
 				includePartialMessages: true,
+				settingSources: ["user", "project", "local"],
 				...(input.model ? { model: input.model.modelId } : {}),
 				...(resumeSessionId ? { resume: resumeSessionId } : {}),
 				...(input.agent ? { agent: input.agent } : {}),

@@ -2,7 +2,6 @@ import * as fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectRegistry } from "../../../src/lib/daemon/project-registry.js";
 import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import {
 	createMockProjectRelay,
