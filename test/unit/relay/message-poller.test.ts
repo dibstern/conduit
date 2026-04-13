@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
-import type { Message } from "../../../src/lib/instance/opencode-client.js";
+import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	buildSeedSnapshot,

@@ -840,3 +840,35 @@
 - **Retained** `HistoryMessage` and `HistoryMessagePart` as relay-specific transport types (they carry `renderedHtml`, index signatures, and optional fields not in SDK types) with updated JSDoc documenting SDK type mapping
 - **Import chain**: `sdk-types.ts` (defines) -> `shared-types.ts` (re-exports) -> `types.ts` / `frontend/types.ts` (re-exports) -> all consumers
 - **Verification**: `pnpm check` clean, `pnpm test:unit` — 236 test files, 4300 tests passing, no lint regressions
+
+### 2026-04-13 — SDK Migration Task 11: Replace OpenCodeEvent with SSEEvent discriminated union
+- **Introduced** `SSEEvent` type in `src/lib/relay/opencode-events.ts` as the canonical SSE stream event type
+- **Defined** `SSEGapEvent` union for 5 events the SSE stream delivers but the SDK `Event` union doesn't cover: `message.part.delta`, `message.created`, `permission.asked`, `question.asked`, `server.heartbeat`
+- **Replaced** `BaseOpenCodeEvent` with local `SSEEventBase` structural interface; all 18 event interfaces now extend `SSEEventBase` instead
+- **Removed** `BaseOpenCodeEvent` and old `OpenCodeEvent` definitions from `src/lib/types.ts`; re-exports `SSEEvent` as `OpenCodeEvent` for backward compatibility
+- **Updated** 11 source files to import `SSEEvent` directly: `sse-consumer.ts`, `sse-wiring.ts`, `event-translator.ts`, `sse-backoff.ts`, `permission-bridge.ts`, `canonical-event-translator.ts`, `dual-write-hook.ts`, `poller-wiring.ts`, `orchestration-wiring.ts`
+- **Updated** 2 test helpers: `sse-factories.ts`, `arbitraries.ts`
+- **Retained** all type guards (needed until Tasks 13-14 replace SSE parser with SDK streaming)
+- **Retained** `KnownOpenCodeEvent`/`KnownOpenCodeEventType` as deprecated aliases for gradual migration
+- **Key insight**: SDK `Event` and old events share the same `{ type, properties }` structure — no shape mismatch
+- **Verification**: `pnpm check` clean, `pnpm test:unit` — 236 test files, 4300 tests passing, `pnpm lint` clean
+- **Commit**: `a05d9bb`
+
+### 2026-04-13 — SDK Migration Tasks 15-16: Delete OpenCodeClient, SSEConsumer, and unused SSE utilities
+- **Task 15 — Delete OpenCodeClient and SSEConsumer**:
+  - **Deleted** `src/lib/instance/opencode-client.ts` (704 lines) — legacy REST client replaced by OpenCodeAPI + SDK
+  - **Deleted** `src/lib/relay/sse-consumer.ts` (284 lines) — legacy SSE consumer replaced by SSEStream + SDK
+  - **Migrated** 4 local type definitions (`PromptOptions`, `Agent`, `Provider`, `ProviderListResult`) to `sdk-types.ts`
+  - **Added** local `Message` interface to `sdk-types.ts` (flat message shape with parts/cost/tokens) — replaces both the deleted local `Message` and shadows SDK's `Message` (which lacks `parts` field)
+  - **Updated** 8 src/ imports and 4 test imports from `opencode-client.js` to `sdk-types.js`
+  - **Replaced** `daemon.ts` discovery: dynamic `import("opencode-client.js")` replaced with `createSdkClient()` from `sdk-factory.ts`
+  - **Deleted** 3 test files: `sse-consumer.test.ts` (65 lines), `sse-consumer.integration.ts` (191 lines), `rest-client.integration.ts` (189 lines)
+  - **Removed** dead `OpenCodeClient` test block from `m4-backend.test.ts`
+- **Task 16 — Clean up unused SSE utilities**:
+  - **Trimmed** `src/lib/relay/sse-backoff.ts` from 357 lines to 103 lines — kept only `BackoffConfig`, `calculateBackoffDelay`, `HealthTracker`, `createHealthTracker`
+  - **Removed** 9 dead functions: `parseSSEData`, `parseSSEDataAuto`, `parseGlobalSSEData`, `isKnownEventType`, `classifyEventType`, `eventBelongsToSession`, `filterEventsBySession`, `getSessionIds`, `getBackoffSequence`
+  - **Deleted** `test/unit/relay/sse-backoff-auto.test.ts` (242 lines)
+  - **Rewrote** `sse-backoff.pbt.test.ts` (655 -> ~280 lines) — kept P1-P6 (backoff + health), removed P7-P11 (deleted functions)
+  - **Rewrote** `sse-backoff.stateful.test.ts` (641 -> ~320 lines) — kept health tracker state machine, removed FilterEvents/ParseSSE/ClassifyEvent commands
+- **Net reduction**: ~1,733 source lines deleted, ~600 test lines deleted
+- **Verification**: `pnpm check` clean, `pnpm test:unit` — 235 test files, 4273 tests passing, lint clean on modified files

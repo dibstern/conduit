@@ -10,7 +10,7 @@
 import type { ServiceRegistry } from "../daemon/service-registry.js";
 import { TrackedService } from "../daemon/tracked-service.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { Message } from "../instance/opencode-client.js";
+import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
 import { mapToolName } from "./event-translator.js";

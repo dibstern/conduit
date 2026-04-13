@@ -144,24 +144,3 @@ describe("types — M4 interfaces", () => {
 		expect(cmd.args).toBeUndefined();
 	});
 });
-
-// ─── OpenCodeClient: new methods exist ──────────────────────────────────────
-
-describe("OpenCodeClient — new M4 methods", () => {
-	// We can't test actual HTTP calls here, but we verify the methods exist
-	it("has getMessagesPage method", async () => {
-		const { OpenCodeClient } = await import(
-			"../../../src/lib/instance/opencode-client.js"
-		);
-		const client = new OpenCodeClient({ baseUrl: "http://localhost:1" });
-		expect(typeof client.getMessagesPage).toBe("function");
-	});
-
-	it("has rejectQuestion method", async () => {
-		const { OpenCodeClient } = await import(
-			"../../../src/lib/instance/opencode-client.js"
-		);
-		const client = new OpenCodeClient({ baseUrl: "http://localhost:1" });
-		expect(typeof client.rejectQuestion).toBe("function");
-	});
-});

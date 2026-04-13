@@ -4,7 +4,7 @@
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { PromptOptions } from "../instance/opencode-client.js";
+import type { PromptOptions } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
 import type {
 	AdapterCapabilities,

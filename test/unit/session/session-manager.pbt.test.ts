@@ -3,8 +3,10 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import type { Message } from "../../../src/lib/instance/opencode-client.js";
-import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
+import type {
+	Message,
+	SessionDetail,
+} from "../../../src/lib/instance/sdk-types.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 

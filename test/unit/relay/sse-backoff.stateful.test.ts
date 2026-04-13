@@ -8,9 +8,7 @@
 //   - AdvanceTime (simulated clock advance)
 //   - CheckStale (verify staleness detection matches model)
 //   - CheckHealth (verify getHealth() shape matches model)
-//   - FilterEvents (verify session filtering against a batch of events)
-//   - ParseSSEData (verify parsing never throws on arbitrary input)
-//   - ClassifyEvent (verify event classification matches prefix)
+//   - BackoffBounds (verify backoff delay is within bounds and monotonic)
 //
 // Model:
 //   connected: boolean
@@ -22,22 +20,15 @@
 //   - Health shape matches model state
 //   - Stale detection: connected && lastEventAt != null && (now - lastEventAt > threshold)
 //   - Reconnect count is monotonically non-decreasing
-//   - Session filtering preserves global events, drops non-matching
 
 import fc from "fast-check";
 import { describe, it } from "vitest";
 import {
 	type BackoffConfig,
 	calculateBackoffDelay,
-	classifyEventType,
 	createHealthTracker,
-	eventBelongsToSession,
-	filterEventsBySession,
 	type HealthTracker,
-	parseGlobalSSEData,
-	parseSSEData,
 } from "../../../src/lib/relay/sse-backoff.js";
-import type { OpenCodeEvent } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
@@ -107,7 +98,7 @@ class DisconnectCommand implements fc.Command<ModelState, RealState> {
 			);
 		}
 
-		// Disconnected → never stale
+		// Disconnected -> never stale
 		if (real.tracker.isStale()) {
 			throw new Error("isStale should be false when disconnected");
 		}
@@ -265,169 +256,6 @@ class CheckHealthCommand implements fc.Command<ModelState, RealState> {
 	}
 }
 
-class FilterEventsCommand implements fc.Command<ModelState, RealState> {
-	constructor(
-		readonly events: OpenCodeEvent[],
-		readonly targetSession: string,
-	) {}
-
-	check(_model: Readonly<ModelState>): boolean {
-		return true;
-	}
-
-	run(_model: ModelState, _real: RealState): void {
-		const filtered = filterEventsBySession(this.events, this.targetSession);
-
-		// All filtered events must belong to the target session
-		for (const e of filtered) {
-			if (!eventBelongsToSession(e, this.targetSession)) {
-				throw new Error(
-					`Filtered event with type "${e.type}" does not belong to session "${this.targetSession}"`,
-				);
-			}
-		}
-
-		// Filtered must be a subset
-		if (filtered.length > this.events.length) {
-			throw new Error(
-				`Filtered (${filtered.length}) larger than input (${this.events.length})`,
-			);
-		}
-
-		// Global events (no sessionID) must always pass
-		const globalEvents = this.events.filter(
-			(e) => (e.properties as { sessionID?: string }).sessionID === undefined,
-		);
-		const filteredGlobals = filtered.filter(
-			(e) => (e.properties as { sessionID?: string }).sessionID === undefined,
-		);
-		if (filteredGlobals.length !== globalEvents.length) {
-			throw new Error(
-				`Global events lost: input=${globalEvents.length}, filtered=${filteredGlobals.length}`,
-			);
-		}
-	}
-
-	toString(): string {
-		return `FilterEvents(${this.events.length} events, session=${this.targetSession})`;
-	}
-}
-
-class ParseSSECommand implements fc.Command<ModelState, RealState> {
-	constructor(readonly raw: string) {}
-
-	check(_model: Readonly<ModelState>): boolean {
-		return true;
-	}
-
-	run(_model: ModelState, _real: RealState): void {
-		// Must never throw
-		const result = parseSSEData(this.raw);
-		if (typeof result.ok !== "boolean") {
-			throw new Error(
-				`parseSSEData result.ok is not boolean: ${typeof result.ok}`,
-			);
-		}
-
-		if (result.ok) {
-			if (!result.event) {
-				throw new Error("parseSSEData ok=true but no event");
-			}
-			if (typeof result.event.type !== "string") {
-				throw new Error(
-					`event.type is not string: ${typeof (result.event as Record<string, unknown>)["type"]}`,
-				);
-			}
-		} else {
-			if (typeof result.error !== "string") {
-				throw new Error(
-					`parseSSEData ok=false but error is not string: ${typeof result.error}`,
-				);
-			}
-		}
-
-		// Also test global parsing
-		const globalResult = parseGlobalSSEData(this.raw);
-		if (typeof globalResult.ok !== "boolean") {
-			throw new Error(`parseGlobalSSEData ok is not boolean`);
-		}
-	}
-
-	toString(): string {
-		return `ParseSSE("${this.raw.slice(0, 30)}${this.raw.length > 30 ? "..." : ""}")`;
-	}
-}
-
-class ClassifyEventCommand implements fc.Command<ModelState, RealState> {
-	constructor(readonly eventType: string) {}
-
-	check(_model: Readonly<ModelState>): boolean {
-		return true;
-	}
-
-	run(_model: ModelState, _real: RealState): void {
-		const category = classifyEventType(this.eventType);
-
-		// Category must be one of the known values
-		const validCategories = [
-			"message",
-			"session",
-			"permission",
-			"question",
-			"pty",
-			"file",
-			"server",
-			"unknown",
-		];
-		if (!validCategories.includes(category)) {
-			throw new Error(
-				`Invalid category "${category}" for type "${this.eventType}"`,
-			);
-		}
-
-		// Verify prefix consistency
-		if (this.eventType.startsWith("message.") && category !== "message") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "message", got "${category}"`,
-			);
-		}
-		if (this.eventType.startsWith("session.") && category !== "session") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "session", got "${category}"`,
-			);
-		}
-		if (this.eventType.startsWith("permission.") && category !== "permission") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "permission", got "${category}"`,
-			);
-		}
-		if (this.eventType.startsWith("question.") && category !== "question") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "question", got "${category}"`,
-			);
-		}
-		if (this.eventType.startsWith("pty.") && category !== "pty") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "pty", got "${category}"`,
-			);
-		}
-		if (this.eventType.startsWith("file.") && category !== "file") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "file", got "${category}"`,
-			);
-		}
-		if (this.eventType.startsWith("server.") && category !== "server") {
-			throw new Error(
-				`Type "${this.eventType}" should classify as "server", got "${category}"`,
-			);
-		}
-	}
-
-	toString(): string {
-		return `ClassifyEvent(${this.eventType})`;
-	}
-}
-
 class BackoffBoundsCommand implements fc.Command<ModelState, RealState> {
 	constructor(
 		readonly attempt: number,
@@ -474,38 +302,6 @@ class BackoffBoundsCommand implements fc.Command<ModelState, RealState> {
 
 // ─── Arbitraries ────────────────────────────────────────────────────────────
 
-const arbEventWithSession: fc.Arbitrary<OpenCodeEvent> = fc
-	.record({
-		type: fc.constantFrom(
-			"message.part.delta",
-			"message.part.updated",
-			"session.status",
-		),
-		sessionID: fc.uuid(),
-	})
-	.map(
-		({ type, sessionID }): OpenCodeEvent => ({
-			type,
-			properties: { sessionID },
-		}),
-	);
-
-const arbEventWithoutSession: fc.Arbitrary<OpenCodeEvent> = fc
-	.record({
-		type: fc.constantFrom("server.connected", "server.heartbeat"),
-	})
-	.map(
-		({ type }): OpenCodeEvent => ({
-			type,
-			properties: {},
-		}),
-	);
-
-const arbMixedEvents = fc.array(
-	fc.oneof(arbEventWithSession, arbEventWithoutSession),
-	{ minLength: 0, maxLength: 10 },
-);
-
 const arbBackoffConfig: fc.Arbitrary<BackoffConfig> = fc
 	.record({
 		baseDelay: fc.integer({ min: 100, max: 5_000 }),
@@ -516,56 +312,6 @@ const arbBackoffConfig: fc.Arbitrary<BackoffConfig> = fc
 		...c,
 		maxDelay: Math.max(c.maxDelay, c.baseDelay),
 	}));
-
-const arbEventType = fc.oneof(
-	fc.constantFrom(
-		"message.part.delta",
-		"message.part.updated",
-		"message.part.removed",
-		"session.status",
-		"permission.asked",
-		"permission.replied",
-		"question.asked",
-		"question.replied",
-		"question.rejected",
-		"pty.created",
-		"pty.updated",
-		"pty.exited",
-		"pty.deleted",
-		"file.edited",
-		"file.watcher.updated",
-		"server.connected",
-		"server.heartbeat",
-	),
-	fc.string({ minLength: 1, maxLength: 30 }),
-);
-
-const arbRawSSE = fc.oneof(
-	// Valid SSE data
-	fc
-		.tuple(
-			fc.string({ minLength: 1, maxLength: 30 }),
-			fc.dictionary(fc.string({ minLength: 1, maxLength: 10 }), fc.jsonValue()),
-		)
-		.map(([type, props]) => JSON.stringify({ type, properties: props })),
-	// Valid global SSE data
-	fc
-		.tuple(
-			fc.string({ minLength: 1, maxLength: 50 }),
-			fc.string({ minLength: 1, maxLength: 30 }),
-		)
-		.map(([dir, type]) =>
-			JSON.stringify({ directory: dir, payload: { type, properties: {} } }),
-		),
-	// Invalid
-	fc.oneof(
-		fc.constant(""),
-		fc.constant("{invalid"),
-		fc.constant("null"),
-		fc.constant("42"),
-		fc.string({ minLength: 0, maxLength: 100 }),
-	),
-);
 
 const allCommands = fc.commands(
 	[
@@ -583,17 +329,6 @@ const allCommands = fc.commands(
 		// State verification
 		fc.constant(new CheckStaleCommand()),
 		fc.constant(new CheckHealthCommand()),
-
-		// Session filtering
-		fc
-			.tuple(arbMixedEvents, fc.uuid())
-			.map(([events, session]) => new FilterEventsCommand(events, session)),
-
-		// SSE parsing (robustness)
-		arbRawSSE.map((raw) => new ParseSSECommand(raw)),
-
-		// Event classification
-		arbEventType.map((type) => new ClassifyEventCommand(type)),
 
 		// Backoff bounds
 		fc

@@ -1168,9 +1168,16 @@ export class Daemon {
 		const discoveryLog = createLogger("relay").child("discovery");
 
 		try {
-			const { OpenCodeClient } = await import("../instance/opencode-client.js");
-			const client = new OpenCodeClient({ baseUrl: discoveryUrl });
-			const projects = await client.listProjects();
+			const { createSdkClient } = await import("../instance/sdk-factory.js");
+			const { client } = createSdkClient({ baseUrl: discoveryUrl });
+			const result = await client.project.list();
+			// SDK with throwOnError: false returns { data, error, response }
+			const projects =
+				(
+					result as {
+						data?: Array<{ id?: string; worktree?: string; path?: string }>;
+					}
+				).data ?? [];
 
 			let added = 0;
 			for (const p of projects) {

@@ -1,6 +1,6 @@
 // ─── Agent Handlers ──────────────────────────────────────────────────────────
 
-import type { Agent } from "../instance/opencode-client.js";
+import type { Agent } from "../instance/sdk-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSessionForLog } from "./resolve-session.js";
 import type { HandlerDeps } from "./types.js";

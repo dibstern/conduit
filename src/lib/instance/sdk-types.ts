@@ -1,7 +1,6 @@
 // ─── SDK Type Re-exports (Task 9) ────────────────────────────────────────────
 // Single import point for types from @opencode-ai/sdk.
-// All relay code should import SDK types from here, not directly from the SDK
-// or from the legacy opencode-client.ts.
+// All relay code should import SDK types from here, not directly from the SDK.
 //
 // SessionDetail extends SDK Session with extra fields that the OpenCode REST
 // API returns at runtime but the SDK's generated types don't include.
@@ -71,7 +70,7 @@ export type {
 	FileDiff,
 	FilePart,
 	GlobalEvent,
-	Message,
+	Message as SdkMessage,
 	// Part types
 	Part,
 	PatchPart,
@@ -121,3 +120,71 @@ export type PartType = _Part["type"];
  * Replaces the hand-maintained ToolStatus union in shared-types.ts.
  */
 export type ToolStatus = _ToolState["status"];
+
+// ─── Local relay types (migrated from opencode-client.ts, Task 15) ──────────
+// These are simplified interfaces used by relay handlers and the OpenCodeAPI
+// adapter. They do NOT match the SDK's strict types 1:1 (e.g., SDK Agent has
+// many required fields that the API doesn't always return).
+
+export interface PromptOptions {
+	text: string;
+	images?: string[];
+	agent?: string;
+	model?: { providerID: string; modelID: string };
+	variant?: string;
+}
+
+/** Simplified agent info returned by app.agents(). */
+export interface Agent {
+	id: string;
+	name: string;
+	description?: string;
+	/** Agent mode: "primary" (user-facing), "subagent" (task tool), or "all" */
+	mode?: string;
+	/** Whether the agent is hidden from user selection */
+	hidden?: boolean;
+}
+
+export interface Provider {
+	id: string;
+	name: string;
+	models?: Array<{
+		id: string;
+		name: string;
+		limit?: { context?: number; output?: number };
+		variants?: Record<string, Record<string, unknown>>;
+	}>;
+}
+
+export interface ProviderListResult {
+	providers: Provider[];
+	defaults: Record<string, string>;
+	connected: string[];
+}
+
+/**
+ * Flat message shape used by the relay's REST polling pipeline.
+ *
+ * The SDK's `Message` (= `UserMessage | AssistantMessage`) does NOT include
+ * a `parts` field; parts are returned separately. The relay's message-poller
+ * and session-lifecycle code expect a flat message with inline parts, cost,
+ * and token data. This interface preserves the shape that was previously in
+ * `opencode-client.ts`.
+ */
+export interface Message {
+	id: string;
+	role: string;
+	sessionID: string;
+	parts?: Array<{
+		id: string;
+		type: string;
+		[key: string]: unknown;
+	}>;
+	cost?: number;
+	tokens?: {
+		input?: number;
+		output?: number;
+		cache?: { read?: number; write?: number };
+	};
+	time?: { created?: number; completed?: number };
+}
