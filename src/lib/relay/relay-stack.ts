@@ -12,7 +12,10 @@ import { resolve } from "node:path";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
+import { GapEndpoints } from "../instance/gap-endpoints.js";
+import { OpenCodeAPI } from "../instance/opencode-api.js";
 import { OpenCodeClient } from "../instance/opencode-client.js";
+import { createSdkClient } from "../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
 import type { PersistenceLayer } from "../persistence/persistence-layer.js";
@@ -148,6 +151,29 @@ export async function createProjectRelay(
 
 	// ── Components ──────────────────────────────────────────────────────────
 
+	// ── SDK-based client (Tasks 3–6) ─────────────────────────────────────────
+	const { client: sdkClient, fetch: sdkFetch, authHeaders } = createSdkClient({
+		baseUrl: config.opencodeUrl,
+		...(config.noServer &&
+			config.projectDir != null && {
+				directory: config.projectDir,
+			}),
+	});
+
+	const gapEndpoints = new GapEndpoints({
+		baseUrl: config.opencodeUrl,
+		fetch: sdkFetch,
+		headers: authHeaders,
+	});
+
+	const api = new OpenCodeAPI({
+		sdk: sdkClient,
+		gapEndpoints,
+		baseUrl: config.opencodeUrl,
+		authHeaders,
+	});
+
+	// Legacy OpenCodeClient — kept temporarily for SSEConsumer (replaced in Task 14).
 	const client = new OpenCodeClient({
 		baseUrl: config.opencodeUrl,
 		...(config.noServer &&

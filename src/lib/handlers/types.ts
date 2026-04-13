@@ -3,10 +3,8 @@
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
-import type {
-	OpenCodeClient,
-	PromptOptions,
-} from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { PromptOptions } from "../instance/opencode-client.js";
 import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
@@ -67,7 +65,7 @@ export interface HandlerDeps {
 		getClientsForSession: (sessionId: string) => string[];
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 	};
-	client: OpenCodeClient;
+	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
