@@ -30,12 +30,22 @@ describe("handleForkSession (ticket 5.3)", () => {
 				sendToSession: vi.fn(),
 			} as unknown as HandlerDeps["wsHandler"],
 			client: {
-				forkSession: vi.fn().mockResolvedValue({
-					id: "ses_forked",
-					title: "Forked from Original",
-					parentID: "ses_original",
-					time: { created: 1000, updated: 1000 },
-				}),
+				session: {
+					fork: vi.fn().mockResolvedValue({
+						id: "ses_forked",
+						title: "Forked from Original",
+						parentID: "ses_original",
+						time: { created: 1000, updated: 1000 },
+					}),
+					get: vi.fn().mockResolvedValue({ id: "ses_original" }),
+					messages: vi.fn().mockResolvedValue([]),
+					messagesPage: vi.fn().mockResolvedValue([]),
+					message: vi
+						.fn()
+						.mockResolvedValue({ id: "msg-1", time: { created: 0 } }),
+				},
+				question: { list: vi.fn().mockResolvedValue([]) },
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_original"),
@@ -202,7 +212,7 @@ describe("handleForkSession (ticket 5.3)", () => {
 			},
 			getForkEntry: () => undefined,
 		};
-		// Mock getMessage to return the fork-point message with a timestamp
+		// Mock session.message to return the fork-point message with a timestamp
 		const getMessageMock = vi.fn().mockResolvedValue({
 			id: "msg_42",
 			role: "assistant",
@@ -212,7 +222,11 @@ describe("handleForkSession (ticket 5.3)", () => {
 			...deps,
 			client: {
 				...deps.client,
-				getMessage: getMessageMock,
+				session: {
+					...(deps.client as unknown as { session: Record<string, unknown> })
+						.session,
+					message: getMessageMock,
+				},
 			} as unknown as HandlerDeps["client"],
 			forkMeta,
 		};
@@ -254,13 +268,17 @@ describe("handleForkSession (ticket 5.3)", () => {
 			},
 			getForkEntry: () => undefined,
 		};
-		// Re-create deps with a client that includes getMessagesPage
+		// Re-create deps with a client that includes session.messagesPage
 		const getMessagesPageMock = vi.fn().mockResolvedValue([{ id: "msg_last" }]);
 		const depsWithMeta = {
 			...deps,
 			client: {
 				...deps.client,
-				getMessagesPage: getMessagesPageMock,
+				session: {
+					...(deps.client as unknown as { session: Record<string, unknown> })
+						.session,
+					messagesPage: getMessagesPageMock,
+				},
 			} as unknown as HandlerDeps["client"],
 			forkMeta,
 		};
@@ -300,11 +318,15 @@ describe("handleViewSession — per-tab session viewing", () => {
 				sendToSession: vi.fn(),
 			} as unknown as HandlerDeps["wsHandler"],
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "sess_target",
-					modelID: "gpt-4",
-					providerID: "openai",
-				}),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "sess_target",
+						modelID: "gpt-4",
+						providerID: "openai",
+					}),
+				},
+				question: { list: vi.fn().mockResolvedValue([]) },
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("sess_current"),
@@ -545,11 +567,15 @@ describe("handleSwitchSession — alias for handleViewSession", () => {
 				sendToSession: vi.fn(),
 			} as unknown as HandlerDeps["wsHandler"],
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "sess_target",
-					modelID: "gpt-4",
-					providerID: "openai",
-				}),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "sess_target",
+						modelID: "gpt-4",
+						providerID: "openai",
+					}),
+				},
+				question: { list: vi.fn().mockResolvedValue([]) },
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("sess_current"),

@@ -255,7 +255,7 @@ describe("project_list includes instanceId", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				listProjects: vi.fn(),
+				app: { projects: vi.fn() },
 			},
 			config: {
 				slug: "current-project",
@@ -322,9 +322,11 @@ describe("project_list includes instanceId", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				listProjects: vi
-					.fn()
-					.mockResolvedValue([{ id: "proj-1", name: "Proj 1", path: "/p1" }]),
+				app: {
+					projects: vi
+						.fn()
+						.mockResolvedValue([{ id: "proj-1", name: "Proj 1", path: "/p1" }]),
+				},
 			},
 			config: {
 				slug: "proj-1",

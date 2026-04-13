@@ -51,7 +51,11 @@ function createMockClient(initial: MockSession[] = []): OpenCodeAPI & {
 					time: { created: now, updated: now },
 				};
 				sessions.push(session);
-				return { id, title: session.title, time: session.time } as SessionDetail;
+				return {
+					id,
+					title: session.title,
+					time: session.time,
+				} as SessionDetail;
 			},
 
 			async delete(sessionId: string) {
@@ -216,10 +220,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			},
 		] as Message[]);
 
-		// Spy on getMessages to verify it is NOT called
+		// Spy on session.messages to verify it is NOT called
 		let getMessagesCalled = false;
-		const origGetMessages = client.getMessages.bind(client);
-		client.getMessages = async (
+		const origGetMessages = client.session.messages.bind(client.session);
+		client.session.messages = async (
 			...args: Parameters<typeof origGetMessages>
 		) => {
 			getMessagesCalled = true;

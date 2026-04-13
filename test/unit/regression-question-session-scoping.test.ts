@@ -62,18 +62,23 @@ describe("Regression: handleViewSession only sends questions for viewed session"
 				sendToSession: vi.fn(),
 			},
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "ses_A",
-					modelID: "claude-4",
-					providerID: "anthropic",
-				}),
-				listPendingQuestions: vi
-					.fn()
-					.mockResolvedValue([
-						makePendingQuestion("que_A1", "ses_A"),
-						makePendingQuestion("que_B1", "ses_B"),
-						makePendingQuestion("que_A2", "ses_A"),
-					]),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "ses_A",
+						modelID: "claude-4",
+						providerID: "anthropic",
+					}),
+				},
+				question: {
+					list: vi
+						.fn()
+						.mockResolvedValue([
+							makePendingQuestion("que_A1", "ses_A"),
+							makePendingQuestion("que_B1", "ses_B"),
+							makePendingQuestion("que_A2", "ses_A"),
+						]),
+				},
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_A"),

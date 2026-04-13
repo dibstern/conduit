@@ -31,8 +31,10 @@ function buildDeps(overrides?: {
 			broadcast: vi.fn(),
 		} as unknown as SessionLifecycleWiringDeps["wsHandler"],
 		client: {
-			getMessages:
-				overrides?.getMessages ?? vi.fn().mockResolvedValue(undefined),
+			session: {
+				messages:
+					overrides?.getMessages ?? vi.fn().mockResolvedValue(undefined),
+			},
 		} as unknown as SessionLifecycleWiringDeps["client"],
 		translator: {
 			reset: vi.fn(),

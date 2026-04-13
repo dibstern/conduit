@@ -39,30 +39,35 @@ describe("handleViewSession — pending question delivery", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "ses_active",
-					modelID: "claude-4",
-					providerID: "anthropic",
-				}),
-				listPendingQuestions: vi.fn().mockResolvedValue([
-					{
-						id: "que_abc123",
-						questions: [
-							{
-								question: "Which option?",
-								header: "Choose",
-								options: [
-									{ label: "Option A", description: "First option" },
-									{ label: "Option B", description: "Second option" },
-								],
-								multiple: false,
-								custom: true,
-							},
-						],
-						tool: { callID: "toolu_xyz" },
-						sessionID: "ses_active",
-					},
-				]),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "ses_active",
+						modelID: "claude-4",
+						providerID: "anthropic",
+					}),
+				},
+				question: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "que_abc123",
+							questions: [
+								{
+									question: "Which option?",
+									header: "Choose",
+									options: [
+										{ label: "Option A", description: "First option" },
+										{ label: "Option B", description: "Second option" },
+									],
+									multiple: false,
+									custom: true,
+								},
+							],
+							tool: { callID: "toolu_xyz" },
+							sessionID: "ses_active",
+						},
+					]),
+				},
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_active"),
@@ -200,22 +205,26 @@ describe("handleViewSession — pending permission delivery", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "ses_active",
-					modelID: "claude-4",
-					providerID: "anthropic",
-				}),
-				listPendingQuestions: vi.fn().mockResolvedValue([]),
-				listPendingPermissions: vi.fn().mockResolvedValue([
-					{
-						id: "per_abc123",
-						sessionID: "ses_active",
-						permission: "external_directory",
-						patterns: ["/tmp/mockups/*"],
-						metadata: { filepath: "/tmp/mockups/screenshot.png" },
-						always: ["/tmp/mockups/*"],
-					},
-				]),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "ses_active",
+						modelID: "claude-4",
+						providerID: "anthropic",
+					}),
+				},
+				question: { list: vi.fn().mockResolvedValue([]) },
+				permission: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "per_abc123",
+							sessionID: "ses_active",
+							permission: "external_directory",
+							patterns: ["/tmp/mockups/*"],
+							metadata: { filepath: "/tmp/mockups/screenshot.png" },
+							always: ["/tmp/mockups/*"],
+						},
+					]),
+				},
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_active"),

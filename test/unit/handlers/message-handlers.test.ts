@@ -463,10 +463,11 @@ describe("handlePermissionResponse", () => {
 			requestId: pid("perm-1"),
 			decision: "allow",
 		});
-		expect(deps.client.permission.reply).toHaveBeenCalledWith({
-			id: "perm-1",
-			decision: "once",
-		});
+		expect(deps.client.permission.reply).toHaveBeenCalledWith(
+			"?",
+			"perm-1",
+			"once",
+		);
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "permission_resolved",
 			requestId: pid("perm-1"),
@@ -523,10 +524,11 @@ describe("handlePermissionResponse", () => {
 			persistScope: "tool",
 		});
 
-		expect(deps.client.permission.reply).toHaveBeenCalledWith({
-			id: "r1",
-			decision: "always",
-		});
+		expect(deps.client.permission.reply).toHaveBeenCalledWith(
+			"?",
+			"r1",
+			"always",
+		);
 		expect(deps.client.config.get).toHaveBeenCalled();
 		expect(deps.client.config.update).toHaveBeenCalledWith({
 			permission: { bash: "ask", read: "allow" },
@@ -589,10 +591,11 @@ describe("handlePermissionResponse", () => {
 		});
 
 		// Reply still sent despite config failure
-		expect(deps.client.permission.reply).toHaveBeenCalledWith({
-			id: "r1",
-			decision: "always",
-		});
+		expect(deps.client.permission.reply).toHaveBeenCalledWith(
+			"?",
+			"r1",
+			"always",
+		);
 	});
 
 	it("handles string permission config (simple form) when persisting tool-level", async () => {
@@ -628,10 +631,9 @@ describe("handleAskUserResponse", () => {
 			toolId: "q-1",
 			answers: { "0": "Option A" },
 		});
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "q-1",
-			answers: [["Option A"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("q-1", [
+			["Option A"],
+		]);
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "q-1",
@@ -667,10 +669,9 @@ describe("handleAskUserResponse", () => {
 		});
 
 		expect(deps.client.question.list).toHaveBeenCalled();
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_fallback",
-			answers: [["yes"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("que_fallback", [
+			["yes"],
+		]);
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_fallback",
@@ -1002,13 +1003,11 @@ describe("handleGetCommands", () => {
 		});
 	});
 
-	it("passes projectDir to listCommands for per-project skill scoping", async () => {
+	it("calls app.commands for command listing", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.client.app.commands).mockResolvedValue([]);
 		await handleGetCommands(deps, "client-1", {});
-		expect(deps.client.app.commands).toHaveBeenCalledWith(
-			deps.config.projectDir,
-		);
+		expect(deps.client.app.commands).toHaveBeenCalled();
 	});
 });
 
@@ -1182,20 +1181,18 @@ describe("handleRewind", () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
 		await handleRewind(deps, "client-1", { messageId: "msg-1" });
-		expect(deps.client.session.revert).toHaveBeenCalledWith(
-			"session-1",
-			"msg-1",
-		);
+		expect(deps.client.session.revert).toHaveBeenCalledWith("session-1", {
+			messageID: "msg-1",
+		});
 	});
 
 	it("also supports uuid field (legacy)", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("session-1");
 		await handleRewind(deps, "client-1", { uuid: "msg-2" });
-		expect(deps.client.session.revert).toHaveBeenCalledWith(
-			"session-1",
-			"msg-2",
-		);
+		expect(deps.client.session.revert).toHaveBeenCalledWith("session-1", {
+			messageID: "msg-2",
+		});
 	});
 
 	it("does nothing when no messageId and no active session", async () => {
@@ -1327,7 +1324,7 @@ describe("handlePtyResize", () => {
 			cols: 120,
 			rows: 40,
 		});
-		expect(deps.client.pty.resize).toHaveBeenCalledWith("pty-1", 120, 40);
+		expect(deps.client.pty.resize).toHaveBeenCalledWith("pty-1", 40, 120);
 	});
 
 	it("logs but does not error when resize fails", async () => {

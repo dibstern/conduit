@@ -14,7 +14,9 @@ describe("SessionManager.listSessions — processing flag", () => {
 	beforeEach(() => {
 		mgr = new SessionManager({
 			client: {
-				listSessions: vi.fn().mockResolvedValue(mockSessions),
+				session: {
+					list: vi.fn().mockResolvedValue(mockSessions),
+				},
 			} as unknown as ConstructorParameters<typeof SessionManager>[0]["client"],
 			log: createSilentLogger(),
 		});

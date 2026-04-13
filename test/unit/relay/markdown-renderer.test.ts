@@ -91,7 +91,9 @@ describe("SessionManager.loadPreRenderedHistory", () => {
 		];
 
 		const mockClient = {
-			getMessagesPage: vi.fn().mockResolvedValue(mockMessages),
+			session: {
+				messagesPage: vi.fn().mockResolvedValue(mockMessages),
+			},
 		};
 
 		const mgr = new SessionManager({
@@ -115,24 +117,29 @@ describe("SessionManager.loadPreRenderedHistory", () => {
 		}));
 
 		const mockClient = {
-			getMessagesPage: vi
-				.fn()
-				.mockImplementation(
-					(_sessionId: string, opts?: { limit?: number; before?: string }) => {
-						const limit = opts?.limit ?? mockMessages.length;
-						if (!opts?.before) {
-							// First page: return the last `limit` messages
-							return Promise.resolve(mockMessages.slice(-limit));
-						}
-						// Subsequent page: return messages before the cursor
-						const idx = mockMessages.findIndex(
-							(m: { id: string }) => m.id === opts.before,
-						);
-						if (idx <= 0) return Promise.resolve([]);
-						const start = Math.max(0, idx - limit);
-						return Promise.resolve(mockMessages.slice(start, idx));
-					},
-				),
+			session: {
+				messagesPage: vi
+					.fn()
+					.mockImplementation(
+						(
+							_sessionId: string,
+							opts?: { limit?: number; before?: string },
+						) => {
+							const limit = opts?.limit ?? mockMessages.length;
+							if (!opts?.before) {
+								// First page: return the last `limit` messages
+								return Promise.resolve(mockMessages.slice(-limit));
+							}
+							// Subsequent page: return messages before the cursor
+							const idx = mockMessages.findIndex(
+								(m: { id: string }) => m.id === opts.before,
+							);
+							if (idx <= 0) return Promise.resolve([]);
+							const start = Math.max(0, idx - limit);
+							return Promise.resolve(mockMessages.slice(start, idx));
+						},
+					),
+			},
 		};
 
 		const mgr = new SessionManager({

@@ -52,10 +52,9 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 			answers: { "0": "PostgreSQL" },
 		});
 
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_abc123",
-			answers: [["PostgreSQL"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("que_abc123", [
+			["PostgreSQL"],
+		]);
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
 			toolId: "que_abc123",
@@ -70,7 +69,7 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 			.mockResolvedValueOnce(undefined);
 		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{ id: "que_fallback_001" },
-		] as Awaited<ReturnType<HandlerDeps["client"]["listPendingQuestions"]>>);
+		] as Awaited<ReturnType<HandlerDeps["client"]["question"]["list"]>>);
 
 		await handleAskUserResponse(deps, "client-1", {
 			toolId: "que_stale",
@@ -78,17 +77,16 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 		});
 
 		// First attempt with the original toolId
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_stale",
-			answers: [["PostgreSQL"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("que_stale", [
+			["PostgreSQL"],
+		]);
 		// Fallback: queries pending questions
 		expect(deps.client.question.list).toHaveBeenCalled();
 		// Replies to the first pending question
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_fallback_001",
-			answers: [["PostgreSQL"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith(
+			"que_fallback_001",
+			[["PostgreSQL"]],
+		);
 		// Broadcasts with the fallback question's ID
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "ask_user_resolved",
@@ -112,10 +110,9 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 		});
 
 		// replyQuestion was attempted
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_orphan",
-			answers: [["Yes"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("que_orphan", [
+			["Yes"],
+		]);
 		// listPendingQuestions was attempted as fallback
 		expect(deps.client.question.list).toHaveBeenCalled();
 		// No broadcast — answer was dropped
@@ -166,10 +163,10 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 			answers: { "0": "Opt A", "1": "Opt B" },
 		});
 
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_multi",
-			answers: [["Opt A"], ["Opt B"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("que_multi", [
+			["Opt A"],
+			["Opt B"],
+		]);
 	});
 
 	it("answer format with empty values: empty string → empty array", async () => {
@@ -181,10 +178,10 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 			answers: { "0": "", "1": "Opt B" },
 		});
 
-		expect(deps.client.question.reply).toHaveBeenCalledWith({
-			id: "que_partial",
-			answers: [[], ["Opt B"]],
-		});
+		expect(deps.client.question.reply).toHaveBeenCalledWith("que_partial", [
+			[],
+			["Opt B"],
+		]);
 	});
 });
 
@@ -214,14 +211,16 @@ describe("handleQuestionReject: bridge-less flow", () => {
 			.mockResolvedValueOnce(undefined);
 		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{ id: "que_pending_001" },
-		] as Awaited<ReturnType<HandlerDeps["client"]["listPendingQuestions"]>>);
+		] as Awaited<ReturnType<HandlerDeps["client"]["question"]["list"]>>);
 
 		await handleQuestionReject(deps, "client-1", {
 			toolId: "que_stale_reject",
 		});
 
 		// First attempt with the original toolId
-		expect(deps.client.question.reject).toHaveBeenCalledWith("que_stale_reject");
+		expect(deps.client.question.reject).toHaveBeenCalledWith(
+			"que_stale_reject",
+		);
 		// Fallback: queries pending questions
 		expect(deps.client.question.list).toHaveBeenCalled();
 		// Rejects the first pending question
