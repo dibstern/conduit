@@ -8,18 +8,18 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 		session: {
 			abort: vi.fn(async () => {}),
 			prompt: vi.fn(async () => {}),
-			...(overrides?.session as Record<string, unknown>),
+			...(overrides?.["session"] as Record<string, unknown>),
 		},
 		permission: {
 			reply: vi.fn(async () => {}),
 			list: vi.fn(async () => []),
-			...(overrides?.permission as Record<string, unknown>),
+			...(overrides?.["permission"] as Record<string, unknown>),
 		},
 		question: {
 			reply: vi.fn(async () => {}),
 			reject: vi.fn(async () => {}),
 			list: vi.fn(async () => []),
-			...(overrides?.question as Record<string, unknown>),
+			...(overrides?.["question"] as Record<string, unknown>),
 		},
 		provider: {
 			list: vi.fn(async () => ({

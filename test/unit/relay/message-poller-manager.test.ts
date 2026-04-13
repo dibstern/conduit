@@ -12,7 +12,7 @@ import { MessagePollerManager } from "../../../src/lib/relay/message-poller-mana
 function makeMockClient() {
 	return {
 		session: { messages: vi.fn().mockResolvedValue([]) },
-	};
+	} as any;
 }
 
 describe("MessagePollerManager", () => {
