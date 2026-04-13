@@ -14,7 +14,7 @@ import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
-import { OpenCodeClient } from "../instance/opencode-client.js";
+// OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
 import { createSdkClient } from "../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
@@ -44,7 +44,7 @@ import { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { wireSessionLifecycle } from "./session-lifecycle-wiring.js";
-import { SSEConsumer } from "./sse-consumer.js";
+import { SSEStream } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { wireTimers } from "./timer-wiring.js";
 
@@ -56,7 +56,7 @@ const WebSocketClass = wsLib.WebSocket as typeof import("ws").WebSocket;
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
 	wsHandler: WebSocketHandler;
-	sseConsumer: SSEConsumer;
+	sseStream: SSEStream;
 	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
 	translator: ReturnType<typeof createTranslator>;
@@ -107,7 +107,7 @@ export interface RelayStackConfig {
 export interface RelayStack {
 	server: RelayServer;
 	wsHandler: WebSocketHandler;
-	sseConsumer: SSEConsumer;
+	sseStream: SSEStream;
 	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
 	translator: ReturnType<typeof createTranslator>;
@@ -175,15 +175,6 @@ export async function createProjectRelay(
 		gapEndpoints,
 		baseUrl: config.opencodeUrl,
 		authHeaders,
-	});
-
-	// Legacy OpenCodeClient — kept temporarily for SSEConsumer (replaced in Task 14).
-	const client = new OpenCodeClient({
-		baseUrl: config.opencodeUrl,
-		...(config.noServer &&
-			config.projectDir != null && {
-				directory: config.projectDir,
-			}),
 	});
 
 	// ── Orchestration layer (Phase 5: provider adapter routing) ─────────────
@@ -288,8 +279,8 @@ export async function createProjectRelay(
 	// ── Health check ────────────────────────────────────────────────────────
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	// Health check via legacy client (SSE consumer still needs it; replaced in Task 14)
-	await client.getHealth();
+	// Health check — use /path endpoint as a lightweight reachability probe
+	await api.app.path();
 	log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`);
 
 	// Seed defaultModel from OpenCode's project config (opencode.jsonc) if no
@@ -371,11 +362,10 @@ export async function createProjectRelay(
 		orchestrationLayer: orchestration,
 	});
 
-	// ── SSE consumer ────────────────────────────────────────────────────────
+	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────
 
-	const sseConsumer = new SSEConsumer(serviceRegistry, {
-		baseUrl: config.opencodeUrl,
-		authHeaders: api.getAuthHeaders(),
+	const sseStream = new SSEStream(serviceRegistry, {
+		api,
 		log: sseLog,
 	});
 
@@ -414,17 +404,17 @@ export async function createProjectRelay(
 			onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
 			...(dualWriteHook != null && { dualWriteHook }),
 		},
-		sseConsumer,
+		sseStream,
 	);
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	await sseConsumer.connect();
+	await sseStream.connect();
 
 	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
 	// Resolves the deferred promise in OpenCodeAdapter.sendTurn() when a
 	// session transitions to idle, allowing the engine dispatch to complete.
 	orchestration.wireSSEToAdapter((event, handler) => {
-		sseConsumer.on(event, handler);
+		sseStream.on(event, handler);
 	});
 
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
@@ -442,7 +432,7 @@ export async function createProjectRelay(
 		statusPoller,
 		pollerManager,
 		registry,
-		sseConsumer,
+		sseStream,
 		config: {
 			...(config.pollerGatingConfig != null && {
 				pollerGatingConfig: config.pollerGatingConfig,
@@ -475,7 +465,7 @@ export async function createProjectRelay(
 	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
 	wirePollers({
 		pollerManager,
-		sseConsumer,
+		sseStream,
 		statusPoller,
 		wsHandler,
 		sessionMgr,
@@ -500,7 +490,7 @@ export async function createProjectRelay(
 
 	return {
 		wsHandler,
-		sseConsumer,
+		sseStream,
 		client: api,
 		sessionMgr,
 		translator,
@@ -517,7 +507,7 @@ export async function createProjectRelay(
 
 		async stop() {
 			// 1. Stop event sources
-			await sseConsumer.disconnect();
+			await sseStream.disconnect();
 			pollerManager.stopAll();
 			statusPoller.stop();
 			// 2. Shut down orchestration engine (rejects pending turns)
@@ -757,7 +747,7 @@ export async function createRelayStack(
 	return {
 		server,
 		wsHandler: relay.wsHandler,
-		sseConsumer: relay.sseConsumer,
+		sseStream: relay.sseStream,
 		client: relay.client,
 		sessionMgr: relay.sessionMgr,
 		translator: relay.translator,

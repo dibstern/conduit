@@ -1,5 +1,5 @@
 // ─── Poller Wiring (G3) ──────────────────────────────────────────────────────
-// Wires pollerManager "events" handler and sseConsumer "event" → poller bridge.
+// Wires pollerManager "events" handler and sseStream "event" → poller bridge.
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
@@ -19,14 +19,14 @@ import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEConsumer } from "./sse-consumer.js";
+import type { SSEStream } from "./sse-stream.js";
 import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface PollerWiringDeps {
 	pollerManager: MessagePollerManager;
-	sseConsumer: SSEConsumer;
+	sseStream: SSEStream;
 	statusPoller: SessionStatusPoller;
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
@@ -46,7 +46,7 @@ export interface PollerWiringDeps {
 export function wirePollers(deps: PollerWiringDeps): void {
 	const {
 		pollerManager,
-		sseConsumer,
+		sseStream,
 		statusPoller,
 		wsHandler,
 		sessionMgr,
@@ -121,8 +121,8 @@ export function wirePollers(deps: PollerWiringDeps): void {
 	});
 
 	// ── Notify poller manager of SSE events (to suppress REST polling) ────
-	sseConsumer.on("event", (event: SSEEvent) => {
-		const sid = extractSessionId(event);
+	sseStream.on("event", (event: unknown) => {
+		const sid = extractSessionId(event as SSEEvent);
 		if (sid) {
 			sseTracker.recordEvent(sid, Date.now());
 			pollerManager.notifySSEEvent(sid);

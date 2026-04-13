@@ -33,7 +33,7 @@ import type {
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEConsumer } from "./sse-consumer.js";
+import type { SSEStream } from "./sse-stream.js";
 import { sendPushForEvent } from "./sse-wiring.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ export interface MonitoringWiringDeps {
 	statusPoller: SessionStatusPoller;
 	pollerManager: MessagePollerManager;
 	registry: SessionRegistry;
-	sseConsumer: SSEConsumer;
+	sseStream: SSEStream;
 	config: {
 		pollerGatingConfig?: Partial<PollerGatingConfig>;
 		pushManager?: PushNotificationManager;
@@ -86,7 +86,7 @@ export function wireMonitoring(
 		statusPoller,
 		pollerManager,
 		registry,
-		sseConsumer,
+		sseStream,
 		config,
 		statusLog,
 		sseLog,
@@ -205,7 +205,7 @@ export function wireMonitoring(
 				assembleContext(
 					sessionId,
 					status,
-					{ connected: sseConsumer.isConnected() },
+					{ connected: sseStream.isConnected() },
 					sseTracker,
 					parentMap,
 					(sid) => registry.hasViewers(sid),

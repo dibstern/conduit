@@ -22,12 +22,12 @@ export interface OrchestrationLayer {
 	readonly adapter: OpenCodeAdapter;
 	/**
 	 * Wire SSE session.status idle events to notifyTurnCompleted().
-	 * Must be called once after the SSEConsumer is created so that
+	 * Must be called once after the SSEStream is created so that
 	 * OpenCodeAdapter.sendTurn() deferred promises can resolve when
 	 * the session transitions to idle.
 	 */
 	wireSSEToAdapter(
-		sseOn: (event: "event", handler: (e: SSEEvent) => void) => void,
+		sseOn: (event: "event", handler: (e: unknown) => void) => void,
 	): void;
 }
 
@@ -63,12 +63,12 @@ export function createOrchestrationLayer(
 	const engine = new OrchestrationEngine({ registry });
 
 	function wireSSEToAdapter(
-		sseOn: (event: "event", handler: (e: SSEEvent) => void) => void,
+		sseOn: (event: "event", handler: (e: unknown) => void) => void,
 	): void {
-		sseOn("event", (event) => {
+		sseOn("event", (raw) => {
+			const event = raw as SSEEvent;
 			if (event.type !== "session.status") return;
-			const props = (event as { properties?: Record<string, unknown> })
-				.properties;
+			const props = event.properties as Record<string, unknown> | undefined;
 			const statusType = (props?.["status"] as { type?: string } | undefined)
 				?.type;
 			if (statusType !== "idle") return;
