@@ -67,7 +67,7 @@ export interface SSEWiringDeps {
 	/** Optional: current session statuses for processing flags */
 	getSessionStatuses?: () => Record<
 		string,
-		import("../instance/opencode-client.js").SessionStatus
+		import("../instance/sdk-types.js").SessionStatus
 	>;
 	/** Optional: REST client for rehydrating pending questions on reconnect */
 	listPendingQuestions?: () => Promise<

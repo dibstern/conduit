@@ -11,10 +11,7 @@ import {
 } from "../daemon/fork-metadata.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type {
-	SessionDetail,
-	SessionStatus,
-} from "../instance/opencode-client.js";
+import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { sessionRowsToSessionInfoList } from "../persistence/session-list-adapter.js";

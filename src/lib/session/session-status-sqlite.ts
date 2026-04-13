@@ -7,7 +7,7 @@
 // augmentation logic (subagent propagation, message-activity) still runs
 // on top of the raw statuses returned by this reader.
 
-import type { SessionStatus } from "../instance/opencode-client.js";
+import type { SessionStatus } from "../instance/sdk-types.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 
 export class SessionStatusSqliteReader {

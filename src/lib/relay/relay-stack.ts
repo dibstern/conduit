@@ -202,7 +202,7 @@ export async function createProjectRelay(
 		// called at runtime when listSessions() runs, so ordering is fine.
 		getStatuses: (): Record<
 			string,
-			import("../instance/opencode-client.js").SessionStatus
+			import("../instance/sdk-types.js").SessionStatus
 		> => statusPoller.getCurrentStatuses(),
 		...(config.configDir != null && { configDir: config.configDir }),
 	});

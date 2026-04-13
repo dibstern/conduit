@@ -16,13 +16,8 @@ import type {
 } from "@opencode-ai/sdk/client";
 import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { GapEndpoints } from "./gap-endpoints.js";
-import type {
-	Agent,
-	Message,
-	ProviderListResult,
-	SessionDetail,
-	SessionStatus,
-} from "./opencode-client.js";
+import type { Agent, Message, ProviderListResult } from "./opencode-client.js";
+import type { SessionDetail, SessionStatus } from "./sdk-types.js";
 
 /**
  * Simplified result shape for the sdk() wrapper.

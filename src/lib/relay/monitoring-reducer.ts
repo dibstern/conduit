@@ -1,4 +1,4 @@
-import type { SessionStatus } from "../instance/opencode-client.js";
+import type { SessionStatus } from "../instance/sdk-types.js";
 import type {
 	MonitoringEffect,
 	MonitoringState,

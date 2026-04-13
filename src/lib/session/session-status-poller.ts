@@ -18,7 +18,7 @@
 import type { ServiceRegistry } from "../daemon/service-registry.js";
 import { TrackedService } from "../daemon/tracked-service.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { SessionStatus } from "../instance/opencode-client.js";
+import type { SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { EventStore } from "../persistence/event-store.js";
 import {

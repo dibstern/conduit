@@ -6,6 +6,7 @@ import {
 	handleSwitchVariant,
 } from "../../../src/lib/handlers/model.js";
 import type { PayloadMap } from "../../../src/lib/handlers/payloads.js";
+import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -406,9 +407,14 @@ describe("handleGetModels — variant wiring", () => {
 		});
 		vi.mocked(deps.client.session.get).mockResolvedValue({
 			id: "ses-1",
+			projectID: "proj-1",
+			directory: "/tmp",
+			title: "Test",
+			version: "1",
+			time: { created: 0, updated: 0 },
 			modelID: "claude-opus-4-6",
 			providerID: "anthropic",
-		});
+		} as SessionDetail);
 		await handleGetModels(deps, "c1", {});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"c1",

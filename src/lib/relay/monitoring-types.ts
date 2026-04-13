@@ -1,5 +1,5 @@
 // src/lib/relay/monitoring-types.ts
-import type { SessionStatus } from "../instance/opencode-client.js";
+import type { SessionStatus } from "../instance/sdk-types.js";
 
 // ── Session monitoring phases ────────────────────────────────────────────
 export type SessionMonitorPhase =
