@@ -131,7 +131,7 @@ Test `makeStubApi` creates a synchronous async generator. Events may yield befor
 
 ---
 
-## Amendments Applied
+## Amendments Applied (v1)
 
 | Finding | Tasks | Amendment |
 |---------|-------|-----------|
@@ -140,3 +140,34 @@ Test `makeStubApi` creates a synchronous async generator. Events may yield befor
 | Provider response shape | 5 | Changed `provider.list()` to use `sdk.provider.list()` (not `config.providers()`). Added model normalization from `Record<string, Model>` to `Array<Model>`. |
 | SSE event type gap | 11 | Created `SSEEvent` superset type covering 3 missing events (`message.part.delta`, `permission.asked`, `question.asked`). Plan keeps opencode-events.ts type guards for these. |
 | PTY getBaseUrl/getAuthHeaders | 5 | Added `getBaseUrl()` and `getAuthHeaders()` methods to `OpenCodeAPI`. Constructor now accepts `baseUrl` and `authHeaders` options. |
+
+## Amendments Applied (v2)
+
+See `2026-04-10-sdk-migration-audit-v2.md` for full analysis.
+
+| Finding | Tasks | Amendment |
+|---------|-------|-----------|
+| SSE auth bypass (CRITICAL) | 3 | Added `Authorization` header to `config.headers` in `createSdkClient()`. SSE's `createSseClient` uses `globalThis.fetch` (not injected fetch) but DOES forward config headers. Belt-and-suspenders: REST gets auth via fetch wrapper, SSE gets auth via config.headers. |
+| Error handling (CRITICAL) | 3, 5 | Set `throwOnError: true` in `createOpencodeClient()`. Replaced `unwrap()` with `sdk()` wrapper that catches thrown errors and translates to `OpenCodeApiError`/`OpenCodeConnectionError` for caller compatibility. |
+| Mock factory scope | 7 | Added explicit Step 0: rewrite `test/helpers/mock-factories.ts` (38 flat methods → namespaced shape). Listed all 13 test files needing updates. |
+| Provider model type | 5 | Removed narrow `Record<string, unknown>` cast. Now uses SDK's full `ProviderListResponse` type. Added Task 10 note to verify model field access. |
+| SSEEvent heartbeat | 11 | Added `ServerHeartbeatEvent` as 4th gap event in `SSEEvent` superset type. |
+
+## Amendments Applied (v3)
+
+See `2026-04-13-sdk-migration-audit-v3.md` for full analysis. Design pivot: dropped `throwOnError: true` in favor of SDK's default error-returning mode.
+
+| Finding | Tasks | Amendment |
+|---------|-------|-----------|
+| authFetch strips REST headers (CRITICAL) | 3 | Rewrote authFetch for SDK's single-Request calling convention: pass-through when `input instanceof Request && !init` (auth already on Request from config.headers), add auth manually only for GapEndpoints two-arg calls. |
+| HTTP status not extractable (CRITICAL) | 3, 5 | **Dropped `throwOnError: true`**. SDK's default mode returns `{ error, response }` on failure — `response.status` available directly. Replaced `translateSdkError()` (50 lines, couldn't get status) with `toRelayError()` (10 lines, uses response.status). |
+| sdk() type signature mismatch | 5 | Broadened `fn` param to `Promise<{ data?: T; error?: unknown; response?: Response }>` — compatible with SDK's default union return type. No compile errors. |
+| Test destructuring | 3 | Fixed all 3 tests: `const { client } = createSdkClient(...)`. Added 4th test for authHeaders. |
+
+## Amendments Applied (v4)
+
+See `2026-04-13-sdk-migration-audit-v4.md` for full analysis.
+
+| Finding | Tasks | Amendment |
+|---------|-------|-----------|
+| GapEndpoints auth missing | 6 | Added explicit construction code to Task 6 passing `headers: authHeaders` to `GapEndpoints`. GapEndpoints calls `fetch(new Request(...))` with one arg — hits authFetch pass-through — so auth must be on the Request via constructor headers. |

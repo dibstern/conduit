@@ -328,7 +328,7 @@ import { createSdkClient, type SdkFactoryOptions } from "../../../src/lib/instan
 
 describe("createSdkClient", () => {
 	it("creates an OpencodeClient with the given baseUrl", () => {
-		const client = createSdkClient({ baseUrl: "http://localhost:4096" });
+		const { client } = createSdkClient({ baseUrl: "http://localhost:4096" });
 		expect(client).toBeDefined();
 		// The SDK client has namespaced methods
 		expect(client.session).toBeDefined();
@@ -336,7 +336,7 @@ describe("createSdkClient", () => {
 	});
 
 	it("applies directory header when provided", () => {
-		const client = createSdkClient({
+		const { client } = createSdkClient({
 			baseUrl: "http://localhost:4096",
 			directory: "/home/user/project",
 		});
@@ -345,11 +345,19 @@ describe("createSdkClient", () => {
 
 	it("uses custom fetch when provided", () => {
 		const customFetch = vi.fn(async () => new Response("ok"));
-		const client = createSdkClient({
+		const { client } = createSdkClient({
 			baseUrl: "http://localhost:4096",
 			fetch: customFetch,
 		});
 		expect(client).toBeDefined();
+	});
+
+	it("returns authHeaders when auth is configured", () => {
+		const { authHeaders } = createSdkClient({
+			baseUrl: "http://localhost:4096",
+			auth: { username: "user", password: "pass" },
+		});
+		expect(authHeaders.Authorization).toMatch(/^Basic /);
 	});
 });
 ```
@@ -364,7 +372,7 @@ Expected: FAIL — module `sdk-factory.js` does not exist
 ```typescript
 // src/lib/instance/sdk-factory.ts
 // Single factory for SDK client creation.
-// Handles auth, directory header, and custom fetch injection.
+// Handles auth, directory header, custom fetch injection, and error mode.
 
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client";
 import { ENV } from "../env.js";
@@ -382,6 +390,8 @@ export interface SdkFactoryResult {
 	client: OpencodeClient;
 	/** The auth-wrapped retryFetch — reuse for GapEndpoints so they share auth. */
 	fetch: typeof fetch;
+	/** Auth headers — reuse for OpenCodeAPI.getAuthHeaders() and PTY upstream. */
+	authHeaders: Record<string, string>;
 }
 
 /**
@@ -389,11 +399,22 @@ export interface SdkFactoryResult {
  *
  * Wires up:
  * - retryFetch as the transport (unless a custom fetch is provided)
- * - Basic Auth headers from options or env vars
+ * - Basic Auth via config.headers (for both REST and SSE) AND a custom
+ *   fetch wrapper (for GapEndpoints raw-fetch calls)
  * - x-opencode-directory header for project scoping
  *
- * Returns both the SDK client and the configured fetch so GapEndpoints
- * can reuse the same auth-wrapped transport.
+ * Auth strategy (Audit v3 design):
+ * - config.headers carries Authorization — SDK's beforeRequest() merges it
+ *   into every Request, covering both REST and SSE paths.
+ * - authFetch handles the SDK's single-Request calling convention (pass-through)
+ *   and GapEndpoints' two-arg calling convention (adds auth to init.headers).
+ * - We do NOT set throwOnError: true. The SDK's default error-returning mode
+ *   gives us { error, response } on failure — response.status is available
+ *   directly without interceptor hacks. OpenCodeAPI.sdk() checks for errors
+ *   and translates them to OpenCodeApiError with responseStatus.
+ *
+ * Returns the SDK client, the configured fetch, and the auth headers so
+ * GapEndpoints and OpenCodeAPI can reuse the same auth-wrapped transport.
  */
 export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 	const baseFetch = options.fetch ?? createRetryFetch({
@@ -402,15 +423,33 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 		timeout: options.retry?.timeout,
 	});
 
-	// Wrap with auth headers if needed
+	// Build auth credentials
 	const password = options.auth?.password ?? ENV.opencodePassword;
 	const username = options.auth?.username ?? ENV.opencodeUsername;
 
+	// Auth headers — passed to config.headers so the SDK's beforeRequest()
+	// merges them into every request (REST via Request headers, SSE via
+	// opts.headers passed to createSseClient's fetch call).
+	const authHeaders: Record<string, string> = {};
+	if (password) {
+		const encoded = Buffer.from(`${username}:${password}`).toString("base64");
+		authHeaders.Authorization = `Basic ${encoded}`;
+	}
+
+	// Custom fetch wrapper:
+	// - SDK calls _fetch(request) with ONE arg — the Request already has auth
+	//   from config.headers via beforeRequest(). Just pass through to baseFetch.
+	// - GapEndpoints call fetch(url, init) with TWO args — no SDK pipeline,
+	//   so we add auth to init.headers manually.
 	const authFetch: typeof fetch = password
 		? async (input, init) => {
-				const encoded = Buffer.from(`${username}:${password}`).toString("base64");
+				if (input instanceof Request && !init) {
+					// SDK path: auth already on Request from config.headers
+					return baseFetch(input);
+				}
+				// GapEndpoints path: add auth to init.headers
 				const headers = new Headers(init?.headers);
-				headers.set("Authorization", `Basic ${encoded}`);
+				headers.set("Authorization", authHeaders.Authorization);
 				return baseFetch(input, { ...init, headers });
 			}
 		: baseFetch;
@@ -418,10 +457,13 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 	const client = createOpencodeClient({
 		baseUrl: options.baseUrl,
 		fetch: authFetch as any,
+		headers: authHeaders,   // ← REST + SSE get auth via config.headers
 		directory: options.directory,
+		// Default throwOnError: false — sdk() wrapper checks errors explicitly
+		// and extracts response.status for OpenCodeApiError compatibility.
 	});
 
-	return { client, fetch: authFetch };
+	return { client, fetch: authFetch, authHeaders };
 }
 ```
 
@@ -829,8 +871,19 @@ Expected: FAIL — module `opencode-api.js` does not exist
 // Thin adapter wrapping @opencode-ai/sdk + GapEndpoints into unified namespaced API.
 // Callers use api.session.list(), api.permission.reply(), etc.
 // Internal gapEndpoints field is visible to maintainers — public API is unified.
+//
+// Error strategy (Audit v3 design):
+// - SDK uses default throwOnError: false — errors return { error, response },
+//   not thrown. This gives us response.status directly.
+// - The sdk() wrapper checks result.error and translates it into
+//   OpenCodeApiError (with responseStatus from response.status) or
+//   OpenCodeConnectionError for caller compatibility.
+// - This means existing catch blocks like:
+//     err instanceof OpenCodeApiError && err.responseStatus === 400
+//   continue working unchanged.
 
 import type { OpencodeClient } from "@opencode-ai/sdk/client";
+import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { GapEndpoints } from "./gap-endpoints.js";
 
 export interface OpenCodeAPIOptions {
@@ -858,12 +911,12 @@ export interface PromptInput {
  */
 export class OpenCodeAPI {
 	/** @internal SDK client — visible for maintainer clarity */
-	private readonly sdk: OpencodeClient;
+	private readonly sdkClient: OpencodeClient;
 	/** @internal Gap endpoints — visible for maintainer clarity */
 	private readonly gapEndpoints: GapEndpoints;
 
 	constructor(options: OpenCodeAPIOptions) {
-		this.sdk = options.sdk;
+		this.sdkClient = options.sdk;
 		this.gapEndpoints = options.gapEndpoints;
 		this.baseUrl = options.baseUrl;
 		this.authHeaders = options.authHeaders ?? {};
@@ -873,42 +926,35 @@ export class OpenCodeAPI {
 
 	readonly session = {
 		list: async (options?: { archived?: boolean; roots?: boolean; limit?: number }) => {
-			const res = await this.sdk.session.list({ query: options });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.list({ query: options }));
 		},
 		get: async (id: string) => {
-			const res = await this.sdk.session.get({ path: { id } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.get({ path: { id } }));
 		},
 		create: async (options?: { title?: string; agentID?: string; providerID?: string; modelID?: string }) => {
-			const res = await this.sdk.session.create({ body: options });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.create({ body: options }));
 		},
 		delete: async (id: string) => {
-			await this.sdk.session.delete({ path: { id } });
+			await this.sdk(() => this.sdkClient.session.delete({ path: { id } }));
 		},
 		update: async (id: string, updates: { title?: string }) => {
-			const res = await this.sdk.session.update({ path: { id }, body: updates });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.update({ path: { id }, body: updates }));
 		},
 		statuses: async () => {
-			const res = await this.sdk.session.status();
-			return this.unwrap(res) as Record<string, unknown>;
+			return this.sdk(() => this.sdkClient.session.status()) as Record<string, unknown>;
 		},
-		// NOTE (Audit fix #2): SDK returns Array<{ info: Message, parts: Part[] }>,
+		// NOTE (Audit v1 fix #2): SDK returns Array<{ info: Message, parts: Part[] }>,
 		// NOT flat messages. This is intentional — "SDK types everywhere" means
 		// callers must access msg.info.id, msg.info.role, etc. Task 7 callers
 		// and Task 10 type migration must update all message field access.
 		messages: async (id: string) => {
-			const res = await this.sdk.session.messages({ path: { id } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.messages({ path: { id } }));
 		},
 		messagesPage: async (id: string, options?: { limit?: number; before?: string }) => {
 			return this.gapEndpoints.getMessagesPage(id, options);
 		},
 		message: async (id: string, messageId: string) => {
-			const res = await this.sdk.session.message({ path: { id, messageID: messageId } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.message({ path: { id, messageID: messageId } }));
 		},
 		prompt: async (id: string, prompt: PromptInput) => {
 			const parts: Array<Record<string, unknown>> = [];
@@ -922,31 +968,28 @@ export class OpenCodeAPI {
 			if (prompt.agent) body["agent"] = prompt.agent;
 			if (prompt.model) body["model"] = prompt.model;
 			if (prompt.variant) body["variant"] = prompt.variant;
-			await this.sdk.session.promptAsync({ path: { id }, body: body as any });
+			await this.sdk(() => this.sdkClient.session.promptAsync({ path: { id }, body: body as any }));
 		},
 		abort: async (id: string) => {
-			await this.sdk.session.abort({ path: { id } });
+			await this.sdk(() => this.sdkClient.session.abort({ path: { id } }));
 		},
 		fork: async (id: string, options: { messageID?: string; title?: string }) => {
-			const res = await this.sdk.session.fork({ path: { id }, body: options });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.fork({ path: { id }, body: options }));
 		},
 		revert: async (id: string, messageId: string) => {
-			await this.sdk.session.revert({ path: { id }, body: { messageID: messageId } });
+			await this.sdk(() => this.sdkClient.session.revert({ path: { id }, body: { messageID: messageId } }));
 		},
 		unrevert: async (id: string) => {
-			await this.sdk.session.unrevert({ path: { id } });
+			await this.sdk(() => this.sdkClient.session.unrevert({ path: { id } }));
 		},
 		share: async (id: string) => {
-			const res = await this.sdk.session.share({ path: { id } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.share({ path: { id } }));
 		},
 		summarize: async (id: string) => {
-			await this.sdk.session.summarize({ path: { id } });
+			await this.sdk(() => this.sdkClient.session.summarize({ path: { id } }));
 		},
 		diff: async (id: string, messageId: string) => {
-			const res = await this.sdk.session.diff({ path: { id }, query: { messageID: messageId } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.session.diff({ path: { id }, query: { messageID: messageId } }));
 		},
 	};
 
@@ -957,10 +1000,10 @@ export class OpenCodeAPI {
 			return this.gapEndpoints.listPendingPermissions();
 		},
 		reply: async (sessionId: string, permissionId: string, response: "once" | "always" | "reject") => {
-			await this.sdk.postSessionIdPermissionsPermissionId({
+			await this.sdk(() => this.sdkClient.postSessionIdPermissionsPermissionId({
 				path: { id: sessionId, permissionID: permissionId },
 				body: { response },
-			});
+			}));
 		},
 	};
 
@@ -982,31 +1025,28 @@ export class OpenCodeAPI {
 
 	readonly config = {
 		get: async () => {
-			const res = await this.sdk.config.get();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.config.get());
 		},
 		update: async (config: Record<string, unknown>) => {
-			const res = await this.sdk.config.update({ body: config as any });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.config.update({ body: config as any }));
 		},
 	};
 
 	// ─── Provider ─────────────────────────────────────────────────────────
 
-	// NOTE (Audit fix #3): Use sdk.provider.list() (not config.providers()) because
-	// it returns { all, default, connected } matching the old ProviderListResult shape.
-	// SDK returns models as Record<string, Model> — normalize to Array<Model> here
-	// so callers don't need to change their iteration patterns.
+	// NOTE (Audit v1 fix #3): Use sdk.provider.list() (not config.providers())
+	// because it returns { all, default, connected } matching ProviderListResult.
+	// NOTE (Audit v2 fix #4): Use SDK's full model type — don't narrow to
+	// Record<string, unknown>. The ProviderListResponses["200"] type defines
+	// detailed model objects with id, name, cost, limits, modalities, etc.
+	// Callers in model.ts, client-init.ts, settings.ts should access these
+	// fields using the SDK model shape (Task 10 verifies this).
 	readonly provider = {
 		list: async () => {
-			const res = await this.sdk.provider.list();
-			const data = this.unwrap(res) as {
-				all: Array<{ id: string; name: string; models: Record<string, unknown> }>;
-				default: Record<string, string>;
-				connected: string[];
-			};
+			const data = await this.sdk(() => this.sdkClient.provider.list());
+			// data is ProviderListResponse: { all: [...], default: {...}, connected: [...] }
 			// Normalize models from Record<string, Model> to Array<Model>
-			const providers = (data.all ?? []).map((p) => ({
+			const providers = (data.all ?? []).map((p: any) => ({
 				...p,
 				models: p.models && typeof p.models === "object" && !Array.isArray(p.models)
 					? Object.values(p.models)
@@ -1020,18 +1060,16 @@ export class OpenCodeAPI {
 
 	readonly pty = {
 		list: async () => {
-			const res = await this.sdk.pty.list();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.pty.list());
 		},
 		create: async (options?: { command?: string; args?: string[]; cwd?: string }) => {
-			const res = await this.sdk.pty.create({ body: options as any });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.pty.create({ body: options as any }));
 		},
 		delete: async (id: string) => {
-			await this.sdk.pty.remove({ path: { id } });
+			await this.sdk(() => this.sdkClient.pty.remove({ path: { id } }));
 		},
 		resize: async (id: string, cols: number, rows: number) => {
-			await this.sdk.pty.update({ path: { id }, body: { size: { cols, rows } } as any });
+			await this.sdk(() => this.sdkClient.pty.update({ path: { id }, body: { size: { cols, rows } } as any }));
 		},
 	};
 
@@ -1039,16 +1077,13 @@ export class OpenCodeAPI {
 
 	readonly file = {
 		list: async (path?: string) => {
-			const res = await this.sdk.file.list({ query: { path: path || "." } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.file.list({ query: { path: path || "." } }));
 		},
 		read: async (path: string) => {
-			const res = await this.sdk.file.read({ query: { path } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.file.read({ query: { path } }));
 		},
 		status: async () => {
-			const res = await this.sdk.file.status();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.file.status());
 		},
 	};
 
@@ -1056,16 +1091,13 @@ export class OpenCodeAPI {
 
 	readonly find = {
 		text: async (pattern: string) => {
-			const res = await this.sdk.find.text({ query: { pattern } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.find.text({ query: { pattern } }));
 		},
 		files: async (query: string) => {
-			const res = await this.sdk.find.files({ query: { query } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.find.files({ query: { query } }));
 		},
 		symbols: async (query: string) => {
-			const res = await this.sdk.find.symbols({ query: { query } });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.find.symbols({ query: { query } }));
 		},
 	};
 
@@ -1073,35 +1105,29 @@ export class OpenCodeAPI {
 
 	readonly app = {
 		health: async () => {
-			await this.sdk.path.get();
+			await this.sdk(() => this.sdkClient.path.get());
 			return { ok: true } as { ok: boolean; version?: string };
 		},
 		agents: async () => {
-			const res = await this.sdk.app.agents();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.app.agents());
 		},
 		commands: async (directory?: string) => {
-			const res = await this.sdk.command.list({ query: directory ? { directory } : undefined });
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.command.list({ query: directory ? { directory } : undefined }));
 		},
 		skills: async (directory?: string) => {
 			return this.gapEndpoints.listSkills(directory);
 		},
 		path: async () => {
-			const res = await this.sdk.path.get();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.path.get());
 		},
 		vcs: async () => {
-			const res = await this.sdk.vcs.get();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.vcs.get());
 		},
 		projects: async () => {
-			const res = await this.sdk.project.list();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.project.list());
 		},
 		currentProject: async () => {
-			const res = await this.sdk.project.current();
-			return this.unwrap(res);
+			return this.sdk(() => this.sdkClient.project.current());
 		},
 	};
 
@@ -1109,7 +1135,7 @@ export class OpenCodeAPI {
 
 	readonly event = {
 		subscribe: async () => {
-			return this.sdk.event.subscribe();
+			return this.sdkClient.event.subscribe();
 		},
 	};
 
@@ -1130,14 +1156,51 @@ export class OpenCodeAPI {
 		return { ...this.authHeaders };
 	}
 
-	// ─── Utility ──────────────────────────────────────────────────────────
+	// ─── SDK Call Wrapper (Audit v3 design) ─────────────────────────────
+	//
+	// With the SDK's default throwOnError: false, success returns
+	// { data, response } and errors return { error, response }.
+	// We check for errors explicitly and translate them to
+	// OpenCodeApiError (with response.status) so callers' existing
+	// catch blocks keep working:
+	//   err instanceof OpenCodeApiError && err.responseStatus === 400
 
-	/** Extract data from SDK response. SDK wraps responses as { data: T }. */
-	private unwrap<T>(response: { data?: T } | T): T {
-		if (response && typeof response === "object" && "data" in response) {
-			return (response as { data: T }).data;
+	/**
+	 * Call an SDK method, check for errors, return data.
+	 *
+	 * The SDK returns { data, response } on success and { error, response }
+	 * on failure. This wrapper checks for errors and translates them into
+	 * OpenCodeApiError / OpenCodeConnectionError for caller compatibility.
+	 * response.status is available directly — no interceptor hacks needed.
+	 */
+	private async sdk<T>(fn: () => Promise<{ data?: T; error?: unknown; response?: Response }>): Promise<T> {
+		try {
+			const result = await fn() as { data?: T; error?: unknown; response?: Response };
+			if (result.error !== undefined) {
+				throw this.toRelayError(result.error, result.response);
+			}
+			return result.data as T;
+		} catch (err) {
+			if (err instanceof OpenCodeApiError || err instanceof OpenCodeConnectionError) throw err;
+			// Network errors (fetch failures) throw directly — no response
+			const message = err instanceof Error ? err.message : String(err);
+			throw new OpenCodeConnectionError(message, { cause: err instanceof Error ? err : undefined });
 		}
-		return response as T;
+	}
+
+	/** Translate SDK error + Response into relay error types. */
+	private toRelayError(error: unknown, response?: Response): Error {
+		if (response) {
+			const message = (error && typeof error === "object" && "message" in error)
+				? String((error as { message: unknown }).message)
+				: `API error: ${response.status}`;
+			return new OpenCodeApiError(message, {
+				endpoint: new URL(response.url).pathname,
+				responseStatus: response.status,
+				responseBody: error,
+			});
+		}
+		return new OpenCodeConnectionError(String(error));
 	}
 }
 ```
@@ -1176,6 +1239,31 @@ In `src/lib/handlers/types.ts`, change the `client` field type from `OpenCodeCli
 **Step 2: Update relay-stack.ts construction**
 
 Replace the `OpenCodeClient` construction with `OpenCodeAPI` construction using `createSdkClient` + `GapEndpoints`. Keep `OpenCodeClient` temporarily for SSE consumer.
+
+> **Audit v4 fix:** Pass `authHeaders` to GapEndpoints' `headers` option so gap endpoint
+> Requests carry auth. GapEndpoints calls `this.fetch(new Request(...))` with one arg,
+> which hits authFetch's pass-through path — so auth must already be on the Request.
+
+```typescript
+// relay-stack.ts construction (replaces OpenCodeClient)
+const { client, fetch: sdkFetch, authHeaders } = createSdkClient({
+    baseUrl: config.opencodeUrl,
+    directory: config.projectDir,
+});
+
+const gapEndpoints = new GapEndpoints({
+    baseUrl: config.opencodeUrl,
+    fetch: sdkFetch,
+    headers: authHeaders,  // ← gap endpoint Requests get auth via constructor headers
+});
+
+const api = new OpenCodeAPI({
+    sdk: client,
+    gapEndpoints,
+    baseUrl: config.opencodeUrl,
+    authHeaders,
+});
+```
 
 **Step 3: Run type check**
 
@@ -1220,9 +1308,109 @@ git commit -m "wip: wire OpenCodeAPI into relay-stack (callers not yet updated)"
 - `src/lib/session/session-status-sqlite.ts` — type import update
 - `src/lib/session/status-augmentation.ts` — type import update
 
-**Step 1: Update each file**
+**Step 0 (Audit v2 fix #3): Rewrite mock-factories.ts FIRST**
 
-For each file above:
+> The central mock factory at `test/helpers/mock-factories.ts` has 38 flat-API
+> stub methods (`sendMessageAsync`, `getSession`, `listSessions`, etc.) that
+> must be restructured to the namespaced shape BEFORE migrating source files.
+> Otherwise every test that uses `createMockHandlerDeps()` will fail.
+
+Restructure `createMockClient()` in `test/helpers/mock-factories.ts`:
+```typescript
+function createMockClient(): HandlerDeps["client"] {
+	return {
+		session: {
+			list: vi.fn().mockResolvedValue([]),
+			get: vi.fn().mockResolvedValue({ id: "s1", modelID: "gpt-4", providerID: "openai" }),
+			create: vi.fn().mockResolvedValue({ id: "session-new" }),
+			delete: vi.fn().mockResolvedValue(undefined),
+			update: vi.fn().mockResolvedValue({ id: "s1" }),
+			statuses: vi.fn().mockResolvedValue({}),
+			messages: vi.fn().mockResolvedValue([]),
+			messagesPage: vi.fn().mockResolvedValue([]),
+			message: vi.fn().mockResolvedValue({ id: "msg-1", time: { created: 0 } }),
+			prompt: vi.fn().mockResolvedValue(undefined),
+			abort: vi.fn().mockResolvedValue(undefined),
+			fork: vi.fn().mockResolvedValue({ id: "ses_forked" }),
+			revert: vi.fn().mockResolvedValue(undefined),
+			unrevert: vi.fn().mockResolvedValue(undefined),
+			share: vi.fn().mockResolvedValue({ url: "https://share.test" }),
+			summarize: vi.fn().mockResolvedValue(undefined),
+			diff: vi.fn().mockResolvedValue({ diffs: [] }),
+		},
+		permission: {
+			list: vi.fn().mockResolvedValue([]),
+			reply: vi.fn().mockResolvedValue(undefined),
+		},
+		question: {
+			list: vi.fn().mockResolvedValue([]),
+			reply: vi.fn().mockResolvedValue(undefined),
+			reject: vi.fn().mockResolvedValue(undefined),
+		},
+		config: {
+			get: vi.fn().mockResolvedValue({}),
+			update: vi.fn().mockResolvedValue({}),
+		},
+		provider: {
+			list: vi.fn().mockResolvedValue({ providers: [], defaults: {}, connected: [] }),
+		},
+		pty: {
+			list: vi.fn().mockResolvedValue([]),
+			create: vi.fn().mockResolvedValue({ id: "pty-1", title: "Terminal", pid: 42 }),
+			delete: vi.fn().mockResolvedValue(undefined),
+			resize: vi.fn().mockResolvedValue(undefined),
+		},
+		file: {
+			list: vi.fn().mockResolvedValue([]),
+			read: vi.fn().mockResolvedValue({ content: "file content", binary: false }),
+			status: vi.fn().mockResolvedValue([]),
+		},
+		find: {
+			text: vi.fn().mockResolvedValue([]),
+			files: vi.fn().mockResolvedValue([]),
+			symbols: vi.fn().mockResolvedValue([]),
+		},
+		app: {
+			health: vi.fn().mockResolvedValue({ ok: true }),
+			agents: vi.fn().mockResolvedValue([]),
+			commands: vi.fn().mockResolvedValue([]),
+			skills: vi.fn().mockResolvedValue([]),
+			path: vi.fn().mockResolvedValue({ cwd: "/test" }),
+			vcs: vi.fn().mockResolvedValue({ branch: "main" }),
+			projects: vi.fn().mockResolvedValue([]),
+			currentProject: vi.fn().mockResolvedValue(undefined),
+		},
+		event: {
+			subscribe: vi.fn().mockResolvedValue({ stream: (async function* () {})() }),
+		},
+		getBaseUrl: vi.fn().mockReturnValue("http://localhost:4096"),
+		getAuthHeaders: vi.fn().mockReturnValue({}),
+	} as unknown as HandlerDeps["client"];
+}
+```
+
+Also update `createMockProjectRelay()` to use `sseStream` instead of `sseConsumer` (forward-compatible with Task 14).
+
+**13 test files** that import `OpenCodeClient` need updating:
+- `test/helpers/mock-factories.ts` — full rewrite (above)
+- `test/unit/provider/opencode-adapter-discover.test.ts`
+- `test/unit/provider/orchestration-wiring.test.ts`
+- `test/unit/provider/opencode-adapter-actions.test.ts`
+- `test/unit/provider/opencode-adapter-send-turn.test.ts`
+- `test/unit/session/session-manager.pbt.test.ts`
+- `test/unit/session/session-manager-parentid.test.ts`
+- `test/unit/session/conduit-owned-fields.test.ts`
+- `test/unit/server/m4-backend.test.ts`
+- `test/unit/relay/markdown-renderer.test.ts`
+- `test/integration/flows/sse-consumer.integration.ts`
+- `test/integration/flows/rest-client.integration.ts`
+- `test/e2e/fixtures/subagent-snapshot.json`
+
+Run: `pnpm check` — expect some failures from callers not yet migrated (that's fine, Steps 1-2 fix them).
+
+**Step 1: Update each source file**
+
+For each file listed above:
 1. Change `import type { OpenCodeClient, ... } from "../instance/opencode-client.js"` to `import type { OpenCodeAPI } from "../instance/opencode-api.js"`
 2. Change method calls from flat (e.g. `client.listSessions()`) to namespaced (e.g. `client.session.list()`)
 3. Update any `Pick<OpenCodeClient, "getMessages">` patterns to `Pick<OpenCodeAPI["session"], "messages">`
@@ -1235,11 +1423,11 @@ Expected: PASS — no type errors
 **Step 3: Run full test suite**
 
 Run: `pnpm test:unit`
-Expected: PASS — all tests pass (test stubs may need updating if they mock OpenCodeClient)
+Expected: PASS — mock-factories already restructured in Step 0, so tests should pass
 
-**Step 4: Fix any test stubs**
+**Step 4: Fix any remaining test-only issues**
 
-Update test files that create `OpenCodeClient` stubs to use the new namespaced API shape. Search for `makeStubClient` or `as unknown as OpenCodeClient` in test files.
+If any individual test files construct one-off stubs using the old flat shape, update them too.
 
 **Step 5: Run full verification**
 
@@ -1453,14 +1641,17 @@ The SDK provides `Event` as a discriminated union of 20+ typed event variants (e
 > export interface PartDeltaEvent { type: "message.part.delta"; properties: { ... } }
 > export interface PermissionAskedEvent { type: "permission.asked"; properties: { ... } }
 > export interface QuestionAskedEvent { type: "question.asked"; properties: { ... } }
+> export interface ServerHeartbeatEvent { type: "server.heartbeat"; properties?: Record<string, unknown> }
 >
-> export type SSEEvent = Event | PartDeltaEvent | PermissionAskedEvent | QuestionAskedEvent;
+> export type SSEEvent = Event | PartDeltaEvent | PermissionAskedEvent | QuestionAskedEvent | ServerHeartbeatEvent;
 > ```
-> Use `SSEEvent` (not `Event`) in sse-wiring.ts and event-translator.ts. Keep the existing type guards for the 3 unmapped types. Delete only the type guards whose events ARE in the SDK union.
+> Use `SSEEvent` (not `Event`) in sse-wiring.ts, event-translator.ts, and sse-stream.ts. Keep the existing type guards for the unmapped types. Delete only the type guards whose events ARE in the SDK union.
+>
+> **Note (Audit v2 fix #5):** `server.heartbeat` is NOT in the SDK `Event` union despite being emitted by the OpenCode SSE stream. SSEStream explicitly handles it for health tracking. Adding it to the SSEEvent superset ensures type safety in `sse-stream.ts` where it checks `evt.type === "server.heartbeat"`.
 
 **Step 1: Create SSEEvent superset type**
 
-In `opencode-events.ts`, define the 3 missing event types and the `SSEEvent` union. Keep existing type guards for `message.part.delta`, `permission.asked`, and `question.asked`. Delete type guards for events now covered by SDK Event (e.g., `isPartUpdatedEvent`, `isSessionStatusEvent`, etc.).
+In `opencode-events.ts`, define the 4 missing event types and the `SSEEvent` union. Keep existing type guards for `message.part.delta`, `permission.asked`, `question.asked`, and `server.heartbeat`. Delete type guards for events now covered by SDK Event (e.g., `isPartUpdatedEvent`, `isSessionStatusEvent`, etc.).
 
 **Step 2: Update sse-wiring.ts event handler**
 
