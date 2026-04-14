@@ -774,11 +774,17 @@ class EventNamespace {
 	/**
 	 * Subscribe to SSE events from OpenCode.
 	 * Returns `{ stream: AsyncGenerator<Event> }`.
+	 *
+	 * @param options.signal - AbortSignal to cancel the SSE connection.
+	 *   When aborted, the SDK's internal ReadableStream reader is cancelled
+	 *   and the async generator terminates.
 	 */
-	async subscribe(): Promise<{
+	async subscribe(options?: { signal?: AbortSignal }): Promise<{
 		stream: AsyncGenerator<OpenCodeEvent, void, unknown>;
 	}> {
-		return this.api._sdk.event.subscribe() as Promise<{
+		return this.api._sdk.event.subscribe(
+			options?.signal ? { signal: options.signal } : undefined,
+		) as Promise<{
 			stream: AsyncGenerator<OpenCodeEvent, void, unknown>;
 		}>;
 	}

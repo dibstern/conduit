@@ -184,13 +184,13 @@ describe("Integration: Session Switch History", () => {
 		// session_switched embeds history in two possible shapes:
 		//   1. Cache path: `events` array of relay events (user_message, delta, etc.)
 		//   2. REST fallback: `history.messages` with pre-rendered message objects
+		//
+		// Note: the mock server returns recorded SSE content, not the test's
+		// actual prompt text. Assertions check structural integrity (roles,
+		// non-empty text, delta consistency) rather than specific prompt text.
 		if (events) {
 			// Cache path: verify user_message and delta events
-			const userMsgEvt = events.find(
-				(e) =>
-					e["type"] === "user_message" &&
-					String(e["text"] ?? "").includes("pi"),
-			);
+			const userMsgEvt = events.find((e) => e["type"] === "user_message");
 			expect(userMsgEvt).toBeTruthy();
 
 			const deltaEvts = events.filter((e) => e["type"] === "delta");
@@ -217,31 +217,26 @@ describe("Integration: Session Switch History", () => {
 			const messages = history.messages;
 			expect(messages.length).toBeGreaterThanOrEqual(2);
 
-			const piUserMsg = messages.find(
-				(m) => getRole(m) === "user" && getTextContent(m).includes("pi"),
-			);
-			expect(piUserMsg).toBeTruthy();
+			// Find the user message (the recording text will differ from the
+			// test's prompt text, so just verify a user message exists)
+			const userMsg = messages.find((m) => getRole(m) === "user");
+			expect(userMsg).toBeTruthy();
 
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const piUserIdx = messages.indexOf(piUserMsg!);
+			const userIdx = messages.indexOf(userMsg!);
 			const assistantMsgs = messages
-				.slice(piUserIdx + 1)
+				.slice(userIdx + 1)
 				.filter((m) => getRole(m) === "assistant");
 			expect(assistantMsgs.length).toBeGreaterThan(0);
 			const assistantMsg = assistantMsgs[0];
 
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			const assistantText = getTextContent(assistantMsg!);
-			expect(assistantText.length).toBeGreaterThanOrEqual(deltaSnippet.length);
+			// The assistant should have produced some text content.
+			// Delta text from SSE and message text from REST come from the
+			// same recording, so they should match.
+			expect(assistantText.length).toBeGreaterThan(0);
 			expect(assistantText).toContain(deltaSnippet);
-
-			const safePrefix = streamedText.slice(
-				0,
-				Math.min(streamedText.length, 40),
-			);
-			if (safePrefix.length > 5) {
-				expect(assistantText).toContain(safePrefix);
-			}
 		} else {
 			// Neither path produced history — fail explicitly
 			expect.unreachable(

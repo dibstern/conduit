@@ -97,6 +97,19 @@ export class MockOpenCodeServer {
 	/** Sessions injected via POST /session (tracked separately for merging into all GET /session responses). */
 	private injectedSessions = new Map<string, Record<string, unknown>>();
 
+	/**
+	 * Messages accumulated from SSE events (message.updated + message.part.updated).
+	 * Keyed by session ID → message ID → { info, parts }.
+	 * Used to serve GET /session/{id}/message after a prompt_async has been processed.
+	 */
+	private sseMessages = new Map<
+		string,
+		Map<
+			string,
+			{ info: Record<string, unknown>; parts: Record<string, unknown>[] }
+		>
+	>();
+
 	/** Session IDs that have been deleted (filtered from GET /session). */
 	private deletedSessionIds = new Set<string>();
 
@@ -209,6 +222,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sseIdleSessions.clear();
+		this.sseMessages.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.buildQueues();
@@ -329,6 +343,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sseIdleSessions.clear();
+		this.sseMessages.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.buildQueues();
@@ -741,6 +756,26 @@ export class MockOpenCodeServer {
 			return;
 		}
 
+		// ── GET /session/{id}/message: serve SSE-accumulated messages ─────────
+		// After a prompt_async has been processed, SSE events accumulate message
+		// data in sseMessages. Serve these when the queue would return empty.
+		if (method === "GET" && /^\/session\/[^/]+\/message$/.test(basePath)) {
+			const segments = basePath.split("/");
+			const sessionId = segments[2];
+			const sessionMsgs = sessionId
+				? this.sseMessages.get(sessionId)
+				: undefined;
+			if (sessionMsgs && sessionMsgs.size > 0) {
+				const messages = [...sessionMsgs.values()].map((m) => ({
+					info: m.info,
+					parts: m.parts,
+				}));
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(messages));
+				return;
+			}
+		}
+
 		// Look up exact path first, then fall back to normalized (parameterized).
 		// Exact match ensures that requests for a specific session ID get the
 		// correct recorded response. Normalized fallback handles session IDs
@@ -948,10 +983,68 @@ export class MockOpenCodeServer {
 						this.sseIdleSessions.delete(sid);
 					}
 				}
+
+				// Accumulate messages from SSE events so GET /session/{id}/message
+				// returns non-empty data after a prompt_async has been processed.
+				this.trackSseMessage(event.type, properties);
+
 				emitCount++;
 			}
 			this.diag("emit_done", `emitted=${emitCount}/${events.length}`);
 		})();
+	}
+
+	/**
+	 * Track message data from SSE events to build GET /session/{id}/message responses.
+	 * Called for every emitted SSE event. Accumulates message.updated (info) and
+	 * message.part.updated (parts) into sseMessages per session.
+	 */
+	private trackSseMessage(
+		type: string,
+		properties: Record<string, unknown>,
+	): void {
+		if (type === "message.updated") {
+			const info = properties["info"] as Record<string, unknown> | undefined;
+			if (!info) return;
+			const sessionId = info["sessionID"] as string | undefined;
+			const messageId = info["id"] as string | undefined;
+			if (!sessionId || !messageId) return;
+			let sessionMap = this.sseMessages.get(sessionId);
+			if (!sessionMap) {
+				sessionMap = new Map();
+				this.sseMessages.set(sessionId, sessionMap);
+			}
+			const existing = sessionMap.get(messageId);
+			if (existing) {
+				existing.info = { ...info };
+			} else {
+				sessionMap.set(messageId, { info: { ...info }, parts: [] });
+			}
+		} else if (type === "message.part.updated") {
+			const part = properties["part"] as Record<string, unknown> | undefined;
+			if (!part) return;
+			const sessionId = part["sessionID"] as string | undefined;
+			const messageId = part["messageID"] as string | undefined;
+			const partId = part["id"] as string | undefined;
+			if (!sessionId || !messageId || !partId) return;
+			let sessionMap = this.sseMessages.get(sessionId);
+			if (!sessionMap) {
+				sessionMap = new Map();
+				this.sseMessages.set(sessionId, sessionMap);
+			}
+			let msg = sessionMap.get(messageId);
+			if (!msg) {
+				msg = { info: { id: messageId, sessionID: sessionId }, parts: [] };
+				sessionMap.set(messageId, msg);
+			}
+			// Update existing part or append new one
+			const existingIdx = msg.parts.findIndex((p) => p["id"] === partId);
+			if (existingIdx >= 0) {
+				msg.parts[existingIdx] = { ...part };
+			} else {
+				msg.parts.push({ ...part });
+			}
+		}
 	}
 
 	// ─── PTY WebSocket handling ──────────────────────────────────────────────

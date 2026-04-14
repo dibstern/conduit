@@ -19,7 +19,9 @@ import {
 export interface SSEStreamOptions {
 	api: {
 		event: {
-			subscribe(): Promise<{ stream: AsyncGenerator<unknown> }>;
+			subscribe(options?: {
+				signal?: AbortSignal;
+			}): Promise<{ stream: AsyncGenerator<unknown> }>;
 		};
 	};
 	backoff?: Partial<BackoffConfig>;
@@ -46,6 +48,8 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 	private running = false;
 	private reconnectAttempt = 0;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	/** AbortController for the current SSE connection. Aborted on disconnect(). */
+	private sseAbort: AbortController | null = null;
 
 	constructor(registry: ServiceRegistry, options: SSEStreamOptions) {
 		super(registry);
@@ -79,6 +83,11 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 	/** Stop consuming and clean up. */
 	async disconnect(): Promise<void> {
 		this.running = false;
+		// Abort the SSE fetch/reader so consumeLoop's `for await` unblocks.
+		if (this.sseAbort) {
+			this.sseAbort.abort();
+			this.sseAbort = null;
+		}
 		if (this.reconnectTimer) {
 			this.clearTrackedTimer(this.reconnectTimer);
 			this.reconnectTimer = null;
@@ -107,7 +116,12 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 	private async consumeLoop(): Promise<void> {
 		while (this.running) {
 			try {
-				const { stream } = await this.api.event.subscribe();
+				// Create a fresh AbortController per connection attempt so
+				// disconnect() can cancel the underlying fetch/reader.
+				this.sseAbort = new AbortController();
+				const { stream } = await this.api.event.subscribe({
+					signal: this.sseAbort.signal,
+				});
 				this.reconnectAttempt = 0;
 				this.healthTracker.onConnected();
 				this.emit("connected");
