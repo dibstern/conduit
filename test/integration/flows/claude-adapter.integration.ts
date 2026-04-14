@@ -439,9 +439,10 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 		// Now invoke canUseTool as the SDK would, simulating the permission check.
 		// The adapter should have wired canUseTool through the permission bridge.
 		expect(capturedCanUseTool).toBeDefined();
+		if (!capturedCanUseTool) throw new Error("canUseTool not captured");
 
 		const abortController = new AbortController();
-		const permissionResult = capturedCanUseTool?.(
+		const permissionResult = await capturedCanUseTool(
 			"Bash",
 			{ command: "rm -rf /" },
 			{ signal: abortController.signal, toolUseID: toolUseId },
@@ -450,9 +451,7 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 		// The permission bridge calls eventSink.requestPermission, which we
 		// mocked to return { decision: "once" }. So permissionResult should
 		// resolve with { behavior: "allow" }.
-		const permResult = await permissionResult;
-		expect(permResult).toBeDefined();
-		expect(permResult?.behavior).toBe("allow");
+		expect(permissionResult.behavior).toBe("allow");
 
 		// Now unblock the post-permission messages
 		resolvePostPermission?.();
