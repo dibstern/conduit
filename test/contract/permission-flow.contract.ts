@@ -41,30 +41,27 @@ describe("AC3 — Permission Flow Shape Validation", () => {
 		});
 	});
 
-	describe("Permission reply endpoint shape", () => {
-		it("POST /permission/:id/reply exists in OpenAPI spec", async () => {
+	describe("Permission reply schema shape", () => {
+		it("OpenAPI spec defines PermissionRequest schema", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
-			expect(doc.paths).toHaveProperty("/permission/{requestID}/reply");
-			const endpoint = doc.paths["/permission/{requestID}/reply"] as Record<
-				string,
-				unknown
-			>;
-			// Should support POST method
-			expect(endpoint).toHaveProperty("post");
+			const schemas = doc.components?.schemas ?? {};
+			// In SDK 1.4.x / OpenCode 1.3.13+, permission endpoints are
+			// project-scoped and not in the global /doc spec.  But the
+			// global spec still defines the PermissionRequest schema.
+			expect(schemas).toHaveProperty("PermissionRequest");
 		});
 
-		it("permission reply endpoint expects { reply } body per OpenAPI spec", async () => {
+		it("permission event schemas include asked and replied", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, Record<string, Record<string, unknown>>>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
-			const post = doc.paths["/permission/{requestID}/reply"]?.["post"];
-			expect(post).toBeDefined();
-			// Should have requestBody defined
-			expect(post).toHaveProperty("requestBody");
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("Event.permission.asked");
+			expect(schemas).toHaveProperty("Event.permission.replied");
 		});
 	});
 

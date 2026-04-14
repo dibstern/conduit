@@ -39,43 +39,39 @@ describe("AC4 — Question Flow Shape Validation", () => {
 		});
 	});
 
-	describe("Question reply endpoint shape", () => {
-		it("POST /question/:id/reply exists in OpenAPI spec", async () => {
+	describe("Question reply schema shape", () => {
+		it("OpenAPI spec defines QuestionRequest schema", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
-			expect(doc.paths).toHaveProperty("/question/{requestID}/reply");
-			const endpoint = doc.paths["/question/{requestID}/reply"] as Record<
-				string,
-				unknown
-			>;
-			expect(endpoint).toHaveProperty("post");
+			const schemas = doc.components?.schemas ?? {};
+			// In SDK 1.4.x / OpenCode 1.3.13+, question endpoints are
+			// project-scoped and not in the global /doc spec.  But the
+			// global spec still defines the QuestionRequest schema.
+			expect(schemas).toHaveProperty("QuestionRequest");
 		});
 
-		it("question reply endpoint expects { answers } body", async () => {
+		it("question reply schema defines QuestionAnswer", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, Record<string, Record<string, unknown>>>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
-			const post = doc.paths["/question/{requestID}/reply"]?.["post"];
-			expect(post).toBeDefined();
-			expect(post).toHaveProperty("requestBody");
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("QuestionAnswer");
 		});
 	});
 
-	describe("Question reject endpoint shape", () => {
-		it("POST /question/:id/reject exists in OpenAPI spec", async () => {
+	describe("Question reject schema shape", () => {
+		it("question event schemas include asked, replied, and rejected", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
-			expect(doc.paths).toHaveProperty("/question/{requestID}/reject");
-			const endpoint = doc.paths["/question/{requestID}/reject"] as Record<
-				string,
-				unknown
-			>;
-			expect(endpoint).toHaveProperty("post");
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("Event.question.asked");
+			expect(schemas).toHaveProperty("Event.question.replied");
+			expect(schemas).toHaveProperty("Event.question.rejected");
 		});
 	});
 

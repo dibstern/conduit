@@ -90,9 +90,11 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 				paths: Record<string, unknown>;
 			}>("/doc");
 
-			// Both global and project event streams should exist
+			// In SDK 1.4.x / OpenCode 1.3.13+, only global event streams
+			// are in the global /doc spec.  Project-scoped /event is no
+			// longer listed here.
 			expect(doc.paths).toHaveProperty("/global/event");
-			expect(doc.paths).toHaveProperty("/event");
+			expect(doc.paths).toHaveProperty("/global/sync-event");
 		});
 	});
 
@@ -129,47 +131,58 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 		});
 	});
 
-	describe("Message part endpoints", () => {
-		it("GET /session/:id/message/:mid endpoint exists", async () => {
+	describe("Message and part schemas", () => {
+		it("spec defines Message schema with part-related types", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
 
-			expect(doc.paths).toHaveProperty(
-				"/session/{sessionID}/message/{messageID}",
-			);
+			// In SDK 1.4.x / OpenCode 1.3.13+, session endpoints are
+			// project-scoped and not in the global /doc spec.  But the
+			// global spec still defines the Message, Part, and ToolPart schemas.
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("Message");
+			expect(schemas).toHaveProperty("Part");
+			expect(schemas).toHaveProperty("ToolPart");
 		});
 
-		it("GET /session/:id/message/:mid/part/:pid endpoint exists", async () => {
+		it("spec defines message part event schemas", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
 
-			expect(doc.paths).toHaveProperty(
-				"/session/{sessionID}/message/{messageID}/part/{partID}",
-			);
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("Event.message.part.updated");
+			expect(schemas).toHaveProperty("Event.message.updated");
 		});
 	});
 
-	describe("Prompt endpoint for triggering tools", () => {
-		it("POST /session/:id/prompt_async endpoint exists", async () => {
+	describe("Session and prompt schemas", () => {
+		it("spec defines Session schema for prompt operations", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
 
-			expect(doc.paths).toHaveProperty("/session/{sessionID}/prompt_async");
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("Session");
+			expect(schemas).toHaveProperty("SessionStatus");
 		});
 
-		it("abort endpoint exists for stopping tool execution", async () => {
+		it("spec defines tool state schemas for lifecycle tracking", async () => {
 			if (skipIfNoServer()) return;
 			const doc = await apiGet<{
-				paths: Record<string, unknown>;
+				components?: { schemas?: Record<string, unknown> };
 			}>("/doc");
 
-			expect(doc.paths).toHaveProperty("/session/{sessionID}/abort");
+			const schemas = doc.components?.schemas ?? {};
+			expect(schemas).toHaveProperty("ToolState");
+			expect(schemas).toHaveProperty("ToolStatePending");
+			expect(schemas).toHaveProperty("ToolStateRunning");
+			expect(schemas).toHaveProperty("ToolStateCompleted");
+			expect(schemas).toHaveProperty("ToolStateError");
 		});
 	});
 });
