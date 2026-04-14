@@ -5,12 +5,15 @@
 // provider layer alongside the existing relay pipeline.
 
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import { createLogger } from "../logger.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { ClaudeAdapter } from "./claude/index.js";
 import { OpenCodeAdapter } from "./opencode-adapter.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import type { TurnResult } from "./types.js";
+
+const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
@@ -82,7 +85,13 @@ export function createOrchestrationLayer(
 				(props?.["sessionID"] as string | undefined) ??
 				(event as { sessionId?: string }).sessionId;
 			if (sessionId) {
-				adapter.notifyTurnCompleted(sessionId, TURN_COMPLETE_RESULT);
+				try {
+					adapter.notifyTurnCompleted(sessionId, TURN_COMPLETE_RESULT);
+				} catch (err) {
+					log.error(
+						`notifyTurnCompleted failed for session ${sessionId}: ${err instanceof Error ? err.message : err}`,
+					);
+				}
 			}
 		});
 	}

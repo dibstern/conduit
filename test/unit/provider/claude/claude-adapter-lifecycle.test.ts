@@ -3,12 +3,14 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
 import type {
 	ClaudeSessionContext,
 	PendingApproval,
 	PendingQuestion,
 } from "../../../../src/lib/provider/claude/types.js";
+import { createMockEventSink } from "../../../helpers/mock-sdk.js";
 
 function makeFakeSessionContext(
 	sessionId: string,
@@ -33,6 +35,7 @@ function makeFakeSessionContext(
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
+		eventSink: undefined,
 		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",
@@ -237,6 +240,48 @@ describe("ClaudeAdapter lifecycle", () => {
 			await adapter.interruptTurn("sess-1");
 
 			expect(ctx.inFlightTools.size).toBe(0);
+		});
+
+		it("emits tool.completed events via EventSink for in-flight tools on interrupt", async () => {
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const sink = createMockEventSink();
+			const ctx = makeFakeSessionContext("sess-1");
+			ctx.eventSink = sink;
+			ctx.lastAssistantUuid = "asst-uuid";
+			ctx.inFlightTools.set(0, {
+				itemId: "tool-1",
+				toolName: "Bash",
+				title: "Command run",
+				input: {},
+				partialInputJson: "",
+			});
+			ctx.inFlightTools.set(1, {
+				itemId: "tool-2",
+				toolName: "Read",
+				title: "File read",
+				input: {},
+				partialInputJson: "",
+			});
+			(
+				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
+			).sessions.set("sess-1", ctx);
+
+			await adapter.interruptTurn("sess-1");
+
+			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
+				.calls as Array<[CanonicalEvent]>;
+			const completedEvents = pushCalls.filter(
+				(call) => call[0].type === "tool.completed",
+			);
+			expect(completedEvents).toHaveLength(2);
+			expect(completedEvents[0]![0].data).toMatchObject({
+				partId: "tool-1",
+				result: null,
+			});
+			expect(completedEvents[1]![0].data).toMatchObject({
+				partId: "tool-2",
+				result: null,
+			});
 		});
 	});
 

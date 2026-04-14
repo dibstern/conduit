@@ -64,8 +64,15 @@ export interface TurnTokens {
 	readonly reasoning?: number;
 }
 
+export type TurnErrorCode =
+	| "send_failed"
+	| "provider_error"
+	| "interrupted"
+	| "timeout"
+	| "unknown";
+
 export interface TurnError {
-	readonly code: string;
+	readonly code: TurnErrorCode;
 	readonly message: string;
 	readonly retryable?: boolean;
 }

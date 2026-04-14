@@ -14,7 +14,6 @@ export { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 export { PromptQueue } from "./prompt-queue.js";
 export type {
 	CanUseTool,
-	ClaudeAdapterConfig,
 	ClaudeResumeCursor,
 	ClaudeSessionContext,
 	Options,
@@ -23,7 +22,6 @@ export type {
 	PermissionMode,
 	PermissionResult,
 	PromptQueueController,
-	PromptQueueItem,
 	Query,
 	SDKAssistantMessage,
 	SDKMessage,

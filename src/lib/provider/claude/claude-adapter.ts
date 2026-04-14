@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
+import { createDeferred, type Deferred } from "../deferred.js";
 import type {
 	AdapterCapabilities,
 	CommandInfo,
@@ -172,22 +173,7 @@ function enumerateSkills(
 }
 
 // ─── Turn deferred ─────────────────────────────────────────────────────────
-
-interface TurnDeferred {
-	readonly resolve: (result: TurnResult) => void;
-	readonly reject: (error: unknown) => void;
-	readonly promise: Promise<TurnResult>;
-}
-
-function createTurnDeferred(): TurnDeferred {
-	let resolve!: (result: TurnResult) => void;
-	let reject!: (error: unknown) => void;
-	const promise = new Promise<TurnResult>((res, rej) => {
-		resolve = res;
-		reject = rej;
-	});
-	return { resolve, reject, promise };
-}
+// Uses the shared Deferred<TurnResult> from the provider utility module.
 
 // ─── Adapter Config ────────────────────────────────────────────────────────
 
@@ -203,7 +189,7 @@ export interface ClaudeAdapterDeps {
 // ─── ClaudeAdapter ─────────────────────────────────────────────────────────
 
 export class ClaudeAdapter implements ProviderAdapter {
-	readonly providerId = "claude" as const;
+	readonly providerId = "claude";
 
 	/** Active SDK sessions, keyed by conduit sessionId. */
 	protected readonly sessions = new Map<string, ClaudeSessionContext>();
@@ -212,7 +198,10 @@ export class ClaudeAdapter implements ProviderAdapter {
 	private readonly sessionLocks = new Map<string, Promise<TurnResult>>();
 
 	/** Per-session queue of deferreds for in-flight turns. */
-	private readonly turnDeferredQueues = new Map<string, TurnDeferred[]>();
+	private readonly turnDeferredQueues = new Map<
+		string,
+		Deferred<TurnResult>[]
+	>();
 
 	/** Permission bridge instance (shared across sessions). */
 	private permissionBridge: ClaudePermissionBridge | undefined;
@@ -285,7 +274,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		const { sessionId } = input;
 
 		// Create a deferred for this turn
-		const deferred = createTurnDeferred();
+		const deferred = createDeferred<TurnResult>();
 		this.pushTurnDeferred(sessionId, deferred);
 
 		// Set session lock synchronously before any await
@@ -314,41 +303,26 @@ export class ClaudeAdapter implements ProviderAdapter {
 				}
 			}
 
-			// Ensure the permission bridge is initialized for this sink.
-			// The bridge is stored on the adapter and used by resolvePermission().
-			this.getOrCreatePermissionBridge(input.eventSink);
+			// Initialize the permission bridge for this sink.
+			const bridge = this.getOrCreatePermissionBridge(input.eventSink);
 
 			const resumeSessionId =
 				typeof input.providerState["resumeSessionId"] === "string"
 					? input.providerState["resumeSessionId"]
 					: undefined;
 
-			const options: SDKOptions = {
-				cwd: input.workspaceRoot,
-				abortController,
-				includePartialMessages: true,
-				settingSources: ["user", "project", "local"],
-				...(input.model ? { model: input.model.modelId } : {}),
-				...(resumeSessionId ? { resume: resumeSessionId } : {}),
-				...(input.agent ? { agent: input.agent } : {}),
-			};
-
-			// 4. Call query factory
-			const query = this.queryFactory({
-				prompt: promptQueue,
-				options,
-			});
-
-			// 5. Create session context
+			// 4. Create session context (query assigned after creation below)
 			const ctx: ClaudeSessionContext = {
 				sessionId,
 				workspaceRoot: input.workspaceRoot,
 				startedAt: new Date().toISOString(),
 				promptQueue,
-				query,
+				// Placeholder — immediately overwritten after query factory call
+				query: undefined as unknown as ClaudeSessionContext["query"],
 				pendingApprovals: new Map(),
 				pendingQuestions: new Map(),
 				inFlightTools: new Map(),
+				eventSink: input.eventSink,
 				streamConsumer: undefined,
 				currentTurnId: input.turnId,
 				currentModel: input.model?.modelId,
@@ -357,6 +331,25 @@ export class ClaudeAdapter implements ProviderAdapter {
 				turnCount: 0,
 				stopped: false,
 			};
+
+			// 5. Build SDK options — canUseTool captures ctx by reference
+			const options: SDKOptions = {
+				cwd: input.workspaceRoot,
+				abortController,
+				includePartialMessages: true,
+				settingSources: ["user", "project", "local"],
+				canUseTool: bridge.createCanUseTool(ctx),
+				...(input.model ? { model: input.model.modelId } : {}),
+				...(resumeSessionId ? { resume: resumeSessionId } : {}),
+				...(input.agent ? { agent: input.agent } : {}),
+			};
+
+			// 6. Call query factory and assign to context
+			const query = this.queryFactory({
+				prompt: promptQueue,
+				options,
+			});
+			(ctx as { query: ClaudeSessionContext["query"] }).query = query;
 
 			// 6. Store session
 			this.sessions.set(sessionId, ctx);
@@ -384,11 +377,12 @@ export class ClaudeAdapter implements ProviderAdapter {
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
 	): Promise<TurnResult> {
-		const deferred = createTurnDeferred();
+		const deferred = createDeferred<TurnResult>();
 		this.pushTurnDeferred(ctx.sessionId, deferred);
 
-		// Update turn id on context
+		// Update turn id and event sink on context (latest sink wins)
 		ctx.currentTurnId = input.turnId;
+		ctx.eventSink = input.eventSink;
 
 		// Build and enqueue the user message
 		const userMessage = this.buildUserMessage(input);
@@ -411,7 +405,13 @@ export class ClaudeAdapter implements ProviderAdapter {
 				}
 			}
 		} catch (err) {
-			await translator.translateError(ctx, err);
+			try {
+				await translator.translateError(ctx, err);
+			} catch (translateErr) {
+				log.warn(
+					`translateError failed for session ${ctx.sessionId}: ${translateErr instanceof Error ? translateErr.message : translateErr}`,
+				);
+			}
 			this.resolveErrorTurn(ctx, err);
 		} finally {
 			this.rejectTurnIfPending(
@@ -423,7 +423,10 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── Turn resolution ──────────────────────────────────────────────────
 
-	private pushTurnDeferred(sessionId: string, deferred: TurnDeferred): void {
+	private pushTurnDeferred(
+		sessionId: string,
+		deferred: Deferred<TurnResult>,
+	): void {
 		let queue = this.turnDeferredQueues.get(sessionId);
 		if (!queue) {
 			queue = [];
@@ -432,7 +435,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 		queue.push(deferred);
 	}
 
-	private shiftTurnDeferred(sessionId: string): TurnDeferred | undefined {
+	private shiftTurnDeferred(
+		sessionId: string,
+	): Deferred<TurnResult> | undefined {
 		const queue = this.turnDeferredQueues.get(sessionId);
 		if (!queue || queue.length === 0) return undefined;
 		const deferred = queue.shift();
@@ -497,7 +502,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 			...(!isSuccess && !isInterrupted && "errors" in result
 				? {
 						error: {
-							code: result.subtype,
+							code: "provider_error" as const,
 							message:
 								(
 									result as unknown as {
@@ -532,27 +537,37 @@ export class ClaudeAdapter implements ProviderAdapter {
 	// ─── buildUserMessage ─────────────────────────────────────────────────
 
 	private buildUserMessage(input: SendTurnInput): SDKUserMessage {
-		const content: Array<{
-			type: string;
-			text?: string;
-			source?: unknown;
-		}> = [];
+		// Build content blocks matching the Anthropic SDK's MessageParam.content
+		// structure. Uses 'as const' for literal type narrowing.
+		const content: Array<
+			| { type: "text"; text: string }
+			| {
+					type: "image";
+					source: {
+						type: "base64";
+						media_type: "image/png";
+						data: string;
+					};
+			  }
+		> = [];
 		if (input.images) {
 			for (const img of input.images) {
 				content.push({
-					type: "image",
+					type: "image" as const,
 					source: {
-						type: "base64",
-						media_type: "image/png",
+						type: "base64" as const,
+						media_type: "image/png" as const,
 						data: img,
 					},
 				});
 			}
 		}
-		content.push({ type: "text", text: input.prompt });
+		content.push({ type: "text" as const, text: input.prompt });
+		// SDKUserMessage.message is MessageParam (a complex union from the
+		// Anthropic SDK). The cast is confined to this single construction site.
 		return {
 			type: "user",
-			message: { role: "user", content },
+			message: { role: "user" as const, content },
 			parent_tool_use_id: null,
 		} as unknown as SDKUserMessage;
 	}
@@ -564,28 +579,24 @@ export class ClaudeAdapter implements ProviderAdapter {
 		if (!ctx) return;
 
 		log.info(`Interrupting turn for session ${sessionId}`);
+		await this.cleanupSession(ctx, "Turn interrupted");
+	}
 
-		// Resolve all pending approvals with deny
-		for (const pending of ctx.pendingApprovals.values()) {
-			try {
-				pending.resolve("reject");
-			} catch {
-				// Already resolved
-			}
-		}
-		ctx.pendingApprovals.clear();
+	// ─── cleanupSession ──────────────────────────────────────────────────
 
-		// Reject all pending questions
-		for (const pending of ctx.pendingQuestions.values()) {
-			try {
-				pending.reject(new Error("Turn interrupted"));
-			} catch {
-				// Already resolved
-			}
-		}
-		ctx.pendingQuestions.clear();
+	/**
+	 * Shared cleanup for a single session — used by both interruptTurn()
+	 * and shutdown(). Emits tool.completed for in-flight tools, resolves
+	 * pending approvals with deny, rejects pending questions, closes the
+	 * prompt queue, and interrupts the SDK query.
+	 */
+	private async cleanupSession(
+		ctx: ClaudeSessionContext,
+		reason: string,
+	): Promise<void> {
+		if (ctx.stopped) return;
 
-		// Complete in-flight tools as failed
+		// 1. Complete in-flight tools as failed via EventSink
 		for (const [, tool] of ctx.inFlightTools) {
 			try {
 				const event = canonicalEvent(
@@ -599,24 +610,41 @@ export class ClaudeAdapter implements ProviderAdapter {
 					},
 					{ provider: "claude" },
 				);
-				// Note: In a full implementation, this would push to the EventSink.
-				// The EventSink is not stored on the session context in the current
-				// design -- it's passed per-turn via SendTurnInput. This is a
-				// limitation of the stub implementation.
-				void event;
+				await ctx.eventSink?.push(event);
 			} catch {
-				// Best-effort
+				// Best-effort — sink may be closed or aborted
 			}
 		}
 		ctx.inFlightTools.clear();
 
-		// Close the prompt queue and interrupt
+		// 2. Resolve pending approvals with deny
+		for (const pending of ctx.pendingApprovals.values()) {
+			try {
+				pending.resolve("reject");
+			} catch {
+				// Already resolved
+			}
+		}
+		ctx.pendingApprovals.clear();
+
+		// 3. Reject pending questions
+		for (const pending of ctx.pendingQuestions.values()) {
+			try {
+				pending.reject(new Error(reason));
+			} catch {
+				// Already resolved
+			}
+		}
+		ctx.pendingQuestions.clear();
+
+		// 4. Close prompt queue
 		try {
 			ctx.promptQueue.close();
 		} catch {
 			// Queue already closed
 		}
 
+		// 5. Interrupt SDK query
 		try {
 			await ctx.query.interrupt();
 		} catch {
@@ -671,47 +699,14 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 		const sessionsToStop = [...this.sessions.values()];
 		for (const ctx of sessionsToStop) {
-			if (ctx.stopped) continue;
-
-			// Resolve pending approvals with deny
-			for (const pending of ctx.pendingApprovals.values()) {
-				try {
-					pending.resolve("reject");
-				} catch {
-					// Already resolved
-				}
-			}
-			ctx.pendingApprovals.clear();
-
-			// Reject pending questions
-			for (const pending of ctx.pendingQuestions.values()) {
-				try {
-					pending.reject(new Error("Adapter shutting down"));
-				} catch {
-					// Already resolved
-				}
-			}
-			ctx.pendingQuestions.clear();
-
-			try {
-				ctx.promptQueue.close();
-			} catch {
-				// Queue already closed
-			}
-
-			try {
-				await ctx.query.interrupt();
-			} catch {
-				// Session may already be finished
-			}
-
+			await this.cleanupSession(ctx, "Adapter shutting down");
+			// Additionally close the query (shutdown is terminal; interrupt alone
+			// lets the query be resumed).
 			try {
 				ctx.query.close();
 			} catch {
 				// Ignore
 			}
-
-			(ctx as { stopped: boolean }).stopped = true;
 		}
 		this.sessions.clear();
 	}

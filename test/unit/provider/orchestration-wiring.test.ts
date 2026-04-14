@@ -88,4 +88,127 @@ describe("Orchestration wiring", () => {
 
 		expect(layer.adapter).toBeInstanceOf(OpenCodeAdapter);
 	});
+
+	// ─── wireSSEToAdapter ────────────────────────────────────────────────
+
+	describe("wireSSEToAdapter", () => {
+		it("calls notifyTurnCompleted when session.status idle event arrives", () => {
+			const client = makeStubClient();
+			const layer = createOrchestrationLayer({ client });
+
+			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+
+			// Capture the handler registered via sseOn
+			type Handler = (e: unknown) => void;
+			const handlers: Handler[] = [];
+			const mockSseOn = (_event: "event", handler: Handler) => {
+				handlers.push(handler);
+			};
+			layer.wireSSEToAdapter(mockSseOn);
+			expect(handlers.length).toBe(1);
+
+			// Fire a session.status idle event
+			handlers[0]!({
+				type: "session.status",
+				properties: {
+					sessionID: "sess-123",
+					status: { type: "idle" },
+				},
+			});
+
+			expect(notifySpy).toHaveBeenCalledTimes(1);
+			expect(notifySpy).toHaveBeenCalledWith(
+				"sess-123",
+				expect.objectContaining({ status: "completed" }),
+			);
+		});
+
+		it("ignores non-session.status events", () => {
+			const client = makeStubClient();
+			const layer = createOrchestrationLayer({ client });
+			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+
+			type Handler = (e: unknown) => void;
+			const handlers: Handler[] = [];
+			layer.wireSSEToAdapter((_event, handler) => {
+				handlers.push(handler);
+			});
+
+			handlers[0]!({
+				type: "message.created",
+				properties: { sessionID: "sess-123" },
+			});
+
+			expect(notifySpy).not.toHaveBeenCalled();
+		});
+
+		it("ignores session.status events with non-idle status", () => {
+			const client = makeStubClient();
+			const layer = createOrchestrationLayer({ client });
+			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+
+			type Handler = (e: unknown) => void;
+			const handlers: Handler[] = [];
+			layer.wireSSEToAdapter((_event, handler) => {
+				handlers.push(handler);
+			});
+
+			handlers[0]!({
+				type: "session.status",
+				properties: {
+					sessionID: "sess-123",
+					status: { type: "busy" },
+				},
+			});
+
+			expect(notifySpy).not.toHaveBeenCalled();
+		});
+
+		it("does nothing when sessionId is not present in event", () => {
+			const client = makeStubClient();
+			const layer = createOrchestrationLayer({ client });
+			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+
+			type Handler = (e: unknown) => void;
+			const handlers: Handler[] = [];
+			layer.wireSSEToAdapter((_event, handler) => {
+				handlers.push(handler);
+			});
+
+			// No sessionID in properties
+			handlers[0]!({
+				type: "session.status",
+				properties: {
+					status: { type: "idle" },
+				},
+			});
+
+			expect(notifySpy).not.toHaveBeenCalled();
+		});
+
+		it("falls back to event.sessionId when properties.sessionID is absent", () => {
+			const client = makeStubClient();
+			const layer = createOrchestrationLayer({ client });
+			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+
+			type Handler = (e: unknown) => void;
+			const handlers: Handler[] = [];
+			layer.wireSSEToAdapter((_event, handler) => {
+				handlers.push(handler);
+			});
+
+			handlers[0]!({
+				type: "session.status",
+				sessionId: "sess-fallback",
+				properties: {
+					status: { type: "idle" },
+				},
+			});
+
+			expect(notifySpy).toHaveBeenCalledWith(
+				"sess-fallback",
+				expect.objectContaining({ status: "completed" }),
+			);
+		});
+	});
 });

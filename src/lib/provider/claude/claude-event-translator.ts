@@ -23,10 +23,9 @@ import { randomUUID } from "node:crypto";
 import type {
 	CanonicalEvent,
 	CanonicalEventType,
-	EventMetadata,
 	EventPayloadMap,
 } from "../../persistence/events.js";
-import { createEventId } from "../../persistence/events.js";
+import { canonicalEvent } from "../../persistence/events.js";
 import type { EventSink } from "../types.js";
 import type {
 	ClaudeSessionContext,
@@ -76,22 +75,15 @@ function getRecord(
 }
 
 // ─── Typed event construction helper ───────────────────────────────────────
+// Uses the shared canonicalEvent() factory from persistence/events.ts.
+// All events are tagged with provider: "claude" via the PROVIDER constant.
 
 function makeCanonicalEvent<K extends CanonicalEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
-	metadata: EventMetadata = {},
 ): CanonicalEvent {
-	return {
-		eventId: createEventId(),
-		sessionId,
-		type,
-		data,
-		metadata,
-		provider: PROVIDER,
-		createdAt: Date.now(),
-	} as CanonicalEvent;
+	return canonicalEvent(type, sessionId, data, { provider: PROVIDER });
 }
 
 // ─── Tool classification ───────────────────────────────────────────────────

@@ -132,6 +132,7 @@ export class OrchestrationEngine {
 		// Record the command as processed (after successful execution)
 		if (command.commandId) {
 			this.processedCommands.add(command.commandId);
+			this.pruneProcessedCommands();
 		}
 
 		return result;
@@ -142,14 +143,16 @@ export class OrchestrationEngine {
 	private async handleSendTurn(command: SendTurnCommand): Promise<TurnResult> {
 		const adapter = this.registry.getAdapterOrThrow(command.providerId);
 
-		// Record session-to-provider binding
-		this.sessionBindings.set(command.input.sessionId, command.providerId);
-
 		log.info(
 			`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,
 		);
 
-		return adapter.sendTurn(command.input);
+		// Bind AFTER sendTurn succeeds — if it throws, the session is not
+		// viable at the provider and should not be bound. Error TurnResults
+		// (non-throwing) still bind because the session exists at the provider.
+		const result = await adapter.sendTurn(command.input);
+		this.sessionBindings.set(command.input.sessionId, command.providerId);
+		return result;
 	}
 
 	private async handleInterruptTurn(
@@ -160,7 +163,14 @@ export class OrchestrationEngine {
 
 		log.info(`Dispatching interruptTurn: session=${command.sessionId}`);
 
-		return adapter.interruptTurn(command.sessionId);
+		try {
+			return await adapter.interruptTurn(command.sessionId);
+		} catch (err) {
+			log.error(
+				`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
+			);
+			throw err;
+		}
 	}
 
 	private async handleResolvePermission(
@@ -169,11 +179,18 @@ export class OrchestrationEngine {
 		const providerId = this.getProviderForSessionOrThrow(command.sessionId);
 		const adapter = this.registry.getAdapterOrThrow(providerId);
 
-		return adapter.resolvePermission(
-			command.sessionId,
-			command.requestId,
-			command.decision,
-		);
+		try {
+			return await adapter.resolvePermission(
+				command.sessionId,
+				command.requestId,
+				command.decision,
+			);
+		} catch (err) {
+			log.error(
+				`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
+			);
+			throw err;
+		}
 	}
 
 	private async handleResolveQuestion(
@@ -182,18 +199,32 @@ export class OrchestrationEngine {
 		const providerId = this.getProviderForSessionOrThrow(command.sessionId);
 		const adapter = this.registry.getAdapterOrThrow(providerId);
 
-		return adapter.resolveQuestion(
-			command.sessionId,
-			command.requestId,
-			command.answers,
-		);
+		try {
+			return await adapter.resolveQuestion(
+				command.sessionId,
+				command.requestId,
+				command.answers,
+			);
+		} catch (err) {
+			log.error(
+				`resolveQuestion failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
+			);
+			throw err;
+		}
 	}
 
 	private async handleDiscover(
 		command: DiscoverCommand,
 	): Promise<AdapterCapabilities> {
 		const adapter = this.registry.getAdapterOrThrow(command.providerId);
-		return adapter.discover();
+		try {
+			return await adapter.discover();
+		} catch (err) {
+			log.error(
+				`discover failed: provider=${command.providerId}: ${err instanceof Error ? err.message : err}`,
+			);
+			throw err;
+		}
 	}
 
 	// ─── Session Binding Management ───────────────────────────────────────
@@ -236,5 +267,22 @@ export class OrchestrationEngine {
 			throw new Error(`No provider bound to session: ${sessionId}`);
 		}
 		return providerId;
+	}
+
+	/**
+	 * Evict the oldest half of processed command IDs when the set exceeds
+	 * the threshold. Set preserves insertion order, so iteration starts
+	 * from the oldest entry. Transitional safeguard until Phase 7 wires
+	 * this to the SQLite-backed CommandReceiptRepository.
+	 */
+	private pruneProcessedCommands(): void {
+		const MAX = 10_000;
+		if (this.processedCommands.size <= MAX) return;
+		const evictCount = MAX / 2;
+		let count = 0;
+		for (const id of this.processedCommands) {
+			if (count++ >= evictCount) break;
+			this.processedCommands.delete(id);
+		}
 	}
 }

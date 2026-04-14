@@ -4,34 +4,21 @@
 // without knowing about SQLite internals. Permission and question requests
 // block the adapter's turn loop until the user resolves them.
 
+import { createLogger } from "../logger.js";
 import type { EventStore } from "../persistence/event-store.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import { canonicalEvent } from "../persistence/events.js";
 import type { ProjectionRunner } from "../persistence/projection-runner.js";
+import { createDeferred, type Deferred } from "./deferred.js";
+
+const log = createLogger("event-sink");
+
 import type {
 	EventSink,
 	PermissionRequest,
 	PermissionResponse,
 	QuestionRequest,
 } from "./types.js";
-
-// ─── Deferred ───────────────────────────────────────────────────────────────
-
-interface Deferred<T> {
-	promise: Promise<T>;
-	resolve: (value: T) => void;
-	reject: (reason: Error) => void;
-}
-
-function createDeferred<T>(): Deferred<T> {
-	let resolve!: (value: T) => void;
-	let reject!: (reason: Error) => void;
-	const promise = new Promise<T>((res, rej) => {
-		resolve = res;
-		reject = rej;
-	});
-	return { promise, resolve, reject };
-}
 
 // ─── EventSink Dependencies ─────────────────────────────────────────────────
 
@@ -156,6 +143,10 @@ export class EventSinkImpl implements EventSink {
 		if (deferred) {
 			this.pendingPermissions.delete(requestId);
 			deferred.resolve(response);
+		} else {
+			log.warn(
+				`resolvePermission: no pending request for ${requestId} (session=${this.sessionId}) — already resolved or expired`,
+			);
 		}
 	}
 
@@ -182,6 +173,10 @@ export class EventSinkImpl implements EventSink {
 		if (deferred) {
 			this.pendingQuestions.delete(requestId);
 			deferred.resolve(answers);
+		} else {
+			log.warn(
+				`resolveQuestion: no pending request for ${requestId} (session=${this.sessionId}) — already resolved or expired`,
+			);
 		}
 	}
 

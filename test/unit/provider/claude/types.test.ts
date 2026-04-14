@@ -6,7 +6,6 @@ import type {
 	PendingApproval,
 	PendingQuestion,
 	PromptQueueController,
-	PromptQueueItem,
 	Query,
 	SDKMessage,
 	SDKUserMessage,
@@ -20,20 +19,6 @@ describe("Claude adapter types", () => {
 		expectTypeOf<Query["setModel"]>().toEqualTypeOf<
 			(model?: string) => Promise<void>
 		>();
-	});
-
-	it("PromptQueueItem is a discriminated union", () => {
-		const msg: PromptQueueItem = {
-			type: "message",
-			message: {
-				type: "user",
-				parent_tool_use_id: null,
-				message: { role: "user", content: [{ type: "text", text: "hi" }] },
-			} as unknown as SDKUserMessage,
-		};
-		const term: PromptQueueItem = { type: "terminate" };
-		expectTypeOf(msg).toMatchTypeOf<PromptQueueItem>();
-		expectTypeOf(term).toMatchTypeOf<PromptQueueItem>();
 	});
 
 	it("ClaudeResumeCursor shape matches provider_state contract", () => {

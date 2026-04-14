@@ -130,8 +130,15 @@ export async function handleGetModels(
 }
 
 /** Check if a provider ID corresponds to the Claude/Anthropic in-process adapter. */
+/**
+ * Determines if a provider ID refers to the in-process Claude SDK adapter
+ * (not OpenCode's "anthropic" provider which proxies to Anthropic via
+ * OpenCode's own REST API). Only the literal "claude" provider ID
+ * routes through the ClaudeAdapter — all other providers (including
+ * "anthropic") route through OpenCodeAdapter.
+ */
 function isClaudeProvider(providerId: string): boolean {
-	return providerId === "anthropic" || providerId === "claude";
+	return providerId === "claude";
 }
 
 export async function handleSwitchModel(

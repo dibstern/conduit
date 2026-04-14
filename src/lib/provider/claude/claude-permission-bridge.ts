@@ -82,23 +82,16 @@ export class ClaudePermissionBridge {
 		const requestId = randomUUID();
 		const createdAt = new Date().toISOString();
 
-		// Create a deferred for this specific permission request.
-		// The resolve/reject are captured by the Promise constructor and
-		// assigned synchronously before the pending record is created.
-		let resolveDeferred: (decision: PermissionDecision) => void = () => {};
-		let rejectDeferred: (error: Error) => void = () => {};
-		void new Promise<PermissionDecision>((res, rej) => {
-			resolveDeferred = res;
-			rejectDeferred = rej;
-		});
-
+		// Track the pending approval on the session context for interrupt
+		// cleanup. Resolution flows through EventSink.requestPermission(),
+		// not through PendingApproval.resolve/reject — those are no-ops here.
 		const pending: PendingApproval = {
 			requestId,
 			toolName,
 			toolInput: toolInput ?? {},
 			createdAt,
-			resolve: resolveDeferred,
-			reject: rejectDeferred,
+			resolve: () => {},
+			reject: () => {},
 		};
 		ctx.pendingApprovals.set(requestId, pending);
 
@@ -114,24 +107,27 @@ export class ClaudePermissionBridge {
 			});
 
 			// Race: sink resolution vs abort signal.
-			// The sink promise resolves a PermissionResponse object.
 			let decision: PermissionDecision;
 			try {
 				const response = await withAbort(sinkPromise, options.signal);
-				// EventSink.requestPermission returns PermissionResponse { decision }
-				decision =
-					typeof response === "string"
-						? response
-						: (response as { decision: PermissionDecision }).decision;
+				// EventSink.requestPermission returns PermissionResponse { decision }.
+				// Guard against unexpected response shapes defensively.
+				if (
+					response &&
+					typeof response === "object" &&
+					"decision" in response
+				) {
+					decision = (response as { decision: PermissionDecision }).decision;
+				} else {
+					decision = "reject";
+				}
 			} catch {
-				// Abort fired -- return deny to unblock the SDK cleanly.
-				ctx.pendingApprovals.delete(requestId);
+				// Abort fired — return deny to unblock the SDK cleanly.
 				return {
 					behavior: "deny",
 					message: "Turn interrupted",
 				};
 			}
-			ctx.pendingApprovals.delete(requestId);
 
 			if (decision === "once" || decision === "always") {
 				return {
@@ -144,6 +140,7 @@ export class ClaudePermissionBridge {
 				message: "User declined tool execution.",
 			};
 		} finally {
+			// Single cleanup point — covers both success and abort paths.
 			ctx.pendingApprovals.delete(requestId);
 		}
 	}

@@ -350,7 +350,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
-		expect(result.error!.code).toBe("error_during_execution");
+		expect(result.error!.code).toBe("provider_error");
 		expect(result.error!.message).toBe("Something went wrong");
 		expect(result.cost).toBe(0.01);
 		expect(result.tokens.input).toBe(50);
@@ -495,5 +495,34 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		await expect(adapter.sendTurn(input)).rejects.toThrow(
 			"SDK stream ended without result",
 		);
+	});
+
+	// ── Test: canUseTool is wired to SDK options ──────────────────────────
+
+	it("passes canUseTool callback to SDK query options", async () => {
+		const resultMsg = makeSuccessResult();
+		const mockQuery = createMockQuery([resultMsg]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sink = createMockEventSink();
+		const input = makeBaseSendTurnInput({
+			sessionId: "session-canuse",
+			eventSink: sink,
+		});
+
+		await adapter.sendTurn(input);
+
+		const callArgs = queryFactorySpy.mock.calls[0]![0] as Record<
+			string,
+			unknown
+		>;
+		const options = callArgs["options"] as Record<string, unknown>;
+		expect(options["canUseTool"]).toBeDefined();
+		expect(typeof options["canUseTool"]).toBe("function");
 	});
 });

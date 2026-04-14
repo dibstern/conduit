@@ -49,6 +49,7 @@ function makeCtx(
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
+		eventSink: undefined,
 		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",

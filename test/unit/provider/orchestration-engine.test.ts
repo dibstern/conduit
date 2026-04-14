@@ -54,15 +54,8 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 	};
 }
 
-function makeStubEventSink() {
-	return {
-		push: vi.fn(async () => {}),
-		requestPermission: vi.fn(async () => ({
-			decision: "once" as const,
-		})),
-		requestQuestion: vi.fn(async () => ({})),
-	};
-}
+// Use shared createMockEventSink from test helpers
+const makeStubEventSink = createMockEventSink;
 
 describe("OrchestrationEngine", () => {
 	let registry: ProviderRegistry;
@@ -312,6 +305,43 @@ describe("OrchestrationEngine", () => {
 		});
 	});
 
+	describe("processedCommands pruning", () => {
+		it("evicts oldest entries when exceeding 10,000 threshold", async () => {
+			// Access the private processedCommands set via the engine instance
+			const commands = (engine as unknown as { processedCommands: Set<string> })
+				.processedCommands;
+
+			// Fill the set to just above the threshold
+			for (let i = 0; i < 10_001; i++) {
+				commands.add(`pre-${i}`);
+			}
+
+			// Dispatch one more command to trigger pruning
+			await engine.dispatch({
+				type: "send_turn",
+				commandId: "trigger-prune",
+				providerId: "opencode",
+				input: {
+					sessionId: "s1",
+					turnId: "t1",
+					prompt: "hello",
+					history: [],
+					providerState: {},
+					workspaceRoot: "/tmp",
+					eventSink: makeStubEventSink(),
+					abortSignal: new AbortController().signal,
+				},
+			});
+
+			// After pruning, the set should be roughly half its previous size
+			// (10,002 entries → prune 5,000 → ~5,002 remaining)
+			expect(commands.size).toBeLessThanOrEqual(5_100);
+			expect(commands.size).toBeGreaterThan(0);
+			// The trigger command should still be in the set
+			expect(commands.has("trigger-prune")).toBe(true);
+		});
+	});
+
 	describe("shutdown", () => {
 		it("delegates to registry.shutdownAll", async () => {
 			const shutdownSpy = vi.spyOn(registry, "shutdownAll");
@@ -319,6 +349,17 @@ describe("OrchestrationEngine", () => {
 			await engine.shutdown();
 
 			expect(shutdownSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it("clears session bindings", async () => {
+			engine.bindSession("s1", "opencode");
+			engine.bindSession("s2", "opencode");
+
+			await engine.shutdown();
+
+			expect(engine.getProviderForSession("s1")).toBeUndefined();
+			expect(engine.getProviderForSession("s2")).toBeUndefined();
+			expect(engine.listBoundSessions()).toEqual([]);
 		});
 	});
 
@@ -472,12 +513,42 @@ describe("OrchestrationEngine", () => {
 			expect(result.error?.message).toContain("SDK connection failed");
 		});
 
-		it("sendTurn failure leaves stale binding (known issue)", async () => {
-			// Known issue: binding set before sendTurn — stale on failure
-			// OrchestrationEngine.handleSendTurn() sets the session binding
-			// (line 146) *before* calling adapter.sendTurn() (line 152). If
-			// sendTurn throws synchronously, the binding remains.
+		it("sendTurn that throws does NOT leave stale session binding", async () => {
+			// A throwing sendTurn should not create a binding — the session is
+			// not viable at the provider. This tests the fix for C3 (stale binding).
+			const throwingAdapter = makeStubAdapter("thrower");
+			throwingAdapter.sendTurn.mockRejectedValue(new Error("Adapter crash"));
 
+			const throwingRegistry = new ProviderRegistry();
+			throwingRegistry.registerAdapter(throwingAdapter);
+			const throwingEngine = new OrchestrationEngine({
+				registry: throwingRegistry,
+			});
+
+			await expect(
+				throwingEngine.dispatch({
+					type: "send_turn",
+					providerId: "thrower",
+					input: {
+						sessionId: "s-crash",
+						turnId: "t1",
+						prompt: "hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: "/tmp",
+						eventSink: makeStubEventSink(),
+						abortSignal: new AbortController().signal,
+					},
+				}),
+			).rejects.toThrow("Adapter crash");
+
+			// Binding should NOT exist after a thrown error
+			expect(throwingEngine.getProviderForSession("s-crash")).toBeUndefined();
+		});
+
+		it("sendTurn returning error TurnResult still binds session (session exists at provider)", async () => {
+			// When sendTurn resolves with an error TurnResult (not throws),
+			// the session IS bound — the provider has the session, it just errored.
 			// biome-ignore lint/correctness/useYield: intentionally throws before yielding
 			const throwingGen = (async function* () {
 				throw new Error("Immediate failure");
@@ -524,20 +595,20 @@ describe("OrchestrationEngine", () => {
 			});
 
 			const sink = createMockEventSink();
-			await claudeEngine.dispatch({
+			const result = await claudeEngine.dispatch({
 				type: "send_turn",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
-					sessionId: "int-session-stale",
-					turnId: "int-turn-stale",
+					sessionId: "int-session-erred",
+					turnId: "int-turn-erred",
 					workspaceRoot: claudeWorkspace,
 					eventSink: sink,
 				}),
 			});
 
-			// Known issue: binding set before sendTurn — stale on failure
-			// The session binding persists even though the turn errored.
-			expect(claudeEngine.getProviderForSession("int-session-stale")).toBe(
+			// Error TurnResult (not thrown) — binding should exist
+			expect(result.status).toBe("error");
+			expect(claudeEngine.getProviderForSession("int-session-erred")).toBe(
 				"claude",
 			);
 		});

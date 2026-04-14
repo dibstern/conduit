@@ -127,12 +127,12 @@ describe("ProviderAdapter types", () => {
 			cost: 0,
 			tokens: { input: 0, output: 0 },
 			durationMs: 100,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: { code: "provider_error", message: "Too many requests" },
 			providerStateUpdates: [],
 		};
 
 		expect(result.status).toBe("error");
-		expect(result.error?.code).toBe("RATE_LIMITED");
+		expect(result.error?.code).toBe("provider_error");
 	});
 
 	it("AdapterCapabilities describes provider features", () => {

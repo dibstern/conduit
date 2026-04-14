@@ -6,6 +6,7 @@
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
+import { createDeferred, type Deferred } from "./deferred.js";
 import type {
 	AdapterCapabilities,
 	CommandInfo,
@@ -17,24 +18,6 @@ import type {
 } from "./types.js";
 
 const log = createLogger("opencode-adapter");
-
-// ─── Deferred ───────────────────────────────────────────────────────────────
-
-interface Deferred<T> {
-	promise: Promise<T>;
-	resolve: (value: T) => void;
-	reject: (reason: Error) => void;
-}
-
-function createDeferred<T>(): Deferred<T> {
-	let resolve!: (value: T) => void;
-	let reject!: (reason: Error) => void;
-	const promise = new Promise<T>((res, rej) => {
-		resolve = res;
-		reject = rej;
-	});
-	return { promise, resolve, reject };
-}
 
 // ─── Options ────────────────────────────────────────────────────────────────
 
@@ -163,7 +146,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
 				cost: 0,
 				tokens: { input: 0, output: 0 },
 				durationMs: 0,
-				error: { code: "SEND_FAILED", message },
+				error: { code: "send_failed", message },
 				providerStateUpdates: [],
 			};
 		}
@@ -190,6 +173,10 @@ export class OpenCodeAdapter implements ProviderAdapter {
 		if (deferred) {
 			this.pendingTurns.delete(sessionId);
 			deferred.resolve(result);
+		} else {
+			log.debug(
+				`notifyTurnCompleted: no pending turn for session ${sessionId} — may have already completed`,
+			);
 		}
 	}
 
@@ -202,15 +189,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
 	// ─── resolvePermission ────────────────────────────────────────────────
 
 	async resolvePermission(
-		_sessionId: string,
+		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
 	): Promise<void> {
-		await this.client.permission.reply(
-			_sessionId,
-			requestId,
-			decision as "once" | "always" | "reject",
-		);
+		await this.client.permission.reply(sessionId, requestId, decision);
 	}
 
 	// ─── resolveQuestion ──────────────────────────────────────────────────

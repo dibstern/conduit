@@ -12,7 +12,7 @@
  * re-exported for convenience. Conduit-specific types (session context,
  * pending approvals, tool tracking, etc.) are defined here.
  */
-import type { PermissionDecision } from "../types.js";
+import type { EventSink, PermissionDecision } from "../types.js";
 
 // ─── SDK Type Re-exports ──────────────────────────────────────────────────
 // Imported from the real Claude Agent SDK and re-exported so that internal
@@ -35,17 +35,6 @@ export type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-
-// ─── Prompt Queue ──────────────────────────────────────────────────────────
-
-/**
- * Items placed into the PromptQueue and consumed as an AsyncIterable by
- * the SDK's `query()`. "terminate" ends the iteration and shuts down the
- * SDK session cleanly.
- */
-export type PromptQueueItem =
-	| { readonly type: "message"; readonly message: SDKUserMessage }
-	| { readonly type: "terminate" };
 
 // ─── Resume Cursor ─────────────────────────────────────────────────────────
 
@@ -113,6 +102,8 @@ export interface ClaudeSessionContext {
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingQuestions: Map<string, PendingQuestion>;
 	readonly inFlightTools: Map<number, ToolInFlight>;
+	/** EventSink for this session — updated on each turn (latest sink wins). */
+	eventSink: EventSink | undefined;
 	streamConsumer: Promise<void> | undefined;
 	currentTurnId: string | undefined;
 	currentModel: string | undefined;
@@ -129,16 +120,4 @@ export interface ClaudeSessionContext {
 export interface PromptQueueController extends AsyncIterable<SDKUserMessage> {
 	enqueue(message: SDKUserMessage): void;
 	close(): void;
-}
-
-// ─── Claude Adapter Config ─────────────────────────────────────────────────
-
-/**
- * Configuration for the Claude adapter.
- */
-export interface ClaudeAdapterConfig {
-	readonly apiKey?: string;
-	readonly model?: string;
-	readonly maxTurns?: number;
-	readonly workspaceRoot: string;
 }
