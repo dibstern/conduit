@@ -34,6 +34,32 @@ export async function handleGetModels(
 			})),
 		}))
 		.filter((p) => p.configured);
+
+	// Merge Claude in-process models when the orchestration engine is available.
+	if (deps.orchestrationEngine) {
+		try {
+			const claudeCaps = await deps.orchestrationEngine.dispatch({
+				type: "discover",
+				providerId: "claude",
+			});
+			if (claudeCaps.models.length > 0) {
+				providers.push({
+					id: "claude",
+					name: "Claude (In-Process)",
+					configured: true,
+					models: claudeCaps.models.map((m) => ({
+						id: m.id,
+						name: m.name,
+						provider: "claude",
+						...(m.limit ? { limit: m.limit } : {}),
+					})),
+				});
+			}
+		} catch {
+			// Claude adapter may not be available — skip silently
+		}
+	}
+
 	deps.wsHandler.sendTo(clientId, { type: "model_list", providers });
 
 	// Send model_info: prefer session's model, fall back to relay-side selection
@@ -103,6 +129,11 @@ export async function handleGetModels(
 	});
 }
 
+/** Check if a provider ID corresponds to the Claude/Anthropic in-process adapter. */
+function isClaudeProvider(providerId: string): boolean {
+	return providerId === "anthropic" || providerId === "claude";
+}
+
 export async function handleSwitchModel(
 	deps: HandlerDeps,
 	clientId: string,
@@ -116,6 +147,14 @@ export async function handleSwitchModel(
 				providerID: providerId,
 				modelID: modelId,
 			});
+			// Bind session to the correct provider adapter so prompts route
+			// through the in-process Claude SDK or OpenCode as appropriate.
+			if (deps.orchestrationEngine) {
+				const providerAdapterId = isClaudeProvider(providerId)
+					? "claude"
+					: "opencode";
+				deps.orchestrationEngine.bindSession(clientSession, providerAdapterId);
+			}
 			deps.wsHandler.sendToSession(clientSession, {
 				type: "model_info",
 				model: modelId,

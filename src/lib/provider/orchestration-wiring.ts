@@ -6,6 +6,7 @@
 
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
+import { ClaudeAdapter } from "./claude/index.js";
 import { OpenCodeAdapter } from "./opencode-adapter.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { ProviderRegistry } from "./provider-registry.js";
@@ -59,6 +60,11 @@ export function createOrchestrationLayer(
 	});
 
 	registry.registerAdapter(adapter);
+
+	const claudeAdapter = new ClaudeAdapter({
+		workspaceRoot: options.workspaceRoot ?? process.cwd(),
+	});
+	registry.registerAdapter(claudeAdapter);
 
 	const engine = new OrchestrationEngine({ registry });
 
