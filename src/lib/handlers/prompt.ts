@@ -124,6 +124,9 @@ export async function handleMessage(
 						send: (msg) => deps.wsHandler.sendToSession(activeId, msg),
 						clearTimeout: () => deps.overrides.clearProcessingTimeout(activeId),
 						resetTimeout: () => deps.overrides.resetProcessingTimeout(activeId),
+						...(deps.claudeEventPersist != null
+							? { persist: deps.claudeEventPersist }
+							: {}),
 					})
 				: NOOP_EVENT_SINK;
 		const sendTurnInput: SendTurnInput = {
