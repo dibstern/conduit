@@ -32,6 +32,7 @@ import {
 	setLogFormat,
 	setLogLevel,
 } from "../logger.js";
+import { PersistenceLayer } from "../persistence/persistence-layer.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import { RequestRouter } from "../server/http-router.js";
 import type { PushNotificationManager } from "../server/push.js";
@@ -1320,6 +1321,15 @@ export class Daemon {
 		opencodeUrl: string,
 	): (signal: AbortSignal) => Promise<ProjectRelay> {
 		return async (signal: AbortSignal) => {
+			// ── SQLite persistence for event store + projections ──────────
+			const conduitDir = resolve(project.directory, ".conduit");
+			mkdirSync(conduitDir, { recursive: true });
+			const dbPath = resolve(conduitDir, "events.db");
+			const persistence = PersistenceLayer.open(dbPath);
+			signal.addEventListener("abort", () => persistence.close(), {
+				once: true,
+			});
+
 			const { createProjectRelay } = await import("../relay/relay-stack.js");
 			return createProjectRelay({
 				// biome-ignore lint/style/noNonNullAssertion: safe — only called when httpServer is available
@@ -1373,6 +1383,7 @@ export class Daemon {
 							? this.versionChecker.getLatestVersion()
 							: null,
 				}),
+				persistence,
 			});
 		};
 	}

@@ -11,6 +11,7 @@ import { formatErrorDetail, RelayError } from "../errors.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
@@ -48,6 +49,8 @@ export interface ClientInitDeps {
 	getCachedUpdate?: () => string | null;
 	/** Optional orchestration engine for Claude SDK model discovery */
 	orchestrationEngine?: OrchestrationEngine;
+	/** SQLite read query service (optional — absent when persistence is not configured) */
+	readQuery?: ReadQueryService;
 	log: Logger;
 }
 
@@ -107,6 +110,7 @@ export async function handleClientConnected(
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
+				...(deps.readQuery != null && { readQuery: deps.readQuery }),
 			} satisfies SessionSwitchDeps,
 			clientId,
 			activeId,

@@ -140,6 +140,7 @@ function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 		pollerManager: deps.pollerManager,
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,
+		...(deps.readQuery != null && { readQuery: deps.readQuery }),
 	};
 }
 

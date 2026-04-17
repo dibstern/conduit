@@ -104,6 +104,7 @@ export function wireHandlerDeps(
 		...(orchestrationLayer != null && {
 			orchestrationEngine: orchestrationLayer.engine,
 		}),
+		...(readQuery != null && { readQuery }),
 		log: wsLog,
 	};
 
