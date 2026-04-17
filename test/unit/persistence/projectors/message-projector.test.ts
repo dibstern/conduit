@@ -841,12 +841,10 @@ describe("MessageProjector", () => {
 			expect(row!.text).toBe("HelloHello");
 		});
 
-		it("rejects text.delta before message.created due to FK constraint", () => {
-			// text.delta arrives before message.created -- the message_parts
-			// INSERT fails because message_id references messages(id) via FK.
-			// FK constraints are deliberately enabled (see schema.ts) to
-			// prevent orphaned data. In practice, events arrive in order during
-			// normal streaming, so this case only occurs in error scenarios.
+		it("accepts text.delta before message.created and creates message row defensively", () => {
+			// text.delta arrives before message.created — the projector defensively
+			// INSERT OR IGNOREs the messages row so data is never lost.
+			// This supports Claude adapter sessions which do not emit message.created.
 			const delta = makeStored(
 				"text.delta",
 				"s1",
@@ -858,9 +856,22 @@ describe("MessageProjector", () => {
 				1,
 			);
 
-			expect(() => projector.project(delta, db)).toThrow(
-				/FOREIGN KEY constraint failed/,
-			);
+			// Should NOT throw — creates the messages row defensively
+			expect(() => projector.project(delta, db)).not.toThrow();
+
+			// Verify the message row was created with correct fields
+			const row = db.queryOne<{
+				id: string;
+				role: string;
+				text: string;
+				session_id: string;
+			}>("SELECT id, role, text, session_id FROM messages WHERE id = ?", [
+				"m-nonexistent",
+			]);
+			expect(row).toBeDefined();
+			expect(row!.role).toBe("assistant");
+			expect(row!.session_id).toBe("s1");
+			expect(row!.text).toBe("orphan delta");
 		});
 	});
 

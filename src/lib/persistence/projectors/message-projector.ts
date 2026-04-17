@@ -87,6 +87,21 @@ export class MessageProjector implements Projector {
 			)
 				return;
 
+			// Defensive: ensure the messages row exists before accumulating text.
+			// The Claude adapter emits text.delta without a preceding message.created;
+			// this INSERT OR IGNORE is a no-op when message.created arrived first.
+			db.execute(
+				`INSERT OR IGNORE INTO messages
+				 (id, session_id, role, text, is_streaming, created_at, updated_at)
+				 VALUES (?, ?, 'assistant', '', 1, ?, ?)`,
+				[
+					event.data.messageId,
+					event.sessionId,
+					event.createdAt,
+					event.createdAt,
+				],
+			);
+
 			// (P1, Perf-Fix-1) sort_order computed in SQL, not Node.js.
 			db.execute(
 				`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)

@@ -1,6 +1,7 @@
 // ─── Prompt Handlers ─────────────────────────────────────────────────────────
 
 import { formatErrorDetail, RelayError } from "../errors.js";
+import { canonicalEvent } from "../persistence/events.js";
 import { createRelayEventSink } from "../provider/relay-event-sink.js";
 import type { SendTurnInput } from "../provider/types.js";
 import { isClaudeProvider } from "./model.js";
@@ -113,6 +114,36 @@ export async function handleMessage(
 		if (!providerId) {
 			providerId =
 				model && isClaudeProvider(model.providerID) ? "claude" : "opencode";
+		}
+		// Persist user message for Claude provider sessions.
+		// The Claude adapter never emits user-side message.created events, so we
+		// record them here — before dispatch — to keep chronological order correct.
+		if (providerId === "claude" && deps.claudeEventPersist != null) {
+			try {
+				const now = Date.now();
+				const userMsgId = crypto.randomUUID();
+				deps.claudeEventPersist.ensureSession(activeId);
+				const storedCreated = deps.claudeEventPersist.eventStore.append(
+					canonicalEvent(
+						"message.created",
+						activeId,
+						{ messageId: userMsgId, role: "user", sessionId: activeId },
+						{ provider: "claude", createdAt: now },
+					),
+				);
+				deps.claudeEventPersist.projectionRunner.projectEvent(storedCreated);
+				const storedDelta = deps.claudeEventPersist.eventStore.append(
+					canonicalEvent(
+						"text.delta",
+						activeId,
+						{ messageId: userMsgId, partId: `${userMsgId}-0`, text },
+						{ provider: "claude", createdAt: now },
+					),
+				);
+				deps.claudeEventPersist.projectionRunner.projectEvent(storedDelta);
+			} catch {
+				// Non-fatal — persistence failure must not block message sending
+			}
 		}
 		// ClaudeAdapter emits events via EventSink. Build a RelayEventSink that
 		// translates CanonicalEvents → RelayMessages → WebSocket. OpenCodeAdapter
