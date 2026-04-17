@@ -70,9 +70,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					persist.ensureSession(sessionId);
 					const stored = persist.eventStore.append(event);
 					persist.projectionRunner.projectEvent(stored);
-				} catch {
+				} catch (err) {
 					// Non-fatal — same pattern as dual-write-hook.ts:149.
 					// Covers: disk full, DB locked, projection recovery guard, etc.
+					log.debug(
+						`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+					);
 				}
 			}
 			const msg = translateCanonicalEvent(event);

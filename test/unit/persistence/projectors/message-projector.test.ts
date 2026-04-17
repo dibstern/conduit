@@ -122,13 +122,13 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(row).toBeDefined();
-			expect(row!.id).toBe("m1");
-			expect(row!.session_id).toBe("s1");
-			expect(row!.role).toBe("assistant");
-			expect(row!.text).toBe("");
-			expect(row!.is_streaming).toBe(1);
-			expect(row!.created_at).toBe(event.createdAt);
-			expect(row!.updated_at).toBe(event.createdAt);
+			expect(row?.id).toBe("m1");
+			expect(row?.session_id).toBe("s1");
+			expect(row?.role).toBe("assistant");
+			expect(row?.text).toBe("");
+			expect(row?.is_streaming).toBe(1);
+			expect(row?.created_at).toBe(event.createdAt);
+			expect(row?.updated_at).toBe(event.createdAt);
 		});
 
 		it("is idempotent (INSERT ON CONFLICT DO NOTHING)", () => {
@@ -160,7 +160,7 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row!.is_streaming).toBe(0);
+			expect(row?.is_streaming).toBe(0);
 		});
 	});
 
@@ -195,15 +195,15 @@ describe("MessageProjector", () => {
 			let row = db.queryOne<MessageRow>("SELECT * FROM messages WHERE id = ?", [
 				"m1",
 			]);
-			expect(row!.text).toBe("Hello ");
+			expect(row?.text).toBe("Hello ");
 			let parts = db.query<MessagePartRow>(
 				"SELECT * FROM message_parts WHERE message_id = ? ORDER BY sort_order",
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.type).toBe("text");
-			expect(parts[0]!.id).toBe("p1");
-			expect(parts[0]!.text).toBe("Hello ");
+			expect(parts[0]?.type).toBe("text");
+			expect(parts[0]?.id).toBe("p1");
+			expect(parts[0]?.text).toBe("Hello ");
 
 			// Second delta, same part -- text is appended via SQL concat
 			const delta2 = makeStored(
@@ -221,13 +221,13 @@ describe("MessageProjector", () => {
 			row = db.queryOne<MessageRow>("SELECT * FROM messages WHERE id = ?", [
 				"m1",
 			]);
-			expect(row!.text).toBe("Hello World!");
+			expect(row?.text).toBe("Hello World!");
 			parts = db.query<MessagePartRow>(
 				"SELECT * FROM message_parts WHERE message_id = ? ORDER BY sort_order",
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.text).toBe("Hello World!");
+			expect(parts[0]?.text).toBe("Hello World!");
 		});
 
 		it("handles multiple text parts on the same message", () => {
@@ -276,14 +276,14 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			// text is the concatenation of all text deltas
-			expect(row!.text).toBe("Part onePart two");
+			expect(row?.text).toBe("Part onePart two");
 			const parts = db.query<MessagePartRow>(
 				"SELECT * FROM message_parts WHERE message_id = ? ORDER BY sort_order",
 				["m1"],
 			);
 			expect(parts).toHaveLength(2);
-			expect(parts[0]!.id).toBe("p1");
-			expect(parts[1]!.id).toBe("p2");
+			expect(parts[0]?.id).toBe("p1");
+			expect(parts[1]?.id).toBe("p2");
 		});
 	});
 
@@ -317,9 +317,9 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.type).toBe("thinking");
-			expect(parts[0]!.id).toBe("t1");
-			expect(parts[0]!.text).toBe("");
+			expect(parts[0]?.type).toBe("thinking");
+			expect(parts[0]?.id).toBe("t1");
+			expect(parts[0]?.text).toBe("");
 		});
 	});
 
@@ -354,15 +354,15 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.type).toBe("thinking");
-			expect(parts[0]!.id).toBe("t1");
-			expect(parts[0]!.text).toBe("Let me think...");
+			expect(parts[0]?.type).toBe("thinking");
+			expect(parts[0]?.id).toBe("t1");
+			expect(parts[0]?.text).toBe("Let me think...");
 			// Thinking text does NOT accumulate into the top-level text column
 			const row = db.queryOne<MessageRow>(
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row!.text).toBe("");
+			expect(row?.text).toBe("");
 		});
 	});
 
@@ -398,7 +398,7 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row!.updated_at).toBe(now + 1000);
+			expect(row?.updated_at).toBe(now + 1000);
 		});
 	});
 
@@ -435,14 +435,14 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.type).toBe("tool");
-			expect(parts[0]!.id).toBe("tool1");
-			expect(parts[0]!.tool_name).toBe("read_file");
-			expect(parts[0]!.call_id).toBe("call_123");
-			expect(JSON.parse(parts[0]!.input!)).toEqual({
+			expect(parts[0]?.type).toBe("tool");
+			expect(parts[0]?.id).toBe("tool1");
+			expect(parts[0]?.tool_name).toBe("read_file");
+			expect(parts[0]?.call_id).toBe("call_123");
+			expect(JSON.parse(parts[0]?.input ?? "null")).toEqual({
 				path: "/foo/bar.ts",
 			});
-			expect(parts[0]!.status).toBe("started");
+			expect(parts[0]?.status).toBe("started");
 		});
 	});
 
@@ -493,7 +493,7 @@ describe("MessageProjector", () => {
 				"SELECT * FROM message_parts WHERE message_id = ? AND id = ?",
 				["m1", "tool1"],
 			);
-			expect(parts[0]!.status).toBe("running");
+			expect(parts[0]?.status).toBe("running");
 		});
 	});
 
@@ -546,11 +546,11 @@ describe("MessageProjector", () => {
 				"SELECT * FROM message_parts WHERE message_id = ? AND id = ?",
 				["m1", "tool1"],
 			);
-			expect(parts[0]!.status).toBe("completed");
-			expect(JSON.parse(parts[0]!.result!)).toEqual({
+			expect(parts[0]?.status).toBe("completed");
+			expect(JSON.parse(parts[0]?.result ?? "null")).toEqual({
 				content: "file contents",
 			});
-			expect(parts[0]!.duration).toBe(150);
+			expect(parts[0]?.duration).toBe(150);
 		});
 	});
 
@@ -589,12 +589,12 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row!.cost).toBeCloseTo(0.0234);
-			expect(row!.tokens_in).toBe(1500);
-			expect(row!.tokens_out).toBe(350);
-			expect(row!.tokens_cache_read).toBe(200);
-			expect(row!.tokens_cache_write).toBe(50);
-			expect(row!.is_streaming).toBe(0);
+			expect(row?.cost).toBeCloseTo(0.0234);
+			expect(row?.tokens_in).toBe(1500);
+			expect(row?.tokens_out).toBe(350);
+			expect(row?.tokens_cache_read).toBe(200);
+			expect(row?.tokens_cache_write).toBe(50);
+			expect(row?.is_streaming).toBe(0);
 		});
 	});
 
@@ -627,7 +627,7 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row!.is_streaming).toBe(0);
+			expect(row?.is_streaming).toBe(0);
 		});
 	});
 
@@ -778,24 +778,24 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row!.text).toBe("I'll read that file. Done!");
-			expect(row!.is_streaming).toBe(0);
-			expect(row!.cost).toBeCloseTo(0.05);
-			expect(row!.tokens_in).toBe(2000);
-			expect(row!.tokens_out).toBe(500);
+			expect(row?.text).toBe("I'll read that file. Done!");
+			expect(row?.is_streaming).toBe(0);
+			expect(row?.cost).toBeCloseTo(0.05);
+			expect(row?.tokens_in).toBe(2000);
+			expect(row?.tokens_out).toBe(500);
 
 			const parts = db.query<MessagePartRow>(
 				"SELECT * FROM message_parts WHERE message_id = ? ORDER BY sort_order",
 				["m1"],
 			);
 			expect(parts).toHaveLength(4); // thinking, text1, tool1, text2
-			expect(parts[0]!.type).toBe("thinking");
-			expect(parts[1]!.type).toBe("text");
-			expect(parts[1]!.text).toBe("I'll read that file. ");
-			expect(parts[2]!.type).toBe("tool");
-			expect(parts[2]!.status).toBe("completed");
-			expect(parts[3]!.type).toBe("text");
-			expect(parts[3]!.text).toBe("Done!");
+			expect(parts[0]?.type).toBe("thinking");
+			expect(parts[1]?.type).toBe("text");
+			expect(parts[1]?.text).toBe("I'll read that file. ");
+			expect(parts[2]?.type).toBe("tool");
+			expect(parts[2]?.status).toBe("completed");
+			expect(parts[3]?.type).toBe("text");
+			expect(parts[3]?.text).toBe("Done!");
 		});
 	});
 
@@ -838,7 +838,7 @@ describe("MessageProjector", () => {
 			// During recovery (replaying=true), the alreadyApplied() check
 			// prevents this. During normal streaming, events arrive in order
 			// and are never replayed.
-			expect(row!.text).toBe("HelloHello");
+			expect(row?.text).toBe("HelloHello");
 		});
 
 		it("accepts text.delta before message.created and creates message row defensively", () => {
@@ -869,9 +869,129 @@ describe("MessageProjector", () => {
 				"m-nonexistent",
 			]);
 			expect(row).toBeDefined();
-			expect(row!.role).toBe("assistant");
-			expect(row!.session_id).toBe("s1");
-			expect(row!.text).toBe("orphan delta");
+			expect(row?.role).toBe("assistant");
+			expect(row?.session_id).toBe("s1");
+			expect(row?.text).toBe("orphan delta");
+		});
+	});
+
+	describe("defensive message creation for tool.started and thinking.start", () => {
+		it("tool.started before message.created creates message row defensively", () => {
+			// Claude adapter may emit tool.started as the first event for an assistant
+			// message (e.g., model calls a tool with no preamble text). The projector
+			// must INSERT OR IGNORE the parent messages row to satisfy the FK constraint.
+			const toolStarted = makeStored(
+				"tool.started",
+				"s1",
+				{
+					messageId: "m-tool-first",
+					partId: "tp1",
+					toolName: "Read",
+					callId: "call-1",
+					input: { file: "test.ts" },
+				} satisfies ToolStartedPayload,
+				1,
+			);
+
+			// Should NOT throw — creates the messages row defensively
+			expect(() => projector.project(toolStarted, db)).not.toThrow();
+
+			// Verify the message row was created
+			const row = db.queryOne<{
+				id: string;
+				role: string;
+				session_id: string;
+				is_streaming: number;
+			}>(
+				"SELECT id, role, session_id, is_streaming FROM messages WHERE id = ?",
+				["m-tool-first"],
+			);
+			expect(row).toBeDefined();
+			expect(row?.role).toBe("assistant");
+			expect(row?.session_id).toBe("s1");
+			expect(row?.is_streaming).toBe(1);
+
+			// Verify the tool part was created
+			const part = db.queryOne<{ id: string; type: string; tool_name: string }>(
+				"SELECT id, type, tool_name FROM message_parts WHERE id = ?",
+				["tp1"],
+			);
+			expect(part).toBeDefined();
+			expect(part?.type).toBe("tool");
+			expect(part?.tool_name).toBe("Read");
+		});
+
+		it("thinking.start before message.created creates message row defensively", () => {
+			// Claude adapter may emit thinking.start as the first event for an
+			// assistant message. The projector must ensure the parent row exists.
+			const thinkingStart = makeStored(
+				"thinking.start",
+				"s1",
+				{
+					messageId: "m-think-first",
+					partId: "thp1",
+				} satisfies ThinkingStartPayload,
+				1,
+			);
+
+			expect(() => projector.project(thinkingStart, db)).not.toThrow();
+
+			const row = db.queryOne<{
+				id: string;
+				role: string;
+				session_id: string;
+			}>("SELECT id, role, session_id FROM messages WHERE id = ?", [
+				"m-think-first",
+			]);
+			expect(row).toBeDefined();
+			expect(row?.role).toBe("assistant");
+			expect(row?.session_id).toBe("s1");
+
+			// Verify the thinking part was created
+			const part = db.queryOne<{ id: string; type: string }>(
+				"SELECT id, type FROM message_parts WHERE id = ?",
+				["thp1"],
+			);
+			expect(part).toBeDefined();
+			expect(part?.type).toBe("thinking");
+		});
+
+		it("defensive INSERT is no-op when messages row already exists", () => {
+			// message.created arrives first, then tool.started — the defensive INSERT
+			// should be a no-op and not overwrite the existing row.
+			const msgCreated = makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "m-existing",
+					role: "assistant",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload,
+				1,
+			);
+			projector.project(msgCreated, db);
+
+			const toolStarted = makeStored(
+				"tool.started",
+				"s1",
+				{
+					messageId: "m-existing",
+					partId: "tp2",
+					toolName: "Bash",
+					callId: "call-2",
+					input: { command: "ls" },
+				} satisfies ToolStartedPayload,
+				2,
+			);
+
+			expect(() => projector.project(toolStarted, db)).not.toThrow();
+
+			// Only one messages row should exist
+			const count = db.queryOne<{ cnt: number }>(
+				"SELECT COUNT(*) as cnt FROM messages WHERE id = ?",
+				["m-existing"],
+			);
+			expect(count?.cnt).toBe(1);
 		});
 	});
 
@@ -933,14 +1053,14 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(m1!.text).toBe("s1 text");
+			expect(m1?.text).toBe("s1 text");
 
 			// Verify s2's message is untouched
 			const m2 = db.queryOne<MessageRow>(
 				"SELECT * FROM messages WHERE id = ?",
 				["m2"],
 			);
-			expect(m2!.text).toBe("");
+			expect(m2?.text).toBe("");
 
 			// Verify per-session queries return correct counts
 			const s1Messages = db.query<MessageRow>(
@@ -1021,12 +1141,12 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(parts).toHaveLength(3);
-			expect(parts[0]!.id).toBe("p1");
-			expect(parts[0]!.sort_order).toBe(0);
-			expect(parts[1]!.id).toBe("t1");
-			expect(parts[1]!.sort_order).toBe(1);
-			expect(parts[2]!.id).toBe("tool1");
-			expect(parts[2]!.sort_order).toBe(2);
+			expect(parts[0]?.id).toBe("p1");
+			expect(parts[0]?.sort_order).toBe(0);
+			expect(parts[1]?.id).toBe("t1");
+			expect(parts[1]?.sort_order).toBe(1);
+			expect(parts[2]?.id).toBe("tool1");
+			expect(parts[2]?.sort_order).toBe(2);
 		});
 
 		it("does not change sort_order on subsequent deltas for the same part", () => {
@@ -1080,8 +1200,8 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.sort_order).toBe(0); // unchanged from first insert
-			expect(parts[0]!.text).toBe("Hello World");
+			expect(parts[0]?.sort_order).toBe(0); // unchanged from first insert
+			expect(parts[0]?.text).toBe("Hello World");
 		});
 
 		it("sort_order is stable when thinking.delta is replayed with replaying=true", () => {
@@ -1123,8 +1243,8 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.sort_order).toBe(0);
-			expect(parts[0]!.text).toBe("Hmm..."); // not doubled
+			expect(parts[0]?.sort_order).toBe(0);
+			expect(parts[0]?.text).toBe("Hmm..."); // not doubled
 		});
 	});
 });

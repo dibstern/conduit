@@ -135,6 +135,20 @@ export class MessageProjector implements Projector {
 		}
 
 		if (isEventType(event, "thinking.start")) {
+			// Defensive: ensure the messages row exists before inserting a thinking part.
+			// The Claude adapter emits thinking.start without a preceding message.created;
+			// this INSERT OR IGNORE is a no-op when message.created or text.delta arrived first.
+			db.execute(
+				`INSERT OR IGNORE INTO messages
+				 (id, session_id, role, text, is_streaming, created_at, updated_at)
+				 VALUES (?, ?, 'assistant', '', 1, ?, ?)`,
+				[
+					event.data.messageId,
+					event.sessionId,
+					event.createdAt,
+					event.createdAt,
+				],
+			);
 			// (Perf-Fix-1) sort_order computed in SQL, not Node.js.
 			db.execute(
 				`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)
@@ -199,6 +213,20 @@ export class MessageProjector implements Projector {
 		}
 
 		if (isEventType(event, "tool.started")) {
+			// Defensive: ensure the messages row exists before inserting a tool part.
+			// The Claude adapter emits tool.started without a preceding message.created;
+			// this INSERT OR IGNORE is a no-op when message.created or text.delta arrived first.
+			db.execute(
+				`INSERT OR IGNORE INTO messages
+				 (id, session_id, role, text, is_streaming, created_at, updated_at)
+				 VALUES (?, ?, 'assistant', '', 1, ?, ?)`,
+				[
+					event.data.messageId,
+					event.sessionId,
+					event.createdAt,
+					event.createdAt,
+				],
+			);
 			// (Perf-Fix-1) sort_order computed in SQL, not Node.js.
 			db.execute(
 				`INSERT INTO message_parts
