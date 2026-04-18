@@ -29,53 +29,17 @@ import { canonicalEvent } from "../../persistence/events.js";
 import type { EventSink } from "../types.js";
 import type {
 	ClaudeSessionContext,
+	SDKAssistantMessage,
 	SDKMessage,
 	SDKPartialAssistantMessage,
 	SDKResultMessage,
 	SDKSystemLike,
+	SDKUserMessage,
 	StreamEvent,
 	ToolInFlight,
 } from "./types.js";
 
 const PROVIDER = "claude" as const;
-
-// ─── Safe record accessor ──────────────────────────────────────────────────
-// The SDK message types are structurally typed and many fields are accessed
-// via Record<string, unknown>. This helper avoids the need for bracket
-// notation on every access.
-
-function asRecord(value: unknown): Record<string, unknown> {
-	if (value && typeof value === "object") {
-		return value as Record<string, unknown>;
-	}
-	return {};
-}
-
-function getString(
-	obj: Record<string, unknown>,
-	key: string,
-): string | undefined {
-	const v = obj[key];
-	return typeof v === "string" ? v : undefined;
-}
-
-function getNumber(
-	obj: Record<string, unknown>,
-	key: string,
-): number | undefined {
-	const v = obj[key];
-	return typeof v === "number" ? v : undefined;
-}
-
-function getRecord(
-	obj: Record<string, unknown>,
-	key: string,
-): Record<string, unknown> | undefined {
-	const v = obj[key];
-	return v && typeof v === "object" && !Array.isArray(v)
-		? (v as Record<string, unknown>)
-		: undefined;
-}
 
 // ─── Typed event construction helper ───────────────────────────────────────
 // Uses the shared canonicalEvent() factory from persistence/events.ts.
@@ -287,16 +251,25 @@ export class ClaudeEventTranslator {
 			// Token usage updates. The SDK type declares usage as
 			// { total_tokens, tool_uses, duration_ms } but runtime payloads
 			// include input_tokens/output_tokens/cache_read_input_tokens.
-			// Use Record cast for those extended fields.
+			// Cast to Record for those extended fields not in the SDK type.
 			case "task_progress": {
 				const usage = message.usage as Record<string, unknown>;
-				const cacheRead = getNumber(usage, "cache_read_input_tokens");
+				const inputTokens =
+					typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : 0;
+				const outputTokens =
+					typeof usage["output_tokens"] === "number"
+						? usage["output_tokens"]
+						: 0;
+				const cacheRead =
+					typeof usage["cache_read_input_tokens"] === "number"
+						? usage["cache_read_input_tokens"]
+						: undefined;
 				await this.push(
 					makeCanonicalEvent("turn.completed", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId || "",
 						tokens: {
-							input: getNumber(usage, "input_tokens") ?? 0,
-							output: getNumber(usage, "output_tokens") ?? 0,
+							input: inputTokens,
+							output: outputTokens,
 							...(cacheRead !== undefined ? { cacheRead } : {}),
 						},
 						cost: 0,
@@ -575,10 +548,9 @@ export class ClaudeEventTranslator {
 
 	private async translateAssistantSnapshot(
 		ctx: ClaudeSessionContext,
-		message: SDKMessage,
+		message: SDKAssistantMessage,
 	): Promise<void> {
-		const record = asRecord(message as unknown);
-		const uuid = getString(record, "uuid");
+		const uuid = message.uuid; // Typed: UUID
 		if (uuid) {
 			ctx.lastAssistantUuid = uuid;
 			this.currentAssistantMessageId = uuid;
@@ -589,18 +561,15 @@ export class ClaudeEventTranslator {
 
 	private async translateUserToolResults(
 		ctx: ClaudeSessionContext,
-		message: SDKMessage,
+		message: SDKUserMessage,
 	): Promise<void> {
-		const record = asRecord(message as unknown);
-		const msg = getRecord(record, "message");
-		if (!msg) return;
-		const content = msg["content"];
+		const content = message.message.content;
 		if (!Array.isArray(content)) return;
 
-		for (const rawBlock of content) {
-			const block = asRecord(rawBlock);
-			if (getString(block, "type") !== "tool_result") continue;
-			const toolUseId = getString(block, "tool_use_id");
+		for (const block of content) {
+			if (typeof block === "string") continue;
+			if (block.type !== "tool_result") continue;
+			const toolUseId = block.tool_use_id;
 			if (!toolUseId) continue;
 
 			// Find the in-flight tool by itemId
@@ -615,7 +584,10 @@ export class ClaudeEventTranslator {
 			}
 			if (!matchedTool || matchedIndex === undefined) continue;
 
-			const resultContent = getString(block, "content") ?? "";
+			// content on ToolResultBlockParam is string | ContentBlockParam[] | undefined.
+			// Coerce to string for downstream use.
+			const rawContent = block.content;
+			const resultContent = typeof rawContent === "string" ? rawContent : "";
 
 			if (resultContent.length > 0) {
 				await this.push(
@@ -666,17 +638,17 @@ export class ClaudeEventTranslator {
 			return;
 		}
 
+		// result is now narrowed to SDKResultSuccess — typed access to
+		// result.is_error, result.result, result.uuid, result.usage, etc.
+
 		// Success subtype with is_error=true: the SDK wraps an upstream API
 		// error (e.g. "unknown provider for model X", 502s after all retries,
 		// reasoning_effort validation failures) as a synthetic successful
 		// completion whose `result` field contains the error text. Surface
 		// this as a turn.error so the UI shows the message instead of a
 		// silent empty assistant reply.
-		const resultRec = asRecord(result as unknown);
-		const isErrorFlag = resultRec["is_error"] === true;
-		if (isErrorFlag) {
-			const errorText =
-				getString(resultRec, "result") || "Provider returned an error";
+		if (result.is_error) {
+			const errorText = result.result || "Provider returned an error";
 			await this.push(
 				makeCanonicalEvent("turn.error", ctx.sessionId, {
 					messageId:
@@ -693,7 +665,7 @@ export class ClaudeEventTranslator {
 		// Emit a synthetic text.delta so the UI renders it as an assistant bubble.
 		// Skip when any assistant message was already seen — streaming already
 		// delivered the content to avoid duplicate rendering.
-		const resultText = getString(resultRec, "result");
+		const resultText = result.result;
 		if (
 			resultText &&
 			resultText.length > 0 &&
@@ -701,8 +673,7 @@ export class ClaudeEventTranslator {
 			!this.currentAssistantMessageId
 		) {
 			const resultUuid =
-				getString(resultRec, "uuid") ??
-				`claude-result-${ctx.sessionId}-${Date.now()}`;
+				result.uuid ?? `claude-result-${ctx.sessionId}-${Date.now()}`;
 			this.currentAssistantMessageId = resultUuid;
 			ctx.lastAssistantUuid = resultUuid;
 			await this.push(
@@ -714,44 +685,31 @@ export class ClaudeEventTranslator {
 			);
 		}
 
-		const usage = result.usage ?? {};
-		const cacheReadVal =
-			typeof usage.cache_read_input_tokens === "number"
-				? usage.cache_read_input_tokens
-				: undefined;
-		const cacheWriteVal =
-			typeof usage.cache_creation_input_tokens === "number"
-				? usage.cache_creation_input_tokens
-				: undefined;
-
-		// Build tokens object, omitting undefined optional fields to satisfy
-		// exactOptionalPropertyTypes.
+		// Usage — typed via NonNullableUsage on SDKResultSuccess
+		const usage = result.usage;
 		const tokens: {
 			readonly input?: number;
 			readonly output?: number;
 			readonly cacheRead?: number;
 			readonly cacheWrite?: number;
 		} = {
-			input: typeof usage.input_tokens === "number" ? usage.input_tokens : 0,
-			output: typeof usage.output_tokens === "number" ? usage.output_tokens : 0,
-			...(cacheReadVal !== undefined ? { cacheRead: cacheReadVal } : {}),
-			...(cacheWriteVal !== undefined ? { cacheWrite: cacheWriteVal } : {}),
+			input: usage.input_tokens,
+			output: usage.output_tokens,
+			...(usage.cache_read_input_tokens > 0
+				? { cacheRead: usage.cache_read_input_tokens }
+				: {}),
+			...(usage.cache_creation_input_tokens > 0
+				? { cacheWrite: usage.cache_creation_input_tokens }
+				: {}),
 		};
-
-		const costVal =
-			typeof result.total_cost_usd === "number"
-				? result.total_cost_usd
-				: undefined;
-		const durationVal =
-			typeof result.duration_ms === "number" ? result.duration_ms : undefined;
 
 		await this.push(
 			makeCanonicalEvent("turn.completed", ctx.sessionId, {
 				messageId:
 					ctx.lastAssistantUuid || this.currentAssistantMessageId || "",
-				...(costVal !== undefined ? { cost: costVal } : {}),
+				cost: result.total_cost_usd,
 				tokens,
-				...(durationVal !== undefined ? { duration: durationVal } : {}),
+				duration: result.duration_ms,
 			}),
 		);
 	}
