@@ -706,6 +706,23 @@ export function handleDone(
 		setMessages(messages);
 	}
 
+	// Safety net: finalize any thinking blocks still marked as !done.
+	// Normal path: thinking_stop arrives before done. But if the event
+	// was lost (SDK bug, network issue, Claude translator gap), this
+	// prevents stuck spinners.
+	{
+		const messages = getMessages();
+		let mutated = false;
+		const patched = messages.map((m) => {
+			if (m.type === "thinking" && !m.done) {
+				mutated = true;
+				return { ...m, done: true, duration: 0 };
+			}
+			return m;
+		});
+		if (mutated) setMessages(patched);
+	}
+
 	chatState.turnEpoch++;
 	log.debug(
 		"handleDone turnEpoch=%d currentMessageId=%s phase=%s",
