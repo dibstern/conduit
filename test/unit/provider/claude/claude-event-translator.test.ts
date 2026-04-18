@@ -441,7 +441,16 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.has(0)).toBe(false);
 	});
 
-	it("translates content_block_stop to tool.completed for thinking blocks", async () => {
+	it("translates content_block_stop to thinking.end for thinking blocks", async () => {
+		// Establish assistant messageId via message_start (like real streaming)
+		await translator.translate(
+			ctx,
+			makeStreamEvent({
+				type: "message_start",
+				message: { id: "msg-think-1", type: "message", role: "assistant" },
+			}),
+		);
+
 		// Start a thinking block
 		await translator.translate(
 			ctx,
@@ -451,6 +460,12 @@ describe("ClaudeEventTranslator", () => {
 				content_block: { type: "thinking", thinking: "" },
 			}),
 		);
+
+		// Capture the partId assigned by thinking.start
+		const thinkingStart = sink.events.find((e) => e.type === "thinking.start");
+		expect(thinkingStart).toBeDefined();
+		const startPartId = dataOf(thinkingStart)["partId"] as string;
+		expect(startPartId).toBeTruthy();
 
 		expect(ctx.inFlightTools.has(0)).toBe(true);
 
@@ -463,8 +478,20 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
+		// Should emit thinking.end, NOT tool.completed
+		const thinkingEnd = sink.events.filter((e) => e.type === "thinking.end");
+		expect(thinkingEnd).toHaveLength(1);
+		const data = dataOf(thinkingEnd[0]);
+		// messageId must match the assistant message (same as thinking.start)
+		expect(data["messageId"]).toBe("msg-think-1");
+		// partId must match the thinking.start partId
+		expect(data["partId"]).toBe(startPartId);
+
+		// No tool.completed for thinking blocks
 		const completed = sink.events.filter((e) => e.type === "tool.completed");
-		expect(completed).toHaveLength(1);
+		expect(completed).toHaveLength(0);
+
+		// In-flight entry cleaned up
 		expect(ctx.inFlightTools.has(0)).toBe(false);
 	});
 

@@ -381,17 +381,31 @@ export class ClaudeEventTranslator {
 
 		// Only complete text/thinking blocks here; tool_use blocks
 		// complete when their tool_result arrives.
-		if (tool.toolName !== "__text" && tool.toolName !== "__thinking") return;
+		if (tool.toolName === "__thinking") {
+			ctx.inFlightTools.delete(index);
+			await this.push(
+				makeCanonicalEvent("thinking.end", ctx.sessionId, {
+					messageId: this.currentAssistantMessageId,
+					partId: tool.itemId,
+				}),
+			);
+			return;
+		}
 
-		ctx.inFlightTools.delete(index);
-		await this.push(
-			makeCanonicalEvent("tool.completed", ctx.sessionId, {
-				messageId: tool.itemId,
-				partId: `part-stop-${index}`,
-				result: null,
-				duration: 0,
-			}),
-		);
+		if (tool.toolName === "__text") {
+			ctx.inFlightTools.delete(index);
+			await this.push(
+				makeCanonicalEvent("tool.completed", ctx.sessionId, {
+					messageId: tool.itemId,
+					partId: `part-stop-${index}`,
+					result: null,
+					duration: 0,
+				}),
+			);
+			return;
+		}
+
+		// tool_use blocks: do NOT complete here — wait for tool_result
 	}
 
 	private async handleBlockStart(
