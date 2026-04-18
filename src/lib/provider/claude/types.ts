@@ -24,15 +24,37 @@ export type {
 	PermissionMode,
 	PermissionResult,
 	Query,
+	SDKAPIRetryMessage,
 	SDKAssistantMessage,
 	SDKMessage,
 	SDKPartialAssistantMessage,
 	SDKResultError,
 	SDKResultMessage,
 	SDKResultSuccess,
+	SDKStatusMessage,
 	SDKSystemMessage,
+	SDKTaskProgressMessage,
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+
+import type { SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
+
+// ─── Stream Event Type ──────────────────────────────────────────────────
+// BetaRawMessageStreamEvent is not directly exported by the SDK, but we
+// can extract it from SDKPartialAssistantMessage. This is a discriminated
+// union with type: 'message_start' | 'message_delta' | 'message_stop' |
+// 'content_block_start' | 'content_block_delta' | 'content_block_stop'.
+export type StreamEvent = SDKPartialAssistantMessage["event"];
+
+// ─── System Message Subtypes ────────────────────────────────────────────
+// Multiple SDK types share `type: 'system'` but differ in `subtype`.
+// When `translate()` switches on `message.type === 'system'`, TypeScript
+// narrows to this union. Further narrowing on `subtype` is done inside
+// `translateSystem()`.
+export type SDKSystemLike = Extract<
+	import("@anthropic-ai/claude-agent-sdk").SDKMessage,
+	{ type: "system" }
+>;
 
 import type { Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 

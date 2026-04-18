@@ -31,6 +31,7 @@ import type {
 	ClaudeSessionContext,
 	SDKMessage,
 	SDKResultMessage,
+	SDKSystemLike,
 	ToolInFlight,
 } from "./types.js";
 
@@ -183,10 +184,10 @@ export class ClaudeEventTranslator {
 		message: SDKMessage,
 	): Promise<void> {
 		// Capture SDK session id for resume cursor on any message.
-		const rec = asRecord(message as unknown);
-		const sessionId = getString(rec, "session_id");
-		if (sessionId && sessionId.length > 0) {
-			ctx.resumeSessionId = sessionId;
+		// All SDK message variants carry session_id (required or optional),
+		// but the union doesn't guarantee it statically — use an `in` guard.
+		if ("session_id" in message && typeof message.session_id === "string") {
+			ctx.resumeSessionId = message.session_id;
 		}
 
 		switch (message.type) {
@@ -199,8 +200,10 @@ export class ClaudeEventTranslator {
 			case "user":
 				return this.translateUserToolResults(ctx, message);
 			case "result":
-				return this.translateResult(ctx, message as SDKResultMessage);
+				return this.translateResult(ctx, message);
 			default:
+				// Explicitly ignore known SDK message types we don't process
+				// (auth_status, tool_progress, rate_limit_event, prompt_suggestion, etc.)
 				return;
 		}
 	}
@@ -223,94 +226,101 @@ export class ClaudeEventTranslator {
 
 	private async translateSystem(
 		ctx: ClaudeSessionContext,
-		message: SDKMessage,
+		message: SDKSystemLike,
 	): Promise<void> {
-		const record = asRecord(message as unknown);
-		const subtype = getString(record, "subtype") ?? "";
-
-		// Handle system/status
-		if (subtype === "status") {
-			await this.push(
-				makeCanonicalEvent("session.status", ctx.sessionId, {
-					sessionId: ctx.sessionId,
-					status: (getString(record, "status") as "idle") ?? "idle",
-				}),
-			);
-			return;
-		}
-
-		// Handle system/api_retry — SDK is retrying a failed API call. Surface
-		// it as a session.status:retry so the UI can display retry progress
-		// instead of silence. Attempt/delay/error details travel via metadata.
-		if (subtype === "api_retry") {
-			const attempt = getNumber(record, "attempt") ?? 0;
-			const maxRetries = getNumber(record, "max_retries") ?? 0;
-			const retryDelayMs = getNumber(record, "retry_delay_ms");
-			const errorStatus = getNumber(record, "error_status");
-			const errorKind = getString(record, "error") ?? "unknown";
-			const parts: string[] = [`Retrying (attempt ${attempt}/${maxRetries})`];
-			if (errorStatus !== undefined) {
-				parts.push(`HTTP ${errorStatus}`);
-			}
-			if (errorKind !== "unknown") parts.push(errorKind);
-			if (retryDelayMs !== undefined) {
-				const secs = Math.round(retryDelayMs / 100) / 10;
-				parts.push(`next in ${secs}s`);
-			}
-			const reason = parts.join(" · ");
-			await this.push(
-				canonicalEvent(
-					"session.status",
-					ctx.sessionId,
-					{
+		switch (message.subtype) {
+			case "status": {
+				await this.push(
+					makeCanonicalEvent("session.status", ctx.sessionId, {
 						sessionId: ctx.sessionId,
-						status: "retry",
-					},
-					{
-						provider: PROVIDER,
-						metadata: {
-							source: "api_retry",
-							correlationId: reason,
+						status: "idle",
+					}),
+				);
+				return;
+			}
+
+			// SDK is retrying a failed API call. Surface it as
+			// session.status:retry so the UI can display retry progress
+			// instead of silence. Attempt/delay/error details travel via metadata.
+			case "api_retry": {
+				const {
+					attempt,
+					max_retries: maxRetries,
+					retry_delay_ms: retryDelayMs,
+				} = message;
+				// error_status is number | null in the SDK type
+				const errorStatus = message.error_status ?? undefined;
+				// error is SDKAssistantMessageError (string literal union)
+				const errorKind: string = message.error ?? "unknown";
+				const parts: string[] = [`Retrying (attempt ${attempt}/${maxRetries})`];
+				if (errorStatus !== undefined) {
+					parts.push(`HTTP ${errorStatus}`);
+				}
+				if (errorKind !== "unknown") parts.push(errorKind);
+				if (retryDelayMs !== undefined) {
+					const secs = Math.round(retryDelayMs / 100) / 10;
+					parts.push(`next in ${secs}s`);
+				}
+				const reason = parts.join(" · ");
+				await this.push(
+					canonicalEvent(
+						"session.status",
+						ctx.sessionId,
+						{
+							sessionId: ctx.sessionId,
+							status: "retry",
 						},
-					},
-				),
-			);
-			return;
-		}
+						{
+							provider: PROVIDER,
+							metadata: {
+								source: "api_retry",
+								correlationId: reason,
+							},
+						},
+					),
+				);
+				return;
+			}
 
-		// Handle system/task_progress -- token usage updates
-		if (subtype === "task_progress") {
-			const usage = getRecord(record, "usage") ?? {};
-			const cacheRead = getNumber(usage, "cache_read_input_tokens");
-			await this.push(
-				makeCanonicalEvent("turn.completed", ctx.sessionId, {
-					messageId: this.currentAssistantMessageId || "",
-					tokens: {
-						input: getNumber(usage, "input_tokens") ?? 0,
-						output: getNumber(usage, "output_tokens") ?? 0,
-						...(cacheRead !== undefined ? { cacheRead } : {}),
-					},
-					cost: 0,
-					duration: 0,
-				}),
-			);
-			return;
-		}
+			// Token usage updates. The SDK type declares usage as
+			// { total_tokens, tool_uses, duration_ms } but runtime payloads
+			// include input_tokens/output_tokens/cache_read_input_tokens.
+			// Use Record cast for those extended fields.
+			case "task_progress": {
+				const usage = message.usage as Record<string, unknown>;
+				const cacheRead = getNumber(usage, "cache_read_input_tokens");
+				await this.push(
+					makeCanonicalEvent("turn.completed", ctx.sessionId, {
+						messageId: this.currentAssistantMessageId || "",
+						tokens: {
+							input: getNumber(usage, "input_tokens") ?? 0,
+							output: getNumber(usage, "output_tokens") ?? 0,
+							...(cacheRead !== undefined ? { cacheRead } : {}),
+						},
+						cost: 0,
+						duration: 0,
+					}),
+				);
+				return;
+			}
 
-		// Only handle init below
-		if (subtype !== "init") return;
+			case "init": {
+				// Store model info on context
+				ctx.currentModel = message.model;
+				await this.push(
+					makeCanonicalEvent("session.status", ctx.sessionId, {
+						sessionId: ctx.sessionId,
+						status: "idle",
+					}),
+				);
+				return;
+			}
 
-		// Store model info on context
-		const model = getString(record, "model");
-		if (model) {
-			ctx.currentModel = model;
+			default:
+				// Ignore other system subtypes (task_notification, task_started,
+				// compact_boundary, hook_*, etc.)
+				return;
 		}
-		await this.push(
-			makeCanonicalEvent("session.status", ctx.sessionId, {
-				sessionId: ctx.sessionId,
-				status: "idle",
-			}),
-		);
 	}
 
 	// ─── Stream Events ───────────────────────────────────────────────────
