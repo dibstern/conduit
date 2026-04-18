@@ -16,7 +16,7 @@
 |-----|-----------|--------------|
 | Thinking animations never stop | `handleBlockStop` emits `tool.completed` for `__thinking` blocks, never `thinking.end` | `claude-event-translator.ts:373-395` |
 | Tool calls/thinking disappear on reload | Missing `thinking.end` → message projector never marks thinking complete; `tool_result` for thinking partId finds no matching ToolMessage | Same as above + `chat.svelte.ts:handleDone` |
-| PROCESSING_TIMEOUT on rejoin | Partial history renders (text messages visible) but thinking/tool call blocks are missing — `thinking.end` never persisted → message projector marks thinking blocks incomplete → history adapter omits them or renders them broken → frontend shows incomplete session → processing timeout fires because the turn appears unfinished | Same as above — correctly persisted `thinking.end` events fix replay; `handleDone` safety net catches any remaining gaps |
+| PROCESSING_TIMEOUT on rejoin | Partial history renders on rejoin (text + some tool calls like reads/searches visible) but **thinking blocks** are missing — `thinking.end` never persisted → message projector never marks thinking blocks complete → history adapter omits incomplete thinking parts → frontend shows session with thinking gaps → turn appears unfinished → processing timeout fires | Same as above — correctly persisted `thinking.end` events fix replay; `handleDone` safety net catches any remaining gaps |
 | Sessions never auto-rename | Claude SDK bypasses OpenCode's REST API — OpenCode never sees the prompt, never auto-titles | `prompt.ts` post-turn handler |
 
 ---
@@ -898,4 +898,439 @@ Update the test count and source file count in the Stats table to reflect new te
 ```bash
 git add docs/PROGRESS.md
 git commit -m "docs: update PROGRESS.md with Claude SDK event parity fixes"
+```
+
+---
+
+## Phase 2: Typed SDK Data Extraction
+
+Tasks 1-8 fix the immediate bugs and add event-type-level guards. Tasks 9-11
+below replace the untyped `asRecord()` / `getString()` pattern in
+`claude-event-translator.ts` with proper TypeScript discriminated union narrowing,
+so the compiler catches field access errors, missing SDK event subtypes, and
+incomplete data extraction at build time.
+
+### Task 9: Type the top-level `translate()` dispatch and `translateSystem()`
+
+**Files:**
+- Modify: `src/lib/provider/claude/claude-event-translator.ts:181-314`
+- Modify: `src/lib/provider/claude/types.ts` (add `StreamEvent` type alias)
+- Test: existing tests in `test/unit/provider/claude/claude-event-translator.test.ts` (must still pass)
+
+**Step 1: Add `StreamEvent` type alias to `types.ts`**
+
+The `BetaRawMessageStreamEvent` type isn't directly re-exported from the SDK, but
+we can extract it from `SDKPartialAssistantMessage["event"]`:
+
+```typescript
+// Add to src/lib/provider/claude/types.ts after the existing re-exports:
+
+// ─── Stream Event Type ──────────────────────────────────────────────────
+// BetaRawMessageStreamEvent is not directly exported by the SDK, but we
+// can extract it from SDKPartialAssistantMessage. This is a discriminated
+// union with type: 'message_start' | 'message_delta' | 'message_stop' |
+// 'content_block_start' | 'content_block_delta' | 'content_block_stop'.
+export type StreamEvent = SDKPartialAssistantMessage["event"];
+```
+
+Also add re-exports for `SDKAPIRetryMessage`, `SDKStatusMessage`, `SDKTaskProgressMessage`
+if they exist in the SDK, so handler methods can accept specific types. Check which
+of these the SDK exports and add them to the re-export list.
+
+**Step 2: Change handler method signatures to accept specific SDK types**
+
+In `claude-event-translator.ts`, change the method signatures:
+
+```typescript
+// BEFORE:
+async translate(ctx: ClaudeSessionContext, message: SDKMessage): Promise<void> {
+    const rec = asRecord(message as unknown);
+    // ...
+    switch (message.type) {
+        case "system": return this.translateSystem(ctx, message);
+        // ...
+    }
+}
+
+// AFTER:
+async translate(ctx: ClaudeSessionContext, message: SDKMessage): Promise<void> {
+    // Capture SDK session id for resume cursor on any message.
+    if ("session_id" in message && typeof message.session_id === "string") {
+        ctx.resumeSessionId = message.session_id;
+    }
+
+    switch (message.type) {
+        case "system":
+            return this.translateSystem(ctx, message);
+        case "stream_event":
+            return this.translateStreamEvent(ctx, message);
+        case "assistant":
+            return this.translateAssistantSnapshot(ctx, message);
+        case "user":
+            return this.translateUserToolResults(ctx, message);
+        case "result":
+            return this.translateResult(ctx, message);
+        default:
+            // Explicitly ignore known SDK message types we don't process
+            return;
+    }
+}
+```
+
+**Step 3: Type `translateSystem` to accept `SDKSystemMessage`**
+
+```typescript
+// BEFORE:
+private async translateSystem(
+    ctx: ClaudeSessionContext,
+    message: SDKMessage,
+): Promise<void> {
+    const record = asRecord(message as unknown);
+    const subtype = getString(record, "subtype") ?? "";
+    // ...
+}
+
+// AFTER:
+private async translateSystem(
+    ctx: ClaudeSessionContext,
+    message: SDKSystemMessage,
+): Promise<void> {
+    // SDKSystemMessage has subtype: 'init' — but SDKAPIRetryMessage,
+    // SDKStatusMessage, SDKTaskProgressMessage also have type: 'system'.
+    // TypeScript narrows message.type to 'system' but the subtype
+    // determines which variant we have.
+    //
+    // NOTE: SDKMessage's type:'system' variants share the 'system' literal
+    // but have different subtypes. We access subtype via the typed field.
+    const subtype = (message as Record<string, unknown>)["subtype"] as string | undefined;
+
+    if (subtype === "status") {
+        // Direct typed access where possible
+        await this.push(
+            makeCanonicalEvent("session.status", ctx.sessionId, {
+                sessionId: ctx.sessionId,
+                status: "idle",
+            }),
+        );
+        return;
+    }
+
+    // ... rest of method adapted similarly
+```
+
+> **Important:** The `type: 'system'` discriminator is shared by multiple SDK
+> message types (`SDKSystemMessage`, `SDKAPIRetryMessage`, `SDKStatusMessage`,
+> `SDKTaskProgressMessage`). TypeScript can't narrow to a specific variant on
+> `type` alone — the `subtype` field is the secondary discriminator. The
+> implementer should check which SDK subtypes share `type: 'system'` and use
+> a union type or conditional narrowing accordingly.
+
+**Step 4: Run existing tests**
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/claude/claude-event-translator.test.ts`
+Expected: ALL PASS — behavioral equivalence with old code
+
+**Step 5: Run type-check**
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
+Expected: PASS
+
+**Step 6: Commit**
+
+```bash
+git add src/lib/provider/claude/claude-event-translator.ts src/lib/provider/claude/types.ts
+git commit -m "refactor: type translate() dispatch and translateSystem() with SDK types
+
+Replace asRecord(message as unknown) with proper type narrowing on the
+SDKMessage discriminated union. Handler methods now accept specific
+variant types (SDKSystemMessage, etc.) instead of generic SDKMessage.
+Compiler catches field access errors and missing SDK fields."
+```
+
+---
+
+### Task 10: Type stream event handling (`translateStreamEvent` + block handlers)
+
+**Files:**
+- Modify: `src/lib/provider/claude/claude-event-translator.ts:318-529`
+
+This is the most impactful typing change — stream events are where all
+thinking/tool/text content flows through, and where the thinking.end bug lived.
+
+**Step 1: Type `translateStreamEvent` to use `SDKPartialAssistantMessage`**
+
+```typescript
+// BEFORE:
+private async translateStreamEvent(
+    ctx: ClaudeSessionContext,
+    message: SDKMessage,
+): Promise<void> {
+    const record = asRecord(message as unknown);
+    const event = getRecord(record, "event");
+    if (!event) return;
+    const eventType = getString(event, "type");
+    if (!eventType) return;
+    // ...
+}
+
+// AFTER:
+private async translateStreamEvent(
+    ctx: ClaudeSessionContext,
+    message: SDKPartialAssistantMessage,
+): Promise<void> {
+    const event = message.event; // Typed: BetaRawMessageStreamEvent
+
+    switch (event.type) {
+        case "message_start":
+            return this.handleMessageStart(ctx, event);
+        case "content_block_start":
+            return this.handleBlockStart(ctx, event);
+        case "content_block_delta":
+            return this.handleBlockDelta(ctx, event);
+        case "content_block_stop":
+            return this.handleBlockStop(ctx, event);
+        case "message_delta":
+        case "message_stop":
+            // No action needed for these event types
+            return;
+    }
+}
+```
+
+**Step 2: Type `handleBlockStart` with `BetaRawContentBlockStartEvent`**
+
+```typescript
+// BEFORE: event: Record<string, unknown>
+// AFTER:
+private async handleBlockStart(
+    ctx: ClaudeSessionContext,
+    event: StreamEvent & { type: "content_block_start" },
+): Promise<void> {
+    const index = event.index; // Typed: number
+    const block = event.content_block; // Typed: BetaContentBlock union
+
+    switch (block.type) {
+        case "text":
+            // block is now BetaTextBlock — typed access to block.text, block.citations
+            // ...
+            break;
+        case "thinking":
+            // block is now BetaThinkingBlock — typed access to block.thinking, block.signature
+            // ...
+            break;
+        case "tool_use":
+            // block is now BetaToolUseBlock — typed access to block.id, block.name, block.input
+            // ...
+            break;
+        case "server_tool_use":
+            // block is now BetaServerToolUseBlock — typed access
+            // ...
+            break;
+        case "mcp_tool_use":
+            // block is now BetaMCPToolUseBlock — typed access
+            // ...
+            break;
+        default:
+            // Compiler enforces handling of new SDK content block types.
+            // Add new cases as SDK adds new block types (e.g. redacted_thinking,
+            // container_upload, web_search_tool_result, etc.)
+            return;
+    }
+}
+```
+
+**Step 3: Type `handleBlockDelta` with narrowed delta types**
+
+```typescript
+private async handleBlockDelta(
+    ctx: ClaudeSessionContext,
+    event: StreamEvent & { type: "content_block_delta" },
+): Promise<void> {
+    const index = event.index;
+    const tool = ctx.inFlightTools.get(index);
+    const delta = event.delta; // Typed: BetaRawContentBlockDelta
+
+    switch (delta.type) {
+        case "text_delta":
+            // delta is BetaTextDelta — typed access to delta.text
+            if (!delta.text) return;
+            // ...
+            break;
+        case "thinking_delta":
+            // delta is BetaThinkingDelta — typed access to delta.thinking
+            if (!delta.thinking) return;
+            // ...
+            break;
+        case "input_json_delta":
+            // delta is BetaInputJSONDelta — typed access to delta.partial_json
+            if (!tool) return;
+            // ...
+            break;
+        case "citations_delta":
+        case "signature_delta":
+        case "compaction_content_block_delta":
+            // Known SDK delta types we don't process
+            return;
+    }
+}
+```
+
+**Step 4: Type `handleBlockStop`**
+
+```typescript
+private async handleBlockStop(
+    ctx: ClaudeSessionContext,
+    event: StreamEvent & { type: "content_block_stop" },
+): Promise<void> {
+    const index = event.index; // Typed: number
+    // ... rest unchanged from Task 1 fix
+}
+```
+
+**Step 5: Run tests**
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/claude/claude-event-translator.test.ts`
+Expected: ALL PASS
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
+Expected: PASS
+
+**Step 6: Commit**
+
+```bash
+git add src/lib/provider/claude/claude-event-translator.ts
+git commit -m "refactor: type stream event handlers with SDK discriminated unions
+
+Replace Record<string, unknown> in handleBlockStart/handleBlockDelta/
+handleBlockStop with BetaRawContentBlockStartEvent etc. Compiler now
+catches missing content block types, wrong field names, and type
+mismatches. New SDK block types (e.g. redacted_thinking) will cause
+compile errors until explicitly handled or acknowledged."
+```
+
+---
+
+### Task 11: Type result and user message handlers + remove `asRecord` helpers
+
+**Files:**
+- Modify: `src/lib/provider/claude/claude-event-translator.ts` (remaining methods + remove helpers)
+
+**Step 1: Type `translateResult` with `SDKResultMessage`**
+
+```typescript
+// BEFORE: result: SDKResultMessage (but internally casts to asRecord)
+// AFTER: use typed access directly
+private async translateResult(
+    ctx: ClaudeSessionContext,
+    result: SDKResultMessage,
+): Promise<void> {
+    if (isInterruptedResult(result)) {
+        // ... unchanged
+        return;
+    }
+
+    if (result.subtype !== "success") {
+        // result is now SDKResultError — typed access to result.errors (string[])
+        const errors = result.errors.join("; ") || "Unknown error";
+        // ...
+        return;
+    }
+
+    // result is now SDKResultSuccess — typed access to result.is_error,
+    // result.result, result.uuid, result.usage, result.total_cost_usd,
+    // result.duration_ms — all with correct types
+    if (result.is_error) {
+        const errorText = result.result || "Provider returned an error";
+        // ...
+        return;
+    }
+
+    // Usage — fully typed via NonNullableUsage
+    const usage = result.usage;
+    const tokens = {
+        input: usage.input_tokens,
+        output: usage.output_tokens,
+        ...(usage.cache_read_input_tokens > 0
+            ? { cacheRead: usage.cache_read_input_tokens }
+            : {}),
+        ...(usage.cache_creation_input_tokens > 0
+            ? { cacheWrite: usage.cache_creation_input_tokens }
+            : {}),
+    };
+    // ... rest with typed access
+}
+```
+
+**Step 2: Type `translateUserToolResults` with `SDKUserMessage`**
+
+```typescript
+private async translateUserToolResults(
+    ctx: ClaudeSessionContext,
+    message: SDKUserMessage,
+): Promise<void> {
+    const content = message.message.content;
+    if (!Array.isArray(content)) return;
+
+    for (const block of content) {
+        if (typeof block === "string") continue;
+        if (block.type !== "tool_result") continue;
+        const toolUseId = block.tool_use_id;
+        // ... typed access — no more getString()
+    }
+}
+```
+
+**Step 3: Type `translateAssistantSnapshot` with `SDKAssistantMessage`**
+
+```typescript
+private async translateAssistantSnapshot(
+    ctx: ClaudeSessionContext,
+    message: SDKAssistantMessage,
+): Promise<void> {
+    const uuid = message.uuid; // Typed: UUID
+    if (uuid) {
+        ctx.lastAssistantUuid = uuid;
+        this.currentAssistantMessageId = uuid;
+    }
+}
+```
+
+**Step 4: Remove unused `asRecord`, `getString`, `getNumber`, `getRecord` helpers**
+
+After all methods use typed access, these helper functions (lines 40-75) should be
+unused. Remove them. If any remain in use (e.g. for `type: 'system'` subtypes where
+the SDK union doesn't fully narrow), keep only those specific helpers with a
+comment explaining why.
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
+If the compiler reports errors on removed helpers still being referenced, keep
+those specific usages and add a `// TODO: remove when SDK types improve` comment.
+
+**Step 5: Run full tests**
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/claude/claude-event-translator.test.ts`
+Expected: ALL PASS
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
+Expected: PASS
+
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm test`
+Expected: ALL PASS
+
+**Step 6: Commit**
+
+```bash
+git add src/lib/provider/claude/claude-event-translator.ts
+git commit -m "refactor: type result/user/assistant handlers, remove asRecord helpers
+
+All SDK message handlers now use typed access via discriminated union
+narrowing. The asRecord/getString/getNumber/getRecord helpers are
+removed (or marked for removal where SDK type gaps remain). The entire
+data extraction pipeline is now compiler-verified:
+
+  SDK (typed) → Translator (typed) → CanonicalEvent (typed) → RelayEventSink (typed)
+
+New SDK fields are visible to the translator via autocomplete. Missing
+field accesses cause compile errors. New content block types or delta
+types cause exhaustive switch errors."
 ```
