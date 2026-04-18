@@ -977,173 +977,56 @@ git commit -m "test: add PROCESSING_TIMEOUT interaction contract test"
 
 These tests document the EXPECTED behavior. They FAIL today, serving as the acceptance criteria for the fix. Add a new describe block after the existing one:
 
-```typescript
 /**
- * FAILING SPECS — these document the expected delivery-layer behavior
- * for the session rejoin bug. They fail today because:
+ * TODO SPECS — these document the expected delivery-layer behavior
+ * for the session rejoin bug. They use it.todo because:
  *
- * 1. wsHandler.sendToSession only delivers to currently-mapped clients
- * 2. When a client navigates away, events emitted while away are lost
- *    (not buffered)
- * 3. When the client returns, session_switched replays history from
- *    SQLite, but live events arriving during/after replay may be
- *    dropped by the frontend
+ * The bug cannot be reproduced at the unit-test level — the mock
+ * wsHandler correctly routes events to remapped clients. The real
+ * bug is in the full system interaction between wsHandler, session
+ * switching, history replay, and frontend event coordination.
  *
- * Fix these tests by fixing the delivery layer, then remove .fails.
+ * These specs document WHAT should work. When investigating the bug,
+ * write integration tests that exercise the full delivery path.
  */
-describe("Claude session rejoin — delivery-layer specs (EXPECTED TO FAIL)", () => {
-	it.fails("client receives events emitted AFTER rejoin via sendToSession", async () => {
-		// This tests the real delivery path: sendToSession should reach
-		// clients that are currently mapped to the session.
-		const clientReceived: RelayMessage[] = [];
-		const wsHandler = createMockWsHandler();
+describe("Claude session rejoin — delivery-layer specs (TODO)", () => {
+	it.todo("client receives events emitted AFTER rejoin via sendToSession");
+	// After navigate-away and return, new events from the ongoing
+	// Claude turn should stream to the client. Currently they don't.
+	// Root cause TBD — likely in wsHandler delivery, session_switched
+	// replay coordination, or frontend turnEpoch/dedup logic.
 
-		// Wire sink's send through the REAL delivery path
-		const sink = createRelayEventSink({
-			sessionId: SESSION_ID,
-			send: (msg) => {
-				// Simulate wsHandler.sendToSession: only deliver to mapped clients
-				const viewers = wsHandler.getViewers(SESSION_ID);
-				for (const viewer of viewers) {
-					clientReceived.push(msg);
-				}
-			},
-		});
+	it.todo("thinking block started before navigate-away completes after return");
+	// If a thinking block starts, user navigates away, thinking ends
+	// while away, text starts, user returns — the text deltas emitted
+	// after return should stream to the client.
 
-		// Phase 1: client mapped, events delivered
-		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
-		await sink.push(
-			canonicalEvent("text.delta", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "Before",
-			}),
-		);
-		expect(clientReceived.length).toBe(1);
-
-		// Phase 2: client navigates away
-		wsHandler.setClientSession(CLIENT_ID, "other-session");
-
-		// Phase 3: events emitted while away — client doesn't receive
-		await sink.push(
-			canonicalEvent("text.delta", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: " while away",
-			}),
-		);
-		// No new messages to client (correct — they're not viewing)
-		expect(clientReceived.length).toBe(1);
-
-		// Phase 4: client returns
-		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
-
-		// Phase 5: new events SHOULD reach client
-		await sink.push(
-			canonicalEvent("text.delta", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: " after return",
-			}),
-		);
-
-		// This assertion documents expected behavior:
-		// client should receive the event emitted after they returned.
-		// FAILS today because [root cause TBD — delivery layer issue].
-		expect(clientReceived.length).toBe(2);
-	});
-
-	it.fails("thinking block started before navigate-away completes after return", async () => {
-		const clientReceived: RelayMessage[] = [];
-		const wsHandler = createMockWsHandler();
-
-		const sink = createRelayEventSink({
-			sessionId: SESSION_ID,
-			send: (msg) => {
-				const viewers = wsHandler.getViewers(SESSION_ID);
-				for (const _viewer of viewers) {
-					clientReceived.push(msg);
-				}
-			},
-		});
-
-		// Start thinking while client is viewing
-		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
-		await sink.push(
-			canonicalEvent("thinking.start", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "part-think-1",
-			}),
-		);
-
-		// Navigate away during thinking
-		wsHandler.setClientSession(CLIENT_ID, "other-session");
-
-		// Thinking continues and ends while away
-		await sink.push(
-			canonicalEvent("thinking.delta", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "part-think-1",
-				text: "reasoning...",
-			}),
-		);
-		await sink.push(
-			canonicalEvent("thinking.end", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "part-think-1",
-			}),
-		);
-
-		// Text streaming starts while still away
-		await sink.push(
-			canonicalEvent("text.delta", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "part-text-1",
-				text: "Here is the answer",
-			}),
-		);
-
-		// Client returns
-		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
-
-		// New text delta after return
-		await sink.push(
-			canonicalEvent("text.delta", SESSION_ID, {
-				messageId: "msg-1",
-				partId: "part-text-1",
-				text: " continued...",
-			}),
-		);
-
-		// Expected: client received thinking_start (before nav) + delta after return
-		// The events while away are in SQLite history (tested elsewhere).
-		// This test asserts live streaming resumes.
-		const postReturnDeltas = clientReceived.filter(
-			(m) => m.type === "delta" || m.type === "thinking_start",
-		);
-		expect(postReturnDeltas.length).toBeGreaterThanOrEqual(2);
-	});
+	it.todo("permission approval after rejoin resumes streaming");
+	// If Claude asks permission, user navigates away, returns, approves
+	// the (rehydrated) permission — streaming should resume with the
+	// SDK's continued output.
 });
 ```
 
-> **Note:** These tests use `it.fails` which means Vitest expects them to fail. When the rejoin bug is fixed, change `it.fails` to `it` and verify they pass.
+> **Note:** These use `it.todo` (no body) because the bug cannot be reproduced at unit-test level — the mock correctly delivers events. Real fix needs integration tests exercising the full wsHandler → session-switch → frontend pipeline. When investigating the bug, replace `it.todo` with real tests.
 
 **Step 2: Run test**
 
 Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/pipeline/claude-session-rejoin.test.ts`
-Expected: ALL PASS (the `.fails` tests pass because Vitest expects the inner assertion to fail)
+Expected: ALL PASS (todo tests are skipped)
 
 **Step 3: Commit**
 
 ```bash
 git add test/unit/pipeline/claude-session-rejoin.test.ts
-git commit -m "test: add failing specs for delivery-layer rejoin bug
+git commit -m "test: add todo specs for delivery-layer rejoin bug
 
-These tests document the expected behavior when a client navigates away
-from a Claude session and returns. They use it.fails because the
-delivery layer currently doesn't resume live streaming after rejoin.
+Documents expected behavior for navigate-away-and-back: events should
+resume streaming after rejoin, thinking blocks should complete across
+navigation, and permission approval should resume streaming.
 
-When the rejoin bug is fixed, change it.fails to it."
+Uses it.todo because the bug is in system-level interactions that
+cannot be reproduced with unit-level mocks."
 ```
 
 ---
