@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -319,6 +320,246 @@ describe("Pipeline property-based tests", () => {
 				}
 			}),
 			{ numRuns: 200 },
+		);
+	});
+});
+
+// ─── Invalid sequence arbitraries ────────────────────────────────────
+
+/** Shuffle an array randomly */
+function shuffle<T>(arr: T[], rng: () => number): T[] {
+	const result = [...arr];
+	for (let i = result.length - 1; i > 0; i--) {
+		const j = Math.floor(rng() * (i + 1));
+		[result[i]!, result[j]!] = [result[j]!, result[i]!];
+	}
+	return result;
+}
+
+/**
+ * Generates a valid event sequence then applies a corruption strategy:
+ * - "shuffle": random permutation of all events within the turn
+ * - "drop": randomly removes 1-3 events (excluding message.created)
+ * - "duplicate": randomly duplicates 1-3 events
+ */
+const corruptedSequenceArb = fc.tuple(
+	eventSequenceArb,
+	fc.oneof(
+		fc.constant("shuffle" as const),
+		fc.constant("drop" as const),
+		fc.constant("duplicate" as const),
+	),
+	fc.integer({ min: 1, max: 2_000_000_000 }), // RNG seed
+).map(([blocks, strategy, seed]) => ({ blocks, strategy, seed }));
+
+describe("Pipeline PBT — invalid/corrupted event sequences", () => {
+	it("PBT: pipeline never crashes on shuffled event order", () => {
+		fc.assert(
+			fc.property(corruptedSequenceArb, ({ blocks, seed }) => {
+				const harness = createTestHarness();
+				try {
+					harness.seedSession("ses-shuffle");
+					const projector = new MessageProjector();
+					const events: StoredEvent[] = [];
+					let seq = 0;
+					let ts = 1_000_000_000_000;
+
+					// Build full event list
+					events.push(
+						makeStored("message.created", "ses-shuffle", {
+							messageId: "msg-s", role: "assistant", sessionId: "ses-shuffle",
+						}, { sequence: ++seq, createdAt: ts++ }),
+					);
+					for (const block of blocks) {
+						if (block.type === "thinking") {
+							events.push(makeStored("thinking.start", "ses-shuffle", {
+								messageId: "msg-s", partId: block.partId,
+							}, { sequence: ++seq, createdAt: ts++ }));
+							for (const text of block.deltas) {
+								events.push(makeStored("thinking.delta", "ses-shuffle", {
+									messageId: "msg-s", partId: block.partId, text,
+								}, { sequence: ++seq, createdAt: ts++ }));
+							}
+							events.push(makeStored("thinking.end", "ses-shuffle", {
+								messageId: "msg-s", partId: block.partId,
+							}, { sequence: ++seq, createdAt: ts++ }));
+						} else {
+							for (const text of block.deltas) {
+								events.push(makeStored("text.delta", "ses-shuffle", {
+									messageId: "msg-s", partId: block.partId, text,
+								}, { sequence: ++seq, createdAt: ts++ }));
+							}
+						}
+					}
+					events.push(makeStored("turn.completed", "ses-shuffle", {
+						messageId: "msg-s", cost: 0, duration: 0,
+						tokens: { input: 0, output: 0 },
+					}, { sequence: ++seq, createdAt: ts++ }));
+
+					// Shuffle using deterministic RNG
+					let rngState = seed;
+					const rng = () => {
+						rngState = (rngState * 1664525 + 1013904223) & 0x7fffffff;
+						return rngState / 0x7fffffff;
+					};
+					const shuffled = shuffle(events, rng);
+
+					// Project all — should never throw
+					expect(() => {
+						for (const event of shuffled) {
+							projector.project(event, harness.db);
+						}
+						readPipeline(harness, "ses-shuffle");
+					}).not.toThrow();
+				} finally {
+					harness.close();
+				}
+			}),
+			{ numRuns: 100 },
+		);
+	});
+
+	it("PBT: pipeline never crashes on sequences with randomly dropped events", () => {
+		fc.assert(
+			fc.property(
+				corruptedSequenceArb,
+				fc.integer({ min: 1, max: 3 }),
+				({ blocks, seed }, dropCount) => {
+					const harness = createTestHarness();
+					try {
+						harness.seedSession("ses-drop");
+						const projector = new MessageProjector();
+						const events: StoredEvent[] = [];
+						let seq = 0;
+						let ts = 1_000_000_000_000;
+
+						events.push(makeStored("message.created", "ses-drop", {
+							messageId: "msg-d", role: "assistant", sessionId: "ses-drop",
+						}, { sequence: ++seq, createdAt: ts++ }));
+						for (const block of blocks) {
+							if (block.type === "thinking") {
+								events.push(makeStored("thinking.start", "ses-drop", {
+									messageId: "msg-d", partId: block.partId,
+								}, { sequence: ++seq, createdAt: ts++ }));
+								for (const text of block.deltas) {
+									events.push(makeStored("thinking.delta", "ses-drop", {
+										messageId: "msg-d", partId: block.partId, text,
+									}, { sequence: ++seq, createdAt: ts++ }));
+								}
+								events.push(makeStored("thinking.end", "ses-drop", {
+									messageId: "msg-d", partId: block.partId,
+								}, { sequence: ++seq, createdAt: ts++ }));
+							} else {
+								for (const text of block.deltas) {
+									events.push(makeStored("text.delta", "ses-drop", {
+										messageId: "msg-d", partId: block.partId, text,
+									}, { sequence: ++seq, createdAt: ts++ }));
+								}
+							}
+						}
+						events.push(makeStored("turn.completed", "ses-drop", {
+							messageId: "msg-d", cost: 0, duration: 0,
+							tokens: { input: 0, output: 0 },
+						}, { sequence: ++seq, createdAt: ts++ }));
+
+						// Drop random events (skip first — message.created)
+						let rngState = seed;
+						const rng = () => {
+							rngState = (rngState * 1664525 + 1013904223) & 0x7fffffff;
+							return rngState / 0x7fffffff;
+						};
+						const droppable = events.slice(1); // keep message.created
+						const toDrop = new Set<number>();
+						for (let i = 0; i < Math.min(dropCount, droppable.length); i++) {
+							toDrop.add(Math.floor(rng() * droppable.length));
+						}
+						const filtered = [
+							events[0]!,
+							...droppable.filter((_, idx) => !toDrop.has(idx)),
+						];
+
+						expect(() => {
+							for (const event of filtered) {
+								projector.project(event, harness.db);
+							}
+							readPipeline(harness, "ses-drop");
+						}).not.toThrow();
+					} finally {
+						harness.close();
+					}
+				},
+			),
+			{ numRuns: 100 },
+		);
+	});
+
+	it("PBT: pipeline never crashes on sequences with duplicate events", () => {
+		fc.assert(
+			fc.property(
+				corruptedSequenceArb,
+				fc.integer({ min: 1, max: 3 }),
+				({ blocks, seed }, dupCount) => {
+					const harness = createTestHarness();
+					try {
+						harness.seedSession("ses-dup");
+						const projector = new MessageProjector();
+						const events: StoredEvent[] = [];
+						let seq = 0;
+						let ts = 1_000_000_000_000;
+
+						events.push(makeStored("message.created", "ses-dup", {
+							messageId: "msg-dp", role: "assistant", sessionId: "ses-dup",
+						}, { sequence: ++seq, createdAt: ts++ }));
+						for (const block of blocks) {
+							if (block.type === "thinking") {
+								events.push(makeStored("thinking.start", "ses-dup", {
+									messageId: "msg-dp", partId: block.partId,
+								}, { sequence: ++seq, createdAt: ts++ }));
+								for (const text of block.deltas) {
+									events.push(makeStored("thinking.delta", "ses-dup", {
+										messageId: "msg-dp", partId: block.partId, text,
+									}, { sequence: ++seq, createdAt: ts++ }));
+								}
+								events.push(makeStored("thinking.end", "ses-dup", {
+									messageId: "msg-dp", partId: block.partId,
+								}, { sequence: ++seq, createdAt: ts++ }));
+							} else {
+								for (const text of block.deltas) {
+									events.push(makeStored("text.delta", "ses-dup", {
+										messageId: "msg-dp", partId: block.partId, text,
+									}, { sequence: ++seq, createdAt: ts++ }));
+								}
+							}
+						}
+						events.push(makeStored("turn.completed", "ses-dup", {
+							messageId: "msg-dp", cost: 0, duration: 0,
+							tokens: { input: 0, output: 0 },
+						}, { sequence: ++seq, createdAt: ts++ }));
+
+						// Duplicate random events
+						let rngState = seed;
+						const rng = () => {
+							rngState = (rngState * 1664525 + 1013904223) & 0x7fffffff;
+							return rngState / 0x7fffffff;
+						};
+						const withDups = [...events];
+						for (let i = 0; i < dupCount; i++) {
+							const idx = Math.floor(rng() * events.length);
+							withDups.splice(idx + 1, 0, events[idx]!);
+						}
+
+						expect(() => {
+							for (const event of withDups) {
+								projector.project(event, harness.db);
+							}
+							readPipeline(harness, "ses-dup");
+						}).not.toThrow();
+					} finally {
+						harness.close();
+					}
+				},
+			),
+			{ numRuns: 100 },
 		);
 	});
 });
