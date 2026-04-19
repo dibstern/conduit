@@ -240,3 +240,33 @@ describe("Claude session rejoin — event flow contracts", () => {
 		expect(sent.some((m) => m.type === "done")).toBe(true);
 	});
 });
+
+/**
+ * TODO SPECS — these document the expected delivery-layer behavior
+ * for the session rejoin bug. They use it.todo because:
+ *
+ * The bug cannot be reproduced at the unit-test level — the mock
+ * wsHandler correctly routes events to remapped clients. The real
+ * bug is in the full system interaction between wsHandler, session
+ * switching, history replay, and frontend event coordination.
+ *
+ * These specs document WHAT should work. When investigating the bug,
+ * write integration tests that exercise the full delivery path.
+ */
+describe("Claude session rejoin — delivery-layer specs (TODO)", () => {
+	it.todo("client receives events emitted AFTER rejoin via sendToSession");
+	// After navigate-away and return, new events from the ongoing
+	// Claude turn should stream to the client. Currently they don't.
+	// Root cause TBD — likely in wsHandler delivery, session_switched
+	// replay coordination, or frontend turnEpoch/dedup logic.
+
+	it.todo("thinking block started before navigate-away completes after return");
+	// If a thinking block starts, user navigates away, thinking ends
+	// while away, text starts, user returns — the text deltas emitted
+	// after return should stream to the client.
+
+	it.todo("permission approval after rejoin resumes streaming");
+	// If Claude asks permission, user navigates away, returns, approves
+	// the (rehydrated) permission — streaming should resume with the
+	// SDK's continued output.
+});
