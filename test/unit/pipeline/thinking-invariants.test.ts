@@ -339,3 +339,37 @@ describe("clearMessages + active thinking race", () => {
 		expect(thinkingBlocks[0]!.done).toBe(true);
 	});
 });
+
+// ─── Future feature specs: Rewind / Fork ─────────────────────────────
+// These document expected invariants for features not yet implemented.
+// Replace it.todo with real tests when implementing.
+
+describe("Rewind feature invariants (TODO)", () => {
+	it.todo(
+		"rewinding to mid-thinking-block produces valid state — thinking block should be truncated or removed, not left with done=false",
+	);
+
+	it.todo(
+		"checkpoint at thinking boundary — rewind to just after thinking.end should preserve complete thinking block",
+	);
+
+	it.todo(
+		"checkpoint mid-thinking — rewind to between thinking.start and thinking.end should discard incomplete thinking",
+	);
+
+	it.todo(
+		"rewind + replay does not double thinking text — replayed thinking.delta events should be deduplicated via alreadyApplied()",
+	);
+
+	it.todo(
+		"rewind across tool/permission boundary — approved permission state should be reverted or preserved based on checkpoint policy",
+	);
+
+	it.todo(
+		"forked session inherits only complete thinking blocks — incomplete thinking at fork point should be excluded from inherited partition",
+	);
+
+	it.todo(
+		"revert/unrevert round-trip — reverting a rewind should restore the original state exactly, including thinking text and done status",
+	);
+});
