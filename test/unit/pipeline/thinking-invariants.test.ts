@@ -193,3 +193,72 @@ describe("Fork-split thinking invariants", () => {
 		}
 	});
 });
+
+describe("Error → recovery cycle", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		clearMessages();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("error mid-thinking, then new turn — old thinking finalized", () => {
+		// Turn 1: thinking starts, no stop
+		handleThinkingStart(msg("thinking_start"));
+		handleThinkingDelta(msg("thinking_delta", { text: "old thought" }));
+		// Error arrives — handleDone finalizes everything
+		handleDone(msg("done", { code: 1 }));
+
+		// Turn 2: new thinking
+		handleThinkingStart(msg("thinking_start"));
+		handleThinkingDelta(msg("thinking_delta", { text: "new thought" }));
+		handleThinkingStop(msg("thinking_stop"));
+		handleDone(msg("done", { code: 0 }));
+
+		const thinkingBlocks = chatState.messages.filter(
+			(m): m is ThinkingMessage => m.type === "thinking",
+		);
+		// All thinking blocks (old and new) must be done
+		for (const block of thinkingBlocks) {
+			expect(block.done).toBe(true);
+		}
+		expect(thinkingBlocks.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("multiple handleDone calls in sequence — no error, no double-finalization artifacts", () => {
+		handleThinkingStart(msg("thinking_start"));
+		handleThinkingDelta(msg("thinking_delta", { text: "content" }));
+		handleThinkingStop(msg("thinking_stop"));
+
+		// First done
+		handleDone(msg("done", { code: 0 }));
+		const countAfterFirst = chatState.messages.filter(
+			(m) => m.type === "thinking",
+		).length;
+
+		// Second done — should not create new messages or crash
+		handleDone(msg("done", { code: 0 }));
+		const countAfterSecond = chatState.messages.filter(
+			(m) => m.type === "thinking",
+		).length;
+
+		expect(countAfterSecond).toBe(countAfterFirst);
+	});
+
+	it("thinking blocks without handleDone — remain done=false (zombie state)", () => {
+		handleThinkingStart(msg("thinking_start"));
+		handleThinkingDelta(msg("thinking_delta", { text: "zombie thought" }));
+		// NO handleDone — simulates process killed or WS disconnect
+
+		const thinking = chatState.messages.find(
+			(m): m is ThinkingMessage => m.type === "thinking",
+		);
+		expect(thinking).toBeDefined();
+		// Without handleDone, thinking blocks remain done=false
+		// This documents the zombie state — frontend should handle reconnect
+		// biome-ignore lint/style/noNonNullAssertion: asserted above
+		expect(thinking!.done).toBe(false);
+	});
+});
