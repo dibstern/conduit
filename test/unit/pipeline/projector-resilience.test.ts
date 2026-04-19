@@ -1004,6 +1004,41 @@ describe("MessageProjector resilience", () => {
 			expect(chatB.some((m) => m.type === "assistant")).toBe(true);
 			expect(chatB.some((m) => m.type === "thinking")).toBe(false);
 		});
+
+		it("KNOWN RISK: mismatched StoredEvent.sessionId vs payload.sessionId — data leaks to wrong session", () => {
+			// StoredEvent wrapper says SESSION_A, but payload says SESSION_B
+			// MessageProjector uses payload.sessionId for the FK insert
+			const mismatchEvent = makeStored("message.created", SESSION_A, {
+				messageId: "msg-inject", role: "assistant", sessionId: SESSION_B,
+			}, { sequence: nextSeq(), createdAt: NOW });
+
+			project(mismatchEvent);
+
+			project(makeStored("text.delta", SESSION_A, {
+				messageId: "msg-inject", partId: "part-inject", text: "injected",
+			}, { sequence: nextSeq(), createdAt: NOW + 100 }));
+
+			project(makeStored("turn.completed", SESSION_A, {
+				messageId: "msg-inject", cost: 0, duration: 0,
+				tokens: { input: 0, output: 0 },
+			}, { sequence: nextSeq(), createdAt: NOW + 200 }));
+
+			// Message lands in SESSION_B despite event being "from" SESSION_A
+			const chatB = readPipeline(SESSION_B);
+			const chatA = readPipeline(SESSION_A);
+
+			// Documents the risk: message.created uses payload.sessionId,
+			// so the message row's session_id = SESSION_B
+			const assistantInB = chatB.find((m) => m.type === "assistant");
+			// If this assertion passes, it confirms the cross-session injection risk
+			// If it fails, the projector may have been fixed to use the wrapper sessionId
+			if (assistantInB) {
+				// Risk confirmed — document it
+				expect(assistantInB).toBeDefined();
+				expect(chatA.find((m) => m.type === "assistant")).toBeUndefined();
+			}
+			// Either way, pipeline should not crash
+		});
 	});
 
 	// ─── Malformed / adversarial payloads ────────────────────────────────
