@@ -188,11 +188,14 @@ export interface PtyInfo {
  * Shape of HistoryMessage parts (tool calls, text, reasoning, etc.).
  *
  * Loosely mirrors SDK `Part` with relay-specific extensions.
- * The `type` field uses SDK-derived `PartType` for discriminated narrowing.
+ * The `type` field uses SDK-derived `PartType` for discriminated narrowing,
+ * widened with `"thinking"` to cover Claude SDK thinking blocks which the
+ * MessageProjector stores in SQLite with `type='thinking'` (not an OpenCode
+ * SDK part type).
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType;
+	type: PartType | "thinking";
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */

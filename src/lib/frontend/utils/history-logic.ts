@@ -180,6 +180,7 @@ function convertAssistantParts(
 				firstTextSeen = true;
 				break;
 			}
+			case "thinking":
 			case "reasoning": {
 				const text = part.text ?? "";
 				const time = part.time as { start?: number; end?: number } | undefined;
