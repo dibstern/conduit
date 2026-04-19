@@ -276,7 +276,21 @@ function translateCanonicalEvent(event: CanonicalEvent): RelayMessage[] {
 		}
 
 		case "tool.input_updated": {
-			return [];
+			// Claude SDK streams tool_use input via input_json_delta — the
+			// initial tool.started event fires with `input: {}` and this
+			// event carries the real parsed input once each delta parses.
+			// Forward as tool_executing so the browser-side tool registry
+			// merges the new input on the already-running tool entry.
+			const { partId, input, messageId, toolName } = event.data;
+			return [
+				{
+					type: "tool_executing",
+					id: partId,
+					name: toolName ?? "",
+					input: isRecord(input) ? input : undefined,
+					messageId,
+				},
+			];
 		}
 
 		case "tool.completed": {

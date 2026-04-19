@@ -531,6 +531,7 @@ export class ClaudeEventTranslator {
 					makeCanonicalEvent("tool.input_updated", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
+						toolName: tool.toolName,
 						input: parsed,
 					}),
 				);

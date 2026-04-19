@@ -112,6 +112,13 @@ export interface ToolInputUpdatedPayload {
 	readonly messageId: string;
 	readonly partId: string;
 	readonly input: unknown;
+	/**
+	 * Optional tool name. Carried through so downstream translators (e.g.
+	 * the relay event sink forwarding to the browser) can tag the derived
+	 * `tool_executing` RelayMessage with the correct tool name. Not required:
+	 * callers that look up the in-flight tool by `partId` alone can omit it.
+	 */
+	readonly toolName?: string;
 }
 
 export interface TurnCompletedPayload {
