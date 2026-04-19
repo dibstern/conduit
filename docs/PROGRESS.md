@@ -409,14 +409,14 @@
 | Production code | ~47,200 lines across 241 server modules |
 | Svelte frontend | ~12,400 lines across 102 modules (8 stores, 8 utils, 41 components, 3 pages, types, App, 41 story files, mocks) |
 | Frontend bundle | 379KB JS + 64KB CSS (Svelte 5 SPA) |
-| Test code (unit/fixture) | ~88,900 lines across 248 test files |
+| Test code (unit/fixture) | ~90,100 lines across 260 test files |
 | Test code (integration) | ~1,200 lines across 8 test files + 2 helpers |
 | Test code (contract) | ~680 lines across 7 test files |
 | Storybook stories | 41 story files, ~153 stories total |
-| Tests passing (unit/fixture) | 4402 / 4402 |
+| Tests passing (unit/fixture) | 4506 / 4506 (+ 12 todo) |
 | Tests passing (integration) | 108 / 108 |
 | Tests (Playwright E2E) | 280 across 9 spec files × 5 viewports |
-| Tests total | 4790 (4402 unit + 108 integration + 280 E2E) |
+| Tests total | 4894 (4506 unit + 108 integration + 280 E2E) |
 | Test duration (unit) | ~5.7s |
 | Test duration (integration) | ~91s |
 | E2E test code | ~1,950 lines across 21 files (3 helpers, 9 page objects, 9 specs) |
@@ -889,3 +889,57 @@
 
 **Tests added:** 14 tests (1 updated + 13 new) across 5 files
 - **Verification**: `pnpm check` clean, `pnpm test:unit` — 248 test files, 4402 tests passing
+
+### 2026-04-18 — Pipeline Resilience Tests
+
+**Production fix:**
+- `src/lib/frontend/utils/history-logic.ts` — `convertAssistantParts` now handles `case "thinking"` alongside `case "reasoning"` (Claude SDK thinking blocks no longer silently dropped on session reload)
+- `src/lib/shared-types.ts` — widened `HistoryMessagePart["type"]` to `PartType | "thinking"`
+- `src/lib/persistence/projectors/message-projector.ts` — defensive `INSERT OR IGNORE INTO messages` added to `thinking.delta` handler for FK-safety under shuffled event delivery (matched existing pattern on siblings `text.delta`, `thinking.start`, `tool.started`)
+
+**Tests added:**
+- Thinking lifecycle pipeline integration (project → SQLite → history → chat state)
+- Thinking block invariants (done=true after handleDone, text preservation, fork-split safety)
+- Claude session rejoin contracts (event flow after navigate-away-and-back)
+- Projector resilience (out-of-order, duplicates, edge cases, fault injection, isolation)
+- History conversion regression (part type guards, duration calculation, pagination)
+- Event translation snapshots + sink lifecycle (RelayMessage shape contracts)
+- Pipeline property-based tests (8 properties via fast-check; SEED=42, endOnFailure)
+- Malformed/adversarial payloads (empty text, SQL injection, 100KB blobs, HTML entities)
+- Unicode/encoding stress (emoji, CJK, RTL, surrogate pairs, null bytes, multi-byte concat)
+- Orphan event edges (orphan end, early turn.completed, turn.error mid-thinking, duplicate idempotency)
+- Frontend error→recovery cycle (error mid-thinking, double handleDone, zombie state)
+- Rejoin integration with delivery-layer fidelity (navigate-away gap documentation)
+- Pre-existing data round-trip / migration safety
+- Cross-session event injection risk documentation
+- Snapshot fragility strategy documentation + structural minimum safety net
+- DB schema CHECK constraint guard (rejects invalid part types)
+- EventPayloadMap key snapshot (derived from CANONICAL_EVENT_TYPES)
+- Concurrent projection stress (interleaved sessions, shared projector)
+- PBT invalid/corrupted event sequences (shuffled, dropped, duplicated events)
+- Text delta concatenation order (3+ distinct deltas, both text and thinking)
+- Multi-turn conversation pipeline (user→assistant→user→assistant with thinking)
+- clearMessages + active thinking race (mid-stream clear, subsequent events safe)
+- Unknown part type runtime drop behavior
+- Session deletion FK constraint contract
+- SSE reconnection replay (overlap events skipped, new applied)
+- Multi-client / multi-tab delivery (two tabs, navigate-away isolation)
+- Permission + thinking interleaving (thinking→tool→text, thinking→tool→thinking→text)
+- PBT regression seed preservation (SEED=42, regression case block)
+- Rewind/fork feature todo specs (7 it.todo stubs)
+
+**Files created:**
+- `test/unit/pipeline/thinking-lifecycle-pipeline.test.ts`
+- `test/unit/pipeline/thinking-invariants.test.ts`
+- `test/unit/pipeline/claude-session-rejoin.test.ts`
+- `test/unit/pipeline/projector-resilience.test.ts`
+- `test/unit/pipeline/history-regression.test.ts`
+- `test/unit/pipeline/event-translation-snapshots.test.ts`
+- `test/unit/pipeline/pipeline-properties.test.ts`
+- `test/unit/pipeline/rejoin-integration.test.ts`
+- `test/unit/pipeline/exhaustiveness-guards.test.ts`
+- `test/unit/pipeline/concurrent-projection.test.ts`
+- `test/unit/pipeline/multi-turn-pipeline.test.ts`
+- `test/unit/pipeline/permission-thinking-interleave.test.ts`
+
+- **Verification**: `pnpm check` clean, `pnpm lint` clean, `pnpm test` — 260 test files, 4506 tests passing (+ 12 todo)
