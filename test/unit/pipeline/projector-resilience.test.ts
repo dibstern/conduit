@@ -53,6 +53,65 @@ describe("MessageProjector resilience", () => {
 		return historyToChatMessages(messages);
 	}
 
+	// ─── Session lifecycle ───────────────────────────────────────────────
+
+	describe("session lifecycle", () => {
+		it("deleting session with dependent messages throws FK error at DELETE", () => {
+			project(
+				makeStored(
+					"message.created",
+					SESSION_A,
+					{
+						messageId: "msg-del",
+						role: "assistant",
+						sessionId: SESSION_A,
+					},
+					{ sequence: nextSeq(), createdAt: NOW },
+				),
+			);
+
+			// DELETE itself throws because messages.session_id FK has no CASCADE
+			// and foreign_keys pragma is ON. This prevents orphan messages.
+			expect(() =>
+				harness.db.execute("DELETE FROM sessions WHERE id = ?", [SESSION_A]),
+			).toThrow(/FOREIGN KEY|constraint/i);
+
+			// Session + message still exist — pipeline state preserved
+			const chat = readPipeline(SESSION_A);
+			// Empty turn (only message.created projected) — no thinking or text
+			expect(chat.filter((m) => m.type === "thinking")).toHaveLength(0);
+			expect(chat.filter((m) => m.type === "assistant")).toHaveLength(0);
+		});
+
+		it("deleting session with no dependents succeeds; subsequent message.created fails FK", () => {
+			// Safe to delete: no messages/turns reference SESSION_B yet
+			// (beforeEach only seeds the session row, no events projected).
+			expect(() =>
+				harness.db.execute("DELETE FROM sessions WHERE id = ?", [SESSION_B]),
+			).not.toThrow();
+
+			// Subsequent message.created for the deleted session fails FK
+			expect(() =>
+				project(
+					makeStored(
+						"message.created",
+						SESSION_B,
+						{
+							messageId: "msg-del-b",
+							role: "assistant",
+							sessionId: SESSION_B,
+						},
+						{ sequence: nextSeq(), createdAt: NOW },
+					),
+				),
+			).toThrow(/FOREIGN KEY|constraint/i);
+
+			// Pipeline read on the deleted session returns empty — no data corruption
+			const chat = readPipeline(SESSION_B);
+			expect(chat).toHaveLength(0);
+		});
+	});
+
 	// ─── Out-of-order events ────────────────────────────────────────────
 
 	describe("out-of-order events", () => {
