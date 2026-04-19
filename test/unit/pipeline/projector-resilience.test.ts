@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
+import type {
+	AssistantMessage,
+	ThinkingMessage,
+} from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
@@ -524,6 +527,176 @@ describe("MessageProjector resilience", () => {
 			// No assistant message — no text.delta was projected
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeUndefined();
+		});
+
+		it("3 sequential text.deltas concatenate in correct order", () => {
+			project(
+				makeStored(
+					"message.created",
+					SESSION_A,
+					{
+						messageId: "msg-concat-ord",
+						role: "assistant",
+						sessionId: SESSION_A,
+					},
+					{ sequence: nextSeq(), createdAt: NOW },
+				),
+			);
+
+			project(
+				makeStored(
+					"text.delta",
+					SESSION_A,
+					{
+						messageId: "msg-concat-ord",
+						partId: "part-concat-ord",
+						text: "alpha",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 100 },
+				),
+			);
+
+			project(
+				makeStored(
+					"text.delta",
+					SESSION_A,
+					{
+						messageId: "msg-concat-ord",
+						partId: "part-concat-ord",
+						text: "beta",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 200 },
+				),
+			);
+
+			project(
+				makeStored(
+					"text.delta",
+					SESSION_A,
+					{
+						messageId: "msg-concat-ord",
+						partId: "part-concat-ord",
+						text: "gamma",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 300 },
+				),
+			);
+
+			project(
+				makeStored(
+					"turn.completed",
+					SESSION_A,
+					{
+						messageId: "msg-concat-ord",
+						cost: 0,
+						duration: 0,
+						tokens: { input: 0, output: 0 },
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 400 },
+				),
+			);
+
+			const chat = readPipeline(SESSION_A);
+			const assistant = chat.find(
+				(m): m is AssistantMessage => m.type === "assistant",
+			);
+			expect(assistant).toBeDefined();
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(assistant!.rawText).toBe("alphabetagamma");
+		});
+
+		it("3 sequential thinking.deltas concatenate in correct order", () => {
+			project(
+				makeStored(
+					"message.created",
+					SESSION_A,
+					{
+						messageId: "msg-tconcat",
+						role: "assistant",
+						sessionId: SESSION_A,
+					},
+					{ sequence: nextSeq(), createdAt: NOW },
+				),
+			);
+
+			project(
+				makeStored(
+					"thinking.start",
+					SESSION_A,
+					{ messageId: "msg-tconcat", partId: "part-tconcat" },
+					{ sequence: nextSeq(), createdAt: NOW + 100 },
+				),
+			);
+
+			project(
+				makeStored(
+					"thinking.delta",
+					SESSION_A,
+					{
+						messageId: "msg-tconcat",
+						partId: "part-tconcat",
+						text: "step1-",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 200 },
+				),
+			);
+
+			project(
+				makeStored(
+					"thinking.delta",
+					SESSION_A,
+					{
+						messageId: "msg-tconcat",
+						partId: "part-tconcat",
+						text: "step2-",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 300 },
+				),
+			);
+
+			project(
+				makeStored(
+					"thinking.delta",
+					SESSION_A,
+					{
+						messageId: "msg-tconcat",
+						partId: "part-tconcat",
+						text: "step3",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 400 },
+				),
+			);
+
+			project(
+				makeStored(
+					"thinking.end",
+					SESSION_A,
+					{ messageId: "msg-tconcat", partId: "part-tconcat" },
+					{ sequence: nextSeq(), createdAt: NOW + 500 },
+				),
+			);
+
+			project(
+				makeStored(
+					"turn.completed",
+					SESSION_A,
+					{
+						messageId: "msg-tconcat",
+						cost: 0,
+						duration: 0,
+						tokens: { input: 0, output: 0 },
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 600 },
+				),
+			);
+
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text).toBe("step1-step2-step3");
 		});
 	});
 
