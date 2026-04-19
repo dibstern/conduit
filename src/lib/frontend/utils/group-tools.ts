@@ -76,6 +76,24 @@ function extractHostname(url: string): string | undefined {
 	}
 }
 
+/**
+ * Reads the first defined string value from `input` matching one of `keys`.
+ *
+ * Motivation: OpenCode emits tool inputs in camelCase (`filePath`) while the
+ * Claude Agent SDK emits snake_case (`file_path`). To render both providers,
+ * we look up each canonical field under all known aliases.
+ */
+function readStr(
+	input: Record<string, unknown>,
+	...keys: string[]
+): string | undefined {
+	for (const key of keys) {
+		const value = input[key];
+		if (typeof value === "string" && value.length > 0) return value;
+	}
+	return undefined;
+}
+
 export function extractToolSummary(
 	name: string,
 	input?: Record<string, unknown>,
@@ -85,7 +103,7 @@ export function extractToolSummary(
 
 	switch (name) {
 		case "Read": {
-			const filePath = input["filePath"] as string | undefined;
+			const filePath = readStr(input, "filePath", "file_path");
 			const tags: string[] = [];
 			if (input["offset"] != null) tags.push(`offset:${input["offset"]}`);
 			if (input["limit"] != null) tags.push(`limit:${input["limit"]}`);
@@ -99,7 +117,7 @@ export function extractToolSummary(
 
 		case "Edit":
 		case "Write": {
-			const filePath = input["filePath"] as string | undefined;
+			const filePath = readStr(input, "filePath", "file_path");
 			return {
 				...(filePath != null && {
 					subtitle: stripRepoRoot(filePath, repoRoot),
@@ -108,41 +126,65 @@ export function extractToolSummary(
 		}
 
 		case "Bash": {
-			const description = input["description"] as string | undefined;
-			if (description) return { subtitle: description };
-			const command = input["command"] as string | undefined;
+			// Prefer the actual command so users see what ran; fall back to the
+			// model-supplied description when the command is not yet streamed.
+			const command = readStr(input, "command");
 			if (command) {
 				const subtitle =
 					command.length > 40 ? `${command.slice(0, 40)}…` : command;
 				return { subtitle };
 			}
-			return {};
+			const description = readStr(input, "description");
+			return description ? { subtitle: description } : {};
 		}
 
 		case "Grep": {
-			const pattern = input["pattern"] as string | undefined;
-			const include = input["include"] as string | undefined;
+			const pattern = readStr(input, "pattern");
+			const tags: string[] = [];
+			// `include` is OpenCode; `glob`/`type` are Claude SDK glob/type filters.
+			const include = readStr(input, "include", "glob");
+			if (include) tags.push(include);
+			const fileType = readStr(input, "type");
+			if (fileType) tags.push(fileType);
+			const searchPath = readStr(input, "path");
+			if (searchPath) tags.push(stripRepoRoot(searchPath, repoRoot));
 			return {
 				...(pattern != null && { subtitle: pattern }),
-				...(include ? { tags: [include] } : {}),
+				...(tags.length > 0 ? { tags } : {}),
 			};
 		}
 
 		case "Glob": {
-			const pattern = input["pattern"] as string | undefined;
-			return { ...(pattern != null && { subtitle: pattern }) };
+			const pattern = readStr(input, "pattern");
+			const tags: string[] = [];
+			const searchPath = readStr(input, "path");
+			if (searchPath) tags.push(stripRepoRoot(searchPath, repoRoot));
+			return {
+				...(pattern != null && { subtitle: pattern }),
+				...(tags.length > 0 ? { tags } : {}),
+			};
 		}
 
-		case "WebFetch":
-		case "WebSearch": {
-			const url = input["url"] as string | undefined;
+		case "WebFetch": {
+			const url = readStr(input, "url");
 			const hostname = url ? extractHostname(url) : undefined;
 			return { ...(hostname != null && { subtitle: hostname }) };
 		}
 
+		case "WebSearch": {
+			// OpenCode passes a `url`; Claude SDK passes a `query` string.
+			const url = readStr(input, "url");
+			if (url) {
+				const hostname = extractHostname(url);
+				if (hostname) return { subtitle: hostname };
+			}
+			const query = readStr(input, "query");
+			return query ? { subtitle: query } : {};
+		}
+
 		case "Task": {
-			const description = input["description"] as string | undefined;
-			const subagentType = input["subagent_type"] as string | undefined;
+			const description = readStr(input, "description");
+			const subagentType = readStr(input, "subagent_type", "subagentType");
 			return {
 				...(description != null && { subtitle: description }),
 				...(subagentType ? { tags: [subagentType] } : {}),
@@ -150,8 +192,8 @@ export function extractToolSummary(
 		}
 
 		case "LSP": {
-			const operation = input["operation"] as string | undefined;
-			const filePath = input["filePath"] as string | undefined;
+			const operation = readStr(input, "operation");
+			const filePath = readStr(input, "filePath", "file_path");
 			const tags: string[] = [];
 			if (filePath) tags.push(stripRepoRoot(filePath, repoRoot));
 			return {

@@ -85,10 +85,19 @@ describe("getToolCategory", () => {
 // ─── extractToolSummary ──────────────────────────────────────────────────────
 
 describe("extractToolSummary", () => {
-	it("extracts relative path for Read", () => {
+	it("extracts relative path for Read (camelCase filePath — OpenCode)", () => {
 		const result = extractToolSummary(
 			"Read",
 			{ filePath: "/home/user/project/src/main.ts" },
+			"/home/user/project",
+		);
+		expect(result.subtitle).toBe("src/main.ts");
+	});
+
+	it("extracts relative path for Read (snake_case file_path — Claude SDK)", () => {
+		const result = extractToolSummary(
+			"Read",
+			{ file_path: "/home/user/project/src/main.ts" },
 			"/home/user/project",
 		);
 		expect(result.subtitle).toBe("src/main.ts");
@@ -108,7 +117,7 @@ describe("extractToolSummary", () => {
 		expect(result.tags).toContain("limit:50");
 	});
 
-	it("extracts relative path for Edit", () => {
+	it("extracts relative path for Edit (camelCase)", () => {
 		const result = extractToolSummary(
 			"Edit",
 			{ filePath: "/home/user/project/src/main.ts" },
@@ -117,10 +126,28 @@ describe("extractToolSummary", () => {
 		expect(result.subtitle).toBe("src/main.ts");
 	});
 
-	it("extracts relative path for Write", () => {
+	it("extracts relative path for Edit (snake_case — Claude SDK)", () => {
+		const result = extractToolSummary(
+			"Edit",
+			{ file_path: "/home/user/project/src/main.ts" },
+			"/home/user/project",
+		);
+		expect(result.subtitle).toBe("src/main.ts");
+	});
+
+	it("extracts relative path for Write (camelCase)", () => {
 		const result = extractToolSummary(
 			"Write",
 			{ filePath: "/home/user/project/src/main.ts" },
+			"/home/user/project",
+		);
+		expect(result.subtitle).toBe("src/main.ts");
+	});
+
+	it("extracts relative path for Write (snake_case — Claude SDK)", () => {
+		const result = extractToolSummary(
+			"Write",
+			{ file_path: "/home/user/project/src/main.ts" },
 			"/home/user/project",
 		);
 		expect(result.subtitle).toBe("src/main.ts");
@@ -133,15 +160,22 @@ describe("extractToolSummary", () => {
 		expect(result.subtitle).toBe("/home/user/project/src/main.ts");
 	});
 
-	it("extracts description for Bash", () => {
+	it("extracts command for Bash (prefers command over description)", () => {
 		const result = extractToolSummary("Bash", {
 			description: "List all files",
 			command: "ls -la",
 		});
+		expect(result.subtitle).toBe("ls -la");
+	});
+
+	it("falls back to description for Bash when no command", () => {
+		const result = extractToolSummary("Bash", {
+			description: "List all files",
+		});
 		expect(result.subtitle).toBe("List all files");
 	});
 
-	it("falls back to command for Bash when no description", () => {
+	it("returns command as subtitle when only command present", () => {
 		const result = extractToolSummary("Bash", {
 			command: "ls -la",
 		});
@@ -164,13 +198,44 @@ describe("extractToolSummary", () => {
 		expect(result.subtitle).toBe("TODO");
 	});
 
-	it("includes include as tag for Grep", () => {
+	it("includes include as tag for Grep (OpenCode)", () => {
 		const result = extractToolSummary("Grep", {
 			pattern: "TODO",
 			include: "*.ts",
 		});
 		expect(result.subtitle).toBe("TODO");
 		expect(result.tags).toContain("*.ts");
+	});
+
+	it("includes glob as tag for Grep (Claude SDK)", () => {
+		const result = extractToolSummary("Grep", {
+			pattern: "TODO",
+			glob: "*.ts",
+		});
+		expect(result.subtitle).toBe("TODO");
+		expect(result.tags).toContain("*.ts");
+	});
+
+	it("includes type as tag for Grep (Claude SDK)", () => {
+		const result = extractToolSummary("Grep", {
+			pattern: "TODO",
+			type: "py",
+		});
+		expect(result.subtitle).toBe("TODO");
+		expect(result.tags).toContain("py");
+	});
+
+	it("includes path as tag for Grep (Claude SDK)", () => {
+		const result = extractToolSummary(
+			"Grep",
+			{
+				pattern: "TODO",
+				path: "/home/user/project/src",
+			},
+			"/home/user/project",
+		);
+		expect(result.subtitle).toBe("TODO");
+		expect(result.tags).toContain("src");
 	});
 
 	it("extracts pattern for Glob", () => {
@@ -187,11 +252,18 @@ describe("extractToolSummary", () => {
 		expect(result.subtitle).toBe("docs.example.com");
 	});
 
-	it("extracts hostname for WebSearch", () => {
+	it("extracts hostname for WebSearch (url — OpenCode)", () => {
 		const result = extractToolSummary("WebSearch", {
 			url: "https://www.google.com/search?q=test",
 		});
 		expect(result.subtitle).toBe("www.google.com");
+	});
+
+	it("extracts query for WebSearch (query — Claude SDK)", () => {
+		const result = extractToolSummary("WebSearch", {
+			query: "how to fix tool rendering",
+		});
+		expect(result.subtitle).toBe("how to fix tool rendering");
 	});
 
 	it("extracts description for Task", () => {
@@ -203,12 +275,25 @@ describe("extractToolSummary", () => {
 		expect(result.tags).toContain("code_review");
 	});
 
-	it("extracts operation for LSP", () => {
+	it("extracts operation for LSP (camelCase)", () => {
 		const result = extractToolSummary(
 			"LSP",
 			{
 				operation: "goToDefinition",
 				filePath: "/home/user/project/src/index.ts",
+			},
+			"/home/user/project",
+		);
+		expect(result.subtitle).toBe("goToDefinition");
+		expect(result.tags).toContain("src/index.ts");
+	});
+
+	it("extracts operation for LSP (snake_case)", () => {
+		const result = extractToolSummary(
+			"LSP",
+			{
+				operation: "goToDefinition",
+				file_path: "/home/user/project/src/index.ts",
 			},
 			"/home/user/project",
 		);
