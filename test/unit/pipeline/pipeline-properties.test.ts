@@ -257,26 +257,37 @@ describe("Pipeline property-based tests", () => {
 					harness.seedSession("ses-iso-b");
 
 					const projector = new MessageProjector();
-					// Use different seq/ts ranges to avoid PK collisions
 					projectBlocks(harness, projector, "ses-iso-a", "msg-a", blocksA);
 					projectBlocks(harness, projector, "ses-iso-b", "msg-b", blocksB);
 
 					const chatA = readPipeline(harness, "ses-iso-a");
 					const chatB = readPipeline(harness, "ses-iso-b");
 
-					// All thinking text in A should NOT appear in B (and vice versa)
-					const thinkTextsA = chatA
-						.filter((m): m is ThinkingMessage => m.type === "thinking")
-						.map((m) => m.text)
-						.filter((t) => t.length > 0);
-					const thinkTextsB = chatB
-						.filter((m): m is ThinkingMessage => m.type === "thinking")
-						.map((m) => m.text)
-						.filter((t) => t.length > 0);
+					// Count expected thinking blocks per session
+					const expectedThinkingA = blocksA.filter((b) => b.type === "thinking").length;
+					const expectedThinkingB = blocksB.filter((b) => b.type === "thinking").length;
+					const expectedTextA = blocksA.filter(
+						(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
+					).length;
+					const expectedTextB = blocksB.filter(
+						(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
+					).length;
 
-					// No text from A should appear in B's pipeline output
-					for (const text of thinkTextsA) {
-						expect(thinkTextsB).not.toContain(text);
+					// Session A has correct counts
+					const thinkingA = chatA.filter((m) => m.type === "thinking");
+					const assistantA = chatA.filter((m) => m.type === "assistant");
+					expect(thinkingA).toHaveLength(expectedThinkingA);
+					// Text blocks with content = assistant messages (may merge if same partId)
+					if (expectedTextA > 0) {
+						expect(assistantA.length).toBeGreaterThanOrEqual(1);
+					}
+
+					// Session B has correct counts
+					const thinkingB = chatB.filter((m) => m.type === "thinking");
+					const assistantB = chatB.filter((m) => m.type === "assistant");
+					expect(thinkingB).toHaveLength(expectedThinkingB);
+					if (expectedTextB > 0) {
+						expect(assistantB.length).toBeGreaterThanOrEqual(1);
 					}
 				} finally {
 					harness.close();
