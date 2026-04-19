@@ -234,8 +234,11 @@ function convertAssistantParts(
 				);
 				break;
 			}
-			// Skip structural parts that have no visual representation
 			default:
+				// Intentionally skipped structural part types:
+				// step_start, step_finish, snapshot, agent
+				// If you add a new PartType that should produce a ChatMessage,
+				// add a case above — don't let it fall through to here.
 				break;
 		}
 	}
