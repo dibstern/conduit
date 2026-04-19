@@ -200,4 +200,43 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// No spurious tool_result for thinking
 		expect(types.filter((t) => t === "tool_result")).toHaveLength(0);
 	});
+
+	it("PROCESSING_TIMEOUT clears cleanly — no stuck state after return", async () => {
+		const sent: RelayMessage[] = [];
+		let timeoutCleared = false;
+
+		const sink = createRelayEventSink({
+			sessionId: SESSION_ID,
+			send: (msg) => sent.push(msg),
+			clearTimeout: () => {
+				timeoutCleared = true;
+			},
+		});
+
+		// Start streaming
+		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
+		await sink.push(
+			canonicalEvent("text.delta", SESSION_ID, {
+				messageId: "msg-1",
+				partId: "p1",
+				text: "streaming...",
+			}),
+		);
+
+		// Simulate turn completing with error (as PROCESSING_TIMEOUT would trigger)
+		await sink.push(
+			canonicalEvent("turn.error", SESSION_ID, {
+				messageId: "msg-1",
+				error: "Processing timeout",
+				code: "PROCESSING_TIMEOUT",
+			}),
+		);
+
+		// Timeout should have been cleared
+		expect(timeoutCleared).toBe(true);
+
+		// Should have error + done messages
+		expect(sent.some((m) => m.type === "error")).toBe(true);
+		expect(sent.some((m) => m.type === "done")).toBe(true);
+	});
 });
