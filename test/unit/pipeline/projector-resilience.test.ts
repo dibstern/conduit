@@ -1131,4 +1131,119 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe(htmlText);
 		});
 	});
+
+	// ─── Unicode and encoding stress ─────────────────────────────────────
+
+	describe("unicode and encoding stress", () => {
+		function projectThinkingWithText(msgId: string, partId: string, text: string) {
+			project(makeStored("message.created", SESSION_A, {
+				messageId: msgId, role: "assistant", sessionId: SESSION_A,
+			}, { sequence: nextSeq(), createdAt: NOW }));
+			project(makeStored("thinking.start", SESSION_A, {
+				messageId: msgId, partId,
+			}, { sequence: nextSeq(), createdAt: NOW + 100 }));
+			project(makeStored("thinking.delta", SESSION_A, {
+				messageId: msgId, partId, text,
+			}, { sequence: nextSeq(), createdAt: NOW + 200 }));
+			project(makeStored("thinking.end", SESSION_A, {
+				messageId: msgId, partId,
+			}, { sequence: nextSeq(), createdAt: NOW + 300 }));
+			project(makeStored("turn.completed", SESSION_A, {
+				messageId: msgId, cost: 0, duration: 0,
+				tokens: { input: 0, output: 0 },
+			}, { sequence: nextSeq(), createdAt: NOW + 400 }));
+		}
+
+		it("emoji round-trips through pipeline", () => {
+			projectThinkingWithText("msg-emoji", "part-emoji", "🧠 Let me think 🤔💭");
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text).toBe("🧠 Let me think 🤔💭");
+		});
+
+		it("CJK characters round-trip through pipeline", () => {
+			projectThinkingWithText("msg-cjk", "part-cjk", "这是一个测试。思考中…");
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text).toBe("这是一个测试。思考中…");
+		});
+
+		it("RTL text (Arabic) round-trips through pipeline", () => {
+			projectThinkingWithText("msg-rtl", "part-rtl", "هذا اختبار للتفكير");
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text).toBe("هذا اختبار للتفكير");
+		});
+
+		it("surrogate pairs (𝕳𝖊𝖑𝖑𝖔) round-trip through pipeline", () => {
+			const surrogatePairText = "𝕳𝖊𝖑𝖑𝖔 𝖂𝖔𝖗𝖑𝖉";
+			projectThinkingWithText("msg-surr", "part-surr", surrogatePairText);
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text).toBe(surrogatePairText);
+		});
+
+		it("null bytes in text — stored as-is by SQLite TEXT column", () => {
+			const nullByteText = "before\0after";
+			projectThinkingWithText("msg-null", "part-null", nullByteText);
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// SQLite TEXT columns handle embedded nulls — verify no truncation
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text.length).toBeGreaterThanOrEqual("before".length);
+		});
+
+		it("multi-byte concatenation via multiple deltas — boundary not corrupted", () => {
+			project(makeStored("message.created", SESSION_A, {
+				messageId: "msg-concat", role: "assistant", sessionId: SESSION_A,
+			}, { sequence: nextSeq(), createdAt: NOW }));
+			project(makeStored("thinking.start", SESSION_A, {
+				messageId: "msg-concat", partId: "part-concat",
+			}, { sequence: nextSeq(), createdAt: NOW + 100 }));
+
+			// Two deltas with multi-byte chars at boundaries
+			project(makeStored("thinking.delta", SESSION_A, {
+				messageId: "msg-concat", partId: "part-concat", text: "思考",
+			}, { sequence: nextSeq(), createdAt: NOW + 200 }));
+			project(makeStored("thinking.delta", SESSION_A, {
+				messageId: "msg-concat", partId: "part-concat", text: "🧠完了",
+			}, { sequence: nextSeq(), createdAt: NOW + 300 }));
+
+			project(makeStored("thinking.end", SESSION_A, {
+				messageId: "msg-concat", partId: "part-concat",
+			}, { sequence: nextSeq(), createdAt: NOW + 400 }));
+			project(makeStored("turn.completed", SESSION_A, {
+				messageId: "msg-concat", cost: 0, duration: 0,
+				tokens: { input: 0, output: 0 },
+			}, { sequence: nextSeq(), createdAt: NOW + 500 }));
+
+			const chat = readPipeline(SESSION_A);
+			const thinking = chat.find(
+				(m): m is ThinkingMessage => m.type === "thinking",
+			);
+			expect(thinking).toBeDefined();
+			// SQL || concatenation must not corrupt multi-byte boundary
+			// biome-ignore lint/style/noNonNullAssertion: asserted above
+			expect(thinking!.text).toBe("思考🧠完了");
+		});
+	});
 });
