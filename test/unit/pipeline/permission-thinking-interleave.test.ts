@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
+import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
-import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	createTestHarness,
 	makeStored,
 	type TestHarness,
 } from "../../helpers/persistence-factories.js";
-import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 
 const SESSION_ID = "ses-perm-think";
 const MSG_ID = "msg-perm-think";
