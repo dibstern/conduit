@@ -77,11 +77,13 @@ import {
 	isStreaming,
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
 
 beforeEach(() => {
+	sessionState.currentId = "test-session";
 	clearMessages();
 	triggerNotificationsMock.mockClear();
 });

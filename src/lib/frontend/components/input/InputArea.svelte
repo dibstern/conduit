@@ -16,7 +16,7 @@
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
-	import { addUserMessage, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
+	import { addUserMessage, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, extractSlashQuery } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
@@ -226,7 +226,11 @@
 		// Always send immediately — OpenCode queues server-side when busy.
 		// When the LLM is processing, `sentDuringEpoch` is recorded so the
 		// UI can derive the "Queued" shimmer reactively.
-		addUserMessage(messageText, imageUrls, isProcessing());
+		const sid = sessionState.currentId;
+		if (sid) {
+			const { activity, messages } = getOrCreateSessionSlot(sid);
+			addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		}
 		wsSend({ type: "message", text: messageText, ...(imageUrls && { images: imageUrls }) });
 
 		// Clear pending images

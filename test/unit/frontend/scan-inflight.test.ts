@@ -2,7 +2,13 @@
 // Verifies that the scanInFlight flag is properly managed across all outcomes:
 // success (scan_result), error (INSTANCE_ERROR), and state reset.
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock DOMPurify (required by chat.svelte.ts → markdown.ts)
+vi.mock("dompurify", () => ({
+	default: { sanitize: (html: string) => html },
+}));
+
 import {
 	clearInstanceState,
 	getScanResult,
@@ -10,8 +16,13 @@ import {
 	isScanInFlight,
 	triggerScan,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
+
+beforeEach(() => {
+	sessionState.currentId = "test-session";
+});
 
 describe("scanInFlight state management", () => {
 	it("triggerScan sets scanInFlight and sends scan_now message", () => {

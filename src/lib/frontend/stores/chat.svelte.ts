@@ -1,5 +1,12 @@
 // ─── Chat Store ──────────────────────────────────────────────────────────────
 // Manages chat messages, streaming state, and processing.
+//
+// Task 2 (F2): handler signatures flipped to (activity, messages, event).
+// During this transitional commit, handlers receive per-session tiers as
+// leading arguments but still write to legacy `chatState` for backward compat.
+// The `dispatchToCurrent` adapter in ws-dispatch.ts resolves the current
+// session's slot and passes it through.  Task 3 migrates writes to the
+// per-session tiers; Task 4 removes the legacy chatState writes entirely.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { PerSessionEvent } from "../../shared-types.js";
@@ -22,7 +29,7 @@ import { sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 import { uiState, updateContextPercent } from "./ui.svelte.js";
 
-// ─── Two-Tier Per-Session Chat State (Task 1 — gated, dead code) ──────────
+// ─── Two-Tier Per-Session Chat State (Task 2 — handler signatures) ──────────
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
@@ -355,22 +362,22 @@ export function isLoading(): boolean {
 // Tests may still set booleans directly for arbitrary state setup.
 
 /** Session is idle — no LLM activity, no streaming. */
-export function phaseToIdle(): void {
+export function phaseToIdle(_activity?: SessionActivity): void {
 	chatState.phase = "idle";
 }
 
 /** LLM is active, awaiting first delta. */
-export function phaseToProcessing(): void {
+export function phaseToProcessing(_activity?: SessionActivity): void {
 	chatState.phase = "processing";
 }
 
 /** Receiving deltas — assistant message being built. */
-export function phaseToStreaming(): void {
+export function phaseToStreaming(_activity?: SessionActivity): void {
 	chatState.phase = "streaming";
 }
 
 /** Start event replay. */
-export function phaseStartReplay(): void {
+export function phaseStartReplay(_activity?: SessionActivity): void {
 	chatState.loadLifecycle = "loading";
 }
 
@@ -381,7 +388,10 @@ export function phaseStartReplay(): void {
  *  If there are no deferred messages, renderDeferredMarkdown sets
  *  "ready" on its first (and only) batch.
  *  @param llmActive — whether the replayed event stream ended mid-turn */
-export function phaseEndReplay(llmActive: boolean): void {
+export function phaseEndReplay(
+	_activity: SessionActivity | undefined,
+	llmActive: boolean,
+): void {
 	// Don't set loadLifecycle here — leave at "committed" so the
 	// scroll controller's settle phase can run while deferred markdown
 	// rendering completes. renderDeferredMarkdown sets "ready" when done.
@@ -454,17 +464,26 @@ const registryLog = createFrontendLogger("ToolRegistry", {
 const registry = createToolRegistry({ log: registryLog });
 
 /** Append a new tool message to chatState.messages. */
-function applyToolCreate(tool: ToolMessage): void {
-	setMessages([...getMessages(), tool]);
+function applyToolCreate(
+	_activity: SessionActivity,
+	_messages: SessionMessages,
+	tool: ToolMessage,
+): void {
+	setMessages(_messages, [...getMessages(_messages), tool]);
 }
 
 /** Replace a tool message in chatState.messages by UUID. */
-function applyToolUpdate(uuid: string, tool: ToolMessage): void {
-	const messages = [...getMessages()];
+function applyToolUpdate(
+	_activity: SessionActivity,
+	_messages: SessionMessages,
+	uuid: string,
+	tool: ToolMessage,
+): void {
+	const messages = [...getMessages(_messages)];
 	const found = findMessage(messages, "tool", (m) => m.uuid === uuid);
 	if (found) {
 		messages[found.index] = tool;
-		setMessages(messages);
+		setMessages(_messages, messages);
 	}
 }
 
@@ -472,6 +491,9 @@ function applyToolUpdate(uuid: string, tool: ToolMessage): void {
  * Track messageIds that have been finalized by handleDone() (not by tool_start).
  * Used to suppress duplicate deltas from the message poller, which can
  * re-synthesize content that SSE already delivered when its snapshot is stale.
+ *
+ * LEGACY module-level set — kept for backward compat. Per-session dedup
+ * lives on activity.doneMessageIds (written in parallel during Task 2).
  */
 const doneMessageIds = new Set<string>();
 
@@ -505,7 +527,10 @@ export function updateLastMessage<T extends ChatMessage["type"]>(
  *
  *  Consolidates the pattern previously duplicated in handleDone,
  *  handleToolStart, and addUserMessage. */
-function flushAndFinalizeAssistant(): string | undefined {
+function flushAndFinalizeAssistant(
+	_activity: SessionActivity,
+	_messages: SessionMessages,
+): string | undefined {
 	// Check the phase flag
 	if (chatState.phase !== "streaming") return undefined;
 
@@ -514,12 +539,12 @@ function flushAndFinalizeAssistant(): string | undefined {
 		renderTimer = null;
 	}
 	if (chatState.currentAssistantText) {
-		flushAssistantRender();
+		flushAssistantRender(_activity, _messages);
 	}
 
 	let finalizedMessageId: string | undefined;
 	const { messages, found } = updateLastMessage(
-		getMessages(),
+		getMessages(_messages),
 		"assistant",
 		(m) => !m.finalized,
 		(m) => {
@@ -527,7 +552,7 @@ function flushAndFinalizeAssistant(): string | undefined {
 			return { ...m, finalized: true };
 		},
 	);
-	if (found) setMessages(messages);
+	if (found) setMessages(_messages, messages);
 
 	// Clear assistant text. Phase transition is the caller's responsibility
 	// (handleDone → phaseToIdle, handleToolStart → phaseToProcessing, etc.)
@@ -539,20 +564,28 @@ function flushAndFinalizeAssistant(): string | undefined {
 // Used by ws-dispatch.ts to abort in-flight async replays when clearMessages
 // is called. Avoids circular imports (ws-dispatch → chat.svelte, not vice versa).
 
-let onClearMessages: (() => void) | null = null;
+let onClearMessages: ((sessionId: string | null) => void) | null = null;
 
-export function registerClearMessagesHook(fn: () => void): void {
+export function registerClearMessagesHook(
+	fn: (sessionId: string | null) => void,
+): void {
 	onClearMessages = fn;
 }
 
 // ─── Replay Batch ───────────────────────────────────────────────────────────
 let replayBatch: ChatMessage[] | null = null;
 
-export function beginReplayBatch(): void {
+export function beginReplayBatch(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
 	replayBatch = [...chatState.messages];
 }
 
-export function discardReplayBatch(): void {
+export function discardReplayBatch(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
 	replayBatch = null;
 }
 
@@ -570,15 +603,25 @@ const replayBuffers = new Map<string, ChatMessage[]>();
 const eventsHasMoreSessions = new Set<string>();
 
 /** Check if a session's event cache was marked as incomplete by the server. */
-export function isEventsHasMore(sessionId: string): boolean {
+export function isEventsHasMore(
+	_activity: SessionActivity | undefined,
+	_messages: SessionMessages | undefined,
+	sessionId: string,
+): boolean {
 	return eventsHasMoreSessions.has(sessionId);
 }
 
-export function getReplayBuffer(sessionId: string): ChatMessage[] | undefined {
+export function getReplayBuffer(
+	_activity: SessionActivity | undefined,
+	_messages: SessionMessages | undefined,
+	sessionId: string,
+): ChatMessage[] | undefined {
 	return replayBuffers.get(sessionId);
 }
 
 export function consumeReplayBuffer(
+	_activity: SessionActivity | undefined,
+	_messages: SessionMessages | undefined,
 	sessionId: string,
 	count: number,
 ): ChatMessage[] {
@@ -608,6 +651,8 @@ export function consumeReplayBuffer(
  *   When false (default), buffer exhaustion means "beginning of session".
  */
 export function commitReplayFinal(
+	_activity: SessionActivity | undefined,
+	_messages: SessionMessages | undefined,
 	sessionId: string,
 	eventsHasMore = false,
 ): void {
@@ -635,11 +680,11 @@ export function commitReplayFinal(
 	chatState.loadLifecycle = "committed";
 }
 
-export function getMessages(): ChatMessage[] {
+export function getMessages(_messages?: SessionMessages): ChatMessage[] {
 	return replayBatch ?? chatState.messages;
 }
 
-function setMessages(msgs: ChatMessage[]): void {
+function setMessages(_messages: SessionMessages, msgs: ChatMessage[]): void {
 	if (replayBatch !== null) {
 		replayBatch = msgs;
 	} else {
@@ -659,29 +704,38 @@ function setMessages(msgs: ChatMessage[]): void {
  *  No-op when the messageId is the same as the current one. */
 /** All messageIds seen in the current session. Prevents the message
  *  poller's re-synthesized events (which alternate between messageIds)
- *  from spuriously bumping turnEpoch on every poll cycle. */
+ *  from spuriously bumping turnEpoch on every poll cycle.
+ *
+ *  LEGACY module-level set — kept for backward compat. Per-session dedup
+ *  lives on activity.seenMessageIds (written in parallel during Task 2). */
 const seenMessageIds = new Set<string>();
 
-export function advanceTurnIfNewMessage(messageId: string | undefined): void {
+export function advanceTurnIfNewMessage(
+	activity: SessionActivity,
+	messages: SessionMessages,
+	messageId: string | undefined,
+): void {
 	if (messageId == null) return;
 
 	// Already seen this messageId — just update currentMessageId (it may
 	// have changed back from a different message) but don't bump epoch.
-	if (seenMessageIds.has(messageId)) {
+	if (seenMessageIds.has(messageId) || activity.seenMessageIds.has(messageId)) {
 		chatState.currentMessageId = messageId;
 		return;
 	}
 
 	// ── First event of a genuinely new message ─────────────────────────
 	seenMessageIds.add(messageId);
+	activity.seenMessageIds.add(messageId);
 
 	// Finalize any in-progress assistant streaming from the previous turn.
 	if (chatState.phase === "streaming") {
-		const finalizedId = flushAndFinalizeAssistant();
+		const finalizedId = flushAndFinalizeAssistant(activity, messages);
 		if (finalizedId) {
 			doneMessageIds.add(finalizedId);
+			activity.doneMessageIds.add(finalizedId);
 		}
-		phaseToProcessing();
+		phaseToProcessing(activity);
 	}
 
 	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
@@ -711,6 +765,8 @@ export function advanceTurnIfNewMessage(messageId: string | undefined): void {
 // ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handleDelta(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "delta" }>,
 ): void {
 	const { text, messageId } = msg;
@@ -719,7 +775,10 @@ export function handleDelta(
 	// This prevents the message poller from creating a second AssistantMessage
 	// for content that SSE already delivered. The poller can re-synthesize the
 	// entire response when its snapshot is stale (SSE silence gap > 2s).
-	if (messageId && doneMessageIds.has(messageId)) {
+	if (
+		messageId &&
+		(doneMessageIds.has(messageId) || activity.doneMessageIds.has(messageId))
+	) {
 		return;
 	}
 
@@ -739,8 +798,8 @@ export function handleDelta(
 			finalized: false,
 			...(messageId != null && { messageId }),
 		};
-		setMessages([...getMessages(), assistantMsg]);
-		phaseToStreaming();
+		setMessages(messages, [...getMessages(messages), assistantMsg]);
+		phaseToStreaming(activity);
 		chatState.currentAssistantText = "";
 	}
 
@@ -750,11 +809,13 @@ export function handleDelta(
 	if (renderTimer !== null) clearTimeout(renderTimer);
 	renderTimer = setTimeout(() => {
 		renderTimer = null;
-		flushAssistantRender();
+		flushAssistantRender(activity, messages);
 	}, 80);
 }
 
 export function handleThinkingStart(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "thinking_start" }>,
 ): void {
 	thinkingStartTime = Date.now();
@@ -766,37 +827,43 @@ export function handleThinkingStart(
 		done: false,
 		...(msg.messageId != null && { messageId: msg.messageId }),
 	};
-	setMessages([...getMessages(), thinkingMsg]);
+	setMessages(messages, [...getMessages(messages), thinkingMsg]);
 }
 
 export function handleThinkingDelta(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "thinking_delta" }>,
 ): void {
-	const { messages, found } = updateLastMessage(
-		getMessages(),
+	const { messages: updated, found } = updateLastMessage(
+		getMessages(messages),
 		"thinking",
 		(m) => !m.done,
 		(m) => ({ ...m, text: m.text + msg.text }),
 	);
-	if (found) setMessages(messages);
+	if (found) setMessages(messages, updated);
 }
 
 export function handleThinkingStop(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	_msg: Extract<RelayMessage, { type: "thinking_stop" }>,
 ): void {
 	const duration = thinkingStartTime > 0 ? Date.now() - thinkingStartTime : 0;
 	thinkingStartTime = 0;
 
-	const { messages, found } = updateLastMessage(
-		getMessages(),
+	const { messages: updated, found } = updateLastMessage(
+		getMessages(messages),
 		"thinking",
 		(m) => !m.done,
 		(m) => ({ ...m, done: true, duration }),
 	);
-	if (found) setMessages(messages);
+	if (found) setMessages(messages, updated);
 }
 
 export function handleToolStart(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_start" }>,
 ): void {
 	const { id, name, messageId } = msg;
@@ -816,23 +883,27 @@ export function handleToolStart(
 	// (advanceTurnIfNewMessage already handles cross-turn finalization, but
 	// same-turn tool calls still need to finalize the text block.)
 	if (chatState.phase === "streaming") {
-		flushAndFinalizeAssistant();
-		phaseToProcessing();
+		flushAndFinalizeAssistant(activity, messages);
+		phaseToProcessing(activity);
 	}
 
-	applyToolCreate(result.tool);
+	applyToolCreate(activity, messages, result.tool);
 }
 
 export function handleToolExecuting(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_executing" }>,
 ): void {
 	const result = registry.executing(msg.id, msg.input, msg.metadata);
 	if (result.action === "update") {
-		applyToolUpdate(result.uuid, result.tool);
+		applyToolUpdate(activity, messages, result.uuid, result.tool);
 	}
 }
 
 export function handleToolResult(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_result" }>,
 ): void {
 	const result = registry.complete(msg.id, msg.content, msg.is_error, {
@@ -842,11 +913,13 @@ export function handleToolResult(
 		}),
 	});
 	if (result.action === "update") {
-		applyToolUpdate(result.uuid, result.tool);
+		applyToolUpdate(activity, messages, result.uuid, result.tool);
 	}
 }
 
 export function handleResult(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "result" }>,
 ): void {
 	const { usage, cost, duration } = msg;
@@ -859,7 +932,7 @@ export function handleResult(
 	// in-place. Only merge when the last message is a result for the SAME
 	// OpenCode message (or when neither carries a messageId, for backward
 	// compatibility).
-	const currentMessages = getMessages();
+	const currentMessages = getMessages(messages);
 	const lastMsg = currentMessages[currentMessages.length - 1];
 	if (lastMsg?.type === "result") {
 		const sameMessage =
@@ -867,9 +940,9 @@ export function handleResult(
 			lastMsg.messageId == null ||
 			messageId === lastMsg.messageId;
 		if (sameMessage) {
-			const messages = [...currentMessages];
+			const msgs = [...currentMessages];
 			const dur = duration ?? lastMsg.duration;
-			messages[messages.length - 1] = {
+			msgs[msgs.length - 1] = {
 				...lastMsg,
 				cost: cost ?? lastMsg.cost,
 				...(dur != null && { duration: dur }),
@@ -879,9 +952,9 @@ export function handleResult(
 				cacheWrite: usage?.cache_creation ?? lastMsg.cacheWrite,
 				...(messageId != null && { messageId }),
 			};
-			setMessages(messages);
-			// Update context usage bar
-			updateContextFromTokens(usage);
+			setMessages(messages, msgs);
+			// Update context usage bar — dual-write: per-session + legacy
+			updateContextFromTokens(messages, usage);
 			return;
 		}
 	}
@@ -898,13 +971,16 @@ export function handleResult(
 		cacheWrite: usage?.cache_creation,
 		...(messageId != null && { messageId }),
 	};
-	setMessages([...getMessages(), resultMsg]);
-	// Update context usage bar
-	updateContextFromTokens(usage);
+	setMessages(messages, [...getMessages(messages), resultMsg]);
+	// Update context usage bar — dual-write: per-session + legacy
+	updateContextFromTokens(messages, usage);
 }
 
-/** Compute context window usage from token counts and current model's limit. */
+/** Compute context window usage from token counts and current model's limit.
+ *  Dual-write: sets both `messages.contextPercent` AND legacy `uiState.contextPercent`
+ *  during this transitional commit. */
 function updateContextFromTokens(
+	messages: SessionMessages,
 	usage:
 		| {
 				input?: number;
@@ -929,6 +1005,8 @@ function updateContextFromTokens(
 		const model = p.models.find((m) => m.id === modelId);
 		if (model?.limit?.context) {
 			const pct = Math.round((total / model.limit.context) * 100);
+			// Dual-write: per-session tier + legacy global
+			messages.contextPercent = pct;
 			updateContextPercent(pct);
 			return;
 		}
@@ -936,26 +1014,29 @@ function updateContextFromTokens(
 }
 
 export function handleDone(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	_msg: Extract<RelayMessage, { type: "done" }>,
 ): void {
 	// Finalize the assistant message and record messageId for dedup
-	const finalizedId = flushAndFinalizeAssistant();
+	const finalizedId = flushAndFinalizeAssistant(activity, messages);
 	if (finalizedId) {
 		doneMessageIds.add(finalizedId);
+		activity.doneMessageIds.add(finalizedId);
 	}
 
 	// Finalize any tools still in non-terminal states (pending/running).
-	const finResult = registry.finalizeAll(getMessages());
+	const finResult = registry.finalizeAll(getMessages(messages));
 	if (finResult.action === "finalized") {
-		const messages = [...getMessages()];
+		const msgs = [...getMessages(messages)];
 		for (const idx of finResult.indices) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — index from finalizeAll
-			const m = messages[idx]!;
+			const m = msgs[idx]!;
 			if (m.type === "tool") {
-				messages[idx] = { ...m, status: "completed" };
+				msgs[idx] = { ...m, status: "completed" };
 			}
 		}
-		setMessages(messages);
+		setMessages(messages, msgs);
 	}
 
 	// Safety net: finalize any thinking blocks still marked as !done.
@@ -963,16 +1044,16 @@ export function handleDone(
 	// was lost (SDK bug, network issue, Claude translator gap), this
 	// prevents stuck spinners.
 	{
-		const messages = getMessages();
+		const msgs = getMessages(messages);
 		let mutated = false;
-		const patched = messages.map((m) => {
+		const patched = msgs.map((m) => {
 			if (m.type === "thinking" && !m.done) {
 				mutated = true;
 				return { ...m, done: true, duration: 0 };
 			}
 			return m;
 		});
-		if (mutated) setMessages(patched);
+		if (mutated) setMessages(messages, patched);
 	}
 
 	chatState.turnEpoch++;
@@ -993,7 +1074,7 @@ export function handleDone(
 	// phase to "idle" synchronously, so when the batched effect fires,
 	// isProcessing() is false and the guard skips the scroll.
 	requestScrollOnNextContent();
-	phaseToIdle();
+	phaseToIdle(activity);
 }
 
 // ─── REST history queued-state fallback ──────────────────────────────────────
@@ -1011,6 +1092,8 @@ export function markPendingHistoryQueuedFallback(): void {
 }
 
 export function handleStatus(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "status" }>,
 ): void {
 	if (msg.status === "processing") {
@@ -1020,7 +1103,7 @@ export function handleStatus(
 		// cause handleDelta to create a new assistant message, splitting
 		// the response around the queued user message.
 		if (chatState.phase !== "streaming") {
-			phaseToProcessing();
+			phaseToProcessing(activity);
 		}
 		// Fallback ONLY for REST history loads — the one path where messages
 		// don't go through addUserMessage and sentDuringEpoch can't be set
@@ -1028,7 +1111,7 @@ export function handleStatus(
 		// addUserMessage, which sets the correct sentDuringEpoch already.
 		if (_pendingHistoryQueuedFallback) {
 			_pendingHistoryQueuedFallback = false;
-			ensureSentDuringEpochOnLastUnrespondedUser();
+			ensureSentDuringEpochOnLastUnrespondedUser(activity, messages);
 		}
 	} else if (msg.status === "idle") {
 		// Defense-in-depth: the server's status is authoritative. If the
@@ -1039,7 +1122,7 @@ export function handleStatus(
 		// Don't clear "streaming" — that phase is data-driven (delta events
 		// are actively arriving) and should only be cleared by a done/error.
 		if (chatState.phase === "processing") {
-			phaseToIdle();
+			phaseToIdle(activity);
 		}
 	}
 }
@@ -1047,8 +1130,11 @@ export function handleStatus(
 /** Set `sentDuringEpoch` on the last unresponded user message if not
  *  already set.  Called ONLY after REST history loads when the session
  *  is processing — the only path where queued state can't be inferred. */
-function ensureSentDuringEpochOnLastUnrespondedUser(): void {
-	const msgs = getMessages();
+function ensureSentDuringEpochOnLastUnrespondedUser(
+	_activity: SessionActivity,
+	messages: SessionMessages,
+): void {
+	const msgs = getMessages(messages);
 	if (msgs.length === 0) return;
 
 	for (let i = msgs.length - 1; i >= 0; i--) {
@@ -1064,6 +1150,7 @@ function ensureSentDuringEpochOnLastUnrespondedUser(): void {
 			if (hasResponse) return;
 			// No sentDuringEpoch and no response — set it
 			setMessages(
+				messages,
 				msgs.map((msg, idx) =>
 					idx === i ? { ...msg, sentDuringEpoch: chatState.turnEpoch } : msg,
 				),
@@ -1084,12 +1171,18 @@ let _scrollRequestPending = false;
 /** Request that the next content-change effect triggers auto-scroll.
  *  Call before adding content that should scroll but won't be covered
  *  by the isProcessing/isSettling guard. */
-export function requestScrollOnNextContent(): void {
+export function requestScrollOnNextContent(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
 	_scrollRequestPending = true;
 }
 
 /** Consume and clear the scroll request. Returns true if a request was pending. */
-export function consumeScrollRequest(): boolean {
+export function consumeScrollRequest(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): boolean {
 	if (_scrollRequestPending) {
 		_scrollRequestPending = false;
 		return true;
@@ -1098,6 +1191,8 @@ export function consumeScrollRequest(): boolean {
 }
 
 export function handleError(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "error" }>,
 ): void {
 	const { code, message, statusCode, details } = msg;
@@ -1111,13 +1206,13 @@ export function handleError(
 		// Subtle retry message — request scroll before adding so the
 		// content-change effect scrolls even though phase stays unchanged.
 		requestScrollOnNextContent();
-		addSystemMessage(message, "info");
+		addSystemMessage(activity, messages, message, "info");
 	} else {
 		// Prominent error — request scroll before phaseToIdle kills the
 		// isProcessing guard that the content-change effect relies on.
 		requestScrollOnNextContent();
-		addSystemMessage(message, "error", errorMeta);
-		phaseToIdle();
+		addSystemMessage(activity, messages, message, "error", errorMeta);
+		phaseToIdle(activity);
 	}
 }
 
@@ -1135,6 +1230,8 @@ export function handleError(
  *  is left unfinalized so deltas keep updating it in-place and the queued
  *  user message stays at the bottom instead of splitting the response. */
 export function addUserMessage(
+	activity: SessionActivity,
+	messages: SessionMessages,
 	text: string,
 	images?: string[],
 	sentWhileProcessing?: boolean,
@@ -1152,8 +1249,8 @@ export function addUserMessage(
 	// message stays unfinalized so subsequent deltas continue updating
 	// it and the queued user message stays at the end.
 	if (!sentWhileProcessing && chatState.currentAssistantText) {
-		flushAndFinalizeAssistant();
-		phaseToIdle();
+		flushAndFinalizeAssistant(activity, messages);
+		phaseToIdle(activity);
 	}
 
 	const uuid = generateUuid();
@@ -1183,18 +1280,24 @@ export function addUserMessage(
 		requestScrollOnNextContent();
 	}
 
-	setMessages([...getMessages(), msg]);
+	setMessages(messages, [...getMessages(messages), msg]);
 }
 
 /** Prepend older messages (from history) before existing messages.
  *  Used when paginating older messages or loading REST history. */
-export function prependMessages(msgs: ChatMessage[]): void {
+export function prependMessages(
+	_activity: SessionActivity,
+	messages: SessionMessages,
+	msgs: ChatMessage[],
+): void {
 	if (msgs.length === 0) return;
-	setMessages([...msgs, ...getMessages()]);
+	setMessages(messages, [...msgs, ...getMessages(messages)]);
 }
 
 /** Add a system message to the chat. */
 export function addSystemMessage(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	text: string,
 	variant: SystemMessageVariant = "info",
 	errorMeta?: {
@@ -1213,7 +1316,7 @@ export function addSystemMessage(
 		...(errorMeta?.statusCode ? { statusCode: errorMeta.statusCode } : {}),
 		...(errorMeta?.details ? { details: errorMeta.details } : {}),
 	};
-	setMessages([...getMessages(), msg]);
+	setMessages(messages, [...getMessages(messages), msg]);
 }
 
 /** Reset all chat state (for stories/tests). Alias for clearMessages. */
@@ -1223,12 +1326,18 @@ export const resetChatState = clearMessages;
  * Flush any pending debounced assistant render immediately.
  * Called after replaying events so mid-stream content is visible.
  */
-export function flushPendingRender(): void {
+export function flushPendingRender(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
 		renderTimer = null;
 	}
-	flushAssistantRender();
+	flushAssistantRender(
+		_activity as SessionActivity,
+		_messages as SessionMessages,
+	);
 }
 
 /** Clear all messages (e.g. on session switch).
@@ -1243,9 +1352,11 @@ export function flushPendingRender(): void {
  * registered via handleToolStart (the live event path).
  */
 export function seedRegistryFromMessages(
-	messages: readonly ChatMessage[],
+	_activity: SessionActivity,
+	_messages: SessionMessages,
+	chatMsgs: readonly ChatMessage[],
 ): void {
-	const tools = messages.filter((m): m is ToolMessage => m.type === "tool");
+	const tools = chatMsgs.filter((m): m is ToolMessage => m.type === "tool");
 	if (tools.length > 0) {
 		registry.seedFromHistory(tools);
 	}
@@ -1255,7 +1366,7 @@ export function clearMessages(): void {
 	replayBatch = null;
 	replayBuffers.clear();
 	phaseReset(); // must be cleared before abort hook — stops replay generation check
-	onClearMessages?.(); // abort in-flight async replays
+	onClearMessages?.(sessionState.currentId); // abort in-flight async replays
 	cancelDeferredMarkdown(); // abort in-flight deferred renders
 	chatState.messages = [];
 	chatState.currentAssistantText = "";
@@ -1265,6 +1376,15 @@ export function clearMessages(): void {
 	registry.clear();
 	doneMessageIds.clear();
 	seenMessageIds.clear();
+	// Also clear per-session dedup sets for the current session
+	const currentId = sessionState.currentId;
+	if (currentId) {
+		const activity = sessionActivity.get(currentId);
+		if (activity) {
+			activity.doneMessageIds.clear();
+			activity.seenMessageIds.clear();
+		}
+	}
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
 		renderTimer = null;
@@ -1344,23 +1464,29 @@ export function evictCachedMessages(sessionId: string): void {
 // ─── Part/message removal handlers ───────────────────────────────────────────
 
 export function handlePartRemoved(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "part_removed" }>,
 ): void {
 	const { partId } = msg;
 	if (!partId) return;
 	setMessages(
-		getMessages().filter((m) => m.type !== "tool" || m.id !== partId),
+		messages,
+		getMessages(messages).filter((m) => m.type !== "tool" || m.id !== partId),
 	);
 	registry.remove(partId);
 }
 
 export function handleMessageRemoved(
+	_activity: SessionActivity,
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "message_removed" }>,
 ): void {
 	const { messageId } = msg;
 	if (!messageId) return;
 	setMessages(
-		getMessages().filter(
+		messages,
+		getMessages(messages).filter(
 			(m) => !("messageId" in m) || m.messageId !== messageId,
 		),
 	);
@@ -1369,7 +1495,10 @@ export function handleMessageRemoved(
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 /** Flush the current assistant text to the last assistant message's HTML. */
-function flushAssistantRender(): void {
+function flushAssistantRender(
+	_activity: SessionActivity,
+	_messages: SessionMessages,
+): void {
 	if (!chatState.currentAssistantText) return;
 
 	const rawText = chatState.currentAssistantText;
@@ -1377,8 +1506,8 @@ function flushAssistantRender(): void {
 		chatState.loadLifecycle === "loading" ? rawText : renderMarkdown(rawText);
 	const isReplay = chatState.loadLifecycle === "loading";
 
-	const { messages, found } = updateLastMessage(
-		getMessages(),
+	const { messages: updated, found } = updateLastMessage(
+		getMessages(_messages),
 		"assistant",
 		(m) => !m.finalized,
 		(m) => ({
@@ -1388,7 +1517,7 @@ function flushAssistantRender(): void {
 			...(isReplay ? { needsRender: true as const } : {}),
 		}),
 	);
-	if (found) setMessages(messages);
+	if (found) setMessages(_messages, updated);
 }
 
 // ─── Deferred Markdown Rendering ────────────────────────────────────────────
@@ -1398,11 +1527,17 @@ function flushAssistantRender(): void {
 
 let deferredGeneration = 0;
 
-export function cancelDeferredMarkdown(): void {
+export function cancelDeferredMarkdown(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
 	deferredGeneration++;
 }
 
-export function renderDeferredMarkdown(): void {
+export function renderDeferredMarkdown(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
 	const generation = ++deferredGeneration;
 	const BATCH_SIZE = 5;
 

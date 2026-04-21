@@ -12,6 +12,8 @@ import {
 	handleThinkingDelta,
 	handleThinkingStart,
 	handleThinkingStop,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import type {
 	AssistantMessage,
@@ -20,6 +22,11 @@ import type {
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
+
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
 
 // Helper to create typed relay messages
 function msg<T extends RelayMessage["type"]>(
@@ -33,6 +40,8 @@ describe("Thinking block invariants", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 	});
 
 	afterEach(() => {
@@ -41,20 +50,20 @@ describe("Thinking block invariants", () => {
 
 	it("INVARIANT: every ThinkingMessage has done=true after handleDone", () => {
 		// Create multiple thinking blocks in various states
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "block 1" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "block 1" }));
 		// Block 1: NOT explicitly stopped
 
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "block 2" }));
-		handleThinkingStop(msg("thinking_stop"));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "block 2" }));
+		handleThinkingStop(ta, tm, msg("thinking_stop"));
 		// Block 2: properly stopped
 
-		handleThinkingStart(msg("thinking_start"));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
 		// Block 3: started but no delta or stop
 
 		// Fire handleDone
-		handleDone(msg("done", { code: 0 }));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 
 		// INVARIANT: every thinking block is done
 		const thinkingBlocks = chatState.messages.filter(
@@ -67,12 +76,12 @@ describe("Thinking block invariants", () => {
 	});
 
 	it("INVARIANT: thinking text preserved through handleDone finalization", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "important" }));
-		handleThinkingDelta(msg("thinking_delta", { text: " reasoning" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "important" }));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: " reasoning" }));
 		// No explicit stop
 
-		handleDone(msg("done", { code: 0 }));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 
 		const thinking = chatState.messages.find(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -85,9 +94,9 @@ describe("Thinking block invariants", () => {
 	});
 
 	it("INVARIANT: handleDone is idempotent for already-done thinking blocks", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "done block" }));
-		handleThinkingStop(msg("thinking_stop"));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "done block" }));
+		handleThinkingStop(ta, tm, msg("thinking_stop"));
 
 		const before = chatState.messages.find(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -95,7 +104,7 @@ describe("Thinking block invariants", () => {
 		// biome-ignore lint/style/noNonNullAssertion: asserted
 		const durationBefore = before!.duration;
 
-		handleDone(msg("done", { code: 0 }));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 
 		const after = chatState.messages.find(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -198,6 +207,8 @@ describe("Error → recovery cycle", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 	});
 
 	afterEach(() => {
@@ -206,16 +217,16 @@ describe("Error → recovery cycle", () => {
 
 	it("error mid-thinking, then new turn — old thinking finalized", () => {
 		// Turn 1: thinking starts, no stop
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "old thought" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "old thought" }));
 		// Error arrives — handleDone finalizes everything
-		handleDone(msg("done", { code: 1 }));
+		handleDone(ta, tm, msg("done", { code: 1 }));
 
 		// Turn 2: new thinking
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "new thought" }));
-		handleThinkingStop(msg("thinking_stop"));
-		handleDone(msg("done", { code: 0 }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "new thought" }));
+		handleThinkingStop(ta, tm, msg("thinking_stop"));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 
 		const thinkingBlocks = chatState.messages.filter(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -228,18 +239,18 @@ describe("Error → recovery cycle", () => {
 	});
 
 	it("multiple handleDone calls in sequence — no error, no double-finalization artifacts", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "content" }));
-		handleThinkingStop(msg("thinking_stop"));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "content" }));
+		handleThinkingStop(ta, tm, msg("thinking_stop"));
 
 		// First done
-		handleDone(msg("done", { code: 0 }));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 		const countAfterFirst = chatState.messages.filter(
 			(m) => m.type === "thinking",
 		).length;
 
 		// Second done — should not create new messages or crash
-		handleDone(msg("done", { code: 0 }));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 		const countAfterSecond = chatState.messages.filter(
 			(m) => m.type === "thinking",
 		).length;
@@ -248,8 +259,12 @@ describe("Error → recovery cycle", () => {
 	});
 
 	it("thinking blocks without handleDone — remain done=false (zombie state)", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "zombie thought" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(
+			ta,
+			tm,
+			msg("thinking_delta", { text: "zombie thought" }),
+		);
 		// NO handleDone — simulates process killed or WS disconnect
 
 		const thinking = chatState.messages.find(
@@ -267,6 +282,8 @@ describe("clearMessages + active thinking race", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 	});
 
 	afterEach(() => {
@@ -274,39 +291,45 @@ describe("clearMessages + active thinking race", () => {
 	});
 
 	it("clearMessages mid-thinking — subsequent delta silently dropped, no crash", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "part 1" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "part 1" }));
 
 		// Mid-stream clear (simulates session switch)
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 
 		// Delta arrives after clear — no target message exists
-		handleThinkingDelta(msg("thinking_delta", { text: "part 2" }));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "part 2" }));
 
 		// No crash, no orphan thinking block
 		expect(chatState.messages).toHaveLength(0);
 	});
 
 	it("clearMessages mid-thinking — subsequent stop silently dropped, no crash", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "content" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "content" }));
 
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 
 		// Stop arrives after clear
-		handleThinkingStop(msg("thinking_stop"));
+		handleThinkingStop(ta, tm, msg("thinking_stop"));
 
 		expect(chatState.messages).toHaveLength(0);
 	});
 
 	it("clearMessages mid-thinking — subsequent handleDone is clean no-op", () => {
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "active" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "active" }));
 
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 
 		// handleDone after clear — should not crash or create zombie thinking
-		handleDone(msg("done", { code: 0 }));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 
 		// No orphan thinking blocks with done=false
 		const zombies = chatState.messages.filter(
@@ -317,16 +340,18 @@ describe("clearMessages + active thinking race", () => {
 
 	it("new thinking after clearMessages — fresh lifecycle works correctly", () => {
 		// First thinking
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "old" }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "old" }));
 
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 
 		// New thinking after clear
-		handleThinkingStart(msg("thinking_start"));
-		handleThinkingDelta(msg("thinking_delta", { text: "fresh" }));
-		handleThinkingStop(msg("thinking_stop"));
-		handleDone(msg("done", { code: 0 }));
+		handleThinkingStart(ta, tm, msg("thinking_start"));
+		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "fresh" }));
+		handleThinkingStop(ta, tm, msg("thinking_stop"));
+		handleDone(ta, tm, msg("done", { code: 0 }));
 
 		const thinkingBlocks = chatState.messages.filter(
 			(m): m is ThinkingMessage => m.type === "thinking",

@@ -59,9 +59,16 @@ import {
 	getMessages,
 	getReplayBuffer,
 	historyState,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
+
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -220,6 +227,8 @@ describe("HistoryLoader buffer → server fallback", () => {
 		observerCallback = null;
 		observedElements = [];
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 		historyState.hasMore = false;
 		historyState.loading = false;
 		historyState.messageCount = 0;
@@ -234,15 +243,15 @@ describe("HistoryLoader buffer → server fallback", () => {
 	it("sends load_more_history after replay buffer is fully consumed", async () => {
 		// Setup: simulate commitReplayFinal with 100 messages.
 		// This puts 50 in the replay buffer and 50 in chatState.messages.
-		beginReplayBatch();
+		beginReplayBatch(ta, tm);
 		for (const m of makeUserMessages(100)) {
-			getMessages().push(m);
+			getMessages(tm).push(m);
 		}
-		commitReplayFinal("buf-session");
+		commitReplayFinal(ta, tm, "buf-session");
 
 		// Verify initial state
 		expect(chatState.messages).toHaveLength(50);
-		expect(getReplayBuffer("buf-session")).toHaveLength(50);
+		expect(getReplayBuffer(ta, tm, "buf-session")).toHaveLength(50);
 		expect(historyState.hasMore).toBe(true);
 
 		// Render the HistoryLoader
@@ -255,7 +264,7 @@ describe("HistoryLoader buffer → server fallback", () => {
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
 		// Buffer should be fully consumed now
-		expect(getReplayBuffer("buf-session")).toBeUndefined();
+		expect(getReplayBuffer(ta, tm, "buf-session")).toBeUndefined();
 		// All 100 messages should be displayed
 		expect(chatState.messages).toHaveLength(100);
 
@@ -274,13 +283,13 @@ describe("HistoryLoader buffer → server fallback", () => {
 
 	it("consumes buffer pages before falling through to server", async () => {
 		// Setup: 200 messages → 150 in buffer, 50 displayed
-		beginReplayBatch();
+		beginReplayBatch(ta, tm);
 		for (const m of makeUserMessages(200)) {
-			getMessages().push(m);
+			getMessages(tm).push(m);
 		}
-		commitReplayFinal("buf-session");
+		commitReplayFinal(ta, tm, "buf-session");
 
-		expect(getReplayBuffer("buf-session")).toHaveLength(150);
+		expect(getReplayBuffer(ta, tm, "buf-session")).toHaveLength(150);
 
 		const sentinel = document.createElement("div");
 		render(HistoryLoader, { props: { sentinelEl: sentinel } });
@@ -297,7 +306,7 @@ describe("HistoryLoader buffer → server fallback", () => {
 
 		// Third intersection: consumes last 50 from buffer (exhausted)
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
-		expect(getReplayBuffer("buf-session")).toBeUndefined();
+		expect(getReplayBuffer(ta, tm, "buf-session")).toBeUndefined();
 
 		// NOW it should fall through to server
 		expect(wsSendSpy).toHaveBeenCalledTimes(1);

@@ -8,6 +8,7 @@
 	import { onMount, onDestroy } from "svelte";
 	import {
 		consumeReplayBuffer,
+		getOrCreateSessionSlot,
 		getReplayBuffer,
 		historyState,
 		prependMessages,
@@ -61,11 +62,12 @@
 		// After replay paging (commitReplayFinal), older messages may be in
 		// a local buffer — reading from it is instant (no network round-trip).
 		const sessionId = sessionState.currentId;
-		const buffer = getReplayBuffer(sessionId);
+		const slot = getOrCreateSessionSlot(sessionId);
+		const buffer = getReplayBuffer(slot.activity, slot.messages, sessionId);
 		if (buffer && buffer.length > 0) {
-			const page = consumeReplayBuffer(sessionId, HISTORY_PAGE_SIZE);
-			prependMessages(page);
-			const remaining = getReplayBuffer(sessionId);
+			const page = consumeReplayBuffer(slot.activity, slot.messages, sessionId, HISTORY_PAGE_SIZE);
+			prependMessages(slot.activity, slot.messages, page);
+			const remaining = getReplayBuffer(slot.activity, slot.messages, sessionId);
 			if (remaining !== undefined && remaining.length > 0) {
 				// Buffer still has messages — keep paging locally.
 				return;

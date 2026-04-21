@@ -53,6 +53,8 @@ import {
 	handleDone,
 	isStreaming,
 	restoreCachedMessages,
+	type SessionActivity,
+	type SessionMessages,
 	stashSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -65,12 +67,19 @@ import type {
 	UserMessage,
 } from "../../../src/lib/frontend/types.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Reset ──────────────────────────────────────────────────────────────────
+
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	vi.useFakeTimers();
 });
 
@@ -109,31 +118,33 @@ describe("turnEpoch tracking", () => {
 	});
 
 	it("increments on handleDone", () => {
-		handleDelta({ type: "delta", sessionId: "s1", text: "hello" });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "hello" });
 		expect(chatState.turnEpoch).toBe(0);
 
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
 	});
 
 	it("increments for each turn", () => {
 		// Turn 1
-		handleDelta({ type: "delta", sessionId: "s1", text: "a" });
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "a" });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
 
 		// Turn 2
-		handleDelta({ type: "delta", sessionId: "s1", text: "b" });
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "b" });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(2);
 	});
 
 	it("resets to 0 on clearMessages", () => {
-		handleDelta({ type: "delta", sessionId: "s1", text: "a" });
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "a" });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
 
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 		expect(chatState.turnEpoch).toBe(0);
 	});
 
@@ -167,7 +178,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		expect(isStreaming()).toBe(true);
 
 		// User queues a message mid-stream
-		addUserMessage("follow-up question", undefined, true);
+		addUserMessage(ta, tm, "follow-up question", undefined, true);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
@@ -199,7 +210,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		} as RelayMessage);
 
 		// User queues message at epoch 0
-		addUserMessage("next question", undefined, true);
+		addUserMessage(ta, tm, "next question", undefined, true);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
@@ -222,7 +233,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		} as RelayMessage);
 
 		// User queues message at epoch 0
-		addUserMessage("follow-up", undefined, true);
+		addUserMessage(ta, tm, "follow-up", undefined, true);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
@@ -253,7 +264,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		} as RelayMessage);
 
 		// User queues message at epoch 0
-		addUserMessage("follow-up", undefined, true);
+		addUserMessage(ta, tm, "follow-up", undefined, true);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
@@ -281,7 +292,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		expect(isStreaming()).toBe(true);
 
 		// User queues message at epoch 0
-		addUserMessage("follow-up", undefined, true);
+		addUserMessage(ta, tm, "follow-up", undefined, true);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 		expect(chatState.turnEpoch).toBe(0);
@@ -327,7 +338,7 @@ describe("queued user message doesn't split assistant response", () => {
 		expect(assistantMessages()).toHaveLength(1);
 
 		// User queues a message
-		addUserMessage("queued msg", undefined, true);
+		addUserMessage(ta, tm, "queued msg", undefined, true);
 
 		// More deltas from same turn
 		handleMessage({
@@ -349,7 +360,7 @@ describe("queued user message doesn't split assistant response", () => {
 			sessionId: "s1",
 			text: "Turn 1 response",
 		} as RelayMessage);
-		addUserMessage("queued", undefined, true);
+		addUserMessage(ta, tm, "queued", undefined, true);
 		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 
 		// Turn 2
@@ -429,12 +440,14 @@ describe("clearMessages resets turn tracking cleanly", () => {
 			sessionId: "s1",
 			text: "hello",
 		} as RelayMessage);
-		addUserMessage("queued", undefined, true);
+		addUserMessage(ta, tm, "queued", undefined, true);
 		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 		expect(chatState.turnEpoch).toBe(1);
 
 		// Session switch clears everything
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 		expect(chatState.turnEpoch).toBe(0);
 		expect(chatState.messages).toHaveLength(0);
 		expect(isStreaming()).toBe(false);
@@ -447,10 +460,12 @@ describe("clearMessages resets turn tracking cleanly", () => {
 			sessionId: "s1",
 			text: "A response",
 		} as RelayMessage);
-		addUserMessage("queued in A", undefined, true);
+		addUserMessage(ta, tm, "queued in A", undefined, true);
 
 		// Switch to session B
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 
 		// Session B: fresh turnEpoch — no stale state from session A
 		handleMessage({
@@ -473,7 +488,7 @@ describe("session cache round-trip preserves turnEpoch", () => {
 			sessionId: "s1",
 			text: "response",
 		} as RelayMessage);
-		addUserMessage("queued msg", undefined, true);
+		addUserMessage(ta, tm, "queued msg", undefined, true);
 		expect(userMessages()[0]?.sentDuringEpoch).toBe(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
@@ -487,6 +502,8 @@ describe("session cache round-trip preserves turnEpoch", () => {
 		// Stash and switch away
 		stashSessionMessages("sess-A");
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 		expect(chatState.turnEpoch).toBe(0);
 
 		// Restore — turnEpoch must be restored so sentDuringEpoch comparison is correct

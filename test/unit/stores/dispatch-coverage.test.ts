@@ -49,6 +49,7 @@ import {
 	chatState,
 	clearMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
 	PERSISTED_EVENT_TYPES,
@@ -60,6 +61,7 @@ import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
+	sessionState.currentId = "test-session";
 	clearMessages();
 	vi.useFakeTimers();
 });

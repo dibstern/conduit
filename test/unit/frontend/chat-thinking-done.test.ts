@@ -16,11 +16,14 @@ import {
 	handleThinkingDelta,
 	handleThinkingStart,
 	handleThinkingStop,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import type {
 	RelayMessage,
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 function msg<T extends RelayMessage["type"]>(data: {
@@ -32,8 +35,14 @@ function msg<T extends RelayMessage["type"]>(data: {
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
+
 beforeEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	vi.useFakeTimers();
 });
 
@@ -44,8 +53,12 @@ afterEach(() => {
 describe("handleDone — thinking block finalization", () => {
 	it("marks unclosed thinking blocks as done when handleDone fires", () => {
 		// Simulate a thinking block that started but never got thinking_stop
-		handleThinkingStart(msg({ type: "thinking_start" }));
-		handleThinkingDelta(msg({ type: "thinking_delta", text: "reasoning..." }));
+		handleThinkingStart(ta, tm, msg({ type: "thinking_start" }));
+		handleThinkingDelta(
+			ta,
+			tm,
+			msg({ type: "thinking_delta", text: "reasoning..." }),
+		);
 
 		// Verify thinking block is open
 		const before = chatState.messages.find(
@@ -56,7 +69,7 @@ describe("handleDone — thinking block finalization", () => {
 		expect(before!.done).toBe(false);
 
 		// Fire done without thinking_stop
-		handleDone(msg({ type: "done", code: 0 }));
+		handleDone(ta, tm, msg({ type: "done", code: 0 }));
 
 		// Thinking block should now be finalized
 		const after = chatState.messages.find(
@@ -68,12 +81,14 @@ describe("handleDone — thinking block finalization", () => {
 	});
 
 	it("preserves thinking text content after finalization", () => {
-		handleThinkingStart(msg({ type: "thinking_start" }));
+		handleThinkingStart(ta, tm, msg({ type: "thinking_start" }));
 		handleThinkingDelta(
+			ta,
+			tm,
 			msg({ type: "thinking_delta", text: "important reasoning" }),
 		);
 
-		handleDone(msg({ type: "done", code: 0 }));
+		handleDone(ta, tm, msg({ type: "done", code: 0 }));
 
 		const m = chatState.messages.find(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -84,9 +99,9 @@ describe("handleDone — thinking block finalization", () => {
 
 	it("does not re-mutate already-done thinking blocks", () => {
 		vi.setSystemTime(new Date(1000));
-		handleThinkingStart(msg({ type: "thinking_start" }));
+		handleThinkingStart(ta, tm, msg({ type: "thinking_start" }));
 		vi.setSystemTime(new Date(3500));
-		handleThinkingStop(msg({ type: "thinking_stop" }));
+		handleThinkingStop(ta, tm, msg({ type: "thinking_stop" }));
 
 		const beforeDone = chatState.messages.find(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -97,7 +112,7 @@ describe("handleDone — thinking block finalization", () => {
 		const originalDuration = beforeDone!.duration;
 		expect(originalDuration).toBe(2500);
 
-		handleDone(msg({ type: "done", code: 0 }));
+		handleDone(ta, tm, msg({ type: "done", code: 0 }));
 
 		const afterDone = chatState.messages.find(
 			(m): m is ThinkingMessage => m.type === "thinking",
@@ -109,7 +124,7 @@ describe("handleDone — thinking block finalization", () => {
 
 	it("is a no-op when there are no thinking blocks", () => {
 		// handleDone with no messages should not throw
-		handleDone(msg({ type: "done", code: 0 }));
+		handleDone(ta, tm, msg({ type: "done", code: 0 }));
 		expect(chatState.messages.length).toBe(0);
 	});
 });

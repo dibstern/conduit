@@ -51,6 +51,8 @@ import {
 	handleDone,
 	isProcessing,
 	isStreaming,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
@@ -59,11 +61,18 @@ import type {
 	ThinkingMessage,
 	ToolMessage,
 } from "../../../src/lib/frontend/types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
+
 beforeEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;
@@ -83,10 +92,18 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 	it("switching away mid-stream then back with cached events restores full conversation", async () => {
 		// ── Phase 1: Live streaming on session A ──
 		sessionState.currentId = "session-a";
-		addUserMessage("What is TypeScript?");
-		handleDelta({ type: "delta", sessionId: "s1", text: "TypeScript is " });
+		addUserMessage(ta, tm, "What is TypeScript?");
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "s1",
+			text: "TypeScript is ",
+		});
 		vi.advanceTimersByTime(100);
-		handleDelta({ type: "delta", sessionId: "s1", text: "a typed superset " });
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "s1",
+			text: "a typed superset ",
+		});
 		vi.advanceTimersByTime(100);
 
 		// Verify we have live messages
@@ -354,8 +371,12 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 
 	it("rapid switch: A→B→A with events — only final A's events are displayed", async () => {
 		sessionState.currentId = "session-a";
-		addUserMessage("message in A");
-		handleDelta({ type: "delta", sessionId: "s1", text: "response in A" });
+		addUserMessage(ta, tm, "message in A");
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "s1",
+			text: "response in A",
+		});
 		vi.advanceTimersByTime(100);
 
 		// Rapid switch A→B→A
@@ -396,10 +417,10 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 
 	it("switch back to session with NO cached events shows nothing (REST fallback needed)", () => {
 		sessionState.currentId = "session-a";
-		addUserMessage("message");
-		handleDelta({ type: "delta", sessionId: "s1", text: "response" });
+		addUserMessage(ta, tm, "message");
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "response" });
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 
 		// Switch to B and back to A WITHOUT events (cache miss — relay would
 		// normally use REST fallback, but here we test the bare switch)

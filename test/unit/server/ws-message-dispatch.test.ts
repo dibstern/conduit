@@ -72,6 +72,8 @@ import {
 	chatState,
 	clearMessages,
 	handleToolStart,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearInstanceState,
@@ -79,11 +81,18 @@ import {
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
 
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
+
 beforeEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	clearInstanceState();
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
@@ -92,6 +101,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	clearInstanceState();
 });
 
@@ -104,7 +115,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		toolName: string,
 		opts?: { messageId?: string },
 	): void {
-		handleToolStart({
+		handleToolStart(ta, tm, {
 			type: "tool_start",
 			sessionId: "s1",
 			id: toolId,

@@ -57,15 +57,24 @@ import {
 	isProcessing,
 	isReplaying,
 	isStreaming,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
+
 beforeEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;
@@ -85,14 +94,14 @@ describe("Regression: session switch clears messages", () => {
 	it("session_switched via handleMessage clears all chat messages", () => {
 		// Simulate a conversation with agent output
 		sessionState.currentId = "session-a";
-		addUserMessage("hello agent");
-		handleDelta({
+		addUserMessage(ta, tm, "hello agent");
+		handleDelta(ta, tm, {
 			type: "delta",
 			sessionId: "s1",
 			text: "I am the agent response",
 		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
 		// Switch to a different session
@@ -113,10 +122,14 @@ describe("Regression: session switch clears messages", () => {
 	it("switching back to a session also clears stale messages", () => {
 		// Start in session A
 		sessionState.currentId = "session-a";
-		addUserMessage("first message in A");
-		handleDelta({ type: "delta", sessionId: "s1", text: "response in A" });
+		addUserMessage(ta, tm, "first message in A");
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "s1",
+			text: "response in A",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		const msgCountA = chatState.messages.length;
 		expect(msgCountA).toBeGreaterThan(0);
 
@@ -129,10 +142,14 @@ describe("Regression: session switch clears messages", () => {
 		expect(chatState.messages).toHaveLength(0);
 
 		// Add messages in session B
-		addUserMessage("message in B");
-		handleDelta({ type: "delta", sessionId: "s1", text: "response in B" });
+		addUserMessage(ta, tm, "message in B");
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "s1",
+			text: "response in B",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", sessionId: "s1", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
 		// Switch back to session A — must clear B's messages
@@ -147,7 +164,7 @@ describe("Regression: session switch clears messages", () => {
 
 	it("session_switched updates currentId before clearing messages", () => {
 		sessionState.currentId = "old-session";
-		addUserMessage("some message");
+		addUserMessage(ta, tm, "some message");
 
 		handleMessage({
 			type: "session_switched",
@@ -166,7 +183,7 @@ describe("Regression: session switch clears messages", () => {
 describe("Regression: handleMessage session_switched dispatch", () => {
 	it("dispatches session_switched to both session and chat stores", () => {
 		sessionState.currentId = "before";
-		addUserMessage("will be cleared");
+		addUserMessage(ta, tm, "will be cleared");
 
 		handleMessage({
 			type: "session_switched",
@@ -180,7 +197,7 @@ describe("Regression: handleMessage session_switched dispatch", () => {
 
 	it("ignores session_switched with missing id", () => {
 		sessionState.currentId = "existing";
-		addUserMessage("kept");
+		addUserMessage(ta, tm, "kept");
 
 		// Deliberately malformed: missing required `id` field — tests defensive handling
 		handleMessage({ type: "session_switched" } as unknown as RelayMessage);
@@ -197,7 +214,7 @@ describe("Regression: handleMessage session_switched dispatch", () => {
 describe("Combined protocol: session_switched with inline events", () => {
 	it("replays raw events through chat handlers (full fidelity)", async () => {
 		sessionState.currentId = "session-a";
-		addUserMessage("message in A");
+		addUserMessage(ta, tm, "message in A");
 
 		// Switch to session B with cached events
 		handleMessage({
@@ -377,7 +394,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 
 	it("session_switched without events or history just clears messages", () => {
 		sessionState.currentId = "session-a";
-		addUserMessage("old message");
+		addUserMessage(ta, tm, "old message");
 
 		handleMessage({
 			type: "session_switched",
@@ -494,8 +511,9 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 
 describe("history_page for load_more_history pagination", () => {
 	it("history_page converts and prepends to chatState.messages", async () => {
+		sessionState.currentId = "test-session";
 		// Seed with a live message so we can verify prepend ordering
-		addUserMessage("live message");
+		addUserMessage(ta, tm, "live message");
 
 		handleMessage({
 			type: "history_page",
@@ -630,7 +648,7 @@ describe("Queued state timing with REST history", () => {
 
 	it("status:processing does NOT apply fallback for normal live sends", () => {
 		// User sends a message to an idle session — NOT queued
-		addUserMessage("hello");
+		addUserMessage(ta, tm, "hello");
 		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		const users = chatState.messages.filter((m) => m.type === "user");
