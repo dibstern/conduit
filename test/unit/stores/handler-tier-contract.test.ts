@@ -12,7 +12,6 @@ vi.mock("dompurify", () => ({
 	},
 }));
 
-import { SvelteSet } from "svelte/reactivity";
 import {
 	advanceTurnIfNewMessage,
 	clearMessages,
@@ -59,6 +58,8 @@ function snapMessages(m: SessionMessages) {
 		historyHasMore: m.historyHasMore,
 		historyMessageCount: m.historyMessageCount,
 		historyLoading: m.historyLoading,
+		replayBatch: m.replayBatch,
+		replayBuffer: m.replayBuffer,
 	};
 }
 
@@ -186,16 +187,17 @@ describe("handleStatus — tier contract", () => {
 // ─── handleThinkingStart ───────────────────────────────────────────────────
 
 describe("handleThinkingStart — tier contract", () => {
-	it("should NOT modify activity tier fields", () => {
+	it("should dual-write thinkingStartTime to activity tier (Task 3)", () => {
 		const before = snapActivity(ta);
 		handleThinkingStart(ta, tm, {
 			type: "thinking_start",
 			sessionId: "s1",
 		});
 		const after = snapActivity(ta);
-		// handleThinkingStart writes module-level thinkingStartTime, not
-		// activity.thinkingStartTime. Activity tier should be untouched.
-		expect(after).toEqual(before);
+		// Task 3: handleThinkingStart now dual-writes thinkingStartTime to
+		// activity tier. Only thinkingStartTime should change.
+		expect(after.thinkingStartTime).toBeGreaterThan(0);
+		expect({ ...after, thinkingStartTime: 0 }).toEqual(before);
 	});
 
 	it("should NOT modify messages tier fields directly (writes to legacy chatState)", () => {

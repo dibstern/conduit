@@ -43,6 +43,8 @@ export function testMessages(): SessionMessages {
 		historyMessageCount: 0,
 		historyLoading: false,
 		toolRegistry: createToolRegistry(),
+		replayBatch: null,
+		replayBuffer: null,
 	};
 }
 

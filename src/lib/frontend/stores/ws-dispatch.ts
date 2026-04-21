@@ -54,6 +54,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 	seedRegistryFromMessages,
+	sessionActivity,
 } from "./chat.svelte.js";
 import {
 	handleAgentList,
@@ -176,6 +177,8 @@ function isLlmContentStart(type: string): boolean {
 
 // ─── Async replay infrastructure ────────────────────────────────────────────
 
+// LEGACY module-level replayGeneration — kept for backward compat.
+// Per-session generation lives on activity.replayGeneration (Task 3).
 let replayGeneration = 0;
 const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
 
@@ -189,6 +192,8 @@ function yieldToEventLoop(): Promise<void> {
 // events (e.g. thinking_stop) with cached events being replayed, which would
 // cause data loss (e.g. cached thinking_deltas silently dropped after a live
 // thinking_stop prematurely marks the thinking message as done).
+// LEGACY module-level buffer — kept for backward compat.
+// Per-session buffer lives on activity.liveEventBuffer (Task 3).
 let liveEventBuffer: RelayMessage[] | null = null;
 
 /** Event types handled by dispatchChatEvent — used to decide what to buffer. */
@@ -207,14 +212,17 @@ const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
 	"error",
 ]);
 
-/** Start buffering live chat events (called at the start of replay). */
-function startBufferingLiveEvents(): void {
+/** Start buffering live chat events for a specific session slot. */
+function startBufferingLiveEvents(activity?: SessionActivity): void {
+	if (activity) activity.liveEventBuffer = [];
 	liveEventBuffer = [];
 }
 
 /** Drain buffered live events through normal dispatch (called after replay commits). */
-function drainLiveEventBuffer(): void {
-	const buffer = liveEventBuffer;
+function drainLiveEventBuffer(activity?: SessionActivity): void {
+	// Prefer per-session buffer, fall back to legacy
+	const buffer = activity?.liveEventBuffer ?? liveEventBuffer;
+	if (activity) activity.liveEventBuffer = null;
 	liveEventBuffer = null;
 	if (!buffer || buffer.length === 0) return;
 	for (const event of buffer) {
@@ -225,9 +233,17 @@ function drainLiveEventBuffer(): void {
 
 // Register abort hook: clearMessages bumps generation to cancel in-flight replays
 // and discards the live event buffer (session is changing, buffered events are stale).
-registerClearMessagesHook((_sessionId: string | null) => {
+registerClearMessagesHook((sessionId: string | null) => {
 	replayGeneration++;
 	liveEventBuffer = null;
+	// Per-session cleanup
+	if (sessionId) {
+		const activity = sessionActivity.get(sessionId);
+		if (activity) {
+			activity.liveEventBuffer = null;
+			activity.replayGeneration++;
+		}
+	}
 });
 
 // ─── Async history conversion ───────────────────────────────────────────────
@@ -237,16 +253,17 @@ registerClearMessagesHook((_sessionId: string | null) => {
  * historyToChatMessages stays synchronous (pure, well-tested).
  * This wrapper yields between chunks to avoid blocking the main thread.
  *
- * Uses replayGeneration for abort detection. Safe because:
- * - historyState.loading prevents concurrent history_page loads
- * - Session switches bump generation via clearMessages → abortReplay()
+ * Captures the target slot at start and uses its replayGeneration for
+ * ghost-write guard. Session switches bump generation via clearMessages.
  */
 async function convertHistoryAsync(
 	messages: HistoryMessage[],
 	render: (text: string) => string,
+	capturedActivity?: SessionActivity,
 ): Promise<ChatMessage[] | null> {
 	const CHUNK = 50;
-	const gen = replayGeneration; // snapshot
+	const gen = replayGeneration; // legacy snapshot
+	const activityGen = capturedActivity?.replayGeneration; // per-session snapshot
 	const result: ChatMessage[] = [];
 
 	for (let i = 0; i < messages.length; i += CHUNK) {
@@ -256,7 +273,14 @@ async function convertHistoryAsync(
 
 		if (i + CHUNK < messages.length) {
 			await yieldToEventLoop();
-			if (gen !== replayGeneration) return null; // aborted
+			// Ghost-write guard: abort if generation changed
+			if (gen !== replayGeneration) return null;
+			if (
+				capturedActivity &&
+				activityGen !== undefined &&
+				capturedActivity.replayGeneration !== activityGen
+			)
+				return null;
 		}
 	}
 
@@ -430,7 +454,15 @@ export function handleMessage(msg: RelayMessage): void {
 	// Without this, a live thinking_stop can arrive mid-replay and mark
 	// a thinking message as done, causing remaining cached thinking_deltas
 	// to be silently dropped (updateLastMessage can't find !done message).
+	// Check per-session buffer first, then legacy module-level.
 	if (liveEventBuffer !== null && CHAT_EVENT_TYPES.has(msg.type)) {
+		// Push to per-session buffer if available
+		const currentActivity = sessionState.currentId
+			? sessionActivity.get(sessionState.currentId)
+			: undefined;
+		if (currentActivity?.liveEventBuffer) {
+			currentActivity.liveEventBuffer.push(msg as PerSessionEvent);
+		}
 		liveEventBuffer.push(msg);
 		return;
 	}
@@ -518,22 +550,26 @@ export function handleMessage(msg: RelayMessage): void {
 				// status:processing should apply the queued-state fallback.
 				markPendingHistoryQueuedFallback();
 				// Fire-and-forget — handleMessage stays synchronous.
+				// Capture slot at start so commits go to the correct session.
 				const historyMsgs = msg.history.messages;
 				const hasMore = msg.history.hasMore;
 				const msgCount = historyMsgs.length;
+				const capturedSlot = getOrCreateSessionSlot(msg.id);
 				const gen = replayGeneration; // snapshot before async
-				convertHistoryAsync(historyMsgs, renderMarkdown)
+				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
 					.then((chatMsgs) => {
 						if (chatMsgs && gen === replayGeneration) {
-							const histSlot = getCurrentSlot();
-							if (histSlot) {
-								prependMessages(histSlot.activity, histSlot.messages, chatMsgs);
-								seedRegistryFromMessages(
-									histSlot.activity,
-									histSlot.messages,
-									chatMsgs,
-								);
-							}
+							// Commit to captured slot, not getCurrentSlot()
+							prependMessages(
+								capturedSlot.activity,
+								capturedSlot.messages,
+								chatMsgs,
+							);
+							seedRegistryFromMessages(
+								capturedSlot.activity,
+								capturedSlot.messages,
+								chatMsgs,
+							);
 							historyState.hasMore = hasMore;
 							historyState.messageCount = msgCount;
 							// Transition loadLifecycle so the scroll controller
@@ -638,19 +674,27 @@ export function handleMessage(msg: RelayMessage): void {
 		case "history_page": {
 			// Convert and prepend older messages into chatState.messages.
 			// Fire-and-forget — handleMessage stays synchronous.
+			// Capture slot at start so commits go to the correct session.
 			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
 			const rawMessages = historyMsg.messages ?? [];
 			const hasMore = historyMsg.hasMore ?? false;
+			const hpCapturedSlot = sessionState.currentId
+				? getOrCreateSessionSlot(sessionState.currentId)
+				: null;
 			const gen = replayGeneration; // snapshot before async
-			convertHistoryAsync(rawMessages, renderMarkdown)
+			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
 				.then((chatMsgs) => {
 					if (chatMsgs && gen === replayGeneration) {
-						const hpSlot = getCurrentSlot();
-						if (hpSlot) {
-							prependMessages(hpSlot.activity, hpSlot.messages, chatMsgs);
+						// Commit to captured slot, not getCurrentSlot()
+						if (hpCapturedSlot) {
+							prependMessages(
+								hpCapturedSlot.activity,
+								hpCapturedSlot.messages,
+								chatMsgs,
+							);
 							seedRegistryFromMessages(
-								hpSlot.activity,
-								hpSlot.messages,
+								hpCapturedSlot.activity,
+								hpCapturedSlot.messages,
 								chatMsgs,
 							);
 						}
@@ -825,12 +869,23 @@ export async function replayEvents(
 	sessionId: string,
 	eventsHasMore = false,
 ): Promise<void> {
-	const replaySlot = getCurrentSlot();
-	phaseStartReplay(replaySlot?.activity);
-	const generation = ++replayGeneration;
+	// ── Slot-capture: capture at start, thread through all dispatches ──
+	// Do NOT use currentChat() or dispatchToCurrent — commit to captured slot.
+	const slot = getOrCreateSessionSlot(sessionId);
+	const gen = ++slot.activity.replayGeneration;
+	const legacyGen = ++replayGeneration;
 
-	beginReplayBatch(replaySlot?.activity, replaySlot?.messages);
-	startBufferingLiveEvents();
+	phaseStartReplay(slot.activity);
+	beginReplayBatch(slot.activity, slot.messages);
+	startBufferingLiveEvents(slot.activity);
+
+	/** Ghost-write guard: abort if the slot's generation has changed
+	 *  (concurrent replay or clearMessages bumped it). */
+	function isAborted(): boolean {
+		return (
+			slot.activity.replayGeneration !== gen || legacyGen !== replayGeneration
+		);
+	}
 
 	try {
 		// Local tracker: true when the LLM is producing content for the current
@@ -840,8 +895,8 @@ export async function replayEvents(
 
 		for (let i = 0; i < events.length; i++) {
 			// Abort: a newer replay or clearMessages happened
-			if (generation !== replayGeneration) {
-				discardReplayBatch(replaySlot?.activity, replaySlot?.messages);
+			if (isAborted()) {
+				discardReplayBatch(slot.activity, slot.messages);
 				return; // don't call phaseEndReplay — clearMessages already reset loadLifecycle, or a new replay set it to loading
 			}
 
@@ -864,22 +919,17 @@ export async function replayEvents(
 			// replay's batch. clearMessages() already sets replayBatch = null.
 			if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
 				await yieldToEventLoop();
-				if (generation !== replayGeneration) return;
+				if (isAborted()) return;
 			}
 		}
 
 		// Flush any pending debounced render (for mid-stream sessions
 		// where no "done" event has been received yet)
-		flushPendingRender(replaySlot?.activity, replaySlot?.messages);
+		flushPendingRender(slot.activity, slot.messages);
 
 		// Single commit: page large replays so only the last 50 messages
 		// render immediately, with older messages buffered for lazy loading.
-		commitReplayFinal(
-			replaySlot?.activity,
-			replaySlot?.messages,
-			sessionId,
-			eventsHasMore,
-		);
+		commitReplayFinal(slot.activity, slot.messages, sessionId, eventsHasMore);
 
 		// Reconcile processing state after replay completes.
 		// During replay, handler functions (handleDone, handleDelta, etc.)
@@ -887,19 +937,20 @@ export async function replayEvents(
 		// phaseEndReplay only needs to handle the edge case where llmActive
 		// is true but phase ended at "idle" (all turns completed during
 		// replay, but server says LLM is still active).
-		phaseEndReplay(replaySlot?.activity, llmActive);
+		phaseEndReplay(slot.activity, llmActive);
 
 		// Drain live events that arrived while the replay was in progress.
 		// These are post-cache events dispatched as normal live events,
 		// continuing the timeline where the cache left off.
-		drainLiveEventBuffer();
+		drainLiveEventBuffer(slot.activity);
 
-		renderDeferredMarkdown(replaySlot?.activity, replaySlot?.messages);
+		renderDeferredMarkdown(slot.activity, slot.messages);
 	} finally {
 		// Safety: ensure buffer is cleared on any exit path not handled above.
 		// Normal path: drainLiveEventBuffer already set buffer to null.
 		// Abort path: clearMessages hook already set buffer to null.
 		// Error path: discard any un-drained buffer to prevent infinite buffering.
+		if (slot.activity) slot.activity.liveEventBuffer = null;
 		liveEventBuffer = null;
 	}
 }

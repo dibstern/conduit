@@ -56,6 +56,12 @@ export type SessionMessages = {
 	historyMessageCount: number;
 	historyLoading: boolean;
 	toolRegistry: ToolRegistry;
+	/** Working copy of messages during replay. Null when not replaying.
+	 *  Moved from module-level in Task 3 to enable per-session replay. */
+	replayBatch: ChatMessage[] | null;
+	/** Per-session buffer of older messages from large replays.
+	 *  HistoryLoader pages through this before hitting the server. */
+	replayBuffer: ChatMessage[] | null;
 };
 
 // Composite read shape for the chat view. NEVER instantiated as storage.
@@ -88,6 +94,8 @@ export function createEmptySessionMessages(): SessionMessages {
 		historyMessageCount: 0,
 		historyLoading: false,
 		toolRegistry: createToolRegistry(),
+		replayBatch: null,
+		replayBuffer: null,
 	};
 }
 
@@ -448,6 +456,9 @@ export function getMessageCount(): number {
 }
 
 // ─── Internal state (not reactive — used for debouncing) ────────────────────
+// LEGACY module-level aliases — kept for backward compat during transition.
+// Per-session state lives on activity.renderTimer / activity.thinkingStartTime.
+// TODO(Task 4): remove these module-level aliases entirely.
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let thinkingStartTime = 0;
@@ -534,6 +545,11 @@ function flushAndFinalizeAssistant(
 	// Check the phase flag
 	if (chatState.phase !== "streaming") return undefined;
 
+	// Clear per-session renderTimer first, then legacy
+	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
+		clearTimeout(_activity.renderTimer);
+		_activity.renderTimer = null;
+	}
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
 		renderTimer = null;
@@ -573,12 +589,17 @@ export function registerClearMessagesHook(
 }
 
 // ─── Replay Batch ───────────────────────────────────────────────────────────
+// LEGACY module-level replayBatch — kept for backward compat.
+// Per-session replay batch lives on messages.replayBatch (Task 3).
 let replayBatch: ChatMessage[] | null = null;
 
 export function beginReplayBatch(
 	_activity?: SessionActivity,
 	_messages?: SessionMessages,
 ): void {
+	if (_messages) {
+		_messages.replayBatch = [...chatState.messages];
+	}
 	replayBatch = [...chatState.messages];
 }
 
@@ -586,6 +607,9 @@ export function discardReplayBatch(
 	_activity?: SessionActivity,
 	_messages?: SessionMessages,
 ): void {
+	if (_messages) {
+		_messages.replayBatch = null;
+	}
 	replayBatch = null;
 }
 
@@ -595,11 +619,10 @@ export function discardReplayBatch(
 // per-session buffer for HistoryLoader to page through on demand.
 
 const INITIAL_PAGE_SIZE = 50;
+// LEGACY module-level maps — kept for backward compat during transition.
+// Per-session replay buffer lives on messages.replayBuffer (Task 3).
+// Per-session eventsHasMore lives on activity.eventsHasMore (Task 3).
 const replayBuffers = new Map<string, ChatMessage[]>();
-
-/** Sessions whose event cache was incomplete (eventsHasMore from server).
- *  When the local replay buffer is exhausted for these sessions, the
- *  HistoryLoader should fall through to server-based pagination. */
 const eventsHasMoreSessions = new Set<string>();
 
 /** Check if a session's event cache was marked as incomplete by the server. */
@@ -608,6 +631,8 @@ export function isEventsHasMore(
 	_messages: SessionMessages | undefined,
 	sessionId: string,
 ): boolean {
+	// Per-session first, legacy fallback
+	if (_activity) return _activity.eventsHasMore;
 	return eventsHasMoreSessions.has(sessionId);
 }
 
@@ -616,6 +641,8 @@ export function getReplayBuffer(
 	_messages: SessionMessages | undefined,
 	sessionId: string,
 ): ChatMessage[] | undefined {
+	// During transition, legacy replayBuffers map is the shared source of truth.
+	// Per-session replayBuffer is a dual-write target for forward compat.
 	return replayBuffers.get(sessionId);
 }
 
@@ -625,10 +652,14 @@ export function consumeReplayBuffer(
 	sessionId: string,
 	count: number,
 ): ChatMessage[] {
+	// Legacy map is source of truth during transition
 	const buffer = replayBuffers.get(sessionId);
 	if (!buffer || buffer.length === 0) return [];
 	const page = buffer.splice(buffer.length - count, count);
-	if (buffer.length === 0) replayBuffers.delete(sessionId);
+	if (buffer.length === 0) {
+		if (_messages) _messages.replayBuffer = null;
+		replayBuffers.delete(sessionId);
+	}
 	// Render deferred markdown on buffered messages before they enter
 	// chatState.messages.  During replay, assistant messages store raw
 	// text in `html` with `needsRender: true` to avoid blocking.  The
@@ -656,8 +687,12 @@ export function commitReplayFinal(
 	sessionId: string,
 	eventsHasMore = false,
 ): void {
+	// Legacy module-level replayBatch is the coordination point during transition.
+	// getMessages/setMessages use it, so commit from it.
 	if (replayBatch === null) return;
 	const all = replayBatch;
+	// Clear both per-session and legacy
+	if (_messages) _messages.replayBatch = null;
 	replayBatch = null;
 
 	if (all.length <= INITIAL_PAGE_SIZE) {
@@ -667,26 +702,38 @@ export function commitReplayFinal(
 		historyState.hasMore = eventsHasMore;
 	} else {
 		const cutoff = all.length - INITIAL_PAGE_SIZE;
-		replayBuffers.set(sessionId, all.slice(0, cutoff));
+		const bufferSlice = all.slice(0, cutoff);
+		// Dual-write: per-session + legacy
+		if (_messages) _messages.replayBuffer = bufferSlice;
+		replayBuffers.set(sessionId, bufferSlice);
 		chatState.messages = all.slice(cutoff);
 		// hasMore = true: either the buffer has more, or after buffer
 		// exhaustion the server has more (eventsHasMore flag).
 		historyState.hasMore = true;
 	}
 	// Store the flag for HistoryLoader to use when the buffer is exhausted.
+	// Dual-write: per-session + legacy
 	if (eventsHasMore) {
+		if (_activity) _activity.eventsHasMore = true;
 		eventsHasMoreSessions.add(sessionId);
 	}
 	chatState.loadLifecycle = "committed";
 }
 
 export function getMessages(_messages?: SessionMessages): ChatMessage[] {
+	// Legacy replayBatch is the coordination point during transition.
+	// When it's non-null, a replay batch is active; when null, no batch.
+	// Per-session replayBatch is a dual-write for forward compat.
 	return replayBatch ?? chatState.messages;
 }
 
 function setMessages(_messages: SessionMessages, msgs: ChatMessage[]): void {
 	if (replayBatch !== null) {
 		replayBatch = msgs;
+		// Dual-write to per-session replayBatch for forward compat
+		if (_messages && _messages.replayBatch !== null) {
+			_messages.replayBatch = msgs;
+		}
 	} else {
 		chatState.messages = msgs;
 	}
@@ -805,12 +852,18 @@ export function handleDelta(
 
 	chatState.currentAssistantText += text;
 
-	// Debounced markdown render (80ms)
+	// Debounced markdown render (80ms) — dual-write: per-session + legacy
+	if (activity?.renderTimer !== null && activity?.renderTimer !== undefined) {
+		clearTimeout(activity.renderTimer);
+	}
 	if (renderTimer !== null) clearTimeout(renderTimer);
-	renderTimer = setTimeout(() => {
+	const timer = setTimeout(() => {
+		if (activity) activity.renderTimer = null;
 		renderTimer = null;
 		flushAssistantRender(activity, messages);
 	}, 80);
+	if (activity) activity.renderTimer = timer;
+	renderTimer = timer;
 }
 
 export function handleThinkingStart(
@@ -818,7 +871,10 @@ export function handleThinkingStart(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "thinking_start" }>,
 ): void {
-	thinkingStartTime = Date.now();
+	const now = Date.now();
+	// Dual-write: per-session + legacy
+	if (_activity) _activity.thinkingStartTime = now;
+	thinkingStartTime = now;
 	const uuid = generateUuid();
 	const thinkingMsg: ThinkingMessage = {
 		type: "thinking",
@@ -849,7 +905,14 @@ export function handleThinkingStop(
 	messages: SessionMessages,
 	_msg: Extract<RelayMessage, { type: "thinking_stop" }>,
 ): void {
-	const duration = thinkingStartTime > 0 ? Date.now() - thinkingStartTime : 0;
+	// Prefer per-session thinkingStartTime, fall back to legacy
+	const startTime =
+		_activity?.thinkingStartTime > 0
+			? _activity.thinkingStartTime
+			: thinkingStartTime;
+	const duration = startTime > 0 ? Date.now() - startTime : 0;
+	// Dual-write: per-session + legacy
+	if (_activity) _activity.thinkingStartTime = 0;
 	thinkingStartTime = 0;
 
 	const { messages: updated, found } = updateLastMessage(
@@ -1330,6 +1393,11 @@ export function flushPendingRender(
 	_activity?: SessionActivity,
 	_messages?: SessionMessages,
 ): void {
+	// Clear per-session renderTimer first, then legacy
+	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
+		clearTimeout(_activity.renderTimer);
+		_activity.renderTimer = null;
+	}
 	if (renderTimer !== null) {
 		clearTimeout(renderTimer);
 		renderTimer = null;
@@ -1376,13 +1444,24 @@ export function clearMessages(): void {
 	registry.clear();
 	doneMessageIds.clear();
 	seenMessageIds.clear();
-	// Also clear per-session dedup sets for the current session
+	// Also clear per-session state for the current session
 	const currentId = sessionState.currentId;
 	if (currentId) {
 		const activity = sessionActivity.get(currentId);
 		if (activity) {
 			activity.doneMessageIds.clear();
 			activity.seenMessageIds.clear();
+			activity.liveEventBuffer = null;
+			activity.replayGeneration++;
+			if (activity.renderTimer) {
+				clearTimeout(activity.renderTimer);
+				activity.renderTimer = null;
+			}
+		}
+		const messages = sessionMessages.get(currentId);
+		if (messages) {
+			messages.replayBatch = null;
+			messages.replayBuffer = null;
 		}
 	}
 	if (renderTimer !== null) {
@@ -1525,6 +1604,8 @@ function flushAssistantRender(
 // in their `html` field. renderDeferredMarkdown processes them in batches
 // via requestIdleCallback/setTimeout to avoid blocking the main thread.
 
+// LEGACY module-level deferredGeneration — kept for backward compat.
+// Per-session abort uses activity.replayGeneration (unified in Task 3).
 let deferredGeneration = 0;
 
 export function cancelDeferredMarkdown(
@@ -1532,6 +1613,8 @@ export function cancelDeferredMarkdown(
 	_messages?: SessionMessages,
 ): void {
 	deferredGeneration++;
+	// Per-session: bump activity.replayGeneration to abort per-session renders
+	if (_activity) _activity.replayGeneration++;
 }
 
 export function renderDeferredMarkdown(
@@ -1539,10 +1622,15 @@ export function renderDeferredMarkdown(
 	_messages?: SessionMessages,
 ): void {
 	const generation = ++deferredGeneration;
+	// Also bump per-session generation so it matches the new value
+	if (_activity) _activity.replayGeneration++;
+	const activityGen = _activity?.replayGeneration ?? generation;
 	const BATCH_SIZE = 5;
 
 	function processBatch(): void {
-		if (generation !== deferredGeneration) return; // aborted
+		if (generation !== deferredGeneration) return; // aborted (legacy)
+		// Per-session abort check
+		if (_activity && _activity.replayGeneration !== activityGen) return;
 
 		const updated = [...chatState.messages];
 		let rendered = 0;
