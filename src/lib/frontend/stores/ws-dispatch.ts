@@ -2,12 +2,15 @@
 // Extracted from ws.svelte.ts — centralized message routing and event replay.
 // Pure dispatch table: routes incoming RelayMessage to the appropriate store.
 //
-// Task 2 (F2): dispatchToCurrent adapter routes per-session events through
-// getOrCreateSessionSlot(sessionState.currentId), passing (activity, messages)
-// to the flipped handler signatures in chat.svelte.ts.
+// Task 4: Two-tier dispatcher routes per-session events by event.sessionId
+// via routePerSession. Global events handled by handleMessage directly.
+// dispatchToCurrent adapter removed.
 
 import { notificationContent } from "../../notification-content.js";
-import type { PerSessionEvent } from "../../shared-types.js";
+import type {
+	PerSessionEvent,
+	PerSessionEventType,
+} from "../../shared-types.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
@@ -125,27 +128,189 @@ import { wsSend } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
-// ─── dispatchToCurrent adapter ─────────────────────────────────────────────
-// Temporary adapter (Task 2): resolves the current session's per-session slot
-// and passes (activity, messages) to flipped handler signatures.
-// Removed in Task 4 when per-session routing replaces the global chatState.
+// ─── Per-session event routing ─────────────────────────────────────────────
+// Runtime Set of per-session event types for the isPerSessionEvent guard.
+// Mirrors the PerSessionEventType TS union in shared-types.ts.
+
+const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
+	new Set<PerSessionEventType>([
+		"delta",
+		"thinking_start",
+		"thinking_delta",
+		"thinking_stop",
+		"tool_start",
+		"tool_executing",
+		"tool_result",
+		"tool_content",
+		"result",
+		"done",
+		"error",
+		"status",
+		"user_message",
+		"part_removed",
+		"message_removed",
+		"ask_user",
+		"ask_user_resolved",
+		"ask_user_error",
+		"permission_request",
+		"permission_resolved",
+		"session_switched",
+		"session_forked",
+		"history_page",
+		"provider_session_reloaded",
+		"session_deleted",
+	]);
+
+/** Runtime guard: does this message carry a per-session event type? */
+export function isPerSessionEvent(msg: RelayMessage): msg is PerSessionEvent {
+	return PER_SESSION_EVENT_TYPES.has(msg.type);
+}
+
+/** Per-session event types that still require global coordination in handleMessage.
+ *  These are NOT routed through routePerSession. */
+const GLOBALLY_COORDINATED_TYPES: ReadonlySet<string> = new Set([
+	"session_switched",
+	"session_forked",
+	"history_page",
+	"session_deleted",
+]);
 
 function isDev(): boolean {
 	return (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
 }
 
-function dispatchToCurrent<T extends PerSessionEvent>(
-	fn: (activity: SessionActivity, messages: SessionMessages, msg: T) => void,
-	msg: T,
-): void {
-	const id = sessionState.currentId;
-	if (!id) {
-		if (isDev()) throw new Error("dispatchToCurrent: null currentId");
-		// prod: silently return — no session to dispatch to
+/**
+ * Route a per-session event to the correct session slot by event.sessionId.
+ * Validates sessionId presence and membership in sessionState.sessions.
+ *
+ * NOTE: notification_event is excluded from PerSessionEventType by
+ * construction — it routes through handleMessage's global dispatch instead.
+ */
+function routePerSession(event: PerSessionEvent): void {
+	// ── Dev-mode assertion on missing/empty sessionId ───────────────────
+	if (typeof event.sessionId !== "string" || event.sessionId.length === 0) {
+		if (isDev())
+			throw new Error(`routePerSession: missing sessionId on ${event.type}`);
+		// prod: silently drop — telemetry counter would go here
 		return;
 	}
-	const { activity, messages } = getOrCreateSessionSlot(id);
-	fn(activity, messages, msg);
+
+	// ── Unknown-session guard ──────────────────────────────────────────
+	if (!sessionState.sessions.has(event.sessionId)) {
+		log.debug(
+			"routePerSession: unknown sessionId %s for event %s",
+			event.sessionId,
+			event.type,
+		);
+		// prod: silently drop — telemetry counter would go here
+		return;
+	}
+
+	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
+
+	// ── Turn boundary detection ─────────────────────────────────────────
+	if ("messageId" in event && event.messageId != null) {
+		advanceTurnIfNewMessage(activity, messages, event.messageId as string);
+	}
+
+	switch (event.type) {
+		case "delta":
+			handleDelta(activity, messages, event);
+			break;
+		case "thinking_start":
+			handleThinkingStart(activity, messages, event);
+			break;
+		case "thinking_delta":
+			handleThinkingDelta(activity, messages, event);
+			break;
+		case "thinking_stop":
+			handleThinkingStop(activity, messages, event);
+			break;
+		case "tool_start":
+			handleToolStart(activity, messages, event);
+			break;
+		case "tool_executing":
+			handleToolExecuting(activity, messages, event);
+			break;
+		case "tool_result": {
+			handleToolResult(activity, messages, event);
+			// If this was a TodoWrite result, also update the todo store.
+			const msgs = getMessages(messages);
+			const toolMsg = msgs.find(
+				(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
+			);
+			if (toolMsg?.name === "TodoWrite" && !event.is_error && event.content) {
+				updateTodosFromToolResult(event.content);
+			}
+			break;
+		}
+		case "result":
+			handleResult(activity, messages, event);
+			break;
+		case "done": {
+			handleDone(activity, messages, event);
+			// Only notify for root agent sessions — subagent completions are
+			// intermediate steps; the parent emits its own done when finished.
+			const doneSession = findSession(event.sessionId);
+			if (!doneSession?.parentID) {
+				triggerNotifications(event);
+			}
+			break;
+		}
+		case "status":
+			handleStatus(activity, messages, event);
+			break;
+		case "error":
+			handleChatError(activity, messages, event);
+			triggerNotifications(event);
+			break;
+		case "user_message":
+			addUserMessage(activity, messages, event.text, undefined, isProcessing());
+			break;
+		case "tool_content":
+			handleToolContentResponse(event);
+			break;
+		case "part_removed":
+			handlePartRemoved(activity, messages, event);
+			break;
+		case "message_removed":
+			handleMessageRemoved(activity, messages, event);
+			break;
+		case "permission_request":
+			handlePermissionRequest(event, wsSend);
+			triggerNotifications(event);
+			break;
+		case "permission_resolved":
+			handlePermissionResolved(event);
+			break;
+		case "ask_user":
+			handleAskUser(event, event.sessionId);
+			triggerNotifications(event);
+			break;
+		case "ask_user_resolved":
+			handleAskUserResolved(event);
+			break;
+		case "ask_user_error":
+			handleAskUserError(event);
+			break;
+		case "session_switched":
+			// Handled in handleMessage — session_switched requires global
+			// coordination (URL updates, message clearing, replay).
+			// This should not be reached via routePerSession.
+			break;
+		case "session_forked":
+			// Handled in handleMessage — requires global toast.
+			break;
+		case "history_page":
+			// Handled in handleMessage — requires async history conversion.
+			break;
+		case "provider_session_reloaded":
+			log.debug("Provider session reloaded:", event.sessionId);
+			break;
+		case "session_deleted":
+			// Handled in handleMessage — requires global session state update.
+			break;
+	}
 }
 
 /** Get the current session slot for non-handler functions that need
@@ -449,40 +614,33 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
-	// ── Buffer live chat events during replay ───────────────────────────
-	// Prevents interleaving with cached events being replayed async.
-	// Without this, a live thinking_stop can arrive mid-replay and mark
-	// a thinking message as done, causing remaining cached thinking_deltas
-	// to be silently dropped (updateLastMessage can't find !done message).
-	// Check per-session buffer first, then legacy module-level.
-	if (liveEventBuffer !== null && CHAT_EVENT_TYPES.has(msg.type)) {
-		// Push to per-session buffer if available
-		const currentActivity = sessionState.currentId
-			? sessionActivity.get(sessionState.currentId)
-			: undefined;
-		if (currentActivity?.liveEventBuffer) {
-			currentActivity.liveEventBuffer.push(msg as PerSessionEvent);
-		}
-		liveEventBuffer.push(msg);
-		return;
-	}
-
-	// ── Chat events (shared dispatch) ───────────────────────────────────
-	const ctx: DispatchContext = {
-		isReplay: false,
-		isQueued: isProcessing(),
-	};
-	if (dispatchChatEvent(msg, ctx)) {
-		return;
-	}
-
-	// ── Live-only chat events (not cacheable, not in replay) ────────────
-	switch (msg.type) {
-		case "tool_content":
-			handleToolContentResponse(msg);
+	// ── Two-tier routing: per-session events vs global events ────────────
+	// Per-session events are routed by event.sessionId to the correct
+	// session slot. notification_event is excluded by construction
+	// (PerSessionEventType union does not include it).
+	if (isPerSessionEvent(msg)) {
+		// Buffer live chat events during replay to prevent interleaving
+		if (liveEventBuffer !== null && CHAT_EVENT_TYPES.has(msg.type)) {
+			const currentActivity = sessionState.currentId
+				? sessionActivity.get(sessionState.currentId)
+				: undefined;
+			if (currentActivity?.liveEventBuffer) {
+				currentActivity.liveEventBuffer.push(msg);
+			}
+			liveEventBuffer.push(msg);
 			return;
+		}
+
+		// Events requiring global coordination are handled in the switch
+		// below rather than routePerSession. All other per-session events
+		// route through routePerSession.
+		if (!GLOBALLY_COORDINATED_TYPES.has(msg.type)) {
+			routePerSession(msg);
+			return;
+		}
 	}
 
+	// ── Global events + globally-coordinated per-session events ──────────
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_list": {
@@ -636,23 +794,7 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 
 		// ─── Permissions & Questions ─────────────────────────────────────
-		case "permission_request":
-			handlePermissionRequest(msg, wsSend);
-			triggerNotifications(msg);
-			break;
-		case "permission_resolved":
-			handlePermissionResolved(msg);
-			break;
-		case "ask_user":
-			handleAskUser(msg, sessionState.currentId ?? "");
-			triggerNotifications(msg);
-			break;
-		case "ask_user_resolved":
-			handleAskUserResolved(msg);
-			break;
-		case "ask_user_error":
-			handleAskUserError(msg);
-			break;
+		// Now routed through routePerSession (per-session events).
 
 		// ─── UI ──────────────────────────────────────────────────────────
 		case "client_count":
@@ -759,19 +901,8 @@ export function handleMessage(msg: RelayMessage): void {
 			handleTodoState(msg);
 			break;
 
-		// ─── Provider session reload ─────────────────────────────────────
-		case "provider_session_reloaded":
-			log.debug("Provider session reloaded:", msg.sessionId);
-			showToast("Skills reloaded");
-			break;
-
-		// ─── Part / Message removal ──────────────────────────────────────
-		case "part_removed":
-			dispatchToCurrent(handlePartRemoved, msg);
-			break;
-		case "message_removed":
-			dispatchToCurrent(handleMessageRemoved, msg);
-			break;
+		// ─── Provider session reload / Part / Message removal ──────────────
+		// Now routed through routePerSession (per-session events).
 
 		// ─── Instances ───────────────────────────────────────────────────
 		case "instance_list":

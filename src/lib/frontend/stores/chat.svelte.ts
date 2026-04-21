@@ -1,12 +1,10 @@
 // ─── Chat Store ──────────────────────────────────────────────────────────────
 // Manages chat messages, streaming state, and processing.
 //
-// Task 2 (F2): handler signatures flipped to (activity, messages, event).
-// During this transitional commit, handlers receive per-session tiers as
-// leading arguments but still write to legacy `chatState` for backward compat.
-// The `dispatchToCurrent` adapter in ws-dispatch.ts resolves the current
-// session's slot and passes it through.  Task 3 migrates writes to the
-// per-session tiers; Task 4 removes the legacy chatState writes entirely.
+// Task 4: Two-tier per-session chat state. Handlers receive (activity, messages, event)
+// and write to per-session tiers. Legacy chatState writes kept for backward compat
+// during transition. The routePerSession dispatcher in ws-dispatch.ts resolves
+// the correct session slot by event.sessionId.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { PerSessionEvent } from "../../shared-types.js";
@@ -1177,16 +1175,31 @@ export function handleStatus(
 			ensureSentDuringEpochOnLastUnrespondedUser(activity, messages);
 		}
 	} else if (msg.status === "idle") {
-		// Defense-in-depth: the server's status is authoritative. If the
-		// server says idle, clear "processing" phase. This catches edge
-		// cases where replay sets phase to "processing" from a stale cache
-		// but the session actually completed (e.g. post-restart).
+		// F2 fix: full cleanup when the server says idle.
+		// The server's status is authoritative — if it says idle, clean
+		// up all streaming/processing state for this session.
 		//
-		// Don't clear "streaming" — that phase is data-driven (delta events
-		// are actively arriving) and should only be cleared by a done/error.
-		if (chatState.phase === "processing") {
-			phaseToIdle(activity);
+		// 1. If a live in-flight message is pending, finalize it via handleDone
+		//    helper path (flushAndFinalizeAssistant).
+		if (activity.currentMessageId != null && chatState.phase === "streaming") {
+			flushAndFinalizeAssistant(activity, messages);
 		}
+
+		// 2. Set phase to idle
+		phaseToIdle(activity);
+
+		// 3. Clear in-flight state
+		activity.currentMessageId = null;
+		messages.currentAssistantText = "";
+		chatState.currentAssistantText = "";
+		activity.thinkingStartTime = 0;
+
+		// 4. Drain liveEventBuffer if non-null
+		if (activity.liveEventBuffer !== null) {
+			activity.liveEventBuffer = null;
+		}
+
+		// 5. seenMessageIds / doneMessageIds remain (cross-turn dedup)
 	}
 }
 

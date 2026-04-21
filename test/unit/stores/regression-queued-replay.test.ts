@@ -63,6 +63,9 @@ import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
+	// Register sessions so routePerSession's unknown-session guard passes.
+	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	sessionState.sessions.set("s1", { id: "s1", title: "" });
 	clearMessages();
 	vi.useFakeTimers();
 });

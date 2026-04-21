@@ -81,6 +81,26 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	sessionState.hasMore = false;
+	// Register sessions so routePerSession's unknown-session guard passes.
+	for (const id of [
+		"test-session",
+		"s1",
+		"s2",
+		"s3",
+		"session-a",
+		"session-b",
+		"session-c",
+		"session-d",
+		"session-e",
+		"session-w",
+		"session-x",
+		"session-y",
+		"session-z",
+		"new-session",
+		"after",
+	]) {
+		sessionState.sessions.set(id, { id, title: "" });
+	}
 	vi.useFakeTimers();
 });
 

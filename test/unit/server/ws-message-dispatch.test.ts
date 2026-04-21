@@ -79,6 +79,7 @@ import {
 	clearInstanceState,
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
@@ -97,6 +98,10 @@ beforeEach(() => {
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
+	// Register sessions so routePerSession's unknown-session guard passes.
+	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	sessionState.currentId = "test-session";
 });
 
 afterEach(() => {

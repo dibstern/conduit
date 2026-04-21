@@ -77,6 +77,9 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
+	// Register sessions so routePerSession's unknown-session guard passes.
+	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	sessionState.sessions.set("s1", { id: "s1", title: "" });
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();
@@ -286,6 +289,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		// Turn 1: assistant streaming with messageId
 		handleMessage({
 			type: "delta",
+			sessionId: "s1",
 			text: "response 1",
 			messageId: "msg-1",
 		} as RelayMessage);
@@ -300,6 +304,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		// More deltas from same messageId — shimmer stays
 		handleMessage({
 			type: "delta",
+			sessionId: "s1",
 			text: " more text",
 			messageId: "msg-1",
 		} as RelayMessage);
@@ -311,6 +316,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		// create new assistant message.
 		handleMessage({
 			type: "delta",
+			sessionId: "s1",
 			text: "response 2",
 			messageId: "msg-2",
 		} as RelayMessage);

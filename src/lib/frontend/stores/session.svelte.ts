@@ -272,6 +272,12 @@ export function handleSessionList(
 		sessionState.rootSessions = sessions.filter((s) => !s.parentID);
 		sessionState.allSessions = sessions;
 	}
+
+	// Populate id-keyed sessions Map for O(1) membership checks.
+	// Used by routePerSession's unknown-session guard.
+	for (const s of sessions) {
+		sessionState.sessions.set(s.id, s);
+	}
 }
 
 export function handleSessionSwitched(
@@ -280,6 +286,11 @@ export function handleSessionSwitched(
 	const { id, requestId } = msg;
 	if (id) {
 		sessionState.currentId = id;
+		// Ensure the session is in the id-keyed Map so routePerSession's
+		// unknown-session guard won't drop events for the active session.
+		if (!sessionState.sessions.has(id)) {
+			sessionState.sessions.set(id, { id, title: "" });
+		}
 	}
 	// Co-located: complete the creation state machine if this session_switched
 	// is the response to our new_session request. This is inside
@@ -301,6 +312,8 @@ export function handleSessionForked(
 	if (!sessionState.allSessions.some((s) => s.id === session.id)) {
 		sessionState.allSessions = [session, ...sessionState.allSessions];
 	}
+	// Ensure the forked session is in the id-keyed Map.
+	sessionState.sessions.set(session.id, session);
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
