@@ -36,6 +36,7 @@ describe("createRelayEventSink — translation", () => {
 		);
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
+			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
 		});
@@ -217,6 +218,7 @@ describe("createRelayEventSink — translation", () => {
 		);
 		expect(send).toHaveBeenCalledWith({
 			type: "thinking_delta",
+			sessionId: "ses-1",
 			text: "pondering",
 			messageId: "msg_1",
 		});
@@ -259,6 +261,7 @@ describe("createRelayEventSink — persistence", () => {
 		expect(projectionRunner.projectEvent).toHaveBeenCalledWith(appendResult);
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
+			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
 		});
@@ -278,6 +281,7 @@ describe("createRelayEventSink — persistence", () => {
 
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
+			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
 		});
@@ -320,6 +324,7 @@ describe("createRelayEventSink — persistence", () => {
 
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
+			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
 		});
@@ -351,6 +356,7 @@ describe("createRelayEventSink — persistence", () => {
 
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
+			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
 		});

@@ -42,6 +42,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toEqual({
 			type: "thinking_start",
+			sessionId: SESSION_ID,
 			messageId: "msg-1",
 		});
 	});
@@ -58,6 +59,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toEqual({
 			type: "thinking_delta",
+			sessionId: SESSION_ID,
 			text: "reasoning text",
 			messageId: "msg-1",
 		});
@@ -74,6 +76,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toEqual({
 			type: "thinking_stop",
+			sessionId: SESSION_ID,
 			messageId: "msg-1",
 		});
 	});

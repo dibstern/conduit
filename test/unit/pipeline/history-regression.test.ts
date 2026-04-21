@@ -186,7 +186,7 @@ describe("History conversion regression", () => {
 
 				// Message should have both parts intact
 				expect(messages).toHaveLength(1);
-				expect(messages[0]!.parts?.length).toBeGreaterThanOrEqual(2);
+				expect(messages[0]?.parts?.length).toBeGreaterThanOrEqual(2);
 			} finally {
 				harness?.close();
 			}

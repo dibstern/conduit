@@ -124,6 +124,7 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 		// Sends ask_user_error to the client
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user_error",
+			sessionId: "ses_test_001",
 			toolId: "que_orphan",
 			message: expect.stringContaining("terminal session"),
 		});
@@ -149,6 +150,7 @@ describe("handleAskUserResponse: bridge-less flow", () => {
 		// Sends ask_user_error with user-friendly message
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user_error",
+			sessionId: "ses_test_001",
 			toolId: "que_gone",
 			message: expect.stringContaining("terminal session"),
 		});
@@ -263,6 +265,7 @@ describe("handleQuestionReject: bridge-less flow", () => {
 		// Sends ask_user_error with user-friendly message
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user_error",
+			sessionId: "ses_test_001",
 			toolId: "que_double_fail",
 			message: expect.stringContaining("terminal session"),
 		});

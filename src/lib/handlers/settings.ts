@@ -55,7 +55,7 @@ export async function handleAddProject(
 			clientId,
 			new RelayError("add_project requires a non-empty 'directory' field", {
 				code: "INVALID_REQUEST",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -64,7 +64,7 @@ export async function handleAddProject(
 			clientId,
 			new RelayError("Adding projects is not supported in this mode", {
 				code: "NOT_SUPPORTED",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -85,7 +85,7 @@ export async function handleAddProject(
 	} catch (err) {
 		deps.wsHandler.sendTo(
 			clientId,
-			RelayError.fromCaught(err, "ADD_PROJECT_FAILED").toMessage(),
+			RelayError.fromCaught(err, "ADD_PROJECT_FAILED").toSystemError(),
 		);
 	}
 }
@@ -109,7 +109,7 @@ export async function handleRemoveProject(
 			clientId,
 			new RelayError("remove_project requires a non-empty 'slug' field", {
 				code: "INVALID_REQUEST",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -118,7 +118,7 @@ export async function handleRemoveProject(
 			clientId,
 			new RelayError("Removing projects is not supported in this mode", {
 				code: "NOT_SUPPORTED",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -135,7 +135,7 @@ export async function handleRemoveProject(
 	} catch (err) {
 		deps.wsHandler.sendTo(
 			clientId,
-			RelayError.fromCaught(err, "REMOVE_PROJECT_FAILED").toMessage(),
+			RelayError.fromCaught(err, "REMOVE_PROJECT_FAILED").toSystemError(),
 		);
 	}
 }
@@ -153,7 +153,7 @@ export async function handleRenameProject(
 			clientId,
 			new RelayError("rename_project requires a non-empty 'slug' field", {
 				code: "INVALID_REQUEST",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -162,7 +162,7 @@ export async function handleRenameProject(
 			clientId,
 			new RelayError("Renaming projects is not supported in this mode", {
 				code: "NOT_SUPPORTED",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -172,7 +172,7 @@ export async function handleRenameProject(
 			clientId,
 			new RelayError("rename_project requires a non-empty 'title' field", {
 				code: "INVALID_REQUEST",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -190,7 +190,7 @@ export async function handleRenameProject(
 	} catch (err) {
 		deps.wsHandler.sendTo(
 			clientId,
-			RelayError.fromCaught(err, "RENAME_PROJECT_FAILED").toMessage(),
+			RelayError.fromCaught(err, "RENAME_PROJECT_FAILED").toSystemError(),
 		);
 	}
 }

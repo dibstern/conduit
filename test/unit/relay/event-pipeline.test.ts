@@ -16,7 +16,7 @@ import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 describe("truncateIfNeeded", () => {
 	it("passes through non-tool_result messages unchanged", () => {
-		const msg: RelayMessage = { type: "delta", text: "hi" };
+		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result = truncateIfNeeded(msg);
 		expect(result.msg).toBe(msg);
 		expect(result.fullContent).toBeUndefined();
@@ -26,6 +26,7 @@ describe("truncateIfNeeded", () => {
 		const content = "x".repeat(60_000);
 		const msg: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content,
 			is_error: false,
@@ -43,6 +44,7 @@ describe("truncateIfNeeded", () => {
 	it("does not truncate tool_result under threshold", () => {
 		const msg: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content: "short",
 			is_error: false,
@@ -148,7 +150,7 @@ describe("resolveTimeout", () => {
 
 describe("processEvent (composed pipeline)", () => {
 	it("composes all decisions for a normal message with viewers", () => {
-		const msg: RelayMessage = { type: "delta", text: "hi" };
+		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.msg).toBe(msg);
 		expect(result.fullContent).toBeUndefined();
@@ -159,7 +161,7 @@ describe("processEvent (composed pipeline)", () => {
 	});
 
 	it("marks done events with clear timeout", () => {
-		const msg: RelayMessage = { type: "done", code: 0 };
+		const msg: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.timeout).toBe("clear");
 		expect(result.cache).toBe(true);
@@ -168,7 +170,7 @@ describe("processEvent (composed pipeline)", () => {
 	});
 
 	it("drops events with no sessionId", () => {
-		const msg: RelayMessage = { type: "delta", text: "hi" };
+		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result = processEvent(msg, undefined, []);
 		expect(result.route).toEqual({ action: "drop", reason: "no session ID" });
 		expect(result.cache).toBe(false);
@@ -177,7 +179,7 @@ describe("processEvent (composed pipeline)", () => {
 	});
 
 	it("caches but drops routing when no viewers", () => {
-		const msg: RelayMessage = { type: "delta", text: "hi" };
+		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result = processEvent(msg, "ses_abc", []);
 		expect(result.cache).toBe(true);
 		expect(result.route).toEqual({
@@ -203,6 +205,7 @@ describe("processEvent (composed pipeline)", () => {
 		const content = "x".repeat(60_000);
 		const msg: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content,
 			is_error: false,
@@ -217,7 +220,7 @@ describe("processEvent (composed pipeline)", () => {
 	});
 
 	it("includes explicit source when provided", () => {
-		const msg: RelayMessage = { type: "done", code: 0 };
+		const msg: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		const result = processEvent(msg, "ses_abc", ["c1"], "status-poller");
 		expect(result.source).toBe("status-poller");
 	});
@@ -230,7 +233,7 @@ function makeDeps(): PipelineDeps & {
 		clearProcessingTimeout: ReturnType<typeof vi.fn>;
 		resetProcessingTimeout: ReturnType<typeof vi.fn>;
 	};
-	wsHandler: { sendToSession: ReturnType<typeof vi.fn> };
+	wsHandler: { broadcastPerSessionEvent: ReturnType<typeof vi.fn> };
 	log: ReturnType<typeof createSilentLogger> & {
 		debug: ReturnType<typeof vi.fn>;
 		verbose: ReturnType<typeof vi.fn>;
@@ -245,7 +248,7 @@ function makeDeps(): PipelineDeps & {
 			clearProcessingTimeout: vi.fn(),
 			resetProcessingTimeout: vi.fn(),
 		},
-		wsHandler: { sendToSession: vi.fn() },
+		wsHandler: { broadcastPerSessionEvent: vi.fn() },
 		log: {
 			...createSilentLogger(),
 			debug: debugSpy,
@@ -262,7 +265,7 @@ describe("applyPipelineResult", () => {
 	it("clears timeout for done events", () => {
 		const deps = makeDeps();
 		const result: PipelineResult = {
-			msg: { type: "done", code: 0 },
+			msg: { type: "done", sessionId: "s1", code: 0 },
 			fullContent: undefined,
 			route: { action: "send", sessionId: "ses_abc" },
 			cache: true,
@@ -279,7 +282,7 @@ describe("applyPipelineResult", () => {
 	it("resets timeout for normal events", () => {
 		const deps = makeDeps();
 		const result: PipelineResult = {
-			msg: { type: "delta", text: "hi" },
+			msg: { type: "delta", sessionId: "s1", text: "hi" },
 			fullContent: undefined,
 			route: { action: "send", sessionId: "ses_abc" },
 			cache: true,
@@ -296,9 +299,9 @@ describe("applyPipelineResult", () => {
 	// messageCache removed in Task 50.5 — applyPipelineResult no longer records
 	// events; the cache field on PipelineResult is now consumed by the SSE wiring layer.
 
-	it("sends to session when route action is send", () => {
+	it("firehoses per-session event when route action is send", () => {
 		const deps = makeDeps();
-		const msg: RelayMessage = { type: "delta", text: "hi" };
+		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result: PipelineResult = {
 			msg,
 			fullContent: undefined,
@@ -308,13 +311,19 @@ describe("applyPipelineResult", () => {
 			source: "sse",
 		};
 		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith("ses_abc", msg);
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
+			"ses_abc",
+			msg,
+		);
 		expect(deps.log.debug).not.toHaveBeenCalled();
 	});
 
-	it("logs drop reason when route action is drop", () => {
+	it("firehoses per-session event even when route action is drop (no viewers)", () => {
+		// Phase 0b: the route field is now a "has-viewers?" signal for
+		// cross-session notification decisions. Delivery is no longer gated
+		// by viewers — every client on the project receives the event.
 		const deps = makeDeps();
-		const msg: RelayMessage = { type: "delta", text: "hi" };
+		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result: PipelineResult = {
 			msg,
 			fullContent: undefined,
@@ -324,7 +333,13 @@ describe("applyPipelineResult", () => {
 			source: "sse",
 		};
 		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
+			"ses_abc",
+			msg,
+		);
+		// The drop reason is still logged as the "no active viewers" signal
+		// — used by downstream notification routing to fire cross-session
+		// notification_event broadcasts.
 		expect(deps.log.info).toHaveBeenCalledWith(
 			"no viewers for session ses_abc — delta (sse)",
 		);
@@ -333,7 +348,7 @@ describe("applyPipelineResult", () => {
 	it("skips timeout actions when no sessionId", () => {
 		const deps = makeDeps();
 		const result: PipelineResult = {
-			msg: { type: "delta", text: "hi" },
+			msg: { type: "delta", sessionId: "s1", text: "hi" },
 			fullContent: undefined,
 			route: { action: "drop", reason: "no session ID" },
 			cache: false,

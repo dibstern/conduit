@@ -38,7 +38,7 @@ describe("handleReloadProviderSession", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
 			expect.objectContaining({
-				type: "error",
+				type: "system_error",
 				code: "NO_SESSION",
 			}),
 		);

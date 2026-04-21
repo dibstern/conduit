@@ -310,6 +310,7 @@ describe("Gap 3 – handleClientConnected uses SQLite history when readQuery is 
 					broadcast: vi.fn(),
 					sendTo: spy.fn,
 					setClientSession: vi.fn(),
+					markClientBootstrapped: vi.fn(),
 				},
 				client: {
 					session: {
@@ -378,6 +379,7 @@ describe("Gap 3 – handleClientConnected uses SQLite history when readQuery is 
 					broadcast: vi.fn(),
 					sendTo: spy.fn,
 					setClientSession: vi.fn(),
+					markClientBootstrapped: vi.fn(),
 				},
 				client: {
 					session: {

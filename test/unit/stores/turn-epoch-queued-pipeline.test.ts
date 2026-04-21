@@ -109,28 +109,28 @@ describe("turnEpoch tracking", () => {
 	});
 
 	it("increments on handleDone", () => {
-		handleDelta({ type: "delta", text: "hello" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "hello" });
 		expect(chatState.turnEpoch).toBe(0);
 
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
 	});
 
 	it("increments for each turn", () => {
 		// Turn 1
-		handleDelta({ type: "delta", text: "a" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta({ type: "delta", sessionId: "s1", text: "a" });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
 
 		// Turn 2
-		handleDelta({ type: "delta", text: "b" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta({ type: "delta", sessionId: "s1", text: "b" });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(2);
 	});
 
 	it("resets to 0 on clearMessages", () => {
-		handleDelta({ type: "delta", text: "a" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta({ type: "delta", sessionId: "s1", text: "a" });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
 
 		clearMessages();
@@ -139,12 +139,12 @@ describe("turnEpoch tracking", () => {
 
 	it("tracks turns during replay", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "q1" },
-			{ type: "delta", text: "a1" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "q2" },
-			{ type: "delta", text: "a2" },
-			{ type: "done", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "q1" },
+			{ type: "delta", sessionId: "s1", text: "a1" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "q2" },
+			{ type: "delta", sessionId: "s1", text: "a2" },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 
 		replayEvents(events, "test-session");
@@ -159,7 +159,11 @@ describe("turnEpoch tracking", () => {
 describe("queued shimmer persists through current-turn deltas", () => {
 	it("sentDuringEpoch survives continuation deltas (visual stays queued)", () => {
 		// Start an assistant turn
-		handleMessage({ type: "delta", text: "Working on " } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "Working on ",
+		} as RelayMessage);
 		expect(isStreaming()).toBe(true);
 
 		// User queues a message mid-stream
@@ -169,18 +173,30 @@ describe("queued shimmer persists through current-turn deltas", () => {
 
 		// More deltas arrive from the CURRENT turn — visual stays queued
 		// because turnEpoch hasn't advanced past sentDuringEpoch
-		handleMessage({ type: "delta", text: "your request..." } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "your request...",
+		} as RelayMessage);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
-		handleMessage({ type: "delta", text: " almost done" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: " almost done",
+		} as RelayMessage);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 	});
 
 	it("visual queued clears when done advances turnEpoch", () => {
 		// Turn 1: assistant streaming
-		handleMessage({ type: "delta", text: "response" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "response",
+		} as RelayMessage);
 
 		// User queues message at epoch 0
 		addUserMessage("next question", undefined, true);
@@ -189,7 +205,7 @@ describe("queued shimmer persists through current-turn deltas", () => {
 
 		// Turn 1 completes — done increments turnEpoch to 1
 		// sentDuringEpoch was 0, so turnEpoch(1) > sentDuringEpoch(0) → not queued
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
 
@@ -199,7 +215,11 @@ describe("queued shimmer persists through current-turn deltas", () => {
 
 	it("visual queued clears when new assistant message starts (done path)", () => {
 		// Turn 1: assistant streaming
-		handleMessage({ type: "delta", text: "response 1" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "response 1",
+		} as RelayMessage);
 
 		// User queues message at epoch 0
 		addUserMessage("follow-up", undefined, true);
@@ -207,12 +227,16 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
 		// done fires — bumps turnEpoch, sets phase to idle
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
 
 		// Response 2 starts (normal done→idle→delta path, no messageId)
-		handleMessage({ type: "delta", text: "response 2" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "response 2",
+		} as RelayMessage);
 
 		// Shimmer stays cleared — done already bumped turnEpoch
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
@@ -222,7 +246,11 @@ describe("queued shimmer persists through current-turn deltas", () => {
 
 	it("visual queued clears when new assistant starts even without done or messageId", () => {
 		// Turn 1: assistant streaming (no messageId on deltas)
-		handleMessage({ type: "delta", text: "response 1" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "response 1",
+		} as RelayMessage);
 
 		// User queues message at epoch 0
 		addUserMessage("follow-up", undefined, true);
@@ -230,11 +258,15 @@ describe("queued shimmer persists through current-turn deltas", () => {
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
 		// done fires (this is the normal path — done IS reliable in most cases)
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 
 		// Next response starts — no messageId. The done already cleared
 		// the shimmer, so this is a verification that it STAYS cleared.
-		handleMessage({ type: "delta", text: "response 2" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "response 2",
+		} as RelayMessage);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
 	});
@@ -287,14 +319,22 @@ describe("queued shimmer persists through current-turn deltas", () => {
 describe("queued user message doesn't split assistant response", () => {
 	it("assistant continues as one message when user queues mid-stream", () => {
 		// Start streaming
-		handleMessage({ type: "delta", text: "Part 1 " } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "Part 1 ",
+		} as RelayMessage);
 		expect(assistantMessages()).toHaveLength(1);
 
 		// User queues a message
 		addUserMessage("queued msg", undefined, true);
 
 		// More deltas from same turn
-		handleMessage({ type: "delta", text: "Part 2" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "Part 2",
+		} as RelayMessage);
 
 		// Should still be ONE assistant message, not two
 		expect(assistantMessages()).toHaveLength(1);
@@ -304,13 +344,21 @@ describe("queued user message doesn't split assistant response", () => {
 
 	it("new turn creates a separate assistant message after queued user msg", () => {
 		// Turn 1
-		handleMessage({ type: "delta", text: "Turn 1 response" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "Turn 1 response",
+		} as RelayMessage);
 		addUserMessage("queued", undefined, true);
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 
 		// Turn 2
-		handleMessage({ type: "delta", text: "Turn 2 response" } as RelayMessage);
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "Turn 2 response",
+		} as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 
 		// Should be: assistant(turn1), user, assistant(turn2)
 		expect(msgTypes()).toEqual(["assistant", "user", "assistant"]);
@@ -323,15 +371,15 @@ describe("queued user message doesn't split assistant response", () => {
 describe("replay pipeline: sentDuringEpoch respects turn boundaries", () => {
 	it("sentDuringEpoch is set during replay; visual clears after done", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "responding..." },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "responding..." },
 			// User sent second message while LLM was active
-			{ type: "user_message", text: "second" },
-			{ type: "delta", text: " still going" },
-			{ type: "done", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "second" },
+			{ type: "delta", sessionId: "s1", text: " still going" },
+			{ type: "done", sessionId: "s1", code: 0 },
 			// New turn starts — turnEpoch advanced past sentDuringEpoch
-			{ type: "delta", text: "Answering second..." },
-			{ type: "done", code: 0 },
+			{ type: "delta", sessionId: "s1", text: "Answering second..." },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 
 		replayEvents(events, "test-session");
@@ -351,10 +399,10 @@ describe("replay pipeline: sentDuringEpoch respects turn boundaries", () => {
 	it("sentDuringEpoch persists visually when replay ends mid-stream", async () => {
 		// Session still processing — no done event at end
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "working on first..." },
-			{ type: "user_message", text: "second (queued)" },
-			{ type: "delta", text: " still going" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "working on first..." },
+			{ type: "user_message", sessionId: "s1", text: "second (queued)" },
+			{ type: "delta", sessionId: "s1", text: " still going" },
 			// No done — session is mid-stream
 		];
 
@@ -376,9 +424,13 @@ describe("replay pipeline: sentDuringEpoch respects turn boundaries", () => {
 describe("clearMessages resets turn tracking cleanly", () => {
 	it("resets turnEpoch and queued tracking on session switch", () => {
 		// Build up some state
-		handleMessage({ type: "delta", text: "hello" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		} as RelayMessage);
 		addUserMessage("queued", undefined, true);
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 		expect(chatState.turnEpoch).toBe(1);
 
 		// Session switch clears everything
@@ -390,14 +442,22 @@ describe("clearMessages resets turn tracking cleanly", () => {
 
 	it("sentDuringEpoch doesn't leak across sessions", () => {
 		// Session A: queue a message
-		handleMessage({ type: "delta", text: "A response" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "A response",
+		} as RelayMessage);
 		addUserMessage("queued in A", undefined, true);
 
 		// Switch to session B
 		clearMessages();
 
 		// Session B: fresh turnEpoch — no stale state from session A
-		handleMessage({ type: "delta", text: "B response" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "B response",
+		} as RelayMessage);
 		expect(isStreaming()).toBe(true);
 		expect(userMessages()).toHaveLength(0);
 	});
@@ -408,14 +468,18 @@ describe("clearMessages resets turn tracking cleanly", () => {
 describe("session cache round-trip preserves turnEpoch", () => {
 	it("restored messages with sentDuringEpoch are not visually queued after cache round-trip", () => {
 		// Turn 1: queue a message at epoch 0
-		handleMessage({ type: "delta", text: "response" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "response",
+		} as RelayMessage);
 		addUserMessage("queued msg", undefined, true);
 		expect(userMessages()[0]?.sentDuringEpoch).toBe(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
 
 		// Turn 1 completes — shimmer clears
-		handleMessage({ type: "done", code: 0 } as RelayMessage);
+		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
 		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
 		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
 		expect(chatState.turnEpoch).toBe(1);

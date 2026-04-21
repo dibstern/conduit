@@ -17,6 +17,7 @@ describe("handleGetToolContent", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "tool_content",
+			sessionId: expect.any(String),
 			toolId: "tool-1",
 			content: "full content here",
 		});
@@ -31,6 +32,7 @@ describe("handleGetToolContent", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "error",
+			sessionId: expect.any(String),
 			code: "NOT_FOUND",
 			message: "Full tool content not available",
 		});
@@ -47,6 +49,7 @@ describe("handleGetToolContent", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "error",
+			sessionId: expect.any(String),
 			code: "INVALID_PARAMS",
 			message: "Missing or invalid toolId parameter",
 		});
@@ -61,6 +64,7 @@ describe("handleGetToolContent", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "error",
+			sessionId: expect.any(String),
 			code: "INVALID_PARAMS",
 			message: "Missing or invalid toolId parameter",
 		});
@@ -79,6 +83,7 @@ describe("handleGetToolContent", () => {
 		expect(readQuery.getToolContent).toHaveBeenCalledWith("tool-1");
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "tool_content",
+			sessionId: expect.any(String),
 			toolId: "tool-1",
 			content: "sqlite content",
 		});
@@ -94,6 +99,7 @@ describe("handleGetToolContent", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "error",
+			sessionId: expect.any(String),
 			code: "NOT_FOUND",
 			message: "Full tool content not available",
 		});
@@ -107,6 +113,7 @@ describe("handleGetToolContent", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "error",
+			sessionId: expect.any(String),
 			code: "NOT_FOUND",
 			message: "Full tool content not available",
 		});

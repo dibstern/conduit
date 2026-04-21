@@ -232,6 +232,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: "Hello world",
 				messageId: "msg_1",
 			});
@@ -267,6 +268,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: " world",
 				messageId: "msg_1",
 			});
@@ -317,6 +319,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "user_message",
+				sessionId: "sess_1",
 				text: "What is 2+2?",
 			});
 
@@ -345,10 +348,12 @@ describe("MessagePoller", () => {
 
 			expect(thinkingStart).toEqual({
 				type: "thinking_start",
+				sessionId: "sess_1",
 				messageId: "msg_1",
 			});
 			expect(thinkingDelta).toEqual({
 				type: "thinking_delta",
+				sessionId: "sess_1",
 				text: "Let me think...",
 				messageId: "msg_1",
 			});
@@ -382,6 +387,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "tool_start",
+				sessionId: "sess_1",
 				id: "t1",
 				name: "Read",
 				messageId: "msg_1",
@@ -413,6 +419,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "tool_executing",
+				sessionId: "sess_1",
 				id: "t1",
 				name: "Bash",
 				input: { command: "ls" },
@@ -456,6 +463,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "tool_result",
+				sessionId: "sess_1",
 				id: "t1",
 				content: "file contents",
 				is_error: false,
@@ -499,6 +507,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "tool_result",
+				sessionId: "sess_1",
 				id: "t1",
 				content: "command not found",
 				is_error: true,
@@ -921,7 +930,11 @@ describe("MessagePoller", () => {
 			poller.startPolling("sess_1");
 			poller.emitDone("sess_1");
 
-			expect(events).toContainEqual({ type: "done", code: 0 });
+			expect(events).toContainEqual({
+				type: "done",
+				sessionId: "sess_1",
+				code: 0,
+			});
 
 			poller.stopPolling();
 		});
@@ -1129,6 +1142,7 @@ describe("MessagePoller", () => {
 			// Only the new suffix should be emitted
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: " world",
 				messageId: "msg_1",
 			});
@@ -1165,6 +1179,7 @@ describe("MessagePoller", () => {
 			// New delta emitted for msg_2
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: "Response text",
 				messageId: "msg_2",
 			});
@@ -1356,6 +1371,7 @@ describe("MessagePoller", () => {
 			expect(deltas).toHaveLength(1);
 			expect(deltas[0]).toEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: " Want more math?",
 				messageId: "msg_a2",
 			});
@@ -1395,6 +1411,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "thinking_delta",
+				sessionId: "sess_1",
 				text: " and more",
 				messageId: "msg_1",
 			});

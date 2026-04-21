@@ -127,8 +127,8 @@ describe("RelayTimers", () => {
 		try {
 			const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
 			vi.spyOn(permissionBridge, "checkTimeouts").mockReturnValue([
-				"perm-1",
-				"perm-2",
+				{ id: "perm-1", sessionId: "s1" },
+				{ id: "perm-2", sessionId: "s1" },
 			]);
 
 			const timers = new RelayTimers(

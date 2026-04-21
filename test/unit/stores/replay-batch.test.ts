@@ -69,7 +69,7 @@ describe("Replay batch infrastructure", () => {
 	it("handleDelta during batch does not update chatState.messages", () => {
 		beginReplayBatch();
 
-		handleDelta({ type: "delta", text: "Hello from batch" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Hello from batch" });
 		vi.advanceTimersByTime(100);
 
 		// chatState.messages should still be empty — mutations go to the batch
@@ -88,9 +88,9 @@ describe("Replay batch infrastructure", () => {
 	it("commitReplayFinal flushes accumulated messages to chatState", () => {
 		beginReplayBatch();
 
-		handleDelta({ type: "delta", text: "Batched response" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Batched response" });
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		// Before commit: chatState.messages is empty
 		expect(chatState.messages).toHaveLength(0);
@@ -112,9 +112,9 @@ describe("Replay batch infrastructure", () => {
 
 		// Simulate a multi-turn conversation replay
 		// Turn 1: user + assistant + done
-		handleDelta({ type: "delta", text: "First response" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "First response" });
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		// chatState.messages stays empty the whole time
 		expect(chatState.messages).toHaveLength(0);
@@ -131,9 +131,13 @@ describe("Replay batch infrastructure", () => {
 	it("discardReplayBatch throws away accumulated mutations", () => {
 		beginReplayBatch();
 
-		handleDelta({ type: "delta", text: "This will be discarded" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "This will be discarded",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		// Batch has messages
 		expect(getMessages().length).toBeGreaterThan(0);
@@ -150,7 +154,7 @@ describe("Replay batch infrastructure", () => {
 
 	it("without batch, mutations update chatState.messages immediately (normal path unchanged)", () => {
 		// No beginReplayBatch — normal path
-		handleDelta({ type: "delta", text: "Direct update" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Direct update" });
 		vi.advanceTimersByTime(100);
 
 		// chatState.messages should be updated directly
@@ -159,13 +163,18 @@ describe("Replay batch infrastructure", () => {
 		expect(assistant).toBeDefined();
 		expect((assistant as { rawText: string }).rawText).toBe("Direct update");
 
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 	});
 
 	it("handleError during batch accumulates system message in batch", () => {
 		beginReplayBatch();
 
-		handleError({ type: "error", code: "ERROR", message: "Something failed" });
+		handleError({
+			type: "error",
+			sessionId: "s1",
+			code: "ERROR",
+			message: "Something failed",
+		});
 
 		// chatState.messages stays empty
 		expect(chatState.messages).toHaveLength(0);
@@ -185,7 +194,7 @@ describe("Replay batch infrastructure", () => {
 	it("clearMessages during active batch discards batch and resets state", () => {
 		beginReplayBatch();
 
-		handleDelta({ type: "delta", text: "In-progress batch" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "In-progress batch" });
 		vi.advanceTimersByTime(100);
 
 		// Batch has messages

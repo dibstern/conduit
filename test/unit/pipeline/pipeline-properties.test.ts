@@ -338,6 +338,7 @@ function shuffle<T>(arr: T[], rng: () => number): T[] {
 	const result = [...arr];
 	for (let i = result.length - 1; i > 0; i--) {
 		const j = Math.floor(rng() * (i + 1));
+		// biome-ignore lint/style/noNonNullAssertion: indices are within bounds by construction
 		[result[i]!, result[j]!] = [result[j]!, result[i]!];
 	}
 	return result;
@@ -585,6 +586,7 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							toDrop.add(Math.floor(rng() * droppable.length));
 						}
 						const filtered = [
+							// biome-ignore lint/style/noNonNullAssertion: events always has at least one element (message.created)
 							events[0]!,
 							...droppable.filter((_, idx) => !toDrop.has(idx)),
 						];
@@ -708,6 +710,7 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						const withDups = [...events];
 						for (let i = 0; i < dupCount; i++) {
 							const idx = Math.floor(rng() * events.length);
+							// biome-ignore lint/style/noNonNullAssertion: idx is within bounds by construction
 							withDups.splice(idx + 1, 0, events[idx]!);
 						}
 

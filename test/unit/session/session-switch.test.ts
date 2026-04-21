@@ -28,27 +28,31 @@ describe("classifyHistorySource", () => {
 
 	it('returns "needs-rest" when events have no chat content (only status/done)', () => {
 		const events: RelayMessage[] = [
-			{ type: "status", status: "processing" },
-			{ type: "done", code: 0 },
+			{ type: "status", sessionId: "s1", status: "processing" },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 		expect(classifyHistorySource(events)).toBe("needs-rest");
 	});
 
 	it('returns "cached-events" when events contain user_message', () => {
-		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
+		const events: RelayMessage[] = [
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+		];
 		expect(classifyHistorySource(events)).toBe("cached-events");
 	});
 
 	it('returns "cached-events" when events contain delta', () => {
-		const events: RelayMessage[] = [{ type: "delta", text: "response" }];
+		const events: RelayMessage[] = [
+			{ type: "delta", sessionId: "s1", text: "response" },
+		];
 		expect(classifyHistorySource(events)).toBe("cached-events");
 	});
 
 	it('returns "cached-events" when events have mixed content with at least one user_message', () => {
 		const events: RelayMessage[] = [
-			{ type: "status", status: "processing" },
-			{ type: "user_message", text: "hello" },
-			{ type: "done", code: 0 },
+			{ type: "status", sessionId: "s1", status: "processing" },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 		expect(classifyHistorySource(events)).toBe("cached-events");
 	});
@@ -56,7 +60,9 @@ describe("classifyHistorySource", () => {
 
 describe("buildSessionSwitchedMessage", () => {
 	it("builds message from cached-events source", () => {
-		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
+		const events: RelayMessage[] = [
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+		];
 		const source: SessionHistorySource = {
 			kind: "cached-events",
 			events,
@@ -67,6 +73,7 @@ describe("buildSessionSwitchedMessage", () => {
 		expect(msg).toEqual({
 			type: "session_switched",
 			id: "ses_1",
+			sessionId: "ses_1",
 			events,
 		});
 	});
@@ -83,6 +90,7 @@ describe("buildSessionSwitchedMessage", () => {
 		expect(msg).toEqual({
 			type: "session_switched",
 			id: "ses_2",
+			sessionId: "ses_2",
 			history: { messages: history.messages, hasMore: true, total: 42 },
 		});
 	});
@@ -103,7 +111,11 @@ describe("buildSessionSwitchedMessage", () => {
 		const source: SessionHistorySource = { kind: "empty" };
 		const msg = buildSessionSwitchedMessage("ses_4", source);
 
-		expect(msg).toEqual({ type: "session_switched", id: "ses_4" });
+		expect(msg).toEqual({
+			type: "session_switched",
+			id: "ses_4",
+			sessionId: "ses_4",
+		});
 	});
 
 	it("includes inputText when draft is provided", () => {
@@ -146,7 +158,9 @@ describe("buildSessionSwitchedMessage", () => {
 	});
 
 	it("includes both draft and requestId with cached-events", () => {
-		const events: RelayMessage[] = [{ type: "delta", text: "hi" }];
+		const events: RelayMessage[] = [
+			{ type: "delta", sessionId: "s1", text: "hi" },
+		];
 		const source: SessionHistorySource = {
 			kind: "cached-events",
 			events,
@@ -160,6 +174,7 @@ describe("buildSessionSwitchedMessage", () => {
 		expect(msg).toEqual({
 			type: "session_switched",
 			id: "ses_10",
+			sessionId: "ses_10",
 			events,
 			eventsHasMore: true,
 			inputText: "draft text",
@@ -187,11 +202,26 @@ function createMinimalDeps(
 describe("countUniqueMessages", () => {
 	it("counts user messages and unique assistant messageIds", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "Turn 1" },
-			{ type: "delta", text: "Response 1", messageId: "msg_asst1" },
-			{ type: "delta", text: "Response 1 cont", messageId: "msg_asst1" },
-			{ type: "user_message", text: "Turn 2" },
-			{ type: "delta", text: "Response 2", messageId: "msg_asst2" },
+			{ type: "user_message", sessionId: "s1", text: "Turn 1" },
+			{
+				type: "delta",
+				sessionId: "s1",
+				text: "Response 1",
+				messageId: "msg_asst1",
+			},
+			{
+				type: "delta",
+				sessionId: "s1",
+				text: "Response 1 cont",
+				messageId: "msg_asst1",
+			},
+			{ type: "user_message", sessionId: "s1", text: "Turn 2" },
+			{
+				type: "delta",
+				sessionId: "s1",
+				text: "Response 2",
+				messageId: "msg_asst2",
+			},
 		];
 		// 2 user messages + 2 unique assistant messageIds = 4
 		expect(countUniqueMessages(events)).toBe(4);
@@ -203,16 +233,16 @@ describe("countUniqueMessages", () => {
 
 	it("counts only user_messages when no messageIds present", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "response without messageId" },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "response without messageId" },
 		];
 		expect(countUniqueMessages(events)).toBe(1);
 	});
 
 	it("ignores non-chat events", () => {
 		const events: RelayMessage[] = [
-			{ type: "status", status: "processing" },
-			{ type: "done", code: 0 },
+			{ type: "status", sessionId: "s1", status: "processing" },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 		expect(countUniqueMessages(events)).toBe(0);
 	});
@@ -226,8 +256,8 @@ describe("countUniqueMessages", () => {
 	it("undercounts SSE-path deltas without messageId (triggers safe REST fallback)", () => {
 		// SSE-path: translator may omit messageId when props.messageID is null
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "response" }, // no messageId
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "response" }, // no messageId
 		];
 		// Only user_message counted — assistant turn invisible to heuristic
 		expect(countUniqueMessages(events)).toBe(1);
@@ -238,10 +268,11 @@ describe("countUniqueMessages", () => {
 	it("undercounts tool-only turns where tool events lack messageId", () => {
 		// Session where LLM only used tools, no text deltas
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "run the build" },
-			{ type: "tool_start", id: "t1", name: "bash" }, // no messageId
+			{ type: "user_message", sessionId: "s1", text: "run the build" },
+			{ type: "tool_start", sessionId: "s1", id: "t1", name: "bash" }, // no messageId
 			{
 				type: "tool_result",
+				sessionId: "s1",
 				id: "t1",
 				content: "ok",
 				is_error: false,
@@ -255,10 +286,17 @@ describe("countUniqueMessages", () => {
 	it("correctly counts tool-only turns when tool events have messageId (poller path)", () => {
 		// Poller-synthesized events always include messageId
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "run the build" },
-			{ type: "tool_start", id: "t1", name: "bash", messageId: "msg_a1" },
+			{ type: "user_message", sessionId: "s1", text: "run the build" },
+			{
+				type: "tool_start",
+				sessionId: "s1",
+				id: "t1",
+				name: "bash",
+				messageId: "msg_a1",
+			},
 			{
 				type: "tool_result",
+				sessionId: "s1",
 				id: "t1",
 				content: "ok",
 				is_error: false,

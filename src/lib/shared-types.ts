@@ -268,14 +268,26 @@ export interface FileVersion {
 
 export type RelayMessage =
 	// ── Streaming ──────────────────────────────────────────────────────────
-	| { type: "delta"; text: string; messageId?: string }
-	| { type: "thinking_start"; messageId?: string }
-	| { type: "thinking_delta"; text: string; messageId?: string }
-	| { type: "thinking_stop"; messageId?: string }
+	| { type: "delta"; sessionId: string; text: string; messageId?: string }
+	| { type: "thinking_start"; sessionId: string; messageId?: string }
+	| {
+			type: "thinking_delta";
+			sessionId: string;
+			text: string;
+			messageId?: string;
+	  }
+	| { type: "thinking_stop"; sessionId: string; messageId?: string }
 	// ── Tools ──────────────────────────────────────────────────────────────
-	| { type: "tool_start"; id: string; name: string; messageId?: string }
+	| {
+			type: "tool_start";
+			sessionId: string;
+			id: string;
+			name: string;
+			messageId?: string;
+	  }
 	| {
 			type: "tool_executing";
+			sessionId: string;
 			id: string;
 			name: string;
 			input: Record<string, unknown> | undefined;
@@ -285,6 +297,7 @@ export type RelayMessage =
 	  }
 	| {
 			type: "tool_result";
+			sessionId: string;
 			id: string;
 			content: string;
 			is_error: boolean;
@@ -292,7 +305,7 @@ export type RelayMessage =
 			fullContentLength?: number;
 			messageId?: string;
 	  }
-	| { type: "tool_content"; toolId: string; content: string }
+	| { type: "tool_content"; sessionId: string; toolId: string; content: string }
 	// ── Permissions / Questions ────────────────────────────────────────────
 	| {
 			type: "permission_request";
@@ -303,15 +316,26 @@ export type RelayMessage =
 			toolUseId?: string;
 			always?: string[];
 	  }
-	| { type: "permission_resolved"; requestId: PermissionId; decision: string }
+	| {
+			type: "permission_resolved";
+			sessionId: string;
+			requestId: PermissionId;
+			decision: string;
+	  }
 	| {
 			type: "ask_user";
+			sessionId: string;
 			toolId: string;
 			questions: AskUserQuestion[];
 			toolUseId?: string;
 	  }
-	| { type: "ask_user_resolved"; toolId: string; sessionId?: string }
-	| { type: "ask_user_error"; toolId: string; message: string }
+	| { type: "ask_user_resolved"; toolId: string; sessionId: string }
+	| {
+			type: "ask_user_error";
+			sessionId: string;
+			toolId: string;
+			message: string;
+	  }
 	// ── Session lifecycle ──────────────────────────────────────────────────
 	| {
 			type: "result";
@@ -321,11 +345,12 @@ export type RelayMessage =
 			sessionId: string;
 			messageId?: string;
 	  }
-	| { type: "status"; status: string }
-	| { type: "done"; code: number }
+	| { type: "status"; sessionId: string; status: string }
+	| { type: "done"; sessionId: string; code: number }
 	| {
 			type: "session_switched";
 			id: string;
+			sessionId: string;
 			/** Correlation ID echoed from new_session request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */
@@ -351,6 +376,7 @@ export type RelayMessage =
 	  }
 	| {
 			type: "session_forked";
+			sessionId: string;
 			/** The newly created forked session. */
 			session: SessionInfo;
 			/** The session this was forked from. */
@@ -385,8 +411,13 @@ export type RelayMessage =
 	| { type: "file_tree"; entries: string[] }
 	| { type: "file_changed"; path: string; changeType: "edited" | "external" }
 	// ── Part lifecycle ─────────────────────────────────────────────────────
-	| { type: "part_removed"; partId: string; messageId: string }
-	| { type: "message_removed"; messageId: string }
+	| {
+			type: "part_removed";
+			sessionId: string;
+			partId: string;
+			messageId: string;
+	  }
+	| { type: "message_removed"; sessionId: string; messageId: string }
 	// ── PTY / Terminal ─────────────────────────────────────────────────────
 	| { type: "pty_created"; pty: PtyInfo }
 	| { type: "pty_output"; ptyId: string; data: string }
@@ -421,10 +452,20 @@ export type RelayMessage =
 	| { type: "file_history_result"; path: string; versions: FileVersion[] }
 	| { type: "rewind_result"; mode: string }
 	// ── Cache / Replay ────────────────────────────────────────────────────
-	| { type: "user_message"; text: string }
+	| { type: "user_message"; sessionId: string; text: string }
+	// ── Session deletion ──────────────────────────────────────────────────
+	| { type: "session_deleted"; sessionId: string }
 	// ── Misc ────────────────────────────────────────────────────────────────
 	| {
 			type: "error";
+			sessionId: string;
+			code: string;
+			message: string;
+			statusCode?: number;
+			details?: Record<string, unknown>;
+	  }
+	| {
+			type: "system_error";
 			code: string;
 			message: string;
 			statusCode?: number;
@@ -472,6 +513,82 @@ export type RelayMessage =
 			/** Session that triggered the event (for notification click routing) */
 			sessionId?: string;
 	  };
+
+// ─── Per-session / Global event discriminators ────────────────────────────
+// These types let code distinguish per-session events (which always carry
+// sessionId) from global events (which never do).
+
+export type PerSessionEventType =
+	| "delta"
+	| "thinking_start"
+	| "thinking_delta"
+	| "thinking_stop"
+	| "tool_start"
+	| "tool_executing"
+	| "tool_result"
+	| "tool_content"
+	| "result"
+	| "done"
+	| "error"
+	| "status"
+	| "user_message"
+	| "part_removed"
+	| "message_removed"
+	| "ask_user"
+	| "ask_user_resolved"
+	| "ask_user_error"
+	| "permission_request"
+	| "permission_resolved"
+	| "session_switched"
+	| "session_forked"
+	| "history_page"
+	| "provider_session_reloaded"
+	| "session_deleted";
+
+export type PerSessionEvent = Extract<
+	RelayMessage,
+	{ type: PerSessionEventType; sessionId: string }
+>;
+export type GlobalRelayEvent = Exclude<
+	RelayMessage,
+	{ type: PerSessionEventType }
+>;
+
+// ─── Untagged events (translator output before sessionId tagging) ──────────
+// The SSE translator and message poller produce events without sessionId.
+// These are tagged with sessionId at emission sites before broadcast.
+
+/**
+ * A RelayMessage variant that may be missing sessionId.
+ * Used as the output type of the SSE translator before post-translation tagging.
+ *
+ * Structurally a `RelayMessage` that also accepts objects without sessionId.
+ * The `tagWithSessionId` helper converts these to proper RelayMessages.
+ */
+export type UntaggedRelayMessage =
+	| RelayMessage
+	// biome-ignore lint/suspicious/noExplicitAny: intentionally loose — translator output before sessionId tagging
+	| (Record<string, any> & { type: string });
+
+/**
+ * Tag a per-session event with the given sessionId. Non-per-session events
+ * pass through unchanged. Returns a properly typed RelayMessage.
+ */
+export function tagWithSessionId(
+	msg: UntaggedRelayMessage,
+	sessionId: string,
+): RelayMessage {
+	// If the message already has a sessionId, return as-is
+	if (
+		"sessionId" in msg &&
+		typeof msg.sessionId === "string" &&
+		msg.sessionId
+	) {
+		return msg as RelayMessage;
+	}
+	// Add sessionId to all per-session event types
+	return { ...msg, sessionId } as RelayMessage;
+}
 
 // ─── Instance Types ─────────────────────────────────────────────────────────
 

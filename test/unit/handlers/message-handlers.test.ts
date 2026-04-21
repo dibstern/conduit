@@ -277,6 +277,7 @@ describe("handleCancel", () => {
 		expect(deps.client.session.abort).toHaveBeenCalledWith("session-1");
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
 			type: "done",
+			sessionId: expect.any(String),
 			code: 1,
 		});
 	});
@@ -298,6 +299,7 @@ describe("handleCancel", () => {
 		await handleCancel(deps, "client-1", {});
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
 			type: "done",
+			sessionId: expect.any(String),
 			code: 1,
 		});
 	});
@@ -319,6 +321,7 @@ describe("handleNewSession", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-new",
+			sessionId: "session-new",
 		});
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "session_list" }),
@@ -343,6 +346,7 @@ describe("handleMessage", () => {
 		await handleMessage(deps, "client-1", { text: "Hello" });
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
 			type: "status",
+			sessionId: "session-1",
 			status: "processing",
 		});
 		expect(deps.overrides.startProcessingTimeout).toHaveBeenCalledWith(
@@ -365,7 +369,7 @@ describe("handleMessage", () => {
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue(undefined);
 		await handleMessage(deps, "client-1", { text: "Hello" });
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "NO_SESSION",
 			message: "No active session. Create or switch to a session first.",
 		});
@@ -400,15 +404,18 @@ describe("handleMessage", () => {
 		// Other clients should receive the user_message
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-2", {
 			type: "user_message",
+			sessionId: "session-1",
 			text: "Hello",
 		});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-3", {
 			type: "user_message",
+			sessionId: "session-1",
 			text: "Hello",
 		});
 		// The sender should NOT receive user_message (they already added it locally)
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith("client-1", {
 			type: "user_message",
+			sessionId: "session-1",
 			text: "Hello",
 		});
 	});
@@ -424,11 +431,16 @@ describe("handleMessage", () => {
 		);
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
 			type: "done",
+			sessionId: expect.any(String),
 			code: 1,
 		});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "SEND_FAILED" }),
+			expect.objectContaining({
+				type: "error",
+				sessionId: expect.any(String),
+				code: "SEND_FAILED",
+			}),
 		);
 	});
 
@@ -710,6 +722,7 @@ describe("handlePermissionResponse", () => {
 		);
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "permission_resolved",
+			sessionId: expect.any(String),
 			requestId: pid("perm-1"),
 			decision: "once",
 		});
@@ -942,6 +955,7 @@ describe("handleAskUserResponse", () => {
 		// Should send ask_user_error to the client
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user_error",
+			sessionId: expect.any(String),
 			toolId: "toolu_123",
 			message: expect.stringContaining("terminal session"),
 		});
@@ -1297,7 +1311,7 @@ describe("handleAddProject", () => {
 			{} as unknown as PayloadMap["add_project"],
 		);
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INVALID_REQUEST",
 			message: "add_project requires a non-empty 'directory' field",
 		});
@@ -1307,7 +1321,7 @@ describe("handleAddProject", () => {
 		const deps = createMockHandlerDeps();
 		await handleAddProject(deps, "client-1", { directory: "/foo" });
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "NOT_SUPPORTED",
 			message: "Adding projects is not supported in this mode",
 		});
@@ -1477,7 +1491,10 @@ describe("handlePtyCreate", () => {
 		await handlePtyCreate(deps, "client-1", {});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "PTY_CREATE_FAILED" }),
+			expect.objectContaining({
+				type: "system_error",
+				code: "PTY_CREATE_FAILED",
+			}),
 		);
 	});
 
@@ -1493,7 +1510,10 @@ describe("handlePtyCreate", () => {
 		expect(broadcastCalls.some((c) => c[0].type === "pty_deleted")).toBe(true);
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "PTY_CONNECT_FAILED" }),
+			expect.objectContaining({
+				type: "system_error",
+				code: "PTY_CONNECT_FAILED",
+			}),
 		);
 	});
 
@@ -1502,7 +1522,7 @@ describe("handlePtyCreate", () => {
 		vi.mocked(deps.client.pty.create).mockResolvedValue({} as { id: string });
 		await handlePtyCreate(deps, "client-1", {});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "PTY_CREATE_FAILED",
 			message: "Terminal creation returned no ID",
 		});

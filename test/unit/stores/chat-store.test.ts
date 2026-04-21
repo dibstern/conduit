@@ -65,7 +65,7 @@ afterEach(() => {
 
 describe("handleDelta", () => {
 	it("creates an assistant message on first delta", () => {
-		handleDelta({ type: "delta", text: "Hello" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Hello" });
 		expect(chatState.messages).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		expect(chatState.messages[0]!.type).toBe("assistant");
@@ -73,14 +73,14 @@ describe("handleDelta", () => {
 	});
 
 	it("accumulates text in currentAssistantText", () => {
-		handleDelta({ type: "delta", text: "Hello " });
-		handleDelta({ type: "delta", text: "world" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Hello " });
+		handleDelta({ type: "delta", sessionId: "s1", text: "world" });
 		expect(chatState.currentAssistantText).toBe("Hello world");
 	});
 
 	it("does not create duplicate assistant messages on subsequent deltas", () => {
-		handleDelta({ type: "delta", text: "a" });
-		handleDelta({ type: "delta", text: "b" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "a" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "b" });
 		const assistantMessages = chatState.messages.filter(
 			(m: { type: string }) => m.type === "assistant",
 		);
@@ -91,7 +91,7 @@ describe("handleDelta", () => {
 	// Runtime validation happens at the WS dispatch layer, not in store handlers.
 
 	it("updates assistant message HTML after debounce", () => {
-		handleDelta({ type: "delta", text: "**bold**" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "**bold**" });
 		vi.advanceTimersByTime(100);
 		const m = chatState.messages[0] as AssistantMessage;
 		expect(m.rawText).toBe("**bold**");
@@ -104,7 +104,7 @@ describe("handleDelta", () => {
 
 describe("thinking lifecycle", () => {
 	it("creates a thinking message on start", () => {
-		handleThinkingStart({ type: "thinking_start" });
+		handleThinkingStart({ type: "thinking_start", sessionId: "s1" });
 		expect(chatState.messages).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		expect(chatState.messages[0]!.type).toBe("thinking");
@@ -112,18 +112,26 @@ describe("thinking lifecycle", () => {
 	});
 
 	it("appends text on thinking delta", () => {
-		handleThinkingStart({ type: "thinking_start" });
-		handleThinkingDelta({ type: "thinking_delta", text: "pondering " });
-		handleThinkingDelta({ type: "thinking_delta", text: "deeply" });
+		handleThinkingStart({ type: "thinking_start", sessionId: "s1" });
+		handleThinkingDelta({
+			type: "thinking_delta",
+			sessionId: "s1",
+			text: "pondering ",
+		});
+		handleThinkingDelta({
+			type: "thinking_delta",
+			sessionId: "s1",
+			text: "deeply",
+		});
 		const m = chatState.messages[0] as ThinkingMessage;
 		expect(m.text).toBe("pondering deeply");
 	});
 
 	it("marks thinking as done on stop with duration", () => {
 		vi.setSystemTime(new Date(1000));
-		handleThinkingStart({ type: "thinking_start" });
+		handleThinkingStart({ type: "thinking_start", sessionId: "s1" });
 		vi.setSystemTime(new Date(3500));
-		handleThinkingStop({ type: "thinking_stop" });
+		handleThinkingStop({ type: "thinking_stop", sessionId: "s1" });
 		const m = chatState.messages[0] as ThinkingMessage;
 		expect(m.done).toBe(true);
 		expect(m.duration).toBe(2500);
@@ -137,7 +145,12 @@ describe("thinking lifecycle", () => {
 
 describe("tool lifecycle", () => {
 	it("creates a tool message on start", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		expect(chatState.messages).toHaveLength(1);
 		const m = chatState.messages[0] as ToolMessage;
 		expect(m.type).toBe("tool");
@@ -146,16 +159,29 @@ describe("tool lifecycle", () => {
 	});
 
 	it("transitions to running on executing", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
-		handleToolExecuting(msg({ type: "tool_executing", id: "t1" }));
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
+		handleToolExecuting(
+			msg({ type: "tool_executing", sessionId: "s1", id: "t1" }),
+		);
 		const m = chatState.messages[0] as ToolMessage;
 		expect(m.status).toBe("running");
 	});
 
 	it("transitions to completed on result", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		handleToolResult({
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content: "file contents",
 			is_error: false,
@@ -166,9 +192,15 @@ describe("tool lifecycle", () => {
 	});
 
 	it("transitions to error on result with is_error", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Write" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Write",
+		});
 		handleToolResult({
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content: "permission denied",
 			is_error: true,
@@ -179,15 +211,21 @@ describe("tool lifecycle", () => {
 	});
 
 	it("uses 'unknown' for missing tool name", () => {
-		handleToolStart(msg({ type: "tool_start", id: "t1" }));
+		handleToolStart(msg({ type: "tool_start", sessionId: "s1", id: "t1" }));
 		const m = chatState.messages[0] as ToolMessage;
 		expect(m.name).toBe("unknown");
 	});
 
 	it("handleToolExecuting stores input on tool message", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		handleToolExecuting({
 			type: "tool_executing",
+			sessionId: "s1",
 			id: "t1",
 			name: "Read",
 			input: { filePath: "/repo/src/foo.ts", offset: 10 },
@@ -204,14 +242,22 @@ describe("tool lifecycle", () => {
 	});
 
 	it("silently ignores executing for unknown tool id (expected overlap)", () => {
-		handleToolExecuting(msg({ type: "tool_executing", id: "unknown" }));
+		handleToolExecuting(
+			msg({ type: "tool_executing", sessionId: "s1", id: "unknown" }),
+		);
 		expect(chatState.messages).toHaveLength(0);
 	});
 
 	it("propagates isTruncated and fullContentLength from tool_result", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		handleToolResult({
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content: "truncated content...",
 			is_error: false,
@@ -224,9 +270,15 @@ describe("tool lifecycle", () => {
 	});
 
 	it("leaves isTruncated undefined when not present in tool_result", () => {
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		handleToolResult({
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content: "small content",
 			is_error: false,
@@ -238,12 +290,17 @@ describe("tool lifecycle", () => {
 
 	it("finalizes streaming assistant message before adding tool message", () => {
 		// Simulate: delta text → tool_start → more delta text
-		handleDelta({ type: "delta", text: "Before tool" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Before tool" });
 		vi.advanceTimersByTime(100); // flush render
 		expect(chatState.messages).toHaveLength(1);
 		expect(isStreaming()).toBe(true);
 
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 
 		// The first assistant message should now be finalized
 		const firstAssistant = chatState.messages[0] as AssistantMessage;
@@ -258,20 +315,26 @@ describe("tool lifecycle", () => {
 
 	it("creates separate assistant messages for text before and after tool calls", () => {
 		// Text before tool
-		handleDelta({ type: "delta", text: "Part 1" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Part 1" });
 		vi.advanceTimersByTime(100);
 
 		// Tool lifecycle
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		handleToolResult({
 			type: "tool_result",
+			sessionId: "s1",
 			id: "t1",
 			content: "file contents",
 			is_error: false,
 		});
 
 		// Text after tool
-		handleDelta({ type: "delta", text: "Part 2" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Part 2" });
 		vi.advanceTimersByTime(100);
 
 		const assistantMessages = chatState.messages.filter(
@@ -284,7 +347,12 @@ describe("tool lifecycle", () => {
 
 	it("does not finalize when no text was accumulated before tool_start", () => {
 		// Tool starts immediately with no preceding text
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 		expect(chatState.messages).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		expect(chatState.messages[0]!.type).toBe("tool");
@@ -299,6 +367,7 @@ describe("tool lifecycle", () => {
 		// First tool_start creates the ToolMessage
 		handleToolStart({
 			type: "tool_start",
+			sessionId: "s1",
 			id: "toolu_abc",
 			name: "AskUserQuestion",
 		});
@@ -307,6 +376,7 @@ describe("tool lifecycle", () => {
 		// Second tool_start for the same callID (e.g., from message poller) is ignored
 		handleToolStart({
 			type: "tool_start",
+			sessionId: "s1",
 			id: "toolu_abc",
 			name: "AskUserQuestion",
 		});
@@ -316,19 +386,21 @@ describe("tool lifecycle", () => {
 	it("after handleDone, duplicate tool_start is ignored and tool stays completed", () => {
 		handleToolStart({
 			type: "tool_start",
+			sessionId: "s1",
 			id: "toolu_abc",
 			name: "AskUserQuestion",
 		});
 		expect(chatState.messages).toHaveLength(1);
 
 		// handleDone force-finalizes the pending tool to completed
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		const afterDone = chatState.messages[0] as ToolMessage;
 		expect(afterDone.status).toBe("completed");
 
 		// Second tool_start for the same ID is a duplicate — ignored by registry
 		handleToolStart({
 			type: "tool_start",
+			sessionId: "s1",
 			id: "toolu_abc",
 			name: "AskUserQuestion",
 		});
@@ -337,6 +409,7 @@ describe("tool lifecycle", () => {
 		// Executing is silently rejected — tool already completed (expected overlap)
 		handleToolExecuting({
 			type: "tool_executing",
+			sessionId: "s1",
 			id: "toolu_abc",
 			name: "AskUserQuestion",
 			input: { question: "Approve?" },
@@ -440,18 +513,18 @@ describe("handleResult", () => {
 
 describe("handleDone", () => {
 	it("clears streaming state", () => {
-		handleDelta({ type: "delta", text: "hi" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "hi" });
 		expect(isStreaming()).toBe(true);
 
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(isStreaming()).toBe(false);
 		expect(isProcessing()).toBe(false);
 		expect(chatState.currentAssistantText).toBe("");
 	});
 
 	it("finalizes the assistant message", () => {
-		handleDelta({ type: "delta", text: "final text" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta({ type: "delta", sessionId: "s1", text: "final text" });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		const m = chatState.messages[0] as AssistantMessage;
 		expect(m.finalized).toBe(true);
 	});
@@ -461,7 +534,12 @@ describe("handleDone", () => {
 
 describe("handleError", () => {
 	it("adds an info system message for RETRY code", () => {
-		handleError({ type: "error", code: "RETRY", message: "Retrying..." });
+		handleError({
+			type: "error",
+			sessionId: "s1",
+			code: "RETRY",
+			message: "Retrying...",
+		});
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		const m = chatState.messages[0]!;
 		expect(m.type).toBe("system");
@@ -472,7 +550,12 @@ describe("handleError", () => {
 	});
 
 	it("adds an error system message for non-RETRY", () => {
-		handleError({ type: "error", code: "UNKNOWN", message: "Something broke" });
+		handleError({
+			type: "error",
+			sessionId: "s1",
+			code: "UNKNOWN",
+			message: "Something broke",
+		});
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		const m = chatState.messages[0]!;
 		expect(m.type).toBe("system");
@@ -483,19 +566,29 @@ describe("handleError", () => {
 
 	it("stops processing on non-RETRY error", () => {
 		phaseToStreaming();
-		handleError({ type: "error", code: "FATAL", message: "fail" });
+		handleError({
+			type: "error",
+			sessionId: "s1",
+			code: "FATAL",
+			message: "fail",
+		});
 		expect(isProcessing()).toBe(false);
 		expect(isStreaming()).toBe(false);
 	});
 
 	it("does NOT stop processing on RETRY", () => {
 		phaseToProcessing();
-		handleError({ type: "error", code: "RETRY", message: "retry" });
+		handleError({
+			type: "error",
+			sessionId: "s1",
+			code: "RETRY",
+			message: "retry",
+		});
 		expect(isProcessing()).toBe(true);
 	});
 
 	it("uses fallback text when message is empty", () => {
-		handleError({ type: "error", code: "", message: "" });
+		handleError({ type: "error", sessionId: "s1", code: "", message: "" });
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		const m = chatState.messages[0]!;
 		if (m.type === "system") {
@@ -531,7 +624,9 @@ describe("addUserMessage", () => {
 
 	it("finalizes streaming assistant message when called mid-stream", () => {
 		// Simulate an assistant streaming (deltas without done)
-		handleDelta(msg({ type: "delta", text: "Shall I proceed?" }));
+		handleDelta(
+			msg({ type: "delta", sessionId: "s1", text: "Shall I proceed?" }),
+		);
 		vi.advanceTimersByTime(100);
 
 		expect(isStreaming()).toBe(true);
@@ -561,7 +656,7 @@ describe("addUserMessage", () => {
 		expect(userMsgs[0]?.text).toBe("Yes");
 
 		// Subsequent deltas should create a NEW assistant message
-		handleDelta(msg({ type: "delta", text: "New response" }));
+		handleDelta(msg({ type: "delta", sessionId: "s1", text: "New response" }));
 		vi.advanceTimersByTime(100);
 
 		const allAssistant = chatState.messages.filter(
@@ -598,7 +693,7 @@ describe("addSystemMessage", () => {
 describe("clearMessages", () => {
 	it("clears all messages and resets state", () => {
 		addUserMessage("hi");
-		handleDelta({ type: "delta", text: "response" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "response" });
 		clearMessages();
 		expect(chatState.messages).toHaveLength(0);
 		expect(chatState.currentAssistantText).toBe("");
@@ -637,8 +732,8 @@ describe("queued user message (sentDuringEpoch)", () => {
 			}
 		}
 		// After a done event, turnEpoch advances but existing messages are unchanged
-		handleDelta({ type: "delta", text: "response" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta({ type: "delta", sessionId: "s1", text: "response" });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		for (const m of chatState.messages) {
 			if (m.type === "user") {
 				expect((m as UserMsg).sentDuringEpoch).toBe(epoch);
@@ -660,9 +755,14 @@ describe("queued user message (sentDuringEpoch)", () => {
 describe("duplicate message deduplication", () => {
 	it("suppresses duplicate deltas after done for same messageId", () => {
 		// First turn: deltas with messageId → done
-		handleDelta({ type: "delta", text: "Hello", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Hello",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		expect(chatState.messages).toHaveLength(1);
 		const firstMsg = chatState.messages[0] as AssistantMessage;
@@ -670,7 +770,12 @@ describe("duplicate message deduplication", () => {
 		expect(firstMsg.finalized).toBe(true);
 
 		// Second turn: duplicate deltas with same messageId (from stale poller)
-		handleDelta({ type: "delta", text: "Hello", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Hello",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
 
 		// Should still be just 1 message — the duplicate was silently dropped
@@ -680,18 +785,33 @@ describe("duplicate message deduplication", () => {
 
 	it("does NOT suppress deltas after tool_start finalization (tool-split)", () => {
 		// First chunk: deltas with messageId
-		handleDelta({ type: "delta", text: "Before tool", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Before tool",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
 		expect(chatState.messages).toHaveLength(1);
 
 		// tool_start finalizes the assistant message but does NOT add to doneMessageIds
-		handleToolStart({ type: "tool_start", id: "t1", name: "Read" });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
 
 		const firstAssistant = chatState.messages[0] as AssistantMessage;
 		expect(firstAssistant.finalized).toBe(true);
 
 		// Second chunk: more deltas with same messageId after tool
-		handleDelta({ type: "delta", text: "After tool", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "After tool",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
 
 		// Should create a new AssistantMessage (tool_start doesn't add to doneMessageIds)
@@ -706,14 +826,24 @@ describe("duplicate message deduplication", () => {
 
 	it("does not suppress deltas with a different messageId", () => {
 		// First turn: msg_A → done
-		handleDelta({ type: "delta", text: "First", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "First",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		expect(chatState.messages).toHaveLength(1);
 
 		// Second turn: msg_B (different ID) should NOT be suppressed
-		handleDelta({ type: "delta", text: "Second", messageId: "msg_B" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Second",
+			messageId: "msg_B",
+		});
 		vi.advanceTimersByTime(100);
 
 		const assistantMessages = chatState.messages.filter(
@@ -725,14 +855,14 @@ describe("duplicate message deduplication", () => {
 
 	it("never suppresses deltas without a messageId", () => {
 		// First turn: no messageId → done
-		handleDelta({ type: "delta", text: "First" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "First" });
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		expect(chatState.messages).toHaveLength(1);
 
 		// Second turn: also no messageId → should NOT be suppressed
-		handleDelta({ type: "delta", text: "Second" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Second" });
 		vi.advanceTimersByTime(100);
 
 		const assistantMessages = chatState.messages.filter(
@@ -744,9 +874,14 @@ describe("duplicate message deduplication", () => {
 
 	it("clearMessages resets dedup state so same messageId works again", () => {
 		// First turn: msg_A → done (adds to doneMessageIds)
-		handleDelta({ type: "delta", text: "Original", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Original",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		expect(chatState.messages).toHaveLength(1);
 
@@ -755,7 +890,12 @@ describe("duplicate message deduplication", () => {
 		expect(chatState.messages).toHaveLength(0);
 
 		// Same messageId should now work again
-		handleDelta({ type: "delta", text: "Replayed", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Replayed",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
 
 		expect(chatState.messages).toHaveLength(1);
@@ -765,7 +905,12 @@ describe("duplicate message deduplication", () => {
 
 	it("handles duplicate result bars properly after delta dedup", () => {
 		// First turn: deltas + result + done
-		handleDelta({ type: "delta", text: "Answer", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Answer",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
 		handleResult({
 			type: "result",
@@ -774,7 +919,7 @@ describe("duplicate message deduplication", () => {
 			usage: { input: 100, output: 200, cache_read: 0, cache_creation: 0 },
 			sessionId: "s1",
 		});
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 
 		// Should have: [assistant, result]
 		expect(chatState.messages).toHaveLength(2);
@@ -782,7 +927,12 @@ describe("duplicate message deduplication", () => {
 		expect(chatState.messages[1]?.type).toBe("result");
 
 		// Duplicate deltas with same messageId are suppressed
-		handleDelta({ type: "delta", text: "Answer", messageId: "msg_A" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "Answer",
+			messageId: "msg_A",
+		});
 		vi.advanceTimersByTime(100);
 
 		// Still [assistant, result] — no new assistant message

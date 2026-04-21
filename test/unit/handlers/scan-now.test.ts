@@ -32,7 +32,7 @@ describe("handleScanNow", () => {
 		await handleScanNow(deps, "client-1", {});
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: "Port scanning not available",
 		});
@@ -48,7 +48,7 @@ describe("handleScanNow", () => {
 		await handleScanNow(deps, "client-1", {});
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: expect.stringContaining("scan failed"),
 		});

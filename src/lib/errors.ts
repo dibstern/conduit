@@ -111,9 +111,25 @@ export class RelayError extends Error {
 		};
 	}
 
-	/** Alias for toWebSocket() — returns a RelayMessage error variant (AC1). */
-	toMessage(): Extract<RelayMessage, { type: "error" }> {
-		return this.toWebSocket();
+	/** Returns a RelayMessage `error` variant with required sessionId (AC1).
+	 *  For genuinely session-less errors, use {@link toSystemError} instead. */
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	/** Returns a RelayMessage `system_error` variant for session-less errors.
+	 *  Use this for broadcast errors that have no session context (e.g.
+	 *  HANDLER_ERROR, INIT_FAILED, terminal/settings errors). */
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details =
+			Object.keys(this.context).length > 0 ? this.context : undefined;
+		return {
+			type: "system_error",
+			code: this.code,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
 	}
 
 	/** Log-safe representation (redacts sensitive data) (AC6) */

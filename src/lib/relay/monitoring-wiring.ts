@@ -141,7 +141,7 @@ export function wireMonitoring(
 				return;
 			}
 
-			const doneMsg = { type: "done" as const, code: 0 };
+			const doneMsg = { type: "done" as const, sessionId, code: 0 };
 			const doneViewers = wsHandler.getClientsForSession(sessionId);
 			const doneResult = processEvent(
 				doneMsg,

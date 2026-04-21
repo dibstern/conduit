@@ -51,7 +51,7 @@ describe("handleRemoveProject", () => {
 		await handleRemoveProject(deps, "c1", { slug: "foo" });
 
 		const msg = lastSentTo(deps);
-		expect(msg.type).toBe("error");
+		expect(msg.type).toBe("system_error");
 	});
 
 	it("sends error for empty slug", async () => {
@@ -68,7 +68,7 @@ describe("handleRemoveProject", () => {
 		await handleRemoveProject(deps, "c1", { slug: "" });
 
 		const msg = lastSentTo(deps);
-		expect(msg.type).toBe("error");
+		expect(msg.type).toBe("system_error");
 	});
 });
 
@@ -115,7 +115,7 @@ describe("handleRenameProject", () => {
 		await handleRenameProject(deps, "c1", { slug: "proj", title: "   " });
 
 		const msg = lastSentTo(deps);
-		expect(msg.type).toBe("error");
+		expect(msg.type).toBe("system_error");
 	});
 
 	it("truncates title to 100 chars", async () => {
@@ -147,6 +147,6 @@ describe("handleRenameProject", () => {
 		});
 
 		const msg = lastSentTo(deps);
-		expect(msg.type).toBe("error");
+		expect(msg.type).toBe("system_error");
 	});
 });

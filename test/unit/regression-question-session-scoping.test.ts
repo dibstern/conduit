@@ -130,6 +130,7 @@ describe("Regression: SSE ask_user events routed to session, not broadcast", () 
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "que_q1",
 			questions: [],
 		};
@@ -157,6 +158,7 @@ describe("Regression: SSE ask_user events routed to session, not broadcast", () 
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user_resolved",
+			sessionId: "s1",
 			toolId: "que_q1",
 		};
 		vi.mocked(deps.translator.translate).mockReturnValue({

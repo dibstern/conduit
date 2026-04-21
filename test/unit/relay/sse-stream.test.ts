@@ -13,6 +13,7 @@ function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
 				})(),
 			})),
 		},
+		// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
 	} as any;
 }
 

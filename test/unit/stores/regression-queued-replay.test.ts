@@ -99,9 +99,9 @@ async function replayValidated(events: RelayMessage[]): Promise<void> {
 describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 	it("sets sentDuringEpoch when replayed mid-stream", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Responding to first..." },
-			{ type: "user_message", text: "second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Responding to first..." },
+			{ type: "user_message", sessionId: "s1", text: "second" },
 		];
 
 		await replayValidated(events);
@@ -117,11 +117,11 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("visual clears when done advances turnEpoch during replay", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Response to first" },
-			{ type: "user_message", text: "second" },
-			{ type: "done", code: 0 },
-			{ type: "delta", text: "Response to second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Response to first" },
+			{ type: "user_message", sessionId: "s1", text: "second" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "delta", sessionId: "s1", text: "Response to second" },
 		];
 
 		await replayValidated(events);
@@ -137,11 +137,11 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("visual clears when done fires (thinking_start is irrelevant)", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Response" },
-			{ type: "user_message", text: "second" },
-			{ type: "done", code: 0 },
-			{ type: "thinking_start" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Response" },
+			{ type: "user_message", sessionId: "s1", text: "second" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "thinking_start", sessionId: "s1" },
 		];
 
 		await replayValidated(events);
@@ -154,11 +154,11 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("visual clears when done fires (tool_start is irrelevant)", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Response" },
-			{ type: "user_message", text: "second" },
-			{ type: "done", code: 0 },
-			{ type: "tool_start", id: "t1", name: "Read" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Response" },
+			{ type: "user_message", sessionId: "s1", text: "second" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "tool_start", sessionId: "s1", id: "t1", name: "Read" },
 		];
 
 		await replayValidated(events);
@@ -171,9 +171,9 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("preserves sentDuringEpoch across session switch round-trip", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Partial response" },
-			{ type: "user_message", text: "second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Partial response" },
+			{ type: "user_message", sessionId: "s1", text: "second" },
 		];
 
 		// First replay
@@ -198,7 +198,9 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 	});
 
 	it("does not set sentDuringEpoch when no prior content", async () => {
-		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
+		const events: RelayMessage[] = [
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+		];
 
 		await replayValidated(events);
 
@@ -209,10 +211,10 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("does not set sentDuringEpoch after done clears llm activity", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Response" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Response" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "second" },
 		];
 
 		await replayValidated(events);
@@ -225,10 +227,10 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("sets sentDuringEpoch when user_message follows thinking events", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "thinking_start" },
-			{ type: "thinking_delta", text: "Hmm..." },
-			{ type: "user_message", text: "second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "thinking_start", sessionId: "s1" },
+			{ type: "thinking_delta", sessionId: "s1", text: "Hmm..." },
+			{ type: "user_message", sessionId: "s1", text: "second" },
 		];
 
 		await replayValidated(events);
@@ -242,10 +244,16 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("sets sentDuringEpoch when user_message follows tool events", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "tool_start", id: "t1", name: "Read" },
-			{ type: "tool_executing", id: "t1", name: "Read", input: undefined },
-			{ type: "user_message", text: "second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "tool_start", sessionId: "s1", id: "t1", name: "Read" },
+			{
+				type: "tool_executing",
+				sessionId: "s1",
+				id: "t1",
+				name: "Read",
+				input: undefined,
+			},
+			{ type: "user_message", sessionId: "s1", text: "second" },
 		];
 
 		await replayValidated(events);
@@ -259,10 +267,15 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 
 	it("resets llm activity on non-retry error", async () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "first" },
-			{ type: "delta", text: "Partial..." },
-			{ type: "error", code: "FATAL", message: "Something broke" },
-			{ type: "user_message", text: "second" },
+			{ type: "user_message", sessionId: "s1", text: "first" },
+			{ type: "delta", sessionId: "s1", text: "Partial..." },
+			{
+				type: "error",
+				sessionId: "s1",
+				code: "FATAL",
+				message: "Something broke",
+			},
+			{ type: "user_message", sessionId: "s1", text: "second" },
 		];
 
 		await replayValidated(events);
@@ -280,7 +293,11 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 describe("Multi-tab: live user_message sentDuringEpoch", () => {
 	it("sets sentDuringEpoch on live user_message when session is processing", () => {
 		phaseToProcessing();
-		handleMessage({ type: "user_message", text: "from other tab" });
+		handleMessage({
+			type: "user_message",
+			sessionId: "s1",
+			text: "from other tab",
+		});
 
 		const users = userMessages();
 		expect(users).toHaveLength(1);
@@ -290,7 +307,11 @@ describe("Multi-tab: live user_message sentDuringEpoch", () => {
 	});
 
 	it("does not set sentDuringEpoch on live user_message when idle", () => {
-		handleMessage({ type: "user_message", text: "from other tab" });
+		handleMessage({
+			type: "user_message",
+			sessionId: "s1",
+			text: "from other tab",
+		});
 
 		const users = userMessages();
 		expect(users).toHaveLength(1);

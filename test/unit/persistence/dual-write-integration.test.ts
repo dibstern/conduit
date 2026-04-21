@@ -30,6 +30,7 @@ describe("Dual-Write Integration (SSE → relay + event store)", () => {
 
 		const broadcast = vi.fn();
 		const sendToSession = vi.fn();
+		const broadcastPerSessionEvent = vi.fn();
 
 		// Configure translator to produce a relay message
 		const deps = createMockSSEWiringDeps({
@@ -37,6 +38,7 @@ describe("Dual-Write Integration (SSE → relay + event store)", () => {
 			wsHandler: {
 				broadcast,
 				sendToSession,
+				broadcastPerSessionEvent,
 				getClientsForSession: vi.fn().mockReturnValue(["c1"]),
 			},
 			translator: {
@@ -68,8 +70,8 @@ describe("Dual-Write Integration (SSE → relay + event store)", () => {
 		const stored = layer.eventStore.readFromSequence(0);
 		expect(stored.length).toBeGreaterThan(0);
 
-		// Verify relay pipeline still processed the message
-		expect(sendToSession).toHaveBeenCalled();
+		// Verify relay pipeline firehosed the message (Phase 0b).
+		expect(broadcastPerSessionEvent).toHaveBeenCalled();
 	});
 
 	it("events reach event store even when translator returns ok:false", () => {
@@ -128,12 +130,14 @@ describe("Dual-Write Integration (SSE → relay + event store)", () => {
 
 		const broadcast = vi.fn();
 		const sendToSession = vi.fn();
+		const broadcastPerSessionEvent = vi.fn();
 
 		const deps = createMockSSEWiringDeps({
 			dualWriteHook: hook,
 			wsHandler: {
 				broadcast,
 				sendToSession,
+				broadcastPerSessionEvent,
 				getClientsForSession: vi.fn().mockReturnValue(["c1"]),
 			},
 			translator: {
@@ -162,8 +166,8 @@ describe("Dual-Write Integration (SSE → relay + event store)", () => {
 		// Should not throw — dual-write errors are caught internally
 		expect(() => handleSSEEvent(deps, event)).not.toThrow();
 
-		// Relay pipeline should still work
-		expect(sendToSession).toHaveBeenCalled();
+		// Relay pipeline should still firehose under Phase 0b.
+		expect(broadcastPerSessionEvent).toHaveBeenCalled();
 
 		// Hook should have recorded the error
 		expect(hook.getStats().errors).toBe(1);

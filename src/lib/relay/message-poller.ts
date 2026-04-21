@@ -12,6 +12,10 @@ import { TrackedService } from "../daemon/tracked-service.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
+import {
+	tagWithSessionId,
+	type UntaggedRelayMessage,
+} from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { mapToolName } from "./event-translator.js";
 
@@ -69,7 +73,7 @@ export interface MessageSnapshot {
 export function synthesizeTextPart(
 	part: { id: string; type: string; [key: string]: unknown },
 	snap: PartSnapshot,
-	events: RelayMessage[],
+	events: UntaggedRelayMessage[],
 	messageId: string,
 	deltaType: "delta" | "thinking_delta",
 ): void {
@@ -119,7 +123,7 @@ export function synthesizeToolPart(
 	part: { id: string; type: string; [key: string]: unknown },
 	snap: PartSnapshot,
 	prev: PartSnapshot | null,
-	events: RelayMessage[],
+	events: UntaggedRelayMessage[],
 	messageId: string,
 ): void {
 	const state = part["state"] as
@@ -218,8 +222,8 @@ export function synthesizePartEvents(
 	part: { id: string; type: string; [key: string]: unknown },
 	prev: PartSnapshot | null,
 	messageId: string,
-): { events: RelayMessage[]; snapshot: PartSnapshot } {
-	const events: RelayMessage[] = [];
+): { events: UntaggedRelayMessage[]; snapshot: PartSnapshot } {
+	const events: UntaggedRelayMessage[] = [];
 	const partType = part.type;
 
 	// Build current snapshot
@@ -261,7 +265,7 @@ function extractUserText(msg: Message): string {
  * Synthesize a result event from an assistant message's cost/token metadata.
  * Only emits when the message has been completed (has cost or token data).
  */
-function synthesizeResultEvent(msg: Message): RelayMessage | null {
+function synthesizeResultEvent(msg: Message): UntaggedRelayMessage | null {
 	const hasCost = msg.cost !== undefined && msg.cost > 0;
 	const hasTokens =
 		msg.tokens?.input !== undefined || msg.tokens?.output !== undefined;
@@ -296,8 +300,11 @@ function synthesizeResultEvent(msg: Message): RelayMessage | null {
 export function diffAndSynthesize(
 	previousSnapshot: Map<string, MessageSnapshot>,
 	messages: Message[],
-): { events: RelayMessage[]; newSnapshot: Map<string, MessageSnapshot> } {
-	const events: RelayMessage[] = [];
+): {
+	events: UntaggedRelayMessage[];
+	newSnapshot: Map<string, MessageSnapshot>;
+} {
+	const events: UntaggedRelayMessage[] = [];
 	const newSnapshot = new Map<string, MessageSnapshot>();
 
 	for (const msg of messages) {
@@ -597,7 +604,7 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 	 */
 	emitDone(sessionId: string): void {
 		if (sessionId !== this.activeSessionId) return;
-		this.emit("events", [{ type: "done", code: 0 }]);
+		this.emit("events", [{ type: "done", sessionId, code: 0 }]);
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
@@ -686,7 +693,7 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 	// ─── Diff + Synthesis ──────────────────────────────────────────────────
 
 	private doDiffAndSynthesize(
-		_sessionId: string,
+		sessionId: string,
 		messages: Message[],
 	): RelayMessage[] {
 		const { events, newSnapshot } = diffAndSynthesize(
@@ -694,6 +701,7 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 			messages,
 		);
 		this.previousSnapshot = newSnapshot;
-		return events;
+		// Tag all synthesized events with the active session's ID
+		return events.map((e) => tagWithSessionId(e, sessionId));
 	}
 }

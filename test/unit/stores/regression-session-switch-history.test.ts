@@ -86,13 +86,21 @@ describe("Regression: session switch clears messages", () => {
 		// Simulate a conversation with agent output
 		sessionState.currentId = "session-a";
 		addUserMessage("hello agent");
-		handleDelta({ type: "delta", text: "I am the agent response" });
+		handleDelta({
+			type: "delta",
+			sessionId: "s1",
+			text: "I am the agent response",
+		});
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
 		// Switch to a different session
-		handleMessage({ type: "session_switched", id: "session-b" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-b",
+			sessionId: "session-b",
+		});
 
 		// Messages must be cleared
 		expect(chatState.messages).toHaveLength(0);
@@ -106,25 +114,33 @@ describe("Regression: session switch clears messages", () => {
 		// Start in session A
 		sessionState.currentId = "session-a";
 		addUserMessage("first message in A");
-		handleDelta({ type: "delta", text: "response in A" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "response in A" });
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		const msgCountA = chatState.messages.length;
 		expect(msgCountA).toBeGreaterThan(0);
 
 		// Switch to session B
-		handleMessage({ type: "session_switched", id: "session-b" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-b",
+			sessionId: "session-b",
+		});
 		expect(chatState.messages).toHaveLength(0);
 
 		// Add messages in session B
 		addUserMessage("message in B");
-		handleDelta({ type: "delta", text: "response in B" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "response in B" });
 		vi.advanceTimersByTime(100);
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
 		// Switch back to session A — must clear B's messages
-		handleMessage({ type: "session_switched", id: "session-a" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-a",
+			sessionId: "session-a",
+		});
 		expect(chatState.messages).toHaveLength(0);
 		expect(sessionState.currentId).toBe("session-a");
 	});
@@ -133,7 +149,11 @@ describe("Regression: session switch clears messages", () => {
 		sessionState.currentId = "old-session";
 		addUserMessage("some message");
 
-		handleMessage({ type: "session_switched", id: "new-session" });
+		handleMessage({
+			type: "session_switched",
+			id: "new-session",
+			sessionId: "new-session",
+		});
 
 		// Both should be updated atomically
 		expect(sessionState.currentId).toBe("new-session");
@@ -148,7 +168,11 @@ describe("Regression: handleMessage session_switched dispatch", () => {
 		sessionState.currentId = "before";
 		addUserMessage("will be cleared");
 
-		handleMessage({ type: "session_switched", id: "after" });
+		handleMessage({
+			type: "session_switched",
+			id: "after",
+			sessionId: "after",
+		});
 
 		expect(sessionState.currentId).toBe("after");
 		expect(chatState.messages).toHaveLength(0);
@@ -179,10 +203,11 @@ describe("Combined protocol: session_switched with inline events", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
+			sessionId: "session-b",
 			events: [
-				{ type: "user_message", text: "hello from B" },
-				{ type: "delta", text: "Agent response" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "hello from B" },
+				{ type: "delta", sessionId: "s1", text: "Agent response" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -211,10 +236,11 @@ describe("Combined protocol: session_switched with inline events", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
+			sessionId: "session-b",
 			events: [
-				{ type: "user_message", text: "question" },
-				{ type: "status", status: "processing" },
-				{ type: "delta", text: "Partial respon" },
+				{ type: "user_message", sessionId: "s1", text: "question" },
+				{ type: "status", sessionId: "s1", status: "processing" },
+				{ type: "delta", sessionId: "s1", text: "Partial respon" },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -236,23 +262,26 @@ describe("Combined protocol: session_switched with inline events", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-c",
+			sessionId: "session-c",
 			events: [
-				{ type: "user_message", text: "read foo.ts" },
-				{ type: "tool_start", id: "t1", name: "Read" },
+				{ type: "user_message", sessionId: "s1", text: "read foo.ts" },
+				{ type: "tool_start", sessionId: "s1", id: "t1", name: "Read" },
 				{
 					type: "tool_executing",
+					sessionId: "s1",
 					id: "t1",
 					name: "Read",
 					input: { path: "foo.ts" },
 				},
 				{
 					type: "tool_result",
+					sessionId: "s1",
 					id: "t1",
 					content: "file contents",
 					is_error: false,
 				},
-				{ type: "delta", text: "Here is the file" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Here is the file" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -267,13 +296,18 @@ describe("Combined protocol: session_switched with inline events", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-d",
+			sessionId: "session-d",
 			events: [
-				{ type: "user_message", text: "complex question" },
-				{ type: "thinking_start" },
-				{ type: "thinking_delta", text: "Let me think about this..." },
-				{ type: "thinking_stop" },
-				{ type: "delta", text: "Here is my answer" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "complex question" },
+				{ type: "thinking_start", sessionId: "s1" },
+				{
+					type: "thinking_delta",
+					sessionId: "s1",
+					text: "Let me think about this...",
+				},
+				{ type: "thinking_stop", sessionId: "s1" },
+				{ type: "delta", sessionId: "s1", text: "Here is my answer" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -297,10 +331,11 @@ describe("Combined protocol: session_switched with inline events", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-e",
+			sessionId: "session-e",
 			events: [
-				{ type: "user_message", text: "hi" },
-				{ type: "delta", text: "hello" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "hi" },
+				{ type: "delta", sessionId: "s1", text: "hello" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -313,20 +348,22 @@ describe("Combined protocol: session_switched with inline events", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
+			sessionId: "session-a",
 			events: [
-				{ type: "user_message", text: "message A" },
-				{ type: "delta", text: "response A" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "message A" },
+				{ type: "delta", sessionId: "s1", text: "response A" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
+			sessionId: "session-b",
 			events: [
-				{ type: "user_message", text: "message B" },
-				{ type: "delta", text: "response B" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "message B" },
+				{ type: "delta", sessionId: "s1", text: "response B" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -342,7 +379,11 @@ describe("Combined protocol: session_switched with inline events", () => {
 		sessionState.currentId = "session-a";
 		addUserMessage("old message");
 
-		handleMessage({ type: "session_switched", id: "session-b" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-b",
+			sessionId: "session-b",
+		});
 
 		expect(sessionState.currentId).toBe("session-b");
 		expect(chatState.messages).toHaveLength(0);
@@ -356,6 +397,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		handleMessage({
 			type: "session_switched",
 			id: "session-x",
+			sessionId: "session-x",
 			history: {
 				messages: [
 					{
@@ -391,6 +433,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		handleMessage({
 			type: "session_switched",
 			id: "session-y",
+			sessionId: "session-y",
 			history: {
 				messages: [
 					{
@@ -413,10 +456,11 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		handleMessage({
 			type: "session_switched",
 			id: "session-z",
+			sessionId: "session-z",
 			events: [
-				{ type: "user_message", text: "cached" },
-				{ type: "delta", text: "response" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "cached" },
+				{ type: "delta", sessionId: "s1", text: "response" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -428,6 +472,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		handleMessage({
 			type: "session_switched",
 			id: "session-w",
+			sessionId: "session-w",
 			history: {
 				messages: [
 					{
@@ -475,9 +520,21 @@ describe("history_page for load_more_history pagination", () => {
 
 	it("multiple rapid session switches only keep last session's state", async () => {
 		// Rapid switches: A → B → C
-		handleMessage({ type: "session_switched", id: "session-a" });
-		handleMessage({ type: "session_switched", id: "session-b" });
-		handleMessage({ type: "session_switched", id: "session-c" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-a",
+			sessionId: "session-a",
+		});
+		handleMessage({
+			type: "session_switched",
+			id: "session-b",
+			sessionId: "session-b",
+		});
+		handleMessage({
+			type: "session_switched",
+			id: "session-c",
+			sessionId: "session-c",
+		});
 
 		// Only session C should be active
 		expect(sessionState.currentId).toBe("session-c");
@@ -517,6 +574,7 @@ describe("Queued state timing with REST history", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
+			sessionId: "s1",
 			history: {
 				messages: [
 					{
@@ -535,7 +593,7 @@ describe("Queued state timing with REST history", () => {
 		expect(usersBefore[0]?.sentDuringEpoch).toBeUndefined();
 
 		// Status arrives — REST history fallback sets sentDuringEpoch
-		handleMessage({ type: "status", status: "processing" });
+		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		const usersAfter = chatState.messages.filter((m) => m.type === "user");
 		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
@@ -548,10 +606,11 @@ describe("Queued state timing with REST history", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
+			sessionId: "s2",
 			events: [
-				{ type: "user_message", text: "first" },
-				{ type: "delta", text: "responding..." },
-				{ type: "user_message", text: "queued" },
+				{ type: "user_message", sessionId: "s1", text: "first" },
+				{ type: "delta", sessionId: "s1", text: "responding..." },
+				{ type: "user_message", sessionId: "s1", text: "queued" },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -561,7 +620,7 @@ describe("Queued state timing with REST history", () => {
 		expect(epochBefore).toBe(0); // set by replay
 
 		// status:processing arrives — fallback flag NOT set for events replay
-		handleMessage({ type: "status", status: "processing" });
+		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		const usersAfter = chatState.messages.filter((m) => m.type === "user");
 		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
@@ -572,7 +631,7 @@ describe("Queued state timing with REST history", () => {
 	it("status:processing does NOT apply fallback for normal live sends", () => {
 		// User sends a message to an idle session — NOT queued
 		addUserMessage("hello");
-		handleMessage({ type: "status", status: "processing" });
+		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		const users = chatState.messages.filter((m) => m.type === "user");
 		// sentDuringEpoch should NOT be set — message was sent to idle session
@@ -583,6 +642,7 @@ describe("Queued state timing with REST history", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s3",
+			sessionId: "s3",
 			history: {
 				messages: [
 					{
@@ -601,7 +661,7 @@ describe("Queued state timing with REST history", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		handleMessage({ type: "status", status: "processing" });
+		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		// User message has a response after it — fallback should NOT set sentDuringEpoch
 		const users = chatState.messages.filter((m) => m.type === "user");
@@ -613,10 +673,11 @@ describe("Queued state timing with REST history", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
+			sessionId: "s2",
 			events: [
-				{ type: "user_message", text: "first" },
-				{ type: "delta", text: "responding..." },
-				{ type: "user_message", text: "queued" },
+				{ type: "user_message", sessionId: "s1", text: "first" },
+				{ type: "delta", sessionId: "s1", text: "responding..." },
+				{ type: "user_message", sessionId: "s1", text: "queued" },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -626,7 +687,7 @@ describe("Queued state timing with REST history", () => {
 		expect(epochBefore).toBe(0); // set by replay
 
 		// status:processing arrives — should NOT change the existing value
-		handleMessage({ type: "status", status: "processing" });
+		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		const usersAfter = chatState.messages.filter((m) => m.type === "user");
 		expect(usersAfter[usersAfter.length - 1]?.sentDuringEpoch).toBe(
@@ -638,6 +699,7 @@ describe("Queued state timing with REST history", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s3",
+			sessionId: "s3",
 			history: {
 				messages: [
 					{
@@ -656,7 +718,7 @@ describe("Queued state timing with REST history", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		handleMessage({ type: "status", status: "processing" });
+		handleMessage({ type: "status", sessionId: "s1", status: "processing" });
 
 		// User message has a response — should NOT get sentDuringEpoch
 		const users = chatState.messages.filter((m) => m.type === "user");

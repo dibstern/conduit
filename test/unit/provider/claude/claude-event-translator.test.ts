@@ -215,14 +215,14 @@ describe("ClaudeEventTranslator", () => {
 		expect(second).toBeDefined();
 
 		// First event: message.created
-		expect(first!.type).toBe("message.created");
+		expect(first?.type).toBe("message.created");
 		const createdData = dataOf(first);
 		expect(createdData["messageId"]).toBe("msg-busy-1");
 		expect(createdData["role"]).toBe("assistant");
 		expect(createdData["sessionId"]).toBe("sess-1");
 
 		// Second event: session.status with status "busy"
-		expect(second!.type).toBe("session.status");
+		expect(second?.type).toBe("session.status");
 		const statusData = dataOf(second);
 		expect(statusData["sessionId"]).toBe("sess-1");
 		expect(statusData["status"]).toBe("busy");

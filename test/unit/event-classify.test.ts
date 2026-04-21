@@ -30,23 +30,25 @@ describe("isLastTurnActive", () => {
 	});
 
 	it("returns false for only user_message events", () => {
-		const events: RelayMessage[] = [{ type: "user_message", text: "hello" }];
+		const events: RelayMessage[] = [
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+		];
 		expect(isLastTurnActive(events)).toBe(false);
 	});
 
 	it("returns true when last turn has delta but no done", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "response" },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "response" },
 		];
 		expect(isLastTurnActive(events)).toBe(true);
 	});
 
 	it("returns false when last turn ends with done", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "response" },
-			{ type: "done", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "response" },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 		expect(isLastTurnActive(events)).toBe(false);
 	});
@@ -55,63 +57,75 @@ describe("isLastTurnActive", () => {
 		// THIS IS THE BUG CASE: patchMissingDone previously saw the old done
 		// and bailed out, leaving the last turn without a done.
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "q1" },
-			{ type: "delta", text: "a1" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "q2" },
-			{ type: "delta", text: "a2 partial..." },
+			{ type: "user_message", sessionId: "s1", text: "q1" },
+			{ type: "delta", sessionId: "s1", text: "a1" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "q2" },
+			{ type: "delta", sessionId: "s1", text: "a2 partial..." },
 		];
 		expect(isLastTurnActive(events)).toBe(true);
 	});
 
 	it("returns true when earlier turn has done but last turn has tool_start without done", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "q1" },
-			{ type: "delta", text: "a1" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "q2" },
-			{ type: "tool_start", id: "t1", name: "bash" },
-			{ type: "tool_executing", id: "t1", name: "bash", input: undefined },
-			{ type: "tool_result", id: "t1", content: "ok", is_error: false },
+			{ type: "user_message", sessionId: "s1", text: "q1" },
+			{ type: "delta", sessionId: "s1", text: "a1" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "q2" },
+			{ type: "tool_start", sessionId: "s1", id: "t1", name: "bash" },
+			{
+				type: "tool_executing",
+				sessionId: "s1",
+				id: "t1",
+				name: "bash",
+				input: undefined,
+			},
+			{
+				type: "tool_result",
+				sessionId: "s1",
+				id: "t1",
+				content: "ok",
+				is_error: false,
+			},
 		];
 		expect(isLastTurnActive(events)).toBe(true);
 	});
 
 	it("returns false when non-retry error ends the turn", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "partial" },
-			{ type: "error", code: "STREAM_ERR", message: "fail" },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "partial" },
+			{ type: "error", sessionId: "s1", code: "STREAM_ERR", message: "fail" },
 		];
 		expect(isLastTurnActive(events)).toBe(false);
 	});
 
 	it("returns true when RETRY error does NOT end the turn", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "partial" },
-			{ type: "error", code: "RETRY", message: "retrying..." },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "partial" },
+			{ type: "error", sessionId: "s1", code: "RETRY", message: "retrying..." },
 		];
 		expect(isLastTurnActive(events)).toBe(true);
 	});
 
 	it("returns true when thinking_start without done", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "think about this" },
-			{ type: "thinking_start" },
-			{ type: "thinking_delta", text: "hmm..." },
+			{ type: "user_message", sessionId: "s1", text: "think about this" },
+			{ type: "thinking_start", sessionId: "s1" },
+			{ type: "thinking_delta", sessionId: "s1", text: "hmm..." },
 		];
 		expect(isLastTurnActive(events)).toBe(true);
 	});
 
 	it("returns false when thinking completes with done", () => {
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "think about this" },
-			{ type: "thinking_start" },
-			{ type: "thinking_delta", text: "hmm..." },
-			{ type: "thinking_stop" },
-			{ type: "delta", text: "here's my answer" },
-			{ type: "done", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "think about this" },
+			{ type: "thinking_start", sessionId: "s1" },
+			{ type: "thinking_delta", sessionId: "s1", text: "hmm..." },
+			{ type: "thinking_stop", sessionId: "s1" },
+			{ type: "delta", sessionId: "s1", text: "here's my answer" },
+			{ type: "done", sessionId: "s1", code: 0 },
 		];
 		expect(isLastTurnActive(events)).toBe(false);
 	});
@@ -121,8 +135,8 @@ describe("isLastTurnActive", () => {
 		// This is the actual cache state from the bug report:
 		// cache ends with result but no done.
 		const events: RelayMessage[] = [
-			{ type: "user_message", text: "hello" },
-			{ type: "delta", text: "response" },
+			{ type: "user_message", sessionId: "s1", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "response" },
 			{
 				type: "result",
 				usage: { input: 10, output: 20, cache_read: 0, cache_creation: 0 },
@@ -139,18 +153,30 @@ describe("isLastTurnActive", () => {
 		// after tool calls but no done.
 		const events: RelayMessage[] = [
 			// Turn 1 (complete)
-			{ type: "user_message", text: "q1" },
-			{ type: "delta", text: "a1" },
-			{ type: "done", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "q1" },
+			{ type: "delta", sessionId: "s1", text: "a1" },
+			{ type: "done", sessionId: "s1", code: 0 },
 			// Turn 2 (complete)
-			{ type: "user_message", text: "q2" },
-			{ type: "delta", text: "a2" },
-			{ type: "done", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "q2" },
+			{ type: "delta", sessionId: "s1", text: "a2" },
+			{ type: "done", sessionId: "s1", code: 0 },
 			// Turn 3 (incomplete — what the real cache looked like)
-			{ type: "user_message", text: "q3" },
-			{ type: "tool_start", id: "t1", name: "bash" },
-			{ type: "tool_executing", id: "t1", name: "bash", input: undefined },
-			{ type: "tool_result", id: "t1", content: "ok", is_error: false },
+			{ type: "user_message", sessionId: "s1", text: "q3" },
+			{ type: "tool_start", sessionId: "s1", id: "t1", name: "bash" },
+			{
+				type: "tool_executing",
+				sessionId: "s1",
+				id: "t1",
+				name: "bash",
+				input: undefined,
+			},
+			{
+				type: "tool_result",
+				sessionId: "s1",
+				id: "t1",
+				content: "ok",
+				is_error: false,
+			},
 			{
 				type: "result",
 				usage: { input: 10, output: 20, cache_read: 0, cache_creation: 0 },
@@ -172,13 +198,13 @@ describe("isLastTurnActive", () => {
 	it("handles cache starting mid-stream (SSE connected late)", () => {
 		// Cache doesn't start with user_message — SSE connected mid-conversation
 		const events: RelayMessage[] = [
-			{ type: "thinking_delta", text: "..." },
-			{ type: "thinking_delta", text: "..." },
-			{ type: "thinking_stop" },
-			{ type: "delta", text: "answer" },
-			{ type: "done", code: 0 },
-			{ type: "user_message", text: "next question" },
-			{ type: "delta", text: "partial..." },
+			{ type: "thinking_delta", sessionId: "s1", text: "..." },
+			{ type: "thinking_delta", sessionId: "s1", text: "..." },
+			{ type: "thinking_stop", sessionId: "s1" },
+			{ type: "delta", sessionId: "s1", text: "answer" },
+			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "user_message", sessionId: "s1", text: "next question" },
+			{ type: "delta", sessionId: "s1", text: "partial..." },
 		];
 		expect(isLastTurnActive(events)).toBe(true);
 	});

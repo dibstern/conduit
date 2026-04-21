@@ -27,6 +27,7 @@ describe("requestId protocol contract", () => {
 		const msg: Extract<RelayMessage, { type: "session_switched" }> = {
 			type: "session_switched",
 			id: "sess-1",
+			sessionId: "sess-1",
 			requestId: "test-uuid" as RequestId,
 		};
 		expect(msg.requestId).toBe("test-uuid");
@@ -36,6 +37,7 @@ describe("requestId protocol contract", () => {
 		const msg: Extract<RelayMessage, { type: "session_switched" }> = {
 			type: "session_switched",
 			id: "sess-1",
+			sessionId: "sess-1",
 		};
 		expect(msg.requestId).toBeUndefined();
 	});

@@ -111,9 +111,13 @@ describe("shouldCache", () => {
 // ─── handleSSEEvent ──────────────────────────────────────────────────────────
 
 describe("handleSSEEvent", () => {
-	it("translates, caches, and routes events to session viewers", () => {
+	it("translates and firehoses events to every client on the project (Phase 0b)", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -128,16 +132,24 @@ describe("handleSSEEvent", () => {
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
 		});
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
+		// sendToSession no longer used for chat events — only for viewer-scoped
+		// status routing (handled elsewhere).
+		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
+		// Cross-session notification_event only fires when no viewers — mock has c1 viewing.
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("caches and routes events for non-active session to its viewers", () => {
+	it("firehoses events regardless of which session they belong to (Phase 0b)", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -149,35 +161,49 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"other-session",
 			translated,
 		);
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-
-	it("does NOT send when no clients are viewing the session", () => {
-		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
-		const translated: RelayMessage = { type: "delta", text: "hello" };
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: { sessionID: "other-session" },
-		};
-		handleSSEEvent(deps, event);
-
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
+	it("firehoses events even when no clients are actively viewing the session (Phase 0b)", () => {
+		// Phase 0b: delivery is no longer viewer-gated. The event goes to all
+		// connected clients. The frontend dispatcher handles routing into the
+		// correct per-session slot.
+		const deps = createMockSSEWiringDeps();
+		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "other-session" },
+		};
+		handleSSEEvent(deps, event);
+
+		// Event still fires on the firehose — the "no viewers" signal only
+		// controls cross-session notification_event fallback (not tested here
+		// because delta is not notification-worthy).
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
+			"other-session",
+			translated,
+		);
+		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
+	});
+
 	it("clears processing timeout when done event arrives for a session", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "done", code: 0 };
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -196,7 +222,7 @@ describe("handleSSEEvent", () => {
 
 	it("clears processing timeout for done on any session (not just active)", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "done", code: 0 };
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -215,7 +241,11 @@ describe("handleSSEEvent", () => {
 
 	it("resets processing timeout on non-done events (inactivity timer)", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -235,7 +265,11 @@ describe("handleSSEEvent", () => {
 
 	it("does not reset processing timeout when no sessionID is present", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -253,7 +287,11 @@ describe("handleSSEEvent", () => {
 
 	it("resets processing timeout on non-done events for active session", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -271,7 +309,11 @@ describe("handleSSEEvent", () => {
 
 	it("resets processing timeout on non-done events for any session (per-session timer)", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -293,7 +335,7 @@ describe("handleSSEEvent", () => {
 		const deps = createMockSSEWiringDeps();
 		// Retry now produces only a single error message (no processing status)
 		const messages: RelayMessage[] = [
-			{ type: "error", code: "RETRY", message: "Retrying..." },
+			{ type: "error", sessionId: "s1", code: "RETRY", message: "Retrying..." },
 		];
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -313,7 +355,11 @@ describe("handleSSEEvent", () => {
 
 	it("does not reset processing timeout when no sessionID is present", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -377,6 +423,7 @@ describe("handleSSEEvent", () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "que_q1",
 			questions: [],
 		};
@@ -419,7 +466,8 @@ describe("handleSSEEvent", () => {
 			type: "file_changed",
 			path: "/foo.ts",
 			changeType: "edited",
-		};
+			sessionId: "active-session",
+		} as RelayMessage;
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -431,8 +479,8 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// Non-cacheable events should still route to session viewers
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		// Non-cacheable events still firehose via Phase 0b.
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
@@ -443,6 +491,7 @@ describe("handleSSEEvent", () => {
 
 		const translated: RelayMessage = {
 			type: "user_message",
+			sessionId: "s1",
 			text: "Hello world",
 		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -456,8 +505,8 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// user_message events are routed normally — no suppression
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		// user_message events are firehosed normally — no suppression.
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
@@ -482,9 +531,10 @@ describe("handleSSEEvent", () => {
 	it("handles array of translated messages", () => {
 		const deps = createMockSSEWiringDeps();
 		const messages: RelayMessage[] = [
-			{ type: "tool_start", id: "call-1", name: "Bash" },
+			{ type: "tool_start", sessionId: "s1", id: "call-1", name: "Bash" },
 			{
 				type: "tool_executing",
+				sessionId: "s1",
 				id: "call-1",
 				name: "Bash",
 				input: { command: "ls" },
@@ -501,12 +551,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledTimes(2);
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledTimes(2);
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			messages[0],
 		);
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			messages[1],
 		);
@@ -514,7 +564,11 @@ describe("handleSSEEvent", () => {
 
 	it("does not route events with no sessionID", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -526,7 +580,9 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// No sessionID means we can't determine which session to route to
+		// No sessionID means we can't attribute the event — Phase 0b firehose
+		// is keyed on sessionId, so missing-id events are dropped.
+		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
@@ -654,7 +710,7 @@ describe("handleSSEEvent", () => {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = { type: "done", code: 0 };
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -679,6 +735,7 @@ describe("handleSSEEvent", () => {
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = {
 			type: "error",
+			sessionId: "s1",
 			code: "SEND_FAILED",
 			message: "Something broke",
 		};
@@ -711,7 +768,7 @@ describe("handleSSEEvent", () => {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = { type: "done", code: 0 };
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -822,7 +879,11 @@ describe("wireSSEConsumer", () => {
 
 		wireSSEConsumer(deps, consumer);
 
-		const translated: RelayMessage = { type: "delta", text: "hi" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hi",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -838,7 +899,7 @@ describe("wireSSEConsumer", () => {
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
 		});
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
@@ -1022,6 +1083,7 @@ describe("handleSSEEvent – tool_result truncation", () => {
 		const largeContent = "x".repeat(TRUNCATION_THRESHOLD + 1000);
 		const translated: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "tool-1",
 			content: largeContent,
 			is_error: false,
@@ -1037,9 +1099,10 @@ describe("handleSSEEvent – tool_result truncation", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// sendToSession should receive truncated content
+		// broadcastPerSessionEvent should receive truncated content under Phase 0b
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const sendArg = vi.mocked(deps.wsHandler.sendToSession).mock.calls[0]![1];
+		const sendArg = vi.mocked(deps.wsHandler.broadcastPerSessionEvent).mock
+			.calls[0]![1];
 		expect(sendArg.type).toBe("tool_result");
 		if (sendArg.type === "tool_result") {
 			expect(sendArg.content.length).toBeLessThan(largeContent.length);
@@ -1053,6 +1116,7 @@ describe("handleSSEEvent – tool_result truncation", () => {
 		const smallContent = "short result";
 		const translated: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "tool-3",
 			content: smallContent,
 			is_error: false,
@@ -1068,8 +1132,8 @@ describe("handleSSEEvent – tool_result truncation", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// sendToSession should receive original message unchanged
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+		// broadcastPerSessionEvent should receive original message unchanged.
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"active-session",
 			translated,
 		);
@@ -1095,7 +1159,9 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "delta", text: "hello" } as RelayMessage],
+			messages: [
+				{ type: "delta", sessionId: "s1", text: "hello" } as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1118,7 +1184,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", code: 0 } as RelayMessage],
+			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1141,7 +1207,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", code: 0 } as RelayMessage],
+			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1160,7 +1226,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", code: 0 } as RelayMessage],
+			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1190,6 +1256,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			messages: [
 				{
 					type: "error",
+					sessionId: "s1",
 					code: "FATAL",
 					message: "crashed",
 				} as RelayMessage,
@@ -1210,7 +1277,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 	it("broadcasts notification_event when done is dropped (no viewers)", () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
-		const translated: RelayMessage = { type: "done", code: 0 };
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -1234,6 +1301,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
 			type: "error",
+			sessionId: "s1",
 			code: "FATAL",
 			message: "Something broke",
 		};
@@ -1260,7 +1328,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		const deps = createMockSSEWiringDeps();
 		// Has viewers — event is sent normally
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
-		const translated: RelayMessage = { type: "done", code: 0 };
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -1283,7 +1351,11 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 	it("does NOT broadcast notification_event for non-notification types (delta)", () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
-		const translated: RelayMessage = { type: "delta", text: "hello" };
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],

@@ -90,12 +90,12 @@ describe("SessionProjector", () => {
 				["s1"],
 			);
 			expect(row).toBeDefined();
-			expect(row!.id).toBe("s1");
-			expect(row!.provider).toBe("opencode");
-			expect(row!.title).toBe("Hello World");
-			expect(row!.status).toBe("idle");
-			expect(row!.created_at).toBe(event.createdAt);
-			expect(row!.updated_at).toBe(event.createdAt);
+			expect(row?.id).toBe("s1");
+			expect(row?.provider).toBe("opencode");
+			expect(row?.title).toBe("Hello World");
+			expect(row?.status).toBe("idle");
+			expect(row?.created_at).toBe(event.createdAt);
+			expect(row?.updated_at).toBe(event.createdAt);
 		});
 
 		it("is idempotent (INSERT ON CONFLICT DO UPDATE)", () => {
@@ -146,8 +146,8 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row!.title).toBe("Renamed Session");
-			expect(row!.updated_at).toBe(now + 1000);
+			expect(row?.title).toBe("Renamed Session");
+			expect(row?.updated_at).toBe(now + 1000);
 		});
 	});
 
@@ -182,8 +182,8 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row!.status).toBe("busy");
-			expect(row!.updated_at).toBe(now + 500);
+			expect(row?.status).toBe("busy");
+			expect(row?.updated_at).toBe(now + 500);
 		});
 	});
 
@@ -219,8 +219,8 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row!.provider).toBe("claude-sdk");
-			expect(row!.updated_at).toBe(now + 2000);
+			expect(row?.provider).toBe("claude-sdk");
+			expect(row?.updated_at).toBe(now + 2000);
 		});
 	});
 
@@ -243,8 +243,8 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			const originalTitle = originalRow!.title;
-			const originalStatus = originalRow!.status;
+			const originalTitle = originalRow?.title;
+			const originalStatus = originalRow?.status;
 
 			const turnDone = makeStored(
 				"turn.completed",
@@ -263,9 +263,9 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row!.title).toBe(originalTitle);
-			expect(row!.status).toBe(originalStatus);
-			expect(row!.updated_at).toBe(now + 5000);
+			expect(row?.title).toBe(originalTitle);
+			expect(row?.status).toBe(originalStatus);
+			expect(row?.updated_at).toBe(now + 5000);
 		});
 	});
 
@@ -300,7 +300,7 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row!.updated_at).toBe(now + 3000);
+			expect(row?.updated_at).toBe(now + 3000);
 		});
 	});
 
@@ -330,6 +330,7 @@ describe("SessionProjector", () => {
 				messageId: "m1",
 				partId: "p1",
 				text: "hello",
+				// biome-ignore lint/suspicious/noExplicitAny: intentionally unrelated event type for "ignores" test
 			} as any,
 			2,
 		);
@@ -339,6 +340,6 @@ describe("SessionProjector", () => {
 			"SELECT * FROM sessions WHERE id = ?",
 			["s1"],
 		);
-		expect(after!.updated_at).toBe(before!.updated_at);
+		expect(after?.updated_at).toBe(before?.updated_at);
 	});
 });

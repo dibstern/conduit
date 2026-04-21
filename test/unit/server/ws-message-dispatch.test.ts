@@ -104,7 +104,12 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		toolName: string,
 		opts?: { messageId?: string },
 	): void {
-		handleToolStart({ type: "tool_start", id: toolId, name: toolName });
+		handleToolStart({
+			type: "tool_start",
+			sessionId: "s1",
+			id: toolId,
+			name: toolName,
+		});
 
 		// Manually update to "completed" with truncated result
 		const messages = [...chatState.messages];
@@ -129,6 +134,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "tool-1",
 			content: "full output here — all 50,000 chars",
 		});
@@ -149,6 +155,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "nonexistent-tool",
 			content: "should be ignored",
 		});
@@ -168,6 +175,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "tool-2",
 			content: "full file contents",
 		});
@@ -192,6 +200,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		// Only update tool-a
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "tool-a",
 			content: "full-a",
 		});

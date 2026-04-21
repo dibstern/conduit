@@ -58,7 +58,7 @@ import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js
 
 // Helper to create typed status messages
 function statusMsg(status: string) {
-	return { type: "status" as const, status };
+	return { type: "status" as const, sessionId: "s1", status };
 }
 
 beforeEach(() => {
@@ -125,7 +125,7 @@ describe("backward-compatible getters", () => {
 	});
 
 	it("streaming: streaming=true, replaying=false", () => {
-		handleDelta({ type: "delta", text: "hello" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "hello" });
 		expect(chatState.phase).toBe("streaming");
 		expect(isStreaming()).toBe(true);
 		expect(isReplaying()).toBe(false);
@@ -149,13 +149,13 @@ describe("phase transitions", () => {
 	});
 
 	it("handleDelta → phase='streaming'", () => {
-		handleDelta({ type: "delta", text: "hello" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "hello" });
 		expect(chatState.phase).toBe("streaming");
 	});
 
 	it("handleDone → phase='idle'", () => {
-		handleDelta({ type: "delta", text: "hello" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta({ type: "delta", sessionId: "s1", text: "hello" });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.phase).toBe("idle");
 	});
 
@@ -198,10 +198,10 @@ describe("impossible states prevented", () => {
 		handleStatus(statusMsg("processing"));
 		expect(validPhases).toContain(chatState.phase);
 
-		handleDelta({ type: "delta", text: "x" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "x" });
 		expect(validPhases).toContain(chatState.phase);
 
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 		expect(validPhases).toContain(chatState.phase);
 
 		phaseStartReplay();

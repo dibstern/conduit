@@ -193,7 +193,7 @@ export function wireHandlerDeps(
 			wsLog.error(`Error handling message for ${cid}:`, formatErrorDetail(err));
 			wsHandler.sendTo(
 				cid,
-				RelayError.fromCaught(err, "HANDLER_ERROR").toMessage(),
+				RelayError.fromCaught(err, "HANDLER_ERROR").toSystemError(),
 			);
 		},
 	});
@@ -204,7 +204,7 @@ export function wireHandlerDeps(
 			const result = rateLimiter.check(clientId);
 			if (!result.allowed) {
 				wsHandler.sendTo(clientId, {
-					type: "error",
+					type: "system_error",
 					code: "RATE_LIMITED",
 					message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
 				});

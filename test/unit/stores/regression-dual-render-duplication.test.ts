@@ -65,10 +65,11 @@ describe("Regression: no dual-render duplication", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
+			sessionId: "session-a",
 			events: [
-				{ type: "user_message", text: "hello" },
-				{ type: "delta", text: "world" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "hello" },
+				{ type: "delta", sessionId: "s1", text: "world" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -82,10 +83,11 @@ describe("Regression: no dual-render duplication", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
+			sessionId: "session-a",
 			events: [
-				{ type: "user_message", text: "hello" },
-				{ type: "delta", text: "response" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "hello" },
+				{ type: "delta", sessionId: "s1", text: "response" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -123,6 +125,7 @@ describe("Regression: no dual-render duplication", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
+			sessionId: "session-b",
 			history: {
 				messages: [
 					{
@@ -145,9 +148,10 @@ describe("Regression: no dual-render duplication", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
+			sessionId: "session-a",
 			events: [
-				{ type: "user_message", text: "in A" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "in A" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -155,7 +159,11 @@ describe("Regression: no dual-render duplication", () => {
 		expect(historyState.hasMore).toBe(false);
 
 		// Switch to session B (empty)
-		handleMessage({ type: "session_switched", id: "session-b" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-b",
+			sessionId: "session-b",
+		});
 		expect(chatState.messages).toHaveLength(0);
 		// historyState resets via clearMessages() — hasMore defaults to false (disarmed)
 		expect(historyState.hasMore).toBe(false);
@@ -169,6 +177,7 @@ describe("messageCount tracking for pagination offset", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
+			sessionId: "s1",
 			history: {
 				messages: [
 					{
@@ -201,6 +210,7 @@ describe("messageCount tracking for pagination offset", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
+			sessionId: "s2",
 			history: {
 				messages: [
 					{
@@ -274,6 +284,7 @@ describe("messageCount tracking for pagination offset", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s3",
+			sessionId: "s3",
 			history: {
 				messages: [
 					{
@@ -289,7 +300,7 @@ describe("messageCount tracking for pagination offset", () => {
 		expect(historyState.messageCount).toBe(1);
 
 		// Switch away — must reset (clearMessages resets synchronously)
-		handleMessage({ type: "session_switched", id: "s4" });
+		handleMessage({ type: "session_switched", id: "s4", sessionId: "s4" });
 		expect(historyState.messageCount).toBe(0);
 		expect(historyState.hasMore).toBe(false);
 		expect(historyState.loading).toBe(false);
@@ -299,10 +310,11 @@ describe("messageCount tracking for pagination offset", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s5",
+			sessionId: "s5",
 			events: [
-				{ type: "user_message", text: "hello" },
-				{ type: "delta", text: "world" },
-				{ type: "done", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "hello" },
+				{ type: "delta", sessionId: "s1", text: "world" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 		});
 		await vi.runAllTimersAsync();
@@ -339,6 +351,7 @@ describe("messageCount tracking for pagination offset", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s7",
+			sessionId: "s7",
 			history: {
 				messages: [
 					{

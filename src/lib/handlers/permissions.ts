@@ -28,9 +28,13 @@ function restartProcessingTimeout(deps: HandlerDeps, sessionId: string): void {
 			new RelayError(
 				"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
 				{ code: "PROCESSING_TIMEOUT" },
-			).toMessage(),
+			).toMessage(sessionId),
 		);
-		deps.wsHandler.sendToSession(sessionId, { type: "done", code: 1 });
+		deps.wsHandler.sendToSession(sessionId, {
+			type: "done",
+			sessionId,
+			code: 1,
+		});
 	});
 }
 
@@ -81,6 +85,7 @@ export async function handlePermissionResponse(
 		}
 		deps.wsHandler.broadcast({
 			type: "permission_resolved",
+			sessionId,
 			requestId,
 			decision: result.mapped,
 		});
@@ -255,6 +260,7 @@ export async function handleAskUserResponse(
 		// instead of silently reverting after 10s timeout.
 		deps.wsHandler.sendTo(clientId, {
 			type: "ask_user_error",
+			sessionId,
 			toolId,
 			message:
 				"This question was asked in a terminal session and can't be answered from the browser. Answer it in the terminal, or send a follow-up message to continue.",
@@ -341,6 +347,7 @@ export async function handleQuestionReject(
 		// Notify the frontend so the QuestionCard can show an error
 		deps.wsHandler.sendTo(clientId, {
 			type: "ask_user_error",
+			sessionId,
 			toolId,
 			message:
 				"This question was asked in a terminal session and can't be skipped from the browser. Answer it in the terminal, or send a follow-up message to continue.",

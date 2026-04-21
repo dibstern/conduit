@@ -32,6 +32,12 @@ export interface ClientInitDeps {
 		broadcast: (msg: RelayMessage) => void;
 		sendTo: (clientId: string, msg: RelayMessage) => void;
 		setClientSession: (clientId: string, sessionId: string) => void;
+		/**
+		 * Phase 0b: called after the initial `session_list` has been
+		 * dispatched so that any per-session events buffered during bootstrap
+		 * are flushed to the client in the order they were produced.
+		 */
+		markClientBootstrapped: (clientId: string) => void;
 	};
 	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
@@ -89,7 +95,7 @@ export async function handleClientConnected(
 		deps.log.warn(`${prefix}: ${formatErrorDetail(err)}`);
 		wsHandler.sendTo(
 			clientId,
-			RelayError.fromCaught(err, "INIT_FAILED", prefix).toMessage(),
+			RelayError.fromCaught(err, "INIT_FAILED", prefix).toSystemError(),
 		);
 	};
 
@@ -152,6 +158,10 @@ export async function handleClientConnected(
 	}
 
 	// ── Session list ─────────────────────────────────────────────────────
+	// Phase 0b: session_list-first invariant — emit the initial session_list
+	// before marking the client bootstrapped. Any per-session events that
+	// fired on the project firehose during bootstrap are buffered
+	// per-client by WebSocketHandler and flushed by markClientBootstrapped.
 	try {
 		const statuses = deps.statusPoller?.getCurrentStatuses();
 		await sessionMgr.sendDualSessionLists(
@@ -160,6 +170,11 @@ export async function handleClientConnected(
 		);
 	} catch (err) {
 		sendInitError(err, "Failed to list sessions");
+	} finally {
+		// Mark bootstrapped even if session_list failed — otherwise the
+		// client's queue would grow unbounded. A failed bootstrap still
+		// emits INIT_FAILED, and the frontend handles the error path.
+		wsHandler.markClientBootstrapped(clientId);
 	}
 
 	// ── Pending permissions + questions (reconnect replay) ───────────────
@@ -251,6 +266,7 @@ export async function handleClientConnected(
 			);
 			wsHandler.sendTo(clientId, {
 				type: "ask_user",
+				sessionId: qSessionId ?? activeId ?? "",
 				toolId: pq.id,
 				questions,
 				...(toolCallId ? { toolUseId: toolCallId } : {}),

@@ -12,6 +12,7 @@ import type { PushNotificationManager } from "../server/push.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { PermissionId } from "../shared-types.js";
+import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { applyPipelineResult, processEvent } from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
@@ -61,6 +62,12 @@ export interface SSEWiringDeps {
 		broadcast: (msg: RelayMessage) => void;
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 		getClientsForSession: (sessionId: string) => string[];
+		/**
+		 * Phase 0b: project-scoped per-session event firehose. Pipeline
+		 * routing uses this (via `applyPipelineResult`) so per-session chat
+		 * events reach every client on `/p/<slug>` regardless of `view_session`.
+		 */
+		broadcastPerSessionEvent: (sessionId: string, msg: RelayMessage) => void;
 	};
 	pushManager?: PushNotificationManager;
 	log: Logger;
@@ -248,7 +255,12 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		if (pushManager) {
 			sendPushForEvent(
 				pushManager,
-				{ type: "ask_user", toolId: "", questions: [] },
+				{
+					type: "ask_user",
+					sessionId: eventSessionId ?? "",
+					toolId: "",
+					questions: [],
+				},
 				log,
 				buildPushContext(deps.slug, eventSessionId),
 			);
@@ -323,7 +335,14 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 
 	const targetSessionId = eventSessionId;
 
-	const toSend = translateResult.messages;
+	// Tag per-session events with sessionId after translation.
+	// The translator produces untagged events; we attach sessionId here
+	// at the SSE emission site.
+	const toSend: RelayMessage[] = translateResult.messages.map((m) =>
+		targetSessionId
+			? tagWithSessionId(m, targetSessionId)
+			: (m as RelayMessage),
+	);
 	for (let msg of toSend) {
 		// Permission events: broadcast to all clients (not session-scoped)
 		if (
@@ -545,15 +564,16 @@ export function wireSSEConsumer(
 						const tool = pq["tool"] as { callID?: string } | undefined;
 						const toolCallId = tool?.callID;
 
-						const askMsg = {
+						const qSessionId = pq["sessionID"] as string | undefined;
+						const askMsg: RelayMessage = {
 							type: "ask_user" as const,
+							sessionId: qSessionId ?? "",
 							toolId: pq.id,
 							questions,
 							...(toolCallId ? { toolUseId: toolCallId } : {}),
 						};
 
 						// Route to clients viewing this question's session
-						const qSessionId = pq["sessionID"] as string | undefined;
 						if (qSessionId) {
 							deps.wsHandler.sendToSession(qSessionId, askMsg);
 						} else {

@@ -155,7 +155,7 @@ describe("EventStoreEviction", () => {
 			"SELECT command_id FROM command_receipts",
 		);
 		expect(receipts).toHaveLength(1);
-		expect(receipts[0]!.command_id).toBe("cmd-recent-for-old");
+		expect(receipts[0]?.command_id).toBe("cmd-recent-for-old");
 	});
 
 	// ─── cascadeProjections ──────────────────────────────────────────────────

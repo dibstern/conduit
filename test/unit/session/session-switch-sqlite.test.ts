@@ -33,10 +33,10 @@ describe("resolveSessionHistoryFromSqlite", () => {
 		if (source.kind === "rest-history") {
 			const { messages } = source.history;
 			expect(messages).toHaveLength(2);
-			expect(messages[0]!.id).toBe("m1");
-			expect(messages[0]!.role).toBe("user");
-			expect(messages[1]!.id).toBe("m2");
-			expect(messages[1]!.role).toBe("assistant");
+			expect(messages[0]?.id).toBe("m1");
+			expect(messages[0]?.role).toBe("user");
+			expect(messages[1]?.id).toBe("m2");
+			expect(messages[1]?.role).toBe("assistant");
 			expect(source.history.hasMore).toBe(false);
 		}
 	});
@@ -91,9 +91,9 @@ describe("resolveSessionHistoryFromSqlite", () => {
 		if (source.kind === "rest-history") {
 			const parts = source.history.messages[0]?.parts ?? [];
 			expect(parts).toHaveLength(1);
-			expect(parts[0]!.id).toBe("p1");
-			expect(parts[0]!.type).toBe("text");
-			expect(parts[0]!.text).toBe("Hello");
+			expect(parts[0]?.id).toBe("p1");
+			expect(parts[0]?.type).toBe("text");
+			expect(parts[0]?.text).toBe("Hello");
 		}
 	});
 

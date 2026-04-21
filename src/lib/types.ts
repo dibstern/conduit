@@ -11,11 +11,14 @@ export type {
 	AskUserQuestion,
 	CommandInfo,
 	FileEntry,
+	GlobalRelayEvent,
 	InstanceConfig,
 	InstanceStatus,
 	ModelInfo,
 	OpenCodeInstance,
 	PartType,
+	PerSessionEvent,
+	PerSessionEventType,
 	ProviderInfo,
 	PtyInfo,
 	PtyStatus,
@@ -25,8 +28,10 @@ export type {
 	TodoStatus,
 	ToolName,
 	ToolStatus,
+	UntaggedRelayMessage,
 	UsageInfo,
 } from "./shared-types.js";
+export { tagWithSessionId } from "./shared-types.js";
 
 // ─── SSE Event Types ────────────────────────────────────────────────────────
 // Re-export SSEEvent as OpenCodeEvent for backward compatibility.

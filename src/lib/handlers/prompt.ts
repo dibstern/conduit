@@ -50,7 +50,7 @@ export async function handleMessage(
 				{
 					code: "NO_SESSION",
 				},
-			).toMessage(),
+			).toSystemError(),
 		);
 		return;
 	}
@@ -70,7 +70,11 @@ export async function handleMessage(
 	const targets = deps.wsHandler.getClientsForSession(activeId);
 	for (const targetId of targets) {
 		if (targetId !== clientId) {
-			deps.wsHandler.sendTo(targetId, { type: "user_message", text });
+			deps.wsHandler.sendTo(targetId, {
+				type: "user_message",
+				sessionId: activeId,
+				text,
+			});
 		}
 	}
 
@@ -91,6 +95,7 @@ export async function handleMessage(
 
 	deps.wsHandler.sendToSession(activeId, {
 		type: "status",
+		sessionId: activeId,
 		status: "processing",
 	});
 	deps.overrides.startProcessingTimeout(activeId, () => {
@@ -102,9 +107,13 @@ export async function handleMessage(
 			new RelayError(
 				"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
 				{ code: "PROCESSING_TIMEOUT" },
-			).toMessage(),
+			).toMessage(activeId),
 		);
-		deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+		deps.wsHandler.sendToSession(activeId, {
+			type: "done",
+			sessionId: activeId,
+			code: 1,
+		});
 	});
 	// Phase 5: Route through OrchestrationEngine when available; fall back to
 	// direct REST call for legacy paths (e.g. tests that don't provide the engine).
@@ -211,10 +220,14 @@ export async function handleMessage(
 						`client=${clientId} session=${activeId} engine dispatch error: ${msg}`,
 					);
 					deps.overrides.clearProcessingTimeout(activeId);
-					deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+					deps.wsHandler.sendToSession(activeId, {
+						type: "done",
+						sessionId: activeId,
+						code: 1,
+					});
 					deps.wsHandler.sendTo(
 						clientId,
-						new RelayError(msg, { code: "SEND_FAILED" }).toMessage(),
+						new RelayError(msg, { code: "SEND_FAILED" }).toMessage(activeId),
 					);
 				}
 				// Persist resume cursor and other provider state updates
@@ -277,14 +290,18 @@ export async function handleMessage(
 					formatErrorDetail(sendErr),
 				);
 				deps.overrides.clearProcessingTimeout(activeId);
-				deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+				deps.wsHandler.sendToSession(activeId, {
+					type: "done",
+					sessionId: activeId,
+					code: 1,
+				});
 				deps.wsHandler.sendTo(
 					clientId,
 					RelayError.fromCaught(
 						sendErr,
 						"SEND_FAILED",
 						"Failed to send message",
-					).toMessage(),
+					).toMessage(activeId),
 				);
 			});
 	} else {
@@ -297,14 +314,18 @@ export async function handleMessage(
 				formatErrorDetail(sendErr),
 			);
 			deps.overrides.clearProcessingTimeout(activeId);
-			deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+			deps.wsHandler.sendToSession(activeId, {
+				type: "done",
+				sessionId: activeId,
+				code: 1,
+			});
 			deps.wsHandler.sendTo(
 				clientId,
 				RelayError.fromCaught(
 					sendErr,
 					"SEND_FAILED",
 					"Failed to send message",
-				).toMessage(),
+				).toMessage(activeId),
 			);
 		}
 	}
@@ -338,7 +359,11 @@ export async function handleCancel(
 						formatErrorDetail(err),
 					);
 				}
-				deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+				deps.wsHandler.sendToSession(activeId, {
+					type: "done",
+					sessionId: activeId,
+					code: 1,
+				});
 				return;
 			}
 		}
@@ -352,7 +377,11 @@ export async function handleCancel(
 				formatErrorDetail(abortErr),
 			);
 		}
-		deps.wsHandler.sendToSession(activeId, { type: "done", code: 1 });
+		deps.wsHandler.sendToSession(activeId, {
+			type: "done",
+			sessionId: activeId,
+			code: 1,
+		});
 	}
 }
 

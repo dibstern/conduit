@@ -108,14 +108,14 @@ export class PermissionBridge {
 		return Array.from(this.pending.values());
 	}
 
-	/** Check for timed-out permissions and return their IDs */
-	checkTimeouts(): string[] {
+	/** Check for timed-out permissions and return their IDs with sessionIds */
+	checkTimeouts(): Array<{ id: string; sessionId: string }> {
 		const now = this.now();
-		const timedOut: string[] = [];
+		const timedOut: Array<{ id: string; sessionId: string }> = [];
 
 		for (const [id, entry] of this.pending) {
 			if (now - entry.timestamp >= this.timeoutMs) {
-				timedOut.push(id);
+				timedOut.push({ id, sessionId: entry.sessionId });
 				this.pending.delete(id);
 			}
 		}

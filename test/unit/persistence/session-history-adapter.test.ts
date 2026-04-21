@@ -85,10 +85,10 @@ describe("messageRowsToHistory", () => {
 		expect(result.messages).toHaveLength(2);
 
 		const [first, second] = result.messages;
-		expect(first!.id).toBe("m1");
-		expect(first!.role).toBe("user");
-		expect(second!.id).toBe("m2");
-		expect(second!.role).toBe("assistant");
+		expect(first?.id).toBe("m1");
+		expect(first?.role).toBe("user");
+		expect(second?.id).toBe("m2");
+		expect(second?.role).toBe("assistant");
 		expect(result.hasMore).toBe(false);
 	});
 
@@ -130,7 +130,7 @@ describe("messageRowsToHistory", () => {
 
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
-		const parts = msg!.parts ?? [];
+		const parts = msg?.parts ?? [];
 		expect(parts).toHaveLength(2);
 
 		const [textPart, toolPart] = parts;
@@ -141,8 +141,8 @@ describe("messageRowsToHistory", () => {
 			tool: "bash",
 			callID: "c1",
 		});
-		expect(toolPart!.state?.status).toBe("completed");
-		expect(toolPart!.state?.input).toEqual({ command: "ls" });
+		expect(toolPart?.state?.status).toBe("completed");
+		expect(toolPart?.state?.input).toEqual({ command: "ls" });
 	});
 
 	it("handles invalid JSON in tool input gracefully", () => {
@@ -160,9 +160,9 @@ describe("messageRowsToHistory", () => {
 
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
-		const [part] = msg!.parts ?? [];
+		const [part] = msg?.parts ?? [];
 		// Invalid JSON falls back to the raw string
-		expect(part!.state?.input).toBe("not-json");
+		expect(part?.state?.input).toBe("not-json");
 	});
 
 	it("includes cost and token fields on assistant messages", () => {
@@ -179,19 +179,19 @@ describe("messageRowsToHistory", () => {
 
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
-		expect(msg!.cost).toBe(0.05);
-		expect(msg!.tokens?.input).toBe(100);
-		expect(msg!.tokens?.output).toBe(200);
-		expect(msg!.tokens?.cache?.read).toBe(50);
-		expect(msg!.tokens?.cache?.write).toBe(10);
+		expect(msg?.cost).toBe(0.05);
+		expect(msg?.tokens?.input).toBe(100);
+		expect(msg?.tokens?.output).toBe(200);
+		expect(msg?.tokens?.cache?.read).toBe(50);
+		expect(msg?.tokens?.cache?.write).toBe(10);
 	});
 
 	it("omits cost and tokens fields when null", () => {
 		const rows = [makeMessageWithParts("m1", { cost: null, tokens_in: null })];
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
-		expect(msg!.cost).toBeUndefined();
-		expect(msg!.tokens).toBeUndefined();
+		expect(msg?.cost).toBeUndefined();
+		expect(msg?.tokens).toBeUndefined();
 	});
 
 	it("includes time fields from created_at and updated_at", () => {
@@ -200,7 +200,7 @@ describe("messageRowsToHistory", () => {
 		];
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
-		expect(msg!.time).toEqual({ created: 1000, completed: 2000 });
+		expect(msg?.time).toEqual({ created: 1000, completed: 2000 });
 	});
 
 	it("does not set state on text parts with no status/input/result", () => {
@@ -219,7 +219,7 @@ describe("messageRowsToHistory", () => {
 		];
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
-		const [part] = msg!.parts ?? [];
-		expect(part!.state).toBeUndefined();
+		const [part] = msg?.parts ?? [];
+		expect(part?.state).toBeUndefined();
 	});
 });

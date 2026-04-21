@@ -144,13 +144,31 @@ export interface PipelineDeps {
 		clearProcessingTimeout(sessionId: string): void;
 		resetProcessingTimeout(sessionId: string): void;
 	};
-	wsHandler: { sendToSession(sessionId: string, msg: RelayMessage): void };
+	/**
+	 * Phase 0b: per-session events are broadcast to every client on the
+	 * project's `/p/<slug>` regardless of `view_session` state. The
+	 * handler buffers events for clients still in bootstrap so that
+	 * `session_list` always arrives first — see
+	 * {@link WebSocketHandler.broadcastPerSessionEvent} and
+	 * {@link WebSocketHandler.markClientBootstrapped}.
+	 */
+	wsHandler: {
+		broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
+	};
 	log: Logger;
 }
 
 /**
  * Apply pipeline side effects based on PipelineResult decisions.
  * This is the single place where pipeline decisions become actions.
+ *
+ * Under Phase 0b the {@link PipelineResult.route} field still reflects
+ * viewer presence (`action: "send"` when at least one client called
+ * `view_session` on the target session, `action: "drop"` otherwise).
+ * That signal drives downstream notification logic (cross-session
+ * `notification_event` broadcasts fire only when no client is actively
+ * viewing), but it no longer gates delivery: every per-session event is
+ * sent to every connected client via `broadcastPerSessionEvent`.
  */
 export function applyPipelineResult(
 	result: PipelineResult,
@@ -162,9 +180,12 @@ export function applyPipelineResult(
 	} else if (result.timeout === "reset" && sessionId) {
 		deps.overrides.resetProcessingTimeout(sessionId);
 	}
-	if (result.route.action === "send") {
-		deps.wsHandler.sendToSession(result.route.sessionId, result.msg);
-	} else {
+	// Phase 0b: always firehose to the project. The route field is retained
+	// as a "had-viewers?" signal for cross-session notification decisions.
+	if (sessionId) {
+		deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
+	}
+	if (result.route.action === "drop") {
 		deps.log.info(
 			`${result.route.reason} — ${result.msg.type} (${result.source})`,
 		);

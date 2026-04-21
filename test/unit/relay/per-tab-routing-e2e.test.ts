@@ -254,13 +254,18 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client.close();
 	});
 
-	it("SSE chat events only reach clients viewing that session", async () => {
+	it("SSE chat events reach every client on the project (Phase 0b firehose)", async () => {
+		// Phase 0b: per-session chat events are broadcast to every client on
+		// the project's /p/<slug> regardless of view_session. The frontend
+		// dispatcher routes into the correct per-session slot using each
+		// event's sessionId.
 		const client1 = await harness.connectClient();
 		const client2 = await harness.connectClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		// Client1 views session A, Client2 views session B
+		// Client1 views session A, Client2 views session B — but this no
+		// longer gates event delivery under Phase 0b.
 		client1.send({ type: "view_session", sessionId: "sess-A" });
 		client2.send({ type: "view_session", sessionId: "sess-B" });
 
@@ -276,9 +281,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		// Inject an SSE text delta event for session A only
-		// (message.part.delta produces a "delta" relay message; message.part.updated
-		// returns null for text parts since text is streamed via deltas)
+		// Inject an SSE text delta event for session A only.
 		harness.mock.injectSSE({
 			type: "message.part.delta",
 			properties: {
@@ -290,26 +293,23 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 			},
 		});
 
-		// Client1 (viewing sess-A) should receive the delta
-		const delta = await client1.waitFor("delta", { timeout: 3000 });
-		expect(delta["text"]).toBe("hello from session A");
-
-		// Client2 (viewing sess-B) should NOT receive it
-		await new Promise((r) => setTimeout(r, 100));
-		const client2Deltas = client2.getReceivedOfType("delta");
-		expect(client2Deltas).toHaveLength(0);
+		// Both clients should receive it — the frontend dispatcher decides
+		// which session slot to write into.
+		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
+		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
+		expect(delta1["text"]).toBe("hello from session A");
+		expect(delta2["text"]).toBe("hello from session A");
 
 		await client1.close();
 		await client2.close();
 	});
 
-	it("SSE events for session B only reach session B viewers", async () => {
+	it("SSE events for session B reach every client on the project", async () => {
 		const client1 = await harness.connectClient();
 		const client2 = await harness.connectClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		// Client1 views session A, Client2 views session B
 		client1.send({ type: "view_session", sessionId: "sess-A" });
 		client2.send({ type: "view_session", sessionId: "sess-B" });
 
@@ -325,7 +325,6 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		// Inject SSE delta event for session B
 		harness.mock.injectSSE({
 			type: "message.part.delta",
 			properties: {
@@ -337,14 +336,11 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 			},
 		});
 
-		// Client2 (viewing sess-B) should receive the delta
-		const delta = await client2.waitFor("delta", { timeout: 3000 });
-		expect(delta["text"]).toBe("hello from session B");
-
-		// Client1 (viewing sess-A) should NOT receive it
-		await new Promise((r) => setTimeout(r, 100));
-		const client1Deltas = client1.getReceivedOfType("delta");
-		expect(client1Deltas).toHaveLength(0);
+		// Both clients receive it under Phase 0b.
+		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
+		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
+		expect(delta2["text"]).toBe("hello from session B");
+		expect(delta1["text"]).toBe("hello from session B");
 
 		await client1.close();
 		await client2.close();

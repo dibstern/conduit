@@ -96,7 +96,7 @@ export async function handleGetModels(
 					err,
 					"MODEL_ERROR",
 					"Failed to get session model info",
-				).toMessage(),
+				).toMessage(activeId),
 			);
 		}
 	}

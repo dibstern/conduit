@@ -108,7 +108,7 @@ describe("Orchestration wiring", () => {
 			expect(handlers.length).toBe(1);
 
 			// Fire a session.status idle event
-			handlers[0]!({
+			handlers[0]?.({
 				type: "session.status",
 				properties: {
 					sessionID: "sess-123",
@@ -134,7 +134,7 @@ describe("Orchestration wiring", () => {
 				handlers.push(handler);
 			});
 
-			handlers[0]!({
+			handlers[0]?.({
 				type: "message.created",
 				properties: { sessionID: "sess-123" },
 			});
@@ -153,7 +153,7 @@ describe("Orchestration wiring", () => {
 				handlers.push(handler);
 			});
 
-			handlers[0]!({
+			handlers[0]?.({
 				type: "session.status",
 				properties: {
 					sessionID: "sess-123",
@@ -176,7 +176,7 @@ describe("Orchestration wiring", () => {
 			});
 
 			// No sessionID in properties
-			handlers[0]!({
+			handlers[0]?.({
 				type: "session.status",
 				properties: {
 					status: { type: "idle" },
@@ -197,7 +197,7 @@ describe("Orchestration wiring", () => {
 				handlers.push(handler);
 			});
 
-			handlers[0]!({
+			handlers[0]?.({
 				type: "session.status",
 				sessionId: "sess-fallback",
 				properties: {

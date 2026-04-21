@@ -291,6 +291,7 @@ export function createMockSSEWiringDeps(
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),
 			getClientsForSession: vi.fn().mockReturnValue(["c1"]),
+			broadcastPerSessionEvent: vi.fn(),
 		},
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
@@ -307,6 +308,7 @@ export function createMockClientInitDeps(
 			broadcast: vi.fn(),
 			sendTo: vi.fn(),
 			setClientSession: vi.fn(),
+			markClientBootstrapped: vi.fn(),
 		},
 		client: createMockClient() as unknown as ClientInitDeps["client"],
 		sessionMgr:

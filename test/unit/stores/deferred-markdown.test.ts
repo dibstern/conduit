@@ -82,8 +82,8 @@ describe("Deferred markdown rendering", () => {
 		// Replay a simple turn: delta + done
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "Hello **world**" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Hello **world**" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -113,11 +113,11 @@ describe("Deferred markdown rendering", () => {
 		// Replay multiple turns
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "First response" },
-				{ type: "done", code: 0 },
-				{ type: "user_message", text: "second question" },
-				{ type: "delta", text: "Second response" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "First response" },
+				{ type: "done", sessionId: "s1", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "second question" },
+				{ type: "delta", sessionId: "s1", text: "Second response" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -147,7 +147,7 @@ describe("Deferred markdown rendering", () => {
 		// Normal path: not replaying
 		expect(isReplaying()).toBe(false);
 
-		handleDelta({ type: "delta", text: "Live **bold**" });
+		handleDelta({ type: "delta", sessionId: "s1", text: "Live **bold**" });
 		vi.advanceTimersByTime(100); // flush debounce
 
 		expect(renderMarkdownSpy).toHaveBeenCalledWith("Live **bold**");
@@ -162,15 +162,15 @@ describe("Deferred markdown rendering", () => {
 		expect("needsRender" in assistant!).toBe(false);
 
 		// Clean up streaming state
-		handleDone({ type: "done", code: 0 });
+		handleDone({ type: "done", sessionId: "s1", code: 0 });
 	});
 
 	it("calling renderDeferredMarkdown twice is idempotent", async () => {
 		// Replay a turn
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "Idempotent test" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Idempotent test" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -204,8 +204,8 @@ describe("Deferred markdown rendering", () => {
 		// Replay a turn
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "Will be cleared" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Will be cleared" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);

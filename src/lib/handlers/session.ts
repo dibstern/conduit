@@ -92,6 +92,7 @@ async function sendSessionMetadata(
 				if (pq.sessionId && pq.sessionId !== id) continue;
 				deps.wsHandler.sendTo(clientId, {
 					type: "ask_user",
+					sessionId: id,
 					toolId: pq.requestId,
 					questions: pq.questions.map((q) => ({
 						question: q.question,
@@ -129,6 +130,7 @@ async function sendSessionMetadata(
 				const toolCallId = tool?.callID;
 				deps.wsHandler.sendTo(clientId, {
 					type: "ask_user",
+					sessionId: id,
 					toolId: pq.id,
 					questions,
 					...(toolCallId ? { toolUseId: toolCallId } : {}),
@@ -288,6 +290,9 @@ export async function handleDeleteSession(
 		}
 	}
 
+	// Broadcast session_deleted so all clients know this session is gone
+	deps.wsHandler.broadcast({ type: "session_deleted", sessionId: id });
+
 	await deps.sessionMgr.sendDualSessionLists((msg) =>
 		deps.wsHandler.broadcast(msg),
 	);
@@ -427,6 +432,7 @@ export async function handleForkSession(
 	// Broadcast the fork notification
 	deps.wsHandler.broadcast({
 		type: "session_forked",
+		sessionId: forked.id,
 		session: {
 			id: forked.id,
 			title: forked.title ?? "Forked Session",

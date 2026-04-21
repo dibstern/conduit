@@ -8,6 +8,7 @@
 import { createLogger } from "../logger.js";
 import type { CanonicalEvent, StoredEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
+import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { createDeferred, type Deferred } from "./deferred.js";
 import type {
@@ -110,7 +111,8 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			}
 			const msg = translateCanonicalEvent(event);
 			if (msg) {
-				for (const m of msg) {
+				for (const raw of msg) {
+					const m = tagWithSessionId(raw, sessionId);
 					send(m);
 					// Done is always terminal; errors are terminal except RETRY,
 					// which is a non-terminal progress signal during API retries.
@@ -171,6 +173,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			}
 			send({
 				type: "ask_user",
+				sessionId,
 				toolId: request.requestId,
 				questions: request.questions.map((q) => ({
 					question: q.question,
@@ -225,7 +228,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 // Maps CanonicalEvent (adapter-emitted) → RelayMessage[] (client-facing).
 // An event may produce zero, one, or many relay messages.
 
-function translateCanonicalEvent(event: CanonicalEvent): RelayMessage[] {
+function translateCanonicalEvent(
+	event: CanonicalEvent,
+): import("../shared-types.js").UntaggedRelayMessage[] {
 	switch (event.type) {
 		case "text.delta":
 			return [

@@ -100,14 +100,14 @@ describe("TurnProjector", () => {
 				"user_m1",
 			]);
 			expect(row).toBeDefined();
-			expect(row!.id).toBe("user_m1");
-			expect(row!.session_id).toBe("s1");
-			expect(row!.state).toBe("pending");
-			expect(row!.user_message_id).toBe("user_m1");
-			expect(row!.assistant_message_id).toBeNull();
-			expect(row!.requested_at).toBe(now);
-			expect(row!.started_at).toBeNull();
-			expect(row!.completed_at).toBeNull();
+			expect(row?.id).toBe("user_m1");
+			expect(row?.session_id).toBe("s1");
+			expect(row?.state).toBe("pending");
+			expect(row?.user_message_id).toBe("user_m1");
+			expect(row?.assistant_message_id).toBeNull();
+			expect(row?.requested_at).toBe(now);
+			expect(row?.started_at).toBeNull();
+			expect(row?.completed_at).toBeNull();
 		});
 	});
 
@@ -148,7 +148,7 @@ describe("TurnProjector", () => {
 			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.assistant_message_id).toBe("asst_m1");
+			expect(row?.assistant_message_id).toBe("asst_m1");
 		});
 
 		it("does not create a new turn for assistant messages", () => {
@@ -224,8 +224,8 @@ describe("TurnProjector", () => {
 			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("running");
-			expect(row!.started_at).toBe(now + 200);
+			expect(row?.state).toBe("running");
+			expect(row?.started_at).toBe(now + 200);
 		});
 
 		it("ignores non-busy status changes", () => {
@@ -261,8 +261,8 @@ describe("TurnProjector", () => {
 			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("pending");
-			expect(row!.started_at).toBeNull();
+			expect(row?.state).toBe("pending");
+			expect(row?.started_at).toBeNull();
 		});
 	});
 
@@ -317,11 +317,11 @@ describe("TurnProjector", () => {
 			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("completed");
-			expect(row!.cost).toBeCloseTo(0.042);
-			expect(row!.tokens_in).toBe(3000);
-			expect(row!.tokens_out).toBe(800);
-			expect(row!.completed_at).toBe(now + 5000);
+			expect(row?.state).toBe("completed");
+			expect(row?.cost).toBeCloseTo(0.042);
+			expect(row?.tokens_in).toBe(3000);
+			expect(row?.tokens_out).toBe(800);
+			expect(row?.completed_at).toBe(now + 5000);
 		});
 	});
 
@@ -375,8 +375,8 @@ describe("TurnProjector", () => {
 			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("error");
-			expect(row!.completed_at).toBe(now + 3000);
+			expect(row?.state).toBe("error");
+			expect(row?.completed_at).toBe(now + 3000);
 		});
 	});
 
@@ -428,8 +428,8 @@ describe("TurnProjector", () => {
 			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("interrupted");
-			expect(row!.completed_at).toBe(now + 2000);
+			expect(row?.state).toBe("interrupted");
+			expect(row?.completed_at).toBe(now + 2000);
 		});
 	});
 
@@ -454,7 +454,7 @@ describe("TurnProjector", () => {
 			let row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("pending");
+			expect(row?.state).toBe("pending");
 
 			// 2. Session goes busy -> turn starts running
 			projector.project(
@@ -474,8 +474,8 @@ describe("TurnProjector", () => {
 			row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("running");
-			expect(row!.started_at).toBe(now + 50);
+			expect(row?.state).toBe("running");
+			expect(row?.started_at).toBe(now + 50);
 
 			// 3. Assistant message arrives
 			projector.project(
@@ -496,7 +496,7 @@ describe("TurnProjector", () => {
 			row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.assistant_message_id).toBe("asst_m1");
+			expect(row?.assistant_message_id).toBe("asst_m1");
 
 			// 4. Turn completes
 			projector.project(
@@ -522,11 +522,11 @@ describe("TurnProjector", () => {
 			row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row!.state).toBe("completed");
-			expect(row!.cost).toBeCloseTo(0.1);
-			expect(row!.tokens_in).toBe(5000);
-			expect(row!.tokens_out).toBe(1200);
-			expect(row!.completed_at).toBe(now + 10000);
+			expect(row?.state).toBe("completed");
+			expect(row?.cost).toBeCloseTo(0.1);
+			expect(row?.tokens_in).toBe(5000);
+			expect(row?.tokens_out).toBe(1200);
+			expect(row?.completed_at).toBe(now + 10000);
 		});
 	});
 
@@ -625,10 +625,10 @@ describe("TurnProjector", () => {
 				["s1"],
 			);
 			expect(rows).toHaveLength(2);
-			expect(rows[0]!.id).toBe("user_m1");
-			expect(rows[0]!.state).toBe("completed");
-			expect(rows[1]!.id).toBe("user_m2");
-			expect(rows[1]!.state).toBe("completed");
+			expect(rows[0]?.id).toBe("user_m1");
+			expect(rows[0]?.state).toBe("completed");
+			expect(rows[1]?.id).toBe("user_m2");
+			expect(rows[1]?.state).toBe("completed");
 		});
 	});
 });

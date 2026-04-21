@@ -68,6 +68,7 @@ describe("handleClientConnected — session with REST history", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
+			sessionId: "session-1",
 			history: {
 				messages: [{ role: "user", content: "hi" }],
 				hasMore: false,
@@ -105,6 +106,7 @@ describe("handleClientConnected — REST API history", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
+			sessionId: "session-1",
 			history: {
 				messages: [{ role: "user", content: "hi" }],
 				hasMore: false,
@@ -124,6 +126,7 @@ describe("handleClientConnected — REST API history", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
+			sessionId: "session-1",
 		});
 	});
 });
@@ -178,7 +181,7 @@ describe("handleClientConnected — model info", () => {
 		// Should send INIT_FAILED error
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 		// And still send model_info from overrides
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
@@ -233,7 +236,7 @@ describe("handleClientConnected — session list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 	});
 });
@@ -262,7 +265,7 @@ describe("handleClientConnected — agent list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 	});
 });
@@ -330,7 +333,7 @@ describe("handleClientConnected — model list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 	});
 });
@@ -619,6 +622,7 @@ describe("handleClientConnected — pending questions", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user",
+			sessionId: "session-1",
 			toolId: "que_tool1",
 			questions: [
 				{
@@ -780,7 +784,7 @@ describe("handleClientConnected — error resilience", () => {
 		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
 		const errorCalls = sendToCalls.filter(
 			(c) =>
-				(c[1] as { type: string }).type === "error" &&
+				(c[1] as { type: string }).type === "system_error" &&
 				(c[1] as { code: string }).code === "INIT_FAILED",
 		);
 		expect(errorCalls.length).toBeGreaterThanOrEqual(3);
@@ -856,6 +860,7 @@ describe("handleClientConnected — real bridges integration (Gap 3)", () => {
 		// Verify the question was mapped correctly (multiple → multiSelect)
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user",
+			sessionId: "session-1",
 			toolId: "q-real-1",
 			questions: [
 				{
@@ -1161,6 +1166,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
+			sessionId: expect.any(String),
 			status: "processing",
 		});
 	});
@@ -1177,6 +1183,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
+			sessionId: expect.any(String),
 			status: "idle",
 		});
 	});
@@ -1206,6 +1213,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
+			sessionId: expect.any(String),
 			status: "idle",
 		});
 	});

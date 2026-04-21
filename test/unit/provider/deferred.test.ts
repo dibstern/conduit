@@ -1,9 +1,6 @@
 // test/unit/provider/deferred.test.ts
 import { describe, expect, it } from "vitest";
-import {
-	createDeferred,
-	type Deferred,
-} from "../../../src/lib/provider/deferred.js";
+import { createDeferred } from "../../../src/lib/provider/deferred.js";
 
 describe("Deferred", () => {
 	it("resolve settles the promise with the given value", async () => {

@@ -51,7 +51,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 
 		// Verify the query was called with prompt (an AsyncIterable) and options
-		const callArgs = queryFactorySpy.mock.calls[0]![0] as Record<
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
 			unknown
 		>;
@@ -154,7 +154,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		const turn2Promise = adapter.sendTurn(input2);
 		// Unblock the second message
-		resolveSecond!();
+		resolveSecond?.();
 		const turn2Result = await turn2Promise;
 
 		// query() should NOT have been called again
@@ -182,7 +182,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		await adapter.sendTurn(input);
 
-		const callArgs = queryFactorySpy.mock.calls[0]![0] as Record<
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
 			unknown
 		>;
@@ -211,7 +211,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		await adapter.sendTurn(input);
 
-		const callArgs = queryFactorySpy.mock.calls[0]![0] as Record<
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
 			unknown
 		>;
@@ -350,8 +350,8 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
-		expect(result.error!.code).toBe("provider_error");
-		expect(result.error!.message).toBe("Something went wrong");
+		expect(result.error?.code).toBe("provider_error");
+		expect(result.error?.message).toBe("Something went wrong");
 		expect(result.cost).toBe(0.01);
 		expect(result.tokens.input).toBe(50);
 		expect(result.tokens.output).toBe(10);
@@ -436,7 +436,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(r1.status).toBe("completed");
 
 		// Unblock second result
-		resolveReady!();
+		resolveReady?.();
 		const r2 = await p2;
 		expect(r2.status).toBe("completed");
 
@@ -517,7 +517,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		await adapter.sendTurn(input);
 
-		const callArgs = queryFactorySpy.mock.calls[0]![0] as Record<
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
 			unknown
 		>;
@@ -616,7 +616,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 		const turn2Promise = adapter.sendTurn(input2);
-		resolveSecond!();
+		resolveSecond?.();
 		const r2 = await turn2Promise;
 
 		expect(r2.status).toBe("completed");
@@ -644,7 +644,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = Object.assign(gen, {
 			interrupt: vi.fn(async () => {
 				// Simulate SDK interrupt by unblocking the generator so it finishes
-				resolveSecond!();
+				resolveSecond?.();
 			}),
 			close: vi.fn(),
 			setModel: vi.fn(async () => {}),
@@ -789,7 +789,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sinkB,
 		});
 		const turn2Promise = adapter.sendTurn(input2);
-		resolveSecond!();
+		resolveSecond?.();
 		await turn2Promise;
 
 		// sinkA should have received events during the first turn (the result
@@ -918,7 +918,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const result = await adapter.sendTurn(input);
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
-		expect(result.error!.message).toBe("SDK kaboom");
+		expect(result.error?.message).toBe("SDK kaboom");
 	});
 
 	it("stream consumer handles partial message before error", async () => {
@@ -994,7 +994,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		// Turn should resolve with error status
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
-		expect(result.error!.message).toBe("stream died mid-message");
+		expect(result.error?.message).toBe("stream died mid-message");
 
 		// The sink should have received the text delta events BEFORE the error
 		const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
@@ -1123,7 +1123,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			}
 		).sessions.get("session-stale-resume");
 		expect(ctx).toBeDefined();
-		expect(ctx!.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
 
 	it("clears resumeSessionId for 'session not found' variant", async () => {
@@ -1183,7 +1183,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			}
 		).sessions.get("session-not-found-resume");
 		expect(ctx).toBeDefined();
-		expect(ctx!.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
 
 	it("does NOT clear resumeSessionId for unrelated errors", async () => {
@@ -1244,7 +1244,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			}
 		).sessions.get("session-unrelated-err");
 		expect(ctx).toBeDefined();
-		expect(ctx!.resumeSessionId).toBe("valid-sdk-session-123");
+		expect(ctx?.resumeSessionId).toBe("valid-sdk-session-123");
 	});
 
 	it("does NOT clear resumeSessionId when it was not set", async () => {
@@ -1305,7 +1305,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			}
 		).sessions.get("session-no-cursor");
 		expect(ctx).toBeDefined();
-		expect(ctx!.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
 
 	it("SDK throws after first result but before second turn enqueues", async () => {

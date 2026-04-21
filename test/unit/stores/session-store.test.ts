@@ -193,7 +193,11 @@ describe("handleSessionList", () => {
 
 describe("handleSessionSwitched", () => {
 	it("sets currentId from message id field (server sends 'id')", () => {
-		handleSessionSwitched({ type: "session_switched", id: "abc" });
+		handleSessionSwitched({
+			type: "session_switched",
+			id: "abc",
+			sessionId: "abc",
+		});
 		expect(sessionState.currentId).toBe("abc");
 	});
 
@@ -244,6 +248,7 @@ describe("handleSessionForked (ticket 5.3)", () => {
 
 		handleSessionForked({
 			type: "session_forked",
+			sessionId: "s1",
 			session: {
 				id: "ses_forked",
 				title: "Forked from Original",
@@ -270,6 +275,7 @@ describe("handleSessionForked (ticket 5.3)", () => {
 
 		handleSessionForked({
 			type: "session_forked",
+			sessionId: "s1",
 			session: {
 				id: "ses_forked",
 				title: "Forked from Original",
@@ -286,6 +292,7 @@ describe("handleSessionForked (ticket 5.3)", () => {
 	it("preserves forkMessageId on forked session", () => {
 		handleSessionForked({
 			type: "session_forked",
+			sessionId: "s1",
 			session: {
 				id: "fork-1",
 				title: "Forked",
@@ -569,6 +576,7 @@ describe("handleSessionSwitched — requestId completion", () => {
 		handleSessionSwitched({
 			type: "session_switched",
 			id: "new-sess",
+			sessionId: "new-sess",
 			requestId,
 		});
 
@@ -580,7 +588,11 @@ describe("handleSessionSwitched — requestId completion", () => {
 		requestNewSession();
 		expect(sessionCreation.value.phase).toBe("creating");
 
-		handleSessionSwitched({ type: "session_switched", id: "other-sess" });
+		handleSessionSwitched({
+			type: "session_switched",
+			id: "other-sess",
+			sessionId: "other-sess",
+		});
 
 		expect(sessionState.currentId).toBe("other-sess");
 		expect(sessionCreation.value.phase).toBe("creating"); // NOT completed
@@ -593,6 +605,7 @@ describe("handleSessionSwitched — requestId completion", () => {
 		handleSessionSwitched({
 			type: "session_switched",
 			id: "other-sess",
+			sessionId: "other-sess",
 			requestId:
 				"wrong-id" as import("../../../src/lib/shared-types.js").RequestId,
 		});
@@ -606,6 +619,7 @@ describe("handleSessionSwitched — requestId completion", () => {
 		handleSessionSwitched({
 			type: "session_switched",
 			id: "sess-1",
+			sessionId: "sess-1",
 			requestId:
 				"some-id" as import("../../../src/lib/shared-types.js").RequestId,
 		});

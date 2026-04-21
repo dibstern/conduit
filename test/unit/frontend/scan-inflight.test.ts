@@ -73,6 +73,7 @@ describe("scanInFlight state management", () => {
 		// Server sends error instead of scan_result (e.g. triggerScan not wired)
 		const errorMsg: RelayMessage = {
 			type: "error",
+			sessionId: "s1",
 			code: "INSTANCE_ERROR",
 			message: "Port scanning not available",
 		};

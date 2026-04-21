@@ -161,15 +161,18 @@ export function patchMissingDone(
 	source: SessionHistorySource,
 	statusPoller: SessionSwitchDeps["statusPoller"],
 	sessionId: string,
+	overrides?: SessionSwitchDeps["overrides"],
 ): SessionHistorySource {
 	if (source.kind !== "cached-events") return source;
+	// F3 fix: widen guard to check both poller and processing timeout
 	if (statusPoller?.isProcessing(sessionId)) return source;
+	if (overrides?.hasActiveProcessingTimeout(sessionId)) return source;
 
 	if (!isLastTurnActive(source.events)) return source;
 
 	return {
 		kind: "cached-events",
-		events: [...source.events, { type: "done", code: 0 }],
+		events: [...source.events, { type: "done", sessionId, code: 0 }],
 		hasMore: source.hasMore,
 	};
 }
@@ -196,6 +199,7 @@ export function buildSessionSwitchedMessage(
 			return {
 				type: "session_switched",
 				id: sessionId,
+				sessionId,
 				events: source.events as RelayMessage[],
 				...(source.hasMore ? { eventsHasMore: true } : {}),
 				...optionalFields,
@@ -204,6 +208,7 @@ export function buildSessionSwitchedMessage(
 			return {
 				type: "session_switched",
 				id: sessionId,
+				sessionId,
 				history: {
 					messages: source.history.messages as HistoryMessage[],
 					hasMore: source.history.hasMore,
@@ -217,6 +222,7 @@ export function buildSessionSwitchedMessage(
 			return {
 				type: "session_switched",
 				id: sessionId,
+				sessionId,
 				...optionalFields,
 			};
 	}
@@ -311,7 +317,13 @@ export async function switchClientToSession(
 		: await resolveSessionHistory(sessionId, deps);
 
 	// Patch missing done event for idle sessions served from cache
-	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId);
+	// F3 fix: pass overrides so the guard checks both poller and processing timeout
+	const patchedSource = patchMissingDone(
+		source,
+		deps.statusPoller,
+		sessionId,
+		deps.overrides,
+	);
 
 	// Seed pagination cursor only when the cache is incomplete (hasMore=true).
 	// Complete caches cover the full session — no server fallback needed.
@@ -336,6 +348,7 @@ export async function switchClientToSession(
 		deps.overrides?.hasActiveProcessingTimeout(sessionId);
 	deps.wsHandler.sendTo(clientId, {
 		type: "status",
+		sessionId,
 		status: isProcessing ? "processing" : "idle",
 	});
 

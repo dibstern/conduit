@@ -419,6 +419,7 @@ describe("ApprovalProjector", () => {
 				messageId: "m1",
 				partId: "p1",
 				text: "hello",
+				// biome-ignore lint/suspicious/noExplicitAny: intentionally unrelated event type for "ignores" test
 			} as any,
 			1,
 			now,

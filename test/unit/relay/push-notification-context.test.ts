@@ -24,10 +24,15 @@ function createMockPushManager() {
 describe("sendPushForEvent with context", () => {
 	it("includes slug and sessionId from context in push payload", () => {
 		const push = createMockPushManager();
-		sendPushForEvent(push, { type: "done", code: 0 }, createSilentLogger(), {
-			slug: "my-project",
-			sessionId: "sess-123",
-		});
+		sendPushForEvent(
+			push,
+			{ type: "done", sessionId: "s1", code: 0 },
+			createSilentLogger(),
+			{
+				slug: "my-project",
+				sessionId: "sess-123",
+			},
+		);
 
 		expect(push.sendToAll).toHaveBeenCalledWith({
 			type: "done",
@@ -41,9 +46,14 @@ describe("sendPushForEvent with context", () => {
 
 	it("omits slug when not provided in context", () => {
 		const push = createMockPushManager();
-		sendPushForEvent(push, { type: "done", code: 0 }, createSilentLogger(), {
-			sessionId: "sess-123",
-		});
+		sendPushForEvent(
+			push,
+			{ type: "done", sessionId: "s1", code: 0 },
+			createSilentLogger(),
+			{
+				sessionId: "sess-123",
+			},
+		);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior call
 		const payload = push.sendToAll.mock.calls[0]![0];
@@ -53,9 +63,14 @@ describe("sendPushForEvent with context", () => {
 
 	it("omits sessionId when not provided in context", () => {
 		const push = createMockPushManager();
-		sendPushForEvent(push, { type: "done", code: 0 }, createSilentLogger(), {
-			slug: "my-project",
-		});
+		sendPushForEvent(
+			push,
+			{ type: "done", sessionId: "s1", code: 0 },
+			createSilentLogger(),
+			{
+				slug: "my-project",
+			},
+		);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior call
 		const payload = push.sendToAll.mock.calls[0]![0];
@@ -65,7 +80,11 @@ describe("sendPushForEvent with context", () => {
 
 	it("works without context parameter (backward compatible)", () => {
 		const push = createMockPushManager();
-		sendPushForEvent(push, { type: "done", code: 0 }, createSilentLogger());
+		sendPushForEvent(
+			push,
+			{ type: "done", sessionId: "s1", code: 0 },
+			createSilentLogger(),
+		);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior call
 		const payload = push.sendToAll.mock.calls[0]![0];
@@ -85,7 +104,7 @@ describe("sendPushForEvent with context", () => {
 describe("resolveNotifications with sessionId", () => {
 	it("includes sessionId in crossSessionPayload when route drops", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", sessionId: "s1", code: 0 } as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 			"sess-456",
@@ -98,7 +117,7 @@ describe("resolveNotifications with sessionId", () => {
 
 	it("omits sessionId from crossSessionPayload when not provided", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", sessionId: "s1", code: 0 } as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 		);
@@ -110,7 +129,7 @@ describe("resolveNotifications with sessionId", () => {
 
 	it("does not include sessionId when route sends (no cross-session payload)", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", sessionId: "s1", code: 0 } as RelayMessage,
 			{ action: "send", sessionId: "s1" },
 			false,
 			"sess-789",

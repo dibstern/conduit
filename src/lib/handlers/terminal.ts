@@ -28,7 +28,7 @@ async function createAndConnectPty(
 				createErr,
 				"PTY_CREATE_FAILED",
 				"Failed to create terminal",
-			).toMessage(),
+			).toSystemError(),
 		);
 		return;
 	}
@@ -42,7 +42,7 @@ async function createAndConnectPty(
 			clientId,
 			new RelayError("Terminal creation returned no ID", {
 				code: "PTY_CREATE_FAILED",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -82,7 +82,7 @@ async function createAndConnectPty(
 				connectErr,
 				"PTY_CONNECT_FAILED",
 				"Failed to connect to terminal",
-			).toMessage(),
+			).toSystemError(),
 		);
 	}
 }

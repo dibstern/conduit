@@ -98,6 +98,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 		handleMessage({
 			type: "session_switched",
 			id: "session-first",
+			sessionId: "session-first",
 			history: { messages: firstHistory, hasMore: true },
 		});
 
@@ -106,6 +107,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 		handleMessage({
 			type: "session_switched",
 			id: "session-second",
+			sessionId: "session-second",
 			history: { messages: secondHistory, hasMore: false },
 		});
 
@@ -137,6 +139,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 		handleMessage({
 			type: "session_switched",
 			id: "s-a",
+			sessionId: "s-a",
 			history: {
 				messages: [makeHistoryMessage("a1", "user", "from A")],
 				hasMore: true,
@@ -145,6 +148,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 		handleMessage({
 			type: "session_switched",
 			id: "s-b",
+			sessionId: "s-b",
 			history: {
 				messages: [makeHistoryMessage("b1", "user", "from B")],
 				hasMore: true,
@@ -153,6 +157,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 		handleMessage({
 			type: "session_switched",
 			id: "s-c",
+			sessionId: "s-c",
 			history: {
 				messages: [makeHistoryMessage("c1", "user", "from C")],
 				hasMore: false,
@@ -172,7 +177,11 @@ describe("Race: session_switched history .then() fires after session switch", ()
 describe("Race: history_page .then() fires after session switch", () => {
 	it("history_page completes after session switch — stale page discarded", async () => {
 		// Start with session A
-		handleMessage({ type: "session_switched", id: "session-a" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-a",
+			sessionId: "session-a",
+		});
 		await vi.runAllTimersAsync();
 
 		// Request older history for session A
@@ -191,6 +200,7 @@ describe("Race: history_page .then() fires after session switch", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
+			sessionId: "session-b",
 			history: {
 				messages: [makeHistoryMessage("b1", "user", "from session B")],
 				hasMore: false,
@@ -216,7 +226,11 @@ describe("Race: history_page .then() fires after session switch", () => {
 
 	it("history_page loading resets even when generation check discards results", async () => {
 		// Set up session A
-		handleMessage({ type: "session_switched", id: "session-a" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-a",
+			sessionId: "session-a",
+		});
 		await vi.runAllTimersAsync();
 
 		historyState.loading = true;
@@ -230,7 +244,11 @@ describe("Race: history_page .then() fires after session switch", () => {
 		});
 
 		// Switch away — bumps generation
-		handleMessage({ type: "session_switched", id: "session-b" });
+		handleMessage({
+			type: "session_switched",
+			id: "session-b",
+			sessionId: "session-b",
+		});
 		await vi.runAllTimersAsync();
 
 		// loading MUST be false — the .then() must always reset it

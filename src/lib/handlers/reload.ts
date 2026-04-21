@@ -21,7 +21,7 @@ export async function handleReloadProviderSession(
 			clientId,
 			new RelayError("No active session to reload", {
 				code: "NO_SESSION",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
