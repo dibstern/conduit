@@ -1,6 +1,7 @@
 // ─── Session Store ───────────────────────────────────────────────────────────
 // Manages session list, active session, search, and date grouping.
 
+import { SvelteMap } from "svelte/reactivity";
 import type {
 	DateGroups,
 	RelayMessage,
@@ -24,6 +25,10 @@ export const sessionState = $state({
 	searchQuery: "",
 	searchResults: null as SessionInfo[] | null,
 	hasMore: false,
+	/** Id-keyed map maintained alongside rootSessions/allSessions arrays.
+	 *  Used by the dispatcher's unknown-session guard (O(1) membership check)
+	 *  and by clearSessionChatState's diff path. */
+	sessions: new SvelteMap<string, SessionInfo>(),
 });
 
 // ─── Session Creation State Machine ──────────────────────────────────────────

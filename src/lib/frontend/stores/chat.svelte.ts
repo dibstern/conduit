@@ -1,6 +1,8 @@
 // ─── Chat Store ──────────────────────────────────────────────────────────────
 // Manages chat messages, streaming state, and processing.
 
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import type { PerSessionEvent } from "../../shared-types.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -16,8 +18,258 @@ import { generateUuid } from "../utils/format.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import { discoveryState } from "./discovery.svelte.js";
-import { createToolRegistry } from "./tool-registry.js";
+import { sessionState } from "./session.svelte.js";
+import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 import { uiState, updateContextPercent } from "./ui.svelte.js";
+
+// ─── Two-Tier Per-Session Chat State (Task 1 — gated, dead code) ──────────
+
+// Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
+export type SessionActivity = {
+	phase: ChatPhase;
+	turnEpoch: number;
+	currentMessageId: string | null;
+	replayGeneration: number;
+	doneMessageIds: SvelteSet<string>;
+	seenMessageIds: SvelteSet<string>;
+	liveEventBuffer: PerSessionEvent[] | null;
+	eventsHasMore: boolean;
+	renderTimer: ReturnType<typeof setTimeout> | null;
+	thinkingStartTime: number;
+};
+
+// Tier 2 — Messages. LRU-capped. Holds only data safely reconstructable
+// from the server's event log.
+export type SessionMessages = {
+	messages: ChatMessage[];
+	currentAssistantText: string;
+	loadLifecycle: LoadLifecycle;
+	contextPercent: number;
+	historyHasMore: boolean;
+	historyMessageCount: number;
+	historyLoading: boolean;
+	toolRegistry: ToolRegistry;
+};
+
+// Composite read shape for the chat view. NEVER instantiated as storage.
+export type SessionChatState = SessionActivity & SessionMessages;
+
+// ── Factories (return plain POJOs — $state wrapping happens in getOrCreate*) ──
+
+export function createEmptySessionActivity(): SessionActivity {
+	return {
+		phase: "idle",
+		turnEpoch: 0,
+		currentMessageId: null,
+		replayGeneration: 0,
+		doneMessageIds: new SvelteSet(),
+		seenMessageIds: new SvelteSet(),
+		liveEventBuffer: null,
+		eventsHasMore: false,
+		renderTimer: null,
+		thinkingStartTime: 0,
+	};
+}
+
+export function createEmptySessionMessages(): SessionMessages {
+	return {
+		messages: [],
+		currentAssistantText: "",
+		loadLifecycle: "empty",
+		contextPercent: 0,
+		historyHasMore: false,
+		historyMessageCount: 0,
+		historyLoading: false,
+		toolRegistry: createToolRegistry(),
+	};
+}
+
+// ── ACTIVITY_KEYS — derived from factory return shape ──
+
+export const ACTIVITY_KEYS: ReadonlySet<keyof SessionActivity> = new Set(
+	Object.keys(createEmptySessionActivity()) as (keyof SessionActivity)[],
+);
+
+// ── composeChatState — read-only Proxy with full trap set ──
+
+export function composeChatState(
+	activity: SessionActivity,
+	messages: SessionMessages,
+): SessionChatState {
+	return new Proxy({} as SessionChatState, {
+		get(_t, key) {
+			if (typeof key !== "string") return undefined;
+			return ACTIVITY_KEYS.has(key as keyof SessionActivity)
+				? (activity as Record<string, unknown>)[key]
+				: (messages as Record<string, unknown>)[key];
+		},
+		set() {
+			throw new Error(
+				"currentChat() is read-only. Mutate state via handlers (activity, messages) parameters.",
+			);
+		},
+		has(_t, key) {
+			if (typeof key !== "string") return false;
+			return ACTIVITY_KEYS.has(key as keyof SessionActivity) || key in messages;
+		},
+		ownKeys() {
+			return [...ACTIVITY_KEYS, ...Object.keys(createEmptySessionMessages())];
+		},
+		getOwnPropertyDescriptor(_t, key) {
+			if (typeof key !== "string") return undefined;
+			const source = ACTIVITY_KEYS.has(key as keyof SessionActivity)
+				? activity
+				: messages;
+			const value = (source as Record<string, unknown>)[key];
+			if (value === undefined) return undefined;
+			return { value, writable: false, enumerable: true, configurable: true };
+		},
+	});
+}
+
+// ── Empty sentinels (frozen POJOs, NOT $state) ──
+
+const EMPTY_ACTIVITY_RAW = createEmptySessionActivity();
+const EMPTY_MESSAGES_RAW = createEmptySessionMessages();
+const throwingRegistryStub = () => {
+	throw new Error("EMPTY_MESSAGES.toolRegistry is read-only");
+};
+for (const methodName of Object.keys(
+	EMPTY_MESSAGES_RAW.toolRegistry,
+) as (keyof ToolRegistry)[]) {
+	if (typeof EMPTY_MESSAGES_RAW.toolRegistry[methodName] === "function") {
+		(EMPTY_MESSAGES_RAW.toolRegistry as unknown as Record<string, unknown>)[
+			methodName
+		] = throwingRegistryStub;
+	}
+}
+export const EMPTY_ACTIVITY: SessionActivity =
+	Object.freeze(EMPTY_ACTIVITY_RAW);
+export const EMPTY_MESSAGES: SessionMessages =
+	Object.freeze(EMPTY_MESSAGES_RAW);
+
+const EMPTY_STATE_RAW: SessionChatState = composeChatState(
+	EMPTY_ACTIVITY,
+	EMPTY_MESSAGES,
+);
+
+export const EMPTY_STATE: SessionChatState =
+	(import.meta as { env?: { DEV?: boolean } }).env?.DEV === true
+		? new Proxy(EMPTY_STATE_RAW, {
+				set(_t, key) {
+					throw new Error(
+						`Attempted to mutate EMPTY_STATE.${String(key)} — currentId is null. This is a routing bug.`,
+					);
+				},
+			})
+		: EMPTY_STATE_RAW;
+
+// ── Per-session maps ──
+
+export const sessionActivity = new SvelteMap<string, SessionActivity>();
+export const sessionMessages = new SvelteMap<string, SessionMessages>();
+
+// ── Read API ──
+
+const _currentChat = $derived.by((): SessionChatState => {
+	const id = sessionState.currentId;
+	if (id == null) return EMPTY_STATE;
+	const activity = sessionActivity.get(id);
+	if (!activity) return EMPTY_STATE;
+	const messages = sessionMessages.get(id) ?? EMPTY_MESSAGES;
+	return composeChatState(activity, messages);
+});
+export function currentChat(): SessionChatState {
+	return _currentChat;
+}
+
+export function getSessionPhase(id: string): ChatPhase {
+	return sessionActivity.get(id)?.phase ?? "idle";
+}
+
+// ── Write API ──
+
+export function getOrCreateSessionActivity(id: string): SessionActivity {
+	if (id === "") throw new Error("getOrCreateSessionActivity: empty sessionId");
+	const existing = sessionActivity.get(id);
+	if (existing) return existing;
+	// biome-ignore lint/style/useConst: $state() requires let for Svelte 5 reactivity
+	let a: SessionActivity = $state(createEmptySessionActivity());
+	sessionActivity.set(id, a);
+	return a;
+}
+
+export function getOrCreateSessionMessages(id: string): SessionMessages {
+	if (id === "") throw new Error("getOrCreateSessionMessages: empty sessionId");
+	const existing = sessionMessages.get(id);
+	if (existing) {
+		touchLRU(id);
+		return existing;
+	}
+	// biome-ignore lint/style/useConst: $state() requires let for Svelte 5 reactivity
+	let m: SessionMessages = $state(createEmptySessionMessages());
+	sessionMessages.set(id, m);
+	ensureLRUCap();
+	touchLRU(id);
+	return m;
+}
+
+export function getOrCreateSessionSlot(id: string): {
+	activity: SessionActivity;
+	messages: SessionMessages;
+} {
+	return {
+		activity: getOrCreateSessionActivity(id),
+		messages: getOrCreateSessionMessages(id),
+	};
+}
+
+export function clearSessionChatState(id: string): void {
+	const activity = sessionActivity.get(id);
+	if (activity) {
+		activity.replayGeneration++;
+		if (activity.renderTimer) {
+			clearTimeout(activity.renderTimer);
+		}
+	}
+	sessionActivity.delete(id);
+	sessionMessages.delete(id);
+	const lruIdx = lruOrder.indexOf(id);
+	if (lruIdx !== -1) lruOrder.splice(lruIdx, 1);
+}
+
+// ── LRU helpers (Tier 2 only) ──
+
+const TIER2_LRU_CAP = 20;
+const lruOrder: string[] = [];
+
+/** Reset internal LRU state. Exported for test cleanup only. */
+export function _resetLRU(): void {
+	lruOrder.length = 0;
+}
+
+function touchLRU(id: string): void {
+	const idx = lruOrder.indexOf(id);
+	if (idx !== -1) lruOrder.splice(idx, 1);
+	lruOrder.push(id);
+}
+
+function ensureLRUCap(): void {
+	while (sessionMessages.size > TIER2_LRU_CAP && lruOrder.length > 0) {
+		// biome-ignore lint/style/noNonNullAssertion: safe — length check above
+		const candidate = lruOrder[0]!;
+		// Never evict the current session
+		if (candidate === sessionState.currentId) {
+			lruOrder.shift();
+			lruOrder.push(candidate);
+			// If the only candidate left is current, stop
+			if (lruOrder.length <= 1) break;
+			continue;
+		}
+		lruOrder.shift();
+		sessionMessages.delete(candidate);
+	}
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
