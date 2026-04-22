@@ -1,7 +1,7 @@
 <!-- ─── History Loader ─────────────────────────────────────────────────────── -->
 <!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
 <!-- Sends load_more_history requests; responses are handled by ws-dispatch -->
-<!-- which converts and prepends into chatState.messages. -->
+<!-- which converts and prepends into the session's message list. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
 <script lang="ts">

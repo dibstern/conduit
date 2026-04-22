@@ -2,9 +2,8 @@
 // Extracted from ws.svelte.ts — centralized message routing and event replay.
 // Pure dispatch table: routes incoming RelayMessage to the appropriate store.
 //
-// Task 4: Two-tier dispatcher routes per-session events by event.sessionId
+// Two-tier dispatcher routes per-session events by event.sessionId
 // via routePerSession. Global events handled by handleMessage directly.
-// dispatchToCurrent adapter removed.
 
 import { notificationContent } from "../../notification-content.js";
 import type {
@@ -59,6 +58,7 @@ import {
 	type SessionMessages,
 	seedRegistryFromMessages,
 	sessionActivity,
+	setMessages,
 } from "./chat.svelte.js";
 import {
 	handleAgentList,
@@ -269,7 +269,7 @@ function routePerSession(event: PerSessionEvent): void {
 			addUserMessage(activity, messages, event.text, undefined, isProcessing());
 			break;
 		case "tool_content":
-			handleToolContentResponse(event);
+			handleToolContentResponse(messages, event);
 			break;
 		case "part_removed":
 			handlePartRemoved(activity, messages, event);
@@ -356,7 +356,7 @@ function yieldToEventLoop(): Promise<void> {
 // events (e.g. thinking_stop) with cached events being replayed, which would
 // cause data loss (e.g. cached thinking_deltas silently dropped after a live
 // thinking_stop prematurely marks the thinking message as done).
-// liveEventBuffer: per-session only (activity.liveEventBuffer). Module-level buffer removed in Task 6.
+// liveEventBuffer: per-session only (activity.liveEventBuffer).
 
 /** Event types handled by dispatchChatEvent — used to decide what to buffer. */
 const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
@@ -550,7 +550,6 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 			handleToolResult(activity, messages, event);
 			// If this was a TodoWrite result, also update the todo store.
 			// The tool_result has no `name`, so look up the message in chat state.
-			// getMessages() returns the replay batch during replay, chatState.messages live.
 			{
 				const msgs = getMessages(messages);
 				const toolMsg = msgs.find(
@@ -829,7 +828,7 @@ export function handleMessage(msg: RelayMessage): void {
 
 		// ─── History ─────────────────────────────────────────────────────
 		case "history_page": {
-			// Convert and prepend older messages into chatState.messages.
+			// Convert and prepend older messages into the session's message list.
 			// Fire-and-forget — handleMessage stays synchronous.
 			// Capture slot at start so commits go to the correct session.
 			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
@@ -1020,7 +1019,6 @@ export async function replayEvents(
 	eventsHasMore = false,
 ): Promise<void> {
 	// ── Slot-capture: capture at start, thread through all dispatches ──
-	// Do NOT use currentChat() or dispatchToCurrent — commit to captured slot.
 	const slot = getOrCreateSessionSlot(sessionId);
 	const gen = ++slot.activity.replayGeneration;
 
@@ -1079,11 +1077,9 @@ export async function replayEvents(
 		commitReplayFinal(slot.activity, slot.messages, sessionId, eventsHasMore);
 
 		// Reconcile processing state after replay completes.
-		// During replay, handler functions (handleDone, handleDelta, etc.)
-		// set chatState.phase directly (no longer guarded by "replaying").
-		// phaseEndReplay only needs to handle the edge case where llmActive
-		// is true but phase ended at "idle" (all turns completed during
-		// replay, but server says LLM is still active).
+		// phaseEndReplay handles the edge case where llmActive is true
+		// but phase ended at "idle" (all turns completed during replay,
+		// but server says LLM is still active).
 		phaseEndReplay(slot.activity, llmActive);
 
 		// Drain live events that arrived while the replay was in progress.
@@ -1105,26 +1101,27 @@ export async function replayEvents(
 
 /** Tool content: replace truncated result with full content. */
 function handleToolContentResponse(
+	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_content" }>,
 ): void {
-	const slot = getCurrentSlot();
 	const { toolId, content } = msg;
-	const msgs = [...chatState.messages];
-	const found = findMessage(msgs, "tool", (m) => m.id === toolId);
+	const currentMsgs = [...getMessages(messages)];
+	const found = findMessage(currentMsgs, "tool", (m) => m.id === toolId);
 	if (found) {
-		chatState.messages = msgs.map((m, i) => {
-			if (i !== found.index) return m;
-			const updated: ToolMessage = {
-				...found.message,
-				result: content,
-				isTruncated: false,
-			};
-			delete updated.fullContentLength;
-			return updated;
-		});
+		setMessages(
+			messages,
+			currentMsgs.map((m, i) => {
+				if (i !== found.index) return m;
+				const updated: ToolMessage = {
+					...found.message,
+					result: content,
+					isTruncated: false,
+				};
+				delete updated.fullContentLength;
+				return updated;
+			}),
+		);
 	}
-	// Suppress unused-variable lint — slot reserved for Task 3 migration
-	void slot;
 }
 
 /** Error routing: PTY errors vs chat errors. */

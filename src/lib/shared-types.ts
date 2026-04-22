@@ -359,7 +359,7 @@ export type RelayMessage =
 			 *  (eviction or late start) and the frontend should fall through
 			 *  to server-based pagination when the replay buffer is exhausted. */
 			eventsHasMore?: boolean;
-			/** Structured messages for REST API fallback (converted to ChatMessages and prepended to chatState). */
+			/** Structured messages for REST API fallback (converted to ChatMessages and prepended to the session's message list). */
 			history?: {
 				messages: HistoryMessage[];
 				hasMore: boolean;

@@ -361,8 +361,8 @@ export function consumeSwitchingFromId(): string | null {
  * Switch this tab to a different session.
  * Updates local state, navigates the URL, and sends `view_session` to the server.
  *
- * The two-tier per-session store retains session state across switches (Tier 1
- * is unbounded, Tier 2 is LRU-capped). No stash/restore needed.
+ * The two-tier per-session store retains session state across switches
+ * (Tier 1 is unbounded, Tier 2 is LRU-capped).
  */
 export function switchToSession(
 	sessionId: string,
@@ -373,7 +373,7 @@ export function switchToSession(
 
 	sessionState.currentId = sessionId;
 
-	// Clear global chatState for the incoming session.
+	// Clear chat state for the incoming session.
 	// The session_switched handler will replay events or load history.
 	clearMessages();
 

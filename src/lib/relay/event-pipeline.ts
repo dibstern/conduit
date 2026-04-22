@@ -70,13 +70,7 @@ export const PERSISTED_EVENT_TYPES = [
 	"error",
 ] as const;
 
-/** @deprecated Use PERSISTED_EVENT_TYPES */
-export const CACHEABLE_EVENT_TYPES = PERSISTED_EVENT_TYPES;
-
 export type PersistedEventType = (typeof PERSISTED_EVENT_TYPES)[number];
-
-/** @deprecated Use PersistedEventType */
-export type CacheableEventType = PersistedEventType;
 
 const PERSISTED_TYPES: ReadonlySet<RelayMessage["type"]> = new Set(
 	PERSISTED_EVENT_TYPES,

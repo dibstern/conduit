@@ -1,10 +1,9 @@
 // ─── Chat Store ──────────────────────────────────────────────────────────────
 // Manages chat messages, streaming state, and processing.
 //
-// Task 4: Two-tier per-session chat state. Handlers receive (activity, messages, event)
-// and write to per-session tiers. Legacy chatState writes kept for backward compat
-// during transition. The routePerSession dispatcher in ws-dispatch.ts resolves
-// the correct session slot by event.sessionId.
+// Two-tier per-session chat state. Handlers receive (activity, messages, event)
+// and write to per-session tiers. The routePerSession dispatcher in
+// ws-dispatch.ts resolves the correct session slot by event.sessionId.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { PerSessionEvent } from "../../shared-types.js";
@@ -25,9 +24,8 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
-// uiState.contextPercent dual-write removed in Task 6. Components read from per-session messages.contextPercent.
 
-// ─── Two-Tier Per-Session Chat State (Task 2 — handler signatures) ──────────
+// ─── Two-Tier Per-Session Chat State ────────────────────────────────────────
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
@@ -453,13 +451,9 @@ export function getMessageCount(): number {
 	return chatState.messages.length;
 }
 
-// renderTimer / thinkingStartTime: per-session only (activity.*). Module-level aliases removed in Task 6.
-
 const log = createFrontendLogger("chat");
 
-// registry: per-session only (messages.toolRegistry). Module-level singleton removed in Task 6.
-
-/** Append a new tool message to chatState.messages. */
+/** Append a new tool message to the session's message list. */
 function applyToolCreate(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
@@ -468,7 +462,7 @@ function applyToolCreate(
 	setMessages(_messages, [...getMessages(_messages), tool]);
 }
 
-/** Replace a tool message in chatState.messages by UUID. */
+/** Replace a tool message in the session's message list by UUID. */
 function applyToolUpdate(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
@@ -583,11 +577,10 @@ export function discardReplayBatch(
 
 // ─── Replay Paging ──────────────────────────────────────────────────────────
 // When a replay produces more than INITIAL_PAGE_SIZE messages, only the last
-// page is committed to chatState.messages. Older messages are stored in a
-// per-session buffer for HistoryLoader to page through on demand.
+// page is committed to the session's message list. Older messages are stored
+// in a per-session buffer for HistoryLoader to page through on demand.
 
 const INITIAL_PAGE_SIZE = 50;
-// replayBuffers / eventsHasMoreSessions: per-session only. Module-level maps removed in Task 6.
 
 /** Check if a session's event cache was marked as incomplete by the server. */
 export function isEventsHasMore(
@@ -620,10 +613,10 @@ export function consumeReplayBuffer(
 		if (_messages) _messages.replayBuffer = null;
 	}
 	// Render deferred markdown on buffered messages before they enter
-	// chatState.messages.  During replay, assistant messages store raw
-	// text in `html` with `needsRender: true` to avoid blocking.  The
-	// initial renderDeferredMarkdown() only processes chatState.messages
-	// (the last INITIAL_PAGE_SIZE), so buffered messages must be rendered
+	// the session's message list.  During replay, assistant messages store
+	// raw text in `html` with `needsRender: true` to avoid blocking.  The
+	// initial renderDeferredMarkdown() only processes the last
+	// INITIAL_PAGE_SIZE messages, so buffered messages must be rendered
 	// here when they're consumed for display.
 	return page.map((m) => {
 		if (m.type === "assistant" && m.needsRender) {
@@ -680,7 +673,10 @@ export function getMessages(_messages?: SessionMessages): ChatMessage[] {
 	return chatState.messages;
 }
 
-function setMessages(_messages: SessionMessages, msgs: ChatMessage[]): void {
+export function setMessages(
+	_messages: SessionMessages,
+	msgs: ChatMessage[],
+): void {
 	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
 		_messages.replayBatch = msgs;
 	} else {
@@ -952,7 +948,7 @@ export function handleResult(
 				...(messageId != null && { messageId }),
 			};
 			setMessages(messages, msgs);
-			// Update context usage bar — dual-write: per-session + legacy
+			// Update context usage bar
 			updateContextFromTokens(messages, usage);
 			return;
 		}
@@ -1406,10 +1402,6 @@ export function clearMessages(): void {
 	historyState.loading = false;
 	historyState.messageCount = 0;
 }
-
-// Session message cache removed in Task 6.
-// The two-tier per-session store (sessionActivity + sessionMessages) replaces
-// stashSessionMessages / restoreCachedMessages / evictCachedMessages.
 
 // ─── Part/message removal handlers ───────────────────────────────────────────
 
