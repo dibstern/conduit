@@ -864,6 +864,12 @@ export class MockOpenCodeServer {
 			Connection: "keep-alive",
 		});
 
+		// Disable Nagle's algorithm so each res.write() is sent immediately.
+		// Without this, small SSE frames are delayed by TCP buffering (up to
+		// 200ms per write), causing event delivery to lag seconds behind
+		// the mock's emission loop — breaking integration test timeouts.
+		res.socket?.setNoDelay(true);
+
 		// Flush headers so the client's body reader starts streaming.
 		// SSE comments (lines starting with ':') are ignored by clients.
 		res.write(": ok\n\n");
