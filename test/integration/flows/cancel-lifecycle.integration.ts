@@ -118,6 +118,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 					"NO_SESSION",
 					"CANCEL_FAILED",
 					"HANDLER_ERROR",
+					"provider_error",
 				].includes(String(e["code"] ?? "")),
 		);
 		expect(cancelErrors).toHaveLength(0);

@@ -1,696 +1,708 @@
 {
-	"name": "chat-thinking",
-	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-27T04:03:49.915Z",
-	"initMessages": [
-		{
-			"type": "client_count",
-			"count": 2
-		},
-		{
-			"type": "client_count",
-			"count": 1
-		},
-		{
-			"type": "session_switched",
-			"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-			"history": {
-				"messages": [],
-				"hasMore": false
-			}
-		},
-		{
-			"type": "status",
-			"status": "idle"
-		},
-		{
-			"type": "model_info",
-			"model": "big-pickle",
-			"provider": "opencode"
-		},
-		{
-			"type": "session_list",
-			"sessions": [
-				{
-					"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-					"title": "New session - 2026-03-27T04:03:21.427Z",
-					"updatedAt": 1774584201427,
-					"messageCount": 0
-				}
-			],
-			"roots": true
-		},
-		{
-			"type": "session_list",
-			"sessions": [
-				{
-					"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-					"title": "New session - 2026-03-27T04:03:21.427Z",
-					"updatedAt": 1774584201427,
-					"messageCount": 0
-				}
-			],
-			"roots": false
-		},
-		{
-			"type": "agent_list",
-			"agents": [
-				{
-					"id": "build",
-					"name": "build",
-					"description": "The default agent. Executes tools based on configured permissions."
-				},
-				{
-					"id": "plan",
-					"name": "plan",
-					"description": "Plan mode. Disallows all edit tools."
-				}
-			]
-		},
-		{
-			"type": "model_list",
-			"providers": [
-				{
-					"id": "anthropic",
-					"name": "Anthropic",
-					"configured": true,
-					"models": [
-						{
-							"id": "claude-opus-4-5-20251101",
-							"name": "Claude Opus 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-20250514",
-							"name": "Claude Opus 4",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-5",
-							"name": "Claude Opus 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-7-sonnet-20250219",
-							"name": "Claude Sonnet 3.7",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-6",
-							"name": "Claude Opus 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-5-20250929",
-							"name": "Claude Sonnet 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-6",
-							"name": "Claude Sonnet 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-20241022",
-							"name": "Claude Haiku 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-sonnet-4-0",
-							"name": "Claude Sonnet 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-haiku-20240307",
-							"name": "Claude Haiku 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-sonnet-4-20250514",
-							"name": "Claude Sonnet 4",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-1",
-							"name": "Claude Opus 4.1 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-opus-20240229",
-							"name": "Claude Opus 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-3-5-haiku-latest",
-							"name": "Claude Haiku 3.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20240620",
-							"name": "Claude Sonnet 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-opus-4-1-20250805",
-							"name": "Claude Opus 4.1",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-0",
-							"name": "Claude Opus 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-haiku-4-5-20251001",
-							"name": "Claude Haiku 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-5",
-							"name": "Claude Sonnet 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-7-sonnet-latest",
-							"name": "Claude Sonnet 3.7 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-haiku-4-5",
-							"name": "Claude Haiku 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-sonnet-20240229",
-							"name": "Claude Sonnet 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20241022",
-							"name": "Claude Sonnet 3.5 v2",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						}
-					]
-				},
-				{
-					"id": "opencode",
-					"name": "OpenCode Zen",
-					"configured": true,
-					"models": [
-						{
-							"id": "big-pickle",
-							"name": "Big Pickle",
-							"provider": "opencode",
-							"limit": {
-								"context": 200000,
-								"output": 128000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "mimo-v2-omni-free",
-							"name": "MiMo V2 Omni Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 262144,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "gpt-5-nano",
-							"name": "GPT-5 Nano",
-							"provider": "opencode",
-							"limit": {
-								"context": 400000,
-								"input": 272000,
-								"output": 128000
-							},
-							"variants": [
-								"minimal",
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "nemotron-3-super-free",
-							"name": "Nemotron 3 Super Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "minimax-m2.5-free",
-							"name": "MiniMax M2.5 Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 204800,
-								"output": 131072
-							}
-						},
-						{
-							"id": "mimo-v2-pro-free",
-							"name": "MiMo V2 Pro Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1048576,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						}
-					]
-				}
-			]
-		},
-		{
-			"type": "variant_info",
-			"variant": "",
-			"variants": [
-				"high",
-				"max"
-			]
-		},
-		{
-			"type": "default_model_info",
-			"model": "claude-opus-4-6",
-			"provider": "anthropic"
-		},
-		{
-			"type": "model_info",
-			"model": "claude-opus-4-6",
-			"provider": "anthropic"
-		}
-	],
-	"turns": [
-		{
-			"prompt": "Go away and think for a bit to plan how you'll write this, considering the best possible style, and write a 300 word essay on agentic ai context management",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "New session - 2026-03-27T04:03:21.427Z",
-							"updatedAt": 1774584203774,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "New session - 2026-03-27T04:03:21.427Z",
-							"updatedAt": 1774584203774,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "New session - 2026-03-27T04:03:21.427Z",
-							"updatedAt": 1774584203774,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "New session - 2026-03-27T04:03:21.427Z",
-							"updatedAt": 1774584203774,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "New session - 2026-03-27T04:03:21.427Z",
-							"updatedAt": 1774584203774,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "New session - 2026-03-27T04:03:21.427Z",
-							"updatedAt": 1774584203774,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "Agentic AI context management essay planning",
-							"updatedAt": 1774584203774,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "Agentic AI context management essay planning",
-							"updatedAt": 1774584203774,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "thinking_start"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "The user wants me to:\n1. Go away and think for a bit to plan how to write something\n2. Write a 300 word essay on \"agentic AI context management\"\n\nThis seems like a creative/cognitive task that doesn't require any tools - they want me to think about how to approach writing something, and then write the essay. Let me think about this and then write the essay directly.\n\n\"Agentic AI context management\" is about how AI agents maintain, update, and reason about context during extended conversations or tasks - including memory, conversation history, working state, and how agents determine what's relevant to retain versus discard.\n\nLet me plan and then write this essay.\n",
-					"messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "",
-					"messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm"
-				},
-				{
-					"type": "thinking_stop"
-				},
-				{
-					"type": "delta",
-					"text": "\n\nI'll think through this and write the essay now.\n\n---\n\n**Agentic AI Context Management: Beyond Short-Term Memory**\n\nThe frontier of AI agent design lies not in how cleverly an agent reasons, but in how wisely it remembers. Agentic AI—systems that act autonomously toward goals across time—faces a fundamental challenge: the context window is finite, but the agent's mission may span hours or require synthesizing thousands of prior interactions.\n\nEffective context management in agentic systems requires three complementary mechanisms. First, **attentional filtering**: determining which information deserves presence in the immediate context window. Sophisticated agents weight recent turns, explicit user references, and task-critical facts while pruning redundancy. This isn't mere truncation—it's active relevance assessment.\n\nSecond, **structured memory architecture**. Agents benefit from layered storage: ephemeral working memory for immediate reasoning, persistent memory for long-term preferences and facts, and episodic storage for retrieving past sessions. The key insight is that not all context is equal. A user's stated preference from three sessions ago may matter more than last turn's filler words.\n\nThird, **contextual self-awareness**. The agent must model its own epistemic state—what it knows, what it suspects, what it has inferred. This metacognitive layer prevents contradiction, enables appropriate confidence, and lets the agent recognize when context is insufficient for a decision.\n\nThe most elegant implementations treat context management as a **resource allocation problem**, not just storage. Every token in context is a vote of attention, and the agent must vote wisely. Emerging techniques like importance-weighted retrieval, summarization-as-compression, and dynamic context windows point toward systems that scale beyond fixed context limits while remaining coherent.\n\nUltimately, agentic context management is the art of making an AI remember what matters, forget what doesn't, and know the difference",
-					"messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm"
-				},
-				{
-					"type": "delta",
-					"text": ".",
-					"messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 15155,
-						"output": 494,
-						"cache_read": 1792,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 15155,
-						"output": 494,
-						"cache_read": 1792,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 25653,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "Agentic AI context management essay planning",
-							"updatedAt": 1774584229408,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "Agentic AI context management essay planning",
-							"updatedAt": 1774584229419,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "Agentic AI context management essay planning",
-							"updatedAt": 1774584229419,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
-							"title": "Agentic AI context management essay planning",
-							"updatedAt": 1774584229419,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		}
-	]
+  "name": "chat-thinking",
+  "model": "opencode/big-pickle",
+  "recordedAt": "2026-03-27T04:03:49.915Z",
+  "initMessages": [
+    {
+      "type": "client_count",
+      "count": 2
+    },
+    {
+      "type": "client_count",
+      "count": 1
+    },
+    {
+      "type": "session_switched",
+      "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+      "history": {
+        "messages": [],
+        "hasMore": false
+      },
+      "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+    },
+    {
+      "type": "status",
+      "status": "idle",
+      "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+    },
+    {
+      "type": "model_info",
+      "model": "big-pickle",
+      "provider": "opencode"
+    },
+    {
+      "type": "session_list",
+      "sessions": [
+        {
+          "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+          "title": "New session - 2026-03-27T04:03:21.427Z",
+          "updatedAt": 1774584201427,
+          "messageCount": 0
+        }
+      ],
+      "roots": true
+    },
+    {
+      "type": "session_list",
+      "sessions": [
+        {
+          "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+          "title": "New session - 2026-03-27T04:03:21.427Z",
+          "updatedAt": 1774584201427,
+          "messageCount": 0
+        }
+      ],
+      "roots": false
+    },
+    {
+      "type": "agent_list",
+      "agents": [
+        {
+          "id": "build",
+          "name": "build",
+          "description": "The default agent. Executes tools based on configured permissions."
+        },
+        {
+          "id": "plan",
+          "name": "plan",
+          "description": "Plan mode. Disallows all edit tools."
+        }
+      ]
+    },
+    {
+      "type": "model_list",
+      "providers": [
+        {
+          "id": "anthropic",
+          "name": "Anthropic",
+          "configured": true,
+          "models": [
+            {
+              "id": "claude-opus-4-5-20251101",
+              "name": "Claude Opus 4.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-20250514",
+              "name": "Claude Opus 4",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-5",
+              "name": "Claude Opus 4.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-7-sonnet-20250219",
+              "name": "Claude Sonnet 3.7",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-6",
+              "name": "Claude Opus 4.6",
+              "provider": "anthropic",
+              "limit": {
+                "context": 1000000,
+                "output": 128000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-sonnet-4-5-20250929",
+              "name": "Claude Sonnet 4.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-sonnet-4-6",
+              "name": "Claude Sonnet 4.6",
+              "provider": "anthropic",
+              "limit": {
+                "context": 1000000,
+                "output": 64000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-5-haiku-20241022",
+              "name": "Claude Haiku 3.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            },
+            {
+              "id": "claude-sonnet-4-0",
+              "name": "Claude Sonnet 4 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-haiku-20240307",
+              "name": "Claude Haiku 3",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 4096
+              }
+            },
+            {
+              "id": "claude-sonnet-4-20250514",
+              "name": "Claude Sonnet 4",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-1",
+              "name": "Claude Opus 4.1 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-opus-20240229",
+              "name": "Claude Opus 3",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 4096
+              }
+            },
+            {
+              "id": "claude-3-5-haiku-latest",
+              "name": "Claude Haiku 3.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            },
+            {
+              "id": "claude-3-5-sonnet-20240620",
+              "name": "Claude Sonnet 3.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            },
+            {
+              "id": "claude-opus-4-1-20250805",
+              "name": "Claude Opus 4.1",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-0",
+              "name": "Claude Opus 4 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-haiku-4-5-20251001",
+              "name": "Claude Haiku 4.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-sonnet-4-5",
+              "name": "Claude Sonnet 4.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-7-sonnet-latest",
+              "name": "Claude Sonnet 3.7 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-haiku-4-5",
+              "name": "Claude Haiku 4.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-sonnet-20240229",
+              "name": "Claude Sonnet 3",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 4096
+              }
+            },
+            {
+              "id": "claude-3-5-sonnet-20241022",
+              "name": "Claude Sonnet 3.5 v2",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            }
+          ]
+        },
+        {
+          "id": "opencode",
+          "name": "OpenCode Zen",
+          "configured": true,
+          "models": [
+            {
+              "id": "big-pickle",
+              "name": "Big Pickle",
+              "provider": "opencode",
+              "limit": {
+                "context": 200000,
+                "output": 128000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "mimo-v2-omni-free",
+              "name": "MiMo V2 Omni Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 262144,
+                "output": 64000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "id": "gpt-5-nano",
+              "name": "GPT-5 Nano",
+              "provider": "opencode",
+              "limit": {
+                "context": 400000,
+                "input": 272000,
+                "output": 128000
+              },
+              "variants": [
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "id": "nemotron-3-super-free",
+              "name": "Nemotron 3 Super Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 1000000,
+                "output": 128000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "id": "minimax-m2.5-free",
+              "name": "MiniMax M2.5 Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 204800,
+                "output": 131072
+              }
+            },
+            {
+              "id": "mimo-v2-pro-free",
+              "name": "MiMo V2 Pro Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 1048576,
+                "output": 64000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "variant_info",
+      "variant": "",
+      "variants": [
+        "high",
+        "max"
+      ]
+    },
+    {
+      "type": "default_model_info",
+      "model": "claude-opus-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "type": "model_info",
+      "model": "claude-opus-4-6",
+      "provider": "anthropic"
+    }
+  ],
+  "turns": [
+    {
+      "prompt": "Go away and think for a bit to plan how you'll write this, considering the best possible style, and write a 300 word essay on agentic ai context management",
+      "events": [
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "New session - 2026-03-27T04:03:21.427Z",
+              "updatedAt": 1774584203774,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "New session - 2026-03-27T04:03:21.427Z",
+              "updatedAt": 1774584203774,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "New session - 2026-03-27T04:03:21.427Z",
+              "updatedAt": 1774584203774,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "New session - 2026-03-27T04:03:21.427Z",
+              "updatedAt": 1774584203774,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "New session - 2026-03-27T04:03:21.427Z",
+              "updatedAt": 1774584203774,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "New session - 2026-03-27T04:03:21.427Z",
+              "updatedAt": 1774584203774,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "Agentic AI context management essay planning",
+              "updatedAt": 1774584203774,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "Agentic AI context management essay planning",
+              "updatedAt": 1774584203774,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "thinking_start",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "The user wants me to:\n1. Go away and think for a bit to plan how to write something\n2. Write a 300 word essay on \"agentic AI context management\"\n\nThis seems like a creative/cognitive task that doesn't require any tools - they want me to think about how to approach writing something, and then write the essay. Let me think about this and then write the essay directly.\n\n\"Agentic AI context management\" is about how AI agents maintain, update, and reason about context during extended conversations or tasks - including memory, conversation history, working state, and how agents determine what's relevant to retain versus discard.\n\nLet me plan and then write this essay.\n",
+          "messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "",
+          "messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "thinking_stop",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "delta",
+          "text": "\n\nI'll think through this and write the essay now.\n\n---\n\n**Agentic AI Context Management: Beyond Short-Term Memory**\n\nThe frontier of AI agent design lies not in how cleverly an agent reasons, but in how wisely it remembers. Agentic AI—systems that act autonomously toward goals across time—faces a fundamental challenge: the context window is finite, but the agent's mission may span hours or require synthesizing thousands of prior interactions.\n\nEffective context management in agentic systems requires three complementary mechanisms. First, **attentional filtering**: determining which information deserves presence in the immediate context window. Sophisticated agents weight recent turns, explicit user references, and task-critical facts while pruning redundancy. This isn't mere truncation—it's active relevance assessment.\n\nSecond, **structured memory architecture**. Agents benefit from layered storage: ephemeral working memory for immediate reasoning, persistent memory for long-term preferences and facts, and episodic storage for retrieving past sessions. The key insight is that not all context is equal. A user's stated preference from three sessions ago may matter more than last turn's filler words.\n\nThird, **contextual self-awareness**. The agent must model its own epistemic state—what it knows, what it suspects, what it has inferred. This metacognitive layer prevents contradiction, enables appropriate confidence, and lets the agent recognize when context is insufficient for a decision.\n\nThe most elegant implementations treat context management as a **resource allocation problem**, not just storage. Every token in context is a vote of attention, and the agent must vote wisely. Emerging techniques like importance-weighted retrieval, summarization-as-compression, and dynamic context windows point toward systems that scale beyond fixed context limits while remaining coherent.\n\nUltimately, agentic context management is the art of making an AI remember what matters, forget what doesn't, and know the difference",
+          "messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "delta",
+          "text": ".",
+          "messageId": "msg_d2d7609e9001dpj7ayvJkuI0rm",
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 15155,
+            "output": 494,
+            "cache_read": 1792,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 15155,
+            "output": 494,
+            "cache_read": 1792,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 25653,
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "Agentic AI context management essay planning",
+              "updatedAt": 1774584229408,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d289ff2cffe6mD7ksB37sDVUa"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "Agentic AI context management essay planning",
+              "updatedAt": 1774584229419,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "Agentic AI context management essay planning",
+              "updatedAt": 1774584229419,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
+              "title": "Agentic AI context management essay planning",
+              "updatedAt": 1774584229419,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        }
+      ]
+    }
+  ]
 }

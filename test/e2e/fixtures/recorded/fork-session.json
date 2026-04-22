@@ -1,1145 +1,1174 @@
 {
-	"name": "fork-session",
-	"model": "opencode/big-pickle",
-	"recordedAt": "2026-03-27T04:01:44.263Z",
-	"initMessages": [
-		{
-			"type": "client_count",
-			"count": 2
-		},
-		{
-			"type": "client_count",
-			"count": 1
-		},
-		{
-			"type": "session_switched",
-			"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-			"history": {
-				"messages": [],
-				"hasMore": false
-			}
-		},
-		{
-			"type": "status",
-			"status": "idle"
-		},
-		{
-			"type": "model_info",
-			"model": "big-pickle",
-			"provider": "opencode"
-		},
-		{
-			"type": "session_list",
-			"sessions": [
-				{
-					"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-					"title": "New session - 2026-03-27T04:01:34.140Z",
-					"updatedAt": 1774584094140,
-					"messageCount": 0
-				}
-			],
-			"roots": true
-		},
-		{
-			"type": "session_list",
-			"sessions": [
-				{
-					"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-					"title": "New session - 2026-03-27T04:01:34.140Z",
-					"updatedAt": 1774584094140,
-					"messageCount": 0
-				}
-			],
-			"roots": false
-		},
-		{
-			"type": "agent_list",
-			"agents": [
-				{
-					"id": "build",
-					"name": "build",
-					"description": "The default agent. Executes tools based on configured permissions."
-				},
-				{
-					"id": "plan",
-					"name": "plan",
-					"description": "Plan mode. Disallows all edit tools."
-				}
-			]
-		},
-		{
-			"type": "model_list",
-			"providers": [
-				{
-					"id": "anthropic",
-					"name": "Anthropic",
-					"configured": true,
-					"models": [
-						{
-							"id": "claude-opus-4-5-20251101",
-							"name": "Claude Opus 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-20250514",
-							"name": "Claude Opus 4",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-5",
-							"name": "Claude Opus 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-7-sonnet-20250219",
-							"name": "Claude Sonnet 3.7",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-6",
-							"name": "Claude Opus 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-5-20250929",
-							"name": "Claude Sonnet 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-6",
-							"name": "Claude Sonnet 4.6",
-							"provider": "anthropic",
-							"limit": {
-								"context": 1000000,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-5-haiku-20241022",
-							"name": "Claude Haiku 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-sonnet-4-0",
-							"name": "Claude Sonnet 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-haiku-20240307",
-							"name": "Claude Haiku 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-sonnet-4-20250514",
-							"name": "Claude Sonnet 4",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-1",
-							"name": "Claude Opus 4.1 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-opus-20240229",
-							"name": "Claude Opus 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-3-5-haiku-latest",
-							"name": "Claude Haiku 3.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20240620",
-							"name": "Claude Sonnet 3.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						},
-						{
-							"id": "claude-opus-4-1-20250805",
-							"name": "Claude Opus 4.1",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-opus-4-0",
-							"name": "Claude Opus 4 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 32000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-haiku-4-5-20251001",
-							"name": "Claude Haiku 4.5",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-sonnet-4-5",
-							"name": "Claude Sonnet 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-7-sonnet-latest",
-							"name": "Claude Sonnet 3.7 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-haiku-4-5",
-							"name": "Claude Haiku 4.5 (latest)",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 64000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "claude-3-sonnet-20240229",
-							"name": "Claude Sonnet 3",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 4096
-							}
-						},
-						{
-							"id": "claude-3-5-sonnet-20241022",
-							"name": "Claude Sonnet 3.5 v2",
-							"provider": "anthropic",
-							"limit": {
-								"context": 200000,
-								"output": 8192
-							}
-						}
-					]
-				},
-				{
-					"id": "opencode",
-					"name": "OpenCode Zen",
-					"configured": true,
-					"models": [
-						{
-							"id": "big-pickle",
-							"name": "Big Pickle",
-							"provider": "opencode",
-							"limit": {
-								"context": 200000,
-								"output": 128000
-							},
-							"variants": [
-								"high",
-								"max"
-							]
-						},
-						{
-							"id": "mimo-v2-omni-free",
-							"name": "MiMo V2 Omni Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 262144,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "gpt-5-nano",
-							"name": "GPT-5 Nano",
-							"provider": "opencode",
-							"limit": {
-								"context": 400000,
-								"input": 272000,
-								"output": 128000
-							},
-							"variants": [
-								"minimal",
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "nemotron-3-super-free",
-							"name": "Nemotron 3 Super Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1000000,
-								"output": 128000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						},
-						{
-							"id": "minimax-m2.5-free",
-							"name": "MiniMax M2.5 Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 204800,
-								"output": 131072
-							}
-						},
-						{
-							"id": "mimo-v2-pro-free",
-							"name": "MiMo V2 Pro Free",
-							"provider": "opencode",
-							"limit": {
-								"context": 1048576,
-								"output": 64000
-							},
-							"variants": [
-								"low",
-								"medium",
-								"high"
-							]
-						}
-					]
-				}
-			]
-		},
-		{
-			"type": "variant_info",
-			"variant": "",
-			"variants": [
-				"high",
-				"max"
-			]
-		},
-		{
-			"type": "default_model_info",
-			"model": "claude-opus-4-6",
-			"provider": "anthropic"
-		},
-		{
-			"type": "model_info",
-			"model": "claude-opus-4-6",
-			"provider": "anthropic"
-		}
-	],
-	"turns": [
-		{
-			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584096468,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584096468,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584096468,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584096468,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584096468,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584096468,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "thinking_start"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "The user is asking me to remember the word \"alpha\" and respond with only \"ok, remembered.\"\n",
-					"messageId": "msg_d2d7466c6001wIT48DGrT54El7"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "",
-					"messageId": "msg_d2d7466c6001wIT48DGrT54El7"
-				},
-				{
-					"type": "thinking_stop"
-				},
-				{
-					"type": "delta",
-					"text": "\n\nok, remembered.",
-					"messageId": "msg_d2d7466c6001wIT48DGrT54El7"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 15161,
-						"output": 28,
-						"cache_read": 1824,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 15161,
-						"output": 28,
-						"cache_read": 1824,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 1692,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098148,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098148,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098159,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098159,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "Now remember 'beta' too. Reply with only: ok, remembered.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098677,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098677,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098677,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098677,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098677,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584098677,
-							"messageCount": 0,
-							"processing": true
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "thinking_start"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "The user is asking me to remember another word 'beta'. I should respond as instructed.",
-					"messageId": "msg_d2d746f65001cS6JaRU12OaPpw"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "",
-					"messageId": "msg_d2d746f65001cS6JaRU12OaPpw"
-				},
-				{
-					"type": "thinking_stop"
-				},
-				{
-					"type": "delta",
-					"text": "\n\nok, remembered.",
-					"messageId": "msg_d2d746f65001cS6JaRU12OaPpw"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 54,
-						"output": 25,
-						"cache_read": 16960,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 54,
-						"output": 25,
-						"cache_read": 16960,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 1468,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100132,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100132,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		},
-		{
-			"prompt": "What words did I ask you to remember? Reply with just the words.",
-			"events": [
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 0,
-						"output": 0,
-						"cache_read": 0,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584102222,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584102222,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584102222,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584102222,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584102222,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C",
-							"processing": true
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "status",
-					"status": "processing"
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584102222,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C",
-							"processing": true
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "thinking_start"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "The user asked me to remember \"alpha\" and then \"beta\". They want me to just list the words.",
-					"messageId": "msg_d2d747d41001H6Jirxk6S19bQK"
-				},
-				{
-					"type": "thinking_delta",
-					"text": "",
-					"messageId": "msg_d2d747d41001H6Jirxk6S19bQK"
-				},
-				{
-					"type": "thinking_stop"
-				},
-				{
-					"type": "delta",
-					"text": "\n\nalpha beta",
-					"messageId": "msg_d2d747d41001H6Jirxk6S19bQK"
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 51,
-						"output": 28,
-						"cache_read": 16992,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 0,
-					"sessionId": ""
-				},
-				{
-					"type": "result",
-					"usage": {
-						"input": 51,
-						"output": 28,
-						"cache_read": 16992,
-						"cache_creation": 0
-					},
-					"cost": 0,
-					"duration": 1538,
-					"sessionId": ""
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584103749,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "done",
-					"code": 0
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584103749,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584103760,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": true
-				},
-				{
-					"type": "session_list",
-					"sessions": [
-						{
-							"id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
-							"title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
-							"updatedAt": 1774584103760,
-							"messageCount": 0,
-							"parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
-						},
-						{
-							"id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
-							"title": "New session - 2026-03-27T04:01:34.140Z",
-							"updatedAt": 1774584100143,
-							"messageCount": 0
-						}
-					],
-					"roots": false
-				}
-			]
-		}
-	]
+  "name": "fork-session",
+  "model": "opencode/big-pickle",
+  "recordedAt": "2026-03-27T04:01:44.263Z",
+  "initMessages": [
+    {
+      "type": "client_count",
+      "count": 2
+    },
+    {
+      "type": "client_count",
+      "count": 1
+    },
+    {
+      "type": "session_switched",
+      "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+      "history": {
+        "messages": [],
+        "hasMore": false
+      },
+      "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+    },
+    {
+      "type": "status",
+      "status": "idle",
+      "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+    },
+    {
+      "type": "model_info",
+      "model": "big-pickle",
+      "provider": "opencode"
+    },
+    {
+      "type": "session_list",
+      "sessions": [
+        {
+          "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+          "title": "New session - 2026-03-27T04:01:34.140Z",
+          "updatedAt": 1774584094140,
+          "messageCount": 0
+        }
+      ],
+      "roots": true
+    },
+    {
+      "type": "session_list",
+      "sessions": [
+        {
+          "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+          "title": "New session - 2026-03-27T04:01:34.140Z",
+          "updatedAt": 1774584094140,
+          "messageCount": 0
+        }
+      ],
+      "roots": false
+    },
+    {
+      "type": "agent_list",
+      "agents": [
+        {
+          "id": "build",
+          "name": "build",
+          "description": "The default agent. Executes tools based on configured permissions."
+        },
+        {
+          "id": "plan",
+          "name": "plan",
+          "description": "Plan mode. Disallows all edit tools."
+        }
+      ]
+    },
+    {
+      "type": "model_list",
+      "providers": [
+        {
+          "id": "anthropic",
+          "name": "Anthropic",
+          "configured": true,
+          "models": [
+            {
+              "id": "claude-opus-4-5-20251101",
+              "name": "Claude Opus 4.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-20250514",
+              "name": "Claude Opus 4",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-5",
+              "name": "Claude Opus 4.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-7-sonnet-20250219",
+              "name": "Claude Sonnet 3.7",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-6",
+              "name": "Claude Opus 4.6",
+              "provider": "anthropic",
+              "limit": {
+                "context": 1000000,
+                "output": 128000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-sonnet-4-5-20250929",
+              "name": "Claude Sonnet 4.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-sonnet-4-6",
+              "name": "Claude Sonnet 4.6",
+              "provider": "anthropic",
+              "limit": {
+                "context": 1000000,
+                "output": 64000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-5-haiku-20241022",
+              "name": "Claude Haiku 3.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            },
+            {
+              "id": "claude-sonnet-4-0",
+              "name": "Claude Sonnet 4 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-haiku-20240307",
+              "name": "Claude Haiku 3",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 4096
+              }
+            },
+            {
+              "id": "claude-sonnet-4-20250514",
+              "name": "Claude Sonnet 4",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-1",
+              "name": "Claude Opus 4.1 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-opus-20240229",
+              "name": "Claude Opus 3",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 4096
+              }
+            },
+            {
+              "id": "claude-3-5-haiku-latest",
+              "name": "Claude Haiku 3.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            },
+            {
+              "id": "claude-3-5-sonnet-20240620",
+              "name": "Claude Sonnet 3.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            },
+            {
+              "id": "claude-opus-4-1-20250805",
+              "name": "Claude Opus 4.1",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-opus-4-0",
+              "name": "Claude Opus 4 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 32000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-haiku-4-5-20251001",
+              "name": "Claude Haiku 4.5",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-sonnet-4-5",
+              "name": "Claude Sonnet 4.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-7-sonnet-latest",
+              "name": "Claude Sonnet 3.7 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-haiku-4-5",
+              "name": "Claude Haiku 4.5 (latest)",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 64000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "claude-3-sonnet-20240229",
+              "name": "Claude Sonnet 3",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 4096
+              }
+            },
+            {
+              "id": "claude-3-5-sonnet-20241022",
+              "name": "Claude Sonnet 3.5 v2",
+              "provider": "anthropic",
+              "limit": {
+                "context": 200000,
+                "output": 8192
+              }
+            }
+          ]
+        },
+        {
+          "id": "opencode",
+          "name": "OpenCode Zen",
+          "configured": true,
+          "models": [
+            {
+              "id": "big-pickle",
+              "name": "Big Pickle",
+              "provider": "opencode",
+              "limit": {
+                "context": 200000,
+                "output": 128000
+              },
+              "variants": [
+                "high",
+                "max"
+              ]
+            },
+            {
+              "id": "mimo-v2-omni-free",
+              "name": "MiMo V2 Omni Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 262144,
+                "output": 64000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "id": "gpt-5-nano",
+              "name": "GPT-5 Nano",
+              "provider": "opencode",
+              "limit": {
+                "context": 400000,
+                "input": 272000,
+                "output": 128000
+              },
+              "variants": [
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "id": "nemotron-3-super-free",
+              "name": "Nemotron 3 Super Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 1000000,
+                "output": 128000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "id": "minimax-m2.5-free",
+              "name": "MiniMax M2.5 Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 204800,
+                "output": 131072
+              }
+            },
+            {
+              "id": "mimo-v2-pro-free",
+              "name": "MiMo V2 Pro Free",
+              "provider": "opencode",
+              "limit": {
+                "context": 1048576,
+                "output": 64000
+              },
+              "variants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "variant_info",
+      "variant": "",
+      "variants": [
+        "high",
+        "max"
+      ]
+    },
+    {
+      "type": "default_model_info",
+      "model": "claude-opus-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "type": "model_info",
+      "model": "claude-opus-4-6",
+      "provider": "anthropic"
+    }
+  ],
+  "turns": [
+    {
+      "prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+      "events": [
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584096468,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584096468,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584096468,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584096468,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584096468,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584096468,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "thinking_start",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "The user is asking me to remember the word \"alpha\" and respond with only \"ok, remembered.\"\n",
+          "messageId": "msg_d2d7466c6001wIT48DGrT54El7",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "",
+          "messageId": "msg_d2d7466c6001wIT48DGrT54El7",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_stop",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "delta",
+          "text": "\n\nok, remembered.",
+          "messageId": "msg_d2d7466c6001wIT48DGrT54El7",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 15161,
+            "output": 28,
+            "cache_read": 1824,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 15161,
+            "output": 28,
+            "cache_read": 1824,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 1692,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098148,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098148,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098159,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098159,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        }
+      ]
+    },
+    {
+      "prompt": "Now remember 'beta' too. Reply with only: ok, remembered.",
+      "events": [
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098677,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098677,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098677,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098677,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098677,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584098677,
+              "messageCount": 0,
+              "processing": true
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "thinking_start",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "The user is asking me to remember another word 'beta'. I should respond as instructed.",
+          "messageId": "msg_d2d746f65001cS6JaRU12OaPpw",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "",
+          "messageId": "msg_d2d746f65001cS6JaRU12OaPpw",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_stop",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "delta",
+          "text": "\n\nok, remembered.",
+          "messageId": "msg_d2d746f65001cS6JaRU12OaPpw",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 54,
+            "output": 25,
+            "cache_read": 16960,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 54,
+            "output": 25,
+            "cache_read": 16960,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 1468,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100132,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100132,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        }
+      ]
+    },
+    {
+      "prompt": "What words did I ask you to remember? Reply with just the words.",
+      "events": [
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584102222,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584102222,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584102222,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584102222,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584102222,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C",
+              "processing": true
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "status",
+          "status": "processing",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584102222,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C",
+              "processing": true
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "thinking_start",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "The user asked me to remember \"alpha\" and then \"beta\". They want me to just list the words.",
+          "messageId": "msg_d2d747d41001H6Jirxk6S19bQK",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_delta",
+          "text": "",
+          "messageId": "msg_d2d747d41001H6Jirxk6S19bQK",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "thinking_stop",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "delta",
+          "text": "\n\nalpha beta",
+          "messageId": "msg_d2d747d41001H6Jirxk6S19bQK",
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 51,
+            "output": 28,
+            "cache_read": 16992,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input": 51,
+            "output": 28,
+            "cache_read": 16992,
+            "cache_creation": 0
+          },
+          "cost": 0,
+          "duration": 1538,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584103749,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "done",
+          "code": 0,
+          "sessionId": "ses_2d28ba243ffe1MSYI6yJ9CzHak"
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584103749,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584103760,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": true
+        },
+        {
+          "type": "session_list",
+          "sessions": [
+            {
+              "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
+              "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "updatedAt": 1774584103760,
+              "messageCount": 0,
+              "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
+            },
+            {
+              "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
+              "title": "New session - 2026-03-27T04:01:34.140Z",
+              "updatedAt": 1774584100143,
+              "messageCount": 0
+            }
+          ],
+          "roots": false
+        }
+      ]
+    }
+  ]
 }
