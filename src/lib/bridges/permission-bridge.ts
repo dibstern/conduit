@@ -1,10 +1,10 @@
 // ─── Permission Bridge (Ticket 1.5) ─────────────────────────────────────────
 
+import type { SSEEvent } from "../relay/opencode-events.js";
 import type { PermissionId } from "../shared-types.js";
 import type {
 	FrontendDecision,
 	OpenCodeDecision,
-	OpenCodeEvent,
 	PendingPermission,
 } from "../types.js";
 
@@ -50,7 +50,7 @@ export class PermissionBridge {
 	}
 
 	/** Process an incoming permission.asked SSE event */
-	onPermissionRequest(event: OpenCodeEvent): PendingPermission | null {
+	onPermissionRequest(event: SSEEvent): PendingPermission | null {
 		const props = event.properties as {
 			id?: string;
 			sessionID?: string;
@@ -98,19 +98,24 @@ export class PermissionBridge {
 		return this.pending.delete(requestId);
 	}
 
+	/** Register a pending permission directly (used by Claude SDK path). */
+	trackPending(entry: PendingPermission): void {
+		this.pending.set(entry.requestId, entry);
+	}
+
 	/** Get all pending permissions (for replay on reconnect) */
 	getPending(): PendingPermission[] {
 		return Array.from(this.pending.values());
 	}
 
-	/** Check for timed-out permissions and return their IDs */
-	checkTimeouts(): string[] {
+	/** Check for timed-out permissions and return their IDs with sessionIds */
+	checkTimeouts(): Array<{ id: string; sessionId: string }> {
 		const now = this.now();
-		const timedOut: string[] = [];
+		const timedOut: Array<{ id: string; sessionId: string }> = [];
 
 		for (const [id, entry] of this.pending) {
 			if (now - entry.timestamp >= this.timeoutMs) {
-				timedOut.push(id);
+				timedOut.push({ id, sessionId: entry.sessionId });
 				this.pending.delete(id);
 			}
 		}

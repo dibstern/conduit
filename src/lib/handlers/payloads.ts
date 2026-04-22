@@ -74,4 +74,5 @@ export interface PayloadMap {
 	instance_rename: { instanceId: string; name: string };
 	proxy_detect: Record<string, never>;
 	scan_now: Record<string, never>;
+	reload_provider_session: Record<string, never>;
 }

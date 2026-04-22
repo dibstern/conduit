@@ -2,11 +2,11 @@
 
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type {
 	Message,
-	OpenCodeClient,
 	SessionDetail,
-} from "../../../src/lib/instance/opencode-client.js";
+} from "../../../src/lib/instance/sdk-types.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 
@@ -21,7 +21,7 @@ interface MockSession {
 	time: { created: number; updated: number };
 }
 
-function createMockClient(initial: MockSession[] = []): OpenCodeClient & {
+function createMockClient(initial: MockSession[] = []): OpenCodeAPI & {
 	_sessions: MockSession[];
 	_messages: Map<string, Message[]>;
 } {
@@ -33,72 +33,72 @@ function createMockClient(initial: MockSession[] = []): OpenCodeClient & {
 		_sessions: sessions,
 		_messages: messages,
 
-		async listSessions() {
-			return sessions.map((s) => ({
-				id: s.id,
-				title: s.title,
-				time: s.time,
-			})) as SessionDetail[];
+		session: {
+			async list() {
+				return sessions.map((s) => ({
+					id: s.id,
+					title: s.title,
+					time: s.time,
+				})) as SessionDetail[];
+			},
+
+			async create(options?: { title?: string }) {
+				const id = `ses_${++nextId}`;
+				const now = Date.now();
+				const session: MockSession = {
+					id,
+					title: options?.title ?? "Untitled",
+					time: { created: now, updated: now },
+				};
+				sessions.push(session);
+				return {
+					id,
+					title: session.title,
+					time: session.time,
+				} as SessionDetail;
+			},
+
+			async delete(sessionId: string) {
+				const idx = sessions.findIndex((s) => s.id === sessionId);
+				if (idx >= 0) sessions.splice(idx, 1);
+			},
+
+			async update(sessionId: string, updates: { title?: string }) {
+				const session = sessions.find((s) => s.id === sessionId);
+				if (session && updates.title) {
+					session.title = updates.title;
+					session.time.updated = Date.now();
+				}
+				return session as unknown as SessionDetail;
+			},
+
+			async messages(sessionId: string) {
+				return messages.get(sessionId) ?? [];
+			},
+
+			async messagesPage(
+				sessionId: string,
+				options?: { limit?: number; before?: string },
+			) {
+				const all = messages.get(sessionId) ?? [];
+				const limit = options?.limit ?? all.length;
+				if (!options?.before) {
+					return all.slice(-limit);
+				}
+				const idx = all.findIndex((m) => m.id === options.before);
+				if (idx <= 0) return [];
+				const start = Math.max(0, idx - limit);
+				return all.slice(start, idx);
+			},
 		},
 
-		async createSession(options?: { title?: string }) {
-			const id = `ses_${++nextId}`;
-			const now = Date.now();
-			const session: MockSession = {
-				id,
-				title: options?.title ?? "Untitled",
-				time: { created: now, updated: now },
-			};
-			sessions.push(session);
-			return { id, title: session.title, time: session.time } as SessionDetail;
-		},
-
-		async deleteSession(sessionId: string) {
-			const idx = sessions.findIndex((s) => s.id === sessionId);
-			if (idx >= 0) sessions.splice(idx, 1);
-		},
-
-		async updateSession(sessionId: string, updates: { title?: string }) {
-			const session = sessions.find((s) => s.id === sessionId);
-			if (session && updates.title) {
-				session.title = updates.title;
-				session.time.updated = Date.now();
-			}
-			return session as unknown as SessionDetail;
-		},
-
-		async getMessages(sessionId: string) {
-			return messages.get(sessionId) ?? [];
-		},
-
-		async getMessagesPage(
-			sessionId: string,
-			options?: { limit?: number; before?: string },
-		) {
-			const all = messages.get(sessionId) ?? [];
-			const limit = options?.limit ?? all.length;
-			if (!options?.before) {
-				// No cursor: return the last `limit` messages (most recent page)
-				return all.slice(-limit);
-			}
-			// Cursor: return `limit` messages before the given ID
-			const idx = all.findIndex((m) => m.id === options.before);
-			if (idx <= 0) return [];
-			const start = Math.max(0, idx - limit);
-			return all.slice(start, idx);
-		},
-
-		// Stubs for other methods that SessionManager doesn't call
-		async getHealth() {
-			return { ok: true };
-		},
 		getAuthHeaders() {
 			return {};
 		},
 		getBaseUrl() {
 			return "http://localhost:4096";
 		},
-	} as unknown as OpenCodeClient & {
+	} as unknown as OpenCodeAPI & {
 		_sessions: MockSession[];
 		_messages: Map<string, Message[]>;
 	};
@@ -220,10 +220,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			},
 		] as Message[]);
 
-		// Spy on getMessages to verify it is NOT called
+		// Spy on session.messages to verify it is NOT called
 		let getMessagesCalled = false;
-		const origGetMessages = client.getMessages.bind(client);
-		client.getMessages = async (
+		const origGetMessages = client.session.messages.bind(client.session);
+		client.session.messages = async (
 			...args: Parameters<typeof origGetMessages>
 		) => {
 			getMessagesCalled = true;
@@ -291,7 +291,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const defaultId = await mgr.getDefaultSessionId();
 			expect(defaultId).toBeTruthy();
 			// Verify session was actually created
-			const sessions = await client.listSessions();
+			const sessions = await client.session.list();
 			expect(sessions).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 			expect(sessions[0]!.id).toBe(defaultId);

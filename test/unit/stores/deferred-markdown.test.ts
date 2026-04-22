@@ -49,12 +49,16 @@ import {
 	handleDone,
 	isReplaying,
 	renderDeferredMarkdown,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type {
 	AssistantMessage,
 	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -65,8 +69,15 @@ async function drainReplay(promise: Promise<void>): Promise<void> {
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
+
 beforeEach(() => {
+	sessionState.currentId = "test-session";
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	renderMarkdownSpy.mockClear();
 	vi.useFakeTimers();
 });
@@ -82,8 +93,8 @@ describe("Deferred markdown rendering", () => {
 		// Replay a simple turn: delta + done
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "Hello **world**" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Hello **world**" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -113,11 +124,11 @@ describe("Deferred markdown rendering", () => {
 		// Replay multiple turns
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "First response" },
-				{ type: "done", code: 0 },
-				{ type: "user_message", text: "second question" },
-				{ type: "delta", text: "Second response" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "First response" },
+				{ type: "done", sessionId: "s1", code: 0 },
+				{ type: "user_message", sessionId: "s1", text: "second question" },
+				{ type: "delta", sessionId: "s1", text: "Second response" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -147,7 +158,11 @@ describe("Deferred markdown rendering", () => {
 		// Normal path: not replaying
 		expect(isReplaying()).toBe(false);
 
-		handleDelta({ type: "delta", text: "Live **bold**" });
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "s1",
+			text: "Live **bold**",
+		});
 		vi.advanceTimersByTime(100); // flush debounce
 
 		expect(renderMarkdownSpy).toHaveBeenCalledWith("Live **bold**");
@@ -162,15 +177,15 @@ describe("Deferred markdown rendering", () => {
 		expect("needsRender" in assistant!).toBe(false);
 
 		// Clean up streaming state
-		handleDone({ type: "done", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 	});
 
 	it("calling renderDeferredMarkdown twice is idempotent", async () => {
 		// Replay a turn
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "Idempotent test" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Idempotent test" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -204,8 +219,8 @@ describe("Deferred markdown rendering", () => {
 		// Replay a turn
 		const promise = replayEvents(
 			[
-				{ type: "delta", text: "Will be cleared" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "Will be cleared" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			] as RelayMessage[],
 			"test-session",
 		);
@@ -217,6 +232,8 @@ describe("Deferred markdown rendering", () => {
 
 		// Clear messages before deferred rendering can run
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 
 		// Drain any pending timers
 		await vi.runAllTimersAsync();

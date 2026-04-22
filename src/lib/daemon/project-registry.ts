@@ -112,17 +112,24 @@ export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 		}
 	}
 
-	/** Evict oldest cached sessions across all ready relays to free memory/disk. */
-	evictOldestSessions(maxPerRelay: number): string[] {
-		const evicted: string[] = [];
-		for (const [, entry] of this.readyEntries()) {
-			for (let i = 0; i < maxPerRelay; i++) {
-				const sessionId = entry.relay.messageCache.evictOldestSession();
-				if (sessionId === null) break;
-				evicted.push(sessionId);
+	/**
+	 * Trigger SQLite event-store eviction across all ready relays.
+	 * Replaces the former MessageCache-based per-session eviction with
+	 * age-based batch eviction via EventStoreEviction (Task 51).
+	 * Returns a summary string per relay that ran eviction, or empty array
+	 * if no relays have persistence configured.
+	 */
+	evictOldestSessions(_maxPerRelay: number): string[] {
+		const summaries: string[] = [];
+		for (const [slug, entry] of this.readyEntries()) {
+			const result = entry.relay.persistence?.eviction.evictSync();
+			if (result && (result.eventsDeleted > 0 || result.receiptsDeleted > 0)) {
+				summaries.push(
+					`${slug}: evicted ${result.eventsDeleted} events, ${result.receiptsDeleted} receipts`,
+				);
 			}
 		}
-		return evicted;
+		return summaries;
 	}
 
 	// ── Lifecycle ────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ function makeDeps(
 	const sent: Array<{ clientId: string; msg: unknown }> = [];
 	const deps = createMockHandlerDeps({
 		client: {
-			listDirectory: listDirectoryImpl,
+			file: { list: listDirectoryImpl },
 		} as unknown as HandlerDeps["client"],
 		wsHandler: {
 			sendTo: (clientId: string, msg: unknown) => {

@@ -118,21 +118,18 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 	it("core endpoints we depend on still exist", () => {
 		if (skipIfNoServer() || !liveSpec) return;
 
+		// In SDK 1.4.x / OpenCode 1.3.13+, the API is split into global
+		// endpoints (served at /doc) and project-scoped endpoints.  The
+		// global spec only lists these top-level paths.
 		const requiredEndpoints = [
 			"/global/health",
 			"/global/event",
-			"/session",
-			"/agent",
-			"/provider",
-			"/command",
-			"/permission",
-			"/question",
-			"/event",
-			"/path",
-			"/config",
-			"/project",
-			"/pty",
-			"/vcs",
+			"/global/sync-event",
+			"/global/config",
+			"/global/dispose",
+			"/global/upgrade",
+			"/auth/{providerID}",
+			"/log",
 			// Note: /doc serves the spec itself, so it's NOT listed IN the spec
 		];
 
@@ -145,37 +142,49 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 		expect(missing).toEqual([]);
 	});
 
-	it("session sub-endpoints we depend on still exist", () => {
+	it("event schemas we depend on are defined in the spec", () => {
 		if (skipIfNoServer() || !liveSpec) return;
 
-		const requiredSessionEndpoints = [
-			"/session/{sessionID}",
-			"/session/{sessionID}/message",
-			"/session/{sessionID}/prompt_async",
-			"/session/{sessionID}/abort",
-			"/session/{sessionID}/fork",
-			"/session/{sessionID}/revert",
-			"/session/{sessionID}/diff",
-			"/session/status",
+		// Session, permission, question, and message endpoints are now
+		// project-scoped and not in the global /doc spec.  But the global
+		// spec still defines all the event and data schemas we rely on.
+		const requiredSchemas = [
+			"Session",
+			"Message",
+			"PermissionRequest",
+			"QuestionRequest",
+			"ToolPart",
+			"TextPart",
+			"Event",
+			"GlobalEvent",
+			"SyncEvent",
 		];
 
-		const livePaths = new Set(Object.keys(liveSpec.paths));
-		const missing = requiredSessionEndpoints.filter((e) => !livePaths.has(e));
+		const liveSchemas = new Set(
+			Object.keys(liveSpec.components?.schemas ?? {}),
+		);
+		const missing = requiredSchemas.filter((s) => !liveSchemas.has(s));
 
 		if (missing.length > 0) {
-			console.error("❌ Missing required session endpoints:", missing);
+			console.error("❌ Missing required schemas:", missing);
 		}
 		expect(missing).toEqual([]);
 	});
 
-	it("permission reply endpoint exists with expected path pattern", () => {
+	it("permission-related schemas exist in the spec", () => {
 		if (skipIfNoServer() || !liveSpec) return;
-		expect(liveSpec.paths).toHaveProperty("/permission/{requestID}/reply");
+		const schemas = Object.keys(liveSpec.components?.schemas ?? {});
+		expect(schemas).toContain("PermissionRequest");
+		expect(schemas).toContain("Event.permission.asked");
+		expect(schemas).toContain("Event.permission.replied");
 	});
 
-	it("question reply endpoint exists with expected path pattern", () => {
+	it("question-related schemas exist in the spec", () => {
 		if (skipIfNoServer() || !liveSpec) return;
-		expect(liveSpec.paths).toHaveProperty("/question/{requestID}/reply");
+		const schemas = Object.keys(liveSpec.components?.schemas ?? {});
+		expect(schemas).toContain("QuestionRequest");
+		expect(schemas).toContain("Event.question.asked");
+		expect(schemas).toContain("Event.question.replied");
 	});
 
 	it("no schema definitions have been REMOVED", () => {

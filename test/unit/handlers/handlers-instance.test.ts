@@ -154,7 +154,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				code: "INSTANCE_ERROR",
 				message: "Instance name is required",
 			});
@@ -172,7 +172,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				message: "Instance management not available",
 			});
 		});
@@ -212,7 +212,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				message: "instanceId is required",
 			});
 		});
@@ -225,7 +225,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				code: "INSTANCE_ERROR",
 			});
 		});
@@ -254,7 +254,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				message: "instanceId is required",
 			});
 		});
@@ -283,7 +283,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				message: "instanceId is required",
 			});
 		});
@@ -336,7 +336,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				code: "INSTANCE_ERROR",
 			});
 		});
@@ -354,7 +354,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				code: "INSTANCE_ERROR",
 			});
 		});
@@ -370,7 +370,7 @@ describe("Instance handlers", () => {
 			expect(sendToCalls).toHaveLength(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(sendToCalls[0]!.msg).toMatchObject({
-				type: "error",
+				type: "system_error",
 				message: "Project instance binding not available",
 			});
 		});

@@ -1,6 +1,6 @@
 # OpenCode-Relay — Progress Tracker
 
-> Last updated: 2026-02-28
+> Last updated: 2026-04-18
 
 ## Current Status: Svelte 5 Migration — Phase S8 Complete (Cutover Done)
 
@@ -406,25 +406,25 @@
 
 | Metric | Value |
 |--------|-------|
-| Production code | ~15,600 lines across 60 server modules |
+| Production code | ~47,200 lines across 241 server modules |
 | Svelte frontend | ~12,400 lines across 102 modules (8 stores, 8 utils, 41 components, 3 pages, types, App, 41 story files, mocks) |
 | Frontend bundle | 379KB JS + 64KB CSS (Svelte 5 SPA) |
-| Test code (unit/fixture) | ~16,000 lines across 56 test files |
+| Test code (unit/fixture) | ~90,100 lines across 260 test files |
 | Test code (integration) | ~1,200 lines across 8 test files + 2 helpers |
 | Test code (contract) | ~680 lines across 7 test files |
 | Storybook stories | 41 story files, ~153 stories total |
-| Tests passing (unit/fixture) | 1481 / 1481 |
+| Tests passing (unit/fixture) | 4506 / 4506 (+ 12 todo) |
 | Tests passing (integration) | 108 / 108 |
 | Tests (Playwright E2E) | 280 across 9 spec files × 5 viewports |
-| Tests total | 1869 (1481 unit + 108 integration + 280 E2E) |
-| Test duration (unit) | ~3.6s |
+| Tests total | 4894 (4506 unit + 108 integration + 280 E2E) |
+| Test duration (unit) | ~5.7s |
 | Test duration (integration) | ~91s |
 | E2E test code | ~1,950 lines across 21 files (3 helpers, 9 page objects, 9 specs) |
 | Type-check | Clean (tsc --noEmit) |
 | Docker image | Node 20 Alpine, ~60MB, healthcheck |
 | Docker Compose | Self-contained: official OpenCode image + relay, no host deps |
 | Svelte migration | ✅ Complete (S0–S8). 37 vanilla modules + 36 vanilla test files deleted. |
-| Tickets complete | 49 / 50 (6.3 remaining) + 20/20 Phase 7 + 26/26 Phase 8 |
+| Tickets complete | 49 / 50 (6.3 remaining) + 20/20 Phase 7 + 26/26 Phase 8 + orchestrator Claude sendTurn |
 
 ---
 
@@ -779,20 +779,167 @@
 - **Regression tests**: 5 new tests in `regression-session-switch-history.test.ts` (wrong session dispatch, normalized format verification, switch-back-and-forth scenario) + 2 new tests in `svelte-history-logic.test.ts` (groupIntoTurns with OpenCode normalized format)
 - All 1481 unit tests passing (57 test files), type-check clean, lint clean
 
-### 2026-04-09 — Orchestrator Task 50.5 (Strip MessageCache/ToolContentStore/PendingUserMessages from all dependency interfaces)
-- **Goal**: Make Phase 7 a pure deletion exercise by removing all references to the three in-memory stores from test fixtures and test assertions before deleting the implementation files
-- **Files deleted**: `test/unit/relay/regression-user-message-echo.test.ts` — echo suppression tests made irrelevant by Task 50 (relay no longer POSTs to OpenCode REST, so no echo arrives)
-- **Files modified** (12 test files):
-  - `test/unit/session/session-switch.test.ts` — removed `messageCache`/`forkMeta` from `createMinimalDeps`; deleted all `cached-events`-path tests (stale cache tail detection, cold cache repair regression, fork cache bypass); replaced with REST-history tests
-  - `test/unit/relay/sse-wiring.test.ts` — removed ~6 `messageCache.recordEvent` assertions, removed `toolContentStore` truncation test, removed echo suppression tests, replaced with unified REST path test
-  - `test/unit/handlers/message-handlers.test.ts` — removed `messageCache.recordEvent` and `messageCache.remove` assertions, deleted pending-user-message echo test, replaced cache-hit/REST-fallback tests with single REST history test
-  - `test/unit/bridges/client-init.test.ts` — replaced `messageCache.getEvents` mocks with `sessionMgr.loadPreRenderedHistory`, converted "cached events on connect" → "REST history on connect" describe blocks
-  - `test/unit/handlers/get-tool-content-handler.test.ts` — rewrote to use `readAdapter.getToolContent()` only (removed ToolContentStore fallback tests)
-  - `test/unit/daemon/project-registry.test.ts` — replaced evict tests (that used messageCache mock) with simple no-op test
-  - `test/unit/relay/regression-server-cache-pipeline.test.ts` — removed messageCache from resolveSessionHistory call
-  - `test/unit/handlers/regression-question-on-session-view.test.ts` — removed messageCache overrides
-  - `test/unit/regression-question-session-scoping.test.ts` — removed messageCache override
-  - `test/unit/relay/event-pipeline.test.ts` — removed toolContentStore/messageCache from `makeDeps()`, deleted tests for applyPipelineResult caching/store behavior (no longer part of PipelineDeps)
-  - `test/unit/relay/per-tab-routing-e2e.test.ts` — removed "SSE events are cached even when no client views that session" test
-  - `test/e2e/specs/unified-rendering.spec.ts` — replaced messageCache.getEvents() with direct REST fetch via client.getMessages()
-- **All 243 test files, 4389 tests passing**, type-check clean, lint clean
+### 2026-04-09 — Orchestrator Task 50.5 (Strip MessageCache/ToolContentStore/PendingUserMessages from test fixtures)
+- **Goal**: Remove all in-memory store references from test files in preparation for Task 51 deletion
+- **Files modified** (12 test files + 1 deleted):
+  - `test/unit/session/session-switch.test.ts` — removed 27+ `messageCache` mock fields from `createMinimalDeps()`, deleted broken placeholder describe blocks (584-839 lines), removed all `messageCache.getEvents` assertions
+  - `test/unit/relay/event-pipeline.test.ts` — removed `toolContentStore`/`messageCache` from `makeDeps()`, deleted 5 tests that verified in-memory store writes
+  - `test/unit/relay/per-tab-routing-e2e.test.ts` — deleted "SSE events are cached even when no client views that session" test
+  - `test/unit/daemon/project-registry.test.ts` — removed unused `ProjectRelay` import
+  - 9 other test files with minor `messageCache`/`toolContentStore` field removals from mock factories
+  - `test/unit/relay/regression-deduplication-e2e.test.ts` — deleted (MessageCache-coupled)
+- **Commit**: `33e0909` — 15 files changed, 81 insertions, 1125 deletions; 243 test files, 4389 tests
+
+### 2026-04-10 — Orchestrator Task 51 (Remove MessageCache + JSONL files — replaced by SQLite event store)
+- **Source files deleted**: `src/lib/relay/message-cache.ts` (411 lines), `src/lib/relay/cold-cache-repair.ts` (69 lines)
+- **New file**: `src/lib/persistence/eviction.ts` — `EventStoreEviction` class with `evictSync()`, `evictAsync()` (yields between batches via `setImmediate`), `cascadeProjections()` (FK-safe cleanup of fully-evicted sessions)
+- **Wiring**: `PersistenceLayer` gets `readonly eviction: EventStoreEviction`; `ProjectRelay` interface gets `persistence?: PersistenceLayer`; `ProjectRegistry.evictOldestSessions()` now calls `relay.persistence?.eviction.evictSync()` per relay; daemon low-disk-space handler logs eviction summaries
+- **Rename**: `CACHEABLE_EVENT_TYPES` → `PERSISTED_EVENT_TYPES`, `CacheableEventType` → `PersistedEventType` (deprecated aliases kept); updated `cache-events.ts`, `dispatch-coverage.test.ts`, `ws-dispatch.ts`, `regression-mid-stream-switch.test.ts`
+- **Test files deleted** (5): `message-cache.test.ts`, `cold-cache-repair.test.ts`, `cache-replay-contract.test.ts`, `regression-server-cache-pipeline.test.ts`, `daemon-eviction-chain.test.ts`
+- **New test file**: `test/unit/persistence/eviction.test.ts` — 12 tests covering sync/async batching, yield counts, receipt cleanup, cascade projections
+- **Commit**: `d7c7042` — 19 files changed (+ 2 new, 7 deleted); 239 test files, 4330 tests passing
+
+### 2026-04-10 — Orchestrator Task 52 (Remove ToolContentStore + PendingUserMessages — replaced by SQLite tables)
+- **Source files deleted**: `src/lib/relay/tool-content-store.ts` (77 lines), `src/lib/relay/pending-user-messages.ts` (82 lines)
+- **Test files deleted**: `test/unit/relay/tool-content-store.test.ts`, `test/unit/relay/pending-user-messages.test.ts`
+- **Comments updated**: `src/lib/handlers/tool-content.ts` and `src/lib/relay/truncate-content.ts` — "ToolContentStore" → "SQLite tool_content table"
+- **Handler already rewritten** (Task 50.5): `handleGetToolContent` uses `deps.readAdapter?.getToolContent(toolId)` — no further changes needed
+- **Handler test kept**: `test/unit/handlers/get-tool-content-handler.test.ts` (7 tests) — already tests SQLite ReadAdapter path
+- **Snapshot harmless**: `test/e2e/fixtures/subagent-snapshot.json` references old filenames in historical traces — no test failures
+- **Verification**: `pnpm check` clean, `pnpm lint` clean (warnings only), 237 test files, 4304 tests passing
+
+### 2026-04-10 — Claude Adapter sendTurn: Replace SDK type stubs with real imports (Task 0)
+- **Replaced** hand-written SDK type stubs in `src/lib/provider/claude/types.ts` with real imports from `@anthropic-ai/claude-agent-sdk`
+- **Rewrote** `ClaudeEventTranslator` tests to use real SDK message types instead of hand-crafted stubs
+- **Commits**: `f050093`, `bffd6a2`
+
+### 2026-04-10 — Claude Adapter sendTurn: Implement SDK query lifecycle (Tasks 1-2)
+- **Implemented** `ClaudeAdapter.sendTurn()` — full SDK query lifecycle with `claude.query()`, AbortController integration, stream consumer that drives `ClaudeEventTranslator`, and `resolveErrorTurn()` for error mapping
+- **Extracted** `isInterruptedResult()` helper, renamed `resolveErrorTurn`, added error result test coverage
+- **Commits**: `f0a5bdc`, `c67f458`
+
+### 2026-04-10 — Claude Adapter sendTurn: Integration and E2E tests (Tasks 3-3.5)
+- **Integration tests**: 15 tests verifying sendTurn through the OrchestrationEngine — normal completion, interruption, abort, error handling, event translation
+- **E2E test**: Real-SDK test with Claude Haiku gated behind `RUN_EXPENSIVE_E2E=1` env var — verifies actual SDK round-trip including tool use
+- **Commits**: `739d968`, `2b417b2`
+- **Verification**: `pnpm check` clean, `pnpm lint` clean, 232 test files, 4263 tests passing
+
+### 2026-04-13 — SDK Migration Task 5: OpenCodeAPI Adapter
+- **Created** `src/lib/instance/opencode-api.ts` — unified namespaced API wrapping OpencodeClient + GapEndpoints
+- **Namespaces**: session (16 methods), permission (2), question (3), config (2), provider (1), pty (4), file (3), find (3), app (7), event (1)
+- **Error strategy**: Private `sdk<T>(fn)` wrapper translates SDK error results to OpenCodeApiError/OpenCodeConnectionError
+- **Type bridge**: `SdkResult<T>` type alias + `call()` helper avoids explicit `any` casts for SDK's complex RequestResult types
+- **Tests**: 18 tests in `test/unit/instance/opencode-api.test.ts` covering delegation, error translation, gap endpoints
+- **Commit**: `f0bb0f6`
+- **Verification**: `pnpm check` clean, `pnpm lint` clean, 18 tests passing
+
+### 2026-04-13 — SDK Migration Task 10: Replace Message and Part types with SDK discriminated unions
+- **Derived** `PartType` from SDK `Part["type"]` and `ToolStatus` from SDK `ToolState["status"]` in `src/lib/instance/sdk-types.ts`
+- **Removed** hand-maintained `PartType` and `ToolStatus` string union definitions from `src/lib/shared-types.ts`
+- **Re-exported** SDK-derived types through `shared-types.ts` so all 30+ downstream consumers continue importing unchanged
+- **Retained** `HistoryMessage` and `HistoryMessagePart` as relay-specific transport types (they carry `renderedHtml`, index signatures, and optional fields not in SDK types) with updated JSDoc documenting SDK type mapping
+- **Import chain**: `sdk-types.ts` (defines) -> `shared-types.ts` (re-exports) -> `types.ts` / `frontend/types.ts` (re-exports) -> all consumers
+- **Verification**: `pnpm check` clean, `pnpm test:unit` — 236 test files, 4300 tests passing, no lint regressions
+
+### 2026-04-13 — SDK Migration Task 11: Replace OpenCodeEvent with SSEEvent discriminated union
+- **Introduced** `SSEEvent` type in `src/lib/relay/opencode-events.ts` as the canonical SSE stream event type
+- **Defined** `SSEGapEvent` union for 5 events the SSE stream delivers but the SDK `Event` union doesn't cover: `message.part.delta`, `message.created`, `permission.asked`, `question.asked`, `server.heartbeat`
+- **Replaced** `BaseOpenCodeEvent` with local `SSEEventBase` structural interface; all 18 event interfaces now extend `SSEEventBase` instead
+- **Removed** `BaseOpenCodeEvent` and old `OpenCodeEvent` definitions from `src/lib/types.ts`; re-exports `SSEEvent` as `OpenCodeEvent` for backward compatibility
+- **Updated** 11 source files to import `SSEEvent` directly: `sse-consumer.ts`, `sse-wiring.ts`, `event-translator.ts`, `sse-backoff.ts`, `permission-bridge.ts`, `canonical-event-translator.ts`, `dual-write-hook.ts`, `poller-wiring.ts`, `orchestration-wiring.ts`
+- **Updated** 2 test helpers: `sse-factories.ts`, `arbitraries.ts`
+- **Retained** all type guards (needed until Tasks 13-14 replace SSE parser with SDK streaming)
+- **Retained** `KnownOpenCodeEvent`/`KnownOpenCodeEventType` as deprecated aliases for gradual migration
+- **Key insight**: SDK `Event` and old events share the same `{ type, properties }` structure — no shape mismatch
+- **Verification**: `pnpm check` clean, `pnpm test:unit` — 236 test files, 4300 tests passing, `pnpm lint` clean
+- **Commit**: `a05d9bb`
+
+### 2026-04-13 — SDK Migration Tasks 15-16: Delete OpenCodeClient, SSEConsumer, and unused SSE utilities
+- **Task 15 — Delete OpenCodeClient and SSEConsumer**:
+  - **Deleted** `src/lib/instance/opencode-client.ts` (704 lines) — legacy REST client replaced by OpenCodeAPI + SDK
+  - **Deleted** `src/lib/relay/sse-consumer.ts` (284 lines) — legacy SSE consumer replaced by SSEStream + SDK
+  - **Migrated** 4 local type definitions (`PromptOptions`, `Agent`, `Provider`, `ProviderListResult`) to `sdk-types.ts`
+  - **Added** local `Message` interface to `sdk-types.ts` (flat message shape with parts/cost/tokens) — replaces both the deleted local `Message` and shadows SDK's `Message` (which lacks `parts` field)
+  - **Updated** 8 src/ imports and 4 test imports from `opencode-client.js` to `sdk-types.js`
+  - **Replaced** `daemon.ts` discovery: dynamic `import("opencode-client.js")` replaced with `createSdkClient()` from `sdk-factory.ts`
+  - **Deleted** 3 test files: `sse-consumer.test.ts` (65 lines), `sse-consumer.integration.ts` (191 lines), `rest-client.integration.ts` (189 lines)
+  - **Removed** dead `OpenCodeClient` test block from `m4-backend.test.ts`
+- **Task 16 — Clean up unused SSE utilities**:
+  - **Trimmed** `src/lib/relay/sse-backoff.ts` from 357 lines to 103 lines — kept only `BackoffConfig`, `calculateBackoffDelay`, `HealthTracker`, `createHealthTracker`
+  - **Removed** 9 dead functions: `parseSSEData`, `parseSSEDataAuto`, `parseGlobalSSEData`, `isKnownEventType`, `classifyEventType`, `eventBelongsToSession`, `filterEventsBySession`, `getSessionIds`, `getBackoffSequence`
+  - **Deleted** `test/unit/relay/sse-backoff-auto.test.ts` (242 lines)
+  - **Rewrote** `sse-backoff.pbt.test.ts` (655 -> ~280 lines) — kept P1-P6 (backoff + health), removed P7-P11 (deleted functions)
+  - **Rewrote** `sse-backoff.stateful.test.ts` (641 -> ~320 lines) — kept health tracker state machine, removed FilterEvents/ParseSSE/ClassifyEvent commands
+- **Net reduction**: ~1,733 source lines deleted, ~600 test lines deleted
+- **Verification**: `pnpm check` clean, `pnpm test:unit` — 235 test files, 4273 tests passing, lint clean on modified files
+
+### 2026-04-18 — Claude SDK Event Parity Fixes
+
+**Bugs fixed:**
+- Thinking animations never stopped (missing `thinking.end` event)
+- Tool calls/thinking blocks disappeared on session reload
+- PROCESSING_TIMEOUT on rejoin after navigating away
+- Sessions never auto-renamed from default title
+
+**Files changed:**
+- `src/lib/provider/claude/claude-event-translator.ts` — emit `thinking.end` for thinking blocks
+- `src/lib/frontend/stores/chat.svelte.ts` — safety net in `handleDone`
+- `src/lib/handlers/prompt.ts` — auto-rename after first Claude turn
+- `src/lib/provider/claude/event-type-guard.ts` — compile-time exhaustiveness guard (new)
+
+**Tests added:** 14 tests (1 updated + 13 new) across 5 files
+- **Verification**: `pnpm check` clean, `pnpm test:unit` — 248 test files, 4402 tests passing
+
+### 2026-04-18 — Pipeline Resilience Tests
+
+**Production fix:**
+- `src/lib/frontend/utils/history-logic.ts` — `convertAssistantParts` now handles `case "thinking"` alongside `case "reasoning"` (Claude SDK thinking blocks no longer silently dropped on session reload)
+- `src/lib/shared-types.ts` — widened `HistoryMessagePart["type"]` to `PartType | "thinking"`
+- `src/lib/persistence/projectors/message-projector.ts` — defensive `INSERT OR IGNORE INTO messages` added to `thinking.delta` handler for FK-safety under shuffled event delivery (matched existing pattern on siblings `text.delta`, `thinking.start`, `tool.started`)
+
+**Tests added:**
+- Thinking lifecycle pipeline integration (project → SQLite → history → chat state)
+- Thinking block invariants (done=true after handleDone, text preservation, fork-split safety)
+- Claude session rejoin contracts (event flow after navigate-away-and-back)
+- Projector resilience (out-of-order, duplicates, edge cases, fault injection, isolation)
+- History conversion regression (part type guards, duration calculation, pagination)
+- Event translation snapshots + sink lifecycle (RelayMessage shape contracts)
+- Pipeline property-based tests (8 properties via fast-check; SEED=42, endOnFailure)
+- Malformed/adversarial payloads (empty text, SQL injection, 100KB blobs, HTML entities)
+- Unicode/encoding stress (emoji, CJK, RTL, surrogate pairs, null bytes, multi-byte concat)
+- Orphan event edges (orphan end, early turn.completed, turn.error mid-thinking, duplicate idempotency)
+- Frontend error→recovery cycle (error mid-thinking, double handleDone, zombie state)
+- Rejoin integration with delivery-layer fidelity (navigate-away gap documentation)
+- Pre-existing data round-trip / migration safety
+- Cross-session event injection risk documentation
+- Snapshot fragility strategy documentation + structural minimum safety net
+- DB schema CHECK constraint guard (rejects invalid part types)
+- EventPayloadMap key snapshot (derived from CANONICAL_EVENT_TYPES)
+- Concurrent projection stress (interleaved sessions, shared projector)
+- PBT invalid/corrupted event sequences (shuffled, dropped, duplicated events)
+- Text delta concatenation order (3+ distinct deltas, both text and thinking)
+- Multi-turn conversation pipeline (user→assistant→user→assistant with thinking)
+- clearMessages + active thinking race (mid-stream clear, subsequent events safe)
+- Unknown part type runtime drop behavior
+- Session deletion FK constraint contract
+- SSE reconnection replay (overlap events skipped, new applied)
+- Multi-client / multi-tab delivery (two tabs, navigate-away isolation)
+- Permission + thinking interleaving (thinking→tool→text, thinking→tool→thinking→text)
+- PBT regression seed preservation (SEED=42, regression case block)
+- Rewind/fork feature todo specs (7 it.todo stubs)
+
+**Files created:**
+- `test/unit/pipeline/thinking-lifecycle-pipeline.test.ts`
+- `test/unit/pipeline/thinking-invariants.test.ts`
+- `test/unit/pipeline/claude-session-rejoin.test.ts`
+- `test/unit/pipeline/projector-resilience.test.ts`
+- `test/unit/pipeline/history-regression.test.ts`
+- `test/unit/pipeline/event-translation-snapshots.test.ts`
+- `test/unit/pipeline/pipeline-properties.test.ts`
+- `test/unit/pipeline/rejoin-integration.test.ts`
+- `test/unit/pipeline/exhaustiveness-guards.test.ts`
+- `test/unit/pipeline/concurrent-projection.test.ts`
+- `test/unit/pipeline/multi-turn-pipeline.test.ts`
+- `test/unit/pipeline/permission-thinking-interleave.test.ts`
+
+- **Verification**: `pnpm check` clean, `pnpm lint` clean, `pnpm test` — 260 test files, 4506 tests passing (+ 12 todo)

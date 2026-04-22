@@ -6,7 +6,7 @@
 
 <script lang="ts">
 	import type { UserMessage } from "../../types.js";
-	import { chatState } from "../../stores/chat.svelte.js";
+	import { currentChat } from "../../stores/chat.svelte.js";
 	import { escapeHtml, extractDisplayText } from "../../utils/format.js";
 
 	let { message }: { message: UserMessage } = $props();
@@ -16,7 +16,7 @@
 	 *  increments `turnEpoch`. */
 	const isQueued = $derived(
 		message.sentDuringEpoch != null &&
-		chatState.turnEpoch <= message.sentDuringEpoch,
+		currentChat().turnEpoch <= message.sentDuringEpoch,
 	);
 
 	// DEBUG: track all reactive inputs driving the shimmer
@@ -24,10 +24,10 @@
 		"[UserMessage shimmer]",
 		{
 			isQueued,
-			turnEpoch: chatState.turnEpoch,
+			turnEpoch: currentChat().turnEpoch,
 			sentDuringEpoch: message.sentDuringEpoch,
-			currentMessageId: chatState.currentMessageId,
-			phase: chatState.phase,
+			currentMessageId: currentChat().currentMessageId,
+			phase: currentChat().phase,
 			text: message.text.slice(0, 40),
 		},
 	);

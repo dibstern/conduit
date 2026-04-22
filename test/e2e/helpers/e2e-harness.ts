@@ -90,7 +90,7 @@ export async function createE2EHarness(opts?: {
 		async stop(): Promise<void> {
 			for (const id of createdSessionIds) {
 				try {
-					await stack.client.deleteSession(id);
+					await stack.client.session.delete(id);
 				} catch {
 					// Best-effort cleanup
 				}

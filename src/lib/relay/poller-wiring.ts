@@ -1,5 +1,5 @@
 // ─── Poller Wiring (G3) ──────────────────────────────────────────────────────
-// Wires pollerManager "events" handler and sseConsumer "event" → poller bridge.
+// Wires pollerManager "events" handler and sseStream "event" → poller bridge.
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
@@ -9,7 +9,6 @@ import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { RelayMessage } from "../shared-types.js";
-import type { OpenCodeEvent } from "../types.js";
 import {
 	applyPipelineResult,
 	type PipelineDeps,
@@ -17,19 +16,18 @@ import {
 } from "./event-pipeline.js";
 import type { MessagePollerManager } from "./message-poller-manager.js";
 import { resolveNotifications } from "./notification-policy.js";
-import type { PendingUserMessages } from "./pending-user-messages.js";
+import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEConsumer } from "./sse-consumer.js";
+import type { SSEStream } from "./sse-stream.js";
 import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface PollerWiringDeps {
 	pollerManager: MessagePollerManager;
-	sseConsumer: SSEConsumer;
+	sseStream: SSEStream;
 	statusPoller: SessionStatusPoller;
-	pendingUserMessages: PendingUserMessages;
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
 	pipelineDeps: PipelineDeps;
@@ -48,9 +46,8 @@ export interface PollerWiringDeps {
 export function wirePollers(deps: PollerWiringDeps): void {
 	const {
 		pollerManager,
-		sseConsumer,
+		sseStream,
 		statusPoller,
-		pendingUserMessages,
 		wsHandler,
 		sessionMgr,
 		pipelineDeps,
@@ -80,17 +77,6 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		}
 
 		for (const msg of events) {
-			// Suppress relay-originated user messages from poller (same as SSE path)
-			if (
-				msg.type === "user_message" &&
-				polledSessionId &&
-				pendingUserMessages.consume(polledSessionId, msg.text)
-			) {
-				pollerLog.debug(
-					`Suppressed relay-originated user_message echo for session=${polledSessionId}`,
-				);
-				continue;
-			}
 			const pollerViewers = polledSessionId
 				? wsHandler.getClientsForSession(polledSessionId)
 				: [];
@@ -135,8 +121,8 @@ export function wirePollers(deps: PollerWiringDeps): void {
 	});
 
 	// ── Notify poller manager of SSE events (to suppress REST polling) ────
-	sseConsumer.on("event", (event: OpenCodeEvent) => {
-		const sid = extractSessionId(event);
+	sseStream.on("event", (event: unknown) => {
+		const sid = extractSessionId(event as SSEEvent);
 		if (sid) {
 			sseTracker.recordEvent(sid, Date.now());
 			pollerManager.notifySSEEvent(sid);

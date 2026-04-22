@@ -1,8 +1,27 @@
-// ─── OpenCode Event Type Guards (Ticket 7) ──────────────────────────────────
+// ─── OpenCode SSE Event Types & Guards (Task 11) ────────────────────────────
 // Typed interfaces and runtime type guard functions for OpenCode SSE events.
-// Replaces unsafe `as` casts scattered across event-translator.ts / sse-wiring.ts.
+//
+// Architecture:
+// - SDK `Event` is a discriminated union of 30+ typed event variants from
+//   @opencode-ai/sdk. All share the `{ type: string; properties: ... }` shape.
+// - The live SSE stream emits a few event types NOT in the SDK union (gap events):
+//   message.part.delta, message.created, permission.asked, question.asked,
+//   server.heartbeat.
+// - `SSEEvent = Event | <gap events>` is the superset used by SSE consumers.
+// - `SSEGapEvent` is the union of just the gap events.
+// - Type guards remain for all event types because the SSE parser emits raw
+//   `{ type, properties }` objects (Tasks 13-14 will replace the SSE parser).
 
-import type { BaseOpenCodeEvent, PartType, ToolStatus } from "../types.js";
+import type { PartType, ToolStatus } from "../shared-types.js";
+
+// ─── Structural base ─────────────────────────────────────────────────────────
+// Matches the shape of every SSE event (same as SDK Event members).
+// Used only as a structural constraint for gap event interfaces.
+
+interface SSEEventBase {
+	type: string;
+	properties: Record<string, unknown>;
+}
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -20,9 +39,14 @@ function hasProps(
 	);
 }
 
-// ─── Part Delta ──────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// GAP EVENTS — SSE delivers these but the SDK Event union does not include them.
+// Each has a dedicated interface and type guard.
+// ═════════════════════════════════════════════════════════════════════════════
 
-export interface PartDeltaEvent extends BaseOpenCodeEvent {
+// ─── Part Delta (gap) ────────────────────────────────────────────────────────
+
+export interface PartDeltaEvent extends SSEEventBase {
 	type: "message.part.delta";
 	properties: {
 		sessionID?: string;
@@ -43,9 +67,107 @@ export function isPartDeltaEvent(event: unknown): event is PartDeltaEvent {
 	);
 }
 
+// ─── Message Created (gap) ───────────────────────────────────────────────────
+
+export interface MessageCreatedEvent extends SSEEventBase {
+	type: "message.created";
+	properties: {
+		sessionID?: string;
+		messageID?: string;
+		info?: {
+			role?: string;
+			parts?: Array<{ type?: string; text?: string }>;
+		};
+		message?: {
+			role?: string;
+			parts?: Array<{ type?: string; text?: string }>;
+		};
+	};
+}
+
+// All properties are optional in the interface — downstream uses optional chaining.
+// No runtime validation needed beyond type string.
+export function isMessageCreatedEvent(
+	event: unknown,
+): event is MessageCreatedEvent {
+	if (!hasProps(event) || event.type !== "message.created") return false;
+	return true;
+}
+
+// ─── Permission Asked (gap) ──────────────────────────────────────────────────
+// SDK has `permission.updated` which is a different event type.
+
+export interface PermissionAskedEvent extends SSEEventBase {
+	type: "permission.asked";
+	properties: {
+		id: string;
+		permission: string;
+		patterns?: string[];
+		metadata?: Record<string, unknown>;
+		tool?: { callID?: string };
+		always?: string[];
+	};
+}
+
+export function isPermissionAskedEvent(
+	event: unknown,
+): event is PermissionAskedEvent {
+	if (!hasProps(event) || event.type !== "permission.asked") return false;
+	const p = event.properties;
+	return typeof p["id"] === "string" && typeof p["permission"] === "string";
+}
+
+// ─── Question Asked (gap) ────────────────────────────────────────────────────
+
+export interface QuestionAskedEvent extends SSEEventBase {
+	type: "question.asked";
+	properties: {
+		id: string;
+		questions: Array<{
+			question?: string;
+			header?: string;
+			options?: Array<{ label?: string; description?: string }>;
+			multiple?: boolean;
+			custom?: boolean;
+		}>;
+		/** Tool context: links this question to the tool_use that triggered it.
+		 *  callID is the toolu_ ID from the LLM provider; matches the id field
+		 *  in tool_start / tool_executing relay messages. */
+		tool?: { callID?: string; messageID?: string };
+	};
+}
+
+export function isQuestionAskedEvent(
+	event: unknown,
+): event is QuestionAskedEvent {
+	if (!hasProps(event) || event.type !== "question.asked") return false;
+	const p = event.properties;
+	return typeof p["id"] === "string" && Array.isArray(p["questions"]);
+}
+
+// ─── Server Heartbeat (gap) ──────────────────────────────────────────────────
+
+export interface ServerHeartbeatEvent extends SSEEventBase {
+	type: "server.heartbeat";
+	properties: Record<string, unknown>;
+}
+
+export function isServerHeartbeatEvent(
+	event: unknown,
+): event is ServerHeartbeatEvent {
+	return hasProps(event) && event.type === "server.heartbeat";
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SDK-COVERED EVENTS — These are in the SDK Event union but we keep local
+// interfaces with relaxed (optional) properties for backward compatibility
+// with the current SSE parser which emits raw { type, properties } objects.
+// Type guards are retained until Tasks 13-14 replace the SSE parser.
+// ═════════════════════════════════════════════════════════════════════════════
+
 // ─── Part Updated ────────────────────────────────────────────────────────────
 
-export interface PartUpdatedEvent extends BaseOpenCodeEvent {
+export interface PartUpdatedEvent extends SSEEventBase {
 	type: "message.part.updated";
 	properties: {
 		partID?: string;
@@ -77,7 +199,7 @@ export function isPartUpdatedEvent(event: unknown): event is PartUpdatedEvent {
 
 // ─── Part Removed ────────────────────────────────────────────────────────────
 
-export interface PartRemovedEvent extends BaseOpenCodeEvent {
+export interface PartRemovedEvent extends SSEEventBase {
 	type: "message.part.removed";
 	properties: {
 		partID: string;
@@ -93,7 +215,7 @@ export function isPartRemovedEvent(event: unknown): event is PartRemovedEvent {
 
 // ─── Session Status ──────────────────────────────────────────────────────────
 
-export interface SessionStatusEvent extends BaseOpenCodeEvent {
+export interface SessionStatusEvent extends SSEEventBase {
 	type: "session.status";
 	properties: {
 		sessionID?: string;
@@ -117,7 +239,7 @@ export function isSessionStatusEvent(
 
 // ─── Session Error ───────────────────────────────────────────────────────────
 
-export interface SessionErrorEvent extends BaseOpenCodeEvent {
+export interface SessionErrorEvent extends SSEEventBase {
 	type: "session.error";
 	properties: {
 		sessionID?: string;
@@ -137,31 +259,9 @@ export function isSessionErrorEvent(
 	return true;
 }
 
-// ─── Permission Asked ────────────────────────────────────────────────────────
-
-export interface PermissionAskedEvent extends BaseOpenCodeEvent {
-	type: "permission.asked";
-	properties: {
-		id: string;
-		permission: string;
-		patterns?: string[];
-		metadata?: Record<string, unknown>;
-		tool?: { callID?: string };
-		always?: string[];
-	};
-}
-
-export function isPermissionAskedEvent(
-	event: unknown,
-): event is PermissionAskedEvent {
-	if (!hasProps(event) || event.type !== "permission.asked") return false;
-	const p = event.properties;
-	return typeof p["id"] === "string" && typeof p["permission"] === "string";
-}
-
 // ─── Permission Replied ──────────────────────────────────────────────────────
 
-export interface PermissionRepliedEvent extends BaseOpenCodeEvent {
+export interface PermissionRepliedEvent extends SSEEventBase {
 	type: "permission.replied";
 	properties: {
 		id: string;
@@ -174,61 +274,6 @@ export function isPermissionRepliedEvent(
 	if (!hasProps(event) || event.type !== "permission.replied") return false;
 	const p = event.properties;
 	return typeof p["id"] === "string";
-}
-
-// ─── Question Asked ──────────────────────────────────────────────────────────
-
-export interface QuestionAskedEvent extends BaseOpenCodeEvent {
-	type: "question.asked";
-	properties: {
-		id: string;
-		questions: Array<{
-			question?: string;
-			header?: string;
-			options?: Array<{ label?: string; description?: string }>;
-			multiple?: boolean;
-			custom?: boolean;
-		}>;
-		/** Tool context: links this question to the tool_use that triggered it.
-		 *  callID is the toolu_ ID from the LLM provider; matches the id field
-		 *  in tool_start / tool_executing relay messages. */
-		tool?: { callID?: string; messageID?: string };
-	};
-}
-
-export function isQuestionAskedEvent(
-	event: unknown,
-): event is QuestionAskedEvent {
-	if (!hasProps(event) || event.type !== "question.asked") return false;
-	const p = event.properties;
-	return typeof p["id"] === "string" && Array.isArray(p["questions"]);
-}
-
-// ─── Message Created ─────────────────────────────────────────────────────────
-
-export interface MessageCreatedEvent extends BaseOpenCodeEvent {
-	type: "message.created";
-	properties: {
-		sessionID?: string;
-		messageID?: string;
-		info?: {
-			role?: string;
-			parts?: Array<{ type?: string; text?: string }>;
-		};
-		message?: {
-			role?: string;
-			parts?: Array<{ type?: string; text?: string }>;
-		};
-	};
-}
-
-// All properties are optional in the interface — downstream uses optional chaining.
-// No runtime validation needed beyond type string.
-export function isMessageCreatedEvent(
-	event: unknown,
-): event is MessageCreatedEvent {
-	if (!hasProps(event) || event.type !== "message.created") return false;
-	return true;
 }
 
 // ─── Message Updated ─────────────────────────────────────────────────────────
@@ -245,7 +290,7 @@ interface MessagePayload {
 	time?: { created?: number; completed?: number };
 }
 
-export interface MessageUpdatedEvent extends BaseOpenCodeEvent {
+export interface MessageUpdatedEvent extends SSEEventBase {
 	type: "message.updated";
 	properties: {
 		sessionID?: string;
@@ -265,7 +310,7 @@ export function isMessageUpdatedEvent(
 
 // ─── Message Removed ─────────────────────────────────────────────────────────
 
-export interface MessageRemovedEvent extends BaseOpenCodeEvent {
+export interface MessageRemovedEvent extends SSEEventBase {
 	type: "message.removed";
 	properties: {
 		messageID: string;
@@ -282,7 +327,7 @@ export function isMessageRemovedEvent(
 
 // ─── PTY Events ──────────────────────────────────────────────────────────────
 
-export interface PtyCreatedEvent extends BaseOpenCodeEvent {
+export interface PtyCreatedEvent extends SSEEventBase {
 	type: "pty.created";
 	properties: {
 		info?: {
@@ -303,7 +348,7 @@ export interface PtyCreatedEvent extends BaseOpenCodeEvent {
 	};
 }
 
-export interface PtyExitedEvent extends BaseOpenCodeEvent {
+export interface PtyExitedEvent extends SSEEventBase {
 	type: "pty.exited";
 	properties: {
 		id?: string;
@@ -311,7 +356,7 @@ export interface PtyExitedEvent extends BaseOpenCodeEvent {
 	};
 }
 
-export interface PtyDeletedEvent extends BaseOpenCodeEvent {
+export interface PtyDeletedEvent extends SSEEventBase {
 	type: "pty.deleted";
 	properties: {
 		id?: string;
@@ -343,14 +388,14 @@ export function isPtyDeletedEvent(event: unknown): event is PtyDeletedEvent {
 
 // ─── File Events ─────────────────────────────────────────────────────────────
 
-export interface FileEditedEvent extends BaseOpenCodeEvent {
+export interface FileEditedEvent extends SSEEventBase {
 	type: "file.edited";
 	properties: {
 		file: string;
 	};
 }
 
-export interface FileWatcherUpdatedEvent extends BaseOpenCodeEvent {
+export interface FileWatcherUpdatedEvent extends SSEEventBase {
 	type: "file.watcher.updated";
 	properties: {
 		file: string;
@@ -369,7 +414,7 @@ export function isFileEvent(event: unknown): event is FileEvent {
 
 // ─── Installation Update Available ───────────────────────────────────────────
 
-export interface InstallationUpdateEvent extends BaseOpenCodeEvent {
+export interface InstallationUpdateEvent extends SSEEventBase {
 	type: "installation.update-available";
 	properties: {
 		version?: string;
@@ -384,7 +429,7 @@ export function isInstallationUpdateEvent(
 
 // ─── Todo Updated ────────────────────────────────────────────────────────────
 
-export interface TodoUpdatedEvent extends BaseOpenCodeEvent {
+export interface TodoUpdatedEvent extends SSEEventBase {
 	type: "todo.updated";
 	properties: {
 		todos?: Array<{
@@ -430,9 +475,52 @@ export function hasInfoWithSessionID(props: Record<string, unknown>): props is {
 	);
 }
 
-// ─── Composed Event Union ────────────────────────────────────────────────────
-// Every typed event in a single union so downstream can narrow on `.type`.
+// ═════════════════════════════════════════════════════════════════════════════
+// COMPOSED TYPES
+// ═════════════════════════════════════════════════════════════════════════════
 
+// ─── SSE Gap Events ──────────────────────────────────────────────────────────
+// Events the SSE stream delivers but the SDK Event union does not include.
+
+export type SSEGapEvent =
+	| PartDeltaEvent
+	| MessageCreatedEvent
+	| PermissionAskedEvent
+	| QuestionAskedEvent
+	| ServerHeartbeatEvent;
+
+// ─── SSE Event (superset) ────────────────────────────────────────────────────
+// The full set of events that can arrive over the SSE stream.
+// Combines:
+//   - Local relaxed interfaces for SDK-covered events (the SSE parser emits
+//     raw objects with optional fields that don't match the SDK's strict types)
+//   - Gap event interfaces for events not in the SDK
+//   - A structural fallback for unknown/future events
+//
+// When Tasks 13-14 replace the SSE parser with SDK streaming, SSEEvent will
+// converge to `Event | SSEGapEvent` (using the SDK's strict types).
+
+export type SSEEvent =
+	| SSEGapEvent
+	| PartUpdatedEvent
+	| PartRemovedEvent
+	| SessionStatusEvent
+	| SessionErrorEvent
+	| PermissionRepliedEvent
+	| MessageUpdatedEvent
+	| MessageRemovedEvent
+	| PtyCreatedEvent
+	| PtyExitedEvent
+	| PtyDeletedEvent
+	| FileEditedEvent
+	| FileWatcherUpdatedEvent
+	| InstallationUpdateEvent
+	| TodoUpdatedEvent
+	| SSEEventBase; // structural fallback for unknown/future events
+
+// ─── Legacy aliases (kept for backward compatibility during migration) ───────
+
+/** @deprecated Use SSEEvent instead */
 export type KnownOpenCodeEvent =
 	| PartDeltaEvent
 	| PartUpdatedEvent
@@ -453,4 +541,5 @@ export type KnownOpenCodeEvent =
 	| InstallationUpdateEvent
 	| TodoUpdatedEvent;
 
+/** @deprecated Use SSEEvent["type"] instead */
 export type KnownOpenCodeEventType = KnownOpenCodeEvent["type"];

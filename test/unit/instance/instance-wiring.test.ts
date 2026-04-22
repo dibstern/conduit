@@ -255,7 +255,7 @@ describe("project_list includes instanceId", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				listProjects: vi.fn(),
+				app: { projects: vi.fn() },
 			},
 			config: {
 				slug: "current-project",
@@ -322,9 +322,11 @@ describe("project_list includes instanceId", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				listProjects: vi
-					.fn()
-					.mockResolvedValue([{ id: "proj-1", name: "Proj 1", path: "/p1" }]),
+				app: {
+					projects: vi
+						.fn()
+						.mockResolvedValue([{ id: "proj-1", name: "Proj 1", path: "/p1" }]),
+				},
 			},
 			config: {
 				slug: "proj-1",
@@ -504,12 +506,12 @@ describe("instance_list resilience", () => {
 		});
 
 		// Make earlier init steps fail
-		vi.mocked(deps.client.getSession).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.client.session.get).mockRejectedValue(new Error("fail"));
 		vi.mocked(deps.sessionMgr.listSessions).mockRejectedValue(
 			new Error("fail"),
 		);
-		vi.mocked(deps.client.listAgents).mockRejectedValue(new Error("fail"));
-		vi.mocked(deps.client.listProviders).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.client.app.agents).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.client.provider.list).mockRejectedValue(new Error("fail"));
 
 		// Should not throw
 		await handleClientConnected(deps, "client-1");

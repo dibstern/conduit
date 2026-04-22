@@ -9,11 +9,16 @@ import {
 	handleClientConnected,
 } from "../bridges/client-init.js";
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
+import { QuestionBridge } from "../bridges/question-bridge.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { dispatchMessage, type HandlerDeps } from "../handlers/index.js";
-import type { OpenCodeClient } from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import { type LogLevel, setLogLevel } from "../logger.js";
+import type { ProviderStateService } from "../persistence/provider-state-service.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
+import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
+import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import { ClientMessageQueue } from "../server/client-message-queue.js";
 import { RateLimiter } from "../server/rate-limiter.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
@@ -22,26 +27,20 @@ import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { ProjectRelayConfig } from "../types.js";
-import type { MessageCache } from "./message-cache.js";
 import type { MessagePollerManager } from "./message-poller-manager.js";
-import type { PendingUserMessages } from "./pending-user-messages.js";
 import type { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
 import { connectPtyUpstream as connectPtyUpstreamImpl } from "./pty-upstream.js";
-import type { ToolContentStore } from "./tool-content-store.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface HandlerDepsWiringDeps {
 	wsHandler: WebSocketHandler;
-	client: OpenCodeClient;
+	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
-	pendingUserMessages: PendingUserMessages;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
-	toolContentStore: ToolContentStore;
 	config: ProjectRelayConfig;
 	log: Logger;
 	wsLog: Logger;
@@ -49,6 +48,14 @@ export interface HandlerDepsWiringDeps {
 	registry: SessionRegistry;
 	pollerManager: MessagePollerManager;
 	ptyDeps: PtyUpstreamDeps;
+	/** SQLite read query service (optional — only when persistence is configured). */
+	readQuery?: ReadQueryService;
+	/** Phase 5: Orchestration layer for provider adapter routing (optional). */
+	orchestrationLayer?: OrchestrationLayer;
+	/** Claude event persistence deps (optional — only when persistence configured). */
+	claudeEventPersist?: RelayEventSinkPersist;
+	/** Provider state service for resume cursor persistence (optional). */
+	providerStateService?: ProviderStateService;
 }
 
 // ─── Return type ─────────────────────────────────────────────────────────────
@@ -68,12 +75,9 @@ export function wireHandlerDeps(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
-		pendingUserMessages,
 		permissionBridge,
 		overrides,
 		ptyManager,
-		toolContentStore,
 		config,
 		log,
 		wsLog,
@@ -81,16 +85,22 @@ export function wireHandlerDeps(
 		registry,
 		pollerManager,
 		ptyDeps,
+		readQuery,
+		orchestrationLayer,
+		claudeEventPersist,
+		providerStateService,
 	} = deps;
 
 	// Per-client sliding-window rate limiter for chat messages
 	const rateLimiter = new RateLimiter();
 
+	// Question bridge for tracking pending questions (enables replay on session switch)
+	const questionBridge = new QuestionBridge();
+
 	const clientInitDeps: ClientInitDeps = {
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
 		overrides,
 		ptyManager,
 		permissionBridge,
@@ -99,6 +109,10 @@ export function wireHandlerDeps(
 		...(config.getCachedUpdate != null && {
 			getCachedUpdate: config.getCachedUpdate,
 		}),
+		...(orchestrationLayer != null && {
+			orchestrationEngine: orchestrationLayer.engine,
+		}),
+		...(readQuery != null && { readQuery }),
 		log: wsLog,
 	};
 
@@ -124,12 +138,10 @@ export function wireHandlerDeps(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
-		pendingUserMessages,
 		permissionBridge,
+		questionBridge,
 		overrides,
 		ptyManager,
-		toolContentStore,
 		config,
 		log,
 		connectPtyUpstream: (ptyId: string, cursor?: number) =>
@@ -168,6 +180,12 @@ export function wireHandlerDeps(
 		...(config.triggerScan != null && {
 			scanDeps: { triggerScan: config.triggerScan },
 		}),
+		...(readQuery != null && { readQuery }),
+		...(orchestrationLayer != null && {
+			orchestrationEngine: orchestrationLayer.engine,
+		}),
+		...(claudeEventPersist != null && { claudeEventPersist }),
+		...(providerStateService != null && { providerStateService }),
 	};
 
 	const clientQueue = new ClientMessageQueue({
@@ -175,7 +193,7 @@ export function wireHandlerDeps(
 			wsLog.error(`Error handling message for ${cid}:`, formatErrorDetail(err));
 			wsHandler.sendTo(
 				cid,
-				RelayError.fromCaught(err, "HANDLER_ERROR").toMessage(),
+				RelayError.fromCaught(err, "HANDLER_ERROR").toSystemError(),
 			);
 		},
 	});
@@ -186,7 +204,7 @@ export function wireHandlerDeps(
 			const result = rateLimiter.check(clientId);
 			if (!result.allowed) {
 				wsHandler.sendTo(clientId, {
-					type: "error",
+					type: "system_error",
 					code: "RATE_LIMITED",
 					message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
 				});

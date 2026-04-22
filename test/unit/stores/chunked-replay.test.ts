@@ -42,6 +42,7 @@ import {
 	clearMessages,
 	isReplaying,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
@@ -53,6 +54,7 @@ async function drainReplay(promise: Promise<void>): Promise<void> {
 }
 
 beforeEach(() => {
+	sessionState.currentId = "test-session";
 	clearMessages();
 	vi.useFakeTimers();
 });

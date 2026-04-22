@@ -1,19 +1,16 @@
 // ─── Session Store ───────────────────────────────────────────────────────────
 // Manages session list, active session, search, and date grouping.
 
+import { SvelteMap } from "svelte/reactivity";
 import type {
 	DateGroups,
 	RelayMessage,
 	RequestId,
 	SessionInfo,
 } from "../types.js";
-import {
-	clearMessages,
-	restoreCachedMessages,
-	stashSessionMessages,
-} from "./chat.svelte.js";
+import { clearMessages, clearSessionChatState } from "./chat.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
-import { uiState, updateContextPercent } from "./ui.svelte.js";
+import { uiState } from "./ui.svelte.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +21,10 @@ export const sessionState = $state({
 	searchQuery: "",
 	searchResults: null as SessionInfo[] | null,
 	hasMore: false,
+	/** Id-keyed map maintained alongside rootSessions/allSessions arrays.
+	 *  Used by the dispatcher's unknown-session guard (O(1) membership check)
+	 *  and by clearSessionChatState's diff path. */
+	sessions: new SvelteMap<string, SessionInfo>(),
 });
 
 // ─── Session Creation State Machine ──────────────────────────────────────────
@@ -246,10 +247,15 @@ export function handleSessionList(
 	if (!Array.isArray(sessions)) return;
 
 	// Search results go to a separate field — never overwrite main arrays.
+	// Guard: skip diff if incoming list is a filtered/search payload.
 	if (search) {
 		sessionState.searchResults = sessions;
 		return;
 	}
+
+	// ── Diff logic: detect removed sessions and clean up chat state ────
+	// Snapshot current session IDs before applying incoming list.
+	const previousIds = new Set(sessionState.sessions.keys());
 
 	// Clear search results when a fresh full list arrives (not during active search)
 	if (!sessionState.searchQuery.trim()) {
@@ -267,6 +273,26 @@ export function handleSessionList(
 		sessionState.rootSessions = sessions.filter((s) => !s.parentID);
 		sessionState.allSessions = sessions;
 	}
+
+	// Populate id-keyed sessions Map for O(1) membership checks.
+	// Used by routePerSession's unknown-session guard.
+	const incomingIds = new Set<string>();
+	for (const s of sessions) {
+		sessionState.sessions.set(s.id, s);
+		incomingIds.add(s.id);
+	}
+
+	// Clean up chat state for sessions that were removed from the list.
+	// Only run diff for full (non-search) lists where roots is undefined
+	// (backward-compat untagged lists contain all sessions).
+	if (roots === undefined) {
+		for (const id of previousIds) {
+			if (!incomingIds.has(id)) {
+				clearSessionChatState(id);
+				sessionState.sessions.delete(id);
+			}
+		}
+	}
 }
 
 export function handleSessionSwitched(
@@ -275,6 +301,11 @@ export function handleSessionSwitched(
 	const { id, requestId } = msg;
 	if (id) {
 		sessionState.currentId = id;
+		// Ensure the session is in the id-keyed Map so routePerSession's
+		// unknown-session guard won't drop events for the active session.
+		if (!sessionState.sessions.has(id)) {
+			sessionState.sessions.set(id, { id, title: "" });
+		}
 	}
 	// Co-located: complete the creation state machine if this session_switched
 	// is the response to our new_session request. This is inside
@@ -296,6 +327,8 @@ export function handleSessionForked(
 	if (!sessionState.allSessions.some((s) => s.id === session.id)) {
 		sessionState.allSessions = [session, ...sessionState.allSessions];
 	}
+	// Ensure the forked session is in the id-keyed Map.
+	sessionState.sessions.set(session.id, session);
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -328,10 +361,8 @@ export function consumeSwitchingFromId(): string | null {
  * Switch this tab to a different session.
  * Updates local state, navigates the URL, and sends `view_session` to the server.
  *
- * Optimistically stashes the outgoing session's messages into a local cache
- * and restores cached messages for the target session (if available) so the
- * user sees an instant transition instead of a blank screen while waiting for
- * the server round-trip.
+ * The two-tier per-session store retains session state across switches
+ * (Tier 1 is unbounded, Tier 2 is LRU-capped).
  */
 export function switchToSession(
 	sessionId: string,
@@ -340,19 +371,11 @@ export function switchToSession(
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
 	_switchingFromId = sessionState.currentId;
 
-	// Stash current session's messages before switching.
-	if (sessionState.currentId) {
-		stashSessionMessages(sessionState.currentId);
-	}
-
 	sessionState.currentId = sessionId;
 
-	// Optimistic restore — show cached messages instantly if we've visited
-	// this session before.  Falls back to a clean slate if no cache entry.
-	if (!restoreCachedMessages(sessionId)) {
-		clearMessages();
-		updateContextPercent(0);
-	}
+	// Clear chat state for the incoming session.
+	// The session_switched handler will replay events or load history.
+	clearMessages();
 
 	const slug = getCurrentSlug();
 	if (slug) navigate(`/p/${slug}/s/${sessionId}`);

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OpenCodeClient } from "../../../src/lib/instance/opencode-client.js";
+import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 
 describe("conduit-owned fields survive session list refresh", () => {
@@ -19,19 +19,21 @@ describe("conduit-owned fields survive session list refresh", () => {
 	describe("toSessionInfoList fork metadata enrichment", () => {
 		it("applies parentID from fork metadata when OpenCode has no parentID", async () => {
 			const mockClient = {
-				listSessions: vi.fn().mockResolvedValue([
-					{
-						id: "ses_forked",
-						title: "Forked Session",
-						time: { created: 1000, updated: 2000 },
-					},
-					{
-						id: "ses_parent",
-						title: "Original Session",
-						time: { created: 500, updated: 1500 },
-					},
-				]),
-			} as unknown as OpenCodeClient;
+				session: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "ses_forked",
+							title: "Forked Session",
+							time: { created: 1000, updated: 2000 },
+						},
+						{
+							id: "ses_parent",
+							title: "Original Session",
+							time: { created: 500, updated: 1500 },
+						},
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
 			const mgr = new SessionManager({ client: mockClient, configDir: tmpDir });
 			mgr.setForkEntry("ses_forked", {
@@ -49,15 +51,17 @@ describe("conduit-owned fields survive session list refresh", () => {
 
 		it("prefers OpenCode parentID over fork metadata parentID", async () => {
 			const mockClient = {
-				listSessions: vi.fn().mockResolvedValue([
-					{
-						id: "ses_sub",
-						title: "Subagent Session",
-						parentID: "ses_opencode_parent",
-						time: { created: 1000, updated: 2000 },
-					},
-				]),
-			} as unknown as OpenCodeClient;
+				session: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "ses_sub",
+							title: "Subagent Session",
+							parentID: "ses_opencode_parent",
+							time: { created: 1000, updated: 2000 },
+						},
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
 			const mgr = new SessionManager({ client: mockClient, configDir: tmpDir });
 			mgr.setForkEntry("ses_sub", {
@@ -72,15 +76,17 @@ describe("conduit-owned fields survive session list refresh", () => {
 
 		it("applies forkMessageId even when parentID comes from OpenCode", async () => {
 			const mockClient = {
-				listSessions: vi.fn().mockResolvedValue([
-					{
-						id: "ses_sub",
-						title: "Subagent Session",
-						parentID: "ses_parent",
-						time: { created: 1000 },
-					},
-				]),
-			} as unknown as OpenCodeClient;
+				session: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "ses_sub",
+							title: "Subagent Session",
+							parentID: "ses_parent",
+							time: { created: 1000 },
+						},
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
 			const mgr = new SessionManager({ client: mockClient, configDir: tmpDir });
 			mgr.setForkEntry("ses_sub", {
@@ -95,14 +101,16 @@ describe("conduit-owned fields survive session list refresh", () => {
 
 		it("non-forked sessions have neither parentID nor forkMessageId", async () => {
 			const mockClient = {
-				listSessions: vi.fn().mockResolvedValue([
-					{
-						id: "ses_normal",
-						title: "Normal Session",
-						time: { created: 1000 },
-					},
-				]),
-			} as unknown as OpenCodeClient;
+				session: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "ses_normal",
+							title: "Normal Session",
+							time: { created: 1000 },
+						},
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
 			const mgr = new SessionManager({ client: mockClient, configDir: tmpDir });
 			const sessions = await mgr.listSessions();
@@ -116,14 +124,16 @@ describe("conduit-owned fields survive session list refresh", () => {
 	describe("server-side enrichment guarantees", () => {
 		it("repeated listSessions calls always include fork metadata", async () => {
 			const mockClient = {
-				listSessions: vi.fn().mockResolvedValue([
-					{
-						id: "ses_forked",
-						title: "Forked",
-						time: { created: 1000 },
-					},
-				]),
-			} as unknown as OpenCodeClient;
+				session: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "ses_forked",
+							title: "Forked",
+							time: { created: 1000 },
+						},
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
 			const mgr = new SessionManager({ client: mockClient, configDir: tmpDir });
 			mgr.setForkEntry("ses_forked", {
@@ -149,14 +159,16 @@ describe("conduit-owned fields survive session list refresh", () => {
 
 		it("searchSessions also includes fork metadata", async () => {
 			const mockClient = {
-				listSessions: vi.fn().mockResolvedValue([
-					{
-						id: "ses_forked",
-						title: "Forked Search Target",
-						time: { created: 1000 },
-					},
-				]),
-			} as unknown as OpenCodeClient;
+				session: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "ses_forked",
+							title: "Forked Search Target",
+							time: { created: 1000 },
+						},
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
 			const mgr = new SessionManager({ client: mockClient, configDir: tmpDir });
 			mgr.setForkEntry("ses_forked", {

@@ -20,8 +20,8 @@ export class RelayTimers extends TrackedService {
 	start(): void {
 		this.repeating(() => {
 			const timedOut = this.permissionBridge.checkTimeouts();
-			for (const id of timedOut) {
-				this.onPermissionTimeout(id);
+			for (const entry of timedOut) {
+				this.onPermissionTimeout(entry.id);
 			}
 		}, 30_000);
 

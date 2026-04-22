@@ -1,0 +1,26 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all canonical event types — breaks when new types added 1`] = `
+[
+  "message.created",
+  "permission.asked",
+  "permission.resolved",
+  "question.asked",
+  "question.resolved",
+  "session.created",
+  "session.provider_changed",
+  "session.renamed",
+  "session.status",
+  "text.delta",
+  "thinking.delta",
+  "thinking.end",
+  "thinking.start",
+  "tool.completed",
+  "tool.input_updated",
+  "tool.running",
+  "tool.started",
+  "turn.completed",
+  "turn.error",
+  "turn.interrupted",
+]
+`;

@@ -72,26 +72,42 @@ import {
 	chatState,
 	clearMessages,
 	handleToolStart,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearInstanceState,
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
 
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
+
 beforeEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	clearInstanceState();
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
+	// Register sessions so routePerSession's unknown-session guard passes.
+	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	sessionState.currentId = "test-session";
 });
 
 afterEach(() => {
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 	clearInstanceState();
 });
 
@@ -104,7 +120,12 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		toolName: string,
 		opts?: { messageId?: string },
 	): void {
-		handleToolStart({ type: "tool_start", id: toolId, name: toolName });
+		handleToolStart(ta, tm, {
+			type: "tool_start",
+			sessionId: "s1",
+			id: toolId,
+			name: toolName,
+		});
 
 		// Manually update to "completed" with truncated result
 		const messages = [...chatState.messages];
@@ -129,6 +150,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "tool-1",
 			content: "full output here — all 50,000 chars",
 		});
@@ -149,6 +171,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "nonexistent-tool",
 			content: "should be ignored",
 		});
@@ -168,6 +191,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "tool-2",
 			content: "full file contents",
 		});
@@ -192,6 +216,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		// Only update tool-a
 		handleMessage({
 			type: "tool_content",
+			sessionId: "s1",
 			toolId: "tool-a",
 			content: "full-a",
 		});

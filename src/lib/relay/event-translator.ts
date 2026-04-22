@@ -2,18 +2,16 @@
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
-import type { PermissionId } from "../shared-types.js";
+import type { PermissionId, UntaggedRelayMessage } from "../shared-types.js";
 import type {
 	AskUserQuestion,
-	OpenCodeEvent,
 	PartType,
-	RelayMessage,
 	TodoItem,
 	TodoStatus,
 	ToolName,
 	ToolStatus,
 } from "../types.js";
-import type { KnownOpenCodeEventType } from "./opencode-events.js";
+import type { KnownOpenCodeEventType, SSEEvent } from "./opencode-events.js";
 import {
 	isFileEvent,
 	isInstallationUpdateEvent,
@@ -101,9 +99,9 @@ export function mapToolName(name: string): string {
 
 /** Translate message.part.delta → delta or thinking_delta */
 export function translatePartDelta(
-	event: OpenCodeEvent,
+	event: SSEEvent,
 	seenParts: Map<string, { type: PartType; status?: ToolStatus }>,
-): RelayMessage | null {
+): UntaggedRelayMessage | null {
 	if (!isPartDeltaEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -154,7 +152,7 @@ export function translateToolPartUpdated(
 	},
 	isNew: boolean,
 	messageId?: string,
-): RelayMessage | RelayMessage[] | null {
+): UntaggedRelayMessage | UntaggedRelayMessage[] | null {
 	if (part.type !== "tool") return null;
 
 	const status = part.state?.status;
@@ -232,7 +230,7 @@ export function translateReasoningPartUpdated(
 	part: { type: PartType; time?: { start?: number; end?: number } },
 	isNew: boolean,
 	messageId?: string,
-): RelayMessage | null {
+): UntaggedRelayMessage | null {
 	if (part.type !== "reasoning") return null;
 
 	if (isNew) {
@@ -248,9 +246,9 @@ export function translateReasoningPartUpdated(
 
 /** Translate permission.asked event */
 export function translatePermission(
-	event: OpenCodeEvent,
+	event: SSEEvent,
 	sessionId?: string,
-): RelayMessage | null {
+): UntaggedRelayMessage | null {
 	if (!isPermissionAskedEvent(event)) return null;
 	if (!sessionId) return null;
 	const { properties: props } = event;
@@ -270,7 +268,9 @@ export function translatePermission(
 }
 
 /** Translate question.asked event */
-export function translateQuestion(event: OpenCodeEvent): RelayMessage | null {
+export function translateQuestion(
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	if (!isQuestionAskedEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -368,8 +368,8 @@ function formatResetTime(delayMs: number): string {
 
 /** Translate session.status event */
 export function translateSessionStatus(
-	event: OpenCodeEvent,
-): RelayMessage | RelayMessage[] | null {
+	event: SSEEvent,
+): UntaggedRelayMessage | UntaggedRelayMessage[] | null {
 	if (!isSessionStatusEvent(event)) return null;
 	const { properties: props } = event;
 	const statusType = props.status?.type;
@@ -402,8 +402,8 @@ export function translateSessionStatus(
 
 /** Translate message.created event → user_message (for TUI-originated messages) */
 export function translateMessageCreated(
-	event: OpenCodeEvent,
-): RelayMessage | null {
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	if (!isMessageCreatedEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -424,8 +424,8 @@ export function translateMessageCreated(
 
 /** Translate message.updated event (usage/cost data) */
 export function translateMessageUpdated(
-	event: OpenCodeEvent,
-): RelayMessage | null {
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	if (!isMessageUpdatedEvent(event)) return null;
 	// OpenCode sends message data under "info" (observed in live SSE events),
 	// but we also support "message" for backward compatibility.
@@ -455,8 +455,8 @@ export function translateMessageUpdated(
 
 /** Translate message.part.removed event */
 export function translatePartRemoved(
-	event: OpenCodeEvent,
-): RelayMessage | null {
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	if (!isPartRemovedEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -469,15 +469,17 @@ export function translatePartRemoved(
 
 /** Translate message.removed event */
 export function translateMessageRemoved(
-	event: OpenCodeEvent,
-): RelayMessage | null {
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	if (!isMessageRemovedEvent(event)) return null;
 	const { properties: props } = event;
 	return { type: "message_removed", messageId: props.messageID };
 }
 
 /** Translate pty.* events */
-export function translatePtyEvent(event: OpenCodeEvent): RelayMessage | null {
+export function translatePtyEvent(
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	if (!isPtyEvent(event)) return null;
 
 	if (isPtyCreatedEvent(event)) {
@@ -518,7 +520,9 @@ export function translatePtyEvent(event: OpenCodeEvent): RelayMessage | null {
 }
 
 /** Translate file.* events */
-export function translateFileEvent(event: OpenCodeEvent): RelayMessage | null {
+export function translateFileEvent(
+	event: SSEEvent,
+): UntaggedRelayMessage | null {
 	// OpenCode uses `file` (not `path`) as the property name for file events
 	if (!isFileEvent(event)) return null;
 	const { properties: props } = event;
@@ -537,7 +541,7 @@ export function translateFileEvent(event: OpenCodeEvent): RelayMessage | null {
 // ─── TranslateResult discriminated union ────────────────────────────────────
 
 export type TranslateResult =
-	| { ok: true; messages: RelayMessage[] }
+	| { ok: true; messages: UntaggedRelayMessage[] }
 	| { ok: false; reason: string };
 
 /** Optional context passed to the translator (e.g. session scope). */
@@ -547,7 +551,7 @@ export interface TranslateContext {
 
 /** Wrap a sub-translator return value into a TranslateResult */
 function wrapResult(
-	result: RelayMessage | RelayMessage[] | null,
+	result: UntaggedRelayMessage | UntaggedRelayMessage[] | null,
 	fallbackReason: string,
 ): TranslateResult {
 	if (!result) return { ok: false, reason: fallbackReason };
@@ -557,7 +561,7 @@ function wrapResult(
 // ─── Stateful translator ────────────────────────────────────────────────────
 
 export interface Translator {
-	translate(event: OpenCodeEvent, context?: TranslateContext): TranslateResult;
+	translate(event: SSEEvent, context?: TranslateContext): TranslateResult;
 	/** Clear tracked parts. If sessionId provided, only that session. If omitted, all sessions. */
 	reset(sessionId?: string): void;
 	/** Get tracked parts for a session (or the default/fallback session if no sessionId). */
@@ -597,10 +601,7 @@ export function createTranslator(): Translator {
 	}
 
 	return {
-		translate(
-			event: OpenCodeEvent,
-			context?: TranslateContext,
-		): TranslateResult {
+		translate(event: SSEEvent, context?: TranslateContext): TranslateResult {
 			const eventType = event.type;
 			const seenParts = getOrCreateSessionParts(context?.sessionId);
 
@@ -856,9 +857,9 @@ function evictOldestIfNeeded(
 }
 
 function handlePartUpdated(
-	event: OpenCodeEvent,
+	event: SSEEvent,
 	seenParts: Map<string, { type: PartType; status?: ToolStatus }>,
-): RelayMessage | RelayMessage[] | null {
+): UntaggedRelayMessage | UntaggedRelayMessage[] | null {
 	if (!isPartUpdatedEvent(event)) return null;
 	const { properties: props } = event;
 

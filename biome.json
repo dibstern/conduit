@@ -10,7 +10,8 @@
 			"!docs/**/*.html",
 			"!.opencode",
 			"!.conduit",
-			"!test/e2e/fixtures/recorded/*.json"
+			"!test/e2e/fixtures/recorded/*.json",
+			"!test/e2e/fixtures/subagent-snapshot.json"
 		]
 	},
 	"css": {

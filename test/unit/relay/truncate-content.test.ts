@@ -75,6 +75,7 @@ describe("truncateToolResult", () => {
 		const largeContent = "z".repeat(TRUNCATION_THRESHOLD + 500);
 		const msg: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "tool-42",
 			content: largeContent,
 			is_error: false,
@@ -96,6 +97,7 @@ describe("truncateToolResult", () => {
 		const smallContent = "small output";
 		const msg: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "tool-99",
 			content: smallContent,
 			is_error: false,
@@ -112,6 +114,7 @@ describe("truncateToolResult", () => {
 	it("preserves all other fields on the message", () => {
 		const msg: RelayMessage = {
 			type: "tool_result",
+			sessionId: "s1",
 			id: "tool-7",
 			content: "x".repeat(TRUNCATION_THRESHOLD + 1),
 			is_error: true,

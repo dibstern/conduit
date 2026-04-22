@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
-import type { SessionStatus } from "../../../src/lib/instance/opencode-client.js";
+import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	SessionStatusPoller,
@@ -12,8 +12,10 @@ function createMockClient(
 	sessionDetail: { id: string; parentID?: string } = { id: "unknown" },
 ) {
 	return {
-		getSessionStatuses: vi.fn().mockResolvedValue(statuses),
-		getSession: vi.fn().mockResolvedValue(sessionDetail),
+		session: {
+			statuses: vi.fn().mockResolvedValue(statuses),
+			get: vi.fn().mockResolvedValue(sessionDetail),
+		},
 	};
 }
 
@@ -52,7 +54,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await establishBaseline();
 
 			// Change child to idle — parent should also disappear → changed emitted
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				child_1: { type: "idle" },
 			});
 			await vi.advanceTimersByTimeAsync(500);
@@ -66,7 +68,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			expect(baselineStatuses["parent_1"]).toBeUndefined();
 
 			// getSession should NOT have been called (fast path)
-			expect(client.getSession).not.toHaveBeenCalled();
+			expect(client.session.get).not.toHaveBeenCalled();
 
 			poller.stop();
 		});
@@ -88,7 +90,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await establishBaseline();
 
 			// Child becomes busy → parent should also appear as busy
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				child_1: { type: "busy" },
 			});
 			await vi.advanceTimersByTimeAsync(500);
@@ -127,12 +129,12 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await establishBaseline();
 
 			// Child becomes busy — not in parentMap, so getSession() is called
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				child_1: { type: "busy" },
 			});
 			await vi.advanceTimersByTimeAsync(500);
 
-			expect(client.getSession).toHaveBeenCalledWith("child_1");
+			expect(client.session.get).toHaveBeenCalledWith("child_1");
 			expect(changed).toHaveBeenCalledTimes(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			const statuses = changed.mock.calls[0]![0] as Record<
@@ -164,19 +166,19 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await establishBaseline();
 
 			// First poll with child busy — triggers getSession()
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				child_1: { type: "busy" },
 			});
 			await vi.advanceTimersByTimeAsync(500);
-			expect(client.getSession).toHaveBeenCalledTimes(1);
+			expect(client.session.get).toHaveBeenCalledTimes(1);
 
 			// Second poll with child still busy — should use cache
 			await vi.advanceTimersByTimeAsync(500);
-			expect(client.getSession).toHaveBeenCalledTimes(1); // still 1
+			expect(client.session.get).toHaveBeenCalledTimes(1); // still 1
 
 			// Third poll — still cached
 			await vi.advanceTimersByTimeAsync(500);
-			expect(client.getSession).toHaveBeenCalledTimes(1); // still 1
+			expect(client.session.get).toHaveBeenCalledTimes(1); // still 1
 
 			poller.stop();
 		});
@@ -203,12 +205,12 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await establishBaseline();
 
 			// Child becomes busy — getSession returns no parentID
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				child_1: { type: "busy" },
 			});
 			await vi.advanceTimersByTimeAsync(500);
 
-			expect(client.getSession).toHaveBeenCalledTimes(1);
+			expect(client.session.get).toHaveBeenCalledTimes(1);
 			// Changed fires because child_1 idle → busy, but no parent injected
 			expect(changed).toHaveBeenCalledTimes(1);
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -221,7 +223,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 
 			// Second poll — should NOT call getSession() again (cached as null)
 			await vi.advanceTimersByTimeAsync(500);
-			expect(client.getSession).toHaveBeenCalledTimes(1);
+			expect(client.session.get).toHaveBeenCalledTimes(1);
 
 			poller.stop();
 		});
@@ -232,7 +234,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 		it("handles gracefully and caches null on getSession() error", async () => {
 			const parentMap = new Map<string, string>();
 			const client = createMockClient({ child_1: { type: "idle" } });
-			client.getSession.mockRejectedValue(new Error("session not found"));
+			client.session.get.mockRejectedValue(new Error("session not found"));
 			const poller = new SessionStatusPoller(new ServiceRegistry(), {
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
@@ -246,7 +248,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await establishBaseline();
 
 			// Child becomes busy — getSession() will throw
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				child_1: { type: "busy" },
 			});
 			await vi.advanceTimersByTimeAsync(500);
@@ -263,7 +265,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 
 			// Cached as null — second poll should NOT call getSession() again
 			await vi.advanceTimersByTimeAsync(500);
-			expect(client.getSession).toHaveBeenCalledTimes(1);
+			expect(client.session.get).toHaveBeenCalledTimes(1);
 
 			poller.stop();
 		});
@@ -351,14 +353,14 @@ describe("SessionStatusPoller — augmentation features", () => {
 
 			poller.start();
 			await establishBaseline(); // immediate first poll
-			const callsAfterBaseline = client.getSessionStatuses.mock.calls.length;
+			const callsAfterBaseline = client.session.statuses.mock.calls.length;
 
 			// markMessageActivity should trigger an immediate poll
 			poller.markMessageActivity("cli_sess_1");
 			await vi.advanceTimersByTimeAsync(0); // flush microtasks only
 
 			// Should have polled again without waiting for the 5s interval
-			expect(client.getSessionStatuses.mock.calls.length).toBe(
+			expect(client.session.statuses.mock.calls.length).toBe(
 				callsAfterBaseline + 1,
 			);
 
@@ -385,7 +387,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 
 			// Subagent becomes busy (parent should propagate)
 			// AND mark a CLI session with message activity
-			client.getSessionStatuses.mockResolvedValue({
+			client.session.statuses.mockResolvedValue({
 				sess_idle: { type: "idle" },
 				subagent_1: { type: "busy" },
 			});
@@ -426,7 +428,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			await vi.advanceTimersByTimeAsync(0);
 
 			// getSessionStatuses should have been called once (the immediate poll)
-			expect(client.getSessionStatuses).toHaveBeenCalledTimes(1);
+			expect(client.session.statuses).toHaveBeenCalledTimes(1);
 
 			// Baseline established — getCurrentStatuses should reflect the data
 			expect(poller.getCurrentStatuses()).toEqual({

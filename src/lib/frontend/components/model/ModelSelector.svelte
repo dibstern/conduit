@@ -15,6 +15,7 @@
 		formatModelName,
 		isProviderConfigured,
 	} from "../../stores/discovery.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import type { ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 
@@ -125,6 +126,13 @@
 		discoveryState.defaultProviderId = model.provider;
 	}
 
+	function handleReload(e: MouseEvent) {
+		e.stopPropagation();
+		wsSend({ type: "reload_provider_session" });
+		showToast("Reloading skills…");
+		dropdownOpen = false;
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === "Escape" && dropdownOpen) {
 			dropdownOpen = false;
@@ -230,6 +238,18 @@
 					</div>
 				{/each}
 			{/if}
+
+			<!-- Reload footer -->
+			<div class="model-reload-footer border-t border-border mt-1 pt-1">
+				<button
+					class="reload-btn w-full flex items-center gap-2 py-1.5 px-3.5 m-0 border-none bg-transparent text-text-dimmer text-sm text-left cursor-pointer transition-colors duration-100 hover:bg-bg hover:text-text-secondary"
+					title="Reload skills and commands from disk"
+					onclick={handleReload}
+				>
+					<Icon name="refresh-cw" size={12} />
+					<span>Reload skills &amp; commands</span>
+				</button>
+			</div>
 		</div>
 	{/if}
 </div>

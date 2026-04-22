@@ -9,10 +9,9 @@ import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
 import type { HandlerDeps } from "../../src/lib/handlers/types.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
-import { PendingUserMessages } from "../../src/lib/relay/pending-user-messages.js";
+import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
-import { ToolContentStore } from "../../src/lib/relay/tool-content-store.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
 
@@ -28,54 +27,89 @@ function createMockWsHandlerFull(): HandlerDeps["wsHandler"] {
 }
 
 function createMockClient(): HandlerDeps["client"] {
-	// We cast to HandlerDeps["client"] because OpenCodeClient is a class
-	// with many methods — we stub every method tests actually call.
+	// Structured to match OpenCodeAPI's namespace shape.
 	// The cast is contained here so no test file needs it.
 	return {
-		sendMessageAsync: vi.fn().mockResolvedValue(undefined),
-		abortSession: vi.fn().mockResolvedValue(undefined),
-		replyPermission: vi.fn().mockResolvedValue(undefined),
-		replyQuestion: vi.fn().mockResolvedValue(undefined),
-		rejectQuestion: vi.fn().mockResolvedValue(undefined),
-		listPendingQuestions: vi.fn().mockResolvedValue([]),
-		getSession: vi
-			.fn()
-			.mockResolvedValue({ id: "s1", modelID: "gpt-4", providerID: "openai" }),
-		getMessages: vi.fn().mockResolvedValue([]),
-		getMessage: vi
-			.fn()
-			.mockResolvedValue({ id: "msg-1", time: { created: 0 } }),
-		getMessagesPage: vi.fn().mockResolvedValue([]),
-		listSessions: vi.fn().mockResolvedValue([]),
-		listAgents: vi.fn().mockResolvedValue([]),
-		listProviders: vi.fn().mockResolvedValue({
-			providers: [],
-			defaults: {},
-			connected: [],
-		}),
-		listCommands: vi.fn().mockResolvedValue([]),
-		listProjects: vi.fn().mockResolvedValue([]),
-		listDirectory: vi.fn().mockResolvedValue([]),
-		getFileContent: vi
-			.fn()
-			.mockResolvedValue({ content: "file content", binary: false }),
-		createPty: vi
-			.fn()
-			.mockResolvedValue({ id: "pty-1", title: "Terminal", pid: 42 }),
-		deletePty: vi.fn().mockResolvedValue(undefined),
-		resizePty: vi.fn().mockResolvedValue(undefined),
-		listPtys: vi.fn().mockResolvedValue([]),
-		revertSession: vi.fn().mockResolvedValue(undefined),
-		forkSession: vi.fn().mockResolvedValue({ id: "ses_forked" }),
-		createSession: vi.fn().mockResolvedValue({ id: "session-new" }),
-		deleteSession: vi.fn().mockResolvedValue(undefined),
-		getAuthHeaders: vi.fn().mockReturnValue({}),
-		getHealth: vi.fn().mockResolvedValue({ ok: true }),
-		switchModel: vi.fn().mockResolvedValue(undefined),
-		listPendingPermissions: vi.fn().mockResolvedValue([]),
+		session: {
+			list: vi.fn().mockResolvedValue([]),
+			get: vi.fn().mockResolvedValue({
+				id: "s1",
+				modelID: "gpt-4",
+				providerID: "openai",
+			}),
+			create: vi.fn().mockResolvedValue({ id: "session-new" }),
+			delete: vi.fn().mockResolvedValue(undefined),
+			update: vi.fn().mockResolvedValue(undefined),
+			statuses: vi.fn().mockResolvedValue({}),
+			messages: vi.fn().mockResolvedValue([]),
+			messagesPage: vi.fn().mockResolvedValue([]),
+			message: vi.fn().mockResolvedValue({ id: "msg-1", time: { created: 0 } }),
+			prompt: vi.fn().mockResolvedValue(undefined),
+			abort: vi.fn().mockResolvedValue(undefined),
+			fork: vi.fn().mockResolvedValue({ id: "ses_forked" }),
+			revert: vi.fn().mockResolvedValue(undefined),
+			unrevert: vi.fn().mockResolvedValue(undefined),
+			share: vi.fn().mockResolvedValue(undefined),
+			summarize: vi.fn().mockResolvedValue(undefined),
+			diff: vi.fn().mockResolvedValue(undefined),
+			children: vi.fn().mockResolvedValue([]),
+		},
+		permission: {
+			list: vi.fn().mockResolvedValue([]),
+			reply: vi.fn().mockResolvedValue(undefined),
+		},
+		question: {
+			list: vi.fn().mockResolvedValue([]),
+			reply: vi.fn().mockResolvedValue(undefined),
+			reject: vi.fn().mockResolvedValue(undefined),
+		},
+		config: {
+			get: vi.fn().mockResolvedValue({}),
+			update: vi.fn().mockResolvedValue({}),
+		},
+		provider: {
+			list: vi.fn().mockResolvedValue({
+				providers: [],
+				defaults: {},
+				connected: [],
+			}),
+		},
+		pty: {
+			list: vi.fn().mockResolvedValue([]),
+			create: vi
+				.fn()
+				.mockResolvedValue({ id: "pty-1", title: "Terminal", pid: 42 }),
+			delete: vi.fn().mockResolvedValue(undefined),
+			resize: vi.fn().mockResolvedValue(undefined),
+		},
+		file: {
+			list: vi.fn().mockResolvedValue([]),
+			read: vi
+				.fn()
+				.mockResolvedValue({ content: "file content", binary: false }),
+			status: vi.fn().mockResolvedValue({}),
+		},
+		find: {
+			text: vi.fn().mockResolvedValue([]),
+			files: vi.fn().mockResolvedValue([]),
+			symbols: vi.fn().mockResolvedValue([]),
+		},
+		app: {
+			agents: vi.fn().mockResolvedValue([]),
+			commands: vi.fn().mockResolvedValue([]),
+			skills: vi.fn().mockResolvedValue([]),
+			path: vi.fn().mockResolvedValue(""),
+			vcs: vi.fn().mockResolvedValue({}),
+			projects: vi.fn().mockResolvedValue([]),
+			currentProject: vi.fn().mockResolvedValue({}),
+		},
+		event: {
+			subscribe: vi
+				.fn()
+				.mockResolvedValue({ stream: (async function* () {})() }),
+		},
 		getBaseUrl: vi.fn().mockReturnValue("http://localhost:4096"),
-		getConfig: vi.fn().mockResolvedValue({}),
-		updateConfig: vi.fn().mockResolvedValue({}),
+		getAuthHeaders: vi.fn().mockReturnValue({}),
 	} as unknown as HandlerDeps["client"];
 }
 
@@ -130,18 +164,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
-function createMockMessageCache(): HandlerDeps["messageCache"] {
-	return {
-		recordEvent: vi.fn(),
-		getEvents: vi.fn().mockReturnValue(null),
-		remove: vi.fn(),
-		evictOldestSession: vi.fn().mockReturnValue(null),
-		sessionCount: vi.fn().mockReturnValue(0),
-		setOpenCodeUpdatedAt: vi.fn(),
-		getOpenCodeUpdatedAt: vi.fn().mockReturnValue(undefined),
-	} as unknown as HandlerDeps["messageCache"];
-}
-
 function createMockPermissionBridge(): HandlerDeps["permissionBridge"] {
 	return {
 		onPermissionResponse: vi.fn().mockReturnValue(null),
@@ -152,6 +174,15 @@ function createMockPermissionBridge(): HandlerDeps["permissionBridge"] {
 		findPendingForSession: vi.fn().mockReturnValue([]),
 		recoverPending: vi.fn(),
 	} as unknown as HandlerDeps["permissionBridge"];
+}
+
+function createMockQuestionBridge(): HandlerDeps["questionBridge"] {
+	return {
+		trackPending: vi.fn(),
+		onResolved: vi.fn().mockReturnValue(false),
+		getPending: vi.fn().mockReturnValue([]),
+		size: 0,
+	} as unknown as HandlerDeps["questionBridge"];
 }
 
 function createMockOverrides(): HandlerDeps["overrides"] {
@@ -176,6 +207,7 @@ function createMockOverrides(): HandlerDeps["overrides"] {
 		startProcessingTimeout: vi.fn(),
 		clearProcessingTimeout: vi.fn(),
 		resetProcessingTimeout: vi.fn(),
+		hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 		dispose: vi.fn(),
 	} as unknown as HandlerDeps["overrides"];
 }
@@ -220,12 +252,10 @@ export function createMockHandlerDeps(
 		wsHandler: createMockWsHandlerFull(),
 		client: createMockClient(),
 		sessionMgr: createMockSessionMgr(),
-		messageCache: createMockMessageCache(),
-		pendingUserMessages: new PendingUserMessages(),
 		permissionBridge: createMockPermissionBridge(),
+		questionBridge: createMockQuestionBridge(),
 		overrides: createMockOverrides(),
 		ptyManager: createMockPtyManager(),
-		toolContentStore: new ToolContentStore(),
 		config: createMockConfig(),
 		log: createSilentLogger(),
 		connectPtyUpstream: vi.fn().mockResolvedValue(undefined),
@@ -254,17 +284,14 @@ export function createMockSSEWiringDeps(
 		translator: createMockTranslator(),
 		sessionMgr:
 			createMockSessionMgr() as unknown as SSEWiringDeps["sessionMgr"],
-		messageCache:
-			createMockMessageCache() as unknown as SSEWiringDeps["messageCache"],
-		pendingUserMessages: new PendingUserMessages(),
 		permissionBridge:
 			createMockPermissionBridge() as unknown as SSEWiringDeps["permissionBridge"],
 		overrides: createMockOverrides() as unknown as SSEWiringDeps["overrides"],
-		toolContentStore: new ToolContentStore(),
 		wsHandler: {
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),
 			getClientsForSession: vi.fn().mockReturnValue(["c1"]),
+			broadcastPerSessionEvent: vi.fn(),
 		},
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
@@ -281,12 +308,11 @@ export function createMockClientInitDeps(
 			broadcast: vi.fn(),
 			sendTo: vi.fn(),
 			setClientSession: vi.fn(),
+			markClientBootstrapped: vi.fn(),
 		},
 		client: createMockClient() as unknown as ClientInitDeps["client"],
 		sessionMgr:
 			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
-		messageCache:
-			createMockMessageCache() as unknown as ClientInitDeps["messageCache"],
 		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
 		ptyManager:
 			createMockPtyManager() as unknown as ClientInitDeps["ptyManager"],
@@ -307,17 +333,34 @@ export function createMockProjectRelay(
 	return {
 		wsHandler:
 			createMockWsHandlerFull() as unknown as ProjectRelay["wsHandler"],
-		sseConsumer: {
+		sseStream: {
 			connect: vi.fn(),
 			disconnect: vi.fn(),
-		} as unknown as ProjectRelay["sseConsumer"],
+		} as unknown as ProjectRelay["sseStream"],
 		client: createMockClient() as unknown as ProjectRelay["client"],
 		sessionMgr: createMockSessionMgr() as unknown as ProjectRelay["sessionMgr"],
 		translator: {} as unknown as ProjectRelay["translator"],
 		permissionBridge:
 			createMockPermissionBridge() as unknown as ProjectRelay["permissionBridge"],
-		messageCache:
-			createMockMessageCache() as unknown as ProjectRelay["messageCache"],
+		orchestration: {
+			engine: {
+				dispatch: vi.fn().mockResolvedValue({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				}),
+				bindSession: vi.fn(),
+				unbindSession: vi.fn(),
+				getProviderForSession: vi.fn().mockReturnValue(undefined),
+				listBoundSessions: vi.fn().mockReturnValue([]),
+				shutdown: vi.fn().mockResolvedValue(undefined),
+			},
+			registry: {} as OrchestrationLayer["registry"],
+			adapter: {} as OrchestrationLayer["adapter"],
+			wireSSEToAdapter: vi.fn(),
+		} as unknown as OrchestrationLayer,
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,

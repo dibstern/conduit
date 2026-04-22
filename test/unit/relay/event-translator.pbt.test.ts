@@ -48,7 +48,6 @@ import {
 import type {
 	OpenCodeEvent,
 	PartType,
-	RelayMessage,
 	ToolStatus,
 } from "../../../src/lib/types.js";
 import {
@@ -162,7 +161,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		// or null. This helper normalises to an array for uniform assertions.
 		function asArray(
 			result: ReturnType<typeof translateToolPartUpdated>,
-		): RelayMessage[] {
+			// biome-ignore lint/suspicious/noExplicitAny: test helper — union return includes null
+		): any[] {
 			if (result == null) return [];
 			return Array.isArray(result) ? result : [result];
 		}
@@ -302,7 +302,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 	describe("tool_executing forwards metadata from part state", () => {
 		function asArray(
 			result: ReturnType<typeof translateToolPartUpdated>,
-		): RelayMessage[] {
+			// biome-ignore lint/suspicious/noExplicitAny: test helper — union return includes null
+		): any[] {
 			if (result == null) return [];
 			return Array.isArray(result) ? result : [result];
 		}
@@ -384,7 +385,7 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 						{ type: "reasoning" },
 						true,
 					);
-					expect(result).toEqual({ type: "thinking_start" });
+					expect(result).toMatchObject({ type: "thinking_start" });
 				}),
 				{ seed: SEED, numRuns: 10, endOnFailure: true },
 			);
@@ -397,7 +398,7 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 						{ type: "reasoning", time: { end: endTime } },
 						false,
 					);
-					expect(result).toEqual({ type: "thinking_stop" });
+					expect(result).toMatchObject({ type: "thinking_stop" });
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
@@ -1459,7 +1460,10 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			expect(result.ok).toBe(true);
 			if (result.ok) {
 				expect(result.messages).toContainEqual(
-					expect.objectContaining({ type: "delta", text: "regular content" }),
+					expect.objectContaining({
+						type: "delta",
+						text: "regular content",
+					}),
 				);
 			}
 		});
@@ -1479,7 +1483,10 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			expect(result.ok).toBe(true);
 			if (result.ok) {
 				expect(result.messages).toContainEqual(
-					expect.objectContaining({ type: "delta", text: "fallback content" }),
+					expect.objectContaining({
+						type: "delta",
+						text: "fallback content",
+					}),
 				);
 			}
 		});

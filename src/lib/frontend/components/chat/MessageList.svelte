@@ -5,7 +5,7 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import { chatState, historyState, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
+	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
 	import ForkContextBlock from "./ForkContextBlock.svelte";
@@ -45,7 +45,7 @@
 	// ─── Scroll controller ────────────────────────────────────────────────────
 
 	const scrollCtrl = createScrollController(
-		() => chatState.loadLifecycle,
+		() => currentChat().loadLifecycle,
 	);
 
 	// Attach/detach the controller to the scroll container
@@ -67,7 +67,7 @@
 	// the settle loop completes. The settle loop scrolls during "committed",
 	// but the final scroll-to-bottom on "ready" ensures we're at the very bottom.
 	$effect(() => {
-		if (chatState.loadLifecycle === "ready") {
+		if (currentChat().loadLifecycle === "ready") {
 			scrollCtrl.onNewContent();
 		}
 	});
@@ -86,7 +86,7 @@
 	// untrack() so they act as guards (checked but not tracked). The effect
 	// only re-runs when actual content changes — not on every toggle.
 	$effect(() => {
-		const _len = chatState.messages.length;
+		const _len = currentChat().messages.length;
 		const _permLen = permissionsState.pendingPermissions.length;
 		const _qLen = permissionsState.pendingQuestions.length;
 		const isActive = untrack(() => isProcessing());
@@ -108,7 +108,7 @@
 	// NOT on appends or content updates. This prevents the $effect.pre from
 	// firing spuriously when message html/status fields change.
 	const firstMessageUuid = $derived(
-		chatState.messages.length > 0 ? chatState.messages[0]?.uuid : "",
+		currentChat().messages.length > 0 ? currentChat().messages[0]?.uuid : "",
 	);
 
 	// Track previous state for prepend detection
@@ -120,7 +120,7 @@
 	$effect.pre(() => {
 		const currentSessionId = sessionState.currentId ?? "";
 		const currentFirstUuid = firstMessageUuid;
-		const currentCount = chatState.messages.length;
+		const currentCount = currentChat().messages.length;
 
 		// Session changed — reset tracking, skip prepend detection
 		if (currentSessionId !== prevSessionId) {
@@ -177,7 +177,7 @@
 		isProcessing() ? "↓ New activity" : "↓ Latest",
 	);
 
-	const groupedMessages: GroupedMessage[] = $derived(groupMessages(chatState.messages));
+	const groupedMessages: GroupedMessage[] = $derived(groupMessages(currentChat().messages));
 	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
 
 	// Fork context: detect if current session is a user fork
@@ -186,7 +186,7 @@
 	const forkSplit = $derived(
 		isFork
 			? splitAtForkPoint(
-					chatState.messages,
+					currentChat().messages,
 					activeSession?.forkMessageId,
 					activeSession?.forkPointTimestamp,
 				)
@@ -222,7 +222,7 @@
 	<HistoryLoader {sentinelEl} />
 
 	<!-- Beginning of session marker (was in HistoryView) -->
-	{#if !historyState.hasMore && !historyState.loading && !isFork}
+	{#if !currentChat().historyHasMore && !currentChat().historyLoading && !isFork}
 		<div class="history-beginning flex flex-col items-center py-4 text-text-dimmer text-xs">
 			<div class="w-8 h-px bg-border mb-2"></div>
 			<span>Beginning of session</span>
@@ -230,7 +230,7 @@
 	{/if}
 
 	<!-- Loading indicator (was in HistoryView) -->
-	{#if historyState.loading}
+	{#if currentChat().historyLoading}
 		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
 			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
 			<span>Loading history...</span>

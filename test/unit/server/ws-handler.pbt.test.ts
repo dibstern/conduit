@@ -152,12 +152,20 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		await c2.waitForMessages(1); // count=2
 		await c1.waitForMessages(2); // count=2 update
 
-		handler.broadcast({ type: "delta", text: "hello world" });
+		handler.broadcast({ type: "delta", sessionId: "s1", text: "hello world" });
 
 		await c1.waitForMessages(3);
 		await c2.waitForMessages(2);
-		expect(c1.messages[2]).toEqual({ type: "delta", text: "hello world" });
-		expect(c2.messages[1]).toEqual({ type: "delta", text: "hello world" });
+		expect(c1.messages[2]).toEqual({
+			type: "delta",
+			sessionId: "s1",
+			text: "hello world",
+		});
+		expect(c2.messages[1]).toEqual({
+			type: "delta",
+			sessionId: "s1",
+			text: "hello world",
+		});
 
 		await c1.close();
 		await c2.close();
@@ -173,7 +181,7 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		c.ws.send("not valid json");
 		await c.waitForMessages(2);
 		expect(c.messages[1]).toEqual({
-			type: "error",
+			type: "system_error",
 			code: "PARSE_ERROR",
 			message: "Could not parse message as JSON",
 		});
@@ -192,7 +200,7 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		c.ws.send(JSON.stringify({ type: "nonexistent_type" }));
 		await c.waitForMessages(2);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(c.messages[1]!["type"]).toBe("error");
+		expect(c.messages[1]!["type"]).toBe("system_error");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		expect(c.messages[1]!["code"]).toBe("UNKNOWN_MESSAGE_TYPE");
 		expect(c.ws.readyState).toBe(WebSocket.OPEN);
@@ -290,9 +298,17 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		await c2.waitForMessages(1); // count=2
 		await c1.waitForMessages(2); // count=2 update
 
-		handler.sendTo(firstId, { type: "status", status: "processing" });
+		handler.sendTo(firstId, {
+			type: "status",
+			sessionId: "s1",
+			status: "processing",
+		});
 		await c1.waitForMessages(3);
-		expect(c1.messages[2]).toEqual({ type: "status", status: "processing" });
+		expect(c1.messages[2]).toEqual({
+			type: "status",
+			sessionId: "s1",
+			status: "processing",
+		});
 
 		// c2 should NOT have received it
 		await new Promise((r) => setTimeout(r, 100));
@@ -400,14 +416,19 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		expect(() => {
 			handler.sendTo("nonexistent-id-12345", {
 				type: "delta",
+				sessionId: "s1",
 				text: "lost message",
 			});
 		}).not.toThrow();
 
 		// The existing client should still be functional
-		handler.broadcast({ type: "delta", text: "still alive" });
+		handler.broadcast({ type: "delta", sessionId: "s1", text: "still alive" });
 		await c.waitForMessages(2);
-		expect(c.messages[1]).toEqual({ type: "delta", text: "still alive" });
+		expect(c.messages[1]).toEqual({
+			type: "delta",
+			sessionId: "s1",
+			text: "still alive",
+		});
 
 		await c.close();
 		await teardown(server, handler);

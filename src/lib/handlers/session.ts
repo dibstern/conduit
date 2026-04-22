@@ -29,7 +29,7 @@ async function sendSessionMetadata(
 	await Promise.allSettled([
 		// Model info
 		(async () => {
-			const session = await deps.client.getSession(id);
+			const session = await deps.client.session.get(id);
 			if (session.modelID) {
 				deps.wsHandler.sendTo(clientId, {
 					type: "model_info",
@@ -58,7 +58,7 @@ async function sendSessionMetadata(
 				});
 				sentPermissionIds.add(perm.requestId);
 			}
-			const apiPermissions = await deps.client.listPendingPermissions();
+			const apiPermissions = await deps.client.permission.list();
 			for (const p of apiPermissions) {
 				const pSessionId = (p as { sessionID?: string }).sessionID ?? "";
 				if (pSessionId && pSessionId !== id) continue;
@@ -81,12 +81,39 @@ async function sendSessionMetadata(
 			),
 		),
 
-		// Pending questions
+		// Pending questions (bridge + API)
 		(async () => {
-			const pendingQuestions = await deps.client.listPendingQuestions();
+			const sentQuestionIds = new Set<string>();
+
+			// Check the QuestionBridge first — Claude sessions store pending
+			// questions here (OpenCode API knows nothing about them).
+			const bridgePendingQuestions = deps.questionBridge.getPending();
+			for (const pq of bridgePendingQuestions) {
+				if (pq.sessionId && pq.sessionId !== id) continue;
+				deps.wsHandler.sendTo(clientId, {
+					type: "ask_user",
+					sessionId: id,
+					toolId: pq.requestId,
+					questions: pq.questions.map((q) => ({
+						question: q.question,
+						header: q.header ?? "",
+						options: (q.options ?? []) as Array<{
+							label: string;
+							description?: string;
+						}>,
+						multiSelect: q.multiSelect ?? false,
+					})),
+					...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
+				});
+				sentQuestionIds.add(pq.requestId);
+			}
+
+			// Fall back to OpenCode API for OpenCode-native sessions.
+			const pendingQuestions = await deps.client.question.list();
 			for (const pq of pendingQuestions) {
 				const qSessionId = pq["sessionID"] as string | undefined;
 				if (qSessionId && qSessionId !== id) continue;
+				if (sentQuestionIds.has(pq.id)) continue;
 
 				const rawQuestions = pq["questions"] as
 					| Array<{
@@ -103,6 +130,7 @@ async function sendSessionMetadata(
 				const toolCallId = tool?.callID;
 				deps.wsHandler.sendTo(clientId, {
 					type: "ask_user",
+					sessionId: id,
 					toolId: pq.id,
 					questions,
 					...(toolCallId ? { toolUseId: toolCallId } : {}),
@@ -134,16 +162,14 @@ async function sendSessionMetadata(
  */
 function toSessionSwitchDeps(deps: HandlerDeps): SessionSwitchDeps {
 	return {
-		messageCache: deps.messageCache,
 		sessionMgr: deps.sessionMgr,
 		wsHandler: deps.wsHandler,
 		statusPoller: deps.statusPoller,
+		overrides: deps.overrides,
 		pollerManager: deps.pollerManager,
 		log: deps.log,
 		getInputDraft: getSessionInputDraft,
-		forkMeta: {
-			getForkEntry: (sid: string) => deps.forkMeta.getForkEntry(sid),
-		},
+		...(deps.readQuery != null && { readQuery: deps.readQuery }),
 	};
 }
 
@@ -240,7 +266,6 @@ export async function handleDeleteSession(
 	// Find ALL clients viewing this session before deletion
 	const viewers = deps.wsHandler.getClientsForSession(id);
 
-	deps.messageCache.remove(id);
 	await deps.sessionMgr.deleteSession(id, { silent: true });
 
 	const sessions = await deps.sessionMgr.listSessions();
@@ -264,6 +289,9 @@ export async function handleDeleteSession(
 			await sendSessionMetadata(deps, viewerClientId, sessions[0]!.id);
 		}
 	}
+
+	// Broadcast session_deleted so all clients know this session is gone
+	deps.wsHandler.broadcast({ type: "session_deleted", sessionId: id });
 
 	await deps.sessionMgr.sendDualSessionLists((msg) =>
 		deps.wsHandler.broadcast(msg),
@@ -341,7 +369,7 @@ export async function handleForkSession(
 
 	const { messageId } = payload;
 
-	const forked = await deps.client.forkSession(sessionId, {
+	const forked = await deps.client.session.fork(sessionId, {
 		...(messageId != null && { messageID: messageId }),
 	});
 
@@ -360,7 +388,7 @@ export async function handleForkSession(
 		// Specific-message fork: look up the fork-point message's timestamp from the parent.
 		// getMessage fetches exactly one message by ID (no pagination needed).
 		try {
-			const forkMsg = await deps.client.getMessage(sessionId, messageId);
+			const forkMsg = await deps.client.session.message(sessionId, messageId);
 			if (forkMsg?.time?.created) {
 				forkPointTimestamp = forkMsg.time.created;
 			}
@@ -376,7 +404,9 @@ export async function handleForkSession(
 
 		// Also capture the last message ID for backward compat.
 		try {
-			const msgs = await deps.client.getMessagesPage(forked.id, { limit: 1 });
+			const msgs = await deps.client.session.messagesPage(forked.id, {
+				limit: 1,
+			});
 			if (msgs.length > 0) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 				forkMessageId = msgs[msgs.length - 1]!.id;
@@ -402,6 +432,7 @@ export async function handleForkSession(
 	// Broadcast the fork notification
 	deps.wsHandler.broadcast({
 		type: "session_forked",
+		sessionId: forked.id,
 		session: {
 			id: forked.id,
 			title: forked.title ?? "Forked Session",

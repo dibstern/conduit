@@ -377,7 +377,6 @@ describe("SessionOverrides — dispose", () => {
 describe("SessionOverrides — variant", () => {
 	it("defaults to empty string", () => {
 		const overrides = new SessionOverrides(new ServiceRegistry());
-		expect(overrides.variant).toBe("");
 		expect(overrides.defaultVariant).toBe("");
 	});
 
@@ -385,13 +384,6 @@ describe("SessionOverrides — variant", () => {
 		const overrides = new SessionOverrides(new ServiceRegistry());
 		overrides.setVariant("sess-1", "high");
 		expect(overrides.getVariant("sess-1")).toBe("high");
-	});
-
-	it("setVariant(variant) sets global default variant", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
-		overrides.setVariant("medium");
-		expect(overrides.variant).toBe("medium");
-		expect(overrides.defaultVariant).toBe("medium");
 	});
 
 	it("getVariant falls back to defaultVariant when session has no override", () => {

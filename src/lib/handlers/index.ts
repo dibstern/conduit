@@ -49,6 +49,7 @@ export {
 	handleMessage,
 	handleRewind,
 } from "./prompt.js";
+export { handleReloadProviderSession } from "./reload.js";
 export {
 	handleDeleteSession,
 	handleForkSession,
@@ -115,6 +116,7 @@ import {
 	handleMessage,
 	handleRewind,
 } from "./prompt.js";
+import { handleReloadProviderSession } from "./reload.js";
 import { resolveSessionForLog } from "./resolve-session.js";
 import {
 	handleDeleteSession,
@@ -199,6 +201,7 @@ export const MESSAGE_HANDLERS: Record<keyof PayloadMap, MessageHandler> = {
 	set_project_instance: handleSetProjectInstance as MessageHandler,
 	proxy_detect: handleProxyDetect as MessageHandler,
 	scan_now: handleScanNow as MessageHandler,
+	reload_provider_session: handleReloadProviderSession as MessageHandler,
 };
 
 /**

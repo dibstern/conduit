@@ -10,6 +10,10 @@ flowchart LR
         src/lib/daemon/daemon.ts]
         server[Shared HTTP and WS edge
         src/lib/server/*]
+        persistence[SQLite event store
+        src/lib/persistence/*]
+        providers[Provider adapters
+        src/lib/provider/*]
 
         subgraph projects[Per-project mounts under /p/<slug>]
             relayA[Project Relay A]
@@ -19,7 +23,7 @@ flowchart LR
 
     opencode[OpenCode server]
     state[Daemon config dir
-    PID, socket, config, caches]
+    PID, socket, config, push settings]
 
     cli -->|foreground or IPC control| daemon
     browser -->|HTTP for SPA and APIs| server
@@ -27,6 +31,9 @@ flowchart LR
     daemon --> server
     server --> relayA
     server --> relayB
-    relayA <-->|REST, SSE, PTY upstream| opencode
-    relayB <-->|REST, SSE, PTY upstream| opencode
+    relayA --> providers
+    relayB --> providers
+    providers <-->|REST, SSE, PTY upstream| opencode
+    providers -->|stream events| persistence
+    persistence --> server
     daemon <--> state

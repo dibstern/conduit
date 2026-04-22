@@ -50,7 +50,7 @@ describe("handleInstanceRename", () => {
 
 		expect(deps.instanceMgmt?.updateInstance).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: "name is required and cannot be empty",
 		});
@@ -76,7 +76,7 @@ describe("handleInstanceRename", () => {
 
 		expect(deps.instanceMgmt?.updateInstance).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: "name is required and cannot be empty",
 		});
@@ -102,7 +102,7 @@ describe("handleInstanceRename", () => {
 
 		expect(deps.instanceMgmt?.updateInstance).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: "instanceId is required",
 		});
@@ -118,7 +118,7 @@ describe("handleInstanceRename", () => {
 		});
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: "Instance management not available",
 		});

@@ -224,6 +224,7 @@ describe("handlePtyError", () => {
 		terminalState.pendingCreate = true;
 		handlePtyError({
 			type: "error",
+			sessionId: "s1",
 			code: "PTY_CONNECT_FAILED",
 			message: "Connection refused",
 		});
@@ -233,13 +234,18 @@ describe("handlePtyError", () => {
 
 	it("falls back to default message when server message is empty", () => {
 		terminalState.pendingCreate = true;
-		handlePtyError({ type: "error", code: "", message: "" });
+		handlePtyError({ type: "error", sessionId: "s1", code: "", message: "" });
 		expect(terminalState.pendingCreate).toBe(false);
 		expect(terminalState.statusMessage).toBe("Terminal creation failed");
 	});
 
 	it("clears error message after 3 seconds", () => {
-		handlePtyError({ type: "error", code: "TIMEOUT", message: "Timeout" });
+		handlePtyError({
+			type: "error",
+			sessionId: "s1",
+			code: "TIMEOUT",
+			message: "Timeout",
+		});
 		expect(terminalState.statusMessage).toBe("Timeout");
 		vi.advanceTimersByTime(3000);
 		expect(terminalState.statusMessage).toBeNull();

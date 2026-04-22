@@ -77,11 +77,17 @@ import {
 	isStreaming,
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
 
 beforeEach(() => {
+	sessionState.currentId = "test-session";
+	// Register sessions used in test events so routePerSession's
+	// unknown-session guard doesn't drop them.
+	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	sessionState.sessions.set("s1", { id: "s1", title: "" });
 	clearMessages();
 	triggerNotificationsMock.mockClear();
 });
@@ -94,7 +100,11 @@ afterEach(() => {
 
 describe("handleMessage calls triggerNotifications for notification-worthy types", () => {
 	it("calls triggerNotifications for 'done' messages", () => {
-		const msg: RelayMessage = { type: "done" } as RelayMessage;
+		const msg: RelayMessage = {
+			type: "done",
+			sessionId: "test-session",
+			code: 0,
+		};
 		handleMessage(msg);
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(msg);
@@ -103,9 +113,10 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 	it("calls triggerNotifications for 'error' messages", () => {
 		const msg: RelayMessage = {
 			type: "error",
+			sessionId: "test-session",
 			message: "test error",
 			code: "UNKNOWN",
-		} as RelayMessage;
+		};
 		handleMessage(msg);
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(msg);
@@ -114,8 +125,10 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 	it("calls triggerNotifications for 'permission_request' messages", () => {
 		const msg: RelayMessage = {
 			type: "permission_request",
+			sessionId: "test-session",
 			toolName: "bash",
 			requestId: "req-1",
+			toolInput: {},
 		} as RelayMessage;
 		handleMessage(msg);
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
@@ -125,6 +138,7 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 	it("calls triggerNotifications for 'ask_user' messages", () => {
 		const msg: RelayMessage = {
 			type: "ask_user",
+			sessionId: "test-session",
 			toolId: "q-1",
 			questions: [{ question: "What?", header: "" }],
 		} as RelayMessage;
@@ -185,13 +199,18 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 
 describe("handleMessage does NOT call triggerNotifications for other types", () => {
 	it("does not call triggerNotifications for 'delta'", () => {
-		handleMessage({ type: "delta", text: "hello" } as RelayMessage);
+		handleMessage({
+			type: "delta",
+			sessionId: "test-session",
+			text: "hello",
+		} as RelayMessage);
 		expect(triggerNotificationsMock).not.toHaveBeenCalled();
 	});
 
 	it("does not call triggerNotifications for 'status'", () => {
 		handleMessage({
 			type: "status",
+			sessionId: "test-session",
 			status: "processing",
 		} as RelayMessage);
 		expect(triggerNotificationsMock).not.toHaveBeenCalled();
@@ -200,6 +219,7 @@ describe("handleMessage does NOT call triggerNotifications for other types", () 
 	it("does not call triggerNotifications for 'tool_start'", () => {
 		handleMessage({
 			type: "tool_start",
+			sessionId: "test-session",
 			id: "t1",
 			name: "bash",
 		} as RelayMessage);
@@ -209,6 +229,7 @@ describe("handleMessage does NOT call triggerNotifications for other types", () 
 	it("does not call triggerNotifications for 'tool_result'", () => {
 		handleMessage({
 			type: "tool_result",
+			sessionId: "test-session",
 			id: "t1",
 			content: "output",
 			is_error: false,

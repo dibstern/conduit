@@ -4,6 +4,8 @@
 // of constructing session_switched messages manually.
 
 import { isLastTurnActive } from "../event-classify.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
+import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import type { HistoryMessage, RequestId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 
@@ -48,11 +50,6 @@ export interface SwitchClientOptions {
 
 /** Narrowed deps for switchClientToSession — only what's needed, nothing more. */
 export interface SessionSwitchDeps {
-	readonly messageCache: {
-		getEvents(sessionId: string): Promise<RelayMessage[] | null>;
-		getOpenCodeUpdatedAt?(sessionId: string): number | undefined;
-		setOpenCodeUpdatedAt?(sessionId: string, timestamp: number): void;
-	};
 	readonly sessionMgr: {
 		loadPreRenderedHistory(
 			sessionId: string,
@@ -70,6 +67,10 @@ export interface SessionSwitchDeps {
 		setClientSession(clientId: string, sessionId: string): void;
 	};
 	readonly statusPoller?: { isProcessing(sessionId: string): boolean };
+	/** Check if a Claude SDK turn is in progress (processing timeout active). */
+	readonly overrides?: {
+		hasActiveProcessingTimeout(sessionId: string): boolean;
+	};
 	readonly pollerManager?: {
 		isPolling(sessionId: string): boolean;
 		startPolling(sessionId: string, messages?: unknown[]): void;
@@ -79,12 +80,8 @@ export interface SessionSwitchDeps {
 		warn(...args: unknown[]): void;
 	};
 	readonly getInputDraft: (sessionId: string) => string | undefined;
-	/** Fork metadata — used to force REST for fork sessions (SSE cache lacks inherited messages). */
-	readonly forkMeta?: {
-		getForkEntry(
-			sessionId: string,
-		): { forkMessageId: string; parentID: string } | undefined;
-	};
+	/** SQLite read query service (optional — absent when persistence is not configured). */
+	readonly readQuery?: ReadQueryService;
 }
 
 // ─── Pure functions ─────────────────────────────────────────────────────────
@@ -164,15 +161,18 @@ export function patchMissingDone(
 	source: SessionHistorySource,
 	statusPoller: SessionSwitchDeps["statusPoller"],
 	sessionId: string,
+	overrides?: SessionSwitchDeps["overrides"],
 ): SessionHistorySource {
 	if (source.kind !== "cached-events") return source;
+	// F3 fix: widen guard to check both poller and processing timeout
 	if (statusPoller?.isProcessing(sessionId)) return source;
+	if (overrides?.hasActiveProcessingTimeout(sessionId)) return source;
 
 	if (!isLastTurnActive(source.events)) return source;
 
 	return {
 		kind: "cached-events",
-		events: [...source.events, { type: "done", code: 0 }],
+		events: [...source.events, { type: "done", sessionId, code: 0 }],
 		hasMore: source.hasMore,
 	};
 }
@@ -199,6 +199,7 @@ export function buildSessionSwitchedMessage(
 			return {
 				type: "session_switched",
 				id: sessionId,
+				sessionId,
 				events: source.events as RelayMessage[],
 				...(source.hasMore ? { eventsHasMore: true } : {}),
 				...optionalFields,
@@ -207,6 +208,7 @@ export function buildSessionSwitchedMessage(
 			return {
 				type: "session_switched",
 				id: sessionId,
+				sessionId,
 				history: {
 					messages: source.history.messages as HistoryMessage[],
 					hasMore: source.history.hasMore,
@@ -220,111 +222,65 @@ export function buildSessionSwitchedMessage(
 			return {
 				type: "session_switched",
 				id: sessionId,
+				sessionId,
 				...optionalFields,
 			};
 	}
 }
 
+// ─── SQLite history path ─────────────────────────────────────────────────────
+
+/**
+ * Resolve session history from the SQLite projection.
+ * Synchronous — all data comes from the local database.
+ *
+ * Returns a `SessionHistorySource` compatible with `buildSessionSwitchedMessage()`.
+ * Uses the same `"rest-history"` kind as the REST path so the frontend cannot
+ * tell whether data came from REST or SQLite.
+ */
+export function resolveSessionHistoryFromSqlite(
+	sessionId: string,
+	readQuery: ReadQueryService,
+	opts: { pageSize: number },
+): SessionHistorySource {
+	const rows = readQuery.getSessionMessagesWithParts(sessionId);
+
+	if (rows.length === 0) {
+		return { kind: "empty" };
+	}
+
+	const { messages, hasMore } = messageRowsToHistory(rows, {
+		pageSize: opts.pageSize,
+	});
+
+	return {
+		kind: "rest-history",
+		history: { messages, hasMore },
+	};
+}
+
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
 /**
- * Resolve session history from cache or REST API.
- * Impure — reads from cache and may call REST.
+ * Resolve session history from SQLite or REST API.
+ * Impure — may call REST.
  *
- * When the cache has chat content, it is validated against OpenCode's
- * session.time.updated timestamp. If OpenCode updated the session after
- * the cache was last written (e.g. session continued while conduit was
- * down), the cache is stale and we fall through to REST for full history.
- *
- * When the cache is fresh, it is served directly WITHOUT a full REST fetch.
- * This avoids fetching all messages (which can be 40MB+ for large sessions)
- * and prevents OOM when many project relays are loaded.
+ * SQLite is the sole source of truth for history. When `readQuery` is
+ * available (persistence configured), reads from SQLite synchronously.
+ * Otherwise falls back to REST API via loadPreRenderedHistory.
  */
 export async function resolveSessionHistory(
 	sessionId: string,
-	deps: Pick<
-		SessionSwitchDeps,
-		"messageCache" | "sessionMgr" | "log" | "forkMeta"
-	>,
+	deps: Pick<SessionSwitchDeps, "sessionMgr" | "log" | "readQuery">,
 ): Promise<SessionHistorySource> {
-	const events = await deps.messageCache.getEvents(sessionId);
-	const classification = classifyHistorySource(events);
-
-	if (classification === "cached-events" && events) {
-		// Fork sessions: the SSE cache only has events from after the fork was
-		// opened — it never contains the inherited parent messages. Force REST
-		// so the frontend gets the full history with timestamps for splitting.
-		const isFork = !!deps.forkMeta?.getForkEntry(sessionId);
-		if (isFork) {
-			deps.log.info(
-				`Fork session ${sessionId.slice(0, 16)}: SSE cache has ${events.length} events but lacks inherited messages — using REST`,
-			);
-			try {
-				const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
-				return { kind: "rest-history", history };
-			} catch (err) {
-				deps.log.warn(
-					`Failed to load history for fork ${sessionId}: ${err instanceof Error ? err.message : err}`,
-				);
-				return { kind: "empty" };
-			}
-		}
-
-		// Stale-tail detection: compare the session.time.updated stored when
-		// the cache was last active against the fresh value from OpenCode
-		// (fetched during sessionMgr.initialize()). The stored value is set
-		// by the SSE wiring (Date.now() at event receipt, always >= OpenCode's
-		// time.updated). If the fresh value is greater, events happened while
-		// conduit was down → cache is stale.
-		//
-		// When no stored timestamp exists (first run with this feature, or
-		// new session), treat as potentially stale — one-time REST validation
-		// to establish the baseline.
-		const cachedUpdatedAt = deps.messageCache.getOpenCodeUpdatedAt?.(sessionId);
-		const freshUpdatedAt = deps.sessionMgr
-			.getLastMessageAtMap?.()
-			?.get(sessionId);
-		const cacheIsStale =
-			freshUpdatedAt != null &&
-			(cachedUpdatedAt == null || freshUpdatedAt > cachedUpdatedAt);
-		if (cacheIsStale) {
-			deps.log.info(
-				`Session ${sessionId.slice(0, 16)}: cache stale (cached updatedAt ${cachedUpdatedAt}, fresh ${freshUpdatedAt}) — using REST`,
-			);
-			try {
-				const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
-				// Update stored timestamp so subsequent switches to this session
-				// don't re-detect staleness and re-fetch REST.
-				deps.messageCache.setOpenCodeUpdatedAt?.(sessionId, freshUpdatedAt);
-				return { kind: "rest-history", history };
-			} catch (err) {
-				deps.log.warn(
-					`Failed to load fresh history for ${sessionId}: ${err instanceof Error ? err.message : err} — falling back to stale cache`,
-				);
-				// Fall through to serve stale cache rather than showing nothing
-			}
-		}
-
-		// Heuristic: if the first event is a user_message, the cache starts
-		// from session creation and covers the full session. If the first
-		// event is mid-conversation (delta, tool_*, etc.), the cache was
-		// truncated (eviction or late relay start) and older messages exist.
-		const cacheAppearsComplete = events[0]?.type === "user_message";
-
-		// Update stored timestamp with the fresh value for the NEXT restart.
-		// This ensures that if the session has new activity before the next
-		// restart, the stored value will be older than the new time.updated.
-		if (freshUpdatedAt != null) {
-			deps.messageCache.setOpenCodeUpdatedAt?.(sessionId, freshUpdatedAt);
-		}
-
-		return {
-			kind: "cached-events",
-			events,
-			hasMore: !cacheAppearsComplete,
-		};
+	// Read from SQLite when available (sole read path).
+	if (deps.readQuery) {
+		return resolveSessionHistoryFromSqlite(sessionId, deps.readQuery, {
+			pageSize: 50,
+		});
 	}
 
+	// Fallback: REST API (persistence not configured)
 	try {
 		const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
 		return { kind: "rest-history", history };
@@ -361,7 +317,13 @@ export async function switchClientToSession(
 		: await resolveSessionHistory(sessionId, deps);
 
 	// Patch missing done event for idle sessions served from cache
-	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId);
+	// F3 fix: pass overrides so the guard checks both poller and processing timeout
+	const patchedSource = patchMissingDone(
+		source,
+		deps.statusPoller,
+		sessionId,
+		deps.overrides,
+	);
 
 	// Seed pagination cursor only when the cache is incomplete (hasMore=true).
 	// Complete caches cover the full session — no server fallback needed.
@@ -380,10 +342,14 @@ export async function switchClientToSession(
 	});
 	deps.wsHandler.sendTo(clientId, message);
 
-	// Send processing status
+	// Send processing status — check both OpenCode poller and Claude SDK timeout
+	const isProcessing =
+		deps.statusPoller?.isProcessing(sessionId) ||
+		deps.overrides?.hasActiveProcessingTimeout(sessionId);
 	deps.wsHandler.sendTo(clientId, {
 		type: "status",
-		status: deps.statusPoller?.isProcessing(sessionId) ? "processing" : "idle",
+		sessionId,
+		status: isProcessing ? "processing" : "idle",
 	});
 
 	// Start poller without seeding — the poller will self-seed on first poll.

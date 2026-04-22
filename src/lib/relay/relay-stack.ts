@@ -8,12 +8,24 @@
 import { stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
-import { OpenCodeClient } from "../instance/opencode-client.js";
+import { GapEndpoints } from "../instance/gap-endpoints.js";
+import { OpenCodeAPI } from "../instance/opencode-api.js";
+// OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
+import { createSdkClient } from "../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../logger.js";
+import { DualWriteHook } from "../persistence/dual-write-hook.js";
+import type { PersistenceLayer } from "../persistence/persistence-layer.js";
+import { ProviderStateService } from "../persistence/provider-state-service.js";
+import { ReadQueryService } from "../persistence/read-query-service.js";
+import { SessionSeeder } from "../persistence/session-seeder.js";
+import {
+	createOrchestrationLayer,
+	type OrchestrationLayer,
+} from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { RelayServer } from "../server/server.js";
@@ -22,23 +34,21 @@ import { SessionManager } from "../session/session-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import { SessionStatusPoller } from "../session/session-status-poller.js";
+import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 import { createTranslator } from "./event-translator.js";
 import { wireHandlerDeps } from "./handler-deps-wiring.js";
-import { MessageCache } from "./message-cache.js";
 import { MessagePollerManager } from "./message-poller-manager.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
-import { PendingUserMessages } from "./pending-user-messages.js";
 import { wirePollers } from "./poller-wiring.js";
 import { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { wireSessionLifecycle } from "./session-lifecycle-wiring.js";
-import { SSEConsumer } from "./sse-consumer.js";
+import { SSEStream } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { wireTimers } from "./timer-wiring.js";
-import { ToolContentStore } from "./tool-content-store.js";
 
 // ─── WebSocket library for upstream PTY connections ─────────────────────────
 const requireWs = createRequire(import.meta.url);
@@ -48,12 +58,15 @@ const WebSocketClass = wsLib.WebSocket as typeof import("ws").WebSocket;
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
 	wsHandler: WebSocketHandler;
-	sseConsumer: SSEConsumer;
-	client: OpenCodeClient;
+	sseStream: SSEStream;
+	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
-	messageCache: MessageCache;
+	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
+	orchestration: OrchestrationLayer;
+	/** SQLite persistence layer — present when the relay was configured with a db path. */
+	persistence?: PersistenceLayer;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -96,13 +109,11 @@ export interface RelayStackConfig {
 export interface RelayStack {
 	server: RelayServer;
 	wsHandler: WebSocketHandler;
-	sseConsumer: SSEConsumer;
-	client: OpenCodeClient;
+	sseStream: SSEStream;
+	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
-	/** Exposed for test access (clear cache to force REST fallback). */
-	messageCache: MessageCache;
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;
@@ -142,42 +153,52 @@ export async function createProjectRelay(
 
 	// ── Components ──────────────────────────────────────────────────────────
 
-	const client = new OpenCodeClient({
+	// ── SDK-based client (Tasks 3–6) ─────────────────────────────────────────
+	const {
+		client: sdkClient,
+		fetch: sdkFetch,
+		authHeaders,
+	} = createSdkClient({
 		baseUrl: config.opencodeUrl,
 		...(config.noServer &&
 			config.projectDir != null && {
 				directory: config.projectDir,
 			}),
 	});
+
+	const gapEndpoints = new GapEndpoints({
+		baseUrl: config.opencodeUrl,
+		fetch: sdkFetch,
+		headers: authHeaders,
+	});
+
+	const api = new OpenCodeAPI({
+		sdk: sdkClient,
+		gapEndpoints,
+		baseUrl: config.opencodeUrl,
+		authHeaders,
+	});
+
+	// ── Orchestration layer (Phase 5: provider adapter routing) ─────────────
+	const orchestration = createOrchestrationLayer({
+		client: api,
+		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+	});
+
 	const translator = createTranslator();
 	const permissionBridge = new PermissionBridge();
 	const sessionMgr: SessionManager = new SessionManager({
-		client,
+		client: api,
 		log: sessionLog,
 		directory: config.projectDir,
 		// Lazy getter — statusPoller is created below but the getter is only
 		// called at runtime when listSessions() runs, so ordering is fine.
 		getStatuses: (): Record<
 			string,
-			import("../instance/opencode-client.js").SessionStatus
+			import("../instance/sdk-types.js").SessionStatus
 		> => statusPoller.getCurrentStatuses(),
 		...(config.configDir != null && { configDir: config.configDir }),
 	});
-
-	// ── Per-session event cache ──
-	const cacheDir = config.configDir
-		? join(config.configDir, "cache", config.slug, "sessions")
-		: join(config.projectDir ?? process.cwd(), ".conduit", "sessions");
-	const messageCache = new MessageCache(cacheDir);
-	await messageCache.loadFromDisk();
-	messageCache.loadMeta();
-	// Fire-and-forget: in-memory repair is synchronous (runs before yielding),
-	// only the disk flush is async. No need to block startup.
-	messageCache
-		.repairColdSessions()
-		.catch((err) => log.warn(`Cold cache repair flush failed: ${err}`));
-
-	const toolContentStore = new ToolContentStore();
 
 	// Per-session overrides (agent, model, processing timeout)
 	const overrides = new SessionOverrides(serviceRegistry);
@@ -200,15 +221,41 @@ export async function createProjectRelay(
 		}
 	}
 
-	// ── Session status poller (polls GET /session/status for processing indicators) ──
+	// ── SQLite read query service (reads from projected tables) ──
+	// Created early so it can be shared with the status poller and handler deps.
+	const readQuery = config.persistence
+		? new ReadQueryService(config.persistence.db)
+		: undefined;
+
+	// ── Provider state service (resume cursor persistence) ──
+	const providerStateService = config.persistence
+		? new ProviderStateService(config.persistence.db)
+		: undefined;
+
+	// ── Session status reconciliation loop ──────────────────────────────────
+	// Background job that detects and corrects status mismatches between
+	// the projected SQLite state and OpenCode's REST API. Default interval
+	// is 7s (was 500ms when this was a real-time polling source).
 	const statusPoller: SessionStatusPoller = new SessionStatusPoller(
 		serviceRegistry,
 		{
-			client,
-			interval: config.statusPollerInterval ?? 500,
+			client: api,
+			...(config.statusPollerInterval != null && {
+				interval: config.statusPollerInterval,
+			}),
 			log: statusLog,
 			getSessionParentMap: (): Map<string, string> =>
 				sessionMgr.getSessionParentMap(),
+			...(readQuery != null && {
+				readQuery,
+				sqliteReader: new SessionStatusSqliteReader(readQuery),
+			}),
+			...(config.persistence != null && {
+				persistence: {
+					eventStore: config.persistence.eventStore,
+					projectionRunner: config.persistence.projectionRunner,
+				},
+			}),
 		},
 	);
 
@@ -218,7 +265,7 @@ export async function createProjectRelay(
 	// ── Message poller manager (REST fallback for CLI sessions without SSE events) ──
 	// Manages multiple pollers concurrently — one per busy session.
 	const pollerManager = new MessagePollerManager(serviceRegistry, {
-		client,
+		client: api,
 		log: pollerMgrLog,
 		hasViewers: (sid: string) => registry.hasViewers(sid),
 		...(config.messagePollerInterval != null && {
@@ -235,12 +282,12 @@ export async function createProjectRelay(
 	// pty_close (tab X button) or upstream disconnect.
 
 	const ptyManager = new PtyManager({ log: ptyLog });
-	const pendingUserMessages = new PendingUserMessages();
 
 	// ── Health check ────────────────────────────────────────────────────────
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	await client.getHealth();
+	// Health check — use /path endpoint as a lightweight reachability probe
+	await api.app.path();
 	log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`);
 
 	// Seed defaultModel from OpenCode's project config (opencode.jsonc) if no
@@ -250,7 +297,7 @@ export async function createProjectRelay(
 	if (!overrides.defaultModel) {
 		try {
 			if (config.signal?.aborted) throw new Error("Relay creation aborted");
-			const ocConfig = await client.getConfig();
+			const ocConfig = await api.config.get();
 			const configModel =
 				typeof ocConfig?.["model"] === "string" ? ocConfig["model"] : "";
 			if (configModel) {
@@ -297,23 +344,32 @@ export async function createProjectRelay(
 	const ptyDeps: PtyUpstreamDeps = {
 		ptyManager,
 		wsHandler,
-		client,
+		client: api,
 		opencodeUrl: config.opencodeUrl,
 		log: ptyLog,
 		WebSocketClass,
 	};
 
+	// ── Claude event persistence (reuses existing persistence layer) ──────
+	const claudeEventPersist = config.persistence
+		? (() => {
+				const seeder = new SessionSeeder(config.persistence.db);
+				return {
+					eventStore: config.persistence.eventStore,
+					projectionRunner: config.persistence.projectionRunner,
+					ensureSession: (sid: string) => seeder.ensureSession(sid, "claude"),
+				};
+			})()
+		: undefined;
+
 	// ── Handler deps wiring (G1: client init, message queue, rate limiter) ──
 	const { rateLimiter } = wireHandlerDeps({
 		wsHandler,
-		client,
+		client: api,
 		sessionMgr,
-		messageCache,
-		pendingUserMessages,
 		permissionBridge,
 		overrides,
 		ptyManager,
-		toolContentStore,
 		config,
 		log,
 		wsLog,
@@ -321,15 +377,35 @@ export async function createProjectRelay(
 		registry,
 		pollerManager,
 		ptyDeps,
+		...(readQuery != null && { readQuery }),
+		orchestrationLayer: orchestration,
+		...(claudeEventPersist != null && { claudeEventPersist }),
+		...(providerStateService != null && { providerStateService }),
 	});
 
-	// ── SSE consumer ────────────────────────────────────────────────────────
+	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────
 
-	const sseConsumer = new SSEConsumer(serviceRegistry, {
-		baseUrl: config.opencodeUrl,
-		authHeaders: client.getAuthHeaders(),
+	const sseStream = new SSEStream(serviceRegistry, {
+		api,
 		log: sseLog,
 	});
+
+	// ── Run projector recovery (required before projectEvent works) ──────
+	// ProjectionRunner guards projectEvent() behind a recovery check.
+	// Without this call, all projections silently fail (caught by try/catch
+	// in DualWriteHook and RelayEventSink) and the messages table stays empty.
+	if (config.persistence) {
+		config.persistence.projectionRunner.recover();
+	}
+
+	// ── Dual-write hook (SSE → SQLite event store) ──────────────────────
+	let dualWriteHook: DualWriteHook | undefined;
+	if (config.persistence) {
+		dualWriteHook = new DualWriteHook({
+			persistence: config.persistence,
+			log: log.child("dual-write"),
+		});
+	}
 
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
 
@@ -342,28 +418,33 @@ export async function createProjectRelay(
 		{
 			translator,
 			sessionMgr,
-			messageCache,
-			pendingUserMessages,
 			permissionBridge,
 			overrides,
-			toolContentStore,
 			wsHandler,
 			...(config.pushManager != null && { pushManager: config.pushManager }),
 			log: sseLog,
 			pipelineLog,
 			getSessionStatuses: () => statusPoller.getCurrentStatuses(),
 			getSessionParentMap: () => sessionMgr.getSessionParentMap(),
-			listPendingQuestions: () => client.listPendingQuestions(),
-			listPendingPermissions: () => client.listPendingPermissions(),
+			listPendingQuestions: () => api.question.list(),
+			listPendingPermissions: () => api.permission.list(),
 			statusPoller,
 			slug: config.slug,
 			onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
+			...(dualWriteHook != null && { dualWriteHook }),
 		},
-		sseConsumer,
+		sseStream,
 	);
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	await sseConsumer.connect();
+	await sseStream.connect();
+
+	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
+	// Resolves the deferred promise in OpenCodeAdapter.sendTurn() when a
+	// session transitions to idle, allowing the engine dispatch to complete.
+	orchestration.wireSSEToAdapter((event, handler) => {
+		sseStream.on(event, handler);
+	});
 
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
 	const {
@@ -373,16 +454,14 @@ export async function createProjectRelay(
 		setMonitoringState,
 		recordDoneDelivered: bindDoneDelivered,
 	} = wireMonitoring({
-		client,
+		client: api,
 		wsHandler,
 		sessionMgr,
 		overrides,
-		toolContentStore,
-		messageCache,
 		statusPoller,
 		pollerManager,
 		registry,
-		sseConsumer,
+		sseStream,
 		config: {
 			...(config.pollerGatingConfig != null && {
 				pollerGatingConfig: config.pollerGatingConfig,
@@ -402,7 +481,7 @@ export async function createProjectRelay(
 	wireSessionLifecycle({
 		sessionMgr,
 		wsHandler,
-		client,
+		client: api,
 		translator,
 		pollerManager,
 		statusPoller,
@@ -415,9 +494,8 @@ export async function createProjectRelay(
 	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
 	wirePollers({
 		pollerManager,
-		sseConsumer,
+		sseStream,
 		statusPoller,
-		pendingUserMessages,
 		wsHandler,
 		sessionMgr,
 		pipelineDeps,
@@ -441,12 +519,13 @@ export async function createProjectRelay(
 
 	return {
 		wsHandler,
-		sseConsumer,
-		client,
+		sseStream,
+		client: api,
 		sessionMgr,
 		translator,
 		permissionBridge,
-		messageCache,
+		orchestration,
+		...(config.persistence ? { persistence: config.persistence } : {}),
 
 		isAnySessionProcessing() {
 			const statuses = statusPoller.getCurrentStatuses();
@@ -456,21 +535,18 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
-			// 1. Stop event sources (prevents new events from being cached)
-			await sseConsumer.disconnect();
+			// 1. Stop event sources
+			await sseStream.disconnect();
 			pollerManager.stopAll();
 			statusPoller.stop();
-			try {
-				// 2. Flush all pending cache writes to disk
-				await messageCache.flush();
-			} finally {
-				// 3. Clean up remaining resources (must run even if flush fails)
-				clearInterval(timeoutTimer);
-				clearInterval(rateLimitCleanupTimer);
-				overrides.dispose();
-				ptyManager.closeAll();
-				wsHandler.close();
-			}
+			// 2. Shut down orchestration engine (rejects pending turns)
+			await orchestration.engine.shutdown();
+			// 3. Clean up remaining resources
+			clearInterval(timeoutTimer);
+			clearInterval(rateLimitCleanupTimer);
+			overrides.dispose();
+			ptyManager.closeAll();
+			wsHandler.close();
 		},
 	};
 }
@@ -700,12 +776,11 @@ export async function createRelayStack(
 	return {
 		server,
 		wsHandler: relay.wsHandler,
-		sseConsumer: relay.sseConsumer,
+		sseStream: relay.sseStream,
 		client: relay.client,
 		sessionMgr: relay.sessionMgr,
 		translator: relay.translator,
 		permissionBridge: relay.permissionBridge,
-		messageCache: relay.messageCache,
 
 		getPort() {
 			const addr = httpServer.address();

@@ -94,6 +94,18 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 	private readonly heartbeatInterval: number;
 	/** Per-tab session tracking: delegates to shared SessionRegistry */
 	private readonly registry: SessionRegistry;
+	/**
+	 * Phase 0b: session_list-first invariant.
+	 *
+	 * Tracks which clients have received their initial `session_list` (and any
+	 * other bootstrap messages). Until a client is marked bootstrapped, any
+	 * per-session events delivered via {@link broadcastPerSessionEvent} are
+	 * buffered in {@link bootstrapQueues} and flushed on
+	 * {@link markClientBootstrapped}. This eliminates the race where a fresh
+	 * connection sees a per-session event before it knows the session exists.
+	 */
+	private readonly bootstrappedClients: Set<string> = new Set();
+	private readonly bootstrapQueues: Map<string, string[]> = new Map();
 
 	constructor(
 		registry: ServiceRegistry,
@@ -194,7 +206,16 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 			.filter((cid) => this.clients.has(cid));
 	}
 
-	/** Send a message to all clients viewing a specific session */
+	/**
+	 * Send a message to all clients viewing a specific session.
+	 *
+	 * Retained for status-only viewer-scoped sends (e.g.
+	 * `sendStatusToSession` in monitoring-wiring). Under Phase 0b, per-session
+	 * chat events no longer go through this method — use
+	 * {@link broadcastPerSessionEvent} instead so every client on this
+	 * handler (i.e., every client on the project's `/p/<slug>`) receives the
+	 * event regardless of which session they are actively viewing.
+	 */
 	sendToSession(sessionId: string, message: RelayMessage): void {
 		const data = JSON.stringify(message);
 		for (const clientId of this.registry.getViewers(sessionId)) {
@@ -202,6 +223,73 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 			if (wsConn && wsConn.readyState === WS_OPEN) {
 				wsConn.send(data);
 			}
+		}
+	}
+
+	/**
+	 * Phase 0b: project-scoped per-session event firehose.
+	 *
+	 * Delivers `message` to every client connected to this handler — all
+	 * clients on the same project's `/p/<slug>`. Delivery is not gated by
+	 * `view_session`; the client-side dispatcher routes by `sessionId`.
+	 *
+	 * Bootstrap-race guarantee: clients that have not yet received their
+	 * initial `session_list` are not eligible recipients. Their events are
+	 * buffered per-client in {@link bootstrapQueues} and flushed in order
+	 * when {@link markClientBootstrapped} is called. This preserves the
+	 * invariant that `session_list` arrives before any `PerSessionEvent` on
+	 * a fresh connection.
+	 *
+	 * Per-session ordering: events produced in a given order are delivered in
+	 * that order to every client. Cross-session interleaving is not
+	 * constrained — events for different sessions may appear in different
+	 * relative orders at different clients (acceptable per plan §Phase 0b).
+	 *
+	 * @param _sessionId - Currently only used for logging/telemetry; routing
+	 *   is by project (this handler) rather than per-session. The parameter
+	 *   is retained so call sites stay explicit about the session they're
+	 *   broadcasting for and so future gating (presence, per-session backpressure)
+	 *   can be layered in without signature churn.
+	 */
+	broadcastPerSessionEvent(_sessionId: string, message: RelayMessage): void {
+		const data = JSON.stringify(message);
+		for (const [clientId, wsConn] of this.clients) {
+			if (!this.bootstrappedClients.has(clientId)) {
+				// Still bootstrapping — hold until markClientBootstrapped flushes.
+				let queue = this.bootstrapQueues.get(clientId);
+				if (!queue) {
+					queue = [];
+					this.bootstrapQueues.set(clientId, queue);
+				}
+				queue.push(data);
+				continue;
+			}
+			if (wsConn.readyState === WS_OPEN) {
+				wsConn.send(data);
+			}
+		}
+	}
+
+	/**
+	 * Phase 0b: mark a client as having completed its initial handshake.
+	 *
+	 * Called by bootstrap code (e.g. `handleClientConnected`) AFTER the
+	 * initial `session_list` has been dispatched. Flushes any per-session
+	 * events buffered in {@link bootstrapQueues} for this client, preserving
+	 * the order they were produced.
+	 *
+	 * Idempotent — calling twice is a no-op.
+	 */
+	markClientBootstrapped(clientId: string): void {
+		if (this.bootstrappedClients.has(clientId)) return;
+		this.bootstrappedClients.add(clientId);
+		const queue = this.bootstrapQueues.get(clientId);
+		this.bootstrapQueues.delete(clientId);
+		if (!queue || queue.length === 0) return;
+		const wsConn = this.clients.get(clientId);
+		if (!wsConn || wsConn.readyState !== WS_OPEN) return;
+		for (const data of queue) {
+			wsConn.send(data);
 		}
 	}
 
@@ -228,6 +316,8 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 
 		this.clients.clear();
 		this.registry.clear();
+		this.bootstrappedClients.clear();
+		this.bootstrapQueues.clear();
 		this.wss.close();
 	}
 
@@ -285,6 +375,9 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 		// Handle close
 		wsConn.on("close", () => {
 			this.clients.delete(clientId);
+			// Drop any bootstrap state — no point flushing to a closed connection.
+			this.bootstrappedClients.delete(clientId);
+			this.bootstrapQueues.delete(clientId);
 			// Remove client from registry — returns the session they were viewing
 			// so the client_disconnected handler can access it.
 			const sessionId = this.registry.removeClient(clientId);
@@ -316,7 +409,7 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 		if (!parsed) {
 			// Invalid JSON — send error but don't disconnect (AC7)
 			this.sendTo(clientId, {
-				type: "error",
+				type: "system_error",
 				code: "PARSE_ERROR",
 				message: "Could not parse message as JSON",
 			});
@@ -328,7 +421,7 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 		if (isRouteError(result)) {
 			// Unknown message type — send error but don't disconnect (AC7)
 			this.sendTo(clientId, {
-				type: "error",
+				type: "system_error",
 				code: result.code,
 				message: result.message,
 			});
@@ -348,8 +441,10 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 			for (const [clientId, wsConn] of this.clients) {
 				const aliveWs = wsConn as WSType & { isAlive: boolean };
 				if (!aliveWs.isAlive) {
-					// Dead connection — terminate
+					// Dead connection — terminate and drop all per-client state.
 					this.clients.delete(clientId);
+					this.bootstrappedClients.delete(clientId);
+					this.bootstrapQueues.delete(clientId);
 					const count = this.tracker.removeClient(clientId);
 					this.emit("client_disconnected", { clientId, clientCount: count });
 					this.broadcast(createClientCountMessage(count));

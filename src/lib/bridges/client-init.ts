@@ -9,9 +9,10 @@
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
-import type { OpenCodeClient } from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
-import type { MessageCache } from "../relay/message-cache.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
+import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
@@ -31,10 +32,15 @@ export interface ClientInitDeps {
 		broadcast: (msg: RelayMessage) => void;
 		sendTo: (clientId: string, msg: RelayMessage) => void;
 		setClientSession: (clientId: string, sessionId: string) => void;
+		/**
+		 * Phase 0b: called after the initial `session_list` has been
+		 * dispatched so that any per-session events buffered during bootstrap
+		 * are flushed to the client in the order they were produced.
+		 */
+		markClientBootstrapped: (clientId: string) => void;
 	};
-	client: OpenCodeClient;
+	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
 	permissionBridge: Pick<PermissionBridge, "getPending" | "recoverPending">;
@@ -47,6 +53,10 @@ export interface ClientInitDeps {
 	getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Optional supplier of cached update version (for replaying to new clients) */
 	getCachedUpdate?: () => string | null;
+	/** Optional orchestration engine for Claude SDK model discovery */
+	orchestrationEngine?: OrchestrationEngine;
+	/** SQLite read query service (optional — absent when persistence is not configured) */
+	readQuery?: ReadQueryService;
 	log: Logger;
 }
 
@@ -76,7 +86,6 @@ export async function handleClientConnected(
 		wsHandler,
 		client,
 		sessionMgr,
-		messageCache,
 		overrides,
 		ptyManager,
 		permissionBridge,
@@ -86,7 +95,7 @@ export async function handleClientConnected(
 		deps.log.warn(`${prefix}: ${formatErrorDetail(err)}`);
 		wsHandler.sendTo(
 			clientId,
-			RelayError.fromCaught(err, "INIT_FAILED", prefix).toMessage(),
+			RelayError.fromCaught(err, "INIT_FAILED", prefix).toSystemError(),
 		);
 	};
 
@@ -102,15 +111,13 @@ export async function handleClientConnected(
 		// adds new required fields that this object doesn't provide.
 		await switchClientToSession(
 			{
-				messageCache,
 				sessionMgr,
 				wsHandler,
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
+				overrides,
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
-				forkMeta: {
-					getForkEntry: (sid: string) => sessionMgr.getForkEntry(sid),
-				},
+				...(deps.readQuery != null && { readQuery: deps.readQuery }),
 			} satisfies SessionSwitchDeps,
 			clientId,
 			activeId,
@@ -119,7 +126,7 @@ export async function handleClientConnected(
 
 		// Send model/agent info from the active session
 		try {
-			const session = await client.getSession(activeId);
+			const session = await client.session.get(activeId);
 			if (session.modelID) {
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
@@ -151,6 +158,10 @@ export async function handleClientConnected(
 	}
 
 	// ── Session list ─────────────────────────────────────────────────────
+	// Phase 0b: session_list-first invariant — emit the initial session_list
+	// before marking the client bootstrapped. Any per-session events that
+	// fired on the project firehose during bootstrap are buffered
+	// per-client by WebSocketHandler and flushed by markClientBootstrapped.
 	try {
 		const statuses = deps.statusPoller?.getCurrentStatuses();
 		await sessionMgr.sendDualSessionLists(
@@ -159,6 +170,11 @@ export async function handleClientConnected(
 		);
 	} catch (err) {
 		sendInitError(err, "Failed to list sessions");
+	} finally {
+		// Mark bootstrapped even if session_list failed — otherwise the
+		// client's queue would grow unbounded. A failed bootstrap still
+		// emits INIT_FAILED, and the frontend handles the error path.
+		wsHandler.markClientBootstrapped(clientId);
 	}
 
 	// ── Pending permissions + questions (reconnect replay) ───────────────
@@ -178,7 +194,7 @@ export async function handleClientConnected(
 	// Then fetch from the API to recover any permissions the bridge missed
 	// (e.g. relay restart, SSE event lost). Dedup against already-sent IDs.
 	try {
-		const apiPermissions = await client.listPendingPermissions();
+		const apiPermissions = await client.permission.list();
 		const newPerms = apiPermissions.filter((p) => !sentPermissionIds.has(p.id));
 		if (newPerms.length > 0) {
 			const recovered = permissionBridge.recoverPending(
@@ -218,7 +234,7 @@ export async function handleClientConnected(
 	}
 	// Replay pending questions for the client's active session only
 	try {
-		const pendingQuestions = await client.listPendingQuestions();
+		const pendingQuestions = await client.question.list();
 		deps.log.debug(
 			`client=${clientId} listPendingQuestions returned ${pendingQuestions.length} question(s)${pendingQuestions.length > 0 ? `: ${JSON.stringify(pendingQuestions.map((q) => ({ id: q.id, hasQuestions: !!q["questions"], hasTool: !!q["tool"] })))}` : ""}`,
 		);
@@ -250,6 +266,7 @@ export async function handleClientConnected(
 			);
 			wsHandler.sendTo(clientId, {
 				type: "ask_user",
+				sessionId: qSessionId ?? activeId ?? "",
 				toolId: pq.id,
 				questions,
 				...(toolCallId ? { toolUseId: toolCallId } : {}),
@@ -263,7 +280,7 @@ export async function handleClientConnected(
 
 	// ── Agent list (filter out internal agents) ──────────────────────────
 	try {
-		const rawAgents = await client.listAgents();
+		const rawAgents = await client.app.agents();
 		const agents = filterAgents(rawAgents);
 		wsHandler.sendTo(clientId, { type: "agent_list", agents });
 	} catch (err) {
@@ -272,7 +289,7 @@ export async function handleClientConnected(
 
 	// ── Provider/model list + auto-select default ────────────────────────
 	try {
-		const providerResult = await client.listProviders();
+		const providerResult = await client.provider.list();
 		const connectedSet = new Set(providerResult.connected);
 		const providers = providerResult.providers
 			.map((p) => ({
@@ -291,6 +308,41 @@ export async function handleClientConnected(
 				})),
 			}))
 			.filter((p) => p.configured);
+
+		// Merge Claude in-process models when the orchestration engine is available.
+		// Mirrors handleGetModels so the initial client_connected payload doesn't
+		// overwrite the merged list the client later receives from get_models.
+		//   "Anthropic - opencode" → routes via OpenCode REST API
+		//   "Anthropic - claude"  → routes via in-process Claude Agent SDK
+		if (deps.orchestrationEngine) {
+			try {
+				const claudeCaps = await deps.orchestrationEngine.dispatch({
+					type: "discover",
+					providerId: "claude",
+				});
+				if (claudeCaps.models.length > 0) {
+					for (const p of providers) {
+						if (p.id === "anthropic") {
+							p.name = "Anthropic - opencode";
+						}
+					}
+					providers.push({
+						id: "claude",
+						name: "Anthropic - claude",
+						configured: true,
+						models: claudeCaps.models.map((m) => ({
+							id: m.id,
+							name: m.name,
+							provider: "claude",
+							...(m.limit ? { limit: m.limit } : {}),
+						})),
+					});
+				}
+			} catch {
+				// Claude adapter may not be available — skip silently
+			}
+		}
+
 		wsHandler.sendTo(clientId, { type: "model_list", providers });
 
 		// Send variant info — current thinking level and available variants

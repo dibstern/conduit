@@ -32,6 +32,7 @@ import {
 	setLogFormat,
 	setLogLevel,
 } from "../logger.js";
+import { PersistenceLayer } from "../persistence/persistence-layer.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import { RequestRouter } from "../server/http-router.js";
 import type { PushNotificationManager } from "../server/push.js";
@@ -644,7 +645,6 @@ export class Daemon {
 						clients: relay?.wsHandler.getClientCount() ?? 0,
 						sessions:
 							relay?.sessionMgr.getLastKnownSessionCount() ||
-							relay?.messageCache.sessionCount() ||
 							this.persistedSessionCounts.get(project.slug) ||
 							0,
 						isProcessing: relay?.isAnySessionProcessing() ?? false,
@@ -926,10 +926,16 @@ export class Daemon {
 					`Low disk space warning: ${availableBytes / 1024 / 1024}MB available (threshold: ${thresholdBytes / 1024 / 1024}MB)`,
 				);
 
-				// Evict cached sessions to free memory/disk (up to 3 per relay)
-				const evicted = this.registry.evictOldestSessions(3);
-				for (const id of evicted) {
-					this.log.info(`Evicted cached session "${id}" to free disk space`);
+				// Trigger SQLite event-store eviction to free disk space
+				const summaries = this.registry.evictOldestSessions(3);
+				if (summaries.length > 0) {
+					for (const summary of summaries) {
+						this.log.info(`Eviction: ${summary}`);
+					}
+				} else {
+					this.log.info(
+						"Eviction triggered but no events were eligible for removal",
+					);
 				}
 			},
 		);
@@ -1163,9 +1169,16 @@ export class Daemon {
 		const discoveryLog = createLogger("relay").child("discovery");
 
 		try {
-			const { OpenCodeClient } = await import("../instance/opencode-client.js");
-			const client = new OpenCodeClient({ baseUrl: discoveryUrl });
-			const projects = await client.listProjects();
+			const { createSdkClient } = await import("../instance/sdk-factory.js");
+			const { client } = createSdkClient({ baseUrl: discoveryUrl });
+			const result = await client.project.list();
+			// SDK with throwOnError: false returns { data, error, response }
+			const projects =
+				(
+					result as {
+						data?: Array<{ id?: string; worktree?: string; path?: string }>;
+					}
+				).data ?? [];
 
 			let added = 0;
 			for (const p of projects) {
@@ -1221,7 +1234,6 @@ export class Daemon {
 			const relay = e.status === "ready" ? e.relay : undefined;
 			sessionCount +=
 				relay?.sessionMgr.getLastKnownSessionCount() ||
-				relay?.messageCache.sessionCount() ||
 				this.persistedSessionCounts.get(slug) ||
 				0;
 		}
@@ -1309,6 +1321,15 @@ export class Daemon {
 		opencodeUrl: string,
 	): (signal: AbortSignal) => Promise<ProjectRelay> {
 		return async (signal: AbortSignal) => {
+			// ── SQLite persistence for event store + projections ──────────
+			const conduitDir = resolve(project.directory, ".conduit");
+			mkdirSync(conduitDir, { recursive: true });
+			const dbPath = resolve(conduitDir, "events.db");
+			const persistence = PersistenceLayer.open(dbPath);
+			signal.addEventListener("abort", () => persistence.close(), {
+				once: true,
+			});
+
 			const { createProjectRelay } = await import("../relay/relay-stack.js");
 			return createProjectRelay({
 				// biome-ignore lint/style/noNonNullAssertion: safe — only called when httpServer is available
@@ -1362,6 +1383,7 @@ export class Daemon {
 							? this.versionChecker.getLatestVersion()
 							: null,
 				}),
+				persistence,
 			});
 		};
 	}
@@ -1482,10 +1504,7 @@ export class Daemon {
 			projects: this.getProjects().map((p) => {
 				const e = this.registry.get(p.slug);
 				const relay = e?.status === "ready" ? e.relay : undefined;
-				const sessionCount =
-					relay?.sessionMgr.getLastKnownSessionCount() ||
-					relay?.messageCache.sessionCount() ||
-					0;
+				const sessionCount = relay?.sessionMgr.getLastKnownSessionCount() || 0;
 				return {
 					path: p.directory,
 					slug: p.slug,
@@ -1621,7 +1640,6 @@ export class Daemon {
 							...project,
 							sessions:
 								relay?.sessionMgr.getLastKnownSessionCount() ||
-								relay?.messageCache.sessionCount() ||
 								this.persistedSessionCounts.get(project.slug) ||
 								0,
 							clients: relay?.wsHandler.getClientCount() ?? 0,

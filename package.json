@@ -60,6 +60,7 @@
 		"generate:media": "tsx scripts/generate-media/index.ts",
 		"check:storybook": "node scripts/check-storybook-health.mjs",
 		"test:all": "bash scripts/test-all.sh",
+		"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run --config vitest.e2e.config.ts",
 		"test:coverage": "vitest run --coverage",
 		"test:record-snapshots": "tsx test/e2e/scripts/record-snapshots.ts",
 		"prepublishOnly": "pnpm test:all",
@@ -68,6 +69,8 @@
 		"prepare": "lefthook install || true"
 	},
 	"dependencies": {
+		"@anthropic-ai/claude-agent-sdk": "^0.2.97",
+		"@opencode-ai/sdk": "^1.4.3",
 		"dompurify": "^3.3.1",
 		"ignore": "^7.0.5",
 		"jsdom": "^28.1.0",
@@ -115,7 +118,7 @@
 		"vitest": "^3.0.0"
 	},
 	"engines": {
-		"node": ">=20.19.0"
+		"node": ">=22.5.0"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": [

@@ -1,15 +1,16 @@
 <!-- ─── History Loader ─────────────────────────────────────────────────────── -->
 <!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
 <!-- Sends load_more_history requests; responses are handled by ws-dispatch -->
-<!-- which converts and prepends into chatState.messages. -->
+<!-- which converts and prepends into the session's message list. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
 	import {
 		consumeReplayBuffer,
+		currentChat,
+		getOrCreateSessionSlot,
 		getReplayBuffer,
-		historyState,
 		prependMessages,
 	} from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
@@ -32,8 +33,8 @@
 					for (const entry of entries) {
 						if (
 							entry.isIntersecting &&
-							historyState.hasMore &&
-							!historyState.loading
+							currentChat().historyHasMore &&
+							!currentChat().historyLoading
 						) {
 							loadMore();
 						}
@@ -50,10 +51,11 @@
 	});
 
 	function loadMore() {
+		const chat = currentChat();
 		if (
 			!sessionState.currentId ||
-			historyState.loading ||
-			!historyState.hasMore
+			chat.historyLoading ||
+			!chat.historyHasMore
 		)
 			return;
 
@@ -61,11 +63,12 @@
 		// After replay paging (commitReplayFinal), older messages may be in
 		// a local buffer — reading from it is instant (no network round-trip).
 		const sessionId = sessionState.currentId;
-		const buffer = getReplayBuffer(sessionId);
+		const slot = getOrCreateSessionSlot(sessionId);
+		const buffer = getReplayBuffer(slot.activity, slot.messages, sessionId);
 		if (buffer && buffer.length > 0) {
-			const page = consumeReplayBuffer(sessionId, HISTORY_PAGE_SIZE);
-			prependMessages(page);
-			const remaining = getReplayBuffer(sessionId);
+			const page = consumeReplayBuffer(slot.activity, slot.messages, sessionId, HISTORY_PAGE_SIZE);
+			prependMessages(slot.activity, slot.messages, page);
+			const remaining = getReplayBuffer(slot.activity, slot.messages, sessionId);
 			if (remaining !== undefined && remaining.length > 0) {
 				// Buffer still has messages — keep paging locally.
 				return;
@@ -77,19 +80,19 @@
 			// { messages: [], hasMore: false } when this truly is the beginning.
 			// Ensure offset > 0 so the server uses cursor-based pagination
 			// rather than returning the most recent page (already displayed).
-			if (historyState.messageCount === 0) {
-				historyState.messageCount = 1;
+			if (slot.messages.historyMessageCount === 0) {
+				slot.messages.historyMessageCount = 1;
 			}
 		}
 
 		// Server request for older messages.
-		historyState.loading = true;
+		slot.messages.historyLoading = true;
 		// offset = number of messages already loaded (tracked by ws-dispatch).
 		// For cache→server transitions, messageCount was seeded above.
 		wsSend({
 			type: "load_more_history",
 			sessionId,
-			offset: historyState.messageCount,
+			offset: slot.messages.historyMessageCount,
 		});
 	}
 </script>

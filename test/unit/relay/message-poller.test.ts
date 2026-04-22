@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
-import type { Message } from "../../../src/lib/instance/opencode-client.js";
+import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	buildSeedSnapshot,
@@ -23,7 +23,7 @@ const IDLE_TIMEOUT_MS = 5000;
 
 function createMockClient(messages: Message[] = []) {
 	return {
-		getMessages: vi.fn().mockResolvedValue(messages),
+		session: { messages: vi.fn().mockResolvedValue(messages) },
 	};
 }
 
@@ -114,12 +114,12 @@ describe("MessagePoller", () => {
 
 			// Immediate poll fires synchronously (as a microtask)
 			await vi.advanceTimersByTimeAsync(0);
-			expect(client.getMessages).toHaveBeenCalledTimes(1);
-			expect(client.getMessages).toHaveBeenCalledWith("sess_1");
+			expect(client.session.messages).toHaveBeenCalledTimes(1);
+			expect(client.session.messages).toHaveBeenCalledWith("sess_1");
 
 			// After one interval, second poll fires
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
-			expect(client.getMessages).toHaveBeenCalledTimes(2);
+			expect(client.session.messages).toHaveBeenCalledTimes(2);
 
 			poller.stopPolling();
 		});
@@ -130,7 +130,7 @@ describe("MessagePoller", () => {
 
 			poller.startPolling("sess_1");
 			await vi.advanceTimersByTimeAsync(0);
-			const callsBefore = client.getMessages.mock.calls.length;
+			const callsBefore = client.session.messages.mock.calls.length;
 
 			poller.stopPolling();
 
@@ -139,7 +139,7 @@ describe("MessagePoller", () => {
 
 			// No further polls after stop
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5);
-			expect(client.getMessages).toHaveBeenCalledTimes(callsBefore);
+			expect(client.session.messages).toHaveBeenCalledTimes(callsBefore);
 		});
 
 		it("isPolling() returns correct state", () => {
@@ -170,14 +170,14 @@ describe("MessagePoller", () => {
 
 			poller.startPolling("sess_1");
 			await vi.advanceTimersByTimeAsync(0);
-			const callsAfterFirst = client.getMessages.mock.calls.length;
+			const callsAfterFirst = client.session.messages.mock.calls.length;
 
 			// Start again for the same session — should be a no-op
 			poller.startPolling("sess_1");
 			await vi.advanceTimersByTimeAsync(0);
 
 			// No additional immediate poll from the second startPolling
-			expect(client.getMessages).toHaveBeenCalledTimes(callsAfterFirst);
+			expect(client.session.messages).toHaveBeenCalledTimes(callsAfterFirst);
 
 			poller.stopPolling();
 		});
@@ -197,7 +197,9 @@ describe("MessagePoller", () => {
 			// The immediate poll should target sess_2
 			await vi.advanceTimersByTimeAsync(0);
 			const lastCall =
-				client.getMessages.mock.calls[client.getMessages.mock.calls.length - 1];
+				client.session.messages.mock.calls[
+					client.session.messages.mock.calls.length - 1
+				];
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			expect(lastCall![0]).toBe("sess_2");
 
@@ -225,11 +227,12 @@ describe("MessagePoller", () => {
 				sessionID: "sess_1",
 				parts: [makeTextPart("p1", "Hello world")],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: "Hello world",
 				messageId: "msg_1",
 			});
@@ -254,7 +257,7 @@ describe("MessagePoller", () => {
 			events.length = 0;
 
 			// Text grows
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				makeMessage({
 					id: "msg_1",
 					sessionID: "sess_1",
@@ -265,6 +268,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: " world",
 				messageId: "msg_1",
 			});
@@ -310,11 +314,12 @@ describe("MessagePoller", () => {
 				role: "user",
 				parts: [makeTextPart("p1", "What is 2+2?")],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			expect(events).toContainEqual({
 				type: "user_message",
+				sessionId: "sess_1",
 				text: "What is 2+2?",
 			});
 
@@ -335,7 +340,7 @@ describe("MessagePoller", () => {
 				sessionID: "sess_1",
 				parts: [makeReasoningPart("p1", "Let me think...")],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			const thinkingStart = events.find((e) => e.type === "thinking_start");
@@ -343,10 +348,12 @@ describe("MessagePoller", () => {
 
 			expect(thinkingStart).toEqual({
 				type: "thinking_start",
+				sessionId: "sess_1",
 				messageId: "msg_1",
 			});
 			expect(thinkingDelta).toEqual({
 				type: "thinking_delta",
+				sessionId: "sess_1",
 				text: "Let me think...",
 				messageId: "msg_1",
 			});
@@ -375,11 +382,12 @@ describe("MessagePoller", () => {
 				sessionID: "sess_1",
 				parts: [makeToolPart("t1", "read", "pending")],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			expect(events).toContainEqual({
 				type: "tool_start",
+				sessionId: "sess_1",
 				id: "t1",
 				name: "Read",
 				messageId: "msg_1",
@@ -406,11 +414,12 @@ describe("MessagePoller", () => {
 					}),
 				],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			expect(events).toContainEqual({
 				type: "tool_executing",
+				sessionId: "sess_1",
 				id: "t1",
 				name: "Bash",
 				input: { command: "ls" },
@@ -438,7 +447,7 @@ describe("MessagePoller", () => {
 			events.length = 0;
 
 			// Now completed
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				makeMessage({
 					id: "msg_1",
 					sessionID: "sess_1",
@@ -454,6 +463,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "tool_result",
+				sessionId: "sess_1",
 				id: "t1",
 				content: "file contents",
 				is_error: false,
@@ -481,7 +491,7 @@ describe("MessagePoller", () => {
 			events.length = 0;
 
 			// Now errored
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				makeMessage({
 					id: "msg_1",
 					sessionID: "sess_1",
@@ -497,6 +507,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "tool_result",
+				sessionId: "sess_1",
 				id: "t1",
 				content: "command not found",
 				is_error: true,
@@ -526,7 +537,7 @@ describe("MessagePoller", () => {
 					}),
 				],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			const toolEvents = events.filter(
@@ -577,7 +588,7 @@ describe("MessagePoller", () => {
 				},
 				time: { created: 1000, completed: 2000 },
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			const resultEvent = events.find((e) => e.type === "result") as Extract<
@@ -621,7 +632,7 @@ describe("MessagePoller", () => {
 
 			poller.startPolling("sess_1");
 			await vi.advanceTimersByTimeAsync(0); // immediate poll
-			const callsAfterStart = client.getMessages.mock.calls.length;
+			const callsAfterStart = client.session.messages.mock.calls.length;
 
 			// Activate SSE
 			poller.notifySSEEvent("sess_1");
@@ -630,7 +641,7 @@ describe("MessagePoller", () => {
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2);
 
 			// No new REST calls while SSE is active
-			expect(client.getMessages).toHaveBeenCalledTimes(callsAfterStart);
+			expect(client.session.messages).toHaveBeenCalledTimes(callsAfterStart);
 
 			poller.stopPolling();
 		});
@@ -641,7 +652,7 @@ describe("MessagePoller", () => {
 
 			poller.startPolling("sess_1");
 			await vi.advanceTimersByTimeAsync(0); // immediate poll
-			const callsAfterStart = client.getMessages.mock.calls.length;
+			const callsAfterStart = client.session.messages.mock.calls.length;
 
 			// Activate SSE
 			poller.notifySSEEvent("sess_1");
@@ -652,7 +663,7 @@ describe("MessagePoller", () => {
 
 			// Advance one more poll interval — polling should resume
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
-			expect(client.getMessages.mock.calls.length).toBeGreaterThan(
+			expect(client.session.messages.mock.calls.length).toBeGreaterThan(
 				callsAfterStart,
 			);
 
@@ -684,16 +695,18 @@ describe("MessagePoller", () => {
 				sessionID: "sess_1",
 				parts: [makeTextPart("p1", "Hello world — SSE delivered this")],
 			});
-			client.getMessages.mockResolvedValue([updatedMsg]);
+			client.session.messages.mockResolvedValue([updatedMsg]);
 
 			// Wait for SSE silence
 			await vi.advanceTimersByTimeAsync(SSE_SILENCE_THRESHOLD_MS);
 
-			const callsBefore = client.getMessages.mock.calls.length;
+			const callsBefore = client.session.messages.mock.calls.length;
 
 			// First poll after SSE silence — should reseed, no events emitted
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
-			expect(client.getMessages.mock.calls.length).toBeGreaterThan(callsBefore);
+			expect(client.session.messages.mock.calls.length).toBeGreaterThan(
+				callsBefore,
+			);
 			expect(events).toHaveLength(0); // Reseed poll emits nothing
 
 			// Second poll after SSE silence — normal diffing, no new content
@@ -723,7 +736,7 @@ describe("MessagePoller", () => {
 				sessionID: "sess_1",
 				parts: [makeTextPart("p1", "Content delivered by SSE")],
 			});
-			client.getMessages.mockResolvedValue([deliveredMsg]);
+			client.session.messages.mockResolvedValue([deliveredMsg]);
 
 			// Wait for SSE silence
 			await vi.advanceTimersByTimeAsync(SSE_SILENCE_THRESHOLD_MS);
@@ -756,7 +769,7 @@ describe("MessagePoller", () => {
 				sessionID: "sess_2",
 				parts: [makeTextPart("p1", "New session content")],
 			});
-			client.getMessages.mockResolvedValue([msg]);
+			client.session.messages.mockResolvedValue([msg]);
 
 			poller.startPolling("sess_2");
 			await vi.advanceTimersByTimeAsync(0); // immediate poll (seeds for sess_2)
@@ -764,7 +777,7 @@ describe("MessagePoller", () => {
 			// First poll seeds for the new session (no events on seed poll).
 			// Verify: the poller should fetch messages and build a seed snapshot,
 			// NOT do a reseed (needsReseed was cleared by startPolling).
-			expect(client.getMessages).toHaveBeenLastCalledWith("sess_2");
+			expect(client.session.messages).toHaveBeenLastCalledWith("sess_2");
 
 			poller.stopPolling();
 		});
@@ -806,7 +819,7 @@ describe("MessagePoller", () => {
 			expect(poller.isPolling()).toBe(true);
 
 			// New content appears — should reset idle timer
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				makeMessage({
 					id: "msg_1",
 					sessionID: "sess_1",
@@ -917,7 +930,11 @@ describe("MessagePoller", () => {
 			poller.startPolling("sess_1");
 			poller.emitDone("sess_1");
 
-			expect(events).toContainEqual({ type: "done", code: 0 });
+			expect(events).toContainEqual({
+				type: "done",
+				sessionId: "sess_1",
+				code: 0,
+			});
 
 			poller.stopPolling();
 		});
@@ -953,7 +970,7 @@ describe("MessagePoller", () => {
 			await vi.advanceTimersByTimeAsync(0); // first poll succeeds
 
 			// Make next poll fail
-			client.getMessages.mockRejectedValue(new Error("network timeout"));
+			client.session.messages.mockRejectedValue(new Error("network timeout"));
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			// Error should be logged
@@ -965,9 +982,11 @@ describe("MessagePoller", () => {
 			expect(poller.isPolling()).toBe(true);
 
 			// Restore success and verify polling continues
-			client.getMessages.mockResolvedValue([]);
+			client.session.messages.mockResolvedValue([]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
-			expect(client.getMessages.mock.calls.length).toBeGreaterThanOrEqual(3);
+			expect(client.session.messages.mock.calls.length).toBeGreaterThanOrEqual(
+				3,
+			);
 
 			poller.stopPolling();
 		});
@@ -1111,7 +1130,7 @@ describe("MessagePoller", () => {
 			expect(events.filter((e) => e.type === "delta")).toHaveLength(0);
 
 			// New text appears on next poll
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				makeMessage({
 					id: "msg_1",
 					sessionID: "sess_1",
@@ -1123,6 +1142,7 @@ describe("MessagePoller", () => {
 			// Only the new suffix should be emitted
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: " world",
 				messageId: "msg_1",
 			});
@@ -1153,12 +1173,13 @@ describe("MessagePoller", () => {
 				sessionID: "sess_1",
 				parts: [makeTextPart("p2", "Response text")],
 			});
-			client.getMessages.mockResolvedValue([seedMsg, newMsg]);
+			client.session.messages.mockResolvedValue([seedMsg, newMsg]);
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
 
 			// New delta emitted for msg_2
 			expect(events).toContainEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: "Response text",
 				messageId: "msg_2",
 			});
@@ -1250,7 +1271,7 @@ describe("MessagePoller", () => {
 			});
 
 			// Restart poller WITHOUT seed — first poll auto-seeds (no events)
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				userMsg1,
 				assistantMsg1,
 				userMsg2,
@@ -1320,7 +1341,7 @@ describe("MessagePoller", () => {
 			const allMessages = [userMsg1, assistantMsg1, userMsg2, assistantMsg2];
 
 			// Restart poller WITH proper seed (all existing messages)
-			client.getMessages.mockResolvedValue(allMessages);
+			client.session.messages.mockResolvedValue(allMessages);
 
 			poller.startPolling("sess_1", allMessages);
 			await vi.advanceTimersByTimeAsync(0);
@@ -1336,7 +1357,7 @@ describe("MessagePoller", () => {
 				parts: [makeTextPart("p_a2", "The answer is 6. Want more math?")],
 			});
 
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				userMsg1,
 				assistantMsg1,
 				userMsg2,
@@ -1350,6 +1371,7 @@ describe("MessagePoller", () => {
 			expect(deltas).toHaveLength(1);
 			expect(deltas[0]).toEqual({
 				type: "delta",
+				sessionId: "sess_1",
 				text: " Want more math?",
 				messageId: "msg_a2",
 			});
@@ -1378,7 +1400,7 @@ describe("MessagePoller", () => {
 			expect(events.filter((e) => e.type === "thinking_delta")).toHaveLength(0);
 
 			// Reasoning grows
-			client.getMessages.mockResolvedValue([
+			client.session.messages.mockResolvedValue([
 				makeMessage({
 					id: "msg_1",
 					sessionID: "sess_1",
@@ -1389,6 +1411,7 @@ describe("MessagePoller", () => {
 
 			expect(events).toContainEqual({
 				type: "thinking_delta",
+				sessionId: "sess_1",
 				text: " and more",
 				messageId: "msg_1",
 			});
@@ -1411,7 +1434,7 @@ describe("MessagePoller", () => {
 
 			poller.startPolling("sess_1");
 			await vi.advanceTimersByTimeAsync(0); // immediate poll
-			const callsAfterStart = client.getMessages.mock.calls.length;
+			const callsAfterStart = client.session.messages.mock.calls.length;
 
 			// Drain the registry — should cancel the interval
 			await registry.drainAll();
@@ -1420,7 +1443,7 @@ describe("MessagePoller", () => {
 			await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5);
 
 			// No new REST calls after drain
-			expect(client.getMessages).toHaveBeenCalledTimes(callsAfterStart);
+			expect(client.session.messages).toHaveBeenCalledTimes(callsAfterStart);
 		});
 
 		it("registry registers the poller (size increases)", () => {

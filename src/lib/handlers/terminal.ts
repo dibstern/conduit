@@ -17,7 +17,7 @@ async function createAndConnectPty(
 	const session = resolveSessionForLog(deps, clientId);
 	let createResult: Record<string, unknown>;
 	try {
-		createResult = (await deps.client.createPty()) as Record<string, unknown>;
+		createResult = (await deps.client.pty.create()) as Record<string, unknown>;
 	} catch (createErr) {
 		deps.log.warn(
 			`client=${clientId} session=${session} Failed to create PTY: ${formatErrorDetail(createErr)}`,
@@ -28,7 +28,7 @@ async function createAndConnectPty(
 				createErr,
 				"PTY_CREATE_FAILED",
 				"Failed to create terminal",
-			).toMessage(),
+			).toSystemError(),
 		);
 		return;
 	}
@@ -42,7 +42,7 @@ async function createAndConnectPty(
 			clientId,
 			new RelayError("Terminal creation returned no ID", {
 				code: "PTY_CREATE_FAILED",
-			}).toMessage(),
+			}).toSystemError(),
 		);
 		return;
 	}
@@ -82,7 +82,7 @@ async function createAndConnectPty(
 				connectErr,
 				"PTY_CONNECT_FAILED",
 				"Failed to connect to terminal",
-			).toMessage(),
+			).toSystemError(),
 		);
 	}
 }
@@ -103,11 +103,11 @@ export async function handleTerminalCommand(
 		const ptyId = payload.ptyId ?? "";
 		if (ptyId) {
 			deps.ptyManager.closeSession(ptyId);
-			await deps.client.deletePty(ptyId);
+			await deps.client.pty.delete(ptyId);
 			deps.wsHandler.broadcast({ type: "pty_deleted", ptyId });
 		}
 	} else if (action === "list") {
-		const ptys = await deps.client.listPtys();
+		const ptys = await deps.client.pty.list();
 		deps.wsHandler.sendTo(clientId, {
 			type: "pty_list",
 			// The REST API returns full PTY objects; the index-typed return
@@ -169,7 +169,7 @@ export async function handlePtyResize(
 	const rows = payload.rows ?? 24;
 	if (ptyId) {
 		try {
-			await deps.client.resizePty(ptyId, cols, rows);
+			await deps.client.pty.resize(ptyId, rows, cols);
 		} catch (resizeErr) {
 			// Non-fatal — log but don't error to browser
 			deps.log.warn(
@@ -187,7 +187,7 @@ export async function handlePtyClose(
 	const { ptyId } = payload;
 	if (ptyId) {
 		deps.ptyManager.closeSession(ptyId);
-		await deps.client.deletePty(ptyId);
+		await deps.client.pty.delete(ptyId);
 		deps.wsHandler.broadcast({ type: "pty_deleted", ptyId });
 	}
 }

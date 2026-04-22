@@ -2,7 +2,6 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
 import type { Logger } from "./logger.js";
-import type { KnownOpenCodeEvent } from "./relay/opencode-events.js";
 import type { PushNotificationManager } from "./server/push.js";
 import type { PartType, PermissionId, ToolStatus } from "./shared-types.js";
 
@@ -12,11 +11,14 @@ export type {
 	AskUserQuestion,
 	CommandInfo,
 	FileEntry,
+	GlobalRelayEvent,
 	InstanceConfig,
 	InstanceStatus,
 	ModelInfo,
 	OpenCodeInstance,
 	PartType,
+	PerSessionEvent,
+	PerSessionEventType,
 	ProviderInfo,
 	PtyInfo,
 	PtyStatus,
@@ -26,24 +28,25 @@ export type {
 	TodoStatus,
 	ToolName,
 	ToolStatus,
+	UntaggedRelayMessage,
 	UsageInfo,
 } from "./shared-types.js";
+export { tagWithSessionId } from "./shared-types.js";
 
-/** OpenCode SSE event shape — structural base for all events */
-export interface BaseOpenCodeEvent {
-	type: string;
-	properties: Record<string, unknown>;
-}
+// ─── SSE Event Types ────────────────────────────────────────────────────────
+// Re-export SSEEvent as OpenCodeEvent for backward compatibility.
+// SSEEvent = SDK Event union + gap events (see relay/opencode-events.ts).
+// New code should import SSEEvent directly from relay/opencode-events.ts.
 
-// Composed union: every typed SSE event + the structural fallback for
-// unknown/future events.  Downstream consumers continue to import
-// `OpenCodeEvent`; the union is transparent.
-export type OpenCodeEvent = KnownOpenCodeEvent | BaseOpenCodeEvent;
+export type {
+	SSEEvent,
+	SSEEvent as OpenCodeEvent,
+} from "./relay/opencode-events.js";
 
 /** OpenCode global SSE event (wrapped) */
 export interface GlobalEvent {
 	directory: string;
-	payload: OpenCodeEvent;
+	payload: import("./relay/opencode-events.js").SSEEvent;
 }
 
 export interface PartState {
@@ -297,4 +300,6 @@ export interface ProjectRelayConfig {
 	 * Standalone/test usage works without it.
 	 */
 	registry?: import("./daemon/service-registry.js").ServiceRegistry;
+	/** Optional: shared PersistenceLayer for SQLite event store. */
+	persistence?: import("./persistence/persistence-layer.js").PersistenceLayer;
 }

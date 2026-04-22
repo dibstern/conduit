@@ -22,7 +22,7 @@ function broadcastInstanceList(deps: HandlerDeps): void {
  */
 function sendError(deps: HandlerDeps, clientId: string, message: string): void {
 	deps.wsHandler.sendTo(clientId, {
-		type: "error",
+		type: "system_error",
 		code: "INSTANCE_ERROR",
 		message,
 	});

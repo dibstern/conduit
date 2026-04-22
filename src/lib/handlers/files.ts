@@ -17,7 +17,7 @@ const ALWAYS_SKIP = new Set([".git", ".svn", ".hg"]);
 async function loadGitignore(deps: HandlerDeps): Promise<Ignore> {
 	const ig = ignore();
 	try {
-		const res = await deps.client.getFileContent(".gitignore");
+		const res = await deps.client.file.read(".gitignore");
 		if (res.content) ig.add(res.content);
 	} catch {
 		// No .gitignore or fetch failed — that's fine, use empty rules
@@ -34,7 +34,7 @@ export async function handleGetFileList(
 ): Promise<void> {
 	const dirPath = payload.path ?? ".";
 	const [files, ig] = await Promise.all([
-		deps.client.listDirectory(dirPath),
+		deps.client.file.list(dirPath),
 		loadGitignore(deps),
 	]);
 
@@ -62,7 +62,7 @@ export async function handleGetFileContent(
 ): Promise<void> {
 	const { path: filePath } = payload;
 	if (filePath) {
-		const result = await deps.client.getFileContent(filePath);
+		const result = await deps.client.file.read(filePath);
 		const binary = (result as { binary?: boolean }).binary;
 		deps.wsHandler.sendTo(clientId, {
 			type: "file_content",
@@ -92,7 +92,7 @@ export async function handleGetFileTree(
 			const next = queue.shift();
 			if (next === undefined) break;
 			const { dir, depth } = next;
-			const items = await deps.client.listDirectory(dir);
+			const items = await deps.client.file.list(dir);
 
 			for (const item of items) {
 				if (ALWAYS_SKIP.has(item.name)) continue;

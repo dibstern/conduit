@@ -15,7 +15,7 @@ export async function handleGetModels(
 	clientId: string,
 	_payload: PayloadMap["get_models"],
 ): Promise<void> {
-	const providerResult = await deps.client.listProviders();
+	const providerResult = await deps.client.provider.list();
 	const connectedSet = new Set(providerResult.connected);
 	const providers = providerResult.providers
 		.map((p) => ({
@@ -34,6 +34,42 @@ export async function handleGetModels(
 			})),
 		}))
 		.filter((p) => p.configured);
+
+	// Merge Claude in-process models when the orchestration engine is available.
+	// Both sets are shown so users can choose which backend handles the request:
+	//   "Anthropic - opencode" → routes via OpenCode REST API
+	//   "Anthropic - claude"  → routes via in-process Claude Agent SDK
+	if (deps.orchestrationEngine) {
+		try {
+			const claudeCaps = await deps.orchestrationEngine.dispatch({
+				type: "discover",
+				providerId: "claude",
+			});
+			if (claudeCaps.models.length > 0) {
+				// Rename "anthropic" provider to distinguish from SDK models
+				for (const p of providers) {
+					if (p.id === "anthropic") {
+						p.name = "Anthropic - opencode";
+					}
+				}
+
+				providers.push({
+					id: "claude",
+					name: "Anthropic - claude",
+					configured: true,
+					models: claudeCaps.models.map((m) => ({
+						id: m.id,
+						name: m.name,
+						provider: "claude",
+						...(m.limit ? { limit: m.limit } : {}),
+					})),
+				});
+			}
+		} catch {
+			// Claude adapter may not be available — skip silently
+		}
+	}
+
 	deps.wsHandler.sendTo(clientId, { type: "model_list", providers });
 
 	// Send model_info: prefer session's model, fall back to relay-side selection
@@ -41,7 +77,7 @@ export async function handleGetModels(
 	const activeId = resolveSession(deps, clientId);
 	if (activeId) {
 		try {
-			const session = await deps.client.getSession(activeId);
+			const session = await deps.client.session.get(activeId);
 			if (session.modelID) {
 				deps.wsHandler.sendTo(clientId, {
 					type: "model_info",
@@ -60,7 +96,7 @@ export async function handleGetModels(
 					err,
 					"MODEL_ERROR",
 					"Failed to get session model info",
-				).toMessage(),
+				).toMessage(activeId),
 			);
 		}
 	}
@@ -103,6 +139,17 @@ export async function handleGetModels(
 	});
 }
 
+/**
+ * Determines if a provider ID refers to the in-process Claude SDK adapter
+ * (not OpenCode's "anthropic" provider which proxies to Anthropic via
+ * OpenCode's own REST API). Only the literal "claude" provider ID
+ * routes through the ClaudeAdapter — all other providers (including
+ * "anthropic") route through OpenCodeAdapter.
+ */
+export function isClaudeProvider(providerId: string): boolean {
+	return providerId === "claude";
+}
+
 export async function handleSwitchModel(
 	deps: HandlerDeps,
 	clientId: string,
@@ -116,6 +163,14 @@ export async function handleSwitchModel(
 				providerID: providerId,
 				modelID: modelId,
 			});
+			// Bind session to the correct provider adapter so prompts route
+			// through the in-process Claude SDK or OpenCode as appropriate.
+			if (deps.orchestrationEngine) {
+				const providerAdapterId = isClaudeProvider(providerId)
+					? "claude"
+					: "opencode";
+				deps.orchestrationEngine.bindSession(clientSession, providerAdapterId);
+			}
 			deps.wsHandler.sendToSession(clientSession, {
 				type: "model_info",
 				model: modelId,
@@ -143,7 +198,7 @@ export async function handleSwitchModel(
 		const modelKey = `${providerId}/${modelId}`;
 		let availableVariants: string[] = [];
 		try {
-			const providerResult = await deps.client.listProviders();
+			const providerResult = await deps.client.provider.list();
 			for (const p of providerResult.providers) {
 				const m = (p.models ?? []).find((mod) => mod.id === modelId);
 				if (m?.variants) {
@@ -197,7 +252,7 @@ export async function handleSetDefaultModel(
 	// Also persist to OpenCode's project config (opencode.jsonc) so the
 	// setting survives independently of the relay's own settings file.
 	try {
-		await deps.client.updateConfig({ model: modelSpec });
+		await deps.client.config.update({ model: modelSpec });
 		await fixupConfigFile(deps.config.projectDir, deps.log);
 	} catch {
 		deps.log.warn("Failed to persist default model to OpenCode config");
@@ -213,7 +268,7 @@ export async function handleSetDefaultModel(
 
 	// Send variant_info for the new default model
 	try {
-		const providerResult = await deps.client.listProviders();
+		const providerResult = await deps.client.provider.list();
 		let availableVariants: string[] = [];
 		for (const p of providerResult.providers) {
 			const m = (p.models ?? []).find((mod) => mod.id === model);
@@ -273,7 +328,7 @@ export async function handleSwitchVariant(
 	let availableVariants: string[] = [];
 	if (activeModel) {
 		try {
-			const providerResult = await deps.client.listProviders();
+			const providerResult = await deps.client.provider.list();
 			for (const p of providerResult.providers) {
 				const m = (p.models ?? []).find(
 					(mod) => mod.id === activeModel.modelID,

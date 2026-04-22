@@ -102,6 +102,7 @@ describe("Async history conversion: correctness", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
+			sessionId: "s1",
 			history: {
 				messages,
 				hasMore: false,
@@ -138,6 +139,7 @@ describe("Async history conversion: correctness", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
+			sessionId: "s2",
 			history: {
 				messages,
 				hasMore: false,
@@ -167,7 +169,7 @@ describe("Async history conversion: correctness", () => {
 
 	it("history_page also converts correctly via async path", async () => {
 		// Seed with a session
-		handleMessage({ type: "session_switched", id: "s3" });
+		handleMessage({ type: "session_switched", id: "s3", sessionId: "s3" });
 
 		const messages: HistoryMessage[] = [
 			makeHistoryMessage("m1", "user", "older question"),
@@ -195,7 +197,11 @@ describe("Async history conversion: correctness", () => {
 describe("Async history conversion: abort handling", () => {
 	it("history_page sets loading=false even on abort (session switch during conversion)", async () => {
 		// Start with a session and set loading state
-		handleMessage({ type: "session_switched", id: "s-original" });
+		handleMessage({
+			type: "session_switched",
+			id: "s-original",
+			sessionId: "s-original",
+		});
 		historyState.loading = true;
 
 		// Send a large history_page that will take multiple chunks
@@ -212,7 +218,11 @@ describe("Async history conversion: abort handling", () => {
 		});
 
 		// Session switch mid-conversion: clearMessages bumps replayGeneration
-		handleMessage({ type: "session_switched", id: "s-new" });
+		handleMessage({
+			type: "session_switched",
+			id: "s-new",
+			sessionId: "s-new",
+		});
 
 		await vi.runAllTimersAsync();
 
@@ -235,6 +245,7 @@ describe("Async history conversion: abort handling", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s-first",
+			sessionId: "s-first",
 			history: {
 				messages: firstMessages,
 				hasMore: false,
@@ -245,6 +256,7 @@ describe("Async history conversion: abort handling", () => {
 		handleMessage({
 			type: "session_switched",
 			id: "s-second",
+			sessionId: "s-second",
 			history: {
 				messages: [makeHistoryMessage("m2", "user", "from second session")],
 				hasMore: false,

@@ -213,6 +213,7 @@ describe("Per-client session tracking", () => {
 		// Send to session-A only
 		handler.sendToSession("session-A", {
 			type: "delta",
+			sessionId: "s1",
 			text: "session-A update",
 		});
 
@@ -221,10 +222,12 @@ describe("Per-client session tracking", () => {
 		await c3.waitForMessages(2);
 		expect(c1.messages[3]).toEqual({
 			type: "delta",
+			sessionId: "s1",
 			text: "session-A update",
 		});
 		expect(c3.messages[1]).toEqual({
 			type: "delta",
+			sessionId: "s1",
 			text: "session-A update",
 		});
 
@@ -345,6 +348,7 @@ describe("Per-client session tracking", () => {
 		expect(() => {
 			handler.sendToSession("session-nobody", {
 				type: "delta",
+				sessionId: "s1",
 				text: "lost message",
 			});
 		}).not.toThrow();
@@ -356,15 +360,21 @@ describe("Per-client session tracking", () => {
 		const c1Before = c1.messages.length;
 		const c2Before = c2.messages.length;
 
-		handler.broadcast({ type: "delta", text: "broadcast check" });
+		handler.broadcast({
+			type: "delta",
+			sessionId: "s1",
+			text: "broadcast check",
+		});
 		await c1.waitForMessages(c1Before + 1);
 		await c2.waitForMessages(c2Before + 1);
 		expect(c1.messages[c1Before]).toEqual({
 			type: "delta",
+			sessionId: "s1",
 			text: "broadcast check",
 		});
 		expect(c2.messages[c2Before]).toEqual({
 			type: "delta",
+			sessionId: "s1",
 			text: "broadcast check",
 		});
 

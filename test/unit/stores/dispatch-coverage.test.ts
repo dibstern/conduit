@@ -1,11 +1,11 @@
 // ─── Dispatch Coverage ───────────────────────────────────────────────────────
-// Verifies that every CACHEABLE_EVENT_TYPE has a fixture and is handled by
+// Verifies that every PERSISTED_EVENT_TYPE has a fixture and is handled by
 // replayEvents() without error. This is the safety net for the dispatch
-// deduplication refactor: if a new cacheable type is added but not handled
+// deduplication refactor: if a new persisted type is added but not handled
 // by dispatchChatEvent(), this test will fail.
 //
 // Approach:
-//   1. Build a minimal fixture for each CACHEABLE_EVENT_TYPE
+//   1. Build a minimal fixture for each PERSISTED_EVENT_TYPE
 //   2. Replay the full fixture array
 //   3. Verify no errors and that all fixtures were processed
 //
@@ -49,10 +49,11 @@ import {
 	chatState,
 	clearMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { replayEvents } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
-	CACHEABLE_EVENT_TYPES,
-	type CacheableEventType,
+	PERSISTED_EVENT_TYPES,
+	type PersistedEventType,
 } from "../../../src/lib/relay/event-pipeline.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
@@ -60,6 +61,7 @@ import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
+	sessionState.currentId = "test-session";
 	clearMessages();
 	vi.useFakeTimers();
 });
@@ -79,35 +81,42 @@ async function replayValidated(events: RelayMessage[]): Promise<void> {
 }
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
-// Minimal fixture for each CACHEABLE_EVENT_TYPE. Sequenced to form a
+// Minimal fixture for each PERSISTED_EVENT_TYPE. Sequenced to form a
 // realistic session: user sends message → LLM thinks → streams text →
 // calls a tool → gets result → produces final result → completes.
 // Includes an error and a retry error for coverage.
 
 const FIXTURE_EVENTS: RelayMessage[] = [
 	// user_message
-	{ type: "user_message", text: "Hello" },
+	{ type: "user_message", sessionId: "s1", text: "Hello" },
 	// thinking_start
-	{ type: "thinking_start" },
+	{ type: "thinking_start", sessionId: "s1" },
 	// thinking_delta
-	{ type: "thinking_delta", text: "Let me think..." },
+	{ type: "thinking_delta", sessionId: "s1", text: "Let me think..." },
 	// thinking_stop
-	{ type: "thinking_stop" },
+	{ type: "thinking_stop", sessionId: "s1" },
 	// delta
-	{ type: "delta", text: "I'll help you with that." },
+	{ type: "delta", sessionId: "s1", text: "I'll help you with that." },
 	// tool_start
-	{ type: "tool_start", id: "tool-1", name: "Read" },
+	{ type: "tool_start", sessionId: "s1", id: "tool-1", name: "Read" },
 	// tool_executing
-	{ type: "tool_executing", id: "tool-1", name: "Read", input: undefined },
+	{
+		type: "tool_executing",
+		sessionId: "s1",
+		id: "tool-1",
+		name: "Read",
+		input: undefined,
+	},
 	// tool_result
 	{
 		type: "tool_result",
+		sessionId: "s1",
 		id: "tool-1",
 		content: "file contents here",
 		is_error: false,
 	},
 	// delta (second assistant segment after tool)
-	{ type: "delta", text: "Based on the file..." },
+	{ type: "delta", sessionId: "s1", text: "Based on the file..." },
 	// result
 	{
 		type: "result",
@@ -117,30 +126,40 @@ const FIXTURE_EVENTS: RelayMessage[] = [
 		sessionId: "test-session",
 	},
 	// done
-	{ type: "done", code: 0 },
+	{ type: "done", sessionId: "s1", code: 0 },
 	// error (retry — should NOT reset processing)
-	{ type: "user_message", text: "Follow-up" },
-	{ type: "error", code: "RETRY", message: "Rate limited, retrying..." },
+	{ type: "user_message", sessionId: "s1", text: "Follow-up" },
+	{
+		type: "error",
+		sessionId: "s1",
+		code: "RETRY",
+		message: "Rate limited, retrying...",
+	},
 	// delta after retry
-	{ type: "delta", text: "Retried response" },
+	{ type: "delta", sessionId: "s1", text: "Retried response" },
 	// error (fatal — resets processing)
-	{ type: "error", code: "FATAL", message: "Something went wrong" },
+	{
+		type: "error",
+		sessionId: "s1",
+		code: "FATAL",
+		message: "Something went wrong",
+	},
 ];
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("Dispatch coverage: every CACHEABLE_EVENT_TYPE handled by replay", () => {
-	it("fixture array covers every CACHEABLE_EVENT_TYPE", () => {
+describe("Dispatch coverage: every PERSISTED_EVENT_TYPE handled by replay", () => {
+	it("fixture array covers every PERSISTED_EVENT_TYPE", () => {
 		const fixtureTypes = new Set(FIXTURE_EVENTS.map((e) => e.type));
 		const missing: string[] = [];
-		for (const cacheableType of CACHEABLE_EVENT_TYPES) {
+		for (const cacheableType of PERSISTED_EVENT_TYPES) {
 			if (!fixtureTypes.has(cacheableType)) {
 				missing.push(cacheableType);
 			}
 		}
 		expect(
 			missing,
-			`Missing fixture for CACHEABLE_EVENT_TYPES: ${missing.join(", ")}`,
+			`Missing fixture for PERSISTED_EVENT_TYPES: ${missing.join(", ")}`,
 		).toHaveLength(0);
 	});
 
@@ -200,54 +219,56 @@ describe("Dispatch coverage: every CACHEABLE_EVENT_TYPE handled by replay", () =
 		// Test each type in isolation to catch type-specific handler crashes.
 		// Some types need a preceding event to be meaningful (e.g. thinking_delta
 		// needs thinking_start), so we wrap each in a minimal valid sequence.
-		const isolatedSequences: Record<CacheableEventType, RelayMessage[]> = {
-			user_message: [{ type: "user_message", text: "hi" }],
+		const isolatedSequences: Record<PersistedEventType, RelayMessage[]> = {
+			user_message: [{ type: "user_message", sessionId: "s1", text: "hi" }],
 			delta: [
-				{ type: "delta", text: "hello" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "hello" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			thinking_start: [
-				{ type: "thinking_start" },
-				{ type: "thinking_stop" },
-				{ type: "done", code: 0 },
+				{ type: "thinking_start", sessionId: "s1" },
+				{ type: "thinking_stop", sessionId: "s1" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			thinking_delta: [
-				{ type: "thinking_start" },
-				{ type: "thinking_delta", text: "hmm" },
-				{ type: "thinking_stop" },
-				{ type: "done", code: 0 },
+				{ type: "thinking_start", sessionId: "s1" },
+				{ type: "thinking_delta", sessionId: "s1", text: "hmm" },
+				{ type: "thinking_stop", sessionId: "s1" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			thinking_stop: [
-				{ type: "thinking_start" },
-				{ type: "thinking_stop" },
-				{ type: "done", code: 0 },
+				{ type: "thinking_start", sessionId: "s1" },
+				{ type: "thinking_stop", sessionId: "s1" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			tool_start: [
-				{ type: "tool_start", id: "t1", name: "Read" },
-				{ type: "done", code: 0 },
+				{ type: "tool_start", sessionId: "s1", id: "t1", name: "Read" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			tool_executing: [
-				{ type: "tool_start", id: "t2", name: "Read" },
+				{ type: "tool_start", sessionId: "s1", id: "t2", name: "Read" },
 				{
 					type: "tool_executing",
+					sessionId: "s1",
 					id: "t2",
 					name: "Read",
 					input: undefined,
 				},
-				{ type: "done", code: 0 },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			tool_result: [
-				{ type: "tool_start", id: "t3", name: "Read" },
+				{ type: "tool_start", sessionId: "s1", id: "t3", name: "Read" },
 				{
 					type: "tool_result",
+					sessionId: "s1",
 					id: "t3",
 					content: "ok",
 					is_error: false,
 				},
-				{ type: "done", code: 0 },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			result: [
-				{ type: "delta", text: "x" },
+				{ type: "delta", sessionId: "s1", text: "x" },
 				{
 					type: "result",
 					usage: { input: 10, output: 5, cache_read: 0, cache_creation: 0 },
@@ -255,13 +276,15 @@ describe("Dispatch coverage: every CACHEABLE_EVENT_TYPE handled by replay", () =
 					duration: 100,
 					sessionId: "test-session",
 				},
-				{ type: "done", code: 0 },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
 			done: [
-				{ type: "delta", text: "x" },
-				{ type: "done", code: 0 },
+				{ type: "delta", sessionId: "s1", text: "x" },
+				{ type: "done", sessionId: "s1", code: 0 },
 			],
-			error: [{ type: "error", code: "FATAL", message: "boom" }],
+			error: [
+				{ type: "error", sessionId: "s1", code: "FATAL", message: "boom" },
+			],
 		};
 
 		for (const [eventType, sequence] of Object.entries(isolatedSequences)) {

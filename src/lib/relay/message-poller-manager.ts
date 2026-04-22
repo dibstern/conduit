@@ -11,7 +11,8 @@
 
 import type { ServiceRegistry } from "../daemon/service-registry.js";
 import { TrackedService } from "../daemon/tracked-service.js";
-import type { Message, OpenCodeClient } from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
 import { MessagePoller } from "./message-poller.js";
@@ -24,7 +25,7 @@ export type MessagePollerManagerEvents = {
 };
 
 export interface MessagePollerManagerOptions {
-	client: Pick<OpenCodeClient, "getMessages">;
+	client: Pick<OpenCodeAPI, "session">;
 	log?: Logger;
 	interval?: number;
 	/** External viewer check — delegates to SessionRegistry */
@@ -35,7 +36,7 @@ export interface MessagePollerManagerOptions {
 
 export class MessagePollerManager extends TrackedService<MessagePollerManagerEvents> {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
-	private readonly client: Pick<OpenCodeClient, "getMessages">;
+	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly log: Logger;
 	private readonly interval?: number;
 	private readonly serviceRegistry: ServiceRegistry;

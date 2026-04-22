@@ -40,23 +40,23 @@ export function truncateIfNeeded(msg: RelayMessage): TruncateResult {
 	return { msg: truncated, fullContent };
 }
 
-/** Determine whether a message type should be cached for replay. */
+/** Determine whether a message type is persisted to the event store for replay. */
 export function shouldCache(
 	type: RelayMessage["type"],
-): type is CacheableEventType {
-	return CACHEABLE_TYPES.has(type);
+): type is PersistedEventType {
+	return PERSISTED_TYPES.has(type);
 }
 
 /**
- * Event types that are recorded to the message cache for replay.
+ * Event types that are persisted to the SQLite event store for replay.
  * Used to type-check test event arrays — if a test includes an event type
- * not in this list, it's fabricating data that wouldn't exist in the real cache.
+ * not in this list, it's fabricating data that wouldn't exist in the real store.
  *
  * NOTE: "status" is intentionally excluded. All status:processing events
  * are sent via wsHandler.sendToSession() directly (prompt.ts, relay-stack.ts,
  * session.ts, client-init.ts) — none flow through the event pipeline.
  */
-export const CACHEABLE_EVENT_TYPES = [
+export const PERSISTED_EVENT_TYPES = [
 	"user_message",
 	"delta",
 	"thinking_start",
@@ -70,18 +70,18 @@ export const CACHEABLE_EVENT_TYPES = [
 	"error",
 ] as const;
 
-export type CacheableEventType = (typeof CACHEABLE_EVENT_TYPES)[number];
+export type PersistedEventType = (typeof PERSISTED_EVENT_TYPES)[number];
 
-const CACHEABLE_TYPES: ReadonlySet<RelayMessage["type"]> = new Set(
-	CACHEABLE_EVENT_TYPES,
+const PERSISTED_TYPES: ReadonlySet<RelayMessage["type"]> = new Set(
+	PERSISTED_EVENT_TYPES,
 );
 
-// ─── Compile-time assertion: CACHEABLE_EVENT_TYPES ⊆ RelayMessage["type"] ──
-type _AssertCacheableSubset =
-	(typeof CACHEABLE_EVENT_TYPES)[number] extends RelayMessage["type"]
+// ─── Compile-time assertion: PERSISTED_EVENT_TYPES ⊆ RelayMessage["type"] ───
+type _AssertPersistedSubset =
+	(typeof PERSISTED_EVENT_TYPES)[number] extends RelayMessage["type"]
 		? true
-		: { error: "CACHEABLE_EVENT_TYPES has invalid types" };
-const _assertCacheableTypes: _AssertCacheableSubset = true;
+		: { error: "PERSISTED_EVENT_TYPES has invalid types" };
+const _assertPersistedTypes: _AssertPersistedSubset = true;
 
 /**
  * Event types that warrant a notification (sound/browser alert/push).
@@ -134,45 +134,52 @@ export function resolveTimeout(
 
 /** Dependencies for applying pipeline side effects. */
 export interface PipelineDeps {
-	toolContentStore: {
-		store(id: string, content: string, sessionId: string): void;
-	};
 	overrides: {
 		clearProcessingTimeout(sessionId: string): void;
 		resetProcessingTimeout(sessionId: string): void;
 	};
-	messageCache: { recordEvent(sessionId: string, msg: RelayMessage): void };
-	wsHandler: { sendToSession(sessionId: string, msg: RelayMessage): void };
+	/**
+	 * Phase 0b: per-session events are broadcast to every client on the
+	 * project's `/p/<slug>` regardless of `view_session` state. The
+	 * handler buffers events for clients still in bootstrap so that
+	 * `session_list` always arrives first — see
+	 * {@link WebSocketHandler.broadcastPerSessionEvent} and
+	 * {@link WebSocketHandler.markClientBootstrapped}.
+	 */
+	wsHandler: {
+		broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
+	};
 	log: Logger;
 }
 
 /**
  * Apply pipeline side effects based on PipelineResult decisions.
  * This is the single place where pipeline decisions become actions.
+ *
+ * Under Phase 0b the {@link PipelineResult.route} field still reflects
+ * viewer presence (`action: "send"` when at least one client called
+ * `view_session` on the target session, `action: "drop"` otherwise).
+ * That signal drives downstream notification logic (cross-session
+ * `notification_event` broadcasts fire only when no client is actively
+ * viewing), but it no longer gates delivery: every per-session event is
+ * sent to every connected client via `broadcastPerSessionEvent`.
  */
 export function applyPipelineResult(
 	result: PipelineResult,
 	sessionId: string | undefined,
 	deps: PipelineDeps,
 ): void {
-	if (
-		result.fullContent !== undefined &&
-		sessionId &&
-		result.msg.type === "tool_result"
-	) {
-		deps.toolContentStore.store(result.msg.id, result.fullContent, sessionId);
-	}
 	if (result.timeout === "clear" && sessionId) {
 		deps.overrides.clearProcessingTimeout(sessionId);
 	} else if (result.timeout === "reset" && sessionId) {
 		deps.overrides.resetProcessingTimeout(sessionId);
 	}
-	if (result.cache && sessionId) {
-		deps.messageCache.recordEvent(sessionId, result.msg);
+	// Phase 0b: always firehose to the project. The route field is retained
+	// as a "had-viewers?" signal for cross-session notification decisions.
+	if (sessionId) {
+		deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
 	}
-	if (result.route.action === "send") {
-		deps.wsHandler.sendToSession(result.route.sessionId, result.msg);
-	} else {
+	if (result.route.action === "drop") {
 		deps.log.info(
 			`${result.route.reason} — ${result.msg.type} (${result.source})`,
 		);

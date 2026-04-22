@@ -5,7 +5,7 @@ import {
 } from "../../../src/lib/bridges/client-init.js";
 import { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
-import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
+import type { OpenCodeEvent } from "../../../src/lib/types.js";
 import { createMockClientInitDeps } from "../../helpers/mock-factories.js";
 
 /** Cast a plain string to PermissionId for test data. */
@@ -47,42 +47,38 @@ const TEST_HISTORY = {
 
 /** Apply test-specific mock return values on top of shared factory defaults. */
 function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
-	vi.mocked(deps.client.listAgents).mockResolvedValue(TEST_AGENTS);
-	vi.mocked(deps.client.listProviders).mockResolvedValue(TEST_PROVIDERS);
+	vi.mocked(deps.client.app.agents).mockResolvedValue(TEST_AGENTS);
+	vi.mocked(deps.client.provider.list).mockResolvedValue(TEST_PROVIDERS);
 	vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockResolvedValue(
 		TEST_HISTORY,
 	);
 	return deps;
 }
 
-// ─── Session with cached events ──────────────────────────────────────────────
+// ─── Session with REST history ───────────────────────────────────────────────
+// MessageCache has been removed (Task 50.5). resolveSessionHistory now always
+// uses the REST path (sessionMgr.loadPreRenderedHistory) or SQLite.
 
-describe("handleClientConnected — session with cached events", () => {
-	it("sends session_switched with cached events when cache has chat content", async () => {
-		const cachedEvents: RelayMessage[] = [
-			{ type: "user_message", text: "hi" },
-			{ type: "delta", text: "hello" },
-		];
-		const deps = createMockClientInitDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(cachedEvents);
+describe("handleClientConnected — session with REST history", () => {
+	it("sends session_switched with REST history on connect", async () => {
+		const deps = applyTestDefaults(createMockClientInitDeps());
 
 		await handleClientConnected(deps, "client-1");
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
-			// Session is idle and cache has no done — synthetic done is appended
-			events: [...cachedEvents, { type: "done", code: 0 }],
+			sessionId: "session-1",
+			history: {
+				messages: [{ role: "user", content: "hi" }],
+				hasMore: false,
+				total: 1,
+			},
 		});
 	});
 
 	it("sends status idle after session_switched", async () => {
-		const cachedEvents: RelayMessage[] = [
-			{ type: "user_message", text: "hi" },
-			{ type: "delta", text: "hello" },
-		];
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(cachedEvents);
 
 		await handleClientConnected(deps, "client-1");
 
@@ -99,19 +95,18 @@ describe("handleClientConnected — session with cached events", () => {
 	});
 });
 
-// ─── Session with REST API fallback ──────────────────────────────────────────
+// ─── Session history — REST fallback and error handling ──────────────────────
 
-describe("handleClientConnected — REST API history fallback", () => {
-	it("sends session_switched with REST API history when cache misses", async () => {
+describe("handleClientConnected — REST API history", () => {
+	it("sends session_switched with REST API history", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
-		// Cache returns null — no events
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(null);
 
 		await handleClientConnected(deps, "client-1");
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
+			sessionId: "session-1",
 			history: {
 				messages: [{ role: "user", content: "hi" }],
 				hasMore: false,
@@ -120,9 +115,8 @@ describe("handleClientConnected — REST API history fallback", () => {
 		});
 	});
 
-	it("sends session_switched without data when REST API also fails", async () => {
+	it("sends session_switched without data when REST API fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(null);
 		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockRejectedValue(
 			new Error("REST fail"),
 		);
@@ -132,32 +126,8 @@ describe("handleClientConnected — REST API history fallback", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "session-1",
+			sessionId: "session-1",
 		});
-	});
-
-	it("uses REST fallback when cache has events but no chat content", async () => {
-		const deps = createMockClientInitDeps();
-		// Events exist but only non-chat types (e.g., status, done)
-		const nonChatEvents: RelayMessage[] = [
-			{ type: "status", status: "processing" },
-			{ type: "done", code: 0 },
-		];
-		vi.mocked(deps.messageCache.getEvents).mockResolvedValue(nonChatEvents);
-
-		await handleClientConnected(deps, "client-1");
-
-		// Should NOT include events (no chat content), should use REST fallback
-		expect(deps.sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
-			"session-1",
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "session_switched",
-				id: "session-1",
-				history: expect.any(Object),
-			}),
-		);
 	});
 });
 
@@ -178,10 +148,10 @@ describe("handleClientConnected — model info", () => {
 
 	it("sends model_info from overrides when session has no model", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.getSession).mockResolvedValue({
+		vi.mocked(deps.client.session.get).mockResolvedValue({
 			id: "s1",
 			modelID: "",
-		} as Awaited<ReturnType<typeof deps.client.getSession>>);
+		} as Awaited<ReturnType<typeof deps.client.session.get>>);
 		vi.mocked(deps.overrides.getModel).mockReturnValue({
 			providerID: "anthropic",
 			modelID: "claude-3",
@@ -198,7 +168,7 @@ describe("handleClientConnected — model info", () => {
 
 	it("sends overrides model_info as fallback when getSession fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.getSession).mockRejectedValue(
+		vi.mocked(deps.client.session.get).mockRejectedValue(
 			new Error("session fail"),
 		);
 		vi.mocked(deps.overrides.getModel).mockReturnValue({
@@ -211,7 +181,7 @@ describe("handleClientConnected — model info", () => {
 		// Should send INIT_FAILED error
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 		// And still send model_info from overrides
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
@@ -223,10 +193,10 @@ describe("handleClientConnected — model info", () => {
 
 	it("does not send model_info when neither session nor overrides have model", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.getSession).mockResolvedValue({
+		vi.mocked(deps.client.session.get).mockResolvedValue({
 			id: "s1",
 			modelID: "",
-		} as Awaited<ReturnType<typeof deps.client.getSession>>);
+		} as Awaited<ReturnType<typeof deps.client.session.get>>);
 		// overrides.model is already undefined by default
 
 		await handleClientConnected(deps, "client-1");
@@ -266,7 +236,7 @@ describe("handleClientConnected — session list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 	});
 });
@@ -287,7 +257,7 @@ describe("handleClientConnected — agent list", () => {
 
 	it("sends INIT_FAILED when listAgents throws", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.listAgents).mockRejectedValue(
+		vi.mocked(deps.client.app.agents).mockRejectedValue(
 			new Error("agents fail"),
 		);
 
@@ -295,7 +265,7 @@ describe("handleClientConnected — agent list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 	});
 });
@@ -355,7 +325,7 @@ describe("handleClientConnected — model list", () => {
 
 	it("sends INIT_FAILED when listProviders throws", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.listProviders).mockRejectedValue(
+		vi.mocked(deps.client.provider.list).mockRejectedValue(
 			new Error("providers fail"),
 		);
 
@@ -363,7 +333,7 @@ describe("handleClientConnected — model list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "error", code: "INIT_FAILED" }),
+			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
 	});
 });
@@ -384,6 +354,7 @@ describe("handleClientConnected — defaultModel priority", () => {
 					getVariant: vi.fn().mockReturnValue(""),
 					getModel: vi.fn().mockReturnValue(undefined),
 					defaultVariant: "",
+					hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 				} as unknown as ClientInitDeps["overrides"],
 			}),
 		);
@@ -413,6 +384,7 @@ describe("handleClientConnected — defaultModel priority", () => {
 					getVariant: vi.fn().mockReturnValue(""),
 					getModel: vi.fn().mockReturnValue(undefined),
 					defaultVariant: "",
+					hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 				} as unknown as ClientInitDeps["overrides"],
 			}),
 		);
@@ -627,7 +599,7 @@ describe("handleClientConnected — pending permissions", () => {
 describe("handleClientConnected — pending questions", () => {
 	it("sends pending questions to reconnecting client", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_tool1",
 				questions: [
@@ -650,6 +622,7 @@ describe("handleClientConnected — pending questions", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user",
+			sessionId: "session-1",
 			toolId: "que_tool1",
 			questions: [
 				{
@@ -692,7 +665,7 @@ describe("handleClientConnected — pending questions", () => {
 				timestamp: 1000,
 			},
 		]);
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_tool1",
 				questions: [
@@ -722,7 +695,7 @@ describe("handleClientConnected — pending questions", () => {
 
 	it("filters out questions from other sessions", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_this",
 				questions: [
@@ -769,7 +742,7 @@ describe("handleClientConnected — pending questions", () => {
 describe("handleClientConnected — error resilience", () => {
 	it("continues sending remaining data when getSession fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.getSession).mockRejectedValue(
+		vi.mocked(deps.client.session.get).mockRejectedValue(
 			new Error("session fail"),
 		);
 
@@ -792,12 +765,12 @@ describe("handleClientConnected — error resilience", () => {
 
 	it("does not crash when all API calls fail", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.getSession).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.client.session.get).mockRejectedValue(new Error("fail"));
 		vi.mocked(deps.sessionMgr.sendDualSessionLists).mockRejectedValue(
 			new Error("fail"),
 		);
-		vi.mocked(deps.client.listAgents).mockRejectedValue(new Error("fail"));
-		vi.mocked(deps.client.listProviders).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.client.app.agents).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.client.provider.list).mockRejectedValue(new Error("fail"));
 		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockRejectedValue(
 			new Error("fail"),
 		);
@@ -811,7 +784,7 @@ describe("handleClientConnected — error resilience", () => {
 		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
 		const errorCalls = sendToCalls.filter(
 			(c) =>
-				(c[1] as { type: string }).type === "error" &&
+				(c[1] as { type: string }).type === "system_error" &&
 				(c[1] as { code: string }).code === "INIT_FAILED",
 		);
 		expect(errorCalls.length).toBeGreaterThanOrEqual(3);
@@ -822,7 +795,7 @@ describe("handleClientConnected — error resilience", () => {
 // Previous tests use vi.fn() mocks for bridges. These tests use real
 // PermissionBridge instances to verify the actual data shape from getPending()
 // matches what handleClientConnected sends. Questions are now fetched via the
-// REST API (client.listPendingQuestions), so those tests use mock return values
+// REST API (client.question.list), so those tests use mock return values
 // in the API format (with `multiple` instead of `multiSelect`).
 
 describe("handleClientConnected — real bridges integration (Gap 3)", () => {
@@ -863,7 +836,7 @@ describe("handleClientConnected — real bridges integration (Gap 3)", () => {
 		const deps = createMockClientInitDeps();
 
 		// Mock the REST API to return a pending question in OpenCode's format
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "q-real-1",
 				questions: [
@@ -887,6 +860,7 @@ describe("handleClientConnected — real bridges integration (Gap 3)", () => {
 		// Verify the question was mapped correctly (multiple → multiSelect)
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "ask_user",
+			sessionId: "session-1",
 			toolId: "q-real-1",
 			questions: [
 				{
@@ -932,7 +906,7 @@ describe("handleClientConnected — real bridges integration (Gap 3)", () => {
 		});
 
 		// Mock the REST API to return 1 pending question
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "q-r1",
 				questions: [{ question: "Continue?", header: "Confirm" }],
@@ -970,7 +944,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 		// Bridge has nothing — simulates relay restart where bridge state is lost
 		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([]);
 		// But API has a pending permission
-		vi.mocked(deps.client.listPendingPermissions).mockResolvedValue([
+		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_api1",
 				sessionID: "ses-abc",
@@ -995,7 +969,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 		await handleClientConnected(deps, "client-1");
 
 		// Should call the API
-		expect(deps.client.listPendingPermissions).toHaveBeenCalled();
+		expect(deps.client.permission.list).toHaveBeenCalled();
 		// Should recover into bridge (sessionID mapped to sessionId for bridge)
 		expect(deps.permissionBridge.recoverPending).toHaveBeenCalledWith([
 			{
@@ -1031,7 +1005,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 			},
 		]);
 		// API returns a different permission (not in bridge)
-		vi.mocked(deps.client.listPendingPermissions).mockResolvedValue([
+		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_api2",
 				sessionID: "ses-2",
@@ -1081,7 +1055,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 			},
 		]);
 		// API also returns per_dup (same permission)
-		vi.mocked(deps.client.listPendingPermissions).mockResolvedValue([
+		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_dup",
 				sessionID: "ses-1",
@@ -1110,7 +1084,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 
 	it("gracefully handles API failure for permissions", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.listPendingPermissions).mockRejectedValue(
+		vi.mocked(deps.client.permission.list).mockRejectedValue(
 			new Error("API down"),
 		);
 		// Bridge still has a permission
@@ -1143,7 +1117,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 	it("maps API sessionID field to sessionId in recovered permissions", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([]);
-		vi.mocked(deps.client.listPendingPermissions).mockResolvedValue([
+		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_sess",
 				sessionID: "ses_325b9c3caffeFlhLvFRycK1ruF",
@@ -1192,6 +1166,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
+			sessionId: expect.any(String),
 			status: "processing",
 		});
 	});
@@ -1208,6 +1183,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
+			sessionId: expect.any(String),
 			status: "idle",
 		});
 	});
@@ -1237,6 +1213,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
+			sessionId: expect.any(String),
 			status: "idle",
 		});
 	});

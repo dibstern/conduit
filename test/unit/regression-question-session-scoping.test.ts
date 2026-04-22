@@ -62,18 +62,23 @@ describe("Regression: handleViewSession only sends questions for viewed session"
 				sendToSession: vi.fn(),
 			},
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "ses_A",
-					modelID: "claude-4",
-					providerID: "anthropic",
-				}),
-				listPendingQuestions: vi
-					.fn()
-					.mockResolvedValue([
-						makePendingQuestion("que_A1", "ses_A"),
-						makePendingQuestion("que_B1", "ses_B"),
-						makePendingQuestion("que_A2", "ses_A"),
-					]),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "ses_A",
+						modelID: "claude-4",
+						providerID: "anthropic",
+					}),
+				},
+				question: {
+					list: vi
+						.fn()
+						.mockResolvedValue([
+							makePendingQuestion("que_A1", "ses_A"),
+							makePendingQuestion("que_B1", "ses_B"),
+							makePendingQuestion("que_A2", "ses_A"),
+						]),
+				},
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_A"),
@@ -84,10 +89,10 @@ describe("Regression: handleViewSession only sends questions for viewed session"
 					total: 0,
 				}),
 			} as unknown as HandlerDeps["sessionMgr"],
-			messageCache: {
-				getEvents: vi.fn().mockReturnValue(null),
-			} as unknown as HandlerDeps["messageCache"],
-			overrides: { clear: vi.fn() } as unknown as HandlerDeps["overrides"],
+			overrides: {
+				clear: vi.fn(),
+				hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
+			} as unknown as HandlerDeps["overrides"],
 			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
 			log: createSilentLogger(),
 		});
@@ -125,6 +130,7 @@ describe("Regression: SSE ask_user events routed to session, not broadcast", () 
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "que_q1",
 			questions: [],
 		};
@@ -152,6 +158,7 @@ describe("Regression: SSE ask_user events routed to session, not broadcast", () 
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user_resolved",
+			sessionId: "s1",
 			toolId: "que_q1",
 		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -212,7 +219,7 @@ describe("Regression: client-init only sends questions for the client's active s
 	it("filters out questions from other sessions on initial connect", async () => {
 		const deps = createMockClientInitDeps();
 		// Default activeId from mock is "session-1"
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			makePendingQuestion("que_mine", "session-1"),
 			makePendingQuestion("que_other", "session-OTHER"),
 			makePendingQuestion("que_mine2", "session-1"),
@@ -235,7 +242,7 @@ describe("Regression: client-init only sends questions for the client's active s
 
 	it("sends questions with no sessionID (defensive — treats as matching)", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_no_session",
 				questions: [

@@ -3,7 +3,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import type { OpenCodeClient } from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
@@ -21,7 +21,7 @@ import type { createSessionSSETracker } from "./session-sse-tracker.js";
 export interface SessionLifecycleWiringDeps {
 	sessionMgr: SessionManager;
 	wsHandler: WebSocketHandler;
-	client: OpenCodeClient;
+	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
 	pollerManager: MessagePollerManager;
 	statusPoller: SessionStatusPoller;
@@ -65,7 +65,7 @@ export function wireSessionLifecycle(deps: SessionLifecycleWiringDeps): void {
 			deletedSessions.delete(sid); // clear stale flag from recycled IDs
 			const existingMessages = await rebuildTranslatorFromHistory(
 				translator,
-				(id) => client.getMessages(id),
+				(id) => client.session.messages(id),
 				sid,
 				sessionLog,
 			);

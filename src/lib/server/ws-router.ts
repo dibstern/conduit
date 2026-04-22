@@ -55,7 +55,8 @@ export type IncomingMessageType =
 	| "view_session"
 	| "proxy_detect"
 	| "scan_now"
-	| "set_log_level";
+	| "set_log_level"
+	| "reload_provider_session";
 
 const VALID_MESSAGE_TYPES = new Set<string>([
 	"message",
@@ -106,6 +107,7 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"proxy_detect",
 	"scan_now",
 	"set_log_level",
+	"reload_provider_session",
 ]);
 
 export interface IncomingMessage {

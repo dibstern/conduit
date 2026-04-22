@@ -1,6 +1,6 @@
 // ─── Agent Handlers ──────────────────────────────────────────────────────────
 
-import type { Agent } from "../instance/opencode-client.js";
+import type { Agent } from "../instance/sdk-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSessionForLog } from "./resolve-session.js";
 import type { HandlerDeps } from "./types.js";
@@ -55,7 +55,7 @@ export async function handleGetAgents(
 	clientId: string,
 	_payload: PayloadMap["get_agents"],
 ): Promise<void> {
-	const rawAgents = await deps.client.listAgents();
+	const rawAgents = await deps.client.app.agents();
 	const agents = filterAgents(rawAgents);
 	deps.wsHandler.sendTo(clientId, { type: "agent_list", agents });
 }

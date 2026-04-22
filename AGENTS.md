@@ -5,7 +5,7 @@ NEVER stash changes, you are interrupting other sessions and work.
 
 ## Purpose
 
-`conduit` is a web UI relay for OpenCode. It lets one long-lived relay daemon expose OpenCode sessions to browser clients across multiple projects.
+`conduit` is a web UI orchestrator for AI coding assistants. It lets one long-lived daemon expose sessions to browser clients across multiple projects. Provider adapters (OpenCode, Claude Agent SDK) are stateless execution engines that stream events into conduit's SQLite event store.
 
 ## Architecture At A Glance
 
@@ -13,18 +13,20 @@ NEVER stash changes, you are interrupting other sessions and work.
 - The CLI either runs a relay in-process with `foreground` or manages a long-lived `Daemon` over Unix socket IPC.
 - `src/lib/daemon/daemon.ts` owns process lifecycle, persisted config, the shared HTTP and IPC servers, project registration, and the OpenCode instance registry.
 - One daemon can host many projects. Each project gets its own relay stack mounted under `/p/<slug>`.
-- `src/lib/relay/relay-stack.ts` builds the per-project relay around `OpenCodeClient`, `SessionManager`, `SSEConsumer`, `WebSocketHandler`, caches, pollers, and PTY wiring.
+- `src/lib/relay/relay-stack.ts` builds the per-project relay around `OpenCodeClient`, `SessionManager`, `SSEConsumer`, `WebSocketHandler`, pollers, and PTY wiring.
 - `src/lib/server/*` handles the shared HTTP and WebSocket edge; `src/lib/handlers/*` dispatch browser messages into focused domain handlers.
-- OpenCode is the source of truth for sessions and messages. Relay-side caches are for responsiveness and recovery.
+- The SQLite event store is the source of truth for sessions and messages. Provider adapters are stateless execution engines that stream events into the store.
 
-Read `docs/agent-guide/architecture.md` before changing daemon behavior, routing, relay wiring, SSE flow, session flow, instance management, or PTY behavior.
+Read `docs/agent-guide/architecture.md` before changing daemon behavior, project routing, relay wiring, event store, projectors, provider adapters, session flow, instance management, or PTY behavior.
 
 ## Source Map
 
 - `src/bin/`: CLI entrypoints.
 - `src/lib/daemon/`: daemon lifecycle, IPC,  config persistence, projects.
 - `src/lib/server/`: HTTP and WebSocket server, router, static files, push.
-- `src/lib/relay/`: OpenCode event pipeline, caches, pollers, PTY upstream wiring.
+- `src/lib/relay/`: OpenCode event pipeline, pollers, PTY upstream wiring.
+- `src/lib/persistence/`: SQLite event store, projectors, migrations.
+- `src/lib/provider/`: Provider adapters (OpenCode, Claude SDK).
 - `src/lib/session/`: session orchestration and status polling.
 - `src/lib/instance/`: OpenCode instance management and client access.
 - `src/lib/handlers/`: browser message handlers.

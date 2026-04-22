@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
-import type { SessionStatus } from "../../../src/lib/instance/opencode-client.js";
+import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	SessionStatusPoller,
@@ -9,7 +9,10 @@ import {
 
 function createMockClient(statuses: Record<string, SessionStatus> = {}) {
 	return {
-		getSessionStatuses: vi.fn().mockResolvedValue(statuses),
+		session: {
+			statuses: vi.fn().mockResolvedValue(statuses),
+			get: vi.fn().mockResolvedValue({}),
+		},
 	};
 }
 
@@ -39,7 +42,7 @@ describe("SessionStatusPoller", () => {
 		changed.mockClear();
 
 		// Session becomes busy
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "busy" } });
+		client.session.statuses.mockResolvedValue({ sess_1: { type: "busy" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
@@ -69,7 +72,7 @@ describe("SessionStatusPoller", () => {
 		changed.mockClear();
 
 		// Session becomes idle
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
+		client.session.statuses.mockResolvedValue({ sess_1: { type: "idle" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
@@ -104,7 +107,7 @@ describe("SessionStatusPoller", () => {
 		expect(changed.mock.calls[1]![1]).toBe(false);
 
 		// Status changes, emits with statusesChanged=true
-		client.getSessionStatuses.mockResolvedValue({
+		client.session.statuses.mockResolvedValue({
 			sess_1: { type: "idle" },
 		});
 		await vi.advanceTimersByTimeAsync(500);
@@ -130,7 +133,7 @@ describe("SessionStatusPoller", () => {
 		changed.mockClear();
 
 		// New session appears
-		client.getSessionStatuses.mockResolvedValue({
+		client.session.statuses.mockResolvedValue({
 			sess_1: { type: "idle" },
 			sess_2: { type: "busy" },
 		});
@@ -160,7 +163,7 @@ describe("SessionStatusPoller", () => {
 		changed.mockClear();
 
 		// sess_2 disappears
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
+		client.session.statuses.mockResolvedValue({ sess_1: { type: "idle" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
@@ -188,7 +191,7 @@ describe("SessionStatusPoller", () => {
 		changed.mockClear();
 
 		// API fails
-		client.getSessionStatuses.mockRejectedValue(new Error("network error"));
+		client.session.statuses.mockRejectedValue(new Error("network error"));
 		await vi.advanceTimersByTimeAsync(500);
 
 		// Should NOT emit changed on failure (stale state preserved)
@@ -262,13 +265,13 @@ describe("SessionStatusPoller", () => {
 		poller.start();
 		// Immediate poll + one interval poll = 2 calls
 		await vi.advanceTimersByTimeAsync(500);
-		const callsBeforeStop = client.getSessionStatuses.mock.calls.length;
+		const callsBeforeStop = client.session.statuses.mock.calls.length;
 		expect(callsBeforeStop).toBeGreaterThanOrEqual(1);
 
 		poller.stop();
 		await vi.advanceTimersByTimeAsync(2000);
 		// No additional calls after stop
-		expect(client.getSessionStatuses).toHaveBeenCalledTimes(callsBeforeStop);
+		expect(client.session.statuses).toHaveBeenCalledTimes(callsBeforeStop);
 	});
 
 	it("handles retry status type in diff detection", async () => {
@@ -293,7 +296,7 @@ describe("SessionStatusPoller", () => {
 		changed.mockClear();
 
 		// retry → busy (still processing but status type changed)
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "busy" } });
+		client.session.statuses.mockResolvedValue({ sess_1: { type: "busy" } });
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(changed).toHaveBeenCalledTimes(1);
@@ -313,14 +316,14 @@ describe("SessionStatusPoller", () => {
 
 		poller.start();
 		await vi.advanceTimersByTimeAsync(500);
-		const callsBeforeDrain = client.getSessionStatuses.mock.calls.length;
+		const callsBeforeDrain = client.session.statuses.mock.calls.length;
 
 		// Drain via registry
 		await registry.drainAll();
 
 		// Advance time — no new polls should fire
 		await vi.advanceTimersByTimeAsync(2000);
-		expect(client.getSessionStatuses).toHaveBeenCalledTimes(callsBeforeDrain);
+		expect(client.session.statuses).toHaveBeenCalledTimes(callsBeforeDrain);
 	});
 
 	it("notifySSEIdle triggers an immediate poll", async () => {
@@ -335,10 +338,10 @@ describe("SessionStatusPoller", () => {
 		// First poll: baseline
 		await vi.advanceTimersByTimeAsync(500);
 
-		const callsBefore = client.getSessionStatuses.mock.calls.length;
+		const callsBefore = client.session.statuses.mock.calls.length;
 
 		// Update mock to return idle, then notify SSE idle
-		client.getSessionStatuses.mockResolvedValue({ sess_1: { type: "idle" } });
+		client.session.statuses.mockResolvedValue({ sess_1: { type: "idle" } });
 
 		poller.notifySSEIdle("sess_1");
 
@@ -346,7 +349,7 @@ describe("SessionStatusPoller", () => {
 		await vi.advanceTimersByTimeAsync(0);
 
 		// Should have polled again immediately
-		expect(client.getSessionStatuses.mock.calls.length).toBeGreaterThan(
+		expect(client.session.statuses.mock.calls.length).toBeGreaterThan(
 			callsBefore,
 		);
 

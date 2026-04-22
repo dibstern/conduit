@@ -143,9 +143,9 @@ function mapToolStatus(
 /**
  * Convert a single assistant message's parts into ChatMessage[].
  * Each part type maps to the corresponding ChatMessage variant:
- *   - "text"      → AssistantMessage
- *   - "reasoning" → ThinkingMessage
- *   - "tool"      → ToolMessage
+ *   - "text"                    → AssistantMessage
+ *   - "reasoning" | "thinking"  → ThinkingMessage
+ *   - "tool"                    → ToolMessage
  *   - Others (step_start, step_finish, snapshot, agent) → skipped
  *
  * @param renderHtml Optional function to render markdown to HTML.
@@ -180,6 +180,7 @@ function convertAssistantParts(
 				firstTextSeen = true;
 				break;
 			}
+			case "thinking":
 			case "reasoning": {
 				const text = part.text ?? "";
 				const time = part.time as { start?: number; end?: number } | undefined;
@@ -233,8 +234,11 @@ function convertAssistantParts(
 				);
 				break;
 			}
-			// Skip structural parts that have no visual representation
 			default:
+				// Intentionally skipped structural part types:
+				// step_start, step_finish, snapshot, agent
+				// If you add a new PartType that should produce a ChatMessage,
+				// add a case above — don't let it fall through to here.
 				break;
 		}
 	}

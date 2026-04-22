@@ -6,6 +6,7 @@
 // bridge state is needed, so questions survive relay restarts.
 
 import { RelayError } from "../errors.js";
+import type { PermissionDecision } from "../provider/types.js";
 import { fixupConfigFile } from "./fixup-config-file.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSession, resolveSessionForLog } from "./resolve-session.js";
@@ -27,9 +28,13 @@ function restartProcessingTimeout(deps: HandlerDeps, sessionId: string): void {
 			new RelayError(
 				"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
 				{ code: "PROCESSING_TIMEOUT" },
-			).toMessage(),
+			).toMessage(sessionId),
 		);
-		deps.wsHandler.sendToSession(sessionId, { type: "done", code: 1 });
+		deps.wsHandler.sendToSession(sessionId, {
+			type: "done",
+			sessionId,
+			code: 1,
+		});
 	});
 }
 
@@ -48,12 +53,39 @@ export async function handlePermissionResponse(
 		deps.log.info(
 			`client=${clientId} session=${sessionId} ${result.toolName}: ${result.mapped}`,
 		);
-		await deps.client.replyPermission({
-			id: requestId,
-			decision: result.mapped,
-		});
+
+		// Route through OrchestrationEngine for Claude sessions so the
+		// decision reaches RelayEventSink.resolvePermission() and unblocks
+		// the in-process SDK turn.
+		if (deps.orchestrationEngine) {
+			const providerId =
+				deps.orchestrationEngine.getProviderForSession(sessionId);
+			if (providerId === "claude") {
+				try {
+					await deps.orchestrationEngine.dispatch({
+						type: "resolve_permission",
+						sessionId,
+						requestId,
+						decision: result.mapped as PermissionDecision,
+					});
+				} catch (err) {
+					deps.log.warn(
+						`client=${clientId} session=${sessionId} engine resolve_permission failed: ${err}`,
+					);
+				}
+			}
+		}
+
+		// Also call the OpenCode REST API (harmless no-op for Claude sessions)
+		try {
+			await deps.client.permission.reply(sessionId, requestId, result.mapped);
+		} catch {
+			// Swallow — this will fail for Claude-only sessions with no
+			// OpenCode counterpart; the engine dispatch above is the real path.
+		}
 		deps.wsHandler.broadcast({
 			type: "permission_resolved",
+			sessionId,
 			requestId,
 			decision: result.mapped,
 		});
@@ -77,7 +109,7 @@ async function persistPermissionRule(
 	pattern?: string,
 ): Promise<void> {
 	try {
-		const config = await deps.client.getConfig();
+		const config = await deps.client.config.get();
 		const rawPermission = config["permission"];
 
 		// Normalise: if permission is a simple string ("ask"/"allow"/"deny"),
@@ -113,7 +145,7 @@ async function persistPermissionRule(
 			return;
 		}
 
-		await deps.client.updateConfig({ permission: currentPermission });
+		await deps.client.config.update({ permission: currentPermission });
 		await fixupConfigFile(deps.config.projectDir, deps.log);
 		deps.log.info(`Persisted: ${toolName} ${scope}=${pattern ?? "*"}`);
 	} catch (err) {
@@ -155,8 +187,37 @@ export async function handleAskUserResponse(
 		`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: formatted })}`,
 	);
 
+	// Route through OrchestrationEngine for Claude sessions so the answer
+	// reaches RelayEventSink.resolveQuestion() and unblocks the SDK turn.
+	if (deps.orchestrationEngine && sessionId) {
+		const providerId =
+			deps.orchestrationEngine.getProviderForSession(sessionId);
+		if (providerId === "claude") {
+			try {
+				await deps.orchestrationEngine.dispatch({
+					type: "resolve_question",
+					sessionId,
+					requestId: toolId,
+					answers: answers as Record<string, unknown>,
+				});
+				deps.wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId,
+				});
+				if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
+				restartProcessingTimeout(deps, sessionId);
+				return;
+			} catch (err) {
+				deps.log.warn(
+					`client=${clientId} session=${sessionId} engine resolve_question failed: ${err}`,
+				);
+			}
+		}
+	}
+
 	try {
-		await deps.client.replyQuestion({ id: toolId, answers: formatted });
+		await deps.client.question.reply(toolId, formatted);
 		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId, sessionId });
 		if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
 		restartProcessingTimeout(deps, sessionId);
@@ -168,14 +229,14 @@ export async function handleAskUserResponse(
 		// API rejected the toolId — fall back to querying pending questions
 		// and replying to the first match.
 		try {
-			const pendingQuestions = await deps.client.listPendingQuestions();
+			const pendingQuestions = await deps.client.question.list();
 			if (pendingQuestions.length > 0) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 				const queId = pendingQuestions[0]!.id;
 				deps.log.info(
 					`client=${clientId} session=${sessionId} API fallback: ${toolId} → ${queId}`,
 				);
-				await deps.client.replyQuestion({ id: queId, answers: formatted });
+				await deps.client.question.reply(queId, formatted);
 				deps.wsHandler.broadcast({
 					type: "ask_user_resolved",
 					toolId: queId,
@@ -199,6 +260,7 @@ export async function handleAskUserResponse(
 		// instead of silently reverting after 10s timeout.
 		deps.wsHandler.sendTo(clientId, {
 			type: "ask_user_error",
+			sessionId,
 			toolId,
 			message:
 				"This question was asked in a terminal session and can't be answered from the browser. Answer it in the terminal, or send a follow-up message to continue.",
@@ -218,8 +280,37 @@ export async function handleQuestionReject(
 
 	deps.log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
 
+	// Route through OrchestrationEngine for Claude sessions — resolve with
+	// empty answers to signal rejection (the SDK interprets {} as skip).
+	if (deps.orchestrationEngine && sessionId) {
+		const providerId =
+			deps.orchestrationEngine.getProviderForSession(sessionId);
+		if (providerId === "claude") {
+			try {
+				await deps.orchestrationEngine.dispatch({
+					type: "resolve_question",
+					sessionId,
+					requestId: toolId,
+					answers: {},
+				});
+				deps.wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId,
+				});
+				if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
+				restartProcessingTimeout(deps, sessionId);
+				return;
+			} catch (err) {
+				deps.log.warn(
+					`client=${clientId} session=${sessionId} engine resolve_question (reject) failed: ${err}`,
+				);
+			}
+		}
+	}
+
 	try {
-		await deps.client.rejectQuestion(toolId);
+		await deps.client.question.reject(toolId);
 		deps.wsHandler.broadcast({ type: "ask_user_resolved", toolId, sessionId });
 		if (sessionId) deps.sessionMgr.decrementPendingQuestionCount(sessionId);
 		restartProcessingTimeout(deps, sessionId);
@@ -230,14 +321,14 @@ export async function handleQuestionReject(
 
 		// API rejected the toolId — fall back to querying pending questions
 		try {
-			const pendingQuestions = await deps.client.listPendingQuestions();
+			const pendingQuestions = await deps.client.question.list();
 			if (pendingQuestions.length > 0) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 				const queId = pendingQuestions[0]!.id;
 				deps.log.info(
 					`client=${clientId} session=${sessionId} reject fallback: ${toolId} → ${queId}`,
 				);
-				await deps.client.rejectQuestion(queId);
+				await deps.client.question.reject(queId);
 				deps.wsHandler.broadcast({
 					type: "ask_user_resolved",
 					toolId: queId,
@@ -256,6 +347,7 @@ export async function handleQuestionReject(
 		// Notify the frontend so the QuestionCard can show an error
 		deps.wsHandler.sendTo(clientId, {
 			type: "ask_user_error",
+			sessionId,
 			toolId,
 			message:
 				"This question was asked in a terminal session and can't be skipped from the browser. Answer it in the terminal, or send a follow-up message to continue.",

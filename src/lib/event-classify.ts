@@ -1,6 +1,6 @@
 // ─── Event Classification ───────────────────────────────────────────────────
 // Shared pure functions for classifying relay event streams.
-// Used by both server (session-switch, cold-cache-repair) and frontend (replay).
+// Used by both server (session-switch) and frontend (replay).
 //
 // These constants and functions encode the canonical rules for LLM turn
 // boundaries. When the LLM starts producing content (delta, thinking, tool use),

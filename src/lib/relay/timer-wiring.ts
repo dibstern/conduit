@@ -33,10 +33,11 @@ export function wireTimers(deps: TimerWiringDeps): TimerWiringResult {
 
 	const timeoutTimer = setInterval(() => {
 		const timedOutPerms = permissionBridge.checkTimeouts();
-		for (const id of timedOutPerms) {
+		for (const entry of timedOutPerms) {
 			wsHandler.broadcast({
 				type: "permission_resolved",
-				requestId: id as PermissionId,
+				sessionId: entry.sessionId,
+				requestId: entry.id as PermissionId,
 				decision: "timeout",
 			});
 		}

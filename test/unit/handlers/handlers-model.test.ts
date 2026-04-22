@@ -6,6 +6,8 @@ import {
 	handleSwitchVariant,
 } from "../../../src/lib/handlers/model.js";
 import type { PayloadMap } from "../../../src/lib/handlers/payloads.js";
+import type { HandlerDeps } from "../../../src/lib/handlers/types.js";
+import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -69,7 +71,7 @@ describe("handleSetDefaultModel", () => {
 		vi.mocked(loadRelaySettings).mockReturnValue({
 			defaultVariants: { "anthropic/claude-opus-4-6": "high" },
 		});
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [],
 			defaults: {},
 			connected: [],
@@ -97,7 +99,7 @@ describe("handleSwitchVariant", () => {
 			providerID: "anthropic",
 			modelID: "claude-opus-4-6",
 		});
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "anthropic",
@@ -133,7 +135,7 @@ describe("handleSwitchVariant", () => {
 			providerID: "anthropic",
 			modelID: "claude-opus-4-6",
 		});
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [],
 			defaults: {},
 			connected: [],
@@ -148,7 +150,7 @@ describe("handleSwitchVariant", () => {
 	it("sends variant_info to client when no session", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue(undefined);
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [],
 			defaults: {},
 			connected: [],
@@ -165,7 +167,7 @@ describe("handleSwitchVariant", () => {
 	it("handles empty variant (reset to default)", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("ses-1");
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [],
 			defaults: {},
 			connected: [],
@@ -181,7 +183,7 @@ describe("handleSwitchModel", () => {
 	it("restores persisted variant and sends variant_info after switching model", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("ses-1");
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "openai",
@@ -219,7 +221,7 @@ describe("handleSwitchModel", () => {
 	it("clears variant when new model has no variants", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("ses-1");
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "openai",
@@ -249,7 +251,7 @@ describe("handleSwitchModel", () => {
 	it("validates persisted variant against available list", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("ses-1");
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "anthropic",
@@ -281,7 +283,7 @@ describe("handleSwitchModel", () => {
 	it("still sends model_info as before", async () => {
 		const deps = createMockHandlerDeps();
 		vi.mocked(deps.wsHandler.getClientSession).mockReturnValue("ses-1");
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [],
 			defaults: {},
 			connected: [],
@@ -307,7 +309,7 @@ describe("handleSwitchModel", () => {
 describe("handleSetDefaultModel — variant wiring", () => {
 	it("broadcasts variant_info after setting default model", async () => {
 		const deps = createMockHandlerDeps();
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "anthropic",
@@ -342,7 +344,7 @@ describe("handleSetDefaultModel — variant wiring", () => {
 
 	it("validates persisted variant and falls back to empty", async () => {
 		const deps = createMockHandlerDeps();
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "anthropic",
@@ -387,7 +389,7 @@ describe("handleGetModels — variant wiring", () => {
 			providerID: "anthropic",
 			modelID: "claude-opus-4-6",
 		});
-		vi.mocked(deps.client.listProviders).mockResolvedValue({
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
 			providers: [
 				{
 					id: "anthropic",
@@ -404,11 +406,16 @@ describe("handleGetModels — variant wiring", () => {
 			defaults: {},
 			connected: ["anthropic"],
 		});
-		vi.mocked(deps.client.getSession).mockResolvedValue({
+		vi.mocked(deps.client.session.get).mockResolvedValue({
 			id: "ses-1",
+			projectID: "proj-1",
+			directory: "/tmp",
+			title: "Test",
+			version: "1",
+			time: { created: 0, updated: 0 },
 			modelID: "claude-opus-4-6",
 			providerID: "anthropic",
-		});
+		} as SessionDetail);
 		await handleGetModels(deps, "c1", {});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"c1",
@@ -417,6 +424,227 @@ describe("handleGetModels — variant wiring", () => {
 				variant: "high",
 				variants: ["low", "high"],
 			}),
+		);
+	});
+});
+
+// ─── handleGetModels — Claude provider labeling ──────────────────────────────
+
+describe("handleGetModels — Claude provider labeling", () => {
+	it("labels SDK provider as 'Anthropic - claude'", async () => {
+		const engine = {
+			dispatch: vi.fn().mockResolvedValue({
+				models: [
+					{
+						id: "claude-sonnet-4",
+						name: "Claude Sonnet 4",
+						providerId: "claude",
+					},
+				],
+				supportsTools: true,
+				supportsThinking: true,
+				supportsPermissions: true,
+				supportsQuestions: true,
+				supportsAttachments: true,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+			getProviderForSession: vi.fn(),
+			bindSession: vi.fn(),
+			shutdown: vi.fn(),
+		} as unknown as NonNullable<HandlerDeps["orchestrationEngine"]>;
+		const deps = createMockHandlerDeps({ orchestrationEngine: engine });
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					models: [{ id: "claude-opus-4-1", name: "Claude Opus 4.1" }],
+				},
+			],
+			defaults: {},
+			connected: ["anthropic"],
+		});
+
+		await handleGetModels(deps, "c1", {});
+
+		const call = vi
+			.mocked(deps.wsHandler.sendTo)
+			.mock.calls.find((c) => (c[1] as { type: string }).type === "model_list");
+		const payload = call?.[1] as {
+			type: string;
+			providers: Array<{
+				id: string;
+				name: string;
+				models: Array<{ id: string }>;
+			}>;
+		};
+
+		const claudeProvider = payload.providers.find((p) => p.id === "claude");
+		expect(claudeProvider).toBeDefined();
+		expect(claudeProvider?.name).toBe("Anthropic - claude");
+	});
+
+	it("renames 'anthropic' to 'Anthropic - opencode' when SDK has models", async () => {
+		const engine = {
+			dispatch: vi.fn().mockResolvedValue({
+				models: [
+					{
+						id: "claude-sonnet-4",
+						name: "Claude Sonnet 4",
+						providerId: "claude",
+					},
+				],
+				supportsTools: true,
+				supportsThinking: true,
+				supportsPermissions: true,
+				supportsQuestions: true,
+				supportsAttachments: true,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+			getProviderForSession: vi.fn(),
+			bindSession: vi.fn(),
+			shutdown: vi.fn(),
+		} as unknown as NonNullable<HandlerDeps["orchestrationEngine"]>;
+		const deps = createMockHandlerDeps({ orchestrationEngine: engine });
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					models: [{ id: "claude-opus-4-1", name: "Claude Opus 4.1" }],
+				},
+			],
+			defaults: {},
+			connected: ["anthropic"],
+		});
+
+		await handleGetModels(deps, "c1", {});
+
+		const call = vi
+			.mocked(deps.wsHandler.sendTo)
+			.mock.calls.find((c) => (c[1] as { type: string }).type === "model_list");
+		const payload = call?.[1] as {
+			type: string;
+			providers: Array<{ id: string; name: string }>;
+		};
+
+		const anthropicProvider = payload.providers.find(
+			(p) => p.id === "anthropic",
+		);
+		expect(anthropicProvider).toBeDefined();
+		expect(anthropicProvider?.name).toBe("Anthropic - opencode");
+	});
+
+	it("keeps 'Anthropic' name unchanged when SDK has no models", async () => {
+		const engine = {
+			dispatch: vi.fn().mockResolvedValue({
+				models: [],
+				supportsTools: true,
+				supportsThinking: true,
+				supportsPermissions: true,
+				supportsQuestions: true,
+				supportsAttachments: true,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+			getProviderForSession: vi.fn(),
+			bindSession: vi.fn(),
+			shutdown: vi.fn(),
+		} as unknown as NonNullable<HandlerDeps["orchestrationEngine"]>;
+		const deps = createMockHandlerDeps({ orchestrationEngine: engine });
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					models: [{ id: "claude-opus-4-1", name: "Claude Opus 4.1" }],
+				},
+			],
+			defaults: {},
+			connected: ["anthropic"],
+		});
+
+		await handleGetModels(deps, "c1", {});
+
+		const call = vi
+			.mocked(deps.wsHandler.sendTo)
+			.mock.calls.find((c) => (c[1] as { type: string }).type === "model_list");
+		const payload = call?.[1] as {
+			type: string;
+			providers: Array<{ id: string; name: string }>;
+		};
+
+		const anthropicProvider = payload.providers.find(
+			(p) => p.id === "anthropic",
+		);
+		expect(anthropicProvider?.name).toBe("Anthropic");
+	});
+
+	it("both provider groups retain their models (no dedup)", async () => {
+		const engine = {
+			dispatch: vi.fn().mockResolvedValue({
+				models: [
+					{
+						id: "claude-sonnet-4",
+						name: "Claude Sonnet 4",
+						providerId: "claude",
+					},
+					{ id: "claude-opus-4", name: "Claude Opus 4", providerId: "claude" },
+				],
+				supportsTools: true,
+				supportsThinking: true,
+				supportsPermissions: true,
+				supportsQuestions: true,
+				supportsAttachments: true,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+			getProviderForSession: vi.fn(),
+			bindSession: vi.fn(),
+			shutdown: vi.fn(),
+		} as unknown as NonNullable<HandlerDeps["orchestrationEngine"]>;
+		const deps = createMockHandlerDeps({ orchestrationEngine: engine });
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					models: [
+						{ id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+						{ id: "claude-opus-4-1", name: "Claude Opus 4.1" },
+					],
+				},
+			],
+			defaults: {},
+			connected: ["anthropic"],
+		});
+
+		await handleGetModels(deps, "c1", {});
+
+		const call = vi
+			.mocked(deps.wsHandler.sendTo)
+			.mock.calls.find((c) => (c[1] as { type: string }).type === "model_list");
+		const payload = call?.[1] as {
+			type: string;
+			providers: Array<{ id: string; models: Array<{ id: string }> }>;
+		};
+
+		// OpenCode anthropic keeps ALL its models
+		const anthropic = payload.providers.find((p) => p.id === "anthropic");
+		expect(anthropic?.models.map((m) => m.id)).toEqual(
+			expect.arrayContaining(["claude-sonnet-4", "claude-opus-4-1"]),
+		);
+
+		// SDK claude has its own models
+		const claude = payload.providers.find((p) => p.id === "claude");
+		expect(claude?.models.map((m) => m.id)).toEqual(
+			expect.arrayContaining(["claude-sonnet-4", "claude-opus-4"]),
 		);
 	});
 });

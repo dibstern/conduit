@@ -303,6 +303,7 @@ describe("handlePermissionResolved", () => {
 		});
 		handlePermissionResolved({
 			type: "permission_resolved",
+			sessionId: "s1",
 			requestId: pid("r1"),
 			decision: "allow",
 		});
@@ -334,7 +335,12 @@ describe("handleAskUser", () => {
 				multiSelect: false,
 			},
 		];
-		handleAskUser({ type: "ask_user", toolId: "t1", questions });
+		handleAskUser({
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "t1",
+			questions,
+		});
 		expect(permissionsState.pendingQuestions).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(permissionsState.pendingQuestions[0]!.toolId).toBe("t1");
@@ -358,7 +364,14 @@ describe("handleAskUser", () => {
 	});
 
 	it("ignores non-array questions", () => {
-		handleAskUser(msg({ type: "ask_user", toolId: "t1", questions: "bad" }));
+		handleAskUser(
+			msg({
+				type: "ask_user",
+				sessionId: "s1",
+				toolId: "t1",
+				questions: "bad",
+			}),
+		);
 		expect(permissionsState.pendingQuestions).toHaveLength(0);
 	});
 
@@ -372,11 +385,21 @@ describe("handleAskUser", () => {
 			},
 		];
 		// First ask_user adds to pending
-		handleAskUser({ type: "ask_user", toolId: "que_abc", questions });
+		handleAskUser({
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "que_abc",
+			questions,
+		});
 		expect(permissionsState.pendingQuestions).toHaveLength(1);
 
 		// Second ask_user with same toolId (e.g., from API replay after SSE) is ignored
-		handleAskUser({ type: "ask_user", toolId: "que_abc", questions });
+		handleAskUser({
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "que_abc",
+			questions,
+		});
 		expect(permissionsState.pendingQuestions).toHaveLength(1);
 	});
 
@@ -389,8 +412,18 @@ describe("handleAskUser", () => {
 				multiSelect: false,
 			},
 		];
-		handleAskUser({ type: "ask_user", toolId: "que_1", questions });
-		handleAskUser({ type: "ask_user", toolId: "que_2", questions });
+		handleAskUser({
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "que_1",
+			questions,
+		});
+		handleAskUser({
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "que_2",
+			questions,
+		});
 		expect(permissionsState.pendingQuestions).toHaveLength(2);
 	});
 });
@@ -401,6 +434,7 @@ describe("handleAskUserResolved", () => {
 	it("removes the resolved question", () => {
 		handleAskUser({
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "t1",
 			questions: [
 				{
@@ -411,7 +445,11 @@ describe("handleAskUserResolved", () => {
 				},
 			],
 		});
-		handleAskUserResolved({ type: "ask_user_resolved", toolId: "t1" });
+		handleAskUserResolved({
+			type: "ask_user_resolved",
+			sessionId: "s1",
+			toolId: "t1",
+		});
 		expect(permissionsState.pendingQuestions).toHaveLength(0);
 	});
 });
@@ -447,6 +485,7 @@ describe("removeQuestion", () => {
 	it("removes by toolId", () => {
 		handleAskUser({
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "t1",
 			questions: [
 				{
@@ -475,6 +514,7 @@ describe("clearAll", () => {
 		});
 		handleAskUser({
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "t1",
 			questions: [
 				{
@@ -522,6 +562,7 @@ describe("clearAllPermissions", () => {
 		});
 		handleAskUser({
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "t1",
 			questions: [
 				{
@@ -560,6 +601,7 @@ describe("handleAskUserError", () => {
 	it("stores error message keyed by toolId", () => {
 		handleAskUserError({
 			type: "ask_user_error",
+			sessionId: "s1",
 			toolId: "t1",
 			message: "This question was asked in a terminal session.",
 		});
@@ -570,7 +612,12 @@ describe("handleAskUserError", () => {
 
 	it("ignores missing toolId", () => {
 		handleAskUserError(
-			msg({ type: "ask_user_error", toolId: "", message: "err" }),
+			msg({
+				type: "ask_user_error",
+				sessionId: "s1",
+				toolId: "",
+				message: "err",
+			}),
 		);
 		expect(permissionsState.questionErrors.size).toBe(0);
 	});
@@ -578,11 +625,13 @@ describe("handleAskUserError", () => {
 	it("overwrites previous error for the same toolId", () => {
 		handleAskUserError({
 			type: "ask_user_error",
+			sessionId: "s1",
 			toolId: "t1",
 			message: "first error",
 		});
 		handleAskUserError({
 			type: "ask_user_error",
+			sessionId: "s1",
 			toolId: "t1",
 			message: "second error",
 		});
@@ -747,6 +796,7 @@ describe("clearSessionLocal", () => {
 	it("clears questions and errors regardless of session", () => {
 		handleAskUser({
 			type: "ask_user",
+			sessionId: "s1",
 			toolId: "t1",
 			questions: [
 				{

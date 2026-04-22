@@ -30,7 +30,11 @@ function createMockPushManager() {
 describe("sendPushForEvent", () => {
 	it("sends push notification for done events", () => {
 		const push = createMockPushManager();
-		sendPushForEvent(push, { type: "done", code: 0 }, createSilentLogger());
+		sendPushForEvent(
+			push,
+			{ type: "done", sessionId: "s1", code: 0 },
+			createSilentLogger(),
+		);
 
 		expect(push.sendToAll).toHaveBeenCalledWith({
 			type: "done",
@@ -44,7 +48,12 @@ describe("sendPushForEvent", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "error", code: "SEND_FAILED", message: "Something broke" },
+			{
+				type: "error",
+				sessionId: "s1",
+				code: "SEND_FAILED",
+				message: "Something broke",
+			},
 			createSilentLogger(),
 		);
 
@@ -60,7 +69,7 @@ describe("sendPushForEvent", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "error", code: "UNKNOWN", message: "" },
+			{ type: "error", sessionId: "s1", code: "UNKNOWN", message: "" },
 			createSilentLogger(),
 		);
 
@@ -76,17 +85,17 @@ describe("sendPushForEvent", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "delta", text: "hello" },
+			{ type: "delta", sessionId: "s1", text: "hello" },
 			createSilentLogger(),
 		);
 		sendPushForEvent(
 			push,
-			{ type: "status", status: "processing" },
+			{ type: "status", sessionId: "s1", status: "processing" },
 			createSilentLogger(),
 		);
 		sendPushForEvent(
 			push,
-			{ type: "tool_start", id: "t1", name: "Bash" },
+			{ type: "tool_start", sessionId: "s1", id: "t1", name: "Bash" },
 			createSilentLogger(),
 		);
 
@@ -101,7 +110,7 @@ describe("sendPushForEvent", () => {
 		const log = { ...createSilentLogger(), warn: warnSpy };
 
 		// Should not throw
-		sendPushForEvent(push, { type: "done", code: 0 }, log);
+		sendPushForEvent(push, { type: "done", sessionId: "s1", code: 0 }, log);
 
 		// Wait for the rejected promise to be caught
 		await vi.waitFor(() => {

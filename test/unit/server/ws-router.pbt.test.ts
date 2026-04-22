@@ -82,6 +82,7 @@ const validMessageTypes: IncomingMessageType[] = [
 	"set_project_instance",
 	"proxy_detect",
 	"scan_now",
+	"reload_provider_session",
 ];
 
 const arbValidMessageType: fc.Arbitrary<IncomingMessageType> = fc.constantFrom(
@@ -429,7 +430,7 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(isRouteError(invalidResult)).toBe(true);
 
 			// Verify our test list has exactly the right number (40 types in production)
-			expect(validMessageTypes).toHaveLength(47);
+			expect(validMessageTypes).toHaveLength(48);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

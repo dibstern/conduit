@@ -39,30 +39,35 @@ describe("handleViewSession — pending question delivery", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "ses_active",
-					modelID: "claude-4",
-					providerID: "anthropic",
-				}),
-				listPendingQuestions: vi.fn().mockResolvedValue([
-					{
-						id: "que_abc123",
-						questions: [
-							{
-								question: "Which option?",
-								header: "Choose",
-								options: [
-									{ label: "Option A", description: "First option" },
-									{ label: "Option B", description: "Second option" },
-								],
-								multiple: false,
-								custom: true,
-							},
-						],
-						tool: { callID: "toolu_xyz" },
-						sessionID: "ses_active",
-					},
-				]),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "ses_active",
+						modelID: "claude-4",
+						providerID: "anthropic",
+					}),
+				},
+				question: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "que_abc123",
+							questions: [
+								{
+									question: "Which option?",
+									header: "Choose",
+									options: [
+										{ label: "Option A", description: "First option" },
+										{ label: "Option B", description: "Second option" },
+									],
+									multiple: false,
+									custom: true,
+								},
+							],
+							tool: { callID: "toolu_xyz" },
+							sessionID: "ses_active",
+						},
+					]),
+				},
+				permission: { list: vi.fn().mockResolvedValue([]) },
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_active"),
@@ -73,10 +78,10 @@ describe("handleViewSession — pending question delivery", () => {
 				}),
 				sendDualSessionLists: vi.fn().mockResolvedValue(undefined),
 			} as unknown as HandlerDeps["sessionMgr"],
-			messageCache: {
-				getEvents: vi.fn().mockReturnValue(null),
-			} as unknown as HandlerDeps["messageCache"],
-			overrides: { clear: vi.fn() } as unknown as HandlerDeps["overrides"],
+			overrides: {
+				clear: vi.fn(),
+				hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
+			} as unknown as HandlerDeps["overrides"],
 			statusPoller: {
 				isProcessing: vi.fn().mockReturnValue(false),
 			},
@@ -118,7 +123,7 @@ describe("handleViewSession — pending question delivery", () => {
 	it("only sends pending questions for the viewed session, not other sessions", async () => {
 		// listPendingQuestions returns questions for multiple sessions
 		// (the API returns all pending questions, not filtered by session)
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([
+		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_this_session",
 				questions: [
@@ -152,7 +157,7 @@ describe("handleViewSession — pending question delivery", () => {
 		await handleViewSession(deps, "client-1", { sessionId: "ses_active" });
 
 		// Should call listPendingQuestions
-		expect(deps.client.listPendingQuestions).toHaveBeenCalled();
+		expect(deps.client.question.list).toHaveBeenCalled();
 
 		// Only the question for ses_active should be sent, NOT the one for ses_other
 		const askUserMsgs = sendToCalls.filter(
@@ -164,7 +169,7 @@ describe("handleViewSession — pending question delivery", () => {
 	});
 
 	it("does not send questions when there are none pending", async () => {
-		vi.mocked(deps.client.listPendingQuestions).mockResolvedValue([]);
+		vi.mocked(deps.client.question.list).mockResolvedValue([]);
 
 		await handleViewSession(deps, "client-1", { sessionId: "ses_active" });
 
@@ -203,22 +208,26 @@ describe("handleViewSession — pending permission delivery", () => {
 				sendToSession: vi.fn(),
 			},
 			client: {
-				getSession: vi.fn().mockResolvedValue({
-					id: "ses_active",
-					modelID: "claude-4",
-					providerID: "anthropic",
-				}),
-				listPendingQuestions: vi.fn().mockResolvedValue([]),
-				listPendingPermissions: vi.fn().mockResolvedValue([
-					{
-						id: "per_abc123",
-						sessionID: "ses_active",
-						permission: "external_directory",
-						patterns: ["/tmp/mockups/*"],
-						metadata: { filepath: "/tmp/mockups/screenshot.png" },
-						always: ["/tmp/mockups/*"],
-					},
-				]),
+				session: {
+					get: vi.fn().mockResolvedValue({
+						id: "ses_active",
+						modelID: "claude-4",
+						providerID: "anthropic",
+					}),
+				},
+				question: { list: vi.fn().mockResolvedValue([]) },
+				permission: {
+					list: vi.fn().mockResolvedValue([
+						{
+							id: "per_abc123",
+							sessionID: "ses_active",
+							permission: "external_directory",
+							patterns: ["/tmp/mockups/*"],
+							metadata: { filepath: "/tmp/mockups/screenshot.png" },
+							always: ["/tmp/mockups/*"],
+						},
+					]),
+				},
 			} as unknown as HandlerDeps["client"],
 			sessionMgr: {
 				getDefaultSessionId: vi.fn().mockResolvedValue("ses_active"),
@@ -230,10 +239,10 @@ describe("handleViewSession — pending permission delivery", () => {
 				listSessions: vi.fn().mockResolvedValue([]),
 				sendDualSessionLists: vi.fn().mockResolvedValue(undefined),
 			} as unknown as HandlerDeps["sessionMgr"],
-			messageCache: {
-				getEvents: vi.fn().mockReturnValue(null),
-			} as unknown as HandlerDeps["messageCache"],
-			overrides: { clear: vi.fn() } as unknown as HandlerDeps["overrides"],
+			overrides: {
+				clear: vi.fn(),
+				hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
+			} as unknown as HandlerDeps["overrides"],
 			permissionBridge: {
 				getPending: vi.fn().mockReturnValue([]),
 				onPermissionResponse: vi.fn(),
@@ -281,7 +290,7 @@ describe("handleViewSession — pending permission delivery", () => {
 	});
 
 	it("only sends permissions for the viewed session, not other sessions", async () => {
-		vi.mocked(deps.client.listPendingPermissions).mockResolvedValue([
+		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_this",
 				permission: "external_directory",
@@ -318,7 +327,7 @@ describe("handleViewSession — pending permission delivery", () => {
 			},
 		]);
 		// API also returns it
-		vi.mocked(deps.client.listPendingPermissions).mockResolvedValue([
+		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_abc123",
 				permission: "external_directory",

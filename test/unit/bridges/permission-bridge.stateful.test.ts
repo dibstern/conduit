@@ -181,7 +181,7 @@ class CheckTimeoutCommand implements fc.Command<ModelState, RealState> {
 			}
 		}
 
-		const realTimedOut = real.bridge.checkTimeouts();
+		const realTimedOut = real.bridge.checkTimeouts().map((e) => e.id);
 
 		// Compare sets (order doesn't matter)
 		const modelSet = new Set(modelTimedOut);

@@ -24,13 +24,13 @@ describe("Integration: SSE to WS Pipeline", () => {
 		harness.mock.resetQueues();
 	});
 
-	it("SSE consumer is running after relay startup", async () => {
-		// The SSE consumer connect() is fire-and-forget, so isConnected() may
+	it("SSE stream is running after relay startup", async () => {
+		// The SSE stream connect() is fire-and-forget, so isConnected() may
 		// not be true immediately. But it should be running (this.running=true).
 		// The best proof is that SSE events actually flow — tested below.
-		// Here we just verify the consumer was started successfully.
-		const consumer = harness.stack.sseConsumer;
-		// The consumer object exists and was wired up
+		// Here we just verify the stream was started successfully.
+		const consumer = harness.stack.sseStream;
+		// The stream object exists and was wired up
 		expect(consumer).toBeTruthy();
 
 		// Give it a moment to connect, then check

@@ -2,7 +2,6 @@ import * as fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectRegistry } from "../../../src/lib/daemon/project-registry.js";
 import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import {
 	createMockProjectRelay,
@@ -717,61 +716,13 @@ describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 		// Only readyRelay should have been called — registering/error have no relay
 	});
 
-	it("evictOldestSessions() returns evicted session IDs", async () => {
+	it("evictOldestSessions() is a no-op (MessageCache removed, SQLite WAL handles storage)", () => {
+		// MessageCache has been removed in Task 50.5. SQLite WAL + EventStoreEviction
+		// (Task 51) handles storage pressure. evictOldestSessions is retained for
+		// call-site compatibility and always returns [].
 		const reg = new ProjectRegistry(new ServiceRegistry());
-		const relay1 = createMockProjectRelay({
-			messageCache: {
-				evictOldestSession: vi
-					.fn()
-					.mockReturnValueOnce("s1")
-					.mockReturnValueOnce("s2")
-					.mockReturnValueOnce(null),
-			} as unknown as ProjectRelay["messageCache"],
-		});
-		const relay2 = createMockProjectRelay({
-			messageCache: {
-				evictOldestSession: vi
-					.fn()
-					.mockReturnValueOnce("s3")
-					.mockReturnValueOnce(null),
-			} as unknown as ProjectRelay["messageCache"],
-		});
-
-		reg.add(makeProject("alpha"), immediateRelayFactory(relay1));
-		reg.add(makeProject("beta"), immediateRelayFactory(relay2));
-
-		await vi.waitFor(() => {
-			expect(reg.isReady("alpha")).toBe(true);
-			expect(reg.isReady("beta")).toBe(true);
-		});
-
 		const evicted = reg.evictOldestSessions(3);
-		expect(evicted).toEqual(["s1", "s2", "s3"]);
-	});
-
-	it("evictOldestSessions() stops early per relay when evictOldestSession returns null", async () => {
-		const reg = new ProjectRegistry(new ServiceRegistry());
-		const evictMock = vi
-			.fn()
-			.mockReturnValueOnce("s1")
-			.mockReturnValueOnce(null);
-
-		const relay = createMockProjectRelay({
-			messageCache: {
-				evictOldestSession: evictMock,
-			} as unknown as ProjectRelay["messageCache"],
-		});
-
-		reg.add(makeProject("alpha"), immediateRelayFactory(relay));
-
-		await vi.waitFor(() => {
-			expect(reg.isReady("alpha")).toBe(true);
-		});
-
-		const evicted = reg.evictOldestSessions(5);
-		expect(evicted).toEqual(["s1"]);
-		// Should have called evictOldestSession only twice (once returned value, once null → stop)
-		expect(evictMock).toHaveBeenCalledTimes(2);
+		expect(evicted).toEqual([]);
 	});
 });
 

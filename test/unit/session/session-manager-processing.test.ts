@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionStatus } from "../../../src/lib/instance/opencode-client.js";
+import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 
@@ -14,7 +14,9 @@ describe("SessionManager.listSessions — processing flag", () => {
 	beforeEach(() => {
 		mgr = new SessionManager({
 			client: {
-				listSessions: vi.fn().mockResolvedValue(mockSessions),
+				session: {
+					list: vi.fn().mockResolvedValue(mockSessions),
+				},
 			} as unknown as ConstructorParameters<typeof SessionManager>[0]["client"],
 			log: createSilentLogger(),
 		});

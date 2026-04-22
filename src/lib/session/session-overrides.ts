@@ -22,12 +22,6 @@ interface SessionState {
 }
 
 export class SessionOverrides extends TrackedService {
-	/**
-	 * Sentinel session ID for backward-compatible shims.
-	 * @deprecated — will be removed when all callers migrate to per-session API.
-	 */
-	private static readonly GLOBAL = "_global";
-
 	/** Global default model — new sessions inherit this when no per-session model is set. */
 	defaultModel: ModelOverride | undefined = undefined;
 
@@ -61,38 +55,16 @@ export class SessionOverrides extends TrackedService {
 	// ─── Per-Session Model ──────────────────────────────────────────────────
 
 	/** Set model for a session AND mark as user-selected. */
-	setModel(sessionId: string, model: ModelOverride): void;
-	/** @deprecated — use setModel(sessionId, model) */
-	setModel(model: ModelOverride): void;
-	setModel(
-		sessionIdOrModel: string | ModelOverride,
-		model?: ModelOverride,
-	): void {
-		const [sid, m] =
-			typeof sessionIdOrModel === "string"
-				? // biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-					[sessionIdOrModel, model!]
-				: [SessionOverrides.GLOBAL, sessionIdOrModel];
-		const s = this.getOrCreate(sid);
-		s.model = m;
+	setModel(sessionId: string, model: ModelOverride): void {
+		const s = this.getOrCreate(sessionId);
+		s.model = model;
 		s.modelUserSelected = true;
 	}
 
 	/** Set model for display WITHOUT marking as user-selected (auto-detected). */
-	setModelDefault(sessionId: string, model: ModelOverride): void;
-	/** @deprecated — use setModelDefault(sessionId, model) */
-	setModelDefault(model: ModelOverride): void;
-	setModelDefault(
-		sessionIdOrModel: string | ModelOverride,
-		model?: ModelOverride,
-	): void {
-		const [sid, m] =
-			typeof sessionIdOrModel === "string"
-				? // biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-					[sessionIdOrModel, model!]
-				: [SessionOverrides.GLOBAL, sessionIdOrModel];
-		const s = this.getOrCreate(sid);
-		s.model = m;
+	setModelDefault(sessionId: string, model: ModelOverride): void {
+		const s = this.getOrCreate(sessionId);
+		s.model = model;
 		// Do NOT touch modelUserSelected — preserve existing flag
 	}
 
@@ -109,14 +81,8 @@ export class SessionOverrides extends TrackedService {
 	// ─── Per-Session Agent ──────────────────────────────────────────────────
 
 	/** Set the agent override for a session. */
-	setAgent(sessionId: string, agentId: string): void;
-	/** @deprecated — use setAgent(sessionId, agentId) */
-	setAgent(agentId: string): void;
-	setAgent(sessionIdOrAgentId: string, agentId?: string): void {
-		const [sid, agent] = agentId
-			? [sessionIdOrAgentId, agentId]
-			: [SessionOverrides.GLOBAL, sessionIdOrAgentId];
-		this.getOrCreate(sid).agent = agent;
+	setAgent(sessionId: string, agentId: string): void {
+		this.getOrCreate(sessionId).agent = agentId;
 	}
 
 	/** Get the agent override for a session. */
@@ -127,25 +93,13 @@ export class SessionOverrides extends TrackedService {
 	// ─── Per-Session Variant (Thinking Level) ───────────────────────────────
 
 	/** Set the variant (thinking level) for a session. Empty string clears. */
-	setVariant(sessionId: string, variant: string): void;
-	/** @deprecated — use setVariant(sessionId, variant) */
-	setVariant(variant: string): void;
-	setVariant(sessionIdOrVariant: string, variant?: string): void {
-		if (variant !== undefined) {
-			this.getOrCreate(sessionIdOrVariant).variant = variant;
-		} else {
-			this.getOrCreate(SessionOverrides.GLOBAL).variant = sessionIdOrVariant;
-			this.defaultVariant = sessionIdOrVariant;
-		}
+	setVariant(sessionId: string, variant: string): void {
+		this.getOrCreate(sessionId).variant = variant;
 	}
 
 	/** Get the variant for a session (per-session override ?? global default). */
-	getVariant(sessionId: string): string;
-	/** @deprecated — use getVariant(sessionId) */
-	getVariant(): string;
-	getVariant(sessionId?: string): string {
-		const sid = sessionId ?? SessionOverrides.GLOBAL;
-		return this.sessions.get(sid)?.variant ?? this.defaultVariant;
+	getVariant(sessionId: string): string {
+		return this.sessions.get(sessionId)?.variant ?? this.defaultVariant;
 	}
 
 	// ─── Per-Session Clear ──────────────────────────────────────────────────
@@ -162,27 +116,16 @@ export class SessionOverrides extends TrackedService {
 	// ─── Per-Session Processing Timeout ─────────────────────────────────────
 
 	/** Start a 120s processing timeout for a specific session. Cancels any existing timer for that session. */
-	startProcessingTimeout(sessionId: string, onTimeout: () => void): void;
-	/** @deprecated — use startProcessingTimeout(sessionId, onTimeout) */
-	startProcessingTimeout(onTimeout: () => void): void;
-	startProcessingTimeout(
-		sessionIdOrCb: string | (() => void),
-		onTimeout?: () => void,
-	): void {
-		const [sid, cb] =
-			typeof sessionIdOrCb === "string"
-				? // biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-					[sessionIdOrCb, onTimeout!]
-				: [SessionOverrides.GLOBAL, sessionIdOrCb];
-		const s = this.getOrCreate(sid);
+	startProcessingTimeout(sessionId: string, onTimeout: () => void): void {
+		const s = this.getOrCreate(sessionId);
 		if (s.processingTimer) {
 			this.clearTrackedTimer(s.processingTimer);
 		}
-		s.processingTimeoutCallback = cb;
+		s.processingTimeoutCallback = onTimeout;
 		s.processingTimer = this.delayed(() => {
 			s.processingTimer = null;
 			s.processingTimeoutCallback = null;
-			cb();
+			onTimeout();
 		}, PROCESSING_TIMEOUT_MS);
 	}
 
@@ -206,12 +149,8 @@ export class SessionOverrides extends TrackedService {
 	}
 
 	/** Cancel the processing timeout for a specific session. Safe to call when no timer is running. */
-	clearProcessingTimeout(sessionId: string): void;
-	/** @deprecated — use clearProcessingTimeout(sessionId) */
-	clearProcessingTimeout(): void;
-	clearProcessingTimeout(sessionId?: string): void {
-		const sid = sessionId ?? SessionOverrides.GLOBAL;
-		const state = this.sessions.get(sid);
+	clearProcessingTimeout(sessionId: string): void {
+		const state = this.sessions.get(sessionId);
 		if (state?.processingTimer) {
 			this.clearTrackedTimer(state.processingTimer);
 			state.processingTimer = null;
@@ -219,6 +158,11 @@ export class SessionOverrides extends TrackedService {
 		if (state) {
 			state.processingTimeoutCallback = null;
 		}
+	}
+
+	/** Check if a session has an active processing timeout (Claude turn in progress). */
+	hasActiveProcessingTimeout(sessionId: string): boolean {
+		return this.sessions.get(sessionId)?.processingTimer != null;
 	}
 
 	// ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -237,36 +181,5 @@ export class SessionOverrides extends TrackedService {
 	override async drain(): Promise<void> {
 		this.dispose();
 		await super.drain();
-	}
-
-	// ─── Backward-Compatible Shims ──────────────────────────────────────────
-	// These delegate to a "_global" sentinel session so existing callers
-	// keep working during the migration. Remove once all callers use the
-	// per-session API (Tasks 5-14).
-
-	/** @deprecated — use getModel(sessionId) */
-	get model(): ModelOverride | undefined {
-		return (
-			this.sessions.get(SessionOverrides.GLOBAL)?.model ?? this.defaultModel
-		);
-	}
-
-	/** @deprecated — use getAgent(sessionId) */
-	get agent(): string | undefined {
-		return this.sessions.get(SessionOverrides.GLOBAL)?.agent;
-	}
-
-	/** @deprecated — use isModelUserSelected(sessionId) */
-	get modelUserSelected(): boolean {
-		return (
-			this.sessions.get(SessionOverrides.GLOBAL)?.modelUserSelected ?? false
-		);
-	}
-
-	/** @deprecated — use getVariant(sessionId) */
-	get variant(): string {
-		return (
-			this.sessions.get(SessionOverrides.GLOBAL)?.variant ?? this.defaultVariant
-		);
 	}
 }

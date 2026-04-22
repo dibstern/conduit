@@ -4,7 +4,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import type { OpenCodeClient } from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
@@ -19,7 +19,6 @@ import {
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
-import type { MessageCache } from "./message-cache.js";
 import type { MessagePollerManager } from "./message-poller-manager.js";
 import {
 	assembleContext,
@@ -34,23 +33,20 @@ import type {
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEConsumer } from "./sse-consumer.js";
+import type { SSEStream } from "./sse-stream.js";
 import { sendPushForEvent } from "./sse-wiring.js";
-import type { ToolContentStore } from "./tool-content-store.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface MonitoringWiringDeps {
-	client: OpenCodeClient;
+	client: OpenCodeAPI;
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
 	overrides: SessionOverrides;
-	toolContentStore: ToolContentStore;
-	messageCache: MessageCache;
 	statusPoller: SessionStatusPoller;
 	pollerManager: MessagePollerManager;
 	registry: SessionRegistry;
-	sseConsumer: SSEConsumer;
+	sseStream: SSEStream;
 	config: {
 		pollerGatingConfig?: Partial<PollerGatingConfig>;
 		pushManager?: PushNotificationManager;
@@ -87,12 +83,10 @@ export function wireMonitoring(
 		wsHandler,
 		sessionMgr,
 		overrides,
-		toolContentStore,
-		messageCache,
 		statusPoller,
 		pollerManager,
 		registry,
-		sseConsumer,
+		sseStream,
 		config,
 		statusLog,
 		sseLog,
@@ -115,9 +109,7 @@ export function wireMonitoring(
 
 	// ── Shared pipeline deps (used by status poller + message poller) ──────
 	const pipelineDeps: PipelineDeps = {
-		toolContentStore,
 		overrides,
-		messageCache,
 		wsHandler,
 		log: pipelineLog,
 	};
@@ -125,8 +117,8 @@ export function wireMonitoring(
 	// ── Effect executor deps (used by monitoring reducer effects) ─────────
 	const effectDeps: EffectDeps = {
 		startPoller: (sessionId) => {
-			client
-				.getMessages(sessionId)
+			client.session
+				.messages(sessionId)
 				.then((msgs) => pollerManager.startPolling(sessionId, msgs))
 				.catch((err) =>
 					statusLog.warn(
@@ -149,7 +141,7 @@ export function wireMonitoring(
 				return;
 			}
 
-			const doneMsg = { type: "done" as const, code: 0 };
+			const doneMsg = { type: "done" as const, sessionId, code: 0 };
 			const doneViewers = wsHandler.getClientsForSession(sessionId);
 			const doneResult = processEvent(
 				doneMsg,
@@ -213,7 +205,7 @@ export function wireMonitoring(
 				assembleContext(
 					sessionId,
 					status,
-					{ connected: sseConsumer.isConnected() },
+					{ connected: sseStream.isConnected() },
 					sseTracker,
 					parentMap,
 					(sid) => registry.hasViewers(sid),

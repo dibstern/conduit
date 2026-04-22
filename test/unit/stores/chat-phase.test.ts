@@ -53,17 +53,26 @@ import {
 	phaseToProcessing,
 	phaseToStreaming,
 	renderDeferredMarkdown,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // Helper to create typed status messages
 function statusMsg(status: string) {
-	return { type: "status" as const, status };
+	return { type: "status" as const, sessionId: "s1", status };
 }
+
+// ─── Per-session tiers for handler calls ────────────────────────────────────
+let ta: SessionActivity;
+let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	clearMessages();
+	ta = testActivity();
+	tm = testMessages();
 });
 
 afterEach(() => {
@@ -87,6 +96,8 @@ describe("LoadLifecycle", () => {
 	it("clearMessages resets loadLifecycle to 'empty'", () => {
 		chatState.loadLifecycle = "loading";
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 		expect(chatState.loadLifecycle).toBe("empty");
 	});
 });
@@ -102,6 +113,8 @@ describe("ChatPhase type", () => {
 		phaseToStreaming();
 		expect(chatState.phase).not.toBe("idle");
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 		expect(chatState.phase).toBe("idle");
 	});
 });
@@ -117,7 +130,7 @@ describe("backward-compatible getters", () => {
 	});
 
 	it("processing: processing=true, streaming=false, replaying=false", () => {
-		handleStatus(statusMsg("processing"));
+		handleStatus(ta, tm, statusMsg("processing"));
 		expect(chatState.phase).toBe("processing");
 		expect(isProcessing()).toBe(true);
 		expect(isStreaming()).toBe(false);
@@ -125,7 +138,7 @@ describe("backward-compatible getters", () => {
 	});
 
 	it("streaming: streaming=true, replaying=false", () => {
-		handleDelta({ type: "delta", text: "hello" });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "hello" });
 		expect(chatState.phase).toBe("streaming");
 		expect(isStreaming()).toBe(true);
 		expect(isReplaying()).toBe(false);
@@ -144,18 +157,18 @@ describe("backward-compatible getters", () => {
 
 describe("phase transitions", () => {
 	it("handleStatus('processing') → phase='processing'", () => {
-		handleStatus(statusMsg("processing"));
+		handleStatus(ta, tm, statusMsg("processing"));
 		expect(chatState.phase).toBe("processing");
 	});
 
 	it("handleDelta → phase='streaming'", () => {
-		handleDelta({ type: "delta", text: "hello" });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "hello" });
 		expect(chatState.phase).toBe("streaming");
 	});
 
 	it("handleDone → phase='idle'", () => {
-		handleDelta({ type: "delta", text: "hello" });
-		handleDone({ type: "done", code: 0 });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "hello" });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(chatState.phase).toBe("idle");
 	});
 
@@ -164,17 +177,17 @@ describe("phase transitions", () => {
 		expect(chatState.loadLifecycle).toBe("loading");
 	});
 
-	it("phaseEndReplay(false) → loadLifecycle stays 'loading' (renderDeferredMarkdown sets ready), phase stays idle", () => {
+	it("phaseEndReplay(ta, false) → loadLifecycle stays 'loading' (renderDeferredMarkdown sets ready), phase stays idle", () => {
 		phaseStartReplay();
-		phaseEndReplay(false);
+		phaseEndReplay(ta, false);
 		// phaseEndReplay no longer sets loadLifecycle — that's renderDeferredMarkdown's job
 		expect(chatState.loadLifecycle).toBe("loading");
 		expect(chatState.phase).toBe("idle");
 	});
 
-	it("phaseEndReplay(true) → phase='processing' when idle, loadLifecycle unchanged", () => {
+	it("phaseEndReplay(ta, true) → phase='processing' when idle, loadLifecycle unchanged", () => {
 		phaseStartReplay();
-		phaseEndReplay(true);
+		phaseEndReplay(ta, true);
 		expect(chatState.loadLifecycle).toBe("loading");
 		expect(chatState.phase).toBe("processing");
 	});
@@ -195,19 +208,19 @@ describe("impossible states prevented", () => {
 		// Run through various transitions
 		expect(validPhases).toContain(chatState.phase);
 
-		handleStatus(statusMsg("processing"));
+		handleStatus(ta, tm, statusMsg("processing"));
 		expect(validPhases).toContain(chatState.phase);
 
-		handleDelta({ type: "delta", text: "x" });
+		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "x" });
 		expect(validPhases).toContain(chatState.phase);
 
-		handleDone({ type: "done", code: 0 });
+		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(validPhases).toContain(chatState.phase);
 
 		phaseStartReplay();
 		expect(validPhases).toContain(chatState.phase);
 
-		phaseEndReplay(false);
+		phaseEndReplay(ta, false);
 		expect(validPhases).toContain(chatState.phase);
 	});
 
@@ -257,7 +270,7 @@ describe("Phase split: replaying removed from ChatPhase", () => {
 		phaseToStreaming();
 		expect(chatState.phase).toBe("streaming");
 		expect(isStreaming()).toBe(false); // gated by loading
-		phaseEndReplay(true);
+		phaseEndReplay(ta, true);
 		// phaseEndReplay does NOT set loadLifecycle (that's renderDeferredMarkdown's job).
 		// But it also doesn't change phase since it's already streaming (not idle).
 		expect(chatState.loadLifecycle).toBe("loading");

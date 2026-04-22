@@ -2,17 +2,17 @@
 // Shared types used by all handler modules.
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
+import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
-import type {
-	OpenCodeClient,
-	PromptOptions,
-} from "../instance/opencode-client.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
-import type { MessageCache } from "../relay/message-cache.js";
+import type { ProviderStateService } from "../persistence/provider-state-service.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
+import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
+import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { MessagePollerManager } from "../relay/message-poller-manager.js";
-import type { PendingUserMessages } from "../relay/pending-user-messages.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { ToolContentStore } from "../relay/tool-content-store.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
@@ -68,14 +68,12 @@ export interface HandlerDeps {
 		getClientsForSession: (sessionId: string) => string[];
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 	};
-	client: OpenCodeClient;
+	client: OpenCodeAPI;
 	sessionMgr: SessionManager;
-	messageCache: MessageCache;
-	pendingUserMessages: PendingUserMessages;
 	permissionBridge: PermissionBridge;
+	questionBridge: QuestionBridge;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
-	toolContentStore: ToolContentStore;
 	config: ProjectRelayConfig;
 	log: Logger;
 	/** Session status poller for processing state */
@@ -96,6 +94,22 @@ export interface HandlerDeps {
 	projectMgmt?: ProjectManagementDeps;
 	/** Port scan capability (optional — only available in daemon mode) */
 	scanDeps?: ScanDeps;
+	/** SQLite read query service (optional — only available when persistence is configured) */
+	readQuery?: ReadQueryService;
+	/**
+	 * Phase 5: OrchestrationEngine for routing prompts through provider adapters.
+	 * When set, handleMessage() dispatches through the engine instead of calling
+	 * client.session.prompt() directly. Optional — tests may omit it; production
+	 * always provides it via relay-stack.ts.
+	 */
+	orchestrationEngine?: OrchestrationEngine;
+	/**
+	 * Claude event persistence deps (optional — only when SQLite is configured).
+	 * Passed to RelayEventSink so Claude SDK events survive session switches.
+	 */
+	claudeEventPersist?: RelayEventSinkPersist;
+	/** Provider state service for resume cursor persistence (optional). */
+	providerStateService?: ProviderStateService;
 }
 
 export type MessageHandler<K extends keyof PayloadMap = keyof PayloadMap> = (

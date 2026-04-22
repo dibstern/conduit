@@ -4,11 +4,11 @@
 // Uses fc.oneof with { weight, arbitrary } syntax (fast-check v4).
 
 import fc from "fast-check";
+import type { SSEEvent } from "../../src/lib/relay/opencode-events.js";
 import type {
 	FrontendDecision,
 	IPCCommand,
 	OpenCodeDecision,
-	OpenCodeEvent,
 	PartType,
 	RecentProject,
 	ToolStatus,
@@ -153,7 +153,7 @@ export const partDeltaEvent = fc
 		delta: edgeCaseString,
 	})
 	.map(
-		(props): OpenCodeEvent => ({
+		(props): SSEEvent => ({
 			type: "message.part.delta",
 			properties: props,
 		}),
@@ -176,7 +176,7 @@ export const toolPartUpdatedEvent = fc
 		}),
 	})
 	.map(
-		(props): OpenCodeEvent => ({
+		(props): SSEEvent => ({
 			type: "message.part.updated",
 			properties: props,
 		}),
@@ -198,7 +198,7 @@ export const reasoningPartUpdatedEvent = fc
 		}),
 	})
 	.map(
-		(props): OpenCodeEvent => ({
+		(props): SSEEvent => ({
 			type: "message.part.updated",
 			properties: props,
 		}),
@@ -218,7 +218,7 @@ export const permissionAskedEvent = fc
 		always: fc.array(edgeCaseString, { minLength: 0, maxLength: 3 }),
 	})
 	.map(
-		(props): OpenCodeEvent => ({
+		(props): SSEEvent => ({
 			type: "permission.asked",
 			properties: props,
 		}),
@@ -244,7 +244,7 @@ export const questionAskedEvent = fc
 		),
 	})
 	.map(
-		(props): OpenCodeEvent => ({
+		(props): SSEEvent => ({
 			type: "question.asked",
 			properties: props,
 		}),
@@ -252,7 +252,7 @@ export const questionAskedEvent = fc
 
 /** Generate a session.status event */
 export const sessionStatusEvent = fc.constantFrom("busy", "idle", "retry").map(
-	(statusType): OpenCodeEvent => ({
+	(statusType): SSEEvent => ({
 		type: "session.status",
 		properties: { status: { type: statusType } },
 	}),
@@ -283,7 +283,7 @@ export const messageUpdatedEvent = fc
 		}),
 	})
 	.map(
-		(props): OpenCodeEvent => ({
+		(props): SSEEvent => ({
 			type: "message.updated",
 			properties: props,
 		}),
@@ -318,7 +318,7 @@ export const unknownEvent = fc
 			!e.type.startsWith("pty.") &&
 			!e.type.startsWith("file.")
 		);
-	}) as fc.Arbitrary<OpenCodeEvent>;
+	}) as fc.Arbitrary<SSEEvent>;
 
 // ─── IPC generators ─────────────────────────────────────────────────────────
 
