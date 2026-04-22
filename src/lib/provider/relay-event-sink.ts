@@ -20,6 +20,25 @@ import type {
 
 const log = createLogger("relay-event-sink");
 
+// ─── Translation Result ───────────────────────────────────────────────────
+
+type TranslationResult =
+	| {
+			kind: "emit";
+			messages: import("../shared-types.js").UntaggedRelayMessage[];
+	  }
+	| { kind: "silent"; reason: string };
+
+function emit(
+	...messages: import("../shared-types.js").UntaggedRelayMessage[]
+): TranslationResult {
+	return { kind: "emit", messages };
+}
+
+function silent(reason: string): TranslationResult {
+	return { kind: "silent", reason };
+}
+
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
 export interface RelayEventSinkPersist {
@@ -109,13 +128,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					);
 				}
 			}
-			const msg = translateCanonicalEvent(event);
-			if (msg) {
-				for (const raw of msg) {
+			const result = translateCanonicalEvent(event);
+			if (result.kind === "emit") {
+				for (const raw of result.messages) {
 					const m = tagWithSessionId(raw, sessionId);
 					send(m);
-					// Done is always terminal; errors are terminal except RETRY,
-					// which is a non-terminal progress signal during API retries.
 					const isTerminal =
 						m.type === "done" || (m.type === "error" && m.code !== "RETRY");
 					if (isTerminal) finish();
@@ -228,43 +245,32 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 // Maps CanonicalEvent (adapter-emitted) → RelayMessage[] (client-facing).
 // An event may produce zero, one, or many relay messages.
 
-function translateCanonicalEvent(
-	event: CanonicalEvent,
-): import("../shared-types.js").UntaggedRelayMessage[] {
+function translateCanonicalEvent(event: CanonicalEvent): TranslationResult {
 	switch (event.type) {
 		case "text.delta":
-			return [
-				{
-					type: "delta",
-					text: event.data.text,
-					messageId: event.data.messageId,
-				},
-			];
+			return emit({
+				type: "delta",
+				text: event.data.text,
+				messageId: event.data.messageId,
+			});
 
 		case "thinking.start":
-			return [{ type: "thinking_start", messageId: event.data.messageId }];
+			return emit({ type: "thinking_start", messageId: event.data.messageId });
 
 		case "thinking.delta":
-			return [
-				{
-					type: "thinking_delta",
-					text: event.data.text,
-					messageId: event.data.messageId,
-				},
-			];
+			return emit({
+				type: "thinking_delta",
+				text: event.data.text,
+				messageId: event.data.messageId,
+			});
 
 		case "thinking.end":
-			return [{ type: "thinking_stop", messageId: event.data.messageId }];
+			return emit({ type: "thinking_stop", messageId: event.data.messageId });
 
 		case "tool.started": {
 			const { toolName, callId, input, messageId } = event.data;
-			return [
-				{
-					type: "tool_start",
-					id: callId,
-					name: toolName,
-					messageId,
-				},
+			return emit(
+				{ type: "tool_start", id: callId, name: toolName, messageId },
 				{
 					type: "tool_executing",
 					id: callId,
@@ -272,110 +278,94 @@ function translateCanonicalEvent(
 					input: isRecord(input) ? input : undefined,
 					messageId,
 				},
-			];
+			);
 		}
 
-		case "tool.running": {
-			// No callId in ToolRunningPayload — pass partId as the best anchor.
-			return [];
-		}
+		case "tool.running":
+			return silent(
+				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
+			);
 
 		case "tool.input_updated": {
-			// Claude SDK streams tool_use input via input_json_delta — the
-			// initial tool.started event fires with `input: {}` and this
-			// event carries the real parsed input once each delta parses.
-			// Forward as tool_executing so the browser-side tool registry
-			// merges the new input on the already-running tool entry.
 			const { partId, input, messageId, toolName } = event.data;
-			return [
-				{
-					type: "tool_executing",
-					id: partId,
-					name: toolName ?? "",
-					input: isRecord(input) ? input : undefined,
-					messageId,
-				},
-			];
+			return emit({
+				type: "tool_executing",
+				id: partId,
+				name: toolName ?? "",
+				input: isRecord(input) ? input : undefined,
+				messageId,
+			});
 		}
 
 		case "tool.completed": {
 			const { partId, result, messageId } = event.data;
-			return [
-				{
-					type: "tool_result",
-					id: partId,
-					content: typeof result === "string" ? result : stringify(result),
-					is_error: false,
-					messageId,
-				},
-			];
+			return emit({
+				type: "tool_result",
+				id: partId,
+				content: typeof result === "string" ? result : stringify(result),
+				is_error: false,
+				messageId,
+			});
 		}
 
 		case "turn.completed": {
 			const { tokens, cost, duration } = event.data;
-			const result: RelayMessage = {
-				type: "result",
-				usage: {
-					input: tokens?.input ?? 0,
-					output: tokens?.output ?? 0,
-					cache_read: tokens?.cacheRead ?? 0,
-					cache_creation: tokens?.cacheWrite ?? 0,
-				},
-				cost: cost ?? 0,
-				duration: duration ?? 0,
-				sessionId: event.sessionId,
-			};
-			return [result, { type: "done", code: 0 }];
+			return emit(
+				{
+					type: "result",
+					usage: {
+						input: tokens?.input ?? 0,
+						output: tokens?.output ?? 0,
+						cache_read: tokens?.cacheRead ?? 0,
+						cache_creation: tokens?.cacheWrite ?? 0,
+					},
+					cost: cost ?? 0,
+					duration: duration ?? 0,
+					sessionId: event.sessionId,
+				} satisfies RelayMessage,
+				{ type: "done", code: 0 },
+			);
 		}
 
 		case "turn.error": {
 			const { error, code } = event.data;
-			return [
-				{
-					type: "error",
-					code: code ?? "TURN_ERROR",
-					message: error,
-				},
+			return emit(
+				{ type: "error", code: code ?? "TURN_ERROR", message: error },
 				{ type: "done", code: 1 },
-			];
+			);
 		}
 
 		case "turn.interrupted":
-			return [{ type: "done", code: 1 }];
+			return emit({ type: "done", code: 1 });
 
 		case "session.status":
-			// status="retry" means the SDK is retrying a failed API call.
-			// Surface it as a non-terminal error so the UI can show progress
-			// (matching the OpenCode retry UX in event-translator.ts).
 			if (event.data.status === "retry") {
 				const reason =
 					typeof event.metadata.correlationId === "string"
 						? event.metadata.correlationId
 						: "Retrying";
-				return [{ type: "error", code: "RETRY", message: reason }];
+				return emit({ type: "error", code: "RETRY", message: reason });
 			}
-			// idle/busy/error statuses are informational here — the prompt handler
-			// already sends "processing" and the terminal done/error events cover
-			// the lifecycle, so we skip them to avoid duplicate signals.
-			return [];
+			return silent(
+				"prompt handler owns lifecycle; terminal done/error covers completion",
+			);
 
 		case "message.created":
 		case "session.created":
 		case "session.renamed":
 		case "session.provider_changed":
-			return [];
+			return silent("persistence-only event; no UI surface in relay");
 
 		case "permission.asked":
 		case "permission.resolved":
 		case "question.asked":
 		case "question.resolved":
-			// Permission/question side-channel is handled via the
-			// requestPermission/requestQuestion APIs on the sink — the adapter
-			// should not push these as canonical events. Defensive no-op.
-			return [];
+			return silent(
+				"handled via requestPermission/requestQuestion side-channel",
+			);
 
 		default:
-			return [];
+			return silent("unhandled event type");
 	}
 }
 
