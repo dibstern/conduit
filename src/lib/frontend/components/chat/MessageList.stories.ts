@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { chatState, resetChatState } from "../../stores/chat.svelte.js";
+import {
+	getOrCreateSessionMessages,
+	resetChatState,
+} from "../../stores/chat.svelte.js";
+import { sessionState } from "../../stores/session.svelte.js";
 import {
 	mockAssistantSimple,
 	mockAssistantWithCode,
@@ -13,6 +17,8 @@ import {
 } from "../../stories/mocks.js";
 import MessageList from "./MessageList.svelte";
 
+const testId = "story-msglist";
+
 const meta = {
 	title: "Chat/MessageList",
 	component: MessageList,
@@ -20,6 +26,7 @@ const meta = {
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
 		resetChatState();
+		sessionState.currentId = testId;
 	},
 } satisfies Meta<typeof MessageList>;
 
@@ -30,25 +37,25 @@ export const Empty: Story = {};
 
 export const SingleUserMessage: Story = {
 	beforeEach: () => {
-		chatState.messages = [mockUserMessage];
+		getOrCreateSessionMessages(testId).messages = [mockUserMessage];
 	},
 };
 
 export const SingleAssistantMessage: Story = {
 	beforeEach: () => {
-		chatState.messages = [mockAssistantSimple];
+		getOrCreateSessionMessages(testId).messages = [mockAssistantSimple];
 	},
 };
 
 export const FullConversation: Story = {
 	beforeEach: () => {
-		chatState.messages = [...mockConversation];
+		getOrCreateSessionMessages(testId).messages = [...mockConversation];
 	},
 };
 
 export const MixedTypes: Story = {
 	beforeEach: () => {
-		chatState.messages = [
+		getOrCreateSessionMessages(testId).messages = [
 			mockUserMessage,
 			mockThinkingDone,
 			mockToolCompleted,

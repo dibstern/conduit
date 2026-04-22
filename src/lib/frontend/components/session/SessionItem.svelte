@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { isProcessing as chatIsProcessing } from "../../stores/chat.svelte.js";
+	import { getSessionPhase } from "../../stores/chat.svelte.js";
 	import { getSessionIndicator } from "../../stores/notification-reducer.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
@@ -71,10 +71,9 @@
 		return parts.join(" \u00B7 ");
 	});
 
-	// Processing state: server flag OR local chat processing for active session
+	// Processing state: server flag OR per-session phase check
 	const isProcessing = $derived(
-		session.processing ||
-			(session.id === sessionState.currentId && chatIsProcessing()),
+		session.processing || getSessionPhase(session.id) !== "idle",
 	);
 
 	// Sidebar indicator: attention > done-unviewed > processing

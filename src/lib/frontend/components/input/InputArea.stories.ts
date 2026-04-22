@@ -1,8 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { phaseToIdle, phaseToProcessing } from "../../stores/chat.svelte.js";
+import {
+	getOrCreateSessionActivity,
+	getOrCreateSessionMessages,
+	phaseToIdle,
+	phaseToProcessing,
+} from "../../stores/chat.svelte.js";
 import { discoveryState } from "../../stores/discovery.svelte.js";
-import { uiState } from "../../stores/ui.svelte.js";
+import { sessionState } from "../../stores/session.svelte.js";
 import InputArea from "./InputArea.svelte";
+
+const testId = "story-input";
 
 function setupDiscovery() {
 	discoveryState.providers = [
@@ -36,8 +43,10 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
+		sessionState.currentId = testId;
 		phaseToIdle();
-		uiState.contextPercent = 0;
+		getOrCreateSessionActivity(testId).phase = "idle";
+		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();
 	},
 } satisfies Meta<typeof InputArea>;
@@ -50,6 +59,7 @@ export const Empty: Story = {};
 export const Processing: Story = {
 	beforeEach: () => {
 		phaseToProcessing();
+		getOrCreateSessionActivity(testId).phase = "processing";
 		// Ensure discovery state persists through processing state change
 		discoveryState.currentVariant = "high";
 	},
@@ -57,18 +67,18 @@ export const Processing: Story = {
 
 export const WithContextBar: Story = {
 	beforeEach: () => {
-		uiState.contextPercent = 42;
+		getOrCreateSessionMessages(testId).contextPercent = 42;
 	},
 };
 
 export const HighContext: Story = {
 	beforeEach: () => {
-		uiState.contextPercent = 85;
+		getOrCreateSessionMessages(testId).contextPercent = 85;
 	},
 };
 
 export const CriticalContext: Story = {
 	beforeEach: () => {
-		uiState.contextPercent = 97;
+		getOrCreateSessionMessages(testId).contextPercent = 97;
 	},
 };

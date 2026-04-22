@@ -46,7 +46,7 @@
 		wsSend,
 	} from "../../stores/ws.svelte.js";
 	import { slugState } from "../../stores/router.svelte.js";
-	import { chatState, clearMessages } from "../../stores/chat.svelte.js";
+	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";

@@ -16,13 +16,12 @@
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
-	import { addUserMessage, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
+	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, extractSlashQuery } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { uiState } from "../../stores/ui.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -104,7 +103,7 @@
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
-	const showContextMini = $derived(uiState.contextPercent > 0);
+	const showContextMini = $derived(currentChat().contextPercent > 0);
 
 	// ─── Mobile detection ─────────────────────────────────────────────────────
 	// On mobile, Enter inserts a newline (default textarea behavior) and the
@@ -466,7 +465,7 @@
 
 		<!-- Context usage bar (above input) -->
 		{#if showContextMini}
-			<ContextBar percent={uiState.contextPercent} />
+			<ContextBar percent={currentChat().contextPercent} />
 		{/if}
 
 		<!-- Processing indicator: animated bounce bar aligned with context mini bar -->

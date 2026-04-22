@@ -8,9 +8,9 @@
 	import { onMount, onDestroy } from "svelte";
 	import {
 		consumeReplayBuffer,
+		currentChat,
 		getOrCreateSessionSlot,
 		getReplayBuffer,
-		historyState,
 		prependMessages,
 	} from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
@@ -33,8 +33,8 @@
 					for (const entry of entries) {
 						if (
 							entry.isIntersecting &&
-							historyState.hasMore &&
-							!historyState.loading
+							currentChat().historyHasMore &&
+							!currentChat().historyLoading
 						) {
 							loadMore();
 						}
@@ -51,10 +51,11 @@
 	});
 
 	function loadMore() {
+		const chat = currentChat();
 		if (
 			!sessionState.currentId ||
-			historyState.loading ||
-			!historyState.hasMore
+			chat.historyLoading ||
+			!chat.historyHasMore
 		)
 			return;
 
@@ -79,19 +80,19 @@
 			// { messages: [], hasMore: false } when this truly is the beginning.
 			// Ensure offset > 0 so the server uses cursor-based pagination
 			// rather than returning the most recent page (already displayed).
-			if (historyState.messageCount === 0) {
-				historyState.messageCount = 1;
+			if (slot.messages.historyMessageCount === 0) {
+				slot.messages.historyMessageCount = 1;
 			}
 		}
 
 		// Server request for older messages.
-		historyState.loading = true;
+		slot.messages.historyLoading = true;
 		// offset = number of messages already loaded (tracked by ws-dispatch).
 		// For cache→server transitions, messageCount was seeded above.
 		wsSend({
 			type: "load_more_history",
 			sessionId,
-			offset: historyState.messageCount,
+			offset: slot.messages.historyMessageCount,
 		});
 	}
 </script>
