@@ -163,9 +163,11 @@ describe("Tool SSE Transition Validation (live)", () => {
 			// slightly after the status transition (network reordering).
 			let idleSeenAt = 0;
 
-			// Start SSE collection BEFORE sending the prompt
+			// Start SSE collection BEFORE sending the prompt.
+			// Timeout is generous for real LLM responses; the until callback
+			// breaks early on session.status:idle + 2s grace period.
 			const ssePromise = collectSSEEvents("/event", {
-				timeoutMs: 90_000,
+				timeoutMs: 110_000,
 				maxEvents: 1000,
 				until: (evt) => {
 					// Stop when we see session.status:idle after some tool events,
@@ -182,8 +184,9 @@ describe("Tool SSE Transition Validation (live)", () => {
 							}
 						}
 					}
-					// After idle, wait 2s grace period for trailing events
-					if (idleSeenAt > 0 && Date.now() - idleSeenAt > 2_000) {
+					// After idle, wait 5s grace period for trailing tool completion
+					// events that may arrive after the session status transitions.
+					if (idleSeenAt > 0 && Date.now() - idleSeenAt > 5_000) {
 						return true;
 					}
 					// Track tool events in real-time for the until check
@@ -279,7 +282,7 @@ describe("Tool SSE Transition Validation (live)", () => {
 			// Must have captured some tool events
 			expect(toolEvents.length).toBeGreaterThan(0);
 			expect(toolGroups.size).toBeGreaterThan(0);
-		}, 120_000);
+		}, 180_000);
 
 		it("every tool starts with pending or running", () => {
 			if (skipIfNoServer() || toolGroups.size === 0) return;
