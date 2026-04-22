@@ -3,6 +3,7 @@
 // Stateful: tracks part lifecycle (tool pending → running → completed,
 // reasoning start → end) per session.
 
+import { normalizeToolInput } from "../provider/opencode/normalize-tool-input.js";
 import { mapToolName } from "../relay/event-translator.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import {
@@ -264,13 +265,18 @@ export class CanonicalEventTranslator {
 
 			if (status === "pending") {
 				return [
-					canonicalEvent("tool.started", sessionId, {
-						messageId,
-						partId,
-						toolName,
-						callId,
-						input: rawPart.state?.input ?? null,
-					}),
+					canonicalEvent(
+						"tool.started",
+						sessionId,
+						{
+							messageId,
+							partId,
+							toolName,
+							callId,
+							input: normalizeToolInput(toolName, rawPart.state?.input),
+						},
+						{ metadata: { schemaVersion: 2 } },
+					),
 				];
 			}
 
@@ -280,13 +286,18 @@ export class CanonicalEventTranslator {
 				// If first seen as running (never saw pending), emit tool.started first
 				if (!existing) {
 					results.push(
-						canonicalEvent("tool.started", sessionId, {
-							messageId,
-							partId,
-							toolName,
-							callId,
-							input: rawPart.state?.input ?? null,
-						}),
+						canonicalEvent(
+							"tool.started",
+							sessionId,
+							{
+								messageId,
+								partId,
+								toolName,
+								callId,
+								input: normalizeToolInput(toolName, rawPart.state?.input),
+							},
+							{ metadata: { schemaVersion: 2 } },
+						),
 					);
 				}
 

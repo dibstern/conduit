@@ -166,7 +166,8 @@ describe("CanonicalEventTranslator", () => {
 				partId: "part-t1",
 				toolName: "Read",
 				callId: "call-001",
-				input: { file: "test.ts" },
+				// normalizeToolInput maps "file" → Unknown since it's not a recognized field
+				input: { tool: "Read", filePath: "" },
 			});
 		});
 	});
