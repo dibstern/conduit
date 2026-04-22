@@ -147,18 +147,22 @@ describe("Integration: Per-Tab Sessions", () => {
 		client1.send({ type: "new_session", title: "List-Broadcast-B" });
 		const b = await client1.waitFor("session_switched");
 
-		// Both clients should get session_list
-		const list1 = await client1.waitFor("session_list");
-		const list2 = await client2.waitFor("session_list");
+		// Both clients should get session_list containing the new session.
+		// Use predicate to avoid matching a stale session_list from before B was created.
+		const bId = b["id"] as string;
+		const containsB = (m: Record<string, unknown>) => {
+			const sessions = m["sessions"] as Array<{ id: string }> | undefined;
+			return Array.isArray(sessions) && sessions.some((s) => s.id === bId);
+		};
+		const list1 = await client1.waitFor("session_list", {
+			predicate: containsB,
+		});
+		const list2 = await client2.waitFor("session_list", {
+			predicate: containsB,
+		});
 
 		expect(Array.isArray(list1["sessions"])).toBe(true);
 		expect(Array.isArray(list2["sessions"])).toBe(true);
-
-		// Both lists should contain the new session
-		const sessions1 = list1["sessions"] as Array<{ id: string }>;
-		const sessions2 = list2["sessions"] as Array<{ id: string }>;
-		expect(sessions1.find((s) => s.id === b["id"])).toBeTruthy();
-		expect(sessions2.find((s) => s.id === b["id"])).toBeTruthy();
 
 		await client1.close();
 		await client2.close();
