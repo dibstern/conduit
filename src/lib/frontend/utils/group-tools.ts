@@ -144,7 +144,7 @@ export function extractToolSummary(
 			// `include` is OpenCode; `glob`/`type` are Claude SDK glob/type filters.
 			const include = readStr(input, "include", "glob");
 			if (include) tags.push(include);
-			const fileType = readStr(input, "type");
+			const fileType = readStr(input, "fileType", "type");
 			if (fileType) tags.push(fileType);
 			const searchPath = readStr(input, "path");
 			if (searchPath) tags.push(stripRepoRoot(searchPath, repoRoot));
