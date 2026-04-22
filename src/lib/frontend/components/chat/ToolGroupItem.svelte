@@ -5,14 +5,20 @@
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
 	import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../../ui-constants.js";
-	import { extractToolSummary } from "../../utils/group-tools.js";
+	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
+	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 
 	let { message, isLast = false }: { message: ToolMessage; isLast?: boolean } = $props();
 	let expanded = $state(false);
 	let loadingFullContent = $state(false);
 
-	const summary = $derived(extractToolSummary(message.name, message.input));
+	const summary = $derived(
+		lookupSummarizer(message.name).summarize(
+			ensureCanonical(message.name, message.input),
+			{},
+		),
+	);
 
 	// For Bash/Shell tools, extract the raw command for display in expanded view
 	const bashCommand = $derived.by(() => {
