@@ -158,20 +158,33 @@ describe("Tool SSE Transition Validation (live)", () => {
 			testSession = await createTestSession("tool-transition-test");
 			expect(testSession.id).toBeTruthy();
 
+			// Track when idle is first seen — add a grace period after idle
+			// to capture any trailing tool completion events that arrive
+			// slightly after the status transition (network reordering).
+			let idleSeenAt = 0;
+
 			// Start SSE collection BEFORE sending the prompt
 			const ssePromise = collectSSEEvents("/event", {
-				timeoutMs: 60_000,
-				maxEvents: 500,
+				timeoutMs: 90_000,
+				maxEvents: 1000,
 				until: (evt) => {
-					// Stop when we see session.status:idle after some tool events
+					// Stop when we see session.status:idle after some tool events,
+					// but only after a short grace period to capture trailing events
 					if (evt.type === "session.status") {
 						const props = evt.properties;
 						const status = props["status"] as
 							| Record<string, unknown>
 							| undefined;
 						if (status?.["type"] === "idle" && toolEvents.length > 0) {
-							return true;
+							if (idleSeenAt === 0) {
+								idleSeenAt = Date.now();
+								return false; // Don't stop yet — wait for grace period
+							}
 						}
+					}
+					// After idle, wait 2s grace period for trailing events
+					if (idleSeenAt > 0 && Date.now() - idleSeenAt > 2_000) {
+						return true;
 					}
 					// Track tool events in real-time for the until check
 					if (evt.type === "message.part.updated") {
@@ -212,7 +225,7 @@ describe("Tool SSE Transition Validation (live)", () => {
 			// Must have captured some tool events
 			expect(toolEvents.length).toBeGreaterThan(0);
 			expect(toolGroups.size).toBeGreaterThan(0);
-		}, 90_000);
+		}, 120_000);
 
 		it("every tool starts with pending or running", () => {
 			if (skipIfNoServer() || toolGroups.size === 0) return;
@@ -363,8 +376,9 @@ describe("Tool SSE Transition Validation (live)", () => {
 		it("session becomes idle after all tools complete", async () => {
 			if (skipIfNoServer() || !testSession) return;
 
-			// Poll session status
-			const deadline = Date.now() + 15_000;
+			// Poll session status — use generous timeout since the prompt
+			// involves file creation and reading which can be slow
+			const deadline = Date.now() + 60_000;
 			let lastStatus = "";
 			while (Date.now() < deadline) {
 				try {
@@ -385,10 +399,10 @@ describe("Tool SSE Transition Validation (live)", () => {
 				} catch {
 					// ignore
 				}
-				await new Promise((r) => setTimeout(r, 500));
+				await new Promise((r) => setTimeout(r, 1_000));
 			}
 			expect(lastStatus).toBe("idle");
-		}, 30_000);
+		}, 90_000);
 	});
 
 	describe("transition table completeness", () => {

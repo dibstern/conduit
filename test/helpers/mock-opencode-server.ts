@@ -239,6 +239,41 @@ export class MockOpenCodeServer {
 	}
 
 	/**
+	 * Trigger SSE event emission for a specific session, as if prompt_async
+	 * had been called for that session. Rewrites session IDs in events to
+	 * match the given session ID, and populates sseMessages so that
+	 * GET /session/{id}/message returns accumulated data.
+	 *
+	 * Use when the relay's prompt call doesn't reach the mock (e.g., in
+	 * integration tests where the relay routes through the orchestration
+	 * engine which may send the prompt to a different backend).
+	 */
+	triggerPromptSse(actualSessionId: string): void {
+		this.promptsFired++;
+
+		const recordedSessionId =
+			this.recordedPromptSessionIds[this.promptsFired - 1];
+
+		const sessionIdMap =
+			actualSessionId &&
+			recordedSessionId &&
+			actualSessionId !== recordedSessionId
+				? { from: recordedSessionId, to: actualSessionId }
+				: undefined;
+
+		if (this.promptsFired === 1) {
+			const combined = [
+				...(this.sseSegments[0] ?? []),
+				...(this.sseSegments[1] ?? []),
+			];
+			this.emitEvents(combined, sessionIdMap);
+		} else {
+			const segment = this.sseSegments[this.promptsFired] ?? [];
+			this.emitEvents(segment, sessionIdMap);
+		}
+	}
+
+	/**
 	 * Override the response for a specific exact endpoint.
 	 * Replaces the entire queue for that key with a single sticky response
 	 * (never consumed — always returns the same response).
@@ -441,8 +476,8 @@ export class MockOpenCodeServer {
 			this.diag("request", `${method} ${path}`);
 		}
 
-		// SSE endpoint
-		if (path === "/event" && method === "GET") {
+		// SSE endpoint (strip query params — SDK may append ?directory=...)
+		if ((path.split("?")[0] ?? path) === "/event" && method === "GET") {
 			this.handleSse(res);
 			return;
 		}
