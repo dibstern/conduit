@@ -93,7 +93,7 @@ export interface ToolStartedPayload {
 	readonly partId: string;
 	readonly toolName: string;
 	readonly callId: string;
-	readonly input: unknown;
+	readonly input: CanonicalToolInput | unknown;
 }
 
 export interface ToolRunningPayload {
@@ -120,6 +120,48 @@ export interface ToolInputUpdatedPayload {
 	 */
 	readonly toolName?: string;
 }
+
+// ─── Canonical Tool Input ───────────────────────────────────────────────────
+// Provider-agnostic tool input shape. Each adapter's normalizeToolInput()
+// maps raw provider casing (snake_case, camelCase) into this canonical form.
+// Unknown tools collapse to { tool: "Unknown" } — never lost, always renderable.
+
+export type CanonicalToolInput =
+	| { tool: "Read"; filePath: string; offset?: number; limit?: number }
+	| {
+			tool: "Edit";
+			filePath: string;
+			oldString: string;
+			newString: string;
+			replaceAll?: boolean;
+	  }
+	| { tool: "Write"; filePath: string; content: string }
+	| {
+			tool: "Bash";
+			command: string;
+			description?: string;
+			timeoutMs?: number;
+	  }
+	| {
+			tool: "Grep";
+			pattern: string;
+			path?: string;
+			include?: string;
+			fileType?: string;
+	  }
+	| { tool: "Glob"; pattern: string; path?: string }
+	| { tool: "WebFetch"; url: string; prompt?: string }
+	| { tool: "WebSearch"; query: string }
+	| {
+			tool: "Task";
+			description: string;
+			prompt: string;
+			subagentType?: string;
+	  }
+	| { tool: "LSP"; operation: string; filePath?: string }
+	| { tool: "Skill"; name: string }
+	| { tool: "AskUserQuestion"; questions: unknown }
+	| { tool: "Unknown"; name: string; raw: Record<string, unknown> };
 
 export interface TurnCompletedPayload {
 	readonly messageId: string;
@@ -227,6 +269,10 @@ export interface EventMetadata {
 	readonly source?: string;
 	readonly sseBatchId?: string;
 	readonly sseBatchSize?: number;
+	/** Schema version for event data shape migration. Events without this
+	 *  field (or < 2) use raw provider-specific input shapes and need
+	 *  normalizeToolInput() upcast at replay time. */
+	readonly schemaVersion?: number;
 }
 
 // ─── Event Envelopes ────────────────────────────────────────────────────────
