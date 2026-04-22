@@ -154,7 +154,10 @@ function optBool(
 ): Record<string, boolean> {
 	for (const k of keys) {
 		const v = input[k];
-		if (typeof v === "boolean") return { [keys[keys.length - 1]!]: v };
+		if (typeof v === "boolean") {
+			const canonicalKey = keys[keys.length - 1] ?? k;
+			return { [canonicalKey]: v };
+		}
 	}
 	return {};
 }

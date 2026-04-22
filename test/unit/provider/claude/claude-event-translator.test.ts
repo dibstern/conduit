@@ -286,7 +286,7 @@ describe("ClaudeEventTranslator", () => {
 
 	// ─── 6. stream_event (content_block_start: tool_use) ─────────────────
 
-	it("translates content_block_start tool_use to tool.started with tool name", async () => {
+	it("translates content_block_start tool_use to tool.started at block stop", async () => {
 		await translator.translate(
 			ctx,
 			makeStreamEvent({
@@ -301,13 +301,22 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
+		// tool.started is buffered — not emitted at content_block_start
+		expect(sink.events.find((e) => e.type === "tool.started")).toBeUndefined();
+		expect(ctx.inFlightTools.get(1)?.toolName).toBe("Bash");
+
+		// Emit content_block_stop to flush the buffered tool.started
+		await translator.translate(
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 1 }),
+		);
+
 		const started = sink.events.find((e) => e.type === "tool.started");
 		expect(started).toBeDefined();
 		const data = dataOf(started);
 		expect(data["toolName"]).toBe("Bash");
 		expect(data["callId"]).toBe("tool-abc");
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
-		expect(ctx.inFlightTools.get(1)?.toolName).toBe("Bash");
 	});
 
 	// ─── 7. stream_event (content_block_delta: text_delta) ───────────────
@@ -372,7 +381,7 @@ describe("ClaudeEventTranslator", () => {
 
 	// ─── 9. stream_event (content_block_delta: input_json_delta) ─────────
 
-	it("translates input_json_delta to tool.running + tool.input_updated", async () => {
+	it("buffers input_json_delta — no tool.running or tool.input_updated until block stop", async () => {
 		// Seed a tool_use block
 		await translator.translate(
 			ctx,
@@ -388,7 +397,7 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		// Send a complete JSON delta
+		// Send a complete JSON delta — should buffer, not emit
 		await translator.translate(
 			ctx,
 			makeStreamEvent({
@@ -401,14 +410,23 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		const running = sink.events.filter((e) => e.type === "tool.running");
-		expect(running.length).toBeGreaterThanOrEqual(1);
-
-		const inputUpdated = sink.events.filter(
-			(e) => e.type === "tool.input_updated",
+		// No events emitted during buffering
+		expect(sink.events.filter((e) => e.type === "tool.running")).toHaveLength(
+			0,
 		);
-		expect(inputUpdated.length).toBeGreaterThanOrEqual(1);
-		const data = dataOf(inputUpdated[0]);
+		expect(
+			sink.events.filter((e) => e.type === "tool.input_updated"),
+		).toHaveLength(0);
+
+		// Stop the block — should emit tool.started with buffered input
+		await translator.translate(
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 0 }),
+		);
+
+		const started = sink.events.filter((e) => e.type === "tool.started");
+		expect(started).toHaveLength(1);
+		const data = dataOf(started[0]);
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
 	});
 
@@ -1025,6 +1043,10 @@ describe("ClaudeEventTranslator", () => {
 				},
 			}),
 		);
+		await translator.translate(
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 0 }),
+		);
 
 		const started = sink.events.find((e) => e.type === "tool.started");
 		expect(started).toBeDefined();
@@ -1045,6 +1067,10 @@ describe("ClaudeEventTranslator", () => {
 					input: {},
 				},
 			}),
+		);
+		await translator.translate(
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 0 }),
 		);
 
 		const started = sink.events.find((e) => e.type === "tool.started");
@@ -1085,7 +1111,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(deltaEvents).toHaveLength(0);
 	});
 
-	it("input_json_delta with duplicate fingerprint is deduplicated", async () => {
+	it("input_json_delta with duplicate fingerprint is deduplicated (buffered input not overwritten)", async () => {
 		// Seed a tool_use block
 		await translator.translate(
 			ctx,
@@ -1101,7 +1127,7 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		// Send the first JSON delta that parses to {"command":"ls"}
+		// Send the first JSON delta
 		await translator.translate(
 			ctx,
 			makeStreamEvent({
@@ -1114,19 +1140,15 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		const runningAfterFirst = sink.events.filter(
-			(e) => e.type === "tool.running",
+		// No events during buffering
+		expect(sink.events.filter((e) => e.type === "tool.running")).toHaveLength(
+			0,
 		);
-		expect(runningAfterFirst).toHaveLength(1);
 
-		// Send a second delta that extends the string but parses to the same JSON
-		// Because partialInputJson accumulates, we need a second delta that, when
-		// appended, still parses to the same object. The tool's partialInputJson
-		// is now '{"command":"ls"}'. Sending '' will keep it the same, but that
-		// won't trigger a parse. Instead, reset the tool's partial state to force
-		// a duplicate parse:
+		// bufferedInput should be set
 		const tool = ctx.inFlightTools.get(0);
-		expect(tool).toBeDefined();
+		expect(tool?.bufferedInput).toEqual({ command: "ls" });
+
 		// Reset partial input so a fresh identical JSON chunk triggers re-parse
 		if (tool) tool.partialInputJson = "";
 
@@ -1142,11 +1164,8 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		// Should still be 1 because the fingerprint is the same
-		const runningAfterSecond = sink.events.filter(
-			(e) => e.type === "tool.running",
-		);
-		expect(runningAfterSecond).toHaveLength(1);
+		// bufferedInput should not change (same fingerprint)
+		expect(tool?.bufferedInput).toEqual({ command: "ls" });
 	});
 
 	it("result with cache_creation_input_tokens includes cacheWrite", async () => {

@@ -68,6 +68,13 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 			},
 		} as never);
 
+		// Flush buffered tool.started via content_block_stop
+		await translator.translate(ctx, {
+			type: "stream_event",
+			session_id: "ses-1",
+			event: { type: "content_block_stop", index: 0 },
+		} as never);
+
 		const toolStarted = events.find((e) => e.type === "tool.started");
 		expect(toolStarted).toBeDefined();
 		expect(toolStarted!.data.input).toEqual({

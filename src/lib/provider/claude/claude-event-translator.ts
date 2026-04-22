@@ -397,6 +397,33 @@ export class ClaudeEventTranslator {
 			return;
 		}
 
+		// tool_use blocks: emit buffered tool.started now with complete input
+		if (tool.pendingStart) {
+			tool.pendingStart = false;
+			const finalInput = tool.bufferedInput ?? tool.input;
+			await this.push(
+				makeCanonicalEvent(
+					"tool.started",
+					ctx.sessionId,
+					{
+						messageId: this.currentAssistantMessageId,
+						partId: tool.itemId,
+						toolName: tool.toolName,
+						callId: tool.itemId,
+						input: normalizeToolInput(tool.toolName, finalInput),
+					},
+					{ schemaVersion: 2 },
+				),
+			);
+			await this.push(
+				makeCanonicalEvent("tool.running", ctx.sessionId, {
+					messageId: this.currentAssistantMessageId,
+					partId: tool.itemId,
+				}),
+			);
+		}
+		// Do NOT delete from inFlightTools — tool_use blocks wait for tool_result
+
 		// tool_use blocks: do NOT complete here — wait for tool_result
 	}
 
@@ -438,9 +465,6 @@ export class ClaudeEventTranslator {
 			case "mcp_tool_use": {
 				const toolName = block.name ?? "unknown";
 				const itemType = classifyToolItemType(toolName);
-				// SDK types `input` as `unknown` for tool_use/mcp_tool_use and
-				// `{ [key: string]: unknown }` for server_tool_use. Coerce to
-				// Record<string, unknown> at runtime for consistency.
 				const rawInput = block.input;
 				const input =
 					rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
@@ -453,22 +477,10 @@ export class ClaudeEventTranslator {
 					title: titleForItemType(itemType),
 					input,
 					partialInputJson: "",
+					pendingStart: true,
 				};
 				ctx.inFlightTools.set(index, tool);
-				await this.push(
-					makeCanonicalEvent(
-						"tool.started",
-						ctx.sessionId,
-						{
-							messageId: this.currentAssistantMessageId,
-							partId: tool.itemId,
-							toolName,
-							callId: blockId,
-							input: normalizeToolInput(toolName, input),
-						},
-						{ schemaVersion: 2 },
-					),
-				);
+				// Do NOT emit tool.started here — buffered until content_block_stop
 				return;
 			}
 
@@ -530,27 +542,8 @@ export class ClaudeEventTranslator {
 				if (tool.lastEmittedFingerprint === fingerprint) return;
 				tool.lastEmittedFingerprint = fingerprint;
 				tool.input = parsed;
-
-				await this.push(
-					makeCanonicalEvent("tool.running", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId,
-						partId: tool.itemId,
-					}),
-				);
-
-				await this.push(
-					makeCanonicalEvent(
-						"tool.input_updated",
-						ctx.sessionId,
-						{
-							messageId: this.currentAssistantMessageId,
-							partId: tool.itemId,
-							toolName: tool.toolName,
-							input: normalizeToolInput(tool.toolName, parsed),
-						},
-						{ schemaVersion: 2 },
-					),
-				);
+				tool.bufferedInput = parsed;
+				// Do NOT emit tool.input_updated or tool.running — buffered
 				return;
 			}
 
@@ -729,6 +722,41 @@ export class ClaudeEventTranslator {
 				duration: result.duration_ms,
 			}),
 		);
+	}
+
+	// ─── Flush Pending Tools ────────────────────────────────────────────
+
+	/** Flush any pendingStart tools (e.g. on stream interruption).
+	 *  Emits tool.started + tool.completed for each buffered tool. */
+	async flushPendingTools(ctx: ClaudeSessionContext): Promise<void> {
+		for (const [index, tool] of ctx.inFlightTools) {
+			if (!tool.pendingStart) continue;
+			tool.pendingStart = false;
+			const finalInput = tool.bufferedInput ?? tool.input;
+			await this.push(
+				makeCanonicalEvent(
+					"tool.started",
+					ctx.sessionId,
+					{
+						messageId: this.currentAssistantMessageId,
+						partId: tool.itemId,
+						toolName: tool.toolName,
+						callId: tool.itemId,
+						input: normalizeToolInput(tool.toolName, finalInput),
+					},
+					{ schemaVersion: 2 },
+				),
+			);
+			await this.push(
+				makeCanonicalEvent("tool.completed", ctx.sessionId, {
+					messageId: this.currentAssistantMessageId,
+					partId: tool.itemId,
+					result: null,
+					duration: 0,
+				}),
+			);
+			ctx.inFlightTools.delete(index);
+		}
 	}
 
 	// ─── Push Helper ─────────────────────────────────────────────────────

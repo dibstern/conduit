@@ -107,6 +107,10 @@ export interface ToolInFlight {
 	input: Record<string, unknown>;
 	partialInputJson: string;
 	lastEmittedFingerprint?: string;
+	/** Phase 2: tool_use blocks buffer until content_block_stop. */
+	pendingStart?: boolean;
+	/** Phase 2: accumulated parsed input from input_json_delta. */
+	bufferedInput?: Record<string, unknown>;
 }
 
 // ─── Session Context ───────────────────────────────────────────────────────
