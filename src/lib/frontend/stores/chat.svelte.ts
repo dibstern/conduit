@@ -902,11 +902,13 @@ export function handleToolExecuting(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_executing" }>,
 ): void {
-	const result = messages.toolRegistry.executing(
-		msg.id,
-		msg.input,
-		msg.metadata,
-	);
+	let result = messages.toolRegistry.executing(msg.id, msg.input, msg.metadata);
+	// If executing() rejected because the tool is already running,
+	// fall back to updateMetadata() for metadata-only updates
+	// (e.g. subagent sessionId arriving after initial running event).
+	if (result.action === "reject" && msg.metadata) {
+		result = messages.toolRegistry.updateMetadata(msg.id, msg.metadata);
+	}
 	if (result.action === "update") {
 		applyToolUpdate(activity, messages, result.uuid, result.tool);
 	}

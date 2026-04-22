@@ -153,27 +153,15 @@ describe("backward transitions rejected", () => {
 		expect(log.error).not.toHaveBeenCalled();
 	});
 
-	it("allows running -> running for metadata/input updates", () => {
+	it("rejects running -> running (use updateMetadata instead)", () => {
 		registry.start("call-1", "Task");
-		const first = registry.executing("call-1", { prompt: "do stuff" });
-		expect(first.action).toBe("update");
-		expect(
-			(first as { tool: { metadata?: unknown } }).tool.metadata,
-		).toBeUndefined();
+		registry.executing("call-1", { prompt: "do stuff" });
 
-		// Second executing with metadata (subagent session spawned)
+		// Second executing while already running is rejected
 		const second = registry.executing("call-1", undefined, {
 			sessionId: "ses_child001",
 		});
-		expect(second.action).toBe("update");
-		const tool = (
-			second as {
-				tool: { metadata?: Record<string, unknown>; input?: unknown };
-			}
-		).tool;
-		expect(tool.metadata).toEqual({ sessionId: "ses_child001" });
-		// Input from first call is preserved
-		expect(tool.input).toEqual({ prompt: "do stuff" });
+		expect(second.action).toBe("reject");
 	});
 
 	it("duplicate start after complete returns duplicate", () => {
@@ -427,6 +415,49 @@ describe("metadata", () => {
 		expect(result.action).toBe("create");
 		if (result.action !== "create") throw new Error("unreachable");
 		expect(result.tool.messageId).toBe("msg-42");
+	});
+});
+
+// ─── updateMetadata ────────────────────────────────────────────────────────
+
+describe("updateMetadata", () => {
+	it("merges metadata on a running tool", () => {
+		registry.start("call-1", "Task");
+		registry.executing("call-1", { prompt: "do stuff" });
+		const result = registry.updateMetadata("call-1", {
+			sessionId: "ses_child001",
+		});
+		expect(result.action).toBe("update");
+		if (result.action !== "update") throw new Error("unreachable");
+		expect(result.tool.metadata).toEqual({ sessionId: "ses_child001" });
+	});
+
+	it("merges metadata on a pending tool", () => {
+		registry.start("call-1", "Task");
+		const result = registry.updateMetadata("call-1", { key: "val" });
+		expect(result.action).toBe("update");
+		if (result.action !== "update") throw new Error("unreachable");
+		expect(result.tool.metadata).toEqual({ key: "val" });
+	});
+
+	it("rejects unknown tool", () => {
+		const result = registry.updateMetadata("nope", { key: "val" });
+		expect(result.action).toBe("reject");
+	});
+
+	it("rejects completed tool", () => {
+		registry.start("call-1", "Read");
+		registry.complete("call-1", "done", false);
+		const result = registry.updateMetadata("call-1", { key: "val" });
+		expect(result.action).toBe("reject");
+	});
+
+	it("rejects error tool", () => {
+		registry.start("call-1", "Bash");
+		registry.executing("call-1");
+		registry.complete("call-1", "fail", true);
+		const result = registry.updateMetadata("call-1", { key: "val" });
+		expect(result.action).toBe("reject");
 	});
 });
 

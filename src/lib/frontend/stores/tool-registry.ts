@@ -46,6 +46,11 @@ export interface ToolRegistry {
 		input?: unknown,
 		metadata?: Record<string, unknown>,
 	): ToolTransitionResult;
+	/** Merge metadata on an in-flight tool without changing status. */
+	updateMetadata(
+		id: string,
+		metadata: Record<string, unknown>,
+	): ToolTransitionResult;
 	complete(
 		id: string,
 		content: string,
@@ -128,17 +133,12 @@ export function createToolRegistry(
 			return { action: "reject", reason: `Unknown tool ID: ${id}` };
 		}
 
-		// running→running: OpenCode sends multiple tool_executing events
-		// as the tool part state evolves (e.g. metadata with sessionId arrives
-		// after the initial running event for subagent/Task tools).
 		if (tracked.status === "running") {
-			// Merge updated input/metadata without changing status
-			tracked.tool = {
-				...tracked.tool,
-				...(input !== undefined && { input }),
-				...(metadata !== undefined && { metadata }),
+			return {
+				action: "reject",
+				reason:
+					"Tool already running (use updateMetadata for metadata-only updates)",
 			};
-			return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
 		}
 
 		// completed→running: Expected during history + SSE overlap.
@@ -167,6 +167,24 @@ export function createToolRegistry(
 			...(input !== undefined && { input }),
 			...(metadata !== undefined && { metadata }),
 		};
+		return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
+	}
+
+	function updateMetadata(
+		id: string,
+		metadata: Record<string, unknown>,
+	): ToolTransitionResult {
+		const tracked = entries.get(id);
+		if (!tracked) {
+			return { action: "reject", reason: `Unknown tool ID: ${id}` };
+		}
+		if (tracked.status === "completed" || tracked.status === "error") {
+			return {
+				action: "reject",
+				reason: `Cannot update metadata on ${tracked.status} tool`,
+			};
+		}
+		tracked.tool = { ...tracked.tool, metadata };
 		return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
 	}
 
@@ -267,6 +285,7 @@ export function createToolRegistry(
 	return {
 		start,
 		executing,
+		updateMetadata,
 		complete,
 		finalizeAll,
 		clear,
