@@ -306,7 +306,7 @@ describe("ClaudeEventTranslator", () => {
 		const data = dataOf(started);
 		expect(data["toolName"]).toBe("Bash");
 		expect(data["callId"]).toBe("tool-abc");
-		expect(data["input"]).toEqual({ command: "ls" });
+		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
 		expect(ctx.inFlightTools.get(1)?.toolName).toBe("Bash");
 	});
 
@@ -409,7 +409,7 @@ describe("ClaudeEventTranslator", () => {
 		);
 		expect(inputUpdated.length).toBeGreaterThanOrEqual(1);
 		const data = dataOf(inputUpdated[0]);
-		expect(data["input"]).toEqual({ command: "ls" });
+		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
 	});
 
 	// ─── 10. stream_event (content_block_stop) ───────────────────────────

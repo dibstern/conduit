@@ -23,10 +23,12 @@ import { randomUUID } from "node:crypto";
 import type {
 	CanonicalEvent,
 	CanonicalEventType,
+	EventMetadata,
 	EventPayloadMap,
 } from "../../persistence/events.js";
 import { canonicalEvent } from "../../persistence/events.js";
 import type { EventSink } from "../types.js";
+import { normalizeToolInput } from "./normalize-tool-input.js";
 import type {
 	ClaudeSessionContext,
 	SDKAssistantMessage,
@@ -49,8 +51,12 @@ function makeCanonicalEvent<K extends CanonicalEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
+	metadata?: EventMetadata,
 ): CanonicalEvent {
-	return canonicalEvent(type, sessionId, data, { provider: PROVIDER });
+	return canonicalEvent(type, sessionId, data, {
+		provider: PROVIDER,
+		...(metadata && { metadata }),
+	});
 }
 
 // ─── Tool classification ───────────────────────────────────────────────────
@@ -450,13 +456,18 @@ export class ClaudeEventTranslator {
 				};
 				ctx.inFlightTools.set(index, tool);
 				await this.push(
-					makeCanonicalEvent("tool.started", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId,
-						partId: tool.itemId,
-						toolName,
-						callId: blockId,
-						input,
-					}),
+					makeCanonicalEvent(
+						"tool.started",
+						ctx.sessionId,
+						{
+							messageId: this.currentAssistantMessageId,
+							partId: tool.itemId,
+							toolName,
+							callId: blockId,
+							input: normalizeToolInput(toolName, input),
+						},
+						{ schemaVersion: 2 },
+					),
 				);
 				return;
 			}
@@ -528,12 +539,17 @@ export class ClaudeEventTranslator {
 				);
 
 				await this.push(
-					makeCanonicalEvent("tool.input_updated", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId,
-						partId: tool.itemId,
-						toolName: tool.toolName,
-						input: parsed,
-					}),
+					makeCanonicalEvent(
+						"tool.input_updated",
+						ctx.sessionId,
+						{
+							messageId: this.currentAssistantMessageId,
+							partId: tool.itemId,
+							toolName: tool.toolName,
+							input: normalizeToolInput(tool.toolName, parsed),
+						},
+						{ schemaVersion: 2 },
+					),
 				);
 				return;
 			}
