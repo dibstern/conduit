@@ -25,7 +25,7 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
-import { uiState, updateContextPercent } from "./ui.svelte.js";
+// uiState.contextPercent dual-write removed in Task 6. Components read from per-session messages.contextPercent.
 
 // ─── Two-Tier Per-Session Chat State (Task 2 — handler signatures) ──────────
 
@@ -453,24 +453,11 @@ export function getMessageCount(): number {
 	return chatState.messages.length;
 }
 
-// ─── Internal state (not reactive — used for debouncing) ────────────────────
-// LEGACY module-level aliases — kept for backward compat during transition.
-// Per-session state lives on activity.renderTimer / activity.thinkingStartTime.
-// TODO(Task 4): remove these module-level aliases entirely.
-
-let renderTimer: ReturnType<typeof setTimeout> | null = null;
-let thinkingStartTime = 0;
+// renderTimer / thinkingStartTime: per-session only (activity.*). Module-level aliases removed in Task 6.
 
 const log = createFrontendLogger("chat");
 
-/** Centralized tool lifecycle state machine. Enforces forward-only transitions. */
-const registryLog = createFrontendLogger("ToolRegistry", {
-	onError(...args: unknown[]) {
-		if (import.meta.env.DEV)
-			throw new Error(["[ToolRegistry]", ...args].map(String).join(" "));
-	},
-});
-const registry = createToolRegistry({ log: registryLog });
+// registry: per-session only (messages.toolRegistry). Module-level singleton removed in Task 6.
 
 /** Append a new tool message to chatState.messages. */
 function applyToolCreate(
@@ -496,15 +483,7 @@ function applyToolUpdate(
 	}
 }
 
-/**
- * Track messageIds that have been finalized by handleDone() (not by tool_start).
- * Used to suppress duplicate deltas from the message poller, which can
- * re-synthesize content that SSE already delivered when its snapshot is stale.
- *
- * LEGACY module-level set — kept for backward compat. Per-session dedup
- * lives on activity.doneMessageIds (written in parallel during Task 2).
- */
-const doneMessageIds = new Set<string>();
+// doneMessageIds: per-session only (activity.doneMessageIds). Module-level set removed in Task 6.
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -543,14 +522,10 @@ function flushAndFinalizeAssistant(
 	// Check the phase flag
 	if (chatState.phase !== "streaming") return undefined;
 
-	// Clear per-session renderTimer first, then legacy
+	// Clear per-session renderTimer
 	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
 		clearTimeout(_activity.renderTimer);
 		_activity.renderTimer = null;
-	}
-	if (renderTimer !== null) {
-		clearTimeout(renderTimer);
-		renderTimer = null;
 	}
 	if (chatState.currentAssistantText) {
 		flushAssistantRender(_activity, _messages);
@@ -586,10 +561,7 @@ export function registerClearMessagesHook(
 	onClearMessages = fn;
 }
 
-// ─── Replay Batch ───────────────────────────────────────────────────────────
-// LEGACY module-level replayBatch — kept for backward compat.
-// Per-session replay batch lives on messages.replayBatch (Task 3).
-let replayBatch: ChatMessage[] | null = null;
+// replayBatch: per-session only (messages.replayBatch). Module-level variable removed in Task 6.
 
 export function beginReplayBatch(
 	_activity?: SessionActivity,
@@ -598,7 +570,6 @@ export function beginReplayBatch(
 	if (_messages) {
 		_messages.replayBatch = [...chatState.messages];
 	}
-	replayBatch = [...chatState.messages];
 }
 
 export function discardReplayBatch(
@@ -608,7 +579,6 @@ export function discardReplayBatch(
 	if (_messages) {
 		_messages.replayBatch = null;
 	}
-	replayBatch = null;
 }
 
 // ─── Replay Paging ──────────────────────────────────────────────────────────
@@ -617,46 +587,37 @@ export function discardReplayBatch(
 // per-session buffer for HistoryLoader to page through on demand.
 
 const INITIAL_PAGE_SIZE = 50;
-// LEGACY module-level maps — kept for backward compat during transition.
-// Per-session replay buffer lives on messages.replayBuffer (Task 3).
-// Per-session eventsHasMore lives on activity.eventsHasMore (Task 3).
-const replayBuffers = new Map<string, ChatMessage[]>();
-const eventsHasMoreSessions = new Set<string>();
+// replayBuffers / eventsHasMoreSessions: per-session only. Module-level maps removed in Task 6.
 
 /** Check if a session's event cache was marked as incomplete by the server. */
 export function isEventsHasMore(
 	_activity: SessionActivity | undefined,
 	_messages: SessionMessages | undefined,
-	sessionId: string,
+	_sessionId: string,
 ): boolean {
-	// Per-session first, legacy fallback
 	if (_activity) return _activity.eventsHasMore;
-	return eventsHasMoreSessions.has(sessionId);
+	return false;
 }
 
 export function getReplayBuffer(
 	_activity: SessionActivity | undefined,
 	_messages: SessionMessages | undefined,
-	sessionId: string,
+	_sessionId: string,
 ): ChatMessage[] | undefined {
-	// During transition, legacy replayBuffers map is the shared source of truth.
-	// Per-session replayBuffer is a dual-write target for forward compat.
-	return replayBuffers.get(sessionId);
+	return _messages?.replayBuffer ?? undefined;
 }
 
 export function consumeReplayBuffer(
 	_activity: SessionActivity | undefined,
 	_messages: SessionMessages | undefined,
-	sessionId: string,
+	_sessionId: string,
 	count: number,
 ): ChatMessage[] {
-	// Legacy map is source of truth during transition
-	const buffer = replayBuffers.get(sessionId);
+	const buffer = _messages?.replayBuffer;
 	if (!buffer || buffer.length === 0) return [];
 	const page = buffer.splice(buffer.length - count, count);
 	if (buffer.length === 0) {
 		if (_messages) _messages.replayBuffer = null;
-		replayBuffers.delete(sessionId);
 	}
 	// Render deferred markdown on buffered messages before they enter
 	// chatState.messages.  During replay, assistant messages store raw
@@ -682,56 +643,46 @@ export function consumeReplayBuffer(
 export function commitReplayFinal(
 	_activity: SessionActivity | undefined,
 	_messages: SessionMessages | undefined,
-	sessionId: string,
+	_sessionId: string,
 	eventsHasMore = false,
 ): void {
-	// Legacy module-level replayBatch is the coordination point during transition.
-	// getMessages/setMessages use it, so commit from it.
-	if (replayBatch === null) return;
-	const all = replayBatch;
-	// Clear both per-session and legacy
+	const batch = _messages?.replayBatch;
+	if (batch === null || batch === undefined) return;
+	const all = batch;
 	if (_messages) _messages.replayBatch = null;
-	replayBatch = null;
 
 	if (all.length <= INITIAL_PAGE_SIZE) {
 		chatState.messages = all;
-		// Small replay: all messages fit. hasMore only if server says cache
-		// is incomplete (older messages exist beyond what the cache had).
+		if (_messages) {
+			_messages.historyHasMore = eventsHasMore;
+		}
 		historyState.hasMore = eventsHasMore;
 	} else {
 		const cutoff = all.length - INITIAL_PAGE_SIZE;
 		const bufferSlice = all.slice(0, cutoff);
-		// Dual-write: per-session + legacy
 		if (_messages) _messages.replayBuffer = bufferSlice;
-		replayBuffers.set(sessionId, bufferSlice);
 		chatState.messages = all.slice(cutoff);
-		// hasMore = true: either the buffer has more, or after buffer
-		// exhaustion the server has more (eventsHasMore flag).
+		if (_messages) {
+			_messages.historyHasMore = true;
+		}
 		historyState.hasMore = true;
 	}
-	// Store the flag for HistoryLoader to use when the buffer is exhausted.
-	// Dual-write: per-session + legacy
 	if (eventsHasMore) {
 		if (_activity) _activity.eventsHasMore = true;
-		eventsHasMoreSessions.add(sessionId);
 	}
 	chatState.loadLifecycle = "committed";
 }
 
 export function getMessages(_messages?: SessionMessages): ChatMessage[] {
-	// Legacy replayBatch is the coordination point during transition.
-	// When it's non-null, a replay batch is active; when null, no batch.
-	// Per-session replayBatch is a dual-write for forward compat.
-	return replayBatch ?? chatState.messages;
+	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
+		return _messages.replayBatch;
+	}
+	return chatState.messages;
 }
 
 function setMessages(_messages: SessionMessages, msgs: ChatMessage[]): void {
-	if (replayBatch !== null) {
-		replayBatch = msgs;
-		// Dual-write to per-session replayBatch for forward compat
-		if (_messages && _messages.replayBatch !== null) {
-			_messages.replayBatch = msgs;
-		}
+	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
+		_messages.replayBatch = msgs;
 	} else {
 		chatState.messages = msgs;
 	}
@@ -747,13 +698,7 @@ function setMessages(_messages: SessionMessages, msgs: ChatMessage[]): void {
  *  and the new messageId is recorded.
  *
  *  No-op when the messageId is the same as the current one. */
-/** All messageIds seen in the current session. Prevents the message
- *  poller's re-synthesized events (which alternate between messageIds)
- *  from spuriously bumping turnEpoch on every poll cycle.
- *
- *  LEGACY module-level set — kept for backward compat. Per-session dedup
- *  lives on activity.seenMessageIds (written in parallel during Task 2). */
-const seenMessageIds = new Set<string>();
+// seenMessageIds: per-session only (activity.seenMessageIds). Module-level set removed in Task 6.
 
 export function advanceTurnIfNewMessage(
 	activity: SessionActivity,
@@ -764,20 +709,18 @@ export function advanceTurnIfNewMessage(
 
 	// Already seen this messageId — just update currentMessageId (it may
 	// have changed back from a different message) but don't bump epoch.
-	if (seenMessageIds.has(messageId) || activity.seenMessageIds.has(messageId)) {
+	if (activity.seenMessageIds.has(messageId)) {
 		chatState.currentMessageId = messageId;
 		return;
 	}
 
 	// ── First event of a genuinely new message ─────────────────────────
-	seenMessageIds.add(messageId);
 	activity.seenMessageIds.add(messageId);
 
 	// Finalize any in-progress assistant streaming from the previous turn.
 	if (chatState.phase === "streaming") {
 		const finalizedId = flushAndFinalizeAssistant(activity, messages);
 		if (finalizedId) {
-			doneMessageIds.add(finalizedId);
 			activity.doneMessageIds.add(finalizedId);
 		}
 		phaseToProcessing(activity);
@@ -820,10 +763,7 @@ export function handleDelta(
 	// This prevents the message poller from creating a second AssistantMessage
 	// for content that SSE already delivered. The poller can re-synthesize the
 	// entire response when its snapshot is stale (SSE silence gap > 2s).
-	if (
-		messageId &&
-		(doneMessageIds.has(messageId) || activity.doneMessageIds.has(messageId))
-	) {
+	if (messageId && activity.doneMessageIds.has(messageId)) {
 		return;
 	}
 
@@ -850,18 +790,15 @@ export function handleDelta(
 
 	chatState.currentAssistantText += text;
 
-	// Debounced markdown render (80ms) — dual-write: per-session + legacy
+	// Debounced markdown render (80ms)
 	if (activity?.renderTimer !== null && activity?.renderTimer !== undefined) {
 		clearTimeout(activity.renderTimer);
 	}
-	if (renderTimer !== null) clearTimeout(renderTimer);
 	const timer = setTimeout(() => {
-		if (activity) activity.renderTimer = null;
-		renderTimer = null;
+		activity.renderTimer = null;
 		flushAssistantRender(activity, messages);
 	}, 80);
-	if (activity) activity.renderTimer = timer;
-	renderTimer = timer;
+	activity.renderTimer = timer;
 }
 
 export function handleThinkingStart(
@@ -870,9 +807,7 @@ export function handleThinkingStart(
 	msg: Extract<RelayMessage, { type: "thinking_start" }>,
 ): void {
 	const now = Date.now();
-	// Dual-write: per-session + legacy
-	if (_activity) _activity.thinkingStartTime = now;
-	thinkingStartTime = now;
+	_activity.thinkingStartTime = now;
 	const uuid = generateUuid();
 	const thinkingMsg: ThinkingMessage = {
 		type: "thinking",
@@ -903,15 +838,9 @@ export function handleThinkingStop(
 	messages: SessionMessages,
 	_msg: Extract<RelayMessage, { type: "thinking_stop" }>,
 ): void {
-	// Prefer per-session thinkingStartTime, fall back to legacy
-	const startTime =
-		_activity?.thinkingStartTime > 0
-			? _activity.thinkingStartTime
-			: thinkingStartTime;
+	const startTime = _activity.thinkingStartTime;
 	const duration = startTime > 0 ? Date.now() - startTime : 0;
-	// Dual-write: per-session + legacy
-	if (_activity) _activity.thinkingStartTime = 0;
-	thinkingStartTime = 0;
+	_activity.thinkingStartTime = 0;
 
 	const { messages: updated, found } = updateLastMessage(
 		getMessages(messages),
@@ -929,7 +858,7 @@ export function handleToolStart(
 ): void {
 	const { id, name, messageId } = msg;
 
-	const result = registry.start(id, name || "unknown", messageId);
+	const result = messages.toolRegistry.start(id, name || "unknown", messageId);
 
 	if (result.action === "duplicate") {
 		return;
@@ -956,7 +885,11 @@ export function handleToolExecuting(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_executing" }>,
 ): void {
-	const result = registry.executing(msg.id, msg.input, msg.metadata);
+	const result = messages.toolRegistry.executing(
+		msg.id,
+		msg.input,
+		msg.metadata,
+	);
 	if (result.action === "update") {
 		applyToolUpdate(activity, messages, result.uuid, result.tool);
 	}
@@ -967,12 +900,17 @@ export function handleToolResult(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "tool_result" }>,
 ): void {
-	const result = registry.complete(msg.id, msg.content, msg.is_error, {
-		...(msg.isTruncated != null && { isTruncated: msg.isTruncated }),
-		...(msg.fullContentLength != null && {
-			fullContentLength: msg.fullContentLength,
-		}),
-	});
+	const result = messages.toolRegistry.complete(
+		msg.id,
+		msg.content,
+		msg.is_error,
+		{
+			...(msg.isTruncated != null && { isTruncated: msg.isTruncated }),
+			...(msg.fullContentLength != null && {
+				fullContentLength: msg.fullContentLength,
+			}),
+		},
+	);
 	if (result.action === "update") {
 		applyToolUpdate(activity, messages, result.uuid, result.tool);
 	}
@@ -1037,9 +975,7 @@ export function handleResult(
 	updateContextFromTokens(messages, usage);
 }
 
-/** Compute context window usage from token counts and current model's limit.
- *  Dual-write: sets both `messages.contextPercent` AND legacy `uiState.contextPercent`
- *  during this transitional commit. */
+/** Compute context window usage from token counts and current model's limit. */
 function updateContextFromTokens(
 	messages: SessionMessages,
 	usage:
@@ -1066,9 +1002,7 @@ function updateContextFromTokens(
 		const model = p.models.find((m) => m.id === modelId);
 		if (model?.limit?.context) {
 			const pct = Math.round((total / model.limit.context) * 100);
-			// Dual-write: per-session tier + legacy global
 			messages.contextPercent = pct;
-			updateContextPercent(pct);
 			return;
 		}
 	}
@@ -1082,12 +1016,11 @@ export function handleDone(
 	// Finalize the assistant message and record messageId for dedup
 	const finalizedId = flushAndFinalizeAssistant(activity, messages);
 	if (finalizedId) {
-		doneMessageIds.add(finalizedId);
 		activity.doneMessageIds.add(finalizedId);
 	}
 
 	// Finalize any tools still in non-terminal states (pending/running).
-	const finResult = registry.finalizeAll(getMessages(messages));
+	const finResult = messages.toolRegistry.finalizeAll(getMessages(messages));
 	if (finResult.action === "finalized") {
 		const msgs = [...getMessages(messages)];
 		for (const idx of finResult.indices) {
@@ -1406,14 +1339,10 @@ export function flushPendingRender(
 	_activity?: SessionActivity,
 	_messages?: SessionMessages,
 ): void {
-	// Clear per-session renderTimer first, then legacy
+	// Clear per-session renderTimer
 	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
 		clearTimeout(_activity.renderTimer);
 		_activity.renderTimer = null;
-	}
-	if (renderTimer !== null) {
-		clearTimeout(renderTimer);
-		renderTimer = null;
 	}
 	flushAssistantRender(
 		_activity as SessionActivity,
@@ -1439,13 +1368,11 @@ export function seedRegistryFromMessages(
 ): void {
 	const tools = chatMsgs.filter((m): m is ToolMessage => m.type === "tool");
 	if (tools.length > 0) {
-		registry.seedFromHistory(tools);
+		_messages.toolRegistry.seedFromHistory(tools);
 	}
 }
 
 export function clearMessages(): void {
-	replayBatch = null;
-	replayBuffers.clear();
 	phaseReset(); // must be cleared before abort hook — stops replay generation check
 	onClearMessages?.(sessionState.currentId); // abort in-flight async replays
 	cancelDeferredMarkdown(); // abort in-flight deferred renders
@@ -1454,9 +1381,6 @@ export function clearMessages(): void {
 	chatState.turnEpoch = 0;
 	chatState.currentMessageId = null;
 	_pendingHistoryQueuedFallback = false;
-	registry.clear();
-	doneMessageIds.clear();
-	seenMessageIds.clear();
 	// Also clear per-session state for the current session
 	const currentId = sessionState.currentId;
 	if (currentId) {
@@ -1475,83 +1399,17 @@ export function clearMessages(): void {
 		if (messages) {
 			messages.replayBatch = null;
 			messages.replayBuffer = null;
+			messages.toolRegistry.clear();
 		}
-	}
-	if (renderTimer !== null) {
-		clearTimeout(renderTimer);
-		renderTimer = null;
 	}
 	historyState.hasMore = false;
 	historyState.loading = false;
 	historyState.messageCount = 0;
 }
 
-// ─── Session Message Cache ──────────────────────────────────────────────────
-// Stashes messages when switching away from a session so that revisiting the
-// session shows content instantly (before the server round-trip completes).
-// Uses a bounded Map (insertion-ordered) as a simple LRU cache.
-
-const SESSION_CACHE_MAX = 10;
-
-interface CachedSession {
-	messages: ChatMessage[];
-	/** Preserved so that `sentDuringEpoch` comparisons remain correct
-	 *  after restore — without this, turnEpoch resets to 0 and messages
-	 *  with sentDuringEpoch would incorrectly show the "Queued" shimmer. */
-	turnEpoch: number;
-	currentMessageId: string | null;
-	contextPercent: number;
-	historyHasMore: boolean;
-	historyMessageCount: number;
-}
-
-const sessionMessageCache = new Map<string, CachedSession>();
-
-/** Save current messages for the given session. No-op if empty.
- *
- *  Uses `$state.snapshot()` to strip Svelte 5 reactive proxies so the
- *  cache holds plain objects.  Re-assigning them later lets Svelte
- *  re-proxify cleanly without double-wrapping or stale signal refs. */
-export function stashSessionMessages(sessionId: string): void {
-	if (!sessionId || chatState.messages.length === 0) return;
-	// Evict oldest entry if at capacity (Map preserves insertion order).
-	if (sessionMessageCache.size >= SESSION_CACHE_MAX) {
-		const oldest = sessionMessageCache.keys().next().value;
-		if (oldest) sessionMessageCache.delete(oldest);
-	}
-	// Re-insert at end (most-recently-used).
-	sessionMessageCache.delete(sessionId);
-	sessionMessageCache.set(sessionId, {
-		messages: $state.snapshot(chatState.messages),
-		turnEpoch: chatState.turnEpoch,
-		currentMessageId: chatState.currentMessageId,
-		contextPercent: uiState.contextPercent,
-		historyHasMore: historyState.hasMore,
-		historyMessageCount: historyState.messageCount,
-	});
-}
-
-/** Restore cached messages for the given session.
- *  Returns true on cache hit (messages + context bar restored). */
-export function restoreCachedMessages(sessionId: string): boolean {
-	const entry = sessionMessageCache.get(sessionId);
-	if (!entry) return false;
-	chatState.messages = entry.messages;
-	chatState.turnEpoch = entry.turnEpoch;
-	chatState.currentMessageId = entry.currentMessageId;
-	updateContextPercent(entry.contextPercent);
-	historyState.hasMore = entry.historyHasMore;
-	historyState.messageCount = entry.historyMessageCount;
-	// Move to end (most-recently-used).
-	sessionMessageCache.delete(sessionId);
-	sessionMessageCache.set(sessionId, entry);
-	return true;
-}
-
-/** Remove a session from the message cache (e.g. after deletion). */
-export function evictCachedMessages(sessionId: string): void {
-	sessionMessageCache.delete(sessionId);
-}
+// Session message cache removed in Task 6.
+// The two-tier per-session store (sessionActivity + sessionMessages) replaces
+// stashSessionMessages / restoreCachedMessages / evictCachedMessages.
 
 // ─── Part/message removal handlers ───────────────────────────────────────────
 
@@ -1566,7 +1424,7 @@ export function handlePartRemoved(
 		messages,
 		getMessages(messages).filter((m) => m.type !== "tool" || m.id !== partId),
 	);
-	registry.remove(partId);
+	messages.toolRegistry.remove(partId);
 }
 
 export function handleMessageRemoved(
@@ -1617,16 +1475,12 @@ function flushAssistantRender(
 // in their `html` field. renderDeferredMarkdown processes them in batches
 // via requestIdleCallback/setTimeout to avoid blocking the main thread.
 
-// LEGACY module-level deferredGeneration — kept for backward compat.
-// Per-session abort uses activity.replayGeneration (unified in Task 3).
-let deferredGeneration = 0;
+// deferredGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
 
 export function cancelDeferredMarkdown(
 	_activity?: SessionActivity,
 	_messages?: SessionMessages,
 ): void {
-	deferredGeneration++;
-	// Per-session: bump activity.replayGeneration to abort per-session renders
 	if (_activity) _activity.replayGeneration++;
 }
 
@@ -1634,14 +1488,11 @@ export function renderDeferredMarkdown(
 	_activity?: SessionActivity,
 	_messages?: SessionMessages,
 ): void {
-	const generation = ++deferredGeneration;
-	// Also bump per-session generation so it matches the new value
 	if (_activity) _activity.replayGeneration++;
-	const activityGen = _activity?.replayGeneration ?? generation;
+	const activityGen = _activity?.replayGeneration ?? 0;
 	const BATCH_SIZE = 5;
 
 	function processBatch(): void {
-		if (generation !== deferredGeneration) return; // aborted (legacy)
 		// Per-session abort check
 		if (_activity && _activity.replayGeneration !== activityGen) return;
 

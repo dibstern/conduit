@@ -64,7 +64,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
-import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Per-session tiers for handler calls ────────────────────────────────────
 let ta: SessionActivity;
@@ -245,8 +244,9 @@ describe("HistoryLoader buffer → server fallback", () => {
 		clearMessages();
 	});
 
-	// Skipped during dual-write transition: commitReplayFinal writes to legacy chatState.messages,
-	// not per-session slot.messages. Un-skip after Task 6 deletes legacy store.
+	// Skipped: commitReplayFinal writes to chatState.messages (global coordination state),
+	// not per-session slot.messages. The full chatState internals migration is required
+	// to un-skip these. The replay buffer itself is per-session (Task 6 completed).
 	it.skip("sends load_more_history after replay buffer is fully consumed", async () => {
 		// Setup: simulate commitReplayFinal with 100 messages.
 		// This puts 50 in the replay buffer and 50 in per-session messages.
@@ -290,7 +290,7 @@ describe("HistoryLoader buffer → server fallback", () => {
 		expect(sm.historyLoading).toBe(true);
 	});
 
-	// Skipped during dual-write transition — see above.
+	// Skipped — see above: chatState.messages ≠ per-session messages.
 	it.skip("consumes buffer pages before falling through to server", async () => {
 		// Setup: 200 messages → 150 in buffer, 50 displayed
 		beginReplayBatch(ta, tm);

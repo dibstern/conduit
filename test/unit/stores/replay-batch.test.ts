@@ -95,7 +95,7 @@ describe("Replay batch infrastructure", () => {
 		expect(assistant).toBeDefined();
 
 		// Clean up
-		discardReplayBatch();
+		discardReplayBatch(ta, tm);
 	});
 
 	it("commitReplayFinal flushes accumulated messages to chatState", () => {
@@ -166,7 +166,7 @@ describe("Replay batch infrastructure", () => {
 		expect(chatState.messages).toHaveLength(0);
 
 		// Discard
-		discardReplayBatch();
+		discardReplayBatch(ta, tm);
 
 		// After discard: getMessages(tm) falls through to chatState.messages (empty)
 		expect(getMessages(tm)).toHaveLength(0);

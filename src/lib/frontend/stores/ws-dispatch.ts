@@ -26,6 +26,7 @@ import {
 	beginReplayBatch,
 	chatState,
 	clearMessages,
+	clearSessionChatState,
 	commitReplayFinal,
 	discardReplayBatch,
 	findMessage,
@@ -342,9 +343,7 @@ function isLlmContentStart(type: string): boolean {
 
 // ─── Async replay infrastructure ────────────────────────────────────────────
 
-// LEGACY module-level replayGeneration — kept for backward compat.
-// Per-session generation lives on activity.replayGeneration (Task 3).
-let replayGeneration = 0;
+// replayGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
 const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
 
 function yieldToEventLoop(): Promise<void> {
@@ -357,9 +356,7 @@ function yieldToEventLoop(): Promise<void> {
 // events (e.g. thinking_stop) with cached events being replayed, which would
 // cause data loss (e.g. cached thinking_deltas silently dropped after a live
 // thinking_stop prematurely marks the thinking message as done).
-// LEGACY module-level buffer — kept for backward compat.
-// Per-session buffer lives on activity.liveEventBuffer (Task 3).
-let liveEventBuffer: RelayMessage[] | null = null;
+// liveEventBuffer: per-session only (activity.liveEventBuffer). Module-level buffer removed in Task 6.
 
 /** Event types handled by dispatchChatEvent — used to decide what to buffer. */
 const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
@@ -380,15 +377,12 @@ const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
 /** Start buffering live chat events for a specific session slot. */
 function startBufferingLiveEvents(activity?: SessionActivity): void {
 	if (activity) activity.liveEventBuffer = [];
-	liveEventBuffer = [];
 }
 
 /** Drain buffered live events through normal dispatch (called after replay commits). */
 function drainLiveEventBuffer(activity?: SessionActivity): void {
-	// Prefer per-session buffer, fall back to legacy
-	const buffer = activity?.liveEventBuffer ?? liveEventBuffer;
+	const buffer = activity?.liveEventBuffer ?? null;
 	if (activity) activity.liveEventBuffer = null;
-	liveEventBuffer = null;
 	if (!buffer || buffer.length === 0) return;
 	for (const event of buffer) {
 		const ctx: DispatchContext = { isReplay: false, isQueued: isProcessing() };
@@ -399,9 +393,6 @@ function drainLiveEventBuffer(activity?: SessionActivity): void {
 // Register abort hook: clearMessages bumps generation to cancel in-flight replays
 // and discards the live event buffer (session is changing, buffered events are stale).
 registerClearMessagesHook((sessionId: string | null) => {
-	replayGeneration++;
-	liveEventBuffer = null;
-	// Per-session cleanup
 	if (sessionId) {
 		const activity = sessionActivity.get(sessionId);
 		if (activity) {
@@ -427,7 +418,6 @@ async function convertHistoryAsync(
 	capturedActivity?: SessionActivity,
 ): Promise<ChatMessage[] | null> {
 	const CHUNK = 50;
-	const gen = replayGeneration; // legacy snapshot
 	const activityGen = capturedActivity?.replayGeneration; // per-session snapshot
 	const result: ChatMessage[] = [];
 
@@ -439,7 +429,6 @@ async function convertHistoryAsync(
 		if (i + CHUNK < messages.length) {
 			await yieldToEventLoop();
 			// Ghost-write guard: abort if generation changed
-			if (gen !== replayGeneration) return null;
 			if (
 				capturedActivity &&
 				activityGen !== undefined &&
@@ -620,15 +609,17 @@ export function handleMessage(msg: RelayMessage): void {
 	// (PerSessionEventType union does not include it).
 	if (isPerSessionEvent(msg)) {
 		// Buffer live chat events during replay to prevent interleaving
-		if (liveEventBuffer !== null && CHAT_EVENT_TYPES.has(msg.type)) {
+		if (CHAT_EVENT_TYPES.has(msg.type)) {
 			const currentActivity = sessionState.currentId
 				? sessionActivity.get(sessionState.currentId)
 				: undefined;
-			if (currentActivity?.liveEventBuffer) {
+			if (
+				currentActivity?.liveEventBuffer !== null &&
+				currentActivity?.liveEventBuffer !== undefined
+			) {
 				currentActivity.liveEventBuffer.push(msg);
+				return;
 			}
-			liveEventBuffer.push(msg);
-			return;
 		}
 
 		// Events requiring global coordination are handled in the switch
@@ -671,6 +662,23 @@ export function handleMessage(msg: RelayMessage): void {
 			showToast(`Forked from "${parentTitle}"`);
 			break;
 		}
+		case "session_deleted": {
+			// Clean up per-session chat state for the deleted session.
+			const deletedId =
+				"sessionId" in msg ? (msg.sessionId as string) : undefined;
+			if (deletedId) {
+				clearSessionChatState(deletedId);
+				// Remove from session map
+				sessionState.sessions.delete(deletedId);
+				sessionState.rootSessions = sessionState.rootSessions.filter(
+					(s) => s.id !== deletedId,
+				);
+				sessionState.allSessions = sessionState.allSessions.filter(
+					(s) => s.id !== deletedId,
+				);
+			}
+			break;
+		}
 		case "session_switched": {
 			// Use the ID captured by switchToSession() before it changed currentId.
 			// Falls back to sessionState.currentId for server-initiated switches
@@ -684,6 +692,13 @@ export function handleMessage(msg: RelayMessage): void {
 			// Update URL to reflect the new session
 			const slug = getCurrentSlug();
 			if (slug && msg.id) replaceRoute(`/p/${slug}/s/${msg.id}`);
+
+			// Bump the outgoing session's replayGeneration to abort any in-flight
+			// convertHistoryAsync or replay for the previous session.
+			if (previousSessionId) {
+				const prevActivity = sessionActivity.get(previousSessionId);
+				if (prevActivity) prevActivity.replayGeneration++;
+			}
 
 			// Idempotent — switchToSession() already cleared optimistically,
 			// but this covers server-initiated switches (new session, fork).
@@ -713,10 +728,10 @@ export function handleMessage(msg: RelayMessage): void {
 				const hasMore = msg.history.hasMore;
 				const msgCount = historyMsgs.length;
 				const capturedSlot = getOrCreateSessionSlot(msg.id);
-				const gen = replayGeneration; // snapshot before async
+				const actGen = capturedSlot.activity.replayGeneration; // per-session snapshot
 				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
 					.then((chatMsgs) => {
-						if (chatMsgs && gen === replayGeneration) {
+						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
 							// Commit to captured slot, not getCurrentSlot()
 							prependMessages(
 								capturedSlot.activity,
@@ -823,10 +838,14 @@ export function handleMessage(msg: RelayMessage): void {
 			const hpCapturedSlot = sessionState.currentId
 				? getOrCreateSessionSlot(sessionState.currentId)
 				: null;
-			const gen = replayGeneration; // snapshot before async
+			const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
 			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
 				.then((chatMsgs) => {
-					if (chatMsgs && gen === replayGeneration) {
+					if (
+						chatMsgs &&
+						(!hpCapturedSlot ||
+							hpCapturedSlot.activity.replayGeneration === hpActGen)
+					) {
 						// Commit to captured slot, not getCurrentSlot()
 						if (hpCapturedSlot) {
 							prependMessages(
@@ -1004,7 +1023,6 @@ export async function replayEvents(
 	// Do NOT use currentChat() or dispatchToCurrent — commit to captured slot.
 	const slot = getOrCreateSessionSlot(sessionId);
 	const gen = ++slot.activity.replayGeneration;
-	const legacyGen = ++replayGeneration;
 
 	phaseStartReplay(slot.activity);
 	beginReplayBatch(slot.activity, slot.messages);
@@ -1013,9 +1031,7 @@ export async function replayEvents(
 	/** Ghost-write guard: abort if the slot's generation has changed
 	 *  (concurrent replay or clearMessages bumped it). */
 	function isAborted(): boolean {
-		return (
-			slot.activity.replayGeneration !== gen || legacyGen !== replayGeneration
-		);
+		return slot.activity.replayGeneration !== gen;
 	}
 
 	try {
@@ -1082,7 +1098,6 @@ export async function replayEvents(
 		// Abort path: clearMessages hook already set buffer to null.
 		// Error path: discard any un-drained buffer to prevent infinite buffering.
 		if (slot.activity) slot.activity.liveEventBuffer = null;
-		liveEventBuffer = null;
 	}
 }
 

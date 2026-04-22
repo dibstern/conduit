@@ -52,10 +52,8 @@ import {
 	handleDelta,
 	handleDone,
 	isStreaming,
-	restoreCachedMessages,
 	type SessionActivity,
 	type SessionMessages,
-	stashSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -484,39 +482,6 @@ describe("clearMessages resets turn tracking cleanly", () => {
 	});
 });
 
-// ─── Session message cache preserves turnEpoch ──────────────────────────────
-
-describe("session cache round-trip preserves turnEpoch", () => {
-	it("restored messages with sentDuringEpoch are not visually queued after cache round-trip", () => {
-		// Turn 1: queue a message at epoch 0
-		handleMessage({
-			type: "delta",
-			sessionId: "s1",
-			text: "response",
-		} as RelayMessage);
-		addUserMessage(ta, tm, "queued msg", undefined, true);
-		expect(userMessages()[0]?.sentDuringEpoch).toBe(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
-		expect(isVisuallyQueued(userMessages()[0]!)).toBe(true);
-
-		// Turn 1 completes — shimmer clears
-		handleMessage({ type: "done", sessionId: "s1", code: 0 } as RelayMessage);
-		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
-		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
-		expect(chatState.turnEpoch).toBe(1);
-
-		// Stash and switch away
-		stashSessionMessages("sess-A");
-		clearMessages();
-		ta = testActivity();
-		tm = testMessages();
-		expect(chatState.turnEpoch).toBe(0);
-
-		// Restore — turnEpoch must be restored so sentDuringEpoch comparison is correct
-		const hit = restoreCachedMessages("sess-A");
-		expect(hit).toBe(true);
-		expect(chatState.turnEpoch).toBe(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — test setup guarantees element
-		expect(isVisuallyQueued(userMessages()[0]!)).toBe(false);
-	});
-});
+// Session message cache test removed — stash/restore cache deleted in Task 6.
+// The two-tier per-session store (sessionActivity + sessionMessages) retains
+// session state across switches without an explicit stash/restore mechanism.

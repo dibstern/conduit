@@ -45,11 +45,13 @@ import {
 	commitReplayFinal,
 	consumeReplayBuffer,
 	getMessages,
+	getOrCreateSessionSlot,
 	getReplayBuffer,
 	historyState,
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -251,23 +253,31 @@ describe("consumeReplayBuffer", () => {
 	});
 
 	it("clearMessages clears the replay buffer for the current session", () => {
-		beginReplayBatch(ta, tm);
+		// Use a real session slot so clearMessages can find and clean it up
+		sessionState.currentId = "session-clear";
+		const slot = getOrCreateSessionSlot("session-clear");
+
+		beginReplayBatch(slot.activity, slot.messages);
 
 		const msgs = makeUserMessages(80);
 		for (const m of msgs) {
-			getMessages(tm).push(m);
+			getMessages(slot.messages).push(m);
 		}
 
-		commitReplayFinal(ta, tm, "session-clear");
+		commitReplayFinal(slot.activity, slot.messages, "session-clear");
 
 		// Buffer exists
-		expect(getReplayBuffer(ta, tm, "session-clear")).toBeDefined();
+		expect(
+			getReplayBuffer(slot.activity, slot.messages, "session-clear"),
+		).toBeDefined();
 
-		// clearMessages should clean up
+		// clearMessages should clean up the current session's slot
 		clearMessages();
 
-		// Buffer should be gone (clearMessages clears all buffers)
-		expect(getReplayBuffer(ta, tm, "session-clear")).toBeUndefined();
+		// Buffer should be gone
+		expect(
+			getReplayBuffer(slot.activity, slot.messages, "session-clear"),
+		).toBeUndefined();
 	});
 });
 
