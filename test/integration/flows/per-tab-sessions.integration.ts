@@ -3,7 +3,7 @@
 // different sessions. Tests the per-tab session routing introduced by the
 // view_session / setClientSession / sendToSession system.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -20,6 +20,12 @@ describe("Integration: Per-Tab Sessions", () => {
 		if (harness) await harness.stop();
 	});
 
+	beforeEach(async () => {
+		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test.
+		await new Promise((r) => setTimeout(r, 500));
+	});
+
 	// ── Independent Session Viewing ──────────────────────────────────────────
 
 	it("two clients can view different sessions independently", async () => {
@@ -31,16 +37,12 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Create two sessions via client1
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "Tab-A Session" });
-		const switchedA = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switchedA = await client1.waitFor("session_switched");
 		const sessionA = switchedA["id"] as string;
 
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "Tab-B Session" });
-		const switchedB = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switchedB = await client1.waitFor("session_switched");
 		const sessionB = switchedB["id"] as string;
 
 		// Client1 views session A, Client2 views session B
@@ -51,8 +53,8 @@ describe("Integration: Per-Tab Sessions", () => {
 		client2.send({ type: "view_session", sessionId: sessionB });
 
 		// Each client gets its own session_switched for the session it viewed
-		const view1 = await client1.waitFor("session_switched", { timeout: 5000 });
-		const view2 = await client2.waitFor("session_switched", { timeout: 5000 });
+		const view1 = await client1.waitFor("session_switched");
+		const view2 = await client2.waitFor("session_switched");
 
 		expect(view1["id"]).toBe(sessionA);
 		expect(view2["id"]).toBe(sessionB);
@@ -68,7 +70,7 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Get any session ID
 		client.send({ type: "list_sessions" });
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		const list = await client.waitFor("session_list");
 		const sessions = list["sessions"] as Array<{ id: string }>;
 		expect(sessions.length).toBeGreaterThan(0);
 
@@ -77,13 +79,11 @@ describe("Integration: Per-Tab Sessions", () => {
 		client.send({ type: "view_session", sessionId: sessions[0]!.id });
 
 		// Should receive session_switched AND status
-		const switched = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client.waitFor("session_switched");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(switched["id"]).toBe(sessions[0]!.id);
 
-		const status = await client.waitFor("status", { timeout: 5000 });
+		const status = await client.waitFor("status");
 		expect(status["status"]).toBe("idle");
 
 		await client.close();
@@ -108,13 +108,11 @@ describe("Integration: Per-Tab Sessions", () => {
 		client1.send({ type: "new_session", title: "Per-Tab New Session" });
 
 		// Client1 should get session_switched with the new ID
-		const switched1 = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched1 = await client1.waitFor("session_switched");
 		expect(switched1["id"]).toBeTruthy();
 
 		// Client2 should get session_list (broadcast) but NOT session_switched
-		const list2 = await client2.waitFor("session_list", { timeout: 5000 });
+		const list2 = await client2.waitFor("session_list");
 		expect(Array.isArray(list2["sessions"])).toBe(true);
 
 		// Wait a moment then verify client2 did NOT get session_switched
@@ -137,21 +135,21 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Have them view different sessions first
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "List-Broadcast-A" });
-		const a = await client1.waitFor("session_switched", { timeout: 5000 });
+		const a = await client1.waitFor("session_switched");
 
 		client2.clearReceived();
 		client2.send({ type: "view_session", sessionId: a["id"] as string });
-		await client2.waitFor("session_switched", { timeout: 5000 });
+		await client2.waitFor("session_switched");
 
 		// Now create another session from client1 — both should get updated list
 		client1.clearReceived();
 		client2.clearReceived();
 		client1.send({ type: "new_session", title: "List-Broadcast-B" });
-		const b = await client1.waitFor("session_switched", { timeout: 5000 });
+		const b = await client1.waitFor("session_switched");
 
 		// Both clients should get session_list
-		const list1 = await client1.waitFor("session_list", { timeout: 5000 });
-		const list2 = await client2.waitFor("session_list", { timeout: 5000 });
+		const list1 = await client1.waitFor("session_list");
+		const list2 = await client2.waitFor("session_list");
 
 		expect(Array.isArray(list1["sessions"])).toBe(true);
 		expect(Array.isArray(list2["sessions"])).toBe(true);
@@ -177,15 +175,13 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Create a shared session
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "Sync-Session" });
-		const switched = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client1.waitFor("session_switched");
 		const sharedId = switched["id"] as string;
 
 		// Both clients view the same session
 		client2.clearReceived();
 		client2.send({ type: "view_session", sessionId: sharedId });
-		await client2.waitFor("session_switched", { timeout: 5000 });
+		await client2.waitFor("session_switched");
 
 		// Clear and send input_sync from client1
 		client1.clearReceived();
@@ -201,10 +197,6 @@ describe("Integration: Per-Tab Sessions", () => {
 	});
 
 	it("input_sync does NOT reach clients viewing a different session", async () => {
-		// Reset queues to ensure fresh POST /session entries are available
-		// (prior tests may have exhausted the queue, causing duplicate session IDs)
-		harness.mock.resetQueues();
-
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -213,19 +205,19 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Create two sessions
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "Input-Sync-A" });
-		const a = await client1.waitFor("session_switched", { timeout: 5000 });
+		const a = await client1.waitFor("session_switched");
 
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "Input-Sync-B" });
-		const b = await client1.waitFor("session_switched", { timeout: 5000 });
+		const b = await client1.waitFor("session_switched");
 
 		// Client1 views session A, Client2 views session B
 		client1.clearReceived();
 		client2.clearReceived();
 		client1.send({ type: "view_session", sessionId: a["id"] as string });
 		client2.send({ type: "view_session", sessionId: b["id"] as string });
-		await client1.waitFor("session_switched", { timeout: 5000 });
-		await client2.waitFor("session_switched", { timeout: 5000 });
+		await client1.waitFor("session_switched");
+		await client2.waitFor("session_switched");
 
 		// Send input_sync from client1 (session A)
 		client1.clearReceived();
@@ -255,15 +247,13 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Create a session for client1 to delete
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "To-Delete-PerTab" });
-		const created = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const created = await client1.waitFor("session_switched");
 		const deleteId = created["id"] as string;
 
 		// Client1 views the session-to-delete
 		client1.clearReceived();
 		client1.send({ type: "view_session", sessionId: deleteId });
-		await client1.waitFor("session_switched", { timeout: 5000 });
+		await client1.waitFor("session_switched");
 
 		// Client2 views a different session (the initial one)
 		client2.clearReceived();
@@ -273,15 +263,13 @@ describe("Integration: Per-Tab Sessions", () => {
 		client1.send({ type: "delete_session", sessionId: deleteId });
 
 		// Client1 should be redirected to another session
-		const redirected = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const redirected = await client1.waitFor("session_switched");
 		expect(redirected["id"]).toBeTruthy();
 		expect(redirected["id"]).not.toBe(deleteId);
 
 		// Both should get updated session_list
-		const list1 = await client1.waitFor("session_list", { timeout: 5000 });
-		const list2 = await client2.waitFor("session_list", { timeout: 5000 });
+		const list1 = await client1.waitFor("session_list");
+		const list2 = await client2.waitFor("session_list");
 		expect(Array.isArray(list1["sessions"])).toBe(true);
 		expect(Array.isArray(list2["sessions"])).toBe(true);
 
@@ -306,15 +294,13 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Create a shared session
 		client1.clearReceived();
 		client1.send({ type: "new_session", title: "Model-Switch-PerTab" });
-		const created = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const created = await client1.waitFor("session_switched");
 		const sharedId = created["id"] as string;
 
 		// Both clients view the same session
 		client2.clearReceived();
 		client2.send({ type: "view_session", sessionId: sharedId });
-		await client2.waitFor("session_switched", { timeout: 5000 });
+		await client2.waitFor("session_switched");
 
 		// Switch model from client1
 		client1.clearReceived();
@@ -326,7 +312,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		});
 
 		// Client2 should receive model_info (same session)
-		const modelMsg = await client2.waitFor("model_info", { timeout: 5000 });
+		const modelMsg = await client2.waitFor("model_info");
 		expect(modelMsg["model"]).toBe("per-tab-test-model");
 		expect(modelMsg["provider"]).toBe("per-tab-test-provider");
 

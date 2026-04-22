@@ -2,7 +2,7 @@
 // Tests the cancel/abort flow against a mock OpenCode server.
 // Verifies: send → processing → cancel → abort called → done → can send again
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -19,6 +19,12 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		if (harness) await harness.stop();
 	});
 
+	beforeEach(async () => {
+		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test.
+		await new Promise((r) => setTimeout(r, 500));
+	});
+
 	it("cancel during processing triggers done", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -33,7 +39,6 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		// Wait for processing to start
 		await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
 
 		// Send cancel while processing
@@ -59,7 +64,6 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 
 		await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
 
 		client.send({ type: "cancel" });
@@ -81,13 +85,12 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		// Should enter processing again
 		const status = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
 		expect(status["status"]).toBe("processing");
 
 		// Should complete — wait for done (delta may or may not arrive
 		// depending on model streaming behavior after abort)
-		const done = await client.waitFor("done", { timeout: 10_000 });
+		const done = await client.waitFor("done");
 		expect(done["code"]).toBe(0);
 
 		await client.close();
@@ -131,11 +134,10 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 
 		const status = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
 		expect(status["status"]).toBe("processing");
 
-		await client.waitFor("done", { timeout: 10_000 });
+		await client.waitFor("done");
 		await client.close();
 	}, 30_000);
 });

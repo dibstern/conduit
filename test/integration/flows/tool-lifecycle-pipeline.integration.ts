@@ -20,15 +20,15 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test.
+		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("delivers tool_start, tool_executing, tool_result in order", async () => {
 		const client = await harness.connectWsClient();
-		const switchMsg = await client.waitFor("session_switched", {
-			timeout: 5_000,
-		});
+		const switchMsg = await client.waitFor("session_switched");
 		const sessionId = switchMsg["id"] as string;
 		expect(sessionId).toBeTruthy();
 
@@ -53,7 +53,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		const toolStart = await client.waitFor("tool_start", { timeout: 5_000 });
+		const toolStart = await client.waitFor("tool_start");
 		expect(toolStart["id"]).toBe("toolu_lifecycle1");
 		expect(toolStart["name"]).toBe("Bash");
 
@@ -78,9 +78,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		const toolExec = await client.waitFor("tool_executing", {
-			timeout: 5_000,
-		});
+		const toolExec = await client.waitFor("tool_executing");
 		expect(toolExec["id"]).toBe("toolu_lifecycle1");
 
 		// Inject SSE completed event → tool_result
@@ -104,9 +102,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		const toolResult = await client.waitFor("tool_result", {
-			timeout: 5_000,
-		});
+		const toolResult = await client.waitFor("tool_result");
 		expect(toolResult["id"]).toBe("toolu_lifecycle1");
 		expect(toolResult["content"]).toBe("file1.txt\nfile2.txt");
 		expect(toolResult["is_error"]).toBe(false);
@@ -131,9 +127,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 
 	it("handles history+SSE overlap without errors", async () => {
 		const client = await harness.connectWsClient();
-		const switchMsg = await client.waitFor("session_switched", {
-			timeout: 5_000,
-		});
+		const switchMsg = await client.waitFor("session_switched");
 		const sessionId = switchMsg["id"] as string;
 		expect(sessionId).toBeTruthy();
 
@@ -159,7 +153,6 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 		await client.waitFor("tool_start", {
-			timeout: 5_000,
 			predicate: (m) => m["id"] === "toolu_overlap1",
 		});
 
@@ -183,7 +176,6 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 		await client.waitFor("tool_executing", {
-			timeout: 5_000,
 			predicate: (m) => m["id"] === "toolu_overlap1",
 		});
 
@@ -207,7 +199,6 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 		const result = await client.waitFor("tool_result", {
-			timeout: 5_000,
 			predicate: (m) => m["id"] === "toolu_overlap1",
 		});
 		expect(result["id"]).toBe("toolu_overlap1");

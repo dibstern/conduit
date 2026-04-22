@@ -20,8 +20,11 @@ describe("Integration: SSE to WS Pipeline", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test before
+		// new test's client connects and starts asserting.
+		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("SSE stream is running after relay startup", async () => {

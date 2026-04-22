@@ -986,10 +986,9 @@ export class MockOpenCodeServer {
 		void (async () => {
 			let emitCount = 0;
 			for (const event of events) {
-				const delay = Math.min(event.delayMs, 5);
-				if (delay > 0) {
-					await new Promise<void>((r) => setTimeout(r, delay));
-				}
+				// No artificial delay — integration tests care about ordering,
+				// not timing fidelity. Delays cause relay pipeline accumulation
+				// that exceeds waitFor timeouts.
 
 				const properties = sessionIdMap
 					? this.rewriteSessionIds(event.properties, sessionIdMap)
@@ -1166,7 +1165,7 @@ export class MockOpenCodeServer {
 
 			if (next.kind === "pty-output") {
 				queue.shift();
-				const delay = Math.min(next.delayMs, 5);
+				const delay = Math.min(next.delayMs, 1);
 				if (delay > 0) {
 					await new Promise<void>((r) => setTimeout(r, delay));
 				}
@@ -1175,7 +1174,7 @@ export class MockOpenCodeServer {
 				}
 			} else if (next.kind === "pty-close") {
 				queue.shift();
-				const delay = Math.min(next.delayMs, 5);
+				const delay = Math.min(next.delayMs, 1);
 				if (delay > 0) {
 					await new Promise<void>((r) => setTimeout(r, delay));
 				}

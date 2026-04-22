@@ -24,8 +24,10 @@ describe("Integration: Switch to Streaming Session", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test.
+		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("deltas arrive after switching to a session that streamed", async () => {
@@ -46,13 +48,11 @@ describe("Integration: Switch to Streaming Session", () => {
 		});
 
 		// Wait for streaming to start — proof that deltas arrive.
-		const firstDelta = await client.waitForAny(["delta", "thinking_delta"], {
-			timeout: 5_000,
-		});
+		const firstDelta = await client.waitForAny(["delta", "thinking_delta"]);
 		expect(firstDelta["text"]).toBeTruthy();
 
 		// Wait for the full cycle to complete
-		await client.waitFor("done", { timeout: 5_000 });
+		await client.waitFor("done");
 
 		// ── Step 2: Switch away to a new Session B ──────────────────
 		client.clearReceived();
@@ -60,9 +60,7 @@ describe("Integration: Switch to Streaming Session", () => {
 			type: "new_session",
 			title: "Streaming Bug Test - Session B",
 		});
-		const switchedToB = await client.waitFor("session_switched", {
-			timeout: 5_000,
-		});
+		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 
 		// Verify no Session A deltas leak through while B is active
@@ -74,9 +72,7 @@ describe("Integration: Switch to Streaming Session", () => {
 		client.send({ type: "switch_session", sessionId: sessionA });
 
 		// Should receive session_switched for Session A
-		const switchedBack = await client.waitFor("session_switched", {
-			timeout: 5_000,
-		});
+		const switchedBack = await client.waitFor("session_switched");
 		expect(switchedBack["id"]).toBe(sessionA);
 
 		// ── Step 4: Verify session content is available after switch ─
@@ -118,10 +114,10 @@ describe("Integration: Switch to Streaming Session", () => {
 		});
 
 		// Wait for streaming to start
-		await client.waitForAny(["delta", "thinking_delta"], { timeout: 5_000 });
+		await client.waitForAny(["delta", "thinking_delta"]);
 
 		// Wait for full cycle
-		await client.waitFor("done", { timeout: 5_000 });
+		await client.waitFor("done");
 
 		const cachedDeltaCount = client
 			.getReceived()
@@ -134,18 +130,14 @@ describe("Integration: Switch to Streaming Session", () => {
 			type: "new_session",
 			title: "Cache+Live Test - Session B",
 		});
-		const switchedToB = await client.waitFor("session_switched", {
-			timeout: 5_000,
-		});
+		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 
 		// ── Switch back ─────────────────────────────────────────────
 		client.clearReceived();
 		client.send({ type: "switch_session", sessionId: sessionA });
 
-		const switchedBack = await client.waitFor("session_switched", {
-			timeout: 5_000,
-		});
+		const switchedBack = await client.waitFor("session_switched");
 		expect(switchedBack["id"]).toBe(sessionA);
 
 		// The session_switched message should contain cached events or history

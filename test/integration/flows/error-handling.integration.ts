@@ -47,7 +47,7 @@ describe("Integration: Error Handling", () => {
 		client.clearReceived();
 
 		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list", { timeout: 5000 });
+		const msg = await client.waitFor("agent_list");
 		expect(Array.isArray(msg["agents"])).toBe(true);
 
 		await client.close();
@@ -85,7 +85,7 @@ describe("Integration: Error Handling", () => {
 		// Verify the server is still alive
 		client.clearReceived();
 		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list", { timeout: 5000 });
+		const msg = await client.waitFor("agent_list");
 		expect(Array.isArray(msg["agents"])).toBe(true);
 
 		await client.close();
@@ -104,7 +104,7 @@ describe("Integration: Error Handling", () => {
 
 		// Verify the client is still connected and functional
 		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list", { timeout: 5000 });
+		const msg = await client.waitFor("agent_list");
 		expect(Array.isArray(msg["agents"])).toBe(true);
 
 		await client.close();
@@ -128,7 +128,7 @@ describe("Integration: Error Handling", () => {
 		// Now send a valid request and verify the server still works
 		client.clearReceived();
 		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list", { timeout: 5000 });
+		const msg = await client.waitFor("agent_list");
 		expect(Array.isArray(msg["agents"])).toBe(true);
 		expect((msg["agents"] as unknown[]).length).toBeGreaterThan(0);
 

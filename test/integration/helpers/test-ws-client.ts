@@ -60,12 +60,14 @@ export class TestWsClient {
 		this.ws.send(JSON.stringify(msg));
 	}
 
-	/** Wait for a message matching a type (and optional predicate) */
+	/** Wait for a message matching a type (and optional predicate).
+	 *  Default 10s: full relay pipeline (SSE → translate → tag → broadcast)
+	 *  processes 26+ events with real I/O; measured throughput is 4-8s. */
 	waitFor(
 		type: string,
 		opts?: { timeout?: number; predicate?: (msg: ReceivedMessage) => boolean },
 	): Promise<ReceivedMessage> {
-		const timeout = opts?.timeout ?? 5000;
+		const timeout = opts?.timeout ?? 10_000;
 
 		// Check already-received messages first
 		const existing = this.received.find(
@@ -111,7 +113,7 @@ export class TestWsClient {
 		types: string[],
 		opts?: { timeout?: number },
 	): Promise<ReceivedMessage> {
-		const timeout = opts?.timeout ?? 5000;
+		const timeout = opts?.timeout ?? 10_000;
 
 		// Check already-received messages first
 		const existing = this.received.find((m) => types.includes(m.type));

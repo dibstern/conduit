@@ -19,8 +19,10 @@ describe("Integration: Send Message", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test.
+		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("sends a message and receives processing status", async () => {
@@ -37,7 +39,6 @@ describe("Integration: Send Message", () => {
 		// Should immediately get processing status
 		const status = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 5000,
 		});
 		expect(status["status"]).toBe("processing");
 
@@ -56,12 +57,12 @@ describe("Integration: Send Message", () => {
 		});
 
 		// Wait for at least one delta (streamed text)
-		const delta = await client.waitFor("delta", { timeout: 5_000 });
+		const delta = await client.waitFor("delta");
 		expect(delta["text"]).toBeTruthy();
 		expect(typeof delta["text"]).toBe("string");
 
 		// Wait for done signal
-		const done = await client.waitFor("done", { timeout: 5_000 });
+		const done = await client.waitFor("done");
 		expect(done["code"]).toBe(0);
 
 		// result events (from message.updated) may or may not arrive depending

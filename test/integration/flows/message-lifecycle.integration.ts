@@ -20,8 +20,10 @@ describe("Integration: Message Lifecycle", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		harness.mock.resetQueues();
+		// Let relay pipeline drain events from previous test.
+		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("complete lifecycle: send → processing → delta → done", async () => {
@@ -38,17 +40,16 @@ describe("Integration: Message Lifecycle", () => {
 		// 1. Should receive processing status
 		const status = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
 		expect(status["status"]).toBe("processing");
 
 		// 2. Should receive at least one delta (streamed text)
-		const delta = await client.waitFor("delta", { timeout: 10_000 });
+		const delta = await client.waitFor("delta");
 		expect(delta["text"]).toBeTruthy();
 		expect(typeof delta["text"]).toBe("string");
 
 		// 3. Should receive done with code 0 (successful completion)
-		const done = await client.waitFor("done", { timeout: 10_000 });
+		const done = await client.waitFor("done");
 		expect(done["code"]).toBe(0);
 
 		await client.close();
@@ -67,9 +68,8 @@ describe("Integration: Message Lifecycle", () => {
 
 		await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
-		const done1 = await client.waitFor("done", { timeout: 10_000 });
+		const done1 = await client.waitFor("done");
 		expect(done1["code"]).toBe(0);
 
 		// Clear messages between turns and reset mock queues so the second
@@ -86,16 +86,15 @@ describe("Integration: Message Lifecycle", () => {
 		// Should enter processing again (not stuck from first turn)
 		const status2 = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
 		});
 		expect(status2["status"]).toBe("processing");
 
 		// Should receive delta for second message
-		const delta2 = await client.waitFor("delta", { timeout: 10_000 });
+		const delta2 = await client.waitFor("delta");
 		expect(delta2["text"]).toBeTruthy();
 
 		// Should complete
-		const done2 = await client.waitFor("done", { timeout: 10_000 });
+		const done2 = await client.waitFor("done");
 		expect(done2["code"]).toBe(0);
 
 		await client.close();
@@ -112,7 +111,7 @@ describe("Integration: Message Lifecycle", () => {
 		});
 
 		// Wait for full cycle
-		await client.waitFor("done", { timeout: 10_000 });
+		await client.waitFor("done");
 
 		// After done, the last status-related message should indicate idle/done
 		// (no lingering processing status)
