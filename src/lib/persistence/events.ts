@@ -41,7 +41,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"tool.started",
 	"tool.running",
 	"tool.completed",
-	"tool.input_updated",
+	"tool.input_updated", // Retained for historical event compatibility — no longer emitted after Phase 2
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
@@ -106,19 +106,6 @@ export interface ToolCompletedPayload {
 	readonly partId: string;
 	readonly result: unknown;
 	readonly duration: number;
-}
-
-export interface ToolInputUpdatedPayload {
-	readonly messageId: string;
-	readonly partId: string;
-	readonly input: unknown;
-	/**
-	 * Optional tool name. Carried through so downstream translators (e.g.
-	 * the relay event sink forwarding to the browser) can tag the derived
-	 * `tool_executing` RelayMessage with the correct tool name. Not required:
-	 * callers that look up the in-flight tool by `partId` alone can omit it.
-	 */
-	readonly toolName?: string;
 }
 
 // ─── Canonical Tool Input ───────────────────────────────────────────────────
@@ -243,7 +230,11 @@ export interface EventPayloadMap {
 	"tool.started": ToolStartedPayload;
 	"tool.running": ToolRunningPayload;
 	"tool.completed": ToolCompletedPayload;
-	"tool.input_updated": ToolInputUpdatedPayload;
+	"tool.input_updated": {
+		readonly messageId: string;
+		readonly partId: string;
+		readonly [key: string]: unknown;
+	};
 	"turn.completed": TurnCompletedPayload;
 	"turn.error": TurnErrorPayload;
 	"turn.interrupted": TurnInterruptedPayload;
@@ -335,7 +326,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"tool.started": ["messageId", "partId", "toolName", "callId"],
 	"tool.running": ["messageId", "partId"],
 	"tool.completed": ["messageId", "partId", "result", "duration"],
-	"tool.input_updated": ["messageId", "partId", "input"],
+	"tool.input_updated": ["messageId", "partId"], // Historical compat
 	"turn.completed": ["messageId"],
 	"turn.error": ["messageId", "error"],
 	"turn.interrupted": ["messageId"],

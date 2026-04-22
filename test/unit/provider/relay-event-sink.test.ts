@@ -180,32 +180,6 @@ describe("createRelayEventSink — translation", () => {
 		});
 	});
 
-	it("maps tool.input_updated → tool_executing with merged input", async () => {
-		// Claude SDK streams tool input via input_json_delta events; the
-		// translator emits tool.started with `input: {}` and then
-		// tool.input_updated with the full parsed input as each delta lands.
-		// The relay sink must forward that update so the browser-side tool
-		// registry can surface the real input fields (file_path, command,
-		// pattern, etc.) in ToolGroupItem / ToolGenericCard.
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await sink.push(
-			makeEvent("tool.input_updated", {
-				messageId: "msg_1",
-				partId: "call_1",
-				input: { file_path: "/repo/src/main.ts" },
-			}),
-		);
-		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
-		expect(calls).toHaveLength(1);
-		expect(calls[0]).toMatchObject({
-			type: "tool_executing",
-			id: "call_1",
-			input: { file_path: "/repo/src/main.ts" },
-			messageId: "msg_1",
-		});
-	});
-
 	it("maps thinking.delta → thinking_delta", async () => {
 		const send = vi.fn();
 		const sink = createRelayEventSink({ sessionId: "ses-1", send });

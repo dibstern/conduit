@@ -26,9 +26,9 @@ describe("CanonicalEventTranslator — normalized tool input", () => {
 		);
 
 		expect(events).not.toBeNull();
-		const toolStarted = events!.find((e) => e.type === "tool.started");
+		const toolStarted = events?.find((e) => e.type === "tool.started");
 		expect(toolStarted).toBeDefined();
-		expect(toolStarted!.data.input).toEqual({
+		expect(toolStarted?.data.input).toEqual({
 			tool: "Read",
 			filePath: "/src/main.ts",
 			offset: 5,
@@ -59,9 +59,9 @@ describe("CanonicalEventTranslator — normalized tool input", () => {
 		);
 
 		expect(events).not.toBeNull();
-		const toolStarted = events!.find((e) => e.type === "tool.started");
+		const toolStarted = events?.find((e) => e.type === "tool.started");
 		expect(toolStarted).toBeDefined();
-		expect(toolStarted!.data.input).toEqual({
+		expect(toolStarted?.data.input).toEqual({
 			tool: "Bash",
 			command: "ls -la",
 		});

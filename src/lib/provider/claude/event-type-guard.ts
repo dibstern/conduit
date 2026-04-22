@@ -23,7 +23,6 @@ const CLAUDE_PRODUCED_TYPES = [
 	"tool.started",
 	"tool.running",
 	"tool.completed",
-	"tool.input_updated",
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
@@ -37,6 +36,7 @@ const CLAUDE_PRODUCED_TYPES = [
  * comment explaining why it's excluded.
  */
 const CLAUDE_NOT_APPLICABLE_TYPES = [
+	"tool.input_updated", // Historical event — no longer emitted after Phase 2 (buffered tool.started replaces it)
 	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator
 	"session.renamed", // Title changes handled by auto-rename in prompt.ts
 	"session.provider_changed", // Provider switching is a relay-level concept

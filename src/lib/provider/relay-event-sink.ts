@@ -286,16 +286,8 @@ function translateCanonicalEvent(event: CanonicalEvent): TranslationResult {
 				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
 			);
 
-		case "tool.input_updated": {
-			const { partId, input, messageId, toolName } = event.data;
-			return emit({
-				type: "tool_executing",
-				id: partId,
-				name: toolName ?? "",
-				input: isRecord(input) ? input : undefined,
-				messageId,
-			});
-		}
+		case "tool.input_updated":
+			return silent("Historical event — no longer emitted after Phase 2");
 
 		case "tool.completed": {
 			const { partId, result, messageId } = event.data;

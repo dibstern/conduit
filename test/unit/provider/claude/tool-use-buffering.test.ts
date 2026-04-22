@@ -101,7 +101,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]!.data.input).toEqual({
+		expect(toolStarted[0]?.data.input).toEqual({
 			tool: "Read",
 			filePath: "/src/main.ts",
 		});
@@ -145,7 +145,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]!.data.input).toEqual({
+		expect(toolStarted[0]?.data.input).toEqual({
 			tool: "Bash",
 			command: "echo hi",
 		});
@@ -181,7 +181,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]!.data.toolName).toBe("Read");
+		expect(toolStarted[0]?.data.toolName).toBe("Read");
 
 		// tool.completed should also be emitted for the interrupted tool
 		const toolCompleted = events.filter((e) => e.type === "tool.completed");
@@ -229,7 +229,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]!.data.input).toEqual({
+		expect(toolStarted[0]?.data.input).toEqual({
 			tool: "Bash",
 			command: "ls -la",
 			description: "list",
@@ -313,8 +313,8 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(2);
-		expect(toolStarted[0]!.data.toolName).toBe("Read");
-		expect(toolStarted[1]!.data.toolName).toBe("Bash");
+		expect(toolStarted[0]?.data.toolName).toBe("Read");
+		expect(toolStarted[1]?.data.toolName).toBe("Bash");
 	});
 
 	it("handles partial JSON that fails to parse mid-stream", async () => {
@@ -366,7 +366,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]!.data.input).toEqual({
+		expect(toolStarted[0]?.data.input).toEqual({
 			tool: "Grep",
 			pattern: "TODO",
 		});

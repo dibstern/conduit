@@ -67,11 +67,6 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 			expectedTypes: ["tool_result"],
 		},
 		{
-			type: "tool.input_updated",
-			data: { messageId: "m", partId: "c", input: { command: "ls" } },
-			expectedTypes: ["tool_executing"],
-		},
-		{
 			type: "turn.completed",
 			data: {
 				messageId: "m",
@@ -120,6 +115,10 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 		data: Record<string, unknown>;
 	}> = [
 		{ type: "tool.running", data: { messageId: "m", partId: "p" } },
+		{
+			type: "tool.input_updated",
+			data: { messageId: "m", partId: "c" },
+		},
 		{ type: "session.status", data: { sessionId: "s", status: "idle" } },
 		{ type: "session.status", data: { sessionId: "s", status: "busy" } },
 		{ type: "session.status", data: { sessionId: "s", status: "error" } },
