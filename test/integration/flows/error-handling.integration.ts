@@ -61,7 +61,7 @@ describe("Integration: Error Handling", () => {
 		client.send({ type: "nonexistent_type" });
 
 		// Should receive an error response about unknown message type
-		const errMsg = await client.waitFor("error", { timeout: 3000 });
+		const errMsg = await client.waitFor("system_error", { timeout: 3000 });
 		expect(errMsg["code"]).toBe("UNKNOWN_MESSAGE_TYPE");
 		expect(typeof errMsg["message"]).toBe("string");
 
