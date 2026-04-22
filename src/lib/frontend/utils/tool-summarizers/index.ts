@@ -8,4 +8,7 @@ export type {
 } from "./types.js";
 
 // Side-effect imports — per-tool summarizers self-register via registry.ts
-// Added incrementally in Tasks 13-14.
+import "./read.js";
+import "./edit.js";
+import "./write.js";
+import "./bash.js";
