@@ -746,6 +746,7 @@ export function handleMessage(msg: RelayMessage): void {
 							historyState.messageCount = msgCount;
 							// Transition loadLifecycle so the scroll controller
 							// exits "loading" state and scrolls to bottom.
+							capturedSlot.messages.loadLifecycle = "ready";
 							chatState.loadLifecycle = "ready";
 						}
 					})
@@ -757,6 +758,8 @@ export function handleMessage(msg: RelayMessage): void {
 				// so "Beginning of session" marker shows immediately.
 				// Transition loadLifecycle to "ready" so the scroll controller
 				// exits "loading" state and can handle live events normally.
+				const emptySlot = getOrCreateSessionSlot(msg.id);
+				emptySlot.messages.loadLifecycle = "ready";
 				chatState.loadLifecycle = "ready";
 			}
 
@@ -1022,7 +1025,7 @@ export async function replayEvents(
 	const slot = getOrCreateSessionSlot(sessionId);
 	const gen = ++slot.activity.replayGeneration;
 
-	phaseStartReplay(slot.activity);
+	phaseStartReplay(slot.activity, slot.messages);
 	beginReplayBatch(slot.activity, slot.messages);
 	startBufferingLiveEvents(slot.activity);
 

@@ -82,29 +82,17 @@ afterEach(() => {
 // ─── handleDelta ───────────────────────────────────────────────────────────
 
 describe("handleDelta — tier contract", () => {
-	it("should NOT modify activity tier fields", () => {
-		const before = snapActivity(ta);
+	it("should modify activity tier (phase → streaming)", () => {
 		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "Hello" });
 		vi.advanceTimersByTime(100); // flush debounced render
-		const after = snapActivity(ta);
-		expect(after).toEqual(before);
+		expect(ta.phase).toBe("streaming");
 	});
 
-	it("should modify messages tier (currentAssistantText)", () => {
-		// handleDelta writes to the legacy chatState, not to the messages
-		// tier object directly. But it reads activity.doneMessageIds for
-		// dedup, confirming it does NOT mutate activity.
-		const beforeMsg = snapMessages(tm);
+	it("should modify messages tier (currentAssistantText, messages)", () => {
 		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "Hello" });
 		vi.advanceTimersByTime(100);
-		// messages tier itself is not directly written in this transitional
-		// commit (writes go to legacy chatState). The key assertion is that
-		// activity was untouched.
-		const afterMsg = snapMessages(tm);
-		// Messages tier is expected to be unchanged on the per-session
-		// object during this transitional commit (writes go to chatState).
-		// The important contract: activity must NOT be modified.
-		expect(afterMsg).toEqual(beforeMsg);
+		expect(tm.currentAssistantText).toBe("Hello");
+		expect(tm.messages.length).toBeGreaterThan(0);
 	});
 });
 
@@ -149,19 +137,16 @@ describe("handleDone — tier contract", () => {
 // ─── handleStatus ──────────────────────────────────────────────────────────
 
 describe("handleStatus — tier contract", () => {
-	it("should NOT modify activity tier fields directly (writes to legacy chatState)", () => {
-		const before = snapActivity(ta);
+	it("should modify activity tier (phase → processing)", () => {
 		handleStatus(ta, tm, {
 			type: "status",
 			sessionId: "s1",
 			status: "processing",
 		});
-		const after = snapActivity(ta);
-		// handleStatus writes to chatState.phase (legacy), not activity.phase
-		expect(after).toEqual(before);
+		expect(ta.phase).toBe("processing");
 	});
 
-	it("should NOT modify messages tier fields", () => {
+	it("should NOT modify messages tier fields on processing", () => {
 		const before = snapMessages(tm);
 		handleStatus(ta, tm, {
 			type: "status",
@@ -172,54 +157,45 @@ describe("handleStatus — tier contract", () => {
 		expect(after).toEqual(before);
 	});
 
-	it("status idle should NOT modify messages tier", () => {
-		const before = snapMessages(tm);
+	it("status idle clears activity in-flight state", () => {
 		handleStatus(ta, tm, {
 			type: "status",
 			sessionId: "s1",
 			status: "idle",
 		});
-		const after = snapMessages(tm);
-		expect(after).toEqual(before);
+		expect(ta.phase).toBe("idle");
+		expect(ta.currentMessageId).toBeNull();
 	});
 });
 
 // ─── handleThinkingStart ───────────────────────────────────────────────────
 
 describe("handleThinkingStart — tier contract", () => {
-	it("should dual-write thinkingStartTime to activity tier (Task 3)", () => {
-		const before = snapActivity(ta);
+	it("should write thinkingStartTime to activity tier", () => {
 		handleThinkingStart(ta, tm, {
 			type: "thinking_start",
 			sessionId: "s1",
 		});
-		const after = snapActivity(ta);
-		// Task 3: handleThinkingStart now dual-writes thinkingStartTime to
-		// activity tier. Only thinkingStartTime should change.
-		expect(after.thinkingStartTime).toBeGreaterThan(0);
-		expect({ ...after, thinkingStartTime: 0 }).toEqual(before);
+		expect(ta.thinkingStartTime).toBeGreaterThan(0);
 	});
 
-	it("should NOT modify messages tier fields directly (writes to legacy chatState)", () => {
-		const before = snapMessages(tm);
+	it("should write thinking message to messages tier", () => {
 		handleThinkingStart(ta, tm, {
 			type: "thinking_start",
 			sessionId: "s1",
 		});
-		const after = snapMessages(tm);
-		// Messages are written to legacy chatState, not the messages tier
-		expect(after).toEqual(before);
+		expect(tm.messages.length).toBe(1);
+		expect(tm.messages[0]?.type).toBe("thinking");
 	});
 });
 
 // ─── phaseToIdle ───────────────────────────────────────────────────────────
 
 describe("phaseToIdle — tier contract", () => {
-	it("should NOT modify activity tier fields (writes to legacy chatState.phase)", () => {
-		const before = snapActivity(ta);
+	it("should write phase to activity tier", () => {
+		phaseToProcessing(ta);
 		phaseToIdle(ta);
-		const after = snapActivity(ta);
-		expect(after).toEqual(before);
+		expect(ta.phase).toBe("idle");
 	});
 
 	it("should NOT modify messages tier", () => {
@@ -233,11 +209,9 @@ describe("phaseToIdle — tier contract", () => {
 // ─── phaseToProcessing ─────────────────────────────────────────────────────
 
 describe("phaseToProcessing — tier contract", () => {
-	it("should NOT modify activity tier fields (writes to legacy chatState.phase)", () => {
-		const before = snapActivity(ta);
+	it("should write phase to activity tier", () => {
 		phaseToProcessing(ta);
-		const after = snapActivity(ta);
-		expect(after).toEqual(before);
+		expect(ta.phase).toBe("processing");
 	});
 
 	it("should NOT modify messages tier", () => {
@@ -251,11 +225,9 @@ describe("phaseToProcessing — tier contract", () => {
 // ─── phaseToStreaming ──────────────────────────────────────────────────────
 
 describe("phaseToStreaming — tier contract", () => {
-	it("should NOT modify activity tier fields (writes to legacy chatState.phase)", () => {
-		const before = snapActivity(ta);
+	it("should write phase to activity tier", () => {
 		phaseToStreaming(ta);
-		const after = snapActivity(ta);
-		expect(after).toEqual(before);
+		expect(ta.phase).toBe("streaming");
 	});
 
 	it("should NOT modify messages tier", () => {

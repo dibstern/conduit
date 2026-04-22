@@ -463,7 +463,11 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect(isProcessing()).toBe(true);
 
 		// Now simulate live events continuing to arrive (agent still working)
-		handleMessage({ type: "delta", sessionId: "s1", text: "your request..." });
+		handleMessage({
+			type: "delta",
+			sessionId: "session-a",
+			text: "your request...",
+		});
 		vi.advanceTimersByTime(100);
 
 		// The live delta should append to the existing assistant message
@@ -476,7 +480,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		);
 
 		// Complete the stream
-		handleMessage({ type: "done", sessionId: "s1", code: 0 });
+		handleMessage({ type: "done", sessionId: "session-a", code: 0 });
 		expect(isStreaming()).toBe(false);
 		expect(isProcessing()).toBe(false);
 		expect((assistantMsgs[0] as AssistantMessage).finalized).toBe(false); // stale ref

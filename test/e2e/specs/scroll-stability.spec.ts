@@ -903,15 +903,21 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		// Simulate: user sent a message, server starts processing
 		wsMock.sendMessage({
 			type: "user_message",
+			sessionId: "sess-empty-001",
 			text: "Hello, can you help me?",
 		});
-		wsMock.sendMessage({ type: "status", status: "processing" });
+		wsMock.sendMessage({
+			type: "status",
+			sessionId: "sess-empty-001",
+			status: "processing",
+		});
 		await page.waitForTimeout(300);
 
 		// Stream response
 		for (let i = 0; i < 8; i++) {
 			wsMock.sendMessage({
 				type: "delta",
+				sessionId: "sess-empty-001",
 				text: `This is line ${i} of the response. It contains enough text to create vertical height in the scroll container for testing purposes. `,
 			});
 			await page.waitForTimeout(100);
@@ -933,8 +939,12 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		expect(msgCount).toBeGreaterThan(0);
 
 		// Complete the turn
-		wsMock.sendMessage({ type: "done", code: 0 });
-		wsMock.sendMessage({ type: "status", status: "idle" });
+		wsMock.sendMessage({ type: "done", sessionId: "sess-empty-001", code: 0 });
+		wsMock.sendMessage({
+			type: "status",
+			sessionId: "sess-empty-001",
+			status: "idle",
+		});
 	});
 
 	test("multi-turn streaming: auto-scroll works across done→new message→streaming cycles", async ({

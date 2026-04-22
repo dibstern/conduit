@@ -72,6 +72,7 @@ let ta: SessionActivity;
 let tm: SessionMessages;
 
 beforeEach(() => {
+	sessionState.currentId = "test-session";
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

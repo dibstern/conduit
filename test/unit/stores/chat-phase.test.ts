@@ -267,7 +267,7 @@ describe("Phase split: replaying removed from ChatPhase", () => {
 	it("phaseEndReplay with streaming phase preserves streaming, loadLifecycle unchanged", () => {
 		phaseStartReplay();
 		expect(chatState.loadLifecycle).toBe("loading");
-		phaseToStreaming();
+		phaseToStreaming(ta);
 		expect(chatState.phase).toBe("streaming");
 		expect(isStreaming()).toBe(false); // gated by loading
 		phaseEndReplay(ta, true);

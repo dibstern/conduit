@@ -298,7 +298,7 @@ describe("Multi-tab: live user_message sentDuringEpoch", () => {
 		phaseToProcessing();
 		handleMessage({
 			type: "user_message",
-			sessionId: "s1",
+			sessionId: "test-session",
 			text: "from other tab",
 		});
 
@@ -312,7 +312,7 @@ describe("Multi-tab: live user_message sentDuringEpoch", () => {
 	it("does not set sentDuringEpoch on live user_message when idle", () => {
 		handleMessage({
 			type: "user_message",
-			sessionId: "s1",
+			sessionId: "test-session",
 			text: "from other tab",
 		});
 

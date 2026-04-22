@@ -4,8 +4,14 @@
  * Task 2 (F2): all handlers now take (activity, messages, event) as leading args.
  * Tests that call handlers directly use this helper to create a test slot.
  *
+ * The helpers register the created objects into the sessionActivity/sessionMessages
+ * maps so that `currentChat()` and derived getters (isProcessing, isStreaming, etc.)
+ * reflect handler mutations. Tests must set `sessionState.currentId` to the test
+ * session ID (default: "test-session") before calling these.
+ *
  * Usage:
  *   import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
+ *   sessionState.currentId = "test-session";
  *   handleDelta(testActivity(), testMessages(), { type: "delta", ... });
  */
 
@@ -14,11 +20,21 @@ import type {
 	SessionActivity,
 	SessionMessages,
 } from "../../src/lib/frontend/stores/chat.svelte.js";
+import {
+	sessionActivity,
+	sessionMessages,
+} from "../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../src/lib/frontend/stores/session.svelte.js";
 import { createToolRegistry } from "../../src/lib/frontend/stores/tool-registry.js";
 
-/** Create a minimal SessionActivity for test handler calls. */
-export function testActivity(): SessionActivity {
-	return {
+/** Default test session ID. Matches the ID typically set in beforeEach blocks. */
+const TEST_SESSION_ID = "test-session";
+
+/** Create a minimal SessionActivity for test handler calls.
+ *  Registered into sessionActivity map for the current session. */
+export function testActivity(sessionId?: string): SessionActivity {
+	const id = sessionId ?? sessionState.currentId ?? TEST_SESSION_ID;
+	const a: SessionActivity = {
 		phase: "idle",
 		turnEpoch: 0,
 		currentMessageId: null,
@@ -30,11 +46,15 @@ export function testActivity(): SessionActivity {
 		renderTimer: null,
 		thinkingStartTime: 0,
 	};
+	sessionActivity.set(id, a);
+	return a;
 }
 
-/** Create a minimal SessionMessages for test handler calls. */
-export function testMessages(): SessionMessages {
-	return {
+/** Create a minimal SessionMessages for test handler calls.
+ *  Registered into sessionMessages map for the current session. */
+export function testMessages(sessionId?: string): SessionMessages {
+	const id = sessionId ?? sessionState.currentId ?? TEST_SESSION_ID;
+	const m: SessionMessages = {
 		messages: [],
 		currentAssistantText: "",
 		loadLifecycle: "empty",
@@ -46,12 +66,17 @@ export function testMessages(): SessionMessages {
 		replayBatch: null,
 		replayBuffer: null,
 	};
+	sessionMessages.set(id, m);
+	return m;
 }
 
 /** Create both tiers as a convenience tuple. */
-export function testSlot(): {
+export function testSlot(sessionId?: string): {
 	activity: SessionActivity;
 	messages: SessionMessages;
 } {
-	return { activity: testActivity(), messages: testMessages() };
+	return {
+		activity: testActivity(sessionId),
+		messages: testMessages(sessionId),
+	};
 }

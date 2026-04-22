@@ -92,16 +92,16 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	clearMessages();
+	// Set currentId and register session BEFORE creating test slots,
+	// so testActivity()/testMessages() register under the correct key ("s1").
+	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	sessionState.currentId = "s1";
 	ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
-	// Register sessions so routePerSession's unknown-session guard passes.
-	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
-	sessionState.currentId = "test-session";
 });
 
 afterEach(() => {
@@ -142,6 +142,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 				...(opts?.messageId != null && { messageId: opts.messageId }),
 			};
 			chatState.messages = messages;
+			tm.messages = messages;
 		}
 	}
 

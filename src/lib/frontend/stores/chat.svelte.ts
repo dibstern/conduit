@@ -367,21 +367,28 @@ export function isLoading(): boolean {
 
 /** Session is idle — no LLM activity, no streaming. */
 export function phaseToIdle(_activity?: SessionActivity): void {
+	if (_activity) _activity.phase = "idle";
 	chatState.phase = "idle";
 }
 
 /** LLM is active, awaiting first delta. */
 export function phaseToProcessing(_activity?: SessionActivity): void {
+	if (_activity) _activity.phase = "processing";
 	chatState.phase = "processing";
 }
 
 /** Receiving deltas — assistant message being built. */
 export function phaseToStreaming(_activity?: SessionActivity): void {
+	if (_activity) _activity.phase = "streaming";
 	chatState.phase = "streaming";
 }
 
 /** Start event replay. */
-export function phaseStartReplay(_activity?: SessionActivity): void {
+export function phaseStartReplay(
+	_activity?: SessionActivity,
+	_messages?: SessionMessages,
+): void {
+	if (_messages) _messages.loadLifecycle = "loading";
 	chatState.loadLifecycle = "loading";
 }
 
@@ -399,7 +406,9 @@ export function phaseEndReplay(
 	// Don't set loadLifecycle here — leave at "committed" so the
 	// scroll controller's settle phase can run while deferred markdown
 	// rendering completes. renderDeferredMarkdown sets "ready" when done.
-	if (llmActive && chatState.phase === "idle") {
+	const phase = _activity?.phase ?? chatState.phase;
+	if (llmActive && phase === "idle") {
+		if (_activity) _activity.phase = "processing";
 		chatState.phase = "processing";
 	}
 }
@@ -514,14 +523,14 @@ function flushAndFinalizeAssistant(
 	_messages: SessionMessages,
 ): string | undefined {
 	// Check the phase flag
-	if (chatState.phase !== "streaming") return undefined;
+	if (_activity.phase !== "streaming") return undefined;
 
 	// Clear per-session renderTimer
 	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
 		clearTimeout(_activity.renderTimer);
 		_activity.renderTimer = null;
 	}
-	if (chatState.currentAssistantText) {
+	if (_messages.currentAssistantText) {
 		flushAssistantRender(_activity, _messages);
 	}
 
@@ -539,6 +548,7 @@ function flushAndFinalizeAssistant(
 
 	// Clear assistant text. Phase transition is the caller's responsibility
 	// (handleDone → phaseToIdle, handleToolStart → phaseToProcessing, etc.)
+	_messages.currentAssistantText = "";
 	chatState.currentAssistantText = "";
 	return finalizedMessageId;
 }
@@ -562,7 +572,7 @@ export function beginReplayBatch(
 	_messages?: SessionMessages,
 ): void {
 	if (_messages) {
-		_messages.replayBatch = [...chatState.messages];
+		_messages.replayBatch = [...(_messages.messages ?? chatState.messages)];
 	}
 }
 
@@ -645,24 +655,27 @@ export function commitReplayFinal(
 	if (_messages) _messages.replayBatch = null;
 
 	if (all.length <= INITIAL_PAGE_SIZE) {
-		chatState.messages = all;
 		if (_messages) {
+			_messages.messages = all;
 			_messages.historyHasMore = eventsHasMore;
 		}
+		chatState.messages = all;
 		historyState.hasMore = eventsHasMore;
 	} else {
 		const cutoff = all.length - INITIAL_PAGE_SIZE;
 		const bufferSlice = all.slice(0, cutoff);
-		if (_messages) _messages.replayBuffer = bufferSlice;
-		chatState.messages = all.slice(cutoff);
 		if (_messages) {
+			_messages.replayBuffer = bufferSlice;
+			_messages.messages = all.slice(cutoff);
 			_messages.historyHasMore = true;
 		}
+		chatState.messages = all.slice(cutoff);
 		historyState.hasMore = true;
 	}
 	if (eventsHasMore) {
 		if (_activity) _activity.eventsHasMore = true;
 	}
+	if (_messages) _messages.loadLifecycle = "committed";
 	chatState.loadLifecycle = "committed";
 }
 
@@ -670,7 +683,7 @@ export function getMessages(_messages?: SessionMessages): ChatMessage[] {
 	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
 		return _messages.replayBatch;
 	}
-	return chatState.messages;
+	return _messages?.messages ?? chatState.messages;
 }
 
 export function setMessages(
@@ -679,6 +692,9 @@ export function setMessages(
 ): void {
 	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
 		_messages.replayBatch = msgs;
+	} else if (_messages) {
+		_messages.messages = msgs;
+		chatState.messages = msgs;
 	} else {
 		chatState.messages = msgs;
 	}
@@ -706,6 +722,7 @@ export function advanceTurnIfNewMessage(
 	// Already seen this messageId — just update currentMessageId (it may
 	// have changed back from a different message) but don't bump epoch.
 	if (activity.seenMessageIds.has(messageId)) {
+		activity.currentMessageId = messageId;
 		chatState.currentMessageId = messageId;
 		return;
 	}
@@ -714,7 +731,7 @@ export function advanceTurnIfNewMessage(
 	activity.seenMessageIds.add(messageId);
 
 	// Finalize any in-progress assistant streaming from the previous turn.
-	if (chatState.phase === "streaming") {
+	if (activity.phase === "streaming") {
 		const finalizedId = flushAndFinalizeAssistant(activity, messages);
 		if (finalizedId) {
 			activity.doneMessageIds.add(finalizedId);
@@ -725,24 +742,26 @@ export function advanceTurnIfNewMessage(
 	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
 	// during the previous turn (sentDuringEpoch < turnEpoch).
 	// Only bump if this isn't the very first message in the session.
-	const prevId = chatState.currentMessageId;
+	const prevId = activity.currentMessageId;
 	if (prevId != null) {
-		chatState.turnEpoch++;
+		activity.turnEpoch++;
+		chatState.turnEpoch = activity.turnEpoch;
 		log.debug(
 			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
 			messageId,
 			prevId,
-			chatState.turnEpoch,
-			chatState.phase,
+			activity.turnEpoch,
+			activity.phase,
 		);
 	} else {
 		log.debug(
 			"advanceTurn FIRST messageId=%s (no bump, turnEpoch=%d)",
 			messageId,
-			chatState.turnEpoch,
+			activity.turnEpoch,
 		);
 	}
 
+	activity.currentMessageId = messageId;
 	chatState.currentMessageId = messageId;
 }
 
@@ -766,7 +785,7 @@ export function handleDelta(
 	// advanceTurnIfNewMessage (called at the dispatch level) already
 	// finalized streaming and transitioned to "processing" if this delta
 	// belongs to a new turn.  We just need to check the phase.
-	const needsNewMessage = chatState.phase !== "streaming";
+	const needsNewMessage = activity.phase !== "streaming";
 
 	// If no current assistant message, create one.
 	if (needsNewMessage) {
@@ -781,10 +800,12 @@ export function handleDelta(
 		};
 		setMessages(messages, [...getMessages(messages), assistantMsg]);
 		phaseToStreaming(activity);
+		messages.currentAssistantText = "";
 		chatState.currentAssistantText = "";
 	}
 
-	chatState.currentAssistantText += text;
+	messages.currentAssistantText += text;
+	chatState.currentAssistantText = messages.currentAssistantText;
 
 	// Debounced markdown render (80ms)
 	if (activity?.renderTimer !== null && activity?.renderTimer !== undefined) {
@@ -868,7 +889,7 @@ export function handleToolStart(
 	// Transition to processing — LLM is still active, just not streaming text.
 	// (advanceTurnIfNewMessage already handles cross-turn finalization, but
 	// same-turn tool calls still need to finalize the text block.)
-	if (chatState.phase === "streaming") {
+	if (activity.phase === "streaming") {
 		flushAndFinalizeAssistant(activity, messages);
 		phaseToProcessing(activity);
 	}
@@ -1046,12 +1067,13 @@ export function handleDone(
 		if (mutated) setMessages(messages, patched);
 	}
 
-	chatState.turnEpoch++;
+	activity.turnEpoch++;
+	chatState.turnEpoch = activity.turnEpoch;
 	log.debug(
 		"handleDone turnEpoch=%d currentMessageId=%s phase=%s",
-		chatState.turnEpoch,
-		chatState.currentMessageId,
-		chatState.phase,
+		activity.turnEpoch,
+		activity.currentMessageId,
+		activity.phase,
 	);
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
@@ -1092,7 +1114,7 @@ export function handleStatus(
 		// while deltas are still flowing; overriding to "processing" would
 		// cause handleDelta to create a new assistant message, splitting
 		// the response around the queued user message.
-		if (chatState.phase !== "streaming") {
+		if (activity.phase !== "streaming") {
 			phaseToProcessing(activity);
 		}
 		// Fallback ONLY for REST history loads — the one path where messages
@@ -1110,7 +1132,7 @@ export function handleStatus(
 		//
 		// 1. If a live in-flight message is pending, finalize it via handleDone
 		//    helper path (flushAndFinalizeAssistant).
-		if (activity.currentMessageId != null && chatState.phase === "streaming") {
+		if (activity.currentMessageId != null && activity.phase === "streaming") {
 			flushAndFinalizeAssistant(activity, messages);
 		}
 
@@ -1119,6 +1141,7 @@ export function handleStatus(
 
 		// 3. Clear in-flight state
 		activity.currentMessageId = null;
+		chatState.currentMessageId = null;
 		messages.currentAssistantText = "";
 		chatState.currentAssistantText = "";
 		activity.thinkingStartTime = 0;
@@ -1157,7 +1180,7 @@ function ensureSentDuringEpochOnLastUnrespondedUser(
 			setMessages(
 				messages,
 				msgs.map((msg, idx) =>
-					idx === i ? { ...msg, sentDuringEpoch: chatState.turnEpoch } : msg,
+					idx === i ? { ...msg, sentDuringEpoch: _activity.turnEpoch } : msg,
 				),
 			);
 			return;
@@ -1244,7 +1267,7 @@ export function addUserMessage(
 	// A live (non-replay) addUserMessage call means addUserMessage is
 	// setting the correct sentDuringEpoch — consume the history fallback
 	// flag so a subsequent status:processing doesn't override it.
-	if (chatState.loadLifecycle !== "loading") {
+	if (messages.loadLifecycle !== "loading") {
 		_pendingHistoryQueuedFallback = false;
 	}
 
@@ -1253,7 +1276,7 @@ export function addUserMessage(
 	// an intervening done event.  During live streaming the assistant
 	// message stays unfinalized so subsequent deltas continue updating
 	// it and the queued user message stays at the end.
-	if (!sentWhileProcessing && chatState.currentAssistantText) {
+	if (!sentWhileProcessing && messages.currentAssistantText) {
 		flushAndFinalizeAssistant(activity, messages);
 		phaseToIdle(activity);
 	}
@@ -1264,15 +1287,15 @@ export function addUserMessage(
 		uuid,
 		text,
 		...(images != null && { images }),
-		...(sentWhileProcessing ? { sentDuringEpoch: chatState.turnEpoch } : {}),
+		...(sentWhileProcessing ? { sentDuringEpoch: activity.turnEpoch } : {}),
 	};
 	if (sentWhileProcessing) {
 		log.debug(
 			"addUserMessage queued msg sentDuringEpoch=%d turnEpoch=%d currentMessageId=%s phase=%s",
-			chatState.turnEpoch,
-			chatState.turnEpoch,
-			chatState.currentMessageId,
-			chatState.phase,
+			activity.turnEpoch,
+			activity.turnEpoch,
+			activity.currentMessageId,
+			activity.phase,
 		);
 	}
 
@@ -1281,7 +1304,7 @@ export function addUserMessage(
 	// between turns), isProcessing() is false and the content-change
 	// effect guard would skip the scroll without this request.
 	// Skip during replay — the settle loop handles replay scrolling.
-	if (chatState.loadLifecycle !== "loading") {
+	if (messages.loadLifecycle !== "loading") {
 		requestScrollOnNextContent();
 	}
 
@@ -1382,6 +1405,9 @@ export function clearMessages(): void {
 	if (currentId) {
 		const activity = sessionActivity.get(currentId);
 		if (activity) {
+			activity.phase = "idle";
+			activity.turnEpoch = 0;
+			activity.currentMessageId = null;
 			activity.doneMessageIds.clear();
 			activity.seenMessageIds.clear();
 			activity.liveEventBuffer = null;
@@ -1393,6 +1419,9 @@ export function clearMessages(): void {
 		}
 		const messages = sessionMessages.get(currentId);
 		if (messages) {
+			messages.messages = [];
+			messages.currentAssistantText = "";
+			messages.loadLifecycle = "empty";
 			messages.replayBatch = null;
 			messages.replayBuffer = null;
 			messages.toolRegistry.clear();
@@ -1441,12 +1470,11 @@ function flushAssistantRender(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
 ): void {
-	if (!chatState.currentAssistantText) return;
+	if (!_messages.currentAssistantText) return;
 
-	const rawText = chatState.currentAssistantText;
-	const html =
-		chatState.loadLifecycle === "loading" ? rawText : renderMarkdown(rawText);
-	const isReplay = chatState.loadLifecycle === "loading";
+	const rawText = _messages.currentAssistantText;
+	const isReplay = _messages.loadLifecycle === "loading";
+	const html = isReplay ? rawText : renderMarkdown(rawText);
 
 	const { messages: updated, found } = updateLastMessage(
 		getMessages(_messages),
@@ -1488,7 +1516,8 @@ export function renderDeferredMarkdown(
 		// Per-session abort check
 		if (_activity && _activity.replayGeneration !== activityGen) return;
 
-		const updated = [...chatState.messages];
+		const source = _messages?.messages ?? chatState.messages;
+		const updated = [...source];
 		let rendered = 0;
 		for (let i = 0; i < updated.length && rendered < BATCH_SIZE; i++) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
@@ -1501,7 +1530,12 @@ export function renderDeferredMarkdown(
 			}
 		}
 		if (rendered > 0) {
-			chatState.messages = updated;
+			if (_messages) {
+				_messages.messages = updated;
+				chatState.messages = updated;
+			} else {
+				chatState.messages = updated;
+			}
 		}
 
 		// Continue if more unrendered messages remain
@@ -1510,8 +1544,12 @@ export function renderDeferredMarkdown(
 		);
 		if (hasMore) {
 			setTimeout(processBatch, 0);
-		} else if (chatState.loadLifecycle === "committed") {
-			chatState.loadLifecycle = "ready";
+		} else {
+			const lc = _messages?.loadLifecycle ?? chatState.loadLifecycle;
+			if (lc === "committed") {
+				if (_messages) _messages.loadLifecycle = "ready";
+				chatState.loadLifecycle = "ready";
+			}
 		}
 	}
 
