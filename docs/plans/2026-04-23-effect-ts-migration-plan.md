@@ -496,7 +496,7 @@ describe("RelayMessage Schema", () => {
   });
 
   it("decodes error message", () => {
-    const raw = { type: "error", code: "AUTH_REQUIRED", message: "PIN required" };
+    const raw = { type: "error", sessionId: "s1", code: "AUTH_REQUIRED", message: "PIN required" };
     const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
     expect(Either.isRight(result)).toBe(true);
   });
@@ -1680,34 +1680,47 @@ Daemon-only (split into `DaemonExtensionsLayer` — only provided in daemon mode
 1. `InstanceMgmtTag` — `instanceMgmt?`
 2. `ProjectMgmtTag` — `projectMgmt?`
 3. `ScanDepsTag` — `scanDeps?`
-4. `ReadQueryTag` — `readQuery?`
-5. `OrchestrationEngineTag` — `orchestrationEngine?`
-6. `ClaudeEventPersistTag` — `claudeEventPersist?`
-7. `ProviderStateServiceTag` — `providerStateService?`
+
+Persistence-dependent (split into `PersistenceExtensionsLayer` — provided when SQLite is configured, in BOTH daemon and standalone modes):
+1. `ReadQueryTag` — `readQuery?` — "only available when persistence is configured"
+2. `ClaudeEventPersistTag` — `claudeEventPersist?` — "only when SQLite is configured"
+3. `ProviderStateServiceTag` — `providerStateService?` — persistence-dependent
+
+Always present (move to `CoreHandlerLayer`):
+1. `OrchestrationEngineTag` — `orchestrationEngine?` — relay-stack.ts always provisions it via simulated InstanceManager
 
 **Layer split strategy:**
 ```typescript
 // Always present
 const CoreHandlerLayer = Layer.mergeAll(
   SessionManagerLive, OpenCodeAPILive, WebSocketHandlerLive,
-  PermissionBridgeLive, PersistenceLive, /* ... core services */
+  PermissionBridgeLive, PersistenceLive, OrchestrationEngineLive,
+  /* ... core services */
+);
+
+// Persistence extensions — provided when SQLite is configured (both modes)
+const PersistenceExtensionsLayer = Layer.mergeAll(
+  ReadQueryLive, ClaudeEventPersistLive, ProviderStateServiceLive,
 );
 
 // Daemon-only extensions
 const DaemonExtensionsLayer = Layer.mergeAll(
   InstanceMgmtLive, ProjectMgmtLive, ScanDepsLive,
-  ReadQueryLive, OrchestrationEngineLive,
-  ClaudeEventPersistLive, ProviderStateServiceLive,
 );
 
-// Standalone mode — compile error if handler tries to use daemon services
-const StandaloneLayer = CoreHandlerLayer;
+// Standalone mode — core + optional persistence
+const StandaloneLayer = CoreHandlerLayer.pipe(
+  Layer.provideMerge(PersistenceExtensionsLayer), // when SQLite configured
+);
 
 // Daemon mode — all services available
-const DaemonLayer = CoreHandlerLayer.pipe(Layer.provideMerge(DaemonExtensionsLayer));
+const DaemonLayer = CoreHandlerLayer.pipe(
+  Layer.provideMerge(PersistenceExtensionsLayer),
+  Layer.provideMerge(DaemonExtensionsLayer),
+);
 ```
 
-Daemon-only handlers can only be dispatched when running with `DaemonLayer`. Type system enforces this at compile time.
+Daemon-only handlers can only be dispatched when running with `DaemonLayer`. Persistence-dependent handlers require `PersistenceExtensionsLayer`. Type system enforces both at compile time.
 
 For inline/Pick/function-typed fields: define explicit `Shape` interfaces first, then create Tags for those shapes.
 
@@ -2169,16 +2182,23 @@ git commit -m "refactor: migrate WebSocket handler to Effect Stream"
 - Create: `src/lib/frontend/transport/runtime.ts`
 - Test: manual — verify bundle size and first-load time
 
+**Step 0: Measure baseline bundle size**
+
+Run: `pnpm build:frontend && du -sh dist/`
+Record the total bundle size and main chunk sizes. Set a hard budget: **+50KB gzipped max** for the Effect chunk. If Effect exceeds this budget after Step 1, defer Layer 7 or scope to Schema-only (no Stream/ManagedRuntime on frontend).
+
 **Step 1: Configure Vite code splitting**
 
-In `vite.config.ts`, add manual chunks to isolate effect:
+In `vite.config.ts`, **merge** with the existing `output` config (which has custom `entryFileNames` for the service worker). Do NOT replace the whole `output` object:
 
 ```typescript
 build: {
   rollupOptions: {
     output: {
+      // KEEP existing entryFileNames for service worker
+      entryFileNames: (chunk) => chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js",
       manualChunks: {
-        effect: ["effect", "@effect/schema"],
+        effect: ["effect"],  // @effect/schema is merged into effect — no separate package
       },
     },
   },
@@ -2189,14 +2209,19 @@ build: {
 
 Create `src/lib/frontend/transport/runtime.ts`:
 
+The runtime is a long-lived singleton (app lifetime). Individual WebSocket connections are managed as fibers within the runtime. On reconnect, only the stream fiber is interrupted — the runtime and its service graph persist.
+
 ```typescript
-import { ManagedRuntime, Layer } from "effect";
+import { ManagedRuntime, Layer, Fiber, Effect } from "effect";
+import type { RuntimeFiber } from "effect/Fiber";
 
 // Lazy-loaded — not in critical path
 const TransportLayer = Layer.empty; // Will be populated in Task 7.2
 
 let runtime: ManagedRuntime.ManagedRuntime<never, never> | null = null;
+let activeStreamFiber: RuntimeFiber<void, unknown> | null = null;
 
+/** Get or create the long-lived runtime (app lifetime). */
 export async function getRuntime() {
   if (!runtime) {
     runtime = ManagedRuntime.make(TransportLayer);
@@ -2204,7 +2229,23 @@ export async function getRuntime() {
   return runtime;
 }
 
+/** Interrupt the active stream fiber (connection lifetime). Called on disconnect/reconnect. */
+export async function interruptStream() {
+  if (activeStreamFiber) {
+    const rt = await getRuntime();
+    await rt.runPromise(Fiber.interrupt(activeStreamFiber));
+    activeStreamFiber = null;
+  }
+}
+
+/** Set the active stream fiber (called after forking a new WS stream). */
+export function setActiveStreamFiber(fiber: RuntimeFiber<void, unknown>) {
+  activeStreamFiber = fiber;
+}
+
+/** Dispose the entire runtime (page unload only). */
 export async function disposeRuntime() {
+  await interruptStream();
   if (runtime) {
     await runtime.dispose();
     runtime = null;
@@ -2212,11 +2253,33 @@ export async function disposeRuntime() {
 }
 ```
 
-**Step 3: Build and verify bundle size**
+**Step 2a: Wire lifecycle hooks**
 
-Run: `pnpm build:frontend`
+In `src/lib/frontend/components/layout/ChatLayout.svelte`, add alongside existing `disconnect()`:
 
-Check output — effect chunk should be separate and lazy-loaded. First-load critical path should not include effect.
+```typescript
+import { interruptStream, disposeRuntime } from "../transport/runtime.js";
+
+// In $effect cleanup (component unmount / SPA navigation):
+// Interrupt stream fiber, keep runtime alive
+$effect(() => {
+  connect();
+  return () => {
+    interruptStream();
+    disconnect();
+  };
+});
+
+// Page unload: dispose entire runtime
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => disposeRuntime());
+}
+```
+
+**Step 3: Build and measure bundle size delta**
+
+Run: `pnpm build:frontend && du -sh dist/`
+Compare against baseline from Step 0. Effect chunk must be under +50KB gzipped. If exceeded, STOP and evaluate whether Layer 7 should be deferred or scoped to Schema-only.
 
 **Step 4: Verify first-load time**
 
@@ -2230,73 +2293,110 @@ git commit -m "feat: add Effect to frontend bundle with lazy code splitting"
 
 ---
 
-### Task 7.2: Migrate WebSocket transport to Effect
+### Task 7.2: Migrate WebSocket message handling to Effect Stream
+
+**Scope:** Replace ONLY the `ws.addEventListener("message", ...)` handler with an Effect Stream. Keep ALL existing connect/disconnect/reconnect logic, URL construction, state management, and lifecycle hooks in `ws.svelte.ts`.
 
 **Files:**
-- Modify: `src/lib/frontend/stores/ws.svelte.ts` (336 lines)
+- Modify: `src/lib/frontend/stores/ws.svelte.ts` (336 lines — surgical change, not rewrite)
 - Modify: `src/lib/frontend/transport/runtime.ts`
 - Test: manual — verify WebSocket connects and messages flow
 
-**Step 1: Create Effect-managed WebSocket connection**
+**Critical: DO NOT replace the following existing features** (lines from ws.svelte.ts):
+- Connect timeout with `CONNECT_TIMEOUT_MS` (line 55)
+- Self-healing status detection (lines 266-278)
+- Slug-based URL construction with session ID query param (lines 186-198)
+- `_currentSlug` tracking for auto-reconnect (line 106)
+- `wsState` reactive state updates (`status`, `statusText`, `attempts`, `relayStatus` — lines 70-79)
+- `flushOfflineQueue()` on open (line 226)
+- `phaseToIdle()` and `clearInstanceState()` on close (lines 247-249)
+- `wsDebugLog` tracing (throughout)
+- `onConnect` callback mechanism (lines 100-103)
+- Non-blocking `fetchRelayStatus()` (lines 113-134)
+- `scheduleReconnect()` with 1s base, 1.5x multiplier, 10s cap (lines 300-313)
 
-In `src/lib/frontend/transport/runtime.ts`, add:
+**Step 1: Create Effect message stream factory**
+
+In `src/lib/frontend/transport/runtime.ts`, add a stream factory that wraps an EXISTING WebSocket (not creating a new one — ws.svelte.ts manages the connection):
 
 ```typescript
-import { Effect, Stream, Schedule, Duration, Schema } from "effect";
-import { RelayMessageSchema } from "../../shared-types.js";
+import { Effect, Stream, Chunk, Option } from "effect";
+import type { RelayMessage } from "../../shared-types.js";
 
-export const makeWsTransport = (url: string) =>
-  Effect.acquireRelease(
-    Effect.sync(() => new WebSocket(url)),
-    (ws) => Effect.sync(() => ws.close()),
-  ).pipe(
-    Effect.flatMap((ws) =>
-      Stream.async<MessageEvent>((emit) => {
-        ws.onmessage = (evt) => emit.single(evt);
-        ws.onerror = () => emit.fail(new Error("WebSocket error"));
-        ws.onclose = () => emit.end();
-      }).pipe(
-        Stream.map((evt) => JSON.parse(evt.data)),
-        Stream.mapEffect((raw) => Schema.decodeUnknown(RelayMessageSchema)(raw)),
-      ),
-    ),
-    Effect.retry(
-      Schedule.exponential(Duration.seconds(1)).pipe(
-        Schedule.compose(Schedule.recurUpTo(Duration.seconds(10))),
-      ),
-    ),
-  );
+/**
+ * Create a Stream from an existing WebSocket's message events.
+ * Does NOT manage connection lifecycle — ws.svelte.ts owns that.
+ * Stream ends when WebSocket closes. Caller handles reconnect.
+ */
+export const wsMessageStream = (ws: WebSocket): Stream.Stream<RelayMessage, Error> =>
+  Stream.async<RelayMessage, Error>((emit) => {
+    const onMessage = (evt: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(evt.data) as RelayMessage;
+        emit(Effect.succeed(Chunk.of(parsed)));
+      } catch (e) {
+        // Bad JSON — skip message, don't kill stream
+        console.warn("WS parse error:", e);
+      }
+    };
+    const onClose = () => emit(Effect.fail(Option.none()));  // Signal stream end
+    const onError = (e: Event) => emit(Effect.fail(Option.some(new Error("WebSocket error"))));
+
+    ws.addEventListener("message", onMessage);
+    ws.addEventListener("close", onClose);
+    ws.addEventListener("error", onError);
+
+    // Cleanup when stream is interrupted
+    return Effect.sync(() => {
+      ws.removeEventListener("message", onMessage);
+      ws.removeEventListener("close", onClose);
+      ws.removeEventListener("error", onError);
+    });
+  });
 ```
 
-**Step 2: Bridge to Svelte stores**
+Note: uses `JSON.parse` + type assertion for now (fast path). Schema validation deferred — the design doc recommends "Critical path uses raw JSON.parse + type assertion. Schema validation takes over once loaded." Full Schema validation can be added later as an optional pipeline step.
 
-In `ws.svelte.ts`, replace manual WebSocket creation with:
+**Step 2: Bridge to existing ws.svelte.ts**
+
+In `ws.svelte.ts`, replace ONLY the `ws.addEventListener("message", ...)` handler inside the existing `connect()` function. Keep all other lifecycle logic:
 
 ```typescript
-import { getRuntime, makeWsTransport } from "../transport/runtime.js";
+import { getRuntime, setActiveStreamFiber, interruptStream, wsMessageStream } from "../transport/runtime.js";
+import { Effect, Stream } from "effect";
 
-// On connect:
+// Inside connect(), after WebSocket "open" event fires:
+// Replace: ws.addEventListener("message", (evt) => handleMessage(JSON.parse(evt.data)));
+// With:
 const runtime = await getRuntime();
-runtime.runPromise(
+const fiber = await runtime.runFork(
   Stream.runForEach(
-    makeWsTransport(wsUrl),
+    wsMessageStream(ws),
     (msg) => Effect.sync(() => handleMessage(msg)),
   ),
 );
+setActiveStreamFiber(fiber);
+
+// Inside disconnect() or reconnect, add:
+await interruptStream();  // Interrupts the message stream fiber
 ```
 
 **Step 3: Test manually**
 
 Run `pnpm dev:all`, open browser, verify:
-- WebSocket connects
-- Messages flow (chat works)
-- Reconnection works on server restart
-- First load under 1.5s
+- WebSocket connects (existing logic)
+- Messages flow (chat works — now via Effect Stream)
+- Reconnection works on server restart (existing scheduleReconnect logic)
+- All wsState reactive updates still work (status, attempts, etc.)
+- Connect timeout still works
+- Self-healing detection still works
+- Offline queue flushes on reconnect
+- First load under 1.5s (Effect chunk lazy-loaded)
 
 **Step 4: Commit**
 
 ```bash
-git commit -m "refactor: migrate WebSocket transport to Effect-managed connection"
+git commit -m "refactor: migrate WebSocket message handling to Effect Stream"
 ```
 
 ---
@@ -2307,13 +2407,17 @@ git commit -m "refactor: migrate WebSocket transport to Effect-managed connectio
 - Modify: `src/lib/frontend/stores/ws-send.svelte.ts`
 - Create: `src/lib/frontend/transport/schemas.ts` (outbound message schemas)
 
-**Step 1: Define outbound message schemas**
+**Scope:** `PayloadMap` in `src/lib/handlers/payloads.ts` has 40+ message types. Defining Schema for ALL at once is a large task. Use gradual migration: add a validated `wsSendTyped` alongside existing `wsSend`, migrate callers incrementally.
+
+**Step 1: Define outbound message schemas (start with most-used types)**
 
 Create `src/lib/frontend/transport/schemas.ts`:
 
 ```typescript
 import { Schema } from "effect";
 
+// Start with the most-used outbound message types.
+// Add more as callers migrate from wsSend → wsSendTyped.
 const ChatMessage = Schema.Struct({
   type: Schema.Literal("message"),
   text: Schema.String,
@@ -2325,42 +2429,183 @@ const CancelMessage = Schema.Struct({
   sessionId: Schema.String,
 });
 
-// ... all outbound message types
+const ViewSession = Schema.Struct({
+  type: Schema.Literal("view_session"),
+  sessionId: Schema.String,
+});
+
+const NewSession = Schema.Struct({
+  type: Schema.Literal("new_session"),
+  requestId: Schema.String,
+});
+
+// Add remaining types as callers migrate. Full list: see PayloadMap in
+// src/lib/handlers/payloads.ts (40+ types). Each needs a Schema.Struct.
 
 export const OutboundMessage = Schema.Union(
   ChatMessage,
   CancelMessage,
-  // ... all variants
+  ViewSession,
+  NewSession,
+  // ... add more as callers migrate
 );
 
 export type OutboundMessage = typeof OutboundMessage.Type;
 ```
 
-**Step 2: Update wsSend to validate outbound messages**
+**Step 2: Add validated send function alongside existing**
 
-In `ws-send.svelte.ts`:
+In `ws-send.svelte.ts` — keep existing `wsSend` unchanged, add `wsSendTyped`:
 
 ```typescript
-import { Schema } from "effect";
+import { Schema, Either } from "effect";
 import { OutboundMessage } from "../transport/schemas.js";
 
-export function wsSend(msg: OutboundMessage) {
-  // Validate at send boundary
-  const encoded = Schema.encodeSync(OutboundMessage)(msg);
-  rawSend(JSON.stringify(encoded));
+// Existing wsSend stays — callers migrate incrementally
+export function wsSend(data: Record<string, unknown>) {
+  rawSend(data);  // rawSend handles JSON.stringify internally
+}
+
+// New: Schema-validated send. Callers opt in as schemas are added.
+export function wsSendTyped(msg: OutboundMessage) {
+  const result = Schema.encodeEither(OutboundMessage)(msg);
+  if (Either.isLeft(result)) {
+    // Log encode error but don't throw — existing wsSend never throws
+    console.error("OutboundMessage encode error:", result.left);
+    // Fall back to raw send so user's message isn't silently lost
+    rawSend(msg as Record<string, unknown>);
+    return;
+  }
+  rawSend(result.right);  // rawSend handles JSON.stringify — do NOT double-stringify
 }
 ```
 
 **Step 3: Run full build and test**
 
 Run: `pnpm build && pnpm test:unit`
-Expected: All pass.
+Expected: All pass. Existing callers still use `wsSend` — no breakage.
 
 **Step 4: Commit**
 
 ```bash
-git commit -m "refactor: migrate outbound WebSocket messages to Schema-encoded"
+git commit -m "refactor: add Schema-validated outbound message sending (gradual migration)"
 ```
+
+---
+
+## Existing Test Updates
+
+Each layer task MUST update the existing tests listed below. These are NOT covered by the new test files each task creates — they are existing tests that will break due to API changes.
+
+### Layer 1 test updates
+
+**Task 1.2 (branded types):** Update `as RequestId` / `as PermissionId` casts in these 8 test files to `as typeof RequestId.Type`:
+- `test/unit/stores/permissions-store.test.ts` — `pid()` helper (line 36)
+- `test/unit/session/session-switch.test.ts` — `as PermissionId` casts
+- `test/unit/relay/sse-wiring.test.ts` — `pid()` helper (line 16)
+- `test/unit/regression-question-session-scoping.test.ts` — branded type assertions
+- `test/unit/handlers/request-id-contract.test.ts` — `as RequestId` (line 31)
+- `test/unit/handlers/message-handlers.test.ts` — `pid()` helper (line 44)
+- `test/unit/bridges/client-init.test.ts` — `pid()` helper (line 12)
+- `test/unit/stores/ws-send-typed.test.ts` — branded type assertions
+
+Run: `grep -rn "as RequestId\|as PermissionId\|as EventId\|as CommandId" test/` to find exact sites.
+
+**Task 1.3 (error hierarchy):** Update error constructors and assertions:
+- `test/unit/errors.pbt.test.ts` — **CRITICAL:** `new RelayError(message, {...})` → props object, `instanceof RelayError` → `_tag` check, `.code` → `._tag`
+- `test/unit/prompt-error-diagnostics.test.ts` — verify constructor sig compat (may already use props)
+
+**Task 1.3 (wire format):** Update `.code ===` checks:
+- `test/unit/provider/relay-event-sink.test.ts` — `.code` checks (line 114)
+- `test/unit/bridges/client-init.test.ts` — `.code === "INIT_FAILED"` format change
+
+### Layer 2 test updates
+
+**Task 2.3 (SQLite transactions):** Verify existing tests still pass:
+- `test/unit/persistence/projection-runner.test.ts` — uses nested transactions
+- `test/unit/persistence/projectors/projector.test.ts` — PersistenceError assertions
+
+### Layer 3 test updates
+
+**Task 3.1 (PromptQueue → Effect Queue):**
+- `test/unit/provider/claude/prompt-queue.test.ts` — entire test rewrite (tests deleted API)
+
+**Task 3.2 (ClientMessageQueue → Semaphore):**
+- `test/unit/server/client-message-queue.test.ts` — entire test rewrite
+
+**Task 3.3 (EventEmitter → PubSub):** Update `.on()` / `.emit()` patterns in ~12 test files:
+- `test/unit/daemon/tracked-service.test.ts` — entire test rewrite (tests TrackedService API)
+- `test/unit/relay/message-poller.test.ts`
+- `test/unit/session/session-status-poller.test.ts`
+- `test/unit/session/session-status-poller-reconciliation.test.ts`
+- `test/unit/session/session-status-poller-augment.test.ts`
+- `test/unit/server/ws-handler.pbt.test.ts`
+- `test/unit/server/ws-handler-sessions.test.ts`
+- `test/unit/relay/sse-stream.test.ts`
+- `test/unit/daemon/daemon.test.ts`
+- `test/unit/instance/instance-manager.test.ts`
+- `test/unit/instance/instance-state-machine.test.ts`
+- `test/integration/flows/daemon-lifecycle.integration.ts`
+
+### Layer 5 test updates
+
+**Tasks 5.1+5.2 (handler signature):** Update `(deps, clientId, payload)` calls in ~18 test files:
+- `test/unit/handlers/message-handlers.test.ts`
+- `test/unit/handlers/handlers-session.test.ts`
+- `test/unit/handlers/handlers-model.test.ts`
+- `test/unit/handlers/handlers-instance.test.ts`
+- `test/unit/handlers/handlers-file-tree.test.ts`
+- `test/unit/handlers/handlers-reload.test.ts`
+- `test/unit/handlers/proxy-detect.test.ts`
+- `test/unit/handlers/get-tool-content-handler.test.ts`
+- `test/unit/handlers/list-directories.test.ts`
+- `test/unit/handlers/scan-now.test.ts`
+- `test/unit/handlers/resolve-session.test.ts`
+- `test/unit/handlers/instance-rename.test.ts`
+- `test/unit/handlers/prompt-claude-persistence.test.ts`
+- `test/unit/handlers/project-management.test.ts`
+- `test/unit/handlers/regression-question-on-session-view.test.ts`
+- `test/unit/regression-question-session-scoping.test.ts`
+- `test/unit/regression-claude-history-wiring.test.ts`
+- `test/unit/bridges/question-answer-flow.test.ts`
+
+**Handler test migration pattern:** Tests need a test Layer providing mock services, then `Effect.runPromise` to run the handler:
+```typescript
+// Old: await handleForkSession(deps, "client-1", { sessionId: "s1" });
+// New:
+const TestLayer = Layer.mergeAll(MockSessionManagerLive, MockWsHandlerLive, /* ... */);
+await Effect.runPromise(
+  handleForkSession("client-1", { sessionId: "s1" }).pipe(Effect.provide(TestLayer)),
+);
+```
+
+### Layer 6 test updates
+
+**Task 6.2 (HTTP router):**
+- `test/unit/server/http-router.test.ts` — router API changes
+- `test/unit/server/push-routes.test.ts` — error format changes
+
+**Task 6.4 (WebSocket handler):**
+- `test/unit/server/ws-router.pbt.test.ts` — EventEmitter patterns
+
+### Layer 5+6 integration test updates
+
+- `test/unit/relay/relay-stack-dual-write-wiring.test.ts`
+- `test/unit/relay/per-tab-routing-e2e.test.ts`
+- `test/unit/provider/orchestration-engine.test.ts`
+- `test/unit/provider/orchestration-wiring.test.ts`
+- `test/integration/flows/relay-lifecycle.integration.ts`
+
+### Summary
+
+| Layer | Existing tests to update | Primary change |
+|-------|-------------------------|----------------|
+| L1 | 10 files | Branded type casts, error constructors, wire format codes |
+| L2 | 2 files | Verify nested transactions still work |
+| L3 | 14 files | EventEmitter → PubSub, Queue/Semaphore API changes |
+| L5 | 18 files | Handler signature `(deps, clientId, payload)` → Effect |
+| L6 | 5 files | Router API, WebSocket patterns |
+| **Total** | **~49 existing test files** | |
 
 ---
 
