@@ -1,19 +1,23 @@
 // src/lib/persistence/events.ts
 import { randomUUID } from "node:crypto";
+import { Schema } from "effect";
 
 // ─── Branded ID Types ───────────────────────────────────────────────────────
 
-export type EventId = string & { readonly __brand: "EventId" };
-export type CommandId = string & { readonly __brand: "CommandId" };
+export const EventId = Schema.String.pipe(Schema.brand("EventId"));
+export type EventId = typeof EventId.Type;
+
+export const CommandId = Schema.String.pipe(Schema.brand("CommandId"));
+export type CommandId = typeof CommandId.Type;
 
 // ─── ID Generators ──────────────────────────────────────────────────────────
 
 export function createEventId(): EventId {
-	return `evt_${randomUUID()}` as EventId;
+	return Schema.decodeSync(EventId)(`evt_${randomUUID()}`);
 }
 
 export function createCommandId(): CommandId {
-	return `cmd_${randomUUID()}` as CommandId;
+	return Schema.decodeSync(CommandId)(`cmd_${randomUUID()}`);
 }
 
 // ─── Constrained String Unions ──────────────────────────────────────────────

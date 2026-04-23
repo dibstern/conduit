@@ -7,19 +7,26 @@
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
 export type { PartType, ToolStatus };
 
+import { Schema } from "effect";
+
+// ─── Branded identifiers ────────────────────────────────────────────────────
+
 /**
  * Branded type for request/response correlation IDs.
  * Prevents accidentally passing a session ID where a correlation ID is expected.
- * Erased at runtime — zero cost.
+ * Schema brand — decoded at construction sites, zero-cost cast elsewhere.
  */
-export type RequestId = string & { readonly __brand: "RequestId" };
+export const RequestId = Schema.String.pipe(Schema.brand("RequestId"));
+export type RequestId = typeof RequestId.Type;
 
 /**
  * Branded type for OpenCode permission entity IDs (e.g., "per_cd6d6dc8...").
  * Prevents accidentally passing a session ID or correlation ID where a
- * permission ID is expected. Erased at runtime — zero cost.
+ * permission ID is expected. Schema brand — decoded at construction sites,
+ * zero-cost cast elsewhere.
  */
-export type PermissionId = string & { readonly __brand: "PermissionId" };
+export const PermissionId = Schema.String.pipe(Schema.brand("PermissionId"));
+export type PermissionId = typeof PermissionId.Type;
 
 // ─── Base16 Theme ───────────────────────────────────────────────────────────
 
