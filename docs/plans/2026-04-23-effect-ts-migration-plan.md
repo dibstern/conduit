@@ -542,7 +542,14 @@ Strategy:
 
 **Scope:** RelayMessage has **51 variants** (not "20+" as previously estimated), spanning lines 269-515 of `shared-types.ts`. Define schemas for ALL 51 variants following the existing type definitions.
 
-**Index signatures:** Several types use `[key: string]: unknown` (e.g., `HistoryMessagePart` at line 217, `HistoryMessage` at line 239). **Decision: strip unknown keys and explicitly type all needed fields.** Add `sessionID` (actively used in `message-poller.ts:290`) and other OpenCode REST API fields (`parentID`, `modelID`, `providerID`, `error`, `mode`, `agent`, `path`, `summary`, `finish`) as explicit optional Schema fields on `HistoryMessage`. Remove `[key: string]: unknown` index signatures — explicit types are more LLM-friendly.
+**Index signatures removed — derive schemas from SQLite, not from SDK REST types.** `HistoryMessage` and `HistoryMessagePart` currently have `[key: string]: unknown` index signatures that carry phantom fields from the OpenCode REST API spread (`parentID`, `modelID`, `providerID`, `mode`, etc.) — none of these are ever accessed on HistoryMessage. Remove index signatures entirely.
+
+**Schema derivation approach (do NOT hand-list fields):**
+1. **Derive `PartType` and `ToolStatus` schemas from SDK types** — already done in `sdk-types.ts:103-122` as `type PartType = _Part["type"]`. Create Schema equivalents from these derived types.
+2. **Build `HistoryMessagePartSchema` matching what `session-history-adapter.ts:26-80` produces from SQLite rows** — the SQLite `message_parts` table is the contract (only `text`, `thinking`, `tool` types). Schema fields should match `partRowToHistoryPart()` output.
+3. **Build `HistoryMessageSchema` matching what `messageRowsToHistory()` returns** — fields: `id`, `role`, `parts`, `time` (created/completed), `cost`, `tokens`.
+4. **Add transport extensions as explicit optional fields:** `renderedHtml` (on parts, added by markdown-renderer), `sessionID` (actively used in `message-poller.ts:290`).
+5. **No index signatures** — SQLite schema defines the contract. OpenCode REST API fields that pass through unused are stripped.
 
 **Derived types:** The following derived types (lines 521-591) must also be migrated or updated to work with the Schema-based union:
 - `PerSessionEvent` — filtered subset of RelayMessage
