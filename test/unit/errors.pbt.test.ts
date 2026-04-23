@@ -119,7 +119,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 			fc.assert(
 				fc.property(edgeCaseString, (message) => {
 					for (const { Class } of errorSubclasses) {
-						const err = new Class(message);
+						const err = new Class({ message });
 						expect(err).toBeInstanceOf(Error);
 						expect(err).toBeInstanceOf(RelayError);
 						expect(err).toBeInstanceOf(Class);
@@ -136,7 +136,8 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					fc.string({ minLength: 1, maxLength: 50 }),
 					fc.integer({ min: 200, max: 599 }),
 					(message, endpoint, responseStatus) => {
-						const err = new OpenCodeApiError(message, {
+						const err = new OpenCodeApiError({
+							message,
 							endpoint,
 							responseStatus,
 						});
@@ -162,7 +163,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					expect(json.error).toHaveProperty("message");
 					expect(typeof json.error.code).toBe("string");
 					expect(typeof json.error.message).toBe("string");
-					expect(json.error.code).toBe(err.code);
+					expect(json.error.code).toBe(err._tag);
 					expect(json.error.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -175,7 +176,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					const json = err.toJSON();
 					const serialized = JSON.stringify(json);
 					const parsed = JSON.parse(serialized);
-					expect(parsed.error.code).toBe(err.code);
+					expect(parsed.error.code).toBe(err._tag);
 					expect(parsed.error.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -191,7 +192,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 				fc.property(arbRelayError, (err) => {
 					const ws = err.toWebSocket();
 					expect(ws.type).toBe("error");
-					expect(ws.code).toBe(err.code);
+					expect(ws.code).toBe(err._tag);
 					expect(ws.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -321,7 +322,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 			fc.assert(
 				fc.property(edgeCaseString, (message) => {
 					for (const { Class, expectedCode } of errorSubclasses) {
-						const err = new Class(message);
+						const err = new Class({ message });
 						expect(err.code).toBe(expectedCode);
 						expect(err.code.length).toBeGreaterThan(0);
 					}

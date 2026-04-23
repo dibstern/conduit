@@ -346,15 +346,15 @@ export function validateEventPayload(event: CanonicalEvent): void {
 	const data = event.data as unknown as Record<string, unknown>;
 	const missing = required.filter((field) => data[field] === undefined);
 	if (missing.length > 0) {
-		throw new PersistenceError(
-			"SCHEMA_VALIDATION_FAILED",
-			`Event ${event.type} missing required fields: ${missing.join(", ")}`,
-			{
+		throw new PersistenceError({
+			code: "SCHEMA_VALIDATION_FAILED",
+			message: `Event ${event.type} missing required fields: ${missing.join(", ")}`,
+			context: {
 				eventId: event.eventId,
 				sessionId: event.sessionId,
 				type: event.type,
 				missing,
 			},
-		);
+		});
 	}
 }

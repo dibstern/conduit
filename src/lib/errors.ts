@@ -1,15 +1,10 @@
 // ─── Error Handling Foundation (Ticket 0.5, 6.2) ─────────────────────────────
 
+import { formatErrorDetail, redactSensitive } from "./errors-utils.js";
 import type { RelayMessage } from "./shared-types.js";
 
-const SENSITIVE_KEYS = new Set([
-	"pin",
-	"password",
-	"token",
-	"secret",
-	"authorization",
-	"cookie",
-]);
+// Re-export utility functions for backward compatibility
+export { formatErrorDetail, redactSensitive } from "./errors-utils.js";
 
 // ─── Error Codes (AC3) ──────────────────────────────────────────────────────
 // Standard error codes for common failure scenarios. Extensible — add new
@@ -56,6 +51,9 @@ export type ErrorCode =
 
 /** Base error class for all relay errors */
 export class RelayError extends Error {
+	/** Tagged discriminant for Effect union support.
+	 *  Base class: equals the ErrorCode.  Subclasses: equals the class name. */
+	readonly _tag: string;
 	readonly code: ErrorCode;
 	readonly statusCode: number;
 	readonly userVisible: boolean;
@@ -73,6 +71,7 @@ export class RelayError extends Error {
 	) {
 		super(message, { cause: options.cause });
 		this.name = "RelayError";
+		this._tag = options.code;
 		this.code = options.code;
 		this.statusCode = options.statusCode ?? 500;
 		this.userVisible = options.userVisible ?? true;
@@ -85,7 +84,7 @@ export class RelayError extends Error {
 			Object.keys(this.context).length > 0 ? this.context : undefined;
 		return {
 			error: {
-				code: this.code,
+				code: this._tag,
 				message: this.message,
 				...(details ? { details } : {}),
 			},
@@ -104,7 +103,7 @@ export class RelayError extends Error {
 			Object.keys(this.context).length > 0 ? this.context : undefined;
 		return {
 			type: "error",
-			code: this.code,
+			code: this._tag,
 			message: this.message,
 			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
 			...(details ? { details } : {}),
@@ -125,7 +124,7 @@ export class RelayError extends Error {
 			Object.keys(this.context).length > 0 ? this.context : undefined;
 		return {
 			type: "system_error",
-			code: this.code,
+			code: this._tag,
 			message: this.message,
 			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
 			...(details ? { details } : {}),
@@ -135,7 +134,7 @@ export class RelayError extends Error {
 	/** Log-safe representation (redacts sensitive data) (AC6) */
 	toLog(): Record<string, unknown> {
 		return {
-			code: this.code,
+			code: this._tag,
 			message: this.message,
 			context: redactSensitive(this.context),
 			...(this.cause instanceof Error
@@ -165,178 +164,174 @@ export class RelayError extends Error {
 }
 
 export class OpenCodeConnectionError extends RelayError {
-	constructor(
-		message: string,
-		options?: { cause?: Error; context?: Record<string, unknown> },
-	) {
-		super(message, {
+	declare readonly _tag: "OpenCodeConnectionError";
+
+	constructor(props: {
+		message: string;
+		cause?: Error;
+		context?: Record<string, unknown>;
+		userVisible?: boolean;
+	}) {
+		super(props.message, {
 			code: "OPENCODE_UNREACHABLE",
 			statusCode: 502,
-			...(options?.cause != null && { cause: options.cause }),
-			context: options?.context ?? {},
+			...(props.userVisible != null && { userVisible: props.userVisible }),
+			...(props.cause != null && { cause: props.cause }),
+			context: props.context ?? {},
 		});
 		this.name = "OpenCodeConnectionError";
+		(this as { _tag: string })._tag = "OpenCodeConnectionError";
 	}
 }
 
 export class OpenCodeApiError extends RelayError {
+	declare readonly _tag: "OpenCodeApiError";
 	readonly endpoint: string;
 	readonly responseStatus: number;
 	readonly responseBody: unknown;
 
-	constructor(
-		message: string,
-		options: {
-			endpoint: string;
-			responseStatus: number;
-			responseBody?: unknown;
-			cause?: Error;
-		},
-	) {
+	constructor(props: {
+		message: string;
+		endpoint: string;
+		responseStatus: number;
+		responseBody?: unknown;
+		cause?: Error;
+		userVisible?: boolean;
+	}) {
 		// For 4xx client errors, include the response body in the message
 		// so callers see actionable details (e.g. Zod validation errors)
-		let enrichedMessage = message;
+		let enrichedMessage = props.message;
 		if (
-			options.responseBody &&
-			options.responseStatus >= 400 &&
-			options.responseStatus < 500
+			props.responseBody &&
+			props.responseStatus >= 400 &&
+			props.responseStatus < 500
 		) {
 			const bodyStr =
-				typeof options.responseBody === "string"
-					? options.responseBody
-					: JSON.stringify(options.responseBody);
+				typeof props.responseBody === "string"
+					? props.responseBody
+					: JSON.stringify(props.responseBody);
 			if (bodyStr.length <= 500) {
-				enrichedMessage = `${message}: ${bodyStr}`;
+				enrichedMessage = `${props.message}: ${bodyStr}`;
 			}
 		}
 
 		super(enrichedMessage, {
 			code: "OPENCODE_API_ERROR",
-			statusCode: options.responseStatus >= 500 ? 502 : options.responseStatus,
+			statusCode: props.responseStatus >= 500 ? 502 : props.responseStatus,
+			...(props.userVisible != null && { userVisible: props.userVisible }),
 			context: {
-				endpoint: options.endpoint,
-				responseStatus: options.responseStatus,
-				responseBody: options.responseBody,
+				endpoint: props.endpoint,
+				responseStatus: props.responseStatus,
+				responseBody: props.responseBody,
 			},
-			...(options.cause != null && { cause: options.cause }),
+			...(props.cause != null && { cause: props.cause }),
 		});
 		this.name = "OpenCodeApiError";
-		this.endpoint = options.endpoint;
-		this.responseStatus = options.responseStatus;
-		this.responseBody = options.responseBody;
+		(this as { _tag: string })._tag = "OpenCodeApiError";
+		this.endpoint = props.endpoint;
+		this.responseStatus = props.responseStatus;
+		this.responseBody = props.responseBody;
 	}
 }
 
 export class SSEConnectionError extends RelayError {
-	constructor(
-		message: string,
-		options?: { cause?: Error; context?: Record<string, unknown> },
-	) {
-		super(message, {
+	declare readonly _tag: "SSEConnectionError";
+
+	constructor(props: {
+		message: string;
+		cause?: Error;
+		context?: Record<string, unknown>;
+		userVisible?: boolean;
+	}) {
+		super(props.message, {
 			code: "SSE_DISCONNECTED",
 			statusCode: 502,
-			...(options?.cause != null && { cause: options.cause }),
-			context: options?.context ?? {},
+			...(props.userVisible != null && { userVisible: props.userVisible }),
+			...(props.cause != null && { cause: props.cause }),
+			context: props.context ?? {},
 		});
 		this.name = "SSEConnectionError";
+		(this as { _tag: string })._tag = "SSEConnectionError";
 	}
 }
 
 export class WebSocketError extends RelayError {
-	constructor(
-		message: string,
-		options?: { cause?: Error; context?: Record<string, unknown> },
-	) {
-		super(message, {
+	declare readonly _tag: "WebSocketError";
+
+	constructor(props: {
+		message: string;
+		cause?: Error;
+		context?: Record<string, unknown>;
+		userVisible?: boolean;
+	}) {
+		super(props.message, {
 			code: "WEBSOCKET_ERROR",
 			statusCode: 400,
-			...(options?.cause != null && { cause: options.cause }),
-			context: options?.context ?? {},
+			...(props.userVisible != null && { userVisible: props.userVisible }),
+			...(props.cause != null && { cause: props.cause }),
+			context: props.context ?? {},
 		});
 		this.name = "WebSocketError";
+		(this as { _tag: string })._tag = "WebSocketError";
 	}
 }
 
 export class AuthenticationError extends RelayError {
-	constructor(
-		message: string,
-		options?: { cause?: Error; context?: Record<string, unknown> },
-	) {
-		super(message, {
+	declare readonly _tag: "AuthenticationError";
+
+	constructor(props: {
+		message: string;
+		cause?: Error;
+		context?: Record<string, unknown>;
+		userVisible?: boolean;
+	}) {
+		super(props.message, {
 			code: "AUTH_FAILED",
 			statusCode: 401,
-			...(options?.cause != null && { cause: options.cause }),
-			context: options?.context ?? {},
+			...(props.userVisible != null && { userVisible: props.userVisible }),
+			...(props.cause != null && { cause: props.cause }),
+			context: props.context ?? {},
 		});
 		this.name = "AuthenticationError";
+		(this as { _tag: string })._tag = "AuthenticationError";
 	}
 }
 
 export class ConfigurationError extends RelayError {
-	constructor(
-		message: string,
-		options?: { cause?: Error; context?: Record<string, unknown> },
-	) {
-		super(message, {
+	declare readonly _tag: "ConfigurationError";
+
+	constructor(props: {
+		message: string;
+		cause?: Error;
+		context?: Record<string, unknown>;
+		userVisible?: boolean;
+	}) {
+		super(props.message, {
 			code: "CONFIG_INVALID",
 			statusCode: 500,
-			...(options?.cause != null && { cause: options.cause }),
-			context: options?.context ?? {},
+			...(props.userVisible != null && { userVisible: props.userVisible }),
+			...(props.cause != null && { cause: props.cause }),
+			context: props.context ?? {},
 		});
 		this.name = "ConfigurationError";
+		(this as { _tag: string })._tag = "ConfigurationError";
 	}
 }
 
 /** Wrap a low-level error in a RelayError subclass, preserving the cause chain */
 export function wrapError(
 	error: unknown,
-	ErrorClass: new (
-		message: string,
-		options?: { cause?: Error; context?: Record<string, unknown> },
-	) => RelayError,
+	ErrorClass: new (props: {
+		message: string;
+		cause?: Error;
+		context?: Record<string, unknown>;
+	}) => RelayError,
 	context?: Record<string, unknown>,
 ): RelayError {
 	const cause = error instanceof Error ? error : new Error(String(error));
-	return new ErrorClass(cause.message, {
+	return new ErrorClass({
+		message: cause.message,
 		cause,
 		...(context != null && { context }),
 	});
-}
-
-/** Redact sensitive values from a context object */
-export function redactSensitive(
-	obj: Record<string, unknown>,
-): Record<string, unknown> {
-	const result: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(obj)) {
-		if (SENSITIVE_KEYS.has(key.toLowerCase())) {
-			result[key] = "[REDACTED]";
-		} else if (
-			value !== null &&
-			typeof value === "object" &&
-			!Array.isArray(value)
-		) {
-			result[key] = redactSensitive(value as Record<string, unknown>);
-		} else {
-			result[key] = value;
-		}
-	}
-	return result;
-}
-
-/**
- * Extract a log-safe error detail string from any caught value.
- * For OpenCodeApiError, includes the response body for diagnostics.
- */
-export function formatErrorDetail(err: unknown): string {
-	if (err instanceof OpenCodeApiError && err.responseBody) {
-		const body =
-			typeof err.responseBody === "string"
-				? err.responseBody
-				: JSON.stringify(err.responseBody);
-		return `${err.message} — ${body}`;
-	}
-	if (err instanceof Error) return err.message;
-	if (typeof err === "string") return err;
-	return "Unknown error";
 }

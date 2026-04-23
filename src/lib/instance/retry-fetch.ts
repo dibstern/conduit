@@ -62,10 +62,10 @@ export function createRetryFetch(
 				lastError = err instanceof Error ? err : new Error(String(err));
 
 				if (lastError.name === "AbortError") {
-					throw new OpenCodeConnectionError(
-						`Request timed out after ${timeout}ms`,
-						{ cause: lastError },
-					);
+					throw new OpenCodeConnectionError({
+						message: `Request timed out after ${timeout}ms`,
+						cause: lastError,
+					});
 				}
 
 				if (attempt < retries) {
@@ -77,8 +77,8 @@ export function createRetryFetch(
 		if (lastError) throw lastError;
 		if (lastResponse) return lastResponse;
 
-		throw new OpenCodeConnectionError(
-			"Unexpected: no response or error after retries",
-		);
+		throw new OpenCodeConnectionError({
+			message: "Unexpected: no response or error after retries",
+		});
 	};
 }

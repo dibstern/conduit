@@ -65,15 +65,15 @@ export class EventStore {
 
 		const row = rows[0];
 		if (!row) {
-			throw new PersistenceError(
-				"APPEND_FAILED",
-				"INSERT RETURNING produced no rows",
-				{
+			throw new PersistenceError({
+				code: "APPEND_FAILED",
+				message: "INSERT RETURNING produced no rows",
+				context: {
 					eventId: event.eventId,
 					sessionId: event.sessionId,
 					type: event.type,
 				},
-			);
+			});
 		}
 
 		const stored = this.rowToStoredEvent(row);
@@ -150,16 +150,16 @@ export class EventStore {
 
 	private rowToStoredEvent(row: EventRow): StoredEvent {
 		if (!CANONICAL_EVENT_TYPES.includes(row.type as CanonicalEventType)) {
-			throw new PersistenceError(
-				"UNKNOWN_EVENT_TYPE",
-				`Unknown event type in database: ${row.type}`,
-				{
+			throw new PersistenceError({
+				code: "UNKNOWN_EVENT_TYPE",
+				message: `Unknown event type in database: ${row.type}`,
+				context: {
 					sequence: row.sequence,
 					eventId: row.event_id,
 					sessionId: row.session_id,
 					type: row.type,
 				},
-			);
+			});
 		}
 
 		let data: unknown;
@@ -167,10 +167,10 @@ export class EventStore {
 		try {
 			data = JSON.parse(row.data);
 		} catch (err) {
-			throw new PersistenceError(
-				"DESERIALIZATION_FAILED",
-				"Failed to parse event data JSON",
-				{
+			throw new PersistenceError({
+				code: "DESERIALIZATION_FAILED",
+				message: "Failed to parse event data JSON",
+				context: {
 					sequence: row.sequence,
 					eventId: row.event_id,
 					sessionId: row.session_id,
@@ -178,21 +178,21 @@ export class EventStore {
 					rawData: row.data.slice(0, 200),
 					parseError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 		try {
 			metadata = JSON.parse(row.metadata);
 		} catch (err) {
-			throw new PersistenceError(
-				"DESERIALIZATION_FAILED",
-				"Failed to parse event metadata JSON",
-				{
+			throw new PersistenceError({
+				code: "DESERIALIZATION_FAILED",
+				message: "Failed to parse event metadata JSON",
+				context: {
 					sequence: row.sequence,
 					eventId: row.event_id,
 					rawMetadata: row.metadata.slice(0, 200),
 					parseError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 
 		return {

@@ -56,15 +56,15 @@ export class CommandReceiptRepository {
 
 	private rowToReceipt(row: ReceiptRow): CommandReceipt {
 		if (row.status !== "accepted" && row.status !== "rejected") {
-			throw new PersistenceError(
-				"INVALID_RECEIPT_STATUS",
-				`Unknown receipt status in database: ${row.status}`,
-				{
+			throw new PersistenceError({
+				code: "INVALID_RECEIPT_STATUS",
+				message: `Unknown receipt status in database: ${row.status}`,
+				context: {
 					commandId: row.command_id,
 					sessionId: row.session_id,
 					status: row.status,
 				},
-			);
+			});
 		}
 		return {
 			commandId: row.command_id,
