@@ -2359,22 +2359,21 @@ export async function disposeRuntime() {
 
 **Step 2a: Wire lifecycle hooks**
 
-In `src/lib/frontend/components/layout/ChatLayout.svelte`, add alongside existing `disconnect()`:
+In `src/lib/frontend/components/layout/ChatLayout.svelte`, integrate into the EXISTING `$effect` block (lines ~303-359) — do NOT create a second `$effect` that calls `connect()` (would cause double connections):
 
 ```typescript
 import { interruptStream, disposeRuntime } from "../transport/runtime.js";
 
-// In $effect cleanup (component unmount / SPA navigation):
-// Interrupt stream fiber, keep runtime alive
+// MODIFY the existing $effect — add interruptStream() to its cleanup:
 $effect(() => {
-  connect();
+  connect(slug);  // existing
   return () => {
-    interruptStream();
-    disconnect();
+    interruptStream();  // NEW: interrupt stream fiber before disconnect
+    disconnect();       // existing
   };
 });
 
-// Page unload: dispose entire runtime
+// ADD page unload handler (separate from $effect — runs on tab close):
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", () => disposeRuntime());
 }
@@ -2473,7 +2472,7 @@ import { Effect, Stream } from "effect";
 // Replace: ws.addEventListener("message", (evt) => handleMessage(JSON.parse(evt.data)));
 // With:
 const runtime = await getRuntime();
-const fiber = await runtime.runFork(
+const fiber = runtime.runFork(  // runFork is synchronous — no await
   Stream.runForEach(
     wsMessageStream(ws),
     (msg) => Effect.sync(() => handleMessage(msg)),
