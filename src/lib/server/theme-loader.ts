@@ -1,11 +1,75 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Schema } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import type { Base16Theme } from "../shared-types.js";
 import { BASE16_KEYS } from "../shared-types.js";
 
 export type { Base16Theme };
+
+// ─── Schema-based theme validation ─────────────────────────────────────────
+
+/** 6-character hex color string (no # prefix). */
+const HexColor = Schema.String.pipe(Schema.pattern(/^[0-9a-fA-F]{6}$/));
+
+/** Compute variant from base00 luminance when absent. */
+function computeVariant(base00: string): "dark" | "light" {
+	const r = parseInt(base00.substring(0, 2), 16);
+	const g = parseInt(base00.substring(2, 4), 16);
+	const b = parseInt(base00.substring(4, 6), 16);
+	const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+	return lum > 0.5 ? "light" : "dark";
+}
+
+/**
+ * Raw schema before variant auto-detection — variant is optional here.
+ * Used as the "from" side of the transform.
+ */
+const Base16ThemeRaw = Schema.Struct({
+	name: Schema.NonEmptyString,
+	author: Schema.optional(Schema.String),
+	variant: Schema.optional(Schema.Literal("dark", "light")),
+	overrides: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	...(Object.fromEntries(BASE16_KEYS.map((key) => [key, HexColor])) as {
+		[K in (typeof BASE16_KEYS)[number]]: typeof HexColor;
+	}),
+});
+
+/**
+ * Final schema with required variant — the "to" side of the transform.
+ * Identical to Base16ThemeRaw but variant is always present.
+ */
+const Base16ThemeFinal = Schema.Struct({
+	name: Schema.NonEmptyString,
+	author: Schema.optional(Schema.String),
+	variant: Schema.Literal("dark", "light"),
+	overrides: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	...(Object.fromEntries(BASE16_KEYS.map((key) => [key, HexColor])) as {
+		[K in (typeof BASE16_KEYS)[number]]: typeof HexColor;
+	}),
+});
+
+/**
+ * Effect Schema for Base16 themes. Validates all fields and auto-detects
+ * the variant (dark/light) from base00 luminance when not explicitly set.
+ */
+export const Base16ThemeSchema = Schema.transform(
+	Base16ThemeRaw,
+	Base16ThemeFinal,
+	{
+		strict: true,
+		decode: (raw) => ({
+			...raw,
+			variant: raw.variant ?? computeVariant(raw.base00),
+		}),
+		encode: (final) => final,
+	},
+);
 
 export function validateTheme(t: unknown): t is Base16Theme {
 	if (!t || typeof t !== "object") return false;
