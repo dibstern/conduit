@@ -142,15 +142,29 @@ Run `grep -rn "as RequestId\|as PermissionId\|as EventId\|as CommandId" src/` to
 Run: `pnpm vitest run test/unit/schema/branded-types.test.ts`
 Expected: PASS
 
-**Step 5: Run full test suite for regressions**
+**Step 5: Update existing tests with branded type casts**
+
+Update `as RequestId` / `as PermissionId` casts to `as typeof RequestId.Type` in these 8 test files:
+- `test/unit/stores/permissions-store.test.ts` — `pid()` helper (line 36)
+- `test/unit/session/session-switch.test.ts` — `as PermissionId` casts
+- `test/unit/relay/sse-wiring.test.ts` — `pid()` helper (line 16)
+- `test/unit/regression-question-session-scoping.test.ts` — branded type assertions
+- `test/unit/handlers/request-id-contract.test.ts` — `as RequestId` (line 31)
+- `test/unit/handlers/message-handlers.test.ts` — `pid()` helper (line 44)
+- `test/unit/bridges/client-init.test.ts` — `pid()` helper (line 12)
+- `test/unit/stores/ws-send-typed.test.ts` — branded type assertions
+
+Run: `grep -rn "as RequestId\|as PermissionId\|as EventId\|as CommandId" test/` to find exact sites.
+
+**Step 6: Run full test suite for regressions**
 
 Run: `pnpm test:unit`
-Expected: All existing tests pass. If any fail on type errors with branded types, update the cast at the failing call site.
+Expected: All existing tests pass.
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
-git add src/lib/shared-types.ts src/lib/persistence/events.ts test/unit/schema/
+git add src/lib/shared-types.ts src/lib/persistence/events.ts test/unit/schema/ test/unit/stores/ test/unit/session/ test/unit/relay/ test/unit/handlers/ test/unit/bridges/ test/unit/regression-*
 git commit -m "refactor: migrate branded types to @effect/schema brands"
 ```
 
@@ -448,20 +462,28 @@ The main change: constructors now take a single props object instead of position
 Before: `new OpenCodeApiError("message", { code: "...", endpoint: "..." })`
 After: `new OpenCodeApiError({ message: "message", endpoint: "..." })`
 
-**Step 5: Run tests**
+**Step 5: Update existing error tests**
+
+Update error constructors, assertions, and wire format checks in these existing test files:
+- `test/unit/errors.pbt.test.ts` — **CRITICAL:** `new RelayError(message, {...})` → props object, `instanceof RelayError` → `_tag` check, `.code` → `._tag`
+- `test/unit/prompt-error-diagnostics.test.ts` — verify constructor sig compat (may already use props)
+- `test/unit/provider/relay-event-sink.test.ts` — `.code` checks (line 114) update to `_tag` format
+- `test/unit/bridges/client-init.test.ts` — `.code === "INIT_FAILED"` format change
+
+**Step 6: Run tests**
 
 Run: `pnpm vitest run test/unit/schema/errors.test.ts && pnpm vitest run test/unit/errors.pbt.test.ts`
-Expected: Both pass. The PBT test may need updating if it constructs errors with old signatures.
+Expected: Both pass.
 
-**Step 6: Run full test suite**
+**Step 7: Run full test suite**
 
 Run: `pnpm test:unit`
-Expected: All pass. Fix any call sites that broke due to constructor signature change.
+Expected: All pass.
 
-**Step 7: Commit**
+**Step 8: Commit**
 
 ```bash
-git add src/lib/errors.ts src/lib/persistence/errors.ts test/unit/schema/
+git add src/lib/errors.ts src/lib/persistence/errors.ts test/unit/schema/ test/unit/errors.pbt.test.ts test/unit/prompt-error-diagnostics.test.ts test/unit/provider/relay-event-sink.test.ts test/unit/bridges/client-init.test.ts
 git commit -m "refactor: migrate error hierarchy to Schema.TaggedErrorClass"
 ```
 
@@ -1156,10 +1178,12 @@ Keep the existing `runInTransaction` method for now — existing code still uses
 Run: `pnpm vitest run test/unit/effect/sqlite-transactions.test.ts`
 Expected: PASS
 
-**Step 5: Run existing persistence tests**
+**Step 5: Run existing persistence tests (verify nested transactions still work)**
 
 Run: `pnpm vitest run test/unit/persistence/`
-Expected: All pass — we added a method, didn't change existing ones.
+Expected: All pass — we added a method, didn't change existing ones. Pay special attention to:
+- `test/unit/persistence/projection-runner.test.ts` — uses nested transactions
+- `test/unit/persistence/projectors/projector.test.ts` — PersistenceError assertions
 
 **Step 6: Commit**
 
@@ -1348,18 +1372,26 @@ function queueToAsyncIterable<A>(queue: Queue.Queue<A>): AsyncIterable<A> {
 
 **Single-consumer guard:** Effect Queue allows multiple consumers. Wrap in single-take guard or consume via single `Stream.fromQueue` fiber to prevent message stealing.
 
-**Step 4: Delete old file**
+**Step 4: Rewrite existing PromptQueue test**
+
+`test/unit/provider/claude/prompt-queue.test.ts` tests the deleted API — rewrite entirely to test Effect Queue usage:
+- `new PromptQueue()` → `Queue.unbounded<SDKUserMessage>()`
+- `queue.enqueue()` → `Queue.offer()`
+- `queue.next()` → `Queue.take()`
+- `for await (const msg of queue)` → `Stream.fromQueue` consumer
+
+**Step 5: Delete old file**
 
 ```bash
 rm src/lib/provider/claude/prompt-queue.ts
 ```
 
-**Step 5: Run full test suite**
+**Step 6: Run full test suite**
 
 Run: `pnpm test:unit`
 Expected: All pass.
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add -A
@@ -1433,6 +1465,10 @@ function removeClient(clientId: string): void {
 
 **Step 3: Expose observability** — `activeClients` (map size) and `getQueueDepth` (binary: 0 or 1).
 
+**Step 4: Rewrite existing ClientMessageQueue test**
+
+`test/unit/server/client-message-queue.test.ts` tests the deleted API — rewrite entirely to test per-client Semaphore serialization.
+
 Commit: `"refactor: replace ClientMessageQueue with per-client Effect Semaphore"`
 
 ---
@@ -1493,12 +1529,30 @@ describe("Effect PubSub replaces EventEmitter", () => {
 
 Define typed event unions for each service (e.g., `SessionEvent`, `RelayEvent`).
 
-**Step 4: Run full test suite**
+**Step 4: Update existing tests using `.on()` / `.emit()` patterns (~12 files)**
+
+These tests use EventEmitter APIs from TrackedService subclasses. Update as each service migrates:
+- `test/unit/daemon/tracked-service.test.ts` — **entire test rewrite** (tests TrackedService API directly)
+- `test/unit/relay/message-poller.test.ts`
+- `test/unit/session/session-status-poller.test.ts`
+- `test/unit/session/session-status-poller-reconciliation.test.ts`
+- `test/unit/session/session-status-poller-augment.test.ts`
+- `test/unit/server/ws-handler.pbt.test.ts`
+- `test/unit/server/ws-handler-sessions.test.ts`
+- `test/unit/relay/sse-stream.test.ts`
+- `test/unit/daemon/daemon.test.ts`
+- `test/unit/instance/instance-manager.test.ts`
+- `test/unit/instance/instance-state-machine.test.ts`
+- `test/integration/flows/daemon-lifecycle.integration.ts`
+
+For each test: replace `svc.on("event", cb)` with PubSub subscription, replace `svc.emit("event", data)` with `PubSub.publish()`.
+
+**Step 5: Run full test suite**
 
 Run: `pnpm test:unit`
 Expected: All pass.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add -A
@@ -1916,9 +1970,42 @@ Handler files to migrate (NOT utilities):
 
 Convert bare try/catch that just rethrow or log-and-ignore → remove (let Effect error channel handle).
 
-**Step 3: Run `pnpm check` after ALL handlers migrated** (cannot pass incrementally due to dispatch table typing).
+**Step 3: Update existing handler tests (~18 files)**
 
-**Step 4: Commit**
+All handler test files call handlers with old `(deps, clientId, payload)` signature. Update to use Effect test pattern:
+
+```typescript
+// Old: await handleForkSession(deps, "client-1", { sessionId: "s1" });
+// New:
+const TestLayer = Layer.mergeAll(MockSessionManagerLive, MockWsHandlerLive, /* ... */);
+await Effect.runPromise(
+  handleForkSession("client-1", { sessionId: "s1" }).pipe(Effect.provide(TestLayer)),
+);
+```
+
+Test files to update:
+- `test/unit/handlers/message-handlers.test.ts`
+- `test/unit/handlers/handlers-session.test.ts`
+- `test/unit/handlers/handlers-model.test.ts`
+- `test/unit/handlers/handlers-instance.test.ts`
+- `test/unit/handlers/handlers-file-tree.test.ts`
+- `test/unit/handlers/handlers-reload.test.ts`
+- `test/unit/handlers/proxy-detect.test.ts`
+- `test/unit/handlers/get-tool-content-handler.test.ts`
+- `test/unit/handlers/list-directories.test.ts`
+- `test/unit/handlers/scan-now.test.ts`
+- `test/unit/handlers/resolve-session.test.ts`
+- `test/unit/handlers/instance-rename.test.ts`
+- `test/unit/handlers/prompt-claude-persistence.test.ts`
+- `test/unit/handlers/project-management.test.ts`
+- `test/unit/handlers/regression-question-on-session-view.test.ts`
+- `test/unit/regression-question-session-scoping.test.ts`
+- `test/unit/regression-claude-history-wiring.test.ts`
+- `test/unit/bridges/question-answer-flow.test.ts`
+
+**Step 4: Run `pnpm check` after ALL handlers migrated** (cannot pass incrementally due to dispatch table typing).
+
+**Step 5: Commit**
 
 ```bash
 git commit -m "refactor: migrate all handlers to Effect-based signature"
@@ -2078,9 +2165,14 @@ Key patterns:
 - Route params: `HttpRouter.params` for `:slug` extraction
 - Static files: `HttpMiddleware.serveStatic` or manual static serving
 
-**Step 3: Run tests**
+**Step 3: Update existing router and route tests**
 
-**Step 4: Commit**
+- `test/unit/server/http-router.test.ts` — router API changes to @effect/platform patterns
+- `test/unit/server/push-routes.test.ts` — error format changes
+
+**Step 4: Run tests**
+
+**Step 5: Commit**
 
 ```bash
 git commit -m "refactor: migrate HTTP router to @effect/platform"
@@ -2127,12 +2219,20 @@ const main = ProjectRelayLive.pipe(
 Effect.runFork(main);
 ```
 
-**Step 3: Run full test suite and manual smoke test**
+**Step 3: Update existing relay stack and integration tests**
+
+- `test/unit/relay/relay-stack-dual-write-wiring.test.ts` — RelayStack API changes
+- `test/unit/relay/per-tab-routing-e2e.test.ts` — RelayStack integration
+- `test/unit/provider/orchestration-engine.test.ts` — orchestration wiring changes
+- `test/unit/provider/orchestration-wiring.test.ts` — provider wiring changes
+- `test/integration/flows/relay-lifecycle.integration.ts` — full lifecycle changes
+
+**Step 4: Run full test suite and manual smoke test**
 
 Run: `pnpm test:unit && pnpm build`
 Then manually start with `pnpm dev` and verify server starts, WebSocket connects, routes respond.
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
 git commit -m "refactor: compose relay stack as Effect ManagedRuntime"
@@ -2163,9 +2263,13 @@ const handleConnection = (ws: WebSocket) =>
   );
 ```
 
-**Step 2: Run tests and smoke test**
+**Step 2: Update existing WebSocket handler tests**
 
-**Step 3: Commit**
+- `test/unit/server/ws-router.pbt.test.ts` — EventEmitter patterns to Effect Stream
+
+**Step 3: Run tests and smoke test**
+
+**Step 4: Commit**
 
 ```bash
 git commit -m "refactor: migrate WebSocket handler to Effect Stream"
@@ -2490,122 +2594,6 @@ Expected: All pass. Existing callers still use `wsSend` — no breakage.
 ```bash
 git commit -m "refactor: add Schema-validated outbound message sending (gradual migration)"
 ```
-
----
-
-## Existing Test Updates
-
-Each layer task MUST update the existing tests listed below. These are NOT covered by the new test files each task creates — they are existing tests that will break due to API changes.
-
-### Layer 1 test updates
-
-**Task 1.2 (branded types):** Update `as RequestId` / `as PermissionId` casts in these 8 test files to `as typeof RequestId.Type`:
-- `test/unit/stores/permissions-store.test.ts` — `pid()` helper (line 36)
-- `test/unit/session/session-switch.test.ts` — `as PermissionId` casts
-- `test/unit/relay/sse-wiring.test.ts` — `pid()` helper (line 16)
-- `test/unit/regression-question-session-scoping.test.ts` — branded type assertions
-- `test/unit/handlers/request-id-contract.test.ts` — `as RequestId` (line 31)
-- `test/unit/handlers/message-handlers.test.ts` — `pid()` helper (line 44)
-- `test/unit/bridges/client-init.test.ts` — `pid()` helper (line 12)
-- `test/unit/stores/ws-send-typed.test.ts` — branded type assertions
-
-Run: `grep -rn "as RequestId\|as PermissionId\|as EventId\|as CommandId" test/` to find exact sites.
-
-**Task 1.3 (error hierarchy):** Update error constructors and assertions:
-- `test/unit/errors.pbt.test.ts` — **CRITICAL:** `new RelayError(message, {...})` → props object, `instanceof RelayError` → `_tag` check, `.code` → `._tag`
-- `test/unit/prompt-error-diagnostics.test.ts` — verify constructor sig compat (may already use props)
-
-**Task 1.3 (wire format):** Update `.code ===` checks:
-- `test/unit/provider/relay-event-sink.test.ts` — `.code` checks (line 114)
-- `test/unit/bridges/client-init.test.ts` — `.code === "INIT_FAILED"` format change
-
-### Layer 2 test updates
-
-**Task 2.3 (SQLite transactions):** Verify existing tests still pass:
-- `test/unit/persistence/projection-runner.test.ts` — uses nested transactions
-- `test/unit/persistence/projectors/projector.test.ts` — PersistenceError assertions
-
-### Layer 3 test updates
-
-**Task 3.1 (PromptQueue → Effect Queue):**
-- `test/unit/provider/claude/prompt-queue.test.ts` — entire test rewrite (tests deleted API)
-
-**Task 3.2 (ClientMessageQueue → Semaphore):**
-- `test/unit/server/client-message-queue.test.ts` — entire test rewrite
-
-**Task 3.3 (EventEmitter → PubSub):** Update `.on()` / `.emit()` patterns in ~12 test files:
-- `test/unit/daemon/tracked-service.test.ts` — entire test rewrite (tests TrackedService API)
-- `test/unit/relay/message-poller.test.ts`
-- `test/unit/session/session-status-poller.test.ts`
-- `test/unit/session/session-status-poller-reconciliation.test.ts`
-- `test/unit/session/session-status-poller-augment.test.ts`
-- `test/unit/server/ws-handler.pbt.test.ts`
-- `test/unit/server/ws-handler-sessions.test.ts`
-- `test/unit/relay/sse-stream.test.ts`
-- `test/unit/daemon/daemon.test.ts`
-- `test/unit/instance/instance-manager.test.ts`
-- `test/unit/instance/instance-state-machine.test.ts`
-- `test/integration/flows/daemon-lifecycle.integration.ts`
-
-### Layer 5 test updates
-
-**Tasks 5.1+5.2 (handler signature):** Update `(deps, clientId, payload)` calls in ~18 test files:
-- `test/unit/handlers/message-handlers.test.ts`
-- `test/unit/handlers/handlers-session.test.ts`
-- `test/unit/handlers/handlers-model.test.ts`
-- `test/unit/handlers/handlers-instance.test.ts`
-- `test/unit/handlers/handlers-file-tree.test.ts`
-- `test/unit/handlers/handlers-reload.test.ts`
-- `test/unit/handlers/proxy-detect.test.ts`
-- `test/unit/handlers/get-tool-content-handler.test.ts`
-- `test/unit/handlers/list-directories.test.ts`
-- `test/unit/handlers/scan-now.test.ts`
-- `test/unit/handlers/resolve-session.test.ts`
-- `test/unit/handlers/instance-rename.test.ts`
-- `test/unit/handlers/prompt-claude-persistence.test.ts`
-- `test/unit/handlers/project-management.test.ts`
-- `test/unit/handlers/regression-question-on-session-view.test.ts`
-- `test/unit/regression-question-session-scoping.test.ts`
-- `test/unit/regression-claude-history-wiring.test.ts`
-- `test/unit/bridges/question-answer-flow.test.ts`
-
-**Handler test migration pattern:** Tests need a test Layer providing mock services, then `Effect.runPromise` to run the handler:
-```typescript
-// Old: await handleForkSession(deps, "client-1", { sessionId: "s1" });
-// New:
-const TestLayer = Layer.mergeAll(MockSessionManagerLive, MockWsHandlerLive, /* ... */);
-await Effect.runPromise(
-  handleForkSession("client-1", { sessionId: "s1" }).pipe(Effect.provide(TestLayer)),
-);
-```
-
-### Layer 6 test updates
-
-**Task 6.2 (HTTP router):**
-- `test/unit/server/http-router.test.ts` — router API changes
-- `test/unit/server/push-routes.test.ts` — error format changes
-
-**Task 6.4 (WebSocket handler):**
-- `test/unit/server/ws-router.pbt.test.ts` — EventEmitter patterns
-
-### Layer 5+6 integration test updates
-
-- `test/unit/relay/relay-stack-dual-write-wiring.test.ts`
-- `test/unit/relay/per-tab-routing-e2e.test.ts`
-- `test/unit/provider/orchestration-engine.test.ts`
-- `test/unit/provider/orchestration-wiring.test.ts`
-- `test/integration/flows/relay-lifecycle.integration.ts`
-
-### Summary
-
-| Layer | Existing tests to update | Primary change |
-|-------|-------------------------|----------------|
-| L1 | 10 files | Branded type casts, error constructors, wire format codes |
-| L2 | 2 files | Verify nested transactions still work |
-| L3 | 14 files | EventEmitter → PubSub, Queue/Semaphore API changes |
-| L5 | 18 files | Handler signature `(deps, clientId, payload)` → Effect |
-| L6 | 5 files | Router API, WebSocket patterns |
-| **Total** | **~49 existing test files** | |
 
 ---
 
