@@ -389,7 +389,7 @@ export { redactSensitive, formatErrorDetail } from "./errors-utils.js";
 
 **Step 3a: Create `src/lib/errors-utils.ts`** — extract `redactSensitive` (line 307) and `formatErrorDetail` (line 331) from `src/lib/errors.ts` into a new file. These are used by 12+ files. Run `grep -rn "redactSensitive\|formatErrorDetail" src/lib/` to find all importers and update their import paths.
 
-**ErrorCode wire format:** The `_tag` names (`"OpenCodeApiError"`) differ from legacy `ErrorCode` values (`"OPENCODE_API_ERROR"`). Keep a separate `code` property with the legacy value alongside `_tag` in `toJSON()`/`toWebSocket()` for backwards compatibility. **(ASK USER: should we keep legacy codes or clean-break to `_tag` names?)**
+**ErrorCode wire format: clean break.** Use `_tag` names (`"OpenCodeApiError"`) as the wire format code in `toJSON()`/`toWebSocket()`. Update all downstream code checking `error.code === "OPENCODE_API_ERROR"` to use the new `_tag` names. Search with `grep -rn "error.code\|error\.code\|\.code ===" src/` to find all sites.
 
 **wrapError:** Update to pass `cause` through to preserve error chains (existing `wrapError` at line 291-304 sets `cause`). Also preserve the `OpenCodeApiError` message enrichment logic (lines 199-210) that appends 4xx response body details.
 
@@ -542,7 +542,7 @@ Strategy:
 
 **Scope:** RelayMessage has **51 variants** (not "20+" as previously estimated), spanning lines 269-515 of `shared-types.ts`. Define schemas for ALL 51 variants following the existing type definitions.
 
-**Index signatures:** Several types use `[key: string]: unknown` (e.g., `HistoryMessagePart` at line 217, `HistoryMessage` at line 239). `Schema.Struct` strips unknown keys by default. **(ASK USER: should Schema variants with index signatures use `Schema.Record` composition to allow extra keys, or strip unknown keys?)**
+**Index signatures:** Several types use `[key: string]: unknown` (e.g., `HistoryMessagePart` at line 217, `HistoryMessage` at line 239). **Decision: strip unknown keys and explicitly type all needed fields.** Add `sessionID` (actively used in `message-poller.ts:290`) and other OpenCode REST API fields (`parentID`, `modelID`, `providerID`, `error`, `mode`, `agent`, `path`, `summary`, `finish`) as explicit optional Schema fields on `HistoryMessage`. Remove `[key: string]: unknown` index signatures — explicit types are more LLM-friendly.
 
 **Derived types:** The following derived types (lines 521-591) must also be migrated or updated to work with the Schema-based union:
 - `PerSessionEvent` — filtered subset of RelayMessage
@@ -1036,8 +1036,8 @@ export const fetchWithRetry = (
         : Effect.succeed(res),
     ),
     Effect.retry({
-      // Match current LINEAR backoff: retryDelay * (attempt+1) = 1000, 2000, 3000ms
-      schedule: Schedule.linear(Duration.millis(retryDelay)).pipe(
+      // Exponential backoff: 1000, 2000, 4000ms (intentional change from old linear)
+      schedule: Schedule.exponential(Duration.millis(retryDelay)).pipe(
         Schedule.compose(Schedule.recurs(retries)),
       ),
       // Do NOT retry timeouts — only connection/server errors
@@ -1508,18 +1508,37 @@ git commit -m "refactor: replace EventEmitter with Effect PubSub"
 
 **Scope clarification:** MessagePoller is 707 lines. The pure functions at lines 73-444 (`synthesizeTextPart`, `synthesizeToolPart`, `synthesizePartEvents`, `diffAndSynthesize`, `buildSeedSnapshot`, `extractUserText`, `synthesizeResultEvent`) must NOT be modified. Only the `MessagePoller` class (lines 469-707) is in scope.
 
-**Primitive choice:** `Deferred` is one-shot — cannot signal "SSE went silent" repeatedly. Use `SubscriptionRef<boolean>` or `Ref<boolean>` polled on schedule for the SSE-active/silent toggle instead.
+**Primitive: `SubscriptionRef<boolean>` for SSE active/silent toggle.** Reactive — poller activates instantly when SSE goes quiet, stops polling entirely during activity (no wasted cycles).
+
+```typescript
+const makePollerGate = Effect.gen(function* () {
+  const sseActive = yield* SubscriptionRef.make(true);
+
+  // Poller subscribes to changes — only runs when sseActive is false
+  const pollerFiber = yield* SubscriptionRef.changes(sseActive).pipe(
+    Stream.filter((active) => !active),
+    Stream.runForEach(() => pollOnce()),
+    Effect.forkScoped,
+  );
+
+  return {
+    signalSseSilent: SubscriptionRef.set(sseActive, false),
+    signalSseActive: SubscriptionRef.set(sseActive, true),
+  };
+});
+```
 
 **State field mapping:**
+- `sseActive` → `SubscriptionRef<boolean>` (reactive toggle, replaces boolean flag + setTimeout)
 - `lastSSEEventAt` → `Ref<number>` (timestamp)
 - `lastContentAt` → `Ref<number>` (timestamp)
 - `polling` overlap guard → `Ref<boolean>` (mutex)
 - `needsReseed` → `Ref<boolean>`
 - `needsSeedOnFirstPoll` → `Ref<boolean>`
-- `timer` → managed by `Effect.repeat` + `Schedule.spaced` (replaces `this.repeating()`)
+- `timer` → eliminated — polling driven by `SubscriptionRef.changes` stream, not a repeating timer
 - `previousSnapshot`, `activeSessionId` → stay as plain instance state (not reactive)
 
-**Dependency ordering:** If Task 2.4 (TrackedService removal) is done first, `this.repeating()` and `this.tracked()` calls no longer exist — replace with Effect equivalents. If 2.4 is not done first, Ref/SubscriptionRef must coexist with TrackedService.
+**Dependency ordering:** Tasks 2.4 + 3.4 are done together per-service (see Task 2.4 merge note). `this.repeating()` and `this.tracked()` replaced with Effect equivalents simultaneously.
 
 **Step 1: Write the failing test** — test the gating state machine in isolation.
 
@@ -1650,7 +1669,7 @@ Required:
 14. `ForkMetaTag` — **NOTE:** inline object type (types.ts:87-90). Define interface.
 15. `ClientIdTag` — **NEW:** per-request client identifier (see Task 5.1 handler signature fix)
 
-Optional (use `Effect.serviceOption` or always provide with no-op impl — **(ASK USER)**):
+Daemon-only (split into `DaemonExtensionsLayer` — only provided in daemon mode):
 1. `InstanceMgmtTag` — `instanceMgmt?`
 2. `ProjectMgmtTag` — `projectMgmt?`
 3. `ScanDepsTag` — `scanDeps?`
@@ -1658,6 +1677,30 @@ Optional (use `Effect.serviceOption` or always provide with no-op impl — **(AS
 5. `OrchestrationEngineTag` — `orchestrationEngine?`
 6. `ClaudeEventPersistTag` — `claudeEventPersist?`
 7. `ProviderStateServiceTag` — `providerStateService?`
+
+**Layer split strategy:**
+```typescript
+// Always present
+const CoreHandlerLayer = Layer.mergeAll(
+  SessionManagerLive, OpenCodeAPILive, WebSocketHandlerLive,
+  PermissionBridgeLive, PersistenceLive, /* ... core services */
+);
+
+// Daemon-only extensions
+const DaemonExtensionsLayer = Layer.mergeAll(
+  InstanceMgmtLive, ProjectMgmtLive, ScanDepsLive,
+  ReadQueryLive, OrchestrationEngineLive,
+  ClaudeEventPersistLive, ProviderStateServiceLive,
+);
+
+// Standalone mode — compile error if handler tries to use daemon services
+const StandaloneLayer = CoreHandlerLayer;
+
+// Daemon mode — all services available
+const DaemonLayer = CoreHandlerLayer.pipe(Layer.provideMerge(DaemonExtensionsLayer));
+```
+
+Daemon-only handlers can only be dispatched when running with `DaemonLayer`. Type system enforces this at compile time.
 
 For inline/Pick/function-typed fields: define explicit `Shape` interfaces first, then create Tags for those shapes.
 
@@ -1737,7 +1780,11 @@ export const ServerConfigLive = (configDir?: string) =>
       const raw = yield* Effect.try(() => readFileSync(join(dir, "daemon.json"), "utf-8")).pipe(
         Effect.option, // Returns Option.none on file-not-found
       );
-      if (Option.isNone(raw)) return defaultDaemonConfig();
+      if (Option.isNone(raw)) {
+        const defaults = defaultDaemonConfig();
+        yield* Effect.try(() => saveDaemonConfigSync(defaults, dir)); // write defaults to disk
+        return defaults;
+      }
       const json = yield* Effect.try(() => JSON.parse(raw.value));
       return yield* Schema.decodeUnknown(DaemonConfigSchema)(json);
     }),
@@ -1947,7 +1994,11 @@ export const dispatchMessage = (clientId: string, type: IncomingMessageType, raw
   );
 ```
 
-**Critical:** Do NOT use `Effect.catchAll` — it swallows programming bugs (null pointer, type errors) and silently sends them to the client. Use `Effect.catchTags` for specific domain errors. Let defects propagate to the caller (`handler-deps-wiring.ts:191-199` onError handler, or the ManagedRuntime in Layer 6).
+**Error semantics — two layers of handling:**
+1. **Domain errors** (expected failures: API 404, session not found, connection dropped, rate limited) — caught at dispatch via `Effect.catchTags`, serialized as structured error responses to the client.
+2. **Defects** (programming bugs: null reference, type mismatch, undefined method) — propagate uncaught through dispatch, handled by top-level `Effect.catchAllCause` in the ManagedRuntime (Layer 6) which logs full stack trace + returns generic `system_error` to client.
+
+Do NOT use `Effect.catchAll` — it conflates domain errors and defects. Nothing should be silently caught.
 
 **Integration point:** The WebSocket message event handler calls `Effect.runPromise(dispatchMessage(...).pipe(Effect.provide(HandlerLayer)))`. This runner lives in the WebSocket Layer (Task 6.4) or a ManagedRuntime created from HandlerLayer stored for the relay's lifetime.
 
