@@ -1,9 +1,10 @@
 // ─── Handler Deps Wiring (G1) ────────────────────────────────────────────────
-// Constructs HandlerDeps, ClientInitDeps, ClientMessageQueue, RateLimiter,
+// Constructs HandlerDeps, ClientInitDeps, per-client Semaphore, RateLimiter,
 // and wires wsHandler client_connected / client_disconnected / message events.
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import { Effect } from "effect";
 import {
 	type ClientInitDeps,
 	handleClientConnected,
@@ -19,7 +20,10 @@ import type { ProviderStateService } from "../persistence/provider-state-service
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
-import { ClientMessageQueue } from "../server/client-message-queue.js";
+import {
+	getClientSemaphore,
+	removeClient,
+} from "../server/client-semaphore.js";
 import { RateLimiter } from "../server/rate-limiter.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
@@ -62,7 +66,6 @@ export interface HandlerDepsWiringDeps {
 
 export interface HandlerDepsWiringResult {
 	handlerDeps: HandlerDeps;
-	clientQueue: ClientMessageQueue;
 	rateLimiter: RateLimiter;
 }
 
@@ -129,8 +132,8 @@ export function wireHandlerDeps(
 	});
 
 	wsHandler.on("client_disconnected", ({ clientId, sessionId: _sessionId }) => {
-		// Clean up per-client message queue on disconnect
-		clientQueue.removeClient(clientId);
+		// Clean up per-client semaphore on disconnect
+		removeClient(clientId);
 		wsLog.info(`Client disconnected: ${clientId}`);
 	});
 
@@ -188,18 +191,8 @@ export function wireHandlerDeps(
 		...(providerStateService != null && { providerStateService }),
 	};
 
-	const clientQueue = new ClientMessageQueue({
-		onError: (cid, err) => {
-			wsLog.error(`Error handling message for ${cid}:`, formatErrorDetail(err));
-			wsHandler.sendTo(
-				cid,
-				RelayError.fromCaught(err, "HANDLER_ERROR").toSystemError(),
-			);
-		},
-	});
-
 	wsHandler.on("message", ({ clientId, handler, payload }) => {
-		// Rate-limit check stays outside the queue (it's synchronous)
+		// Rate-limit check stays outside the semaphore (it's synchronous)
 		if (handler === "message") {
 			const result = rateLimiter.check(clientId);
 			if (!result.allowed) {
@@ -212,7 +205,7 @@ export function wireHandlerDeps(
 			}
 		}
 
-		// Handle log level changes directly (no queue needed, synchronous)
+		// Handle log level changes directly (no semaphore needed, synchronous)
 		if (handler === "set_log_level") {
 			const level = payload["level"];
 			const validLevels = new Set([
@@ -229,10 +222,24 @@ export function wireHandlerDeps(
 			return;
 		}
 
-		clientQueue.enqueue(clientId, async () => {
-			await dispatchMessage(handlerDeps, clientId, handler, payload);
+		// Serialize handler execution per-client via Effect Semaphore(1)
+		const sem = getClientSemaphore(clientId);
+		const program = sem.withPermits(1)(
+			Effect.tryPromise(() =>
+				dispatchMessage(handlerDeps, clientId, handler, payload),
+			),
+		);
+		Effect.runPromise(program).catch((err) => {
+			wsLog.error(
+				`Error handling message for ${clientId}:`,
+				formatErrorDetail(err),
+			);
+			wsHandler.sendTo(
+				clientId,
+				RelayError.fromCaught(err, "HANDLER_ERROR").toSystemError(),
+			);
 		});
 	});
 
-	return { handlerDeps, clientQueue, rateLimiter };
+	return { handlerDeps, rateLimiter };
 }

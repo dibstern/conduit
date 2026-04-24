@@ -203,7 +203,7 @@ export async function handleViewSession(
 	// sendTo is safe after disconnect (silently drops messages).
 	// All errors are caught and logged inside sendSessionMetadata.
 	// NOTE: This is intentionally NOT awaited — the handler returns immediately
-	// after sending session_switched, unblocking the ClientMessageQueue.
+	// after sending session_switched, unblocking the per-client semaphore.
 	// When skipMetadata is true, the caller (e.g. handleDeleteSession) will
 	// await sendSessionMetadata directly to avoid duplicate metadata sends.
 	if (!skipMetadata) {
