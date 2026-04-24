@@ -270,7 +270,8 @@ export class Daemon {
 		this.keepAwakeCommand = options?.keepAwakeCommand;
 		this.keepAwakeArgs = options?.keepAwakeArgs;
 		this.smartDefault = options?.smartDefault ?? true;
-		this.instanceManager = new InstanceManager(this.serviceRegistry);
+		this.instanceManager = new InstanceManager();
+		this.serviceRegistry.register(this.instanceManager);
 		this.registry = new ProjectRegistry(this.serviceRegistry);
 
 		// Auto-persist config on project mutations

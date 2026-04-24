@@ -3,9 +3,8 @@
 // process spawning, and health checks.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
 
@@ -21,12 +20,13 @@ export type InstanceHealthChecker = (
 	instance: OpenCodeInstance,
 ) => Promise<boolean>;
 
-export type InstanceManagerEvents = {
-	instance_added: [instance: OpenCodeInstance];
-	instance_removed: [id: string];
-	status_changed: [instance: OpenCodeInstance];
-	instance_error: [payload: { id: string; error: string }];
-};
+/** Callback signatures for each InstanceManager event type. */
+export interface InstanceManagerCallbacks {
+	instance_added: (instance: OpenCodeInstance) => void;
+	instance_removed: (id: string) => void;
+	status_changed: (instance: OpenCodeInstance) => void;
+	instance_error: (payload: { id: string; error: string }) => void;
+}
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -43,10 +43,7 @@ export interface InstanceManagerOptions {
 
 // ─── InstanceManager ────────────────────────────────────────────────────────
 
-export class InstanceManager
-	extends EventEmitter<InstanceManagerEvents>
-	implements Drainable
-{
+export class InstanceManager implements Drainable {
 	private readonly maxInstances: number;
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;
@@ -78,13 +75,39 @@ export class InstanceManager
 	/** Pending fire-and-forget promises — awaited in drain(). */
 	private readonly pendingPromises = new Set<Promise<unknown>>();
 
-	constructor(registry: ServiceRegistry, options: InstanceManagerOptions = {}) {
-		super();
-		registry.register(this);
+	/** Registered callbacks keyed by event type. */
+	private readonly callbacks: {
+		[K in keyof InstanceManagerCallbacks]: InstanceManagerCallbacks[K][];
+	} = {
+		instance_added: [],
+		instance_removed: [],
+		status_changed: [],
+		instance_error: [],
+	};
+
+	constructor(options: InstanceManagerOptions = {}) {
 		this.maxInstances = options.maxInstances ?? 5;
 		this.maxRestartsPerWindow = options.maxRestartsPerWindow ?? 3;
 		this.restartWindowMs = options.restartWindowMs ?? 60_000;
 		this.healthPollIntervalMs = options.healthPollIntervalMs ?? 5_000;
+	}
+
+	/** Register a callback for a specific event type. */
+	on<K extends keyof InstanceManagerCallbacks>(
+		event: K,
+		callback: InstanceManagerCallbacks[K],
+	): void {
+		this.callbacks[event].push(callback);
+	}
+
+	/** Invoke all registered callbacks for a given event type. */
+	private notify<K extends keyof InstanceManagerCallbacks>(
+		event: K,
+		...args: Parameters<InstanceManagerCallbacks[K]>
+	): void {
+		for (const cb of this.callbacks[event]) {
+			(cb as (...a: unknown[]) => void)(...args);
+		}
 	}
 
 	// ─── Dependency injection ────────────────────────────────────────────
@@ -148,7 +171,7 @@ export class InstanceManager
 			this.startHealthPolling(id);
 		}
 
-		this.emit("instance_added", instance);
+		this.notify("instance_added", instance);
 		return instance;
 	}
 
@@ -169,7 +192,7 @@ export class InstanceManager
 
 		this.instances.delete(id);
 		this.externalUrls.delete(id);
-		this.emit("instance_removed", id);
+		this.notify("instance_removed", id);
 	}
 
 	/**
@@ -222,7 +245,7 @@ export class InstanceManager
 		}
 
 		if (changed) {
-			this.emit("status_changed", instance);
+			this.notify("status_changed", instance);
 		}
 
 		return instance;
@@ -289,7 +312,7 @@ export class InstanceManager
 		// Transition to "starting"
 		instance.status = "starting";
 		instance.needsRestart = false;
-		this.emit("status_changed", instance);
+		this.notify("status_changed", instance);
 
 		try {
 			// Spawn the process
@@ -340,7 +363,7 @@ export class InstanceManager
 			if (healthy) {
 				instance.status = "healthy";
 				instance.lastHealthCheck = Date.now();
-				this.emit("status_changed", instance);
+				this.notify("status_changed", instance);
 			}
 
 			// Start periodic health polling
@@ -355,7 +378,7 @@ export class InstanceManager
 			}
 			instance.status = "stopped";
 			delete instance.pid;
-			this.emit("status_changed", instance);
+			this.notify("status_changed", instance);
 			throw err;
 		}
 	}
@@ -392,7 +415,7 @@ export class InstanceManager
 		instance.status = "stopped";
 		delete instance.pid;
 		instance.needsRestart = false;
-		this.emit("status_changed", instance);
+		this.notify("status_changed", instance);
 	}
 
 	/**
@@ -460,7 +483,7 @@ export class InstanceManager
 
 			if (previousStatus !== newStatus) {
 				current.status = newStatus;
-				this.emit("status_changed", current);
+				this.notify("status_changed", current);
 			}
 		}, this.healthPollIntervalMs);
 
@@ -522,7 +545,7 @@ export class InstanceManager
 		if (code === 0) {
 			instance.status = "stopped";
 			instance.exitCode = 0;
-			this.emit("status_changed", instance);
+			this.notify("status_changed", instance);
 			return;
 		}
 
@@ -534,7 +557,7 @@ export class InstanceManager
 		}
 		instance.restartCount++;
 		instance.status = "unhealthy";
-		this.emit("status_changed", instance);
+		this.notify("status_changed", instance);
 
 		// Rate-limit restarts
 		const now = Date.now();
@@ -545,8 +568,8 @@ export class InstanceManager
 
 		if (recent.length >= this.maxRestartsPerWindow) {
 			instance.status = "stopped";
-			this.emit("status_changed", instance);
-			this.emit("instance_error", {
+			this.notify("status_changed", instance);
+			this.notify("instance_error", {
 				id,
 				error: `Crashed ${recent.length} times in ${this.restartWindowMs / 1000}s — giving up`,
 			});
@@ -564,8 +587,8 @@ export class InstanceManager
 					await this.startInstance(id);
 				} catch (err) {
 					instance.status = "stopped";
-					this.emit("status_changed", instance);
-					this.emit("instance_error", {
+					this.notify("status_changed", instance);
+					this.notify("instance_error", {
 						id,
 						error: `Restart failed: ${formatErrorDetail(err)}`,
 					});

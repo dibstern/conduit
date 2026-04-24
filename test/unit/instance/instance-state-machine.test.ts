@@ -9,7 +9,6 @@
 
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig } from "../../../src/lib/types.js";
 
@@ -66,7 +65,7 @@ describe("Instance state machine transitions", () => {
 	// ── #4: starting → health check fails → stays starting, poll starts ──
 
 	it("starting → initial health check fails → stays 'starting', poll begins", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		mgr.setSpawner(
@@ -88,7 +87,7 @@ describe("Instance state machine transitions", () => {
 	it("starting → process exits code=0 → stopped", async () => {
 		vi.useFakeTimers();
 		const { spawner, getExitCb } = createExitCapturingSpawner(10001);
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		mgr.setSpawner(spawner);
@@ -125,7 +124,7 @@ describe("Instance state machine transitions", () => {
 	// ── #7: starting → stopInstance → stopped ──
 
 	it("starting → stopInstance → stopped", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		const proc = createMockProcess(10002);
@@ -157,7 +156,7 @@ describe("Instance state machine transitions", () => {
 
 	it("healthy → health poll fails → unhealthy", async () => {
 		vi.useFakeTimers();
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 100,
 		});
 		mgr.setSpawner(
@@ -195,7 +194,7 @@ describe("Instance state machine transitions", () => {
 	it("healthy → process exits code=0 → stopped", async () => {
 		vi.useFakeTimers();
 		const { spawner, getExitCb } = createExitCapturingSpawner(10003);
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		mgr.setSpawner(spawner);
@@ -230,7 +229,7 @@ describe("Instance state machine transitions", () => {
 	// ── #14: unhealthy → stopInstance → stopped ──
 
 	it("unhealthy → stopInstance → stopped", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		const proc = createMockProcess(10004);
@@ -259,7 +258,7 @@ describe("Instance state machine transitions", () => {
 	// ── #16: unhealthy → startInstance → kills old, starting ──
 
 	it("unhealthy → startInstance → kills old process, transitions to starting then healthy", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		const oldProc = createMockProcess(10005);
@@ -302,7 +301,7 @@ describe("Instance state machine transitions", () => {
 	// ── #17: stopped → startInstance (second time) → starting ──
 
 	it("stopped → startInstance (second time after stop) → starting → healthy", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		let spawnCount = 0;
@@ -342,7 +341,7 @@ describe("Instance state machine transitions", () => {
 	// ── #19: starting → startInstance again → returns early (no double spawn) ──
 
 	it("starting → startInstance again → returns early", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		let spawnCount = 0;
@@ -374,7 +373,7 @@ describe("Instance state machine transitions", () => {
 	// ── #20: healthy → startInstance again → returns early ──
 
 	it("healthy → startInstance again → returns early (no re-spawn)", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
 		});
 		let spawnCount = 0;
