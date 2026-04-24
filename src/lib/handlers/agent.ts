@@ -1,5 +1,12 @@
 // ─── Agent Handlers ──────────────────────────────────────────────────────────
 
+import { Effect } from "effect";
+import {
+	LoggerTag,
+	OpenCodeAPITag,
+	SessionOverridesTag,
+	WebSocketHandlerTag,
+} from "../effect/services.js";
 import type { Agent } from "../instance/sdk-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSessionForLog } from "./resolve-session.js";
@@ -80,3 +87,44 @@ export async function handleSwitchAgent(
 		);
 	}
 }
+
+// ─── Effect-based handler implementations ──────────────────────────────────
+// These will replace the above functions once the dispatch table is rewired
+// in Task 5.3. Until then they coexist alongside the original handlers.
+
+export const handleGetAgentsEffect = (
+	clientId: string,
+	_payload: PayloadMap["get_agents"],
+) =>
+	Effect.gen(function* () {
+		const client = yield* OpenCodeAPITag;
+		const wsHandler = yield* WebSocketHandlerTag;
+
+		const rawAgents = yield* Effect.tryPromise(() => client.app.agents());
+		const agents = filterAgents(rawAgents);
+		wsHandler.sendTo(clientId, { type: "agent_list", agents });
+	});
+
+export const handleSwitchAgentEffect = (
+	clientId: string,
+	payload: PayloadMap["switch_agent"],
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const overrides = yield* SessionOverridesTag;
+		const log = yield* LoggerTag;
+
+		const { agentId } = payload;
+		if (agentId) {
+			const clientSession = wsHandler.getClientSession(clientId);
+			if (clientSession) {
+				overrides.setAgent(clientSession, agentId);
+			} else {
+				log.warn(`client=${clientId} switch_agent with no session — ignoring`);
+			}
+			const sessionForLog = wsHandler.getClientSession(clientId) ?? "?";
+			log.info(
+				`client=${clientId} session=${sessionForLog} Switched to: ${agentId}`,
+			);
+		}
+	});

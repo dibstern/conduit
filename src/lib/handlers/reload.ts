@@ -3,11 +3,17 @@
 // prompt picks up newly-added skills/commands from disk. Also refreshes the
 // models and commands lists so the client's command palette stays current.
 
+import { Effect } from "effect";
+import {
+	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
+} from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
-import { handleGetModels } from "./model.js";
+import { handleGetModels, handleGetModelsEffect } from "./model.js";
 import type { PayloadMap } from "./payloads.js";
 import { resolveSession } from "./resolve-session.js";
-import { handleGetCommands } from "./settings.js";
+import { handleGetCommands, handleGetCommandsEffect } from "./settings.js";
 import type { HandlerDeps } from "./types.js";
 
 export async function handleReloadProviderSession(
@@ -52,3 +58,53 @@ export async function handleReloadProviderSession(
 		sessionId: activeId,
 	});
 }
+
+// ─── Effect-based handler implementation ───────────────────────────────────
+// This will replace the above function once the dispatch table is rewired
+// in Task 5.3. Until then it coexists alongside the original handler.
+
+export const handleReloadProviderSessionEffect = (
+	clientId: string,
+	_payload: PayloadMap["reload_provider_session"],
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const log = yield* LoggerTag;
+
+		const activeId = wsHandler.getClientSession(clientId);
+		if (!activeId) {
+			wsHandler.sendTo(
+				clientId,
+				new RelayError("No active session to reload", {
+					code: "NO_SESSION",
+				}).toSystemError(),
+			);
+			return;
+		}
+
+		log.info(
+			`client=${clientId} session=${activeId} Reloading provider session`,
+		);
+
+		// Try to end the orchestration engine session (optional service)
+		const engineResult = yield* Effect.either(
+			Effect.gen(function* () {
+				const engine = yield* OrchestrationEngineTag;
+				yield* Effect.tryPromise(() =>
+					engine.dispatch({ type: "end_session", sessionId: activeId }),
+				);
+			}),
+		);
+		if (engineResult._tag === "Left") {
+			log.warn(`endSession failed: ${formatErrorDetail(engineResult.left)}`);
+		}
+
+		// Refresh models and commands via their Effect implementations
+		yield* handleGetModelsEffect(clientId, {});
+		yield* handleGetCommandsEffect(clientId, {});
+
+		wsHandler.sendTo(clientId, {
+			type: "provider_session_reloaded",
+			sessionId: activeId,
+		});
+	});
