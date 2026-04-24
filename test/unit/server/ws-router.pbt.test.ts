@@ -17,7 +17,7 @@
 
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { MESSAGE_HANDLERS } from "../../../src/lib/handlers/index.js";
+import { EFFECT_MESSAGE_HANDLERS } from "../../../src/lib/handlers/index.js";
 import {
 	createClientCountMessage,
 	createClientTracker,
@@ -437,10 +437,10 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(uniqueTypes.size).toBe(validMessageTypes.length);
 		});
 
-		it("every handler in MESSAGE_HANDLERS is in our test list", () => {
+		it("every handler in EFFECT_MESSAGE_HANDLERS is in our test list", () => {
 			// This catches the case where a new handler is added to production
 			// but the test list is not updated — the actual drift we want to detect.
-			const handlerKeys = Object.keys(MESSAGE_HANDLERS).sort();
+			const handlerKeys = Object.keys(EFFECT_MESSAGE_HANDLERS).sort();
 			const testKeys = [...validMessageTypes].sort();
 			expect(testKeys).toEqual(handlerKeys);
 		});

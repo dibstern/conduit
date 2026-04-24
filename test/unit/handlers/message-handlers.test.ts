@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	dispatchMessage,
 	filterAgents,
 	getSessionInputDraft,
 	type HandlerDeps,
@@ -33,7 +32,6 @@ import {
 	handleSwitchModel,
 	handleSwitchSession,
 	handleTerminalCommand,
-	MESSAGE_HANDLERS,
 	type PayloadMap,
 } from "../../../src/lib/handlers/index.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -1666,91 +1664,5 @@ describe("handleTerminalCommand", () => {
 		vi.mocked(deps.ptyManager.hasSession).mockReturnValue(true);
 		await handleTerminalCommand(deps, "client-1", { action: "list" });
 		expect(deps.connectPtyUpstream).not.toHaveBeenCalled();
-	});
-});
-
-// ─── dispatchMessage ─────────────────────────────────────────────────────────
-
-describe("dispatchMessage", () => {
-	it("dispatches to known handler", async () => {
-		const deps = createMockHandlerDeps();
-		await dispatchMessage(deps, "client-1", "get_todo", {});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "todo_state",
-			items: [],
-		});
-	});
-
-	it("logs unknown handler names", async () => {
-		const warnSpy = vi.fn();
-		const deps = createMockHandlerDeps({
-			log: { ...createSilentLogger(), warn: warnSpy },
-		});
-		await dispatchMessage(deps, "client-1", "unknown_handler", {});
-		expect(warnSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Unhandled: unknown_handler"),
-		);
-	});
-
-	it("dispatch table has entries for all expected handlers", () => {
-		const expectedHandlers = [
-			"message",
-			"permission_response",
-			"ask_user_response",
-			"question_reject",
-			"new_session",
-			"switch_session",
-			"view_session",
-			"delete_session",
-			"rename_session",
-			"fork_session",
-			"list_sessions",
-			"search_sessions",
-			"load_more_history",
-			"get_agents",
-			"switch_agent",
-			"get_models",
-			"switch_model",
-			"set_default_model",
-			"switch_variant",
-			"get_commands",
-			"get_projects",
-			"add_project",
-			"list_directories",
-			"remove_project",
-			"rename_project",
-			"get_file_list",
-			"get_file_content",
-			"get_file_tree",
-			"get_tool_content",
-			"terminal_command",
-			"pty_create",
-			"pty_input",
-			"pty_resize",
-			"pty_close",
-			"cancel",
-			"rewind",
-			"input_sync",
-			"get_todo",
-			"instance_add",
-			"instance_remove",
-			"instance_start",
-			"instance_stop",
-			"instance_update",
-			"instance_rename",
-			"set_project_instance",
-			"proxy_detect",
-			"scan_now",
-			"reload_provider_session",
-		];
-		const table = MESSAGE_HANDLERS as Record<string, unknown>;
-		for (const name of expectedHandlers) {
-			expect(table[name]).toBeDefined();
-			expect(typeof table[name]).toBe("function");
-		}
-		// Reverse check: no handlers in production that we don't expect
-		expect(Object.keys(MESSAGE_HANDLERS).sort()).toEqual(
-			[...expectedHandlers].sort(),
-		);
 	});
 });
