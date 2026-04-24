@@ -6,7 +6,7 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { Context } from "effect";
+import { Context, type Deferred } from "effect";
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
@@ -153,6 +153,14 @@ export class ClaudeEventPersistTag extends Context.Tag("ClaudeEventPersist")<
 export class ProviderStateServiceTag extends Context.Tag(
 	"ProviderStateService",
 )<ProviderStateServiceTag, ProviderStateService>() {}
+
+// ─── Daemon lifecycle Tags ────────────────────────────────────────────────
+
+/** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
+export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
+	ShutdownSignalTag,
+	Deferred.Deferred<void>
+>() {}
 
 // ─── Daemon-only Tags ──────────────────────────────────────────────────────
 
