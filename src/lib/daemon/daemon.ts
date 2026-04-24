@@ -1167,8 +1167,13 @@ export class Daemon {
 		const discoveryLog = createLogger("relay").child("discovery");
 
 		try {
-			const { createSdkClient } = await import("../instance/sdk-factory.js");
-			const { client } = createSdkClient({ baseUrl: discoveryUrl });
+			const { createSdkClientEffect } = await import(
+				"../instance/sdk-factory.js"
+			);
+			const { Effect } = await import("effect");
+			const { client } = Effect.runSync(
+				createSdkClientEffect({ baseUrl: discoveryUrl }),
+			);
 			const result = await client.project.list();
 			// SDK with throwOnError: false returns { data, error, response }
 			const projects =

@@ -30,12 +30,4 @@ describe("Effect-based SDK factory", () => {
 			expect(result.value.authHeaders["Authorization"]).toMatch(/^Basic /);
 		}
 	});
-
-	it("legacy createSdkClient still works for daemon compat", async () => {
-		const { createSdkClient } = await import(
-			"../../../src/lib/instance/sdk-factory.js"
-		);
-		const result = createSdkClient({ baseUrl: "http://localhost:12345" });
-		expect(result.client).toBeDefined();
-	});
 });

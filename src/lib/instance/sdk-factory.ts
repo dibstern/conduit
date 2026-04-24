@@ -84,11 +84,3 @@ export const createSdkClientEffect = (
 
 		return { client, fetch: authFetch, authHeaders };
 	});
-
-/**
- * Legacy synchronous wrapper -- used by daemon.ts until W4 daemon migration.
- * Delete this function in Task 14 (daemon migration cleanup).
- */
-export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
-	return Effect.runSync(createSdkClientEffect(options));
-}
