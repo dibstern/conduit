@@ -9,14 +9,25 @@ import { stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { Effect } from "effect";
+import {
+	type ClientInitDeps,
+	handleClientConnected,
+} from "../bridges/client-init.js";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
+import { QuestionBridge } from "../bridges/question-bridge.js";
 import { ServiceRegistry } from "../daemon/service-registry.js";
-import { formatErrorDetail } from "../errors.js";
+import { formatErrorDetail, RelayError } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
 import { createSdkClient } from "../instance/sdk-factory.js";
-import { createLogger, type Logger } from "../logger.js";
+import {
+	createLogger,
+	type Logger,
+	type LogLevel,
+	setLogLevel,
+} from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
 import type { PersistenceLayer } from "../persistence/persistence-layer.js";
 import { ProviderStateService } from "../persistence/provider-state-service.js";
@@ -26,8 +37,13 @@ import {
 	createOrchestrationLayer,
 	type OrchestrationLayer,
 } from "../provider/orchestration-wiring.js";
+import {
+	getClientSemaphore,
+	removeClient,
+} from "../server/client-semaphore.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
+import { RateLimiter } from "../server/rate-limiter.js";
 import { RelayServer } from "../server/server.js";
 import { WebSocketHandler } from "../server/ws-handler.js";
 import { SessionManager } from "../session/session-manager.js";
@@ -42,12 +58,12 @@ import {
 	type RelayRuntime,
 } from "./effect-relay-runtime.js";
 import { createTranslator } from "./event-translator.js";
-import { wireHandlerDeps } from "./handler-deps-wiring.js";
 import { MessagePollerManager } from "./message-poller-manager.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
 import { wirePollers } from "./poller-wiring.js";
 import { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
+import { connectPtyUpstream as connectPtyUpstreamImpl } from "./pty-upstream.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { wireSessionLifecycle } from "./session-lifecycle-wiring.js";
 import { SSEStream } from "./sse-stream.js";
@@ -368,72 +384,166 @@ export async function createProjectRelay(
 			})()
 		: undefined;
 
-	// ── Late-binding Effect dispatch ref ────────────────────────────────────
-	// wireHandlerDeps needs a dispatch function, but the Effect runtime needs
-	// the handlerDeps that wireHandlerDeps creates. Use a ref to break the
-	// cycle — bind it after the runtime is created below.
-	const effectDispatchRef: {
-		fn: (clientId: string, type: string, raw: unknown) => Promise<void>;
-	} = {
-		fn: () => {
-			throw new Error("effectDispatch called before runtime initialized");
-		},
+	// ── Per-client rate limiter & question bridge ──────────────────────────
+	const rateLimiter = new RateLimiter();
+	const questionBridge = new QuestionBridge();
+
+	// ── Client init deps + connection handlers ──────────────────────────────
+	const clientInitDeps: ClientInitDeps = {
+		wsHandler,
+		client: api,
+		sessionMgr,
+		overrides,
+		ptyManager,
+		permissionBridge,
+		statusPoller,
+		...(config.getInstances != null && { getInstances: config.getInstances }),
+		...(config.getCachedUpdate != null && {
+			getCachedUpdate: config.getCachedUpdate,
+		}),
+		...(orchestration != null && {
+			orchestrationEngine: orchestration.engine,
+		}),
+		...(readQuery != null && { readQuery }),
+		log: wsLog,
 	};
 
-	// ── Handler deps wiring (G1: client init, message queue, rate limiter) ──
-	const { handlerDeps, rateLimiter } = wireHandlerDeps({
+	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
+		wsLog.info(
+			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
+		);
+		handleClientConnected(clientInitDeps, clientId, requestedSessionId).catch(
+			(err) =>
+				wsLog.error(
+					`Client init failed for ${clientId}: ${formatErrorDetail(err)}`,
+				),
+		);
+	});
+
+	wsHandler.on("client_disconnected", ({ clientId }) => {
+		removeClient(clientId);
+		wsLog.info(`Client disconnected: ${clientId}`);
+	});
+
+	// ── Derived deps for Effect runtime ─────────────────────────────────────
+	const connectPtyUpstream = (ptyId: string, cursor?: number) =>
+		connectPtyUpstreamImpl(ptyDeps, ptyId, cursor);
+
+	const forkMeta = {
+		setForkEntry: (
+			sid: string,
+			entry: import("../daemon/fork-metadata.js").ForkEntry,
+		) => sessionMgr.setForkEntry(sid, entry),
+		getForkEntry: (sid: string) => sessionMgr.getForkEntry(sid),
+	};
+
+	const instanceMgmt =
+		config.getInstances != null &&
+		config.addInstance != null &&
+		config.removeInstance != null &&
+		config.startInstance != null &&
+		config.stopInstance != null &&
+		config.updateInstance != null &&
+		config.persistConfig != null
+			? {
+					getInstances: config.getInstances,
+					addInstance: config.addInstance,
+					removeInstance: config.removeInstance,
+					startInstance: config.startInstance,
+					stopInstance: config.stopInstance,
+					updateInstance: config.updateInstance,
+					persistConfig: config.persistConfig,
+				}
+			: undefined;
+
+	const projectMgmt =
+		config.getProjects != null && config.setProjectInstance != null
+			? {
+					getProjects: config.getProjects,
+					setProjectInstance: config.setProjectInstance,
+				}
+			: undefined;
+
+	const scanDeps =
+		config.triggerScan != null
+			? { triggerScan: config.triggerScan }
+			: undefined;
+
+	// ── Effect ManagedRuntime (bridge between imperative and Effect worlds) ──
+	const effectRuntime = createRelayRuntime({
 		wsHandler,
 		client: api,
 		sessionMgr,
 		permissionBridge,
+		questionBridge,
 		overrides,
 		ptyManager,
 		config,
 		log,
-		wsLog,
 		statusPoller,
 		registry,
 		pollerManager,
-		ptyDeps,
-		...(readQuery != null && { readQuery }),
-		orchestrationLayer: orchestration,
-		...(claudeEventPersist != null && { claudeEventPersist }),
-		...(providerStateService != null && { providerStateService }),
-		effectDispatch: (clientId, type, raw) =>
-			effectDispatchRef.fn(clientId, type, raw),
-	});
-
-	// ── Effect ManagedRuntime (bridge between imperative and Effect worlds) ──
-	const effectRuntime = createRelayRuntime({
-		wsHandler: handlerDeps.wsHandler,
-		client: handlerDeps.client,
-		sessionMgr: handlerDeps.sessionMgr,
-		permissionBridge: handlerDeps.permissionBridge,
-		questionBridge: handlerDeps.questionBridge,
-		overrides: handlerDeps.overrides,
-		ptyManager: handlerDeps.ptyManager,
-		config: handlerDeps.config,
-		log: handlerDeps.log,
-		statusPoller: handlerDeps.statusPoller,
-		registry: handlerDeps.registry,
-		pollerManager: handlerDeps.pollerManager,
-		connectPtyUpstream: handlerDeps.connectPtyUpstream,
-		forkMeta: handlerDeps.forkMeta,
+		connectPtyUpstream,
+		forkMeta,
 		orchestrationEngine: orchestration.engine,
 		...(readQuery != null && { readQuery }),
 		...(claudeEventPersist != null && { claudeEventPersist }),
 		...(providerStateService != null && { providerStateService }),
-		...(handlerDeps.instanceMgmt != null && {
-			instanceMgmt: handlerDeps.instanceMgmt,
-		}),
-		...(handlerDeps.projectMgmt != null && {
-			projectMgmt: handlerDeps.projectMgmt,
-		}),
-		...(handlerDeps.scanDeps != null && { scanDeps: handlerDeps.scanDeps }),
+		...(instanceMgmt != null && { instanceMgmt }),
+		...(projectMgmt != null && { projectMgmt }),
+		...(scanDeps != null && { scanDeps }),
 	});
 
-	// Bind the late-binding dispatch ref now that the runtime exists.
-	effectDispatchRef.fn = effectRuntime.dispatch;
+	// ── WebSocket message handler ───────────────────────────────────────────
+	wsHandler.on("message", ({ clientId, handler, payload }) => {
+		// Rate-limit check (synchronous — stays outside the semaphore)
+		if (handler === "message") {
+			const result = rateLimiter.check(clientId);
+			if (!result.allowed) {
+				wsHandler.sendTo(clientId, {
+					type: "system_error",
+					code: "RATE_LIMITED",
+					message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
+				});
+				return;
+			}
+		}
+
+		// Log level changes (synchronous, no semaphore needed)
+		if (handler === "set_log_level") {
+			const level = payload["level"];
+			const validLevels = new Set([
+				"debug",
+				"verbose",
+				"info",
+				"warn",
+				"error",
+			]);
+			if (typeof level === "string" && validLevels.has(level)) {
+				setLogLevel(level as LogLevel);
+				wsLog.info(`Log level changed to ${level} by client ${clientId}`);
+			}
+			return;
+		}
+
+		// Serialize handler execution per-client via Effect Semaphore(1)
+		const sem = getClientSemaphore(clientId);
+		const program = sem.withPermits(1)(
+			Effect.tryPromise(() =>
+				effectRuntime.dispatch(clientId, handler, payload),
+			),
+		);
+		Effect.runPromise(program).catch((err) => {
+			wsLog.error(
+				`Error handling message for ${clientId}:`,
+				formatErrorDetail(err),
+			);
+			wsHandler.sendTo(
+				clientId,
+				RelayError.fromCaught(err, "HANDLER_ERROR").toSystemError(),
+			);
+		});
+	});
 
 	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────
 

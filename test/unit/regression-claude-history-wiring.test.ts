@@ -25,8 +25,6 @@ import {
 import { handleViewSession } from "../../src/lib/handlers/session.js";
 import type { HandlerDeps } from "../../src/lib/handlers/types.js";
 import { ReadQueryService } from "../../src/lib/persistence/read-query-service.js";
-import type { RelayEventSinkPersist } from "../../src/lib/provider/relay-event-sink.js";
-import { wireHandlerDeps } from "../../src/lib/relay/handler-deps-wiring.js";
 import {
 	createMockClientInitDeps,
 	createMockHandlerDeps,
@@ -52,90 +50,11 @@ function makeSendToSpy() {
 }
 
 // ─── Gap 1 ───────────────────────────────────────────────────────────────────
-// wireHandlerDeps must propagate claudeEventPersist to handlerDeps.
-// If the spread `...(claudeEventPersist != null && { claudeEventPersist })` is
-// removed from handler-deps-wiring.ts the resulting handlerDeps would have
-// claudeEventPersist=undefined, so user turns never reach SQLite.
-
-describe("Gap 1 – wireHandlerDeps propagates claudeEventPersist", () => {
-	let harness: TestHarness;
-
-	beforeEach(() => {
-		harness = createTestHarness();
-	});
-	afterEach(() => {
-		harness.close();
-	});
-
-	it("handlerDeps.claudeEventPersist is defined when wired with persistence", () => {
-		const persist: RelayEventSinkPersist = {
-			eventStore: harness.eventStore,
-			projectionRunner: {
-				projectEvent: vi.fn(),
-			} as RelayEventSinkPersist["projectionRunner"],
-			ensureSession: vi.fn(),
-		};
-
-		const base = createMockHandlerDeps();
-		// wireHandlerDeps registers event listeners via wsHandler.on().
-		// Provide a minimal .on() stub so the wiring call doesn't throw.
-		type WiringDeps = Parameters<typeof wireHandlerDeps>[0];
-		const wsHandlerWithOn = {
-			...base.wsHandler,
-			on: vi.fn(),
-		} as unknown as WiringDeps["wsHandler"];
-
-		const result = wireHandlerDeps({
-			wsHandler: wsHandlerWithOn,
-			client: base.client,
-			sessionMgr: base.sessionMgr,
-			permissionBridge: base.permissionBridge,
-			overrides: base.overrides,
-			ptyManager: base.ptyManager,
-			config: base.config,
-			log: base.log,
-			wsLog: base.log,
-			statusPoller: base.statusPoller as unknown as WiringDeps["statusPoller"],
-			registry: base.registry,
-			pollerManager:
-				base.pollerManager as unknown as WiringDeps["pollerManager"],
-			ptyDeps: {} as unknown as WiringDeps["ptyDeps"],
-			claudeEventPersist: persist,
-		});
-
-		expect(result.handlerDeps.claudeEventPersist).toBeDefined();
-		expect(result.handlerDeps.claudeEventPersist).toBe(persist);
-	});
-
-	it("handlerDeps.claudeEventPersist is undefined when wired without persistence", () => {
-		const base = createMockHandlerDeps();
-		type WiringDeps = Parameters<typeof wireHandlerDeps>[0];
-		const wsHandlerWithOn = {
-			...base.wsHandler,
-			on: vi.fn(),
-		} as unknown as WiringDeps["wsHandler"];
-
-		const result = wireHandlerDeps({
-			wsHandler: wsHandlerWithOn,
-			client: base.client,
-			sessionMgr: base.sessionMgr,
-			permissionBridge: base.permissionBridge,
-			overrides: base.overrides,
-			ptyManager: base.ptyManager,
-			config: base.config,
-			log: base.log,
-			wsLog: base.log,
-			statusPoller: base.statusPoller as unknown as WiringDeps["statusPoller"],
-			registry: base.registry,
-			pollerManager:
-				base.pollerManager as unknown as WiringDeps["pollerManager"],
-			ptyDeps: {} as unknown as WiringDeps["ptyDeps"],
-			// claudeEventPersist intentionally omitted
-		});
-
-		expect(result.handlerDeps.claudeEventPersist).toBeUndefined();
-	});
-});
+// Originally tested wireHandlerDeps propagation of claudeEventPersist.
+// wireHandlerDeps was eliminated in the Effect.ts migration (Task 4.4);
+// claudeEventPersist now flows directly into createRelayRuntime in
+// relay-stack.ts. The structural guarantee (explicit optional field on
+// HandlerLayerDeps) makes the old propagation regression impossible.
 
 // ─── Gap 2 ───────────────────────────────────────────────────────────────────
 // toSessionSwitchDeps() in handlers/session.ts must include readQuery.
