@@ -352,7 +352,6 @@ export async function createProjectRelay(
 	// ── WebSocket handler ───────────────────────────────────────────────────
 
 	const wsHandler = new WebSocketHandler(
-		serviceRegistry,
 		config.noServer ? null : config.httpServer,
 		{
 			registry,
@@ -362,6 +361,7 @@ export async function createProjectRelay(
 				config.verifyClient != null && { verifyClient: config.verifyClient }),
 		},
 	);
+	serviceRegistry.register(wsHandler);
 
 	// ── PTY upstream deps (constructed after wsHandler is available) ────────
 	const ptyDeps: PtyUpstreamDeps = {

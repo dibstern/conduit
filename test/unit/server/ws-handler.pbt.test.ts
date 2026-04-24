@@ -94,7 +94,7 @@ async function setup(options?: {
 	const server = createServer();
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const port = (server.address() as { port: number }).port;
-	const handler = new WebSocketHandler(new ServiceRegistry(), server, {
+	const handler = new WebSocketHandler(server, {
 		heartbeatInterval: options?.heartbeatInterval ?? 60_000,
 	});
 	return { server, handler, port };
@@ -454,13 +454,14 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		await new Promise<void>((r) => server.close(() => r()));
 	});
 
-	it("P12: WebSocketHandler registers with ServiceRegistry on construction", () => {
+	it("P12: WebSocketHandler can be externally registered with ServiceRegistry", () => {
 		const registry = new ServiceRegistry();
 		expect(registry.size).toBe(0);
 
-		const handler = new WebSocketHandler(registry, null, {
+		const handler = new WebSocketHandler(null, {
 			heartbeatInterval: 60_000,
 		});
+		registry.register(handler);
 		expect(registry.size).toBe(1);
 		handler.close();
 	});

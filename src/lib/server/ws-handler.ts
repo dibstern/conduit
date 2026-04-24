@@ -3,11 +3,10 @@
 // Wires ws-router.ts (pure logic) to real WebSocket connections.
 
 import { randomBytes } from "node:crypto";
-import { EventEmitter } from "node:events";
 import type { IncomingMessage, Server } from "node:http";
 import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../types.js";
 import {
@@ -53,43 +52,29 @@ export interface WebSocketHandlerOptions {
 	registry?: SessionRegistry;
 }
 
-export type WebSocketHandlerEvents = {
-	/** Client connected */
-	client_connected: [
-		{
-			clientId: string;
-			clientCount: number;
-			/** Session ID requested via ?session= query param (new-tab routing) */
-			requestedSessionId?: string;
-		},
-	];
-	/** Client disconnected */
-	client_disconnected: [
-		{
-			clientId: string;
-			clientCount: number;
-			/** Session ID the client was viewing when they disconnected */
-			sessionId?: string;
-		},
-	];
-	/** Incoming message from a client */
-	message: [
-		{
-			clientId: string;
-			handler: IncomingMessageType;
-			payload: Record<string, unknown>;
-		},
-	];
-	/** Error on a client connection */
-	client_error: [{ clientId: string; error: Error }];
-};
+/** Callback signatures for each WebSocketHandler broadcast event type. */
+export interface WebSocketHandlerCallbacks {
+	client_connected: (info: {
+		clientId: string;
+		clientCount: number;
+		requestedSessionId?: string;
+	}) => void;
+	client_disconnected: (info: {
+		clientId: string;
+		clientCount: number;
+		sessionId?: string;
+	}) => void;
+	message: (info: {
+		clientId: string;
+		handler: IncomingMessageType;
+		payload: Record<string, unknown>;
+	}) => void;
+	client_error: (info: { clientId: string; error: Error }) => void;
+}
 
 // ─── WebSocket Handler ──────────────────────────────────────────────────────
 
-export class WebSocketHandler
-	extends EventEmitter<WebSocketHandlerEvents>
-	implements Drainable
-{
+export class WebSocketHandler implements Drainable {
 	private readonly wss: InstanceType<typeof WebSocketServerClass>;
 	private readonly clients: Map<string, WSType> = new Map();
 	private readonly tracker: ClientTracker;
@@ -110,13 +95,17 @@ export class WebSocketHandler
 	private readonly bootstrappedClients: Set<string> = new Set();
 	private readonly bootstrapQueues: Map<string, string[]> = new Map();
 
-	constructor(
-		registry: ServiceRegistry,
-		server: Server | null,
-		options: WebSocketHandlerOptions = {},
-	) {
-		super();
-		registry.register(this);
+	/** Registered callbacks keyed by event type. */
+	private readonly wsCallbacks: {
+		[K in keyof WebSocketHandlerCallbacks]: WebSocketHandlerCallbacks[K][];
+	} = {
+		client_connected: [],
+		client_disconnected: [],
+		message: [],
+		client_error: [],
+	};
+
+	constructor(server: Server | null, options: WebSocketHandlerOptions = {}) {
 		this.tracker = createClientTracker();
 		this.heartbeatInterval = options.heartbeatInterval ?? 30_000;
 		this.registry = options.registry ?? new SessionRegistry();
@@ -170,6 +159,39 @@ export class WebSocketHandler
 
 		// Start heartbeat
 		this.startHeartbeat();
+	}
+
+	/** Register a callback for a specific broadcast event type. */
+	on<K extends keyof WebSocketHandlerCallbacks>(
+		event: K,
+		callback: WebSocketHandlerCallbacks[K],
+	): void {
+		this.wsCallbacks[event].push(callback);
+	}
+
+	/** Register a one-shot callback that auto-removes after first invocation. */
+	once<K extends keyof WebSocketHandlerCallbacks>(
+		event: K,
+		callback: WebSocketHandlerCallbacks[K],
+	): void {
+		const wrapper = ((...args: unknown[]) => {
+			const idx = this.wsCallbacks[event].indexOf(
+				wrapper as WebSocketHandlerCallbacks[K],
+			);
+			if (idx >= 0) this.wsCallbacks[event].splice(idx, 1);
+			(callback as (...a: unknown[]) => void)(...args);
+		}) as WebSocketHandlerCallbacks[K];
+		this.wsCallbacks[event].push(wrapper);
+	}
+
+	/** Invoke all registered callbacks for a given event type. */
+	private notify<K extends keyof WebSocketHandlerCallbacks>(
+		event: K,
+		...args: Parameters<WebSocketHandlerCallbacks[K]>
+	): void {
+		for (const cb of this.wsCallbacks[event]) {
+			(cb as (...a: unknown[]) => void)(...args);
+		}
 	}
 
 	/** Broadcast a message to all connected clients */
@@ -361,7 +383,7 @@ export class WebSocketHandler
 		}
 
 		// Notify about new client
-		this.emit("client_connected", {
+		this.notify("client_connected", {
 			clientId,
 			clientCount: count,
 			...(requestedSessionId != null && { requestedSessionId }),
@@ -385,7 +407,7 @@ export class WebSocketHandler
 			// so the client_disconnected handler can access it.
 			const sessionId = this.registry.removeClient(clientId);
 			const newCount = this.tracker.removeClient(clientId);
-			this.emit("client_disconnected", {
+			this.notify("client_disconnected", {
 				clientId,
 				clientCount: newCount,
 				...(sessionId != null && { sessionId }),
@@ -395,7 +417,7 @@ export class WebSocketHandler
 
 		// Handle errors
 		wsConn.on("error", (err: Error) => {
-			this.emit("client_error", { clientId, error: err });
+			this.notify("client_error", { clientId, error: err });
 		});
 
 		// Mark as alive for heartbeat
@@ -432,7 +454,7 @@ export class WebSocketHandler
 		}
 
 		// Emit for the project context to handle
-		this.emit("message", {
+		this.notify("message", {
 			clientId,
 			handler: result.handler,
 			payload: result.payload,
@@ -449,7 +471,7 @@ export class WebSocketHandler
 					this.bootstrappedClients.delete(clientId);
 					this.bootstrapQueues.delete(clientId);
 					const count = this.tracker.removeClient(clientId);
-					this.emit("client_disconnected", { clientId, clientCount: count });
+					this.notify("client_disconnected", { clientId, clientCount: count });
 					this.broadcast(createClientCountMessage(count));
 					wsConn.terminate();
 					continue;
