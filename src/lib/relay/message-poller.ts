@@ -7,8 +7,7 @@
 // RelayMessages (delta, tool_start, tool_executing, tool_result, thinking_*,
 // result, done, etc.) that feed into the same cache + broadcast pipeline.
 
-import { EventEmitter } from "node:events";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -459,17 +458,12 @@ export interface MessagePollerOptions {
 	hasViewers?: () => boolean;
 }
 
-export type MessagePollerEvents = {
-	/** Emitted with synthesized streaming events from REST diff */
-	events: [messages: RelayMessage[]];
-};
+/** Callback signature for the "events" broadcast event. */
+export type MessagePollerEventsCallback = (messages: RelayMessage[]) => void;
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
 
-export class MessagePoller
-	extends EventEmitter<MessagePollerEvents>
-	implements Drainable
-{
+export class MessagePoller implements Drainable {
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly interval: number;
 	private readonly log: Logger;
@@ -504,13 +498,24 @@ export class MessagePoller
 	/** Pending fire-and-forget promises — awaited in drain(). */
 	private readonly pendingPromises = new Set<Promise<unknown>>();
 
-	constructor(registry: ServiceRegistry, options: MessagePollerOptions) {
-		super();
-		registry.register(this);
+	/** Registered "events" broadcast callbacks. */
+	private readonly eventsCallbacks: MessagePollerEventsCallback[] = [];
+
+	constructor(options: MessagePollerOptions) {
 		this.client = options.client;
 		this.interval = options.interval ?? POLL_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
 		this.hasViewers = options.hasViewers;
+	}
+
+	/** Register a callback for the "events" broadcast event. */
+	on(_event: "events", callback: MessagePollerEventsCallback): void {
+		this.eventsCallbacks.push(callback);
+	}
+
+	/** Remove all registered callbacks. */
+	removeAllListeners(): void {
+		this.eventsCallbacks.length = 0;
 	}
 
 	// ─── Public API ────────────────────────────────────────────────────────
@@ -611,7 +616,10 @@ export class MessagePoller
 	 */
 	emitDone(sessionId: string): void {
 		if (sessionId !== this.activeSessionId) return;
-		this.emit("events", [{ type: "done", sessionId, code: 0 }]);
+		const events: RelayMessage[] = [{ type: "done", sessionId, code: 0 }];
+		for (const cb of this.eventsCallbacks) {
+			cb(events);
+		}
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
@@ -687,7 +695,9 @@ export class MessagePoller
 				this.log.info(
 					`SYNTHESIZED session=${sessionId.slice(0, 12)} events=${events.length} types=[${events.map((e) => e.type).join(",")}]`,
 				);
-				this.emit("events", events);
+				for (const cb of this.eventsCallbacks) {
+					cb(events);
+				}
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

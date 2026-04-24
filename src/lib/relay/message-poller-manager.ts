@@ -74,7 +74,7 @@ export class MessagePollerManager
 	startPolling(sessionId: string, seedMessages?: Message[]): void {
 		if (this.pollers.has(sessionId)) return;
 
-		const poller = new MessagePoller(this.serviceRegistry, {
+		const poller = new MessagePoller({
 			client: this.client,
 			...(this.interval != null && { interval: this.interval }),
 			log: this.log,
