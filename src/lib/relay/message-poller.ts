@@ -7,8 +7,8 @@
 // RelayMessages (delta, tool_start, tool_executing, tool_result, thinking_*,
 // result, done, etc.) that feed into the same cache + broadcast pipeline.
 
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import { EventEmitter } from "node:events";
+import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -466,7 +466,10 @@ export type MessagePollerEvents = {
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
 
-export class MessagePoller extends TrackedService<MessagePollerEvents> {
+export class MessagePoller
+	extends EventEmitter<MessagePollerEvents>
+	implements Drainable
+{
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly interval: number;
 	private readonly log: Logger;
@@ -498,8 +501,12 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 	 */
 	private needsSeedOnFirstPoll = false;
 
+	/** Pending fire-and-forget promises — awaited in drain(). */
+	private readonly pendingPromises = new Set<Promise<unknown>>();
+
 	constructor(registry: ServiceRegistry, options: MessagePollerOptions) {
-		super(registry);
+		super();
+		registry.register(this);
 		this.client = options.client;
 		this.interval = options.interval ?? POLL_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
@@ -547,18 +554,18 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 			);
 		}
 
-		this.timer = this.repeating(() => {
-			this.tracked(this.poll());
+		this.timer = setInterval(() => {
+			this.trackPromise(this.poll());
 		}, this.interval);
 
 		// Immediate first poll
-		this.tracked(this.poll());
+		this.trackPromise(this.poll());
 	}
 
 	/** Stop polling and clear state. */
 	stopPolling(): void {
 		if (this.timer) {
-			this.clearTrackedTimer(this.timer);
+			clearInterval(this.timer);
 			this.timer = null;
 		}
 		if (this.activeSessionId) {
@@ -690,6 +697,13 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 		}
 	}
 
+	/** Cancel all work and wait for in-flight operations to settle. */
+	async drain(): Promise<void> {
+		this.stopPolling();
+		await Promise.allSettled([...this.pendingPromises]);
+		this.pendingPromises.clear();
+	}
+
 	// ─── Diff + Synthesis ──────────────────────────────────────────────────
 
 	private doDiffAndSynthesize(
@@ -703,5 +717,11 @@ export class MessagePoller extends TrackedService<MessagePollerEvents> {
 		this.previousSnapshot = newSnapshot;
 		// Tag all synthesized events with the active session's ID
 		return events.map((e) => tagWithSessionId(e, sessionId));
+	}
+
+	/** Track a fire-and-forget promise for drain. */
+	private trackPromise<T>(promise: Promise<T>): void {
+		this.pendingPromises.add(promise);
+		promise.finally(() => this.pendingPromises.delete(promise)).catch(() => {});
 	}
 }

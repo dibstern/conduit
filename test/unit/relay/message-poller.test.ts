@@ -1420,9 +1420,9 @@ describe("MessagePoller", () => {
 		});
 	});
 
-	// ─── TrackedService drain ────────────────────────────────────────────
+	// ─── Drainable lifecycle ─────────────────────────────────────────────
 
-	describe("TrackedService drain", () => {
+	describe("Drainable lifecycle", () => {
 		it("after drain(), interval no longer fires", async () => {
 			const client = createMockClient([]);
 			const registry = new ServiceRegistry();

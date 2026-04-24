@@ -3,9 +3,9 @@
 // process spawning, and health checks.
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
 
@@ -43,7 +43,10 @@ export interface InstanceManagerOptions {
 
 // ─── InstanceManager ────────────────────────────────────────────────────────
 
-export class InstanceManager extends TrackedService<InstanceManagerEvents> {
+export class InstanceManager
+	extends EventEmitter<InstanceManagerEvents>
+	implements Drainable
+{
 	private readonly maxInstances: number;
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;
@@ -72,9 +75,12 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	>();
 	/** Restart timestamps per instance for rate-limiting. */
 	private readonly restartTimestamps = new Map<string, number[]>();
+	/** Pending fire-and-forget promises — awaited in drain(). */
+	private readonly pendingPromises = new Set<Promise<unknown>>();
 
 	constructor(registry: ServiceRegistry, options: InstanceManagerOptions = {}) {
-		super(registry);
+		super();
+		registry.register(this);
 		this.maxInstances = options.maxInstances ?? 5;
 		this.maxRestartsPerWindow = options.maxRestartsPerWindow ?? 3;
 		this.restartWindowMs = options.restartWindowMs ?? 60_000;
@@ -407,7 +413,8 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	/** Cancel all work and wait for in-flight operations to settle. */
 	async drain(): Promise<void> {
 		this.stopAll();
-		await super.drain();
+		await Promise.allSettled([...this.pendingPromises]);
+		this.pendingPromises.clear();
 	}
 
 	// ─── Health polling (private) ───────────────────────────────────────────
@@ -417,7 +424,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		// Clear any existing interval first
 		this.stopHealthPolling(id);
 
-		const interval = this.repeating(async () => {
+		const interval = setInterval(async () => {
 			const instance = this.instances.get(id);
 			if (!instance) {
 				this.stopHealthPolling(id);
@@ -464,7 +471,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	private stopHealthPolling(id: string): void {
 		const interval = this.healthIntervals.get(id);
 		if (interval) {
-			this.clearTrackedTimer(interval);
+			clearInterval(interval);
 			this.healthIntervals.delete(id);
 		}
 	}
@@ -473,7 +480,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	private cancelPendingRestart(id: string): void {
 		const timer = this.pendingRestarts.get(id);
 		if (timer) {
-			this.clearTrackedTimer(timer);
+			clearTimeout(timer);
 			this.pendingRestarts.delete(id);
 		}
 	}
@@ -548,20 +555,23 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 
 		// Restart with exponential backoff: 1s, 2s, 4s, ... capped at 30s
 		const backoffMs = Math.min(1000 * 2 ** (recent.length - 1), 30_000);
-		const timer = this.delayed(async () => {
+		const timer = setTimeout(() => {
 			this.pendingRestarts.delete(id);
-			try {
-				// Reset status so startInstance doesn't return early
-				instance.status = "stopped";
-				await this.startInstance(id);
-			} catch (err) {
-				instance.status = "stopped";
-				this.emit("status_changed", instance);
-				this.emit("instance_error", {
-					id,
-					error: `Restart failed: ${formatErrorDetail(err)}`,
-				});
-			}
+			const p = (async () => {
+				try {
+					// Reset status so startInstance doesn't return early
+					instance.status = "stopped";
+					await this.startInstance(id);
+				} catch (err) {
+					instance.status = "stopped";
+					this.emit("status_changed", instance);
+					this.emit("instance_error", {
+						id,
+						error: `Restart failed: ${formatErrorDetail(err)}`,
+					});
+				}
+			})();
+			this.trackPromise(p);
 		}, backoffMs);
 
 		this.pendingRestarts.set(id, timer);
@@ -597,10 +607,16 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		_instance: OpenCodeInstance,
 	): Promise<boolean> {
 		try {
-			const res = await this.fetch(`http://localhost:${port}/health`);
+			const res = await fetch(`http://localhost:${port}/health`);
 			return res.ok;
 		} catch {
 			return false;
 		}
+	}
+
+	/** Track a fire-and-forget promise for drain. */
+	private trackPromise<T>(promise: Promise<T>): void {
+		this.pendingPromises.add(promise);
+		promise.finally(() => this.pendingPromises.delete(promise)).catch(() => {});
 	}
 }

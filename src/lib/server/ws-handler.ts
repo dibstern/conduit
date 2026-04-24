@@ -3,11 +3,11 @@
 // Wires ws-router.ts (pure logic) to real WebSocket connections.
 
 import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import type { IncomingMessage, Server } from "node:http";
 import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../types.js";
 import {
@@ -86,7 +86,10 @@ export type WebSocketHandlerEvents = {
 
 // ─── WebSocket Handler ──────────────────────────────────────────────────────
 
-export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
+export class WebSocketHandler
+	extends EventEmitter<WebSocketHandlerEvents>
+	implements Drainable
+{
 	private readonly wss: InstanceType<typeof WebSocketServerClass>;
 	private readonly clients: Map<string, WSType> = new Map();
 	private readonly tracker: ClientTracker;
@@ -112,7 +115,8 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 		server: Server | null,
 		options: WebSocketHandlerOptions = {},
 	) {
-		super(registry);
+		super();
+		registry.register(this);
 		this.tracker = createClientTracker();
 		this.heartbeatInterval = options.heartbeatInterval ?? 30_000;
 		this.registry = options.registry ?? new SessionRegistry();
@@ -306,7 +310,7 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 	/** Close all connections and clean up */
 	close(): void {
 		if (this.heartbeatTimer) {
-			this.clearTrackedTimer(this.heartbeatTimer);
+			clearInterval(this.heartbeatTimer);
 			this.heartbeatTimer = null;
 		}
 
@@ -321,10 +325,9 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 		this.wss.close();
 	}
 
-	/** Drain: close connections then cancel tracked async work. */
-	override async drain(): Promise<void> {
+	/** Drain: close connections and clean up. */
+	async drain(): Promise<void> {
 		this.close();
-		await super.drain();
 	}
 
 	/**
@@ -437,7 +440,7 @@ export class WebSocketHandler extends TrackedService<WebSocketHandlerEvents> {
 	}
 
 	private startHeartbeat(): void {
-		this.heartbeatTimer = this.repeating(() => {
+		this.heartbeatTimer = setInterval(() => {
 			for (const [clientId, wsConn] of this.clients) {
 				const aliveWs = wsConn as WSType & { isAlive: boolean };
 				if (!aliveWs.isAlive) {
