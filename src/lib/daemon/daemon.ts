@@ -272,7 +272,8 @@ export class Daemon {
 		this.smartDefault = options?.smartDefault ?? true;
 		this.instanceManager = new InstanceManager();
 		this.serviceRegistry.register(this.instanceManager);
-		this.registry = new ProjectRegistry(this.serviceRegistry);
+		this.registry = new ProjectRegistry();
+		this.serviceRegistry.register(this.registry);
 
 		// Auto-persist config on project mutations
 		this.registry.on("project_added", () => this.persistConfig());

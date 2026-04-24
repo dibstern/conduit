@@ -3,10 +3,9 @@
 // three independent data structures (projects, projectRelays, pendingRelaySlugs)
 // with a typed discriminated union.
 
-import { EventEmitter } from "node:events";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import type { RelayMessage, StoredProject } from "../types.js";
-import type { Drainable, ServiceRegistry } from "./service-registry.js";
+import type { Drainable } from "./service-registry.js";
 
 // ─── Discriminated union ────────────────────────────────────────────────────
 
@@ -29,29 +28,66 @@ export interface ProjectError {
 
 export type ProjectEntry = ProjectRegistering | ProjectReady | ProjectError;
 
-// ─── Events ─────────────────────────────────────────────────────────────────
+// ─── Callbacks ──────────────────────────────────────────────────────────────
 
-export type ProjectRegistryEvents = {
-	project_added: [slug: string, project: StoredProject];
-	project_ready: [slug: string, relay: ProjectRelay];
-	project_error: [slug: string, error: string];
-	project_updated: [slug: string, project: StoredProject];
-	project_removed: [slug: string];
-};
+/** Callback signatures for each ProjectRegistry event type. */
+export interface ProjectRegistryCallbacks {
+	project_added: (slug: string, project: StoredProject) => void;
+	project_ready: (slug: string, relay: ProjectRelay) => void;
+	project_error: (slug: string, error: string) => void;
+	project_updated: (slug: string, project: StoredProject) => void;
+	project_removed: (slug: string) => void;
+}
 
 // ─── Registry class ─────────────────────────────────────────────────────────
 
-export class ProjectRegistry
-	extends EventEmitter<ProjectRegistryEvents>
-	implements Drainable
-{
+export class ProjectRegistry implements Drainable {
 	private readonly entries = new Map<string, ProjectEntry>();
 	private readonly abortControllers = new Map<string, AbortController>();
 	private readonly pending = new Set<Promise<unknown>>();
 
-	constructor(registry: ServiceRegistry) {
-		super();
-		registry.register(this);
+	/** Registered callbacks keyed by event type. */
+	private readonly callbacks: {
+		[K in keyof ProjectRegistryCallbacks]: ProjectRegistryCallbacks[K][];
+	} = {
+		project_added: [],
+		project_ready: [],
+		project_error: [],
+		project_updated: [],
+		project_removed: [],
+	};
+
+	/** Register a callback for a specific event type. */
+	on<K extends keyof ProjectRegistryCallbacks>(
+		event: K,
+		callback: ProjectRegistryCallbacks[K],
+	): void {
+		this.callbacks[event].push(callback);
+	}
+
+	/** Unregister a callback for a specific event type. */
+	off<K extends keyof ProjectRegistryCallbacks>(
+		event: K,
+		callback: ProjectRegistryCallbacks[K],
+	): void {
+		const arr = this.callbacks[event];
+		const idx = arr.indexOf(callback);
+		if (idx !== -1) arr.splice(idx, 1);
+	}
+
+	/** Return the number of registered callbacks for a given event type. */
+	listenerCount<K extends keyof ProjectRegistryCallbacks>(event: K): number {
+		return this.callbacks[event].length;
+	}
+
+	/** Invoke all registered callbacks for a given event type. */
+	private notify<K extends keyof ProjectRegistryCallbacks>(
+		event: K,
+		...args: Parameters<ProjectRegistryCallbacks[K]>
+	): void {
+		for (const cb of [...this.callbacks[event]]) {
+			(cb as (...a: unknown[]) => void)(...args);
+		}
 	}
 
 	// ── Queries ──────────────────────────────────────────────────────────
@@ -154,7 +190,7 @@ export class ProjectRegistry
 		}
 
 		this.entries.set(slug, { status: "registering", project });
-		this.emit("project_added", slug, project);
+		this.notify("project_added", slug, project);
 
 		const ac = new AbortController();
 		this.abortControllers.set(slug, ac);
@@ -169,7 +205,7 @@ export class ProjectRegistry
 					}
 					this.abortControllers.delete(slug);
 					this.entries.set(slug, { status: "ready", project, relay });
-					this.emit("project_ready", slug, relay);
+					this.notify("project_ready", slug, relay);
 				},
 				(err) => {
 					if (ac.signal.aborted) return; // Expected — remove() was called
@@ -180,7 +216,7 @@ export class ProjectRegistry
 						project,
 						error: message,
 					});
-					this.emit("project_error", slug, message);
+					this.notify("project_error", slug, message);
 				},
 			),
 		);
@@ -196,7 +232,7 @@ export class ProjectRegistry
 		}
 		this.entries.set(slug, { status: "registering", project });
 		if (!options?.silent) {
-			this.emit("project_added", slug, project);
+			this.notify("project_added", slug, project);
 		}
 	}
 
@@ -231,7 +267,7 @@ export class ProjectRegistry
 						project: entry.project,
 						relay,
 					});
-					this.emit("project_ready", slug, relay);
+					this.notify("project_ready", slug, relay);
 				},
 				(err) => {
 					if (ac.signal.aborted) return;
@@ -242,7 +278,7 @@ export class ProjectRegistry
 						project: entry.project,
 						error: message,
 					});
-					this.emit("project_error", slug, message);
+					this.notify("project_error", slug, message);
 				},
 			),
 		);
@@ -270,7 +306,7 @@ export class ProjectRegistry
 		}
 
 		this.entries.delete(slug);
-		this.emit("project_removed", slug);
+		this.notify("project_removed", slug);
 	}
 
 	async replaceRelay(
@@ -328,7 +364,7 @@ export class ProjectRegistry
 			});
 		}
 
-		this.emit("project_updated", slug, updatedProject);
+		this.notify("project_updated", slug, updatedProject);
 	}
 
 	updateProject(
@@ -362,7 +398,7 @@ export class ProjectRegistry
 			});
 		}
 
-		this.emit("project_updated", slug, updatedProject);
+		this.notify("project_updated", slug, updatedProject);
 	}
 
 	// ── WS upgrade helper ───────────────────────────────────────────────
@@ -452,7 +488,7 @@ export class ProjectRegistry
 				stops.push(entry.relay.stop().catch(() => {}));
 			}
 			this.entries.delete(slug);
-			this.emit("project_removed", slug);
+			this.notify("project_removed", slug);
 		}
 
 		await Promise.all(stops);
