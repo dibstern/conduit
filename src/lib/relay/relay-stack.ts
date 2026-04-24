@@ -548,10 +548,11 @@ export async function createProjectRelay(
 
 	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────
 
-	const sseStream = new SSEStream(serviceRegistry, {
+	const sseStream = new SSEStream({
 		api,
 		log: sseLog,
 	});
+	serviceRegistry.register(sseStream);
 
 	// ── Run projector recovery (required before projectEvent works) ──────
 	// ProjectionRunner guards projectEvent() behind a recovery check.

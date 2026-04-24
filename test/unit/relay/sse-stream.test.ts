@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { SSEStream } from "../../../src/lib/relay/sse-stream.js";
 
 function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
@@ -18,18 +17,15 @@ function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
 }
 
 describe("SSEStream", () => {
-	it("registers itself with ServiceRegistry", () => {
-		const registry = new ServiceRegistry();
+	it("can be created without a ServiceRegistry", () => {
 		const api = makeStubApi([]);
-		expect(registry.size).toBe(0);
-		new SSEStream(registry, { api });
-		expect(registry.size).toBe(1);
+		const stream = new SSEStream({ api });
+		expect(stream.isConnected()).toBe(false);
 	});
 
 	it("emits 'connected' when stream starts", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
@@ -39,7 +35,6 @@ describe("SSEStream", () => {
 	});
 
 	it("emits events from the SDK stream", async () => {
-		const registry = new ServiceRegistry();
 		const events = [
 			{ type: "message.part.updated", properties: { part: { id: "p1" } } },
 			{
@@ -48,7 +43,7 @@ describe("SSEStream", () => {
 			},
 		];
 		const api = makeStubApi(events);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const received: unknown[] = [];
 		stream.on("event", (e) => received.push(e));
 		const connected = new Promise<void>((resolve) => {
@@ -63,9 +58,8 @@ describe("SSEStream", () => {
 	});
 
 	it("emits heartbeat for server.heartbeat events", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([{ type: "server.heartbeat" }]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		let heartbeatSeen = false;
 		stream.on("heartbeat", () => {
 			heartbeatSeen = true;
@@ -81,9 +75,8 @@ describe("SSEStream", () => {
 	});
 
 	it("emits heartbeat for server.connected events", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([{ type: "server.connected" }]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		let heartbeatSeen = false;
 		stream.on("heartbeat", () => {
 			heartbeatSeen = true;
@@ -99,13 +92,12 @@ describe("SSEStream", () => {
 	});
 
 	it("does not emit heartbeat events as regular events", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([
 			{ type: "server.heartbeat" },
 			{ type: "message.part.updated", properties: { part: { id: "p1" } } },
 			{ type: "server.connected" },
 		]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const received: unknown[] = [];
 		stream.on("event", (e) => received.push(e));
 		const connected = new Promise<void>((resolve) => {
@@ -120,9 +112,8 @@ describe("SSEStream", () => {
 	});
 
 	it("reports health state", () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const health = stream.getHealth();
 		expect(health).toHaveProperty("connected");
 		expect(health).toHaveProperty("lastEventAt");
@@ -130,16 +121,14 @@ describe("SSEStream", () => {
 	});
 
 	it("isConnected returns false before connect", () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		expect(stream.isConnected()).toBe(false);
 	});
 
 	it("isConnected returns true after connect", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([{ type: "message.part.updated", properties: {} }]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
@@ -150,9 +139,8 @@ describe("SSEStream", () => {
 	});
 
 	it("isConnected returns false after disconnect", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
@@ -163,9 +151,8 @@ describe("SSEStream", () => {
 	});
 
 	it("drain stops the stream", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
@@ -176,9 +163,8 @@ describe("SSEStream", () => {
 	});
 
 	it("connect is idempotent when already running", async () => {
-		const registry = new ServiceRegistry();
 		const api = makeStubApi([]);
-		const stream = new SSEStream(registry, { api });
+		const stream = new SSEStream({ api });
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});

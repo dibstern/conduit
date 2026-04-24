@@ -3,8 +3,7 @@
 // Replaces SSEConsumer's raw HTTP/SSE parsing with the typed AsyncGenerator
 // returned by the OpenCode SDK. Reconnects with exponential backoff on failure.
 
-import { EventEmitter } from "node:events";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
 import {
@@ -29,21 +28,19 @@ export interface SSEStreamOptions {
 	log?: Logger;
 }
 
-export type SSEStreamEvents = {
-	event: [unknown];
-	connected: [];
-	disconnected: [Error | undefined];
-	reconnecting: [{ attempt: number; delay: number }];
-	error: [Error];
-	heartbeat: [];
-};
+/** Callback signatures for each SSEStream broadcast event type. */
+export interface SSEStreamCallbacks {
+	event: (data: unknown) => void;
+	connected: () => void;
+	disconnected: (error: Error | undefined) => void;
+	reconnecting: (info: { attempt: number; delay: number }) => void;
+	error: (error: Error) => void;
+	heartbeat: () => void;
+}
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
-export class SSEStream
-	extends EventEmitter<SSEStreamEvents>
-	implements Drainable
-{
+export class SSEStream implements Drainable {
 	private readonly api: SSEStreamOptions["api"];
 	private readonly backoffConfig: BackoffConfig;
 	private readonly healthTracker: HealthTracker;
@@ -57,9 +54,19 @@ export class SSEStream
 	/** Pending fire-and-forget promises — awaited in drain(). */
 	private readonly pendingPromises = new Set<Promise<unknown>>();
 
-	constructor(registry: ServiceRegistry, options: SSEStreamOptions) {
-		super();
-		registry.register(this);
+	/** Registered callbacks keyed by event type. */
+	private readonly callbacks: {
+		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
+	} = {
+		event: [],
+		connected: [],
+		disconnected: [],
+		reconnecting: [],
+		error: [],
+		heartbeat: [],
+	};
+
+	constructor(options: SSEStreamOptions) {
 		this.api = options.api;
 		this.log = options.log ?? createSilentLogger();
 		this.backoffConfig = {
@@ -72,17 +79,25 @@ export class SSEStream
 		});
 	}
 
-	/** Start consuming SSE events. Does not throw — errors are emitted. */
+	/** Register a callback for a specific broadcast event type. */
+	on<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		callback: SSEStreamCallbacks[K],
+	): void {
+		this.callbacks[event].push(callback);
+	}
+
+	/** Start consuming SSE events. Does not throw — errors are notified via callbacks. */
 	async connect(): Promise<void> {
 		if (this.running) return;
 		this.running = true;
 		this.reconnectAttempt = 0;
-		// Fire-and-forget: consumeLoop handles its own errors via emit + reconnect.
+		// Fire-and-forget: consumeLoop handles its own errors via callbacks + reconnect.
 		this.trackPromise(
 			this.consumeLoop().catch((err) => {
 				if (!this.running) return;
 				const error = err instanceof Error ? err : new Error(String(err));
-				this.emit("error", error);
+				this.notify("error", error);
 			}),
 		);
 	}
@@ -121,6 +136,16 @@ export class SSEStream
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
+	/** Invoke all registered callbacks for a given event type. */
+	private notify<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		...args: Parameters<SSEStreamCallbacks[K]>
+	): void {
+		for (const cb of this.callbacks[event]) {
+			(cb as (...a: unknown[]) => void)(...args);
+		}
+	}
+
 	/** Track a fire-and-forget promise for drain. */
 	private trackPromise<T>(promise: Promise<T>): Promise<T> {
 		this.pendingPromises.add(promise);
@@ -139,7 +164,7 @@ export class SSEStream
 				});
 				this.reconnectAttempt = 0;
 				this.healthTracker.onConnected();
-				this.emit("connected");
+				this.notify("connected");
 
 				for await (const event of stream) {
 					if (!this.running) break;
@@ -150,25 +175,25 @@ export class SSEStream
 						evt.type === "server.heartbeat" ||
 						evt.type === "server.connected"
 					) {
-						this.emit("heartbeat");
+						this.notify("heartbeat");
 						continue;
 					}
 
-					this.emit("event", event);
+					this.notify("event", event);
 				}
 
 				// Stream ended gracefully — reconnect if still running
 				if (this.running) {
 					this.healthTracker.onDisconnected();
-					this.emit("disconnected", undefined);
+					this.notify("disconnected", undefined);
 				}
 			} catch (err) {
 				if (!this.running) return;
 				const error = err instanceof Error ? err : new Error(String(err));
 				if (error.name === "AbortError") return;
 				this.healthTracker.onDisconnected();
-				this.emit("disconnected", error);
-				this.emit("error", error);
+				this.notify("disconnected", error);
+				this.notify("error", error);
 			}
 
 			// Schedule reconnection with exponential backoff
@@ -179,7 +204,7 @@ export class SSEStream
 				);
 				this.reconnectAttempt++;
 				this.healthTracker.onReconnect();
-				this.emit("reconnecting", {
+				this.notify("reconnecting", {
 					attempt: this.reconnectAttempt,
 					delay,
 				});
