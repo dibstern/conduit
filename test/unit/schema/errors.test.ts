@@ -132,14 +132,32 @@ describe("Schema.TaggedError errors", () => {
 		expect(err._tag).toBe("ConfigurationError");
 	});
 
-	it("PersistenceError has _tag discriminant", () => {
+	it("PersistenceError._tag is PersistenceError", () => {
 		const err = new PersistenceError({
 			message: "Write failed",
 			code: "WRITE_FAILED",
-			context: { table: "events" },
 		});
 		expect(err._tag).toBe("PersistenceError");
 		expect(err.code).toBe("WRITE_FAILED");
+	});
+
+	it("PersistenceError message includes code prefix", () => {
+		const err = new PersistenceError({
+			message: "disk full",
+			code: "APPEND_FAILED",
+		});
+		expect(err.message).toContain("disk full");
+	});
+
+	it("PersistenceError.toLog returns structured output", () => {
+		const err = new PersistenceError({
+			message: "test",
+			code: "MIGRATION_FAILED",
+			context: { table: "events" },
+		});
+		const log = err.toLog();
+		expect(log.error).toBe("PersistenceError");
+		expect(log.code).toBe("MIGRATION_FAILED");
 	});
 
 	it("RelayError base class supports generic codes", () => {
