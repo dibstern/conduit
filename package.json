@@ -70,6 +70,8 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "^0.2.97",
+		"@effect/platform": "^0.96.1",
+		"@effect/platform-node": "^0.106.0",
 		"@opencode-ai/sdk": "^1.4.3",
 		"dompurify": "^3.3.1",
 		"effect": "^3.21.2",
