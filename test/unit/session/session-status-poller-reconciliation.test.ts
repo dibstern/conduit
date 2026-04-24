@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -87,7 +86,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 	describe("default interval", () => {
 		it("uses 7000ms as default interval instead of 500ms", async () => {
 			const client = createMockClient({ sess_1: { type: "idle" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				log: createSilentLogger(),
 			});
@@ -124,7 +123,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log,
@@ -166,7 +165,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log,
@@ -202,7 +201,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 
 			const client = createMockClient({ sess_1: { type: "busy" } });
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -250,7 +249,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log,
@@ -294,7 +293,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log,
@@ -341,7 +340,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log,
@@ -380,7 +379,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			// REST says idle
 			const client = createMockClient({ sess_1: { type: "idle" } });
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 60_000, // very long — reconcileNow should work without waiting
 				log: createSilentLogger(),
@@ -404,7 +403,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 		it("is a no-op when persistence is not configured", async () => {
 			const client = createMockClient({ sess_1: { type: "idle" } });
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				log: createSilentLogger(),
 			});
@@ -429,7 +428,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 
 			const client = createMockClient({ sess_1: { type: "idle" } });
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -482,7 +481,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 			const warnSpy = vi.fn();
 			const log = { ...createSilentLogger(), warn: warnSpy };
 
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log,
@@ -518,7 +517,7 @@ describe("SessionStatusPoller — reconciliation", () => {
 	describe("without persistence", () => {
 		it("still works as a basic status poller without reconciliation", async () => {
 			const client = createMockClient({ sess_1: { type: "idle" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),

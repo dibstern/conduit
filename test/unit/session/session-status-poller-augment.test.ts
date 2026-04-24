@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
@@ -39,7 +38,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 		it("marks the parent busy when a child is busy and in the parent map", async () => {
 			const parentMap = new Map<string, string>([["child_1", "parent_1"]]);
 			const client = createMockClient({ child_1: { type: "busy" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -77,7 +76,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			const parentMap = new Map<string, string>([["child_1", "parent_1"]]);
 			// Start idle, then go busy
 			const client = createMockClient({ child_1: { type: "idle" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -116,7 +115,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 				{ child_1: { type: "idle" } },
 				{ id: "child_1", parentID: "parent_1" },
 			);
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -155,7 +154,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 				{ child_1: { type: "idle" } },
 				{ id: "child_1", parentID: "parent_1" },
 			);
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -192,7 +191,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 				{ child_1: { type: "idle" } },
 				{ id: "child_1" }, // no parentID
 			);
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -235,7 +234,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 			const parentMap = new Map<string, string>();
 			const client = createMockClient({ child_1: { type: "idle" } });
 			client.session.get.mockRejectedValue(new Error("session not found"));
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -275,7 +274,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 	describe("markMessageActivity", () => {
 		it("injects a synthetic busy status for a session not in /session/status", async () => {
 			const client = createMockClient({}); // API returns no sessions
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -307,7 +306,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 	describe("clearMessageActivity", () => {
 		it("removes the synthetic busy status after clearing", async () => {
 			const client = createMockClient({});
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -345,7 +344,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 	describe("markMessageActivity triggers immediate poll", () => {
 		it("does not wait for the next interval to poll", async () => {
 			const client = createMockClient({});
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 5000, // very long interval
 				log: createSilentLogger(),
@@ -373,7 +372,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 		it("both augmentations appear in the same changed event", async () => {
 			const parentMap = new Map<string, string>([["subagent_1", "parent_1"]]);
 			const client = createMockClient({ sess_idle: { type: "idle" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -417,7 +416,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 	describe("immediate first poll on start()", () => {
 		it("polls immediately on start() before the first interval fires", async () => {
 			const client = createMockClient({ sess_1: { type: "busy" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 5000, // very long interval
 				log: createSilentLogger(),
@@ -440,7 +439,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 
 		it("establishes baseline without emitting changed", async () => {
 			const client = createMockClient({ sess_1: { type: "busy" } });
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -466,7 +465,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 	describe("message activity TTL (time-decay)", () => {
 		it("message activity expires after 10s of no new calls", async () => {
 			const client = createMockClient({});
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),
@@ -500,7 +499,7 @@ describe("SessionStatusPoller — augmentation features", () => {
 
 		it("repeated markMessageActivity refreshes the TTL", async () => {
 			const client = createMockClient({});
-			const poller = new SessionStatusPoller(new ServiceRegistry(), {
+			const poller = new SessionStatusPoller({
 				client: client as unknown as SessionStatusPollerOptions["client"],
 				interval: 500,
 				log: createSilentLogger(),

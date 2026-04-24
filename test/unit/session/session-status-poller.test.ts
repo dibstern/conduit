@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
@@ -27,7 +26,7 @@ describe("SessionStatusPoller", () => {
 
 	it("emits 'changed' with statusesChanged=true on idle→busy transition", async () => {
 		const client = createMockClient({ sess_1: { type: "idle" } });
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -57,7 +56,7 @@ describe("SessionStatusPoller", () => {
 
 	it("emits 'changed' with statusesChanged=true on busy→idle transition", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -83,7 +82,7 @@ describe("SessionStatusPoller", () => {
 
 	it("emits 'changed' on every poll cycle with statusesChanged flag", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -120,7 +119,7 @@ describe("SessionStatusPoller", () => {
 
 	it("emits with statusesChanged=true when a new session appears", async () => {
 		const client = createMockClient({ sess_1: { type: "idle" } });
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -150,7 +149,7 @@ describe("SessionStatusPoller", () => {
 			sess_1: { type: "idle" },
 			sess_2: { type: "busy" },
 		});
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -176,7 +175,7 @@ describe("SessionStatusPoller", () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
 		const warnSpy = vi.fn();
 		const log = { ...createSilentLogger(), warn: warnSpy };
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log,
@@ -208,7 +207,7 @@ describe("SessionStatusPoller", () => {
 
 	it("getCurrentStatuses() returns current state", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -237,7 +236,7 @@ describe("SessionStatusPoller", () => {
 			},
 			sess_3: { type: "idle" },
 		});
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -256,7 +255,7 @@ describe("SessionStatusPoller", () => {
 
 	it("stop() clears the timer and prevents further polls", async () => {
 		const client = createMockClient({});
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -283,7 +282,7 @@ describe("SessionStatusPoller", () => {
 				next: 1000,
 			},
 		});
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -306,9 +305,8 @@ describe("SessionStatusPoller", () => {
 	});
 
 	it("drain() stops the timer and settles in-flight polls", async () => {
-		const registry = new ServiceRegistry();
 		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller(registry, {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),
@@ -318,8 +316,8 @@ describe("SessionStatusPoller", () => {
 		await vi.advanceTimersByTimeAsync(500);
 		const callsBeforeDrain = client.session.statuses.mock.calls.length;
 
-		// Drain via registry
-		await registry.drainAll();
+		// Drain directly
+		await poller.drain();
 
 		// Advance time — no new polls should fire
 		await vi.advanceTimersByTimeAsync(2000);
@@ -328,7 +326,7 @@ describe("SessionStatusPoller", () => {
 
 	it("notifySSEIdle triggers an immediate poll", async () => {
 		const client = createMockClient({ sess_1: { type: "busy" } });
-		const poller = new SessionStatusPoller(new ServiceRegistry(), {
+		const poller = new SessionStatusPoller({
 			client: client as unknown as SessionStatusPollerOptions["client"],
 			interval: 500,
 			log: createSilentLogger(),

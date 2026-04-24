@@ -260,28 +260,26 @@ export async function createProjectRelay(
 	// Background job that detects and corrects status mismatches between
 	// the projected SQLite state and OpenCode's REST API. Default interval
 	// is 7s (was 500ms when this was a real-time polling source).
-	const statusPoller: SessionStatusPoller = new SessionStatusPoller(
-		serviceRegistry,
-		{
-			client: api,
-			...(config.statusPollerInterval != null && {
-				interval: config.statusPollerInterval,
-			}),
-			log: statusLog,
-			getSessionParentMap: (): Map<string, string> =>
-				sessionMgr.getSessionParentMap(),
-			...(readQuery != null && {
-				readQuery,
-				sqliteReader: new SessionStatusSqliteReader(readQuery),
-			}),
-			...(config.persistence != null && {
-				persistence: {
-					eventStore: config.persistence.eventStore,
-					projectionRunner: config.persistence.projectionRunner,
-				},
-			}),
-		},
-	);
+	const statusPoller: SessionStatusPoller = new SessionStatusPoller({
+		client: api,
+		...(config.statusPollerInterval != null && {
+			interval: config.statusPollerInterval,
+		}),
+		log: statusLog,
+		getSessionParentMap: (): Map<string, string> =>
+			sessionMgr.getSessionParentMap(),
+		...(readQuery != null && {
+			readQuery,
+			sqliteReader: new SessionStatusSqliteReader(readQuery),
+		}),
+		...(config.persistence != null && {
+			persistence: {
+				eventStore: config.persistence.eventStore,
+				projectionRunner: config.persistence.projectionRunner,
+			},
+		}),
+	});
+	serviceRegistry.register(statusPoller);
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
 	const registry = new SessionRegistry(log.child("session-registry"));

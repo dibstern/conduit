@@ -15,8 +15,7 @@
 // Also maintains in-memory augmentation (subagent propagation, message
 // activity) for the legacy consumer interface.
 
-import { EventEmitter } from "node:events";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -91,17 +90,15 @@ export interface SessionStatusPollerOptions {
 	persistence?: ReconciliationPersistence;
 }
 
-export type SessionStatusPollerEvents = {
-	/** Emitted every poll cycle. statusesChanged indicates if status types actually differ from last poll. */
-	changed: [statuses: Record<string, SessionStatus>, statusesChanged: boolean];
-};
+/** Callback signature for the "changed" broadcast event. */
+export type StatusChangedCallback = (
+	statuses: Record<string, SessionStatus>,
+	statusesChanged: boolean,
+) => void | Promise<void>;
 
 // ─── Reconciliation Loop ─────────────────────────────────────────────────────
 
-export class SessionStatusPoller
-	extends EventEmitter<SessionStatusPollerEvents>
-	implements Drainable
-{
+export class SessionStatusPoller implements Drainable {
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly interval: number;
 	private readonly log: Logger;
@@ -147,9 +144,10 @@ export class SessionStatusPoller
 	 */
 	private sseIdleSessions = new Set<string>();
 
-	constructor(registry: ServiceRegistry, options: SessionStatusPollerOptions) {
-		super();
-		registry.register(this);
+	/** Registered "changed" broadcast callbacks. */
+	private readonly changedCallbacks: StatusChangedCallback[] = [];
+
+	constructor(options: SessionStatusPollerOptions) {
 		this.client = options.client;
 		this.interval = options.interval ?? DEFAULT_RECONCILIATION_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
@@ -157,6 +155,11 @@ export class SessionStatusPoller
 		this.sqliteReader = options.sqliteReader;
 		this.readQuery = options.readQuery;
 		this.persistence = options.persistence;
+	}
+
+	/** Register a callback for the "changed" broadcast event. */
+	on(_event: "changed", callback: StatusChangedCallback): void {
+		this.changedCallbacks.push(callback);
 	}
 
 	/**
@@ -325,11 +328,13 @@ export class SessionStatusPoller
 				);
 			}
 
-			// Always emit — the monitoring reducer needs periodic evaluation
+			// Always notify — the monitoring reducer needs periodic evaluation
 			// for time-based transitions (grace period expiry, SSE staleness).
 			this.previous = current;
 			this.previousRaw = raw;
-			this.emit("changed", current, statusesChanged);
+			for (const cb of this.changedCallbacks) {
+				cb(current, statusesChanged);
+			}
 
 			// Run reconciliation after emitting the status change
 			await this.runReconciliation();
