@@ -2,6 +2,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Ref } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the logger module so we can spy on log.error calls
@@ -419,14 +420,19 @@ describe("OrchestrationEngine", () => {
 
 	describe("processedCommands pruning", () => {
 		it("evicts oldest entries when exceeding 10,000 threshold", async () => {
-			// Access the private processedCommands set via the engine instance
-			const commands = (engine as unknown as { processedCommands: Set<string> })
-				.processedCommands;
+			// Access the private processedCommands Ref via the engine instance
+			const commandsRef = (
+				engine as unknown as {
+					processedCommands: Ref.Ref<Set<string>>;
+				}
+			).processedCommands;
 
-			// Fill the set to just above the threshold
+			// Fill the Ref<Set> to just above the threshold
+			const bigSet = new Set<string>();
 			for (let i = 0; i < 10_001; i++) {
-				commands.add(`pre-${i}`);
+				bigSet.add(`pre-${i}`);
 			}
+			Effect.runSync(Ref.set(commandsRef, bigSet));
 
 			// Dispatch one more command to trigger pruning
 			await engine.dispatch({
@@ -447,6 +453,7 @@ describe("OrchestrationEngine", () => {
 
 			// After pruning, the set should be roughly half its previous size
 			// (10,002 entries → prune 5,000 → ~5,002 remaining)
+			const commands = Effect.runSync(Ref.get(commandsRef));
 			expect(commands.size).toBeLessThanOrEqual(5_100);
 			expect(commands.size).toBeGreaterThan(0);
 			// The trigger command should still be in the set
