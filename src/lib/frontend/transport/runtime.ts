@@ -5,8 +5,17 @@
 //
 // Lazy-loaded — not in the critical rendering path.
 
-import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
+import {
+	Chunk,
+	Effect,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Stream,
+} from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import type { RelayMessage } from "../../shared-types.js";
 
 // Layer is empty for now — will be populated in Task 7.2 when WebSocket
 // message handling migrates to Effect Stream.
@@ -36,6 +45,38 @@ export async function interruptStream() {
 export function setActiveStreamFiber(fiber: RuntimeFiber<void, unknown>) {
 	activeStreamFiber = fiber;
 }
+
+/**
+ * Create a Stream from an existing WebSocket's message events.
+ * Does NOT manage connection lifecycle — ws.svelte.ts owns that.
+ * Stream ends when WebSocket closes. Caller handles reconnect.
+ */
+export const wsMessageStream = (
+	ws: WebSocket,
+): Stream.Stream<RelayMessage, Error> =>
+	Stream.async<RelayMessage, Error>((emit) => {
+		const onMessage = (evt: MessageEvent) => {
+			try {
+				const parsed = JSON.parse(evt.data) as RelayMessage;
+				emit(Effect.succeed(Chunk.of(parsed)));
+			} catch {
+				// Bad JSON — skip message, don't kill stream
+			}
+		};
+		const onClose = () => emit(Effect.fail(Option.none()));
+		const onError = () =>
+			emit(Effect.fail(Option.some(new Error("WebSocket error"))));
+
+		ws.addEventListener("message", onMessage);
+		ws.addEventListener("close", onClose);
+		ws.addEventListener("error", onError);
+
+		return Effect.sync(() => {
+			ws.removeEventListener("message", onMessage);
+			ws.removeEventListener("close", onClose);
+			ws.removeEventListener("error", onError);
+		});
+	});
 
 /** Dispose the entire runtime (page unload only). */
 export async function disposeRuntime() {
