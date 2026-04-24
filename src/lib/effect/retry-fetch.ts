@@ -5,17 +5,24 @@ export interface RetryFetchOptions {
 	readonly retries?: number;
 	readonly retryDelay?: number;
 	readonly timeout?: number;
+	readonly baseFetch?: typeof fetch;
 }
 
 export const fetchWithRetry = (
-	url: string,
+	url: RequestInfo | URL,
 	init?: RequestInit,
 	options: RetryFetchOptions = {},
 ) => {
-	const { retries = 2, retryDelay = 1000, timeout = 10_000 } = options;
+	const {
+		retries = 2,
+		retryDelay = 1000,
+		timeout = 10_000,
+		baseFetch = globalThis.fetch,
+	} = options;
 
 	return Effect.tryPromise({
-		try: () => fetch(url, { ...init, signal: AbortSignal.timeout(timeout) }),
+		try: () =>
+			baseFetch(url, { ...init, signal: AbortSignal.timeout(timeout) }),
 		catch: (err) => {
 			if (err instanceof DOMException && err.name === "AbortError") {
 				return new OpenCodeConnectionError({
@@ -32,15 +39,25 @@ export const fetchWithRetry = (
 				? Effect.fail(
 						new OpenCodeConnectionError({
 							message: `Server error: ${res.status}`,
+							context: { lastResponse: res },
 						}),
 					)
 				: Effect.succeed(res),
 		),
 		Effect.retry({
-			schedule: Schedule.exponential(Duration.millis(retryDelay)).pipe(
+			schedule: Schedule.linear(Duration.millis(retryDelay)).pipe(
 				Schedule.compose(Schedule.recurs(retries)),
 			),
 			while: (err) => !err.message.startsWith("Request timed out"),
+		}),
+		// After retry exhaustion on 5xx, return the last Response (not the error).
+		// SDK callers check response.ok / response.status — rejecting breaks them.
+		Effect.catchTag("OpenCodeConnectionError", (err) => {
+			const lastResponse = err.context?.["lastResponse"];
+			if (lastResponse instanceof Response && lastResponse.status >= 500) {
+				return Effect.succeed(lastResponse);
+			}
+			return Effect.fail(err);
 		}),
 	);
 };
