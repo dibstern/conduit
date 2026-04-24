@@ -9,8 +9,7 @@
 // detect activity from external processes (e.g. the OpenCode TUI running
 // in a separate OS process that shares only SQLite).
 
-import { EventEmitter } from "node:events";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -19,10 +18,11 @@ import { MessagePoller } from "./message-poller.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type MessagePollerManagerEvents = {
-	/** Emitted with synthesized events + sessionId from REST diff */
-	events: [messages: RelayMessage[], sessionId: string];
-};
+/** Callback signature for the "events" broadcast event. */
+export type PollerManagerEventsCallback = (
+	messages: RelayMessage[],
+	sessionId: string,
+) => void;
 
 export interface MessagePollerManagerOptions {
 	client: Pick<OpenCodeAPI, "session">;
@@ -34,27 +34,28 @@ export interface MessagePollerManagerOptions {
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
 
-export class MessagePollerManager
-	extends EventEmitter<MessagePollerManagerEvents>
-	implements Drainable
-{
+export class MessagePollerManager implements Drainable {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly log: Logger;
 	private readonly interval?: number;
-	private readonly serviceRegistry: ServiceRegistry;
 
 	/** External viewer check — delegates to SessionRegistry when provided */
 	private readonly _hasViewers: ((sessionId: string) => boolean) | undefined;
 
-	constructor(registry: ServiceRegistry, options: MessagePollerManagerOptions) {
-		super();
-		registry.register(this);
-		this.serviceRegistry = registry;
+	/** Registered "events" broadcast callbacks. */
+	private readonly eventsCallbacks: PollerManagerEventsCallback[] = [];
+
+	constructor(options: MessagePollerManagerOptions) {
 		this.client = options.client;
 		this.log = options.log ?? createSilentLogger();
 		if (options.interval != null) this.interval = options.interval;
 		this._hasViewers = options.hasViewers;
+	}
+
+	/** Register a callback for the "events" broadcast event. */
+	on(_event: "events", callback: PollerManagerEventsCallback): void {
+		this.eventsCallbacks.push(callback);
 	}
 
 	// ─── Viewer tracking ──────────────────────────────────────────────────
@@ -80,7 +81,11 @@ export class MessagePollerManager
 			log: this.log,
 			hasViewers: () => this.hasViewers(sessionId),
 		});
-		poller.on("events", (events) => this.emit("events", events, sessionId));
+		poller.on("events", (events) => {
+			for (const cb of this.eventsCallbacks) {
+				cb(events, sessionId);
+			}
+		});
 		poller.startPolling(sessionId, seedMessages);
 		this.pollers.set(sessionId, poller);
 	}

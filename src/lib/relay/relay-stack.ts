@@ -286,7 +286,7 @@ export async function createProjectRelay(
 
 	// ── Message poller manager (REST fallback for CLI sessions without SSE events) ──
 	// Manages multiple pollers concurrently — one per busy session.
-	const pollerManager = new MessagePollerManager(serviceRegistry, {
+	const pollerManager = new MessagePollerManager({
 		client: api,
 		log: pollerMgrLog,
 		hasViewers: (sid: string) => registry.hasViewers(sid),
@@ -294,6 +294,7 @@ export async function createProjectRelay(
 			interval: config.messagePollerInterval,
 		}),
 	});
+	serviceRegistry.register(pollerManager);
 
 	// ── PTY sessions with server-side scrollback (claude-relay architecture) ──
 	// Each active PTY gets one upstream WebSocket to OpenCode's /pty/:id/connect.
