@@ -1,6 +1,6 @@
 // test/unit/provider/claude/prompt-queue.test.ts
 import { describe, expect, it } from "vitest";
-import { PromptQueue } from "../../../../src/lib/provider/claude/prompt-queue.js";
+import { EffectPromptQueue } from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
 import type { SDKUserMessage } from "../../../../src/lib/provider/claude/types.js";
 
 function msg(text: string): SDKUserMessage {
@@ -20,9 +20,9 @@ async function takeN<T>(iter: AsyncIterable<T>, n: number): Promise<T[]> {
 	return out;
 }
 
-describe("PromptQueue", () => {
+describe("EffectPromptQueue", () => {
 	it("yields messages in enqueue order", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		q.enqueue(msg("one"));
 		q.enqueue(msg("two"));
 		q.enqueue(msg("three"));
@@ -40,7 +40,7 @@ describe("PromptQueue", () => {
 	});
 
 	it("blocks consumer until a message is enqueued", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		const consumerPromise = takeN(q, 1);
 
 		// Give the consumer a tick to start awaiting.
@@ -56,7 +56,7 @@ describe("PromptQueue", () => {
 	});
 
 	it("terminates the iterator when close() is called", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		q.enqueue(msg("only"));
 		q.close();
 
@@ -66,7 +66,7 @@ describe("PromptQueue", () => {
 	});
 
 	it("close() unblocks a waiting consumer with an end-of-stream", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		const consumer = (async () => {
 			const items: SDKUserMessage[] = [];
 			for await (const m of q) items.push(m);
@@ -81,7 +81,7 @@ describe("PromptQueue", () => {
 	});
 
 	it("enqueue after close is a no-op", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		q.close();
 		q.enqueue(msg("ignored"));
 		const items: SDKUserMessage[] = [];
@@ -90,22 +90,20 @@ describe("PromptQueue", () => {
 	});
 
 	it("throws on second iteration attempt (single-consumer guard)", () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		q[Symbol.asyncIterator]();
-		expect(() => q[Symbol.asyncIterator]()).toThrow(
-			"PromptQueue is single-consumer",
-		);
+		expect(() => q[Symbol.asyncIterator]()).toThrow("single-consumer");
 		q.close();
 	});
 
 	it("close() is idempotent", () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		q.close();
 		q.close(); // should not throw
 	});
 
 	it("drains buffered messages before ending on close", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		q.enqueue(msg("first"));
 		q.enqueue(msg("second"));
 		q.close();
@@ -117,7 +115,7 @@ describe("PromptQueue", () => {
 	});
 
 	it("return() closes the queue and signals done", async () => {
-		const q = new PromptQueue();
+		const q = EffectPromptQueue.create();
 		const iter = q[Symbol.asyncIterator]();
 		const result = await iter.return?.();
 		expect(result?.done).toBe(true);

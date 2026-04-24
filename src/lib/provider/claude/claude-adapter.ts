@@ -5,9 +5,9 @@
  *
  * Architectural notes:
  * - One SDK query() per conduit session, not per turn.
- * - First sendTurn() creates a PromptQueue + calls query() + starts a
- *   background stream consumer. Subsequent turns enqueue into the existing
- *   PromptQueue.
+ * - First sendTurn() creates an EffectPromptQueue (backed by Effect Queue)
+ *   + calls query() + starts a background stream consumer. Subsequent
+ *   turns enqueue into the existing queue.
  * - Discovery is filesystem + hardcoded: the SDK does not expose a models
  *   or commands API, so we enumerate ~/.claude/ and <workspace>/.claude/
  *   directories for user/project commands and skills.
@@ -36,7 +36,7 @@ import {
 	isInterruptedResult,
 } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
-import { PromptQueue } from "./prompt-queue.js";
+import { EffectPromptQueue } from "./effect-prompt-queue.js";
 import type {
 	ClaudeSessionContext,
 	Query,
@@ -304,7 +304,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 		try {
 			// 1. Create prompt queue
-			const promptQueue = new PromptQueue();
+			const promptQueue = EffectPromptQueue.create();
 
 			// 2. Build initial user message and enqueue
 			const userMessage = this.buildUserMessage(input);
