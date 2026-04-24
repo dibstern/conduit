@@ -60,6 +60,13 @@ export interface HandlerDepsWiringDeps {
 	claudeEventPersist?: RelayEventSinkPersist;
 	/** Provider state service for resume cursor persistence (optional). */
 	providerStateService?: ProviderStateService;
+	/** Effect-based dispatch function. When provided, messages are routed through
+	 *  the Effect handler pipeline instead of the legacy imperative dispatch. */
+	effectDispatch?: (
+		clientId: string,
+		type: string,
+		raw: unknown,
+	) => Promise<void>;
 }
 
 // ─── Return type ─────────────────────────────────────────────────────────────
@@ -224,11 +231,11 @@ export function wireHandlerDeps(
 
 		// Serialize handler execution per-client via Effect Semaphore(1)
 		const sem = getClientSemaphore(clientId);
-		const program = sem.withPermits(1)(
-			Effect.tryPromise(() =>
-				dispatchMessage(handlerDeps, clientId, handler, payload),
-			),
-		);
+		const effectFn = deps.effectDispatch;
+		const dispatch = effectFn
+			? () => effectFn(clientId, handler, payload)
+			: () => dispatchMessage(handlerDeps, clientId, handler, payload);
+		const program = sem.withPermits(1)(Effect.tryPromise(dispatch));
 		Effect.runPromise(program).catch((err) => {
 			wsLog.error(
 				`Error handling message for ${clientId}:`,

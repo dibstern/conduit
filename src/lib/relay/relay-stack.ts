@@ -37,6 +37,10 @@ import { SessionStatusPoller } from "../session/session-status-poller.js";
 import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
+import {
+	createRelayRuntime,
+	type RelayRuntime,
+} from "./effect-relay-runtime.js";
 import { createTranslator } from "./event-translator.js";
 import { wireHandlerDeps } from "./handler-deps-wiring.js";
 import { MessagePollerManager } from "./message-poller-manager.js";
@@ -65,6 +69,8 @@ export interface ProjectRelay {
 	permissionBridge: PermissionBridge;
 	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
 	orchestration: OrchestrationLayer;
+	/** Effect ManagedRuntime for dispatching through the Effect handler pipeline. */
+	effectRuntime: RelayRuntime;
 	/** SQLite persistence layer — present when the relay was configured with a db path. */
 	persistence?: PersistenceLayer;
 	/** True when at least one session in this project is busy or retrying. */
@@ -362,8 +368,20 @@ export async function createProjectRelay(
 			})()
 		: undefined;
 
+	// ── Late-binding Effect dispatch ref ────────────────────────────────────
+	// wireHandlerDeps needs a dispatch function, but the Effect runtime needs
+	// the handlerDeps that wireHandlerDeps creates. Use a ref to break the
+	// cycle — bind it after the runtime is created below.
+	const effectDispatchRef: {
+		fn: (clientId: string, type: string, raw: unknown) => Promise<void>;
+	} = {
+		fn: () => {
+			throw new Error("effectDispatch called before runtime initialized");
+		},
+	};
+
 	// ── Handler deps wiring (G1: client init, message queue, rate limiter) ──
-	const { rateLimiter } = wireHandlerDeps({
+	const { handlerDeps, rateLimiter } = wireHandlerDeps({
 		wsHandler,
 		client: api,
 		sessionMgr,
@@ -381,7 +399,41 @@ export async function createProjectRelay(
 		orchestrationLayer: orchestration,
 		...(claudeEventPersist != null && { claudeEventPersist }),
 		...(providerStateService != null && { providerStateService }),
+		effectDispatch: (clientId, type, raw) =>
+			effectDispatchRef.fn(clientId, type, raw),
 	});
+
+	// ── Effect ManagedRuntime (bridge between imperative and Effect worlds) ──
+	const effectRuntime = createRelayRuntime({
+		wsHandler: handlerDeps.wsHandler,
+		client: handlerDeps.client,
+		sessionMgr: handlerDeps.sessionMgr,
+		permissionBridge: handlerDeps.permissionBridge,
+		questionBridge: handlerDeps.questionBridge,
+		overrides: handlerDeps.overrides,
+		ptyManager: handlerDeps.ptyManager,
+		config: handlerDeps.config,
+		log: handlerDeps.log,
+		statusPoller: handlerDeps.statusPoller,
+		registry: handlerDeps.registry,
+		pollerManager: handlerDeps.pollerManager,
+		connectPtyUpstream: handlerDeps.connectPtyUpstream,
+		forkMeta: handlerDeps.forkMeta,
+		orchestrationEngine: orchestration.engine,
+		...(readQuery != null && { readQuery }),
+		...(claudeEventPersist != null && { claudeEventPersist }),
+		...(providerStateService != null && { providerStateService }),
+		...(handlerDeps.instanceMgmt != null && {
+			instanceMgmt: handlerDeps.instanceMgmt,
+		}),
+		...(handlerDeps.projectMgmt != null && {
+			projectMgmt: handlerDeps.projectMgmt,
+		}),
+		...(handlerDeps.scanDeps != null && { scanDeps: handlerDeps.scanDeps }),
+	});
+
+	// Bind the late-binding dispatch ref now that the runtime exists.
+	effectDispatchRef.fn = effectRuntime.dispatch;
 
 	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────
 
@@ -525,6 +577,7 @@ export async function createProjectRelay(
 		translator,
 		permissionBridge,
 		orchestration,
+		effectRuntime,
 		...(config.persistence ? { persistence: config.persistence } : {}),
 
 		isAnySessionProcessing() {
@@ -541,7 +594,9 @@ export async function createProjectRelay(
 			statusPoller.stop();
 			// 2. Shut down orchestration engine (rejects pending turns)
 			await orchestration.engine.shutdown();
-			// 3. Clean up remaining resources
+			// 3. Dispose Effect ManagedRuntime
+			await effectRuntime.dispose();
+			// 4. Clean up remaining resources
 			clearInterval(timeoutTimer);
 			clearInterval(rateLimitCleanupTimer);
 			overrides.dispose();

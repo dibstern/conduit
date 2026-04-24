@@ -361,6 +361,11 @@ export function createMockProjectRelay(
 			adapter: {} as OrchestrationLayer["adapter"],
 			wireSSEToAdapter: vi.fn(),
 		} as unknown as OrchestrationLayer,
+		effectRuntime: {
+			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],
+			dispatch: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		},
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,
