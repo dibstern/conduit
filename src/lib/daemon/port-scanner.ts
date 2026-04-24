@@ -1,5 +1,5 @@
 // src/lib/daemon/port-scanner.ts
-import type { Drainable, ServiceRegistry } from "./service-registry.js";
+import type { Drainable } from "./service-registry.js";
 
 export interface PortScannerConfig {
 	portRange: [number, number];
@@ -34,12 +34,7 @@ export class PortScanner implements Drainable {
 	// ─── Callbacks ─────────────────────────────────────────────────────────
 	onScan: ((result: ScanResult) => void) | null = null;
 
-	constructor(
-		registry: ServiceRegistry,
-		config: PortScannerConfig,
-		probeFn: ProbeFn,
-	) {
-		registry.register(this);
+	constructor(config: PortScannerConfig, probeFn: ProbeFn) {
 		this.config = config;
 		this.probeFn = probeFn;
 	}

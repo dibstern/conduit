@@ -30,7 +30,6 @@ import {
 	_defaultWhichSync,
 	KeepAwake,
 } from "../../../src/lib/daemon/keep-awake.js";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 
 const SEED = 42;
 const NUM_RUNS = 30;
@@ -62,17 +61,17 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 	describe("T1: Constructor defaults", () => {
 		it("defaults to enabled", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(ka.isEnabled()).toBe(true);
 		});
 
 		it("defaults to not active", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(ka.isActive()).toBe(false);
 		});
 
 		it("exposes callback properties", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(ka.onActivated).toBeNull();
 			expect(ka.onDeactivated).toBeNull();
 			expect(ka.onError).toBeNull();
@@ -80,7 +79,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("respects enabled: false in constructor", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				enabled: false,
 			});
@@ -95,7 +94,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -115,7 +114,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 				command: "/usr/bin/caffeinate",
@@ -138,7 +137,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -162,7 +161,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				.spyOn(process, "kill")
 				.mockImplementation(() => true);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -178,7 +177,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -197,7 +196,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 	describe("T5: isActive() tracks state correctly", () => {
 		it("false before activate", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(ka.isActive()).toBe(false);
 		});
 
@@ -205,7 +204,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -218,7 +217,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -239,7 +238,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				.spyOn(process, "kill")
 				.mockImplementation(() => true);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -259,7 +258,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("just disables when not active", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 
 			ka.setEnabled(false);
 			expect(ka.isEnabled()).toBe(false);
@@ -274,7 +273,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 				enabled: false,
@@ -294,7 +293,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -311,7 +310,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -332,7 +331,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -352,7 +351,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "win32",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -368,7 +367,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("does not throw on unsupported platform", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_whichSync: () => null,
 			});
@@ -383,7 +382,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -399,7 +398,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -421,7 +420,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -436,7 +435,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -452,7 +451,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("deactivate is safe when never activated", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(() => ka.deactivate()).not.toThrow();
 		});
 	});
@@ -464,7 +463,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -487,7 +486,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -512,7 +511,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				return callCount === 1 ? child1 : child2;
 			}) as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -535,7 +534,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -556,7 +555,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -579,12 +578,12 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 	describe("T12: isSupported() returns true on darwin, delegates to resolveCommand", () => {
 		it("returns true on darwin", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
+			const ka = new KeepAwake({ _platform: "darwin" });
 			expect(ka.isSupported()).toBe(true);
 		});
 
 		it("returns false on linux when no tool found", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_whichSync: () => null,
 			});
@@ -592,7 +591,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("returns false on win32", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "win32",
 				_whichSync: () => null,
 			});
@@ -600,7 +599,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("returns false on freebsd", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "freebsd",
 				_whichSync: () => null,
 			});
@@ -615,7 +614,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 				enabled: false,
@@ -628,7 +627,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("does not emit activated when disabled", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				enabled: false,
 			});
@@ -642,7 +641,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("does not emit unsupported when disabled", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				enabled: false,
 			});
@@ -675,7 +674,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 						const child = createMockChild();
 						const mockSpawn = createMockSpawn(child);
 
-						const ka = new KeepAwake(new ServiceRegistry(), {
+						const ka = new KeepAwake({
 							_platform: "darwin",
 							_spawn: mockSpawn,
 						});
@@ -710,7 +709,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		it("property: isSupported is deterministic for any platform (no tool)", () => {
 			fc.assert(
 				fc.property(fc.string({ minLength: 1, maxLength: 20 }), (platform) => {
-					const ka = new KeepAwake(new ServiceRegistry(), {
+					const ka = new KeepAwake({
 						_platform: platform,
 						_whichSync: () => null,
 					});
@@ -728,7 +727,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 					const child = createMockChild();
 					const mockSpawn = createMockSpawn(child);
 
-					const ka = new KeepAwake(new ServiceRegistry(), {
+					const ka = new KeepAwake({
 						_platform: "darwin",
 						_spawn: mockSpawn,
 					});
@@ -753,7 +752,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				throw new Error("ENOENT: caffeinate not found");
 			}) as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: throwingSpawn,
 			});
@@ -777,7 +776,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -799,7 +798,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
 				_whichSync: (cmd: string) =>
@@ -826,7 +825,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -843,7 +842,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("isSupported() returns true on linux when systemd-inhibit is available", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_whichSync: (cmd: string) =>
 					cmd === "systemd-inhibit" ? "/usr/bin/systemd-inhibit" : null,
@@ -853,7 +852,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("isSupported() returns false on linux when no tool found", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_whichSync: () => null,
 			});
@@ -866,7 +865,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn = createMockSpawn(child);
 
 			// darwin + custom command → should use custom, not caffeinate
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 				command: "/opt/my-tool",
@@ -886,7 +885,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn =
 				vi.fn() as unknown as typeof import("node:child_process").spawn;
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "win32",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -905,7 +904,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const child = createMockChild();
 			const mockSpawn = createMockSpawn(child);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "win32",
 				_spawn: mockSpawn,
 				_whichSync: () => null,
@@ -933,7 +932,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				cmd === "systemd-inhibit" ? "/usr/bin/systemd-inhibit" : null,
 			);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "linux",
 				_spawn: mockSpawn,
 				_whichSync: whichSpy,
@@ -953,7 +952,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			const mockSpawn = createMockSpawn(child);
 
 			// darwin + command:"" → should auto-detect to caffeinate
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 				command: "",
@@ -975,7 +974,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 	describe("T17: Process group kill (integration)", () => {
 		it("deactivate() kills a real detached child process", async () => {
 			// Spawn a real 'sleep' process using KeepAwake with a custom command
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				command: "sleep",
 				args: ["60"],
@@ -1027,7 +1026,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 	describe("T19: activate() spawn error handling", () => {
 		it("emits error and deactivates when spawn returns ENOENT", () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				command: "/nonexistent/binary/that/does/not/exist",
 				args: [],
@@ -1055,7 +1054,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 
 		it("emits error when spawned process exits with non-zero code unexpectedly", () => {
 			// Use a command that exits immediately with error
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				command: "false", // exits with code 1
 				args: [],
@@ -1086,7 +1085,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 				.spyOn(process, "kill")
 				.mockImplementation(() => true);
 
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 				_spawn: mockSpawn,
 			});
@@ -1102,44 +1101,12 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 
 		it("drains safely when not active", async () => {
-			const ka = new KeepAwake(new ServiceRegistry(), {
+			const ka = new KeepAwake({
 				_platform: "darwin",
 			});
 
 			expect(ka.isActive()).toBe(false);
 			await expect(ka.drain()).resolves.toBeUndefined();
-		});
-
-		it("registers with the ServiceRegistry", () => {
-			const registry = new ServiceRegistry();
-			expect(registry.size).toBe(0);
-
-			new KeepAwake(registry, { _platform: "darwin" });
-
-			expect(registry.size).toBe(1);
-		});
-
-		it("drainAll on registry kills the child process", async () => {
-			const child = createMockChild();
-			const mockSpawn = createMockSpawn(child);
-			const processKillSpy = vi
-				.spyOn(process, "kill")
-				.mockImplementation(() => true);
-
-			const registry = new ServiceRegistry();
-			const ka = new KeepAwake(registry, {
-				_platform: "darwin",
-				_spawn: mockSpawn,
-			});
-
-			ka.activate();
-			expect(ka.isActive()).toBe(true);
-
-			await registry.drainAll();
-
-			expect(ka.isActive()).toBe(false);
-			expect(processKillSpy).toHaveBeenCalledWith(-12345, "SIGTERM");
-			processKillSpy.mockRestore();
 		});
 	});
 });

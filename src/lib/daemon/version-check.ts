@@ -2,7 +2,7 @@
 // Periodically checks npm for newer versions and notifies via callbacks.
 
 import { getVersion } from "../version.js";
-import type { Drainable, ServiceRegistry } from "./service-registry.js";
+import type { Drainable } from "./service-registry.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -210,8 +210,7 @@ export class VersionChecker implements Drainable {
 		| null = null;
 	onCheckError: ((data: { error: Error }) => void) | null = null;
 
-	constructor(registry: ServiceRegistry, options?: VersionCheckOptions) {
-		registry.register(this);
+	constructor(options?: VersionCheckOptions) {
 		this.packageName = options?.packageName ?? DEFAULT_PACKAGE_NAME;
 		this.currentVersion = options?.currentVersion ?? getVersion();
 		this.checkInterval = options?.checkInterval ?? DEFAULT_CHECK_INTERVAL;

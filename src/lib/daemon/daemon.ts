@@ -741,7 +741,6 @@ export class Daemon {
 		// Skipped when smartDefault is false (tests that don't want network probing).
 		if (this.smartDefault) {
 			this.scanner = new PortScanner(
-				this.serviceRegistry,
 				{
 					portRange: [4096, 4110],
 					intervalMs: 30_000,
@@ -891,7 +890,7 @@ export class Daemon {
 		await saveDaemonConfig(this.buildConfig(), this.configDir);
 
 		// Start version checker (non-fatal if it fails)
-		this.versionChecker = new VersionChecker(this.serviceRegistry, {
+		this.versionChecker = new VersionChecker({
 			enabled: !process.argv.includes("--no-update"),
 		});
 		this.versionChecker.onUpdateAvailable = ({ latest }) => {
@@ -904,7 +903,7 @@ export class Daemon {
 		this.versionChecker.start();
 
 		// Initialize keep-awake (macOS caffeinate, Linux systemd-inhibit, or user-configured)
-		this.keepAwakeManager = new KeepAwake(this.serviceRegistry, {
+		this.keepAwakeManager = new KeepAwake({
 			enabled: this.keepAwake,
 			...(this.keepAwakeCommand != null && { command: this.keepAwakeCommand }),
 			...(this.keepAwakeArgs != null && { args: this.keepAwakeArgs }),
@@ -916,7 +915,7 @@ export class Daemon {
 
 		// Start storage monitor (Ticket 6.2 AC8)
 		const firstProject = this.getProjects()[0];
-		this.storageMonitor = new StorageMonitor(this.serviceRegistry, {
+		this.storageMonitor = new StorageMonitor({
 			path: firstProject?.directory ?? process.cwd(),
 		});
 		this.storageMonitor.onLowDiskSpace = ({
@@ -993,8 +992,15 @@ export class Daemon {
 		await this.flushConfigSave();
 		await saveDaemonConfig(this.buildConfig(), this.configDir);
 
-		// Drain ALL tracked services (PortScanner, VersionChecker, StorageMonitor,
-		// KeepAwake, InstanceManager, ProjectRegistry, and all relay services)
+		// Bridge: manual drain for services removed from ServiceRegistry (Tasks 9->12).
+		// These services are no longer registered with the registry but are not yet
+		// managed by Effect Layers. Explicit drain calls ensure cleanup during shutdown.
+		await this.keepAwakeManager?.drain();
+		await this.versionChecker?.drain();
+		await this.storageMonitor?.drain();
+		await this.scanner?.drain();
+
+		// Drain remaining registry services (InstanceManager, ProjectRegistry, relay services)
 		await this.serviceRegistry.drainAll();
 
 		// Drain Daemon's own tracked promises
@@ -1671,7 +1677,7 @@ export class Daemon {
 					// Deactivate old manager to clean up spawned processes
 					this.keepAwakeManager?.deactivate();
 					// Reconstruct with new command
-					this.keepAwakeManager = new KeepAwake(this.serviceRegistry, {
+					this.keepAwakeManager = new KeepAwake({
 						enabled: this.keepAwake,
 						command,
 						args,

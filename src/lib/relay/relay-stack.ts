@@ -225,7 +225,7 @@ export async function createProjectRelay(
 	});
 
 	// Per-session overrides (agent, model, processing timeout)
-	const overrides = new SessionOverrides(serviceRegistry);
+	const overrides = new SessionOverrides();
 
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);

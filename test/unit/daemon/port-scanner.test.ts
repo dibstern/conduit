@@ -4,7 +4,6 @@ import {
 	PortScanner,
 	type PortScannerConfig,
 } from "../../../src/lib/daemon/port-scanner.js";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 
 describe("PortScanner", () => {
 	const defaultConfig: PortScannerConfig = {
@@ -20,7 +19,7 @@ describe("PortScanner", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockProbe = vi.fn().mockResolvedValue(false);
-		scanner = new PortScanner(new ServiceRegistry(), defaultConfig, mockProbe);
+		scanner = new PortScanner(defaultConfig, mockProbe);
 	});
 
 	afterEach(() => {
@@ -162,15 +161,14 @@ describe("PortScanner", () => {
 				}),
 		);
 
-		const registry = new ServiceRegistry();
-		const drainScanner = new PortScanner(registry, defaultConfig, hangingProbe);
+		const drainScanner = new PortScanner(defaultConfig, hangingProbe);
 		drainScanner.start();
 
 		// Start a scan (which will call the hanging probe)
 		drainScanner.scan().catch(() => {});
 
 		// Drain while scan is in-flight
-		await registry.drainAll();
+		await drainScanner.drain();
 
 		// After drain, the interval should not fire
 		const onScan = vi.fn();

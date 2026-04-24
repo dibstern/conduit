@@ -4,7 +4,7 @@
 // space issues.
 
 import { statfs as nodeStatfs } from "node:fs/promises";
-import type { Drainable, ServiceRegistry } from "./service-registry.js";
+import type { Drainable } from "./service-registry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -63,8 +63,7 @@ export class StorageMonitor implements Drainable {
 	onLowDiskSpace: ((event: LowDiskSpaceEvent) => void) | null = null;
 	onDiskSpaceOk: ((event: DiskSpaceOkEvent) => void) | null = null;
 
-	constructor(registry: ServiceRegistry, options: StorageMonitorOptions) {
-		registry.register(this);
+	constructor(options: StorageMonitorOptions) {
 		this.monitorPath = options.path;
 		this.thresholdBytes = options.thresholdBytes ?? DEFAULT_THRESHOLD_BYTES;
 		this.intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;

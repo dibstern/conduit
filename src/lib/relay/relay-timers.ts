@@ -1,22 +1,18 @@
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import type { RateLimiter } from "../server/rate-limiter.js";
 
 /**
- * Wraps per-relay periodic timers (permission timeout check, rate limiter cleanup)
- * with lifecycle management via the ServiceRegistry.
+ * Wraps per-relay periodic timers (permission timeout check, rate limiter cleanup).
+ * Not currently instantiated in src/ — test-only/dormant.
  */
-export class RelayTimers implements Drainable {
+export class RelayTimers {
 	private readonly timers = new Set<ReturnType<typeof setInterval>>();
 
 	constructor(
-		registry: ServiceRegistry,
 		private permissionBridge: PermissionBridge,
 		private rateLimiter: RateLimiter,
 		private onPermissionTimeout: (id: string) => void,
-	) {
-		registry.register(this);
-	}
+	) {}
 
 	start(): void {
 		this.timers.add(

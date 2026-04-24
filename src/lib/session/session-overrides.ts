@@ -3,7 +3,7 @@
 // processing timeout. Each session has independent overrides. A global
 // defaultModel provides the fallback when no per-session model is set.
 
-import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
+import type { Drainable } from "../daemon/service-registry.js";
 
 export interface ModelOverride {
 	providerID: string;
@@ -30,9 +30,7 @@ export class SessionOverrides implements Drainable {
 
 	private readonly sessions: Map<string, SessionState> = new Map();
 
-	constructor(registry: ServiceRegistry) {
-		registry.register(this);
-	}
+	constructor() {}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn as defaultSpawn, execFileSync } from "node:child_process";
-import type { Drainable, ServiceRegistry } from "./service-registry.js";
+import type { Drainable } from "./service-registry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -83,8 +83,7 @@ export class KeepAwake implements Drainable {
 	onError: ((data: { error: Error }) => void) | null = null;
 	onUnsupported: ((data: { platform: string }) => void) | null = null;
 
-	constructor(registry: ServiceRegistry, options?: KeepAwakeOptions) {
-		registry.register(this);
+	constructor(options?: KeepAwakeOptions) {
 		this.enabled = options?.enabled ?? true;
 		// Treat empty string as "no command" — fall through to auto-detect
 		this.configCommand = options?.command?.trim() || undefined;

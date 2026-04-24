@@ -1,44 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { RelayTimers } from "../../../src/lib/relay/relay-timers.js";
 import { RateLimiter } from "../../../src/lib/server/rate-limiter.js";
 
 function setup() {
-	const registry = new ServiceRegistry();
 	const permissionBridge = new PermissionBridge();
 	const rateLimiter = new RateLimiter();
 	const onTimeout = vi.fn();
-	return { registry, permissionBridge, rateLimiter, onTimeout };
+	return { permissionBridge, rateLimiter, onTimeout };
 }
 
 describe("RelayTimers", () => {
-	it("registers with the ServiceRegistry on construction", () => {
-		const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
-		const _timers = new RelayTimers(
-			registry,
-			permissionBridge,
-			rateLimiter,
-			onTimeout,
-		);
-		expect(registry.size).toBe(1);
-	});
-
 	it("creates tracked intervals on start()", async () => {
 		vi.useFakeTimers();
 		try {
-			const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
+			const { permissionBridge, rateLimiter, onTimeout } = setup();
 			const cleanupSpy = vi.spyOn(rateLimiter, "cleanup");
 			const checkTimeoutsSpy = vi
 				.spyOn(permissionBridge, "checkTimeouts")
 				.mockReturnValue([]);
 
-			const timers = new RelayTimers(
-				registry,
-				permissionBridge,
-				rateLimiter,
-				onTimeout,
-			);
+			const timers = new RelayTimers(permissionBridge, rateLimiter, onTimeout);
 			timers.start();
 
 			// Before any tick, nothing called
@@ -64,18 +46,13 @@ describe("RelayTimers", () => {
 	it("drain clears intervals (no more callbacks after drain)", async () => {
 		vi.useFakeTimers();
 		try {
-			const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
+			const { permissionBridge, rateLimiter, onTimeout } = setup();
 			const checkTimeoutsSpy = vi
 				.spyOn(permissionBridge, "checkTimeouts")
 				.mockReturnValue([]);
 			const cleanupSpy = vi.spyOn(rateLimiter, "cleanup");
 
-			const timers = new RelayTimers(
-				registry,
-				permissionBridge,
-				rateLimiter,
-				onTimeout,
-			);
+			const timers = new RelayTimers(permissionBridge, rateLimiter, onTimeout);
 			timers.start();
 
 			// Let one tick fire
@@ -93,50 +70,16 @@ describe("RelayTimers", () => {
 		}
 	});
 
-	it("drainAll on registry clears RelayTimers intervals", async () => {
-		vi.useFakeTimers();
-		try {
-			const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
-			const checkTimeoutsSpy = vi
-				.spyOn(permissionBridge, "checkTimeouts")
-				.mockReturnValue([]);
-
-			const timers = new RelayTimers(
-				registry,
-				permissionBridge,
-				rateLimiter,
-				onTimeout,
-			);
-			timers.start();
-
-			vi.advanceTimersByTime(30_000);
-			expect(checkTimeoutsSpy).toHaveBeenCalledTimes(1);
-
-			await registry.drainAll();
-
-			vi.advanceTimersByTime(60_000);
-			// No more ticks after registry drain
-			expect(checkTimeoutsSpy).toHaveBeenCalledTimes(1);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
 	it("calls onPermissionTimeout for each timed-out permission", async () => {
 		vi.useFakeTimers();
 		try {
-			const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
+			const { permissionBridge, rateLimiter, onTimeout } = setup();
 			vi.spyOn(permissionBridge, "checkTimeouts").mockReturnValue([
 				{ id: "perm-1", sessionId: "s1" },
 				{ id: "perm-2", sessionId: "s1" },
 			]);
 
-			const timers = new RelayTimers(
-				registry,
-				permissionBridge,
-				rateLimiter,
-				onTimeout,
-			);
+			const timers = new RelayTimers(permissionBridge, rateLimiter, onTimeout);
 			timers.start();
 
 			vi.advanceTimersByTime(30_000);
@@ -154,15 +97,10 @@ describe("RelayTimers", () => {
 	it("does not call onPermissionTimeout when no timeouts", async () => {
 		vi.useFakeTimers();
 		try {
-			const { registry, permissionBridge, rateLimiter, onTimeout } = setup();
+			const { permissionBridge, rateLimiter, onTimeout } = setup();
 			vi.spyOn(permissionBridge, "checkTimeouts").mockReturnValue([]);
 
-			const timers = new RelayTimers(
-				registry,
-				permissionBridge,
-				rateLimiter,
-				onTimeout,
-			);
+			const timers = new RelayTimers(permissionBridge, rateLimiter, onTimeout);
 			timers.start();
 
 			vi.advanceTimersByTime(30_000);
