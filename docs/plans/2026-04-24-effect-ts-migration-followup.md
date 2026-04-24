@@ -71,12 +71,12 @@ git commit -m "chore: delete dead legacy MESSAGE_HANDLERS and dispatchMessage"
 **Files:**
 - Modify: `src/lib/frontend/transport/runtime.ts`
 
-**Step 1: Add comment**
+**Step 1: Replace existing comment**
 
-After the `TransportLayer = Layer.empty` line, add:
+Replace the existing comment on lines 20-21 (which references stale "Task 7.2" from a prior plan) with the following. Do NOT append — the old comment is outdated:
 
 ```typescript
-// Frontend has no service dependencies — message dispatch is sync.
+// Frontend transport has no async service dependencies.
 // ManagedRuntime is needed for fiber lifecycle (interrupt stream on reconnect).
 // Extend if async services (logging, metrics) are added later.
 ```
@@ -190,6 +190,7 @@ export const fetchWithRetry = (
 				? Effect.fail(
 						new OpenCodeConnectionError({
 							message: `Server error: ${res.status}`,
+							context: { lastResponse: res },
 						}),
 					)
 				: Effect.succeed(res),
@@ -199,6 +200,15 @@ export const fetchWithRetry = (
 				Schedule.compose(Schedule.recurs(retries)),
 			),
 			while: (err) => !err.message.startsWith("Request timed out"),
+		}),
+		// After retry exhaustion on 5xx, return the last Response (not the error).
+		// SDK callers check response.ok / response.status — rejecting breaks them.
+		Effect.catchTag("OpenCodeConnectionError", (err) => {
+			const lastResponse = err.context?.lastResponse;
+			if (lastResponse instanceof Response && lastResponse.status >= 500) {
+				return Effect.succeed(lastResponse);
+			}
+			return Effect.fail(err);
 		}),
 	);
 };
@@ -573,48 +583,14 @@ const RelayErrorFields = {
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
     { default: () => ({}) },
   ),
-  cause: Schema.optionalWith(Schema.Unknown, { default: () => undefined }),
+  // NOTE: Do NOT add `cause` here — it comes from the Error base class.
+  // Pass cause via constructor option: new OpenCodeConnectionError({ message: "..." }, { cause: err })
 };
 
-// ─── Transport serialization mixin ──────────────────────────────────────────
-// Shared methods added to each TaggedErrorClass via the class body.
-// Cannot use a base class with Schema.TaggedErrorClass — methods go on each.
-
-function relayErrorMethods(self: {
-  _tag: string;
-  message: string;
-  userVisible: boolean;
-  context: Record<string, unknown>;
-  statusCode: number;
-}) {
-  return {
-    get code() { return self._tag; },
-    toJSON() {
-      return { error: { code: self._tag, message: self.message } };
-    },
-    toWebSocket() {
-      return {
-        type: "error" as const,
-        code: self._tag,
-        message: self.message,
-        statusCode: self.statusCode,
-      };
-    },
-    toMessage(sessionId: string) {
-      return { ...self.toWebSocket(), sessionId };
-    },
-    toSystemError() {
-      return { ...self.toWebSocket(), type: "system_error" as const };
-    },
-    toLog() {
-      return {
-        error: self._tag,
-        message: self.message,
-        ...redactSensitive(self.context),
-      };
-    },
-  };
-}
+// ─── Transport serialization ────────────────────────────────────────────────
+// Methods are inlined on each error class (no mixin — Schema.TaggedError
+// classes cannot use a shared base class). Each class defines:
+//   get code(), toJSON(), toWebSocket(), toMessage(), toSystemError(), toLog()
 
 // ─── Error subclasses ───────────────────────────────────────────────────────
 
@@ -766,12 +742,12 @@ export function fromCaught(err: unknown, code: string, prefix?: string): RelayEr
   const ErrorClass = CODE_TO_CLASS[code] ?? OpenCodeConnectionError;
   return new ErrorClass({
     message: fullMessage,
-    cause: err instanceof Error ? err : undefined,
-  });
+    context: { originalCode: code },
+  }, { cause: err instanceof Error ? err : undefined });
 }
 ```
 
-For codes like `"INIT_FAILED"`, `"HANDLER_ERROR"`, `"INTERNAL_ERROR"` that don't map to a specific subclass, `OpenCodeConnectionError` is the fallback. The `.code` getter returns the `_tag` name, NOT the original code string. Downstream assertions checking `code === "INIT_FAILED"` must be updated to check `code === "OpenCodeConnectionError"` (or use `_tag` directly).
+For codes like `"INIT_FAILED"`, `"HANDLER_ERROR"`, `"INTERNAL_ERROR"` that don't map to a specific subclass, `OpenCodeConnectionError` is the fallback. The `.code` getter returns the `_tag` name, NOT the original code string. The original code is preserved in `error.context.originalCode` for debugging/logging. Downstream assertions checking `code === "INIT_FAILED"` must be updated to check `code === "OpenCodeConnectionError"` (or use `_tag` directly). If tests need the original code, check `error.context.originalCode`.
 
 2. Remove any `instanceof RelayError` checks. Search: `grep -rn "instanceof RelayError" src/ test/` — update to `_tag` checks or type guards.
 
@@ -882,6 +858,8 @@ export class PersistenceError extends Schema.TaggedError<PersistenceError>()(
   }
 }
 ```
+
+**Behavioral note:** The current `PersistenceError` constructor prepends `[CODE]` to the message (e.g., `[APPEND_FAILED] disk full`). The `Schema.TaggedError` version stores the raw message without prefix. This is intentional — the `code` field is available separately via `err.code` and `err.toLog()` includes both. Update any log parsers or alerts that match on `[CODE]` prefix patterns.
 
 **Step 3: Update construction sites (~23 sites)**
 
@@ -1304,38 +1282,62 @@ git commit -m "refactor: migrate leaf Drainable services to Effect Layers"
 
 **This is the largest single task.** Do one service at a time, commit after each.
 
-**Pattern for each EventEmitter service:**
+**Approach: Direct calls for sync-critical + PubSub for broadcast (Option 3)**
 
-1. Remove `extends EventEmitter<Events>`
-2. Remove `implements Drainable` and `ServiceRegistry` from constructor
-3. Create a typed event union for PubSub:
+Each emit site must be classified before migration:
+- **Sequential** — caller reads state or calls functions after emit that assume the handler already ran → replace with direct `yield*` function call inside Effect pipeline
+- **Broadcast** — "FYI" notification where caller doesn't depend on handler completion → replace with `PubSub.publish()`
+
+**Step 0 (per service): Classify emit sites**
+
+For each `.emit()` call in the service, check the 3 lines after it:
+- If next lines read state that the handler modifies → **Sequential** (direct call)
+- If next lines are unrelated or return immediately → **Broadcast** (PubSub)
+
+Run: `grep -A3 "\.emit(" src/lib/<service-file>` to identify patterns.
+
+**Pattern for sequential emit sites (direct calls):**
+
+```typescript
+// Old:
+this.emit("instance_added", instance);
+this.broadcastSessionList(); // assumes handler updated state
+
+// New: call handler directly inside Effect pipeline
+yield* onInstanceAdded(instance)
+yield* broadcastSessionList()
+```
+
+Extract handler logic into standalone Effect functions. Dependencies become explicit — if you miss one, the type system catches it.
+
+**Pattern for broadcast emit sites (PubSub):**
+
+1. Create a typed event union:
    ```typescript
-   type InstanceEvent =
-     | { _tag: "instance_added"; instance: OpenCodeInstance }
-     | { _tag: "instance_removed"; id: string }
+   type InstanceBroadcast =
      | { _tag: "status_changed"; instance: OpenCodeInstance }
      | { _tag: "instance_error"; id: string; error: string };
    ```
-4. Add a `pubsub` field: `readonly events: PubSub.PubSub<InstanceEvent>`
-5. Replace `this.emit("event_name", data)` → `PubSub.unsafeOffer(this.events, { _tag: "event_name", ...data })` (synchronous, fire-and-forget). **Note:** `PubSub.publish()` returns an `Effect` and cannot be used with `Effect.runSync` (it may suspend). Use `PubSub.unsafeOffer` for synchronous emit replacement, or restructure the calling code to be inside an Effect context.
-6. Replace subscriber sites (`.on("event", handler)`) with PubSub subscription pattern:
+2. Add a PubSub field: `readonly broadcasts: PubSub.PubSub<InstanceBroadcast>`
+3. Replace broadcast emits: `yield* PubSub.publish(this.broadcasts, { _tag: "status_changed", instance })`
+4. Replace subscribers:
    ```typescript
-   // Old: service.on("status_changed", (instance) => { ... });
-   // New: 
-   const sub = yield* PubSub.subscribe(service.events);
+   const sub = yield* PubSub.subscribe(service.broadcasts);
    yield* Stream.fromQueue(sub).pipe(
      Stream.filter((e) => e._tag === "status_changed"),
      Stream.runForEach((e) => Effect.sync(() => handleStatusChange(e.instance))),
-     Effect.forkScoped,  // runs in background, cancelled on scope close
+     Effect.forkScoped,
    );
    ```
-7. Move `drain()` to `Effect.addFinalizer` in the Layer
-8. Add `PubSub.shutdown(this.events)` to the finalizer to signal subscribers to stop
 
-**Sync → async concern:** `EventEmitter.emit()` is synchronous. `PubSub.publish()` is async. For sites where callers depend on handlers completing before continuing, use direct function calls instead of PubSub. Specific sites to check:
-- `session-manager.ts:382-386` — calls `broadcastSessionList()` after emit, may assume lifecycle handler already fired
-- Any `emit()` followed immediately by state reads that assume the handler ran
-- Search: `grep -A3 "\.emit(" src/` in each service file to identify emit-then-check patterns
+**Important API note:** Use `PubSub.publish()` (returns Effect) inside Effect pipelines. Do NOT use `PubSub.unsafeOffer` — verify whether this API exists in Effect 3.21.2 before using. If emit sites are outside Effect context, wrap with `Effect.runFork(PubSub.publish(...))` for fire-and-forget.
+
+**Other patterns:**
+
+5. Remove `extends EventEmitter<Events>`
+6. Remove `implements Drainable` and `ServiceRegistry` from constructor
+7. Move `drain()` to `Effect.addFinalizer` in the Layer
+8. Add `PubSub.shutdown(this.broadcasts)` to the finalizer
 
 **Subscriber cleanup:** PubSub subscribers need explicit Scope. Wrap subscriber creation in `Effect.scoped` or ensure the subscriber is created inside a scoped Layer. Wiring functions (`handler-deps-wiring.ts`, `poller-wiring.ts`, `session-lifecycle-wiring.ts`, `sse-wiring.ts`) must either be inside Effect context or create scoped subscriptions.
 
@@ -1502,17 +1504,23 @@ const startupEffects = Effect.gen(function* () {
 The entry point blocks on the shutdown Deferred, then exits:
 
 ```typescript
+const DaemonLive = makeDaemonLive(options);
+
 const program = Effect.gen(function* () {
-  // Build all daemon layers
-  yield* Effect.provide(startupEffects, makeDaemonLive(options));
+  // Run startup effects (probe, auto-start, prefetch, discover)
+  // These run inside the provided Layer context — no double-provide
+  yield* probeSmartDefault(options);
+  yield* autoStartDefaultInstance(options);
+  yield* prefetchSessionCounts(options);
+  yield* discoverProjects(options);
 
   // Block until shutdown signal
   const shutdown = yield* ShutdownSignalTag;
-  yield* shutdown;
+  yield* Deferred.await(shutdown);
   // Scope close triggers all Layer finalizers (reverse order)
 }).pipe(
   Effect.scoped,
-  Effect.provide(makeDaemonLive(options)),
+  Effect.provide(DaemonLive),  // Single provide — Layer memoization works correctly
   Effect.catchAllCause((cause) =>
     Effect.logError("Fatal", Cause.pretty(cause)),
   ),
@@ -1521,7 +1529,7 @@ const program = Effect.gen(function* () {
 Effect.runFork(program);
 ```
 
-Note: This replaces `Layer.launch` with explicit `yield* shutdown` + `Effect.scoped` so that the shutdown signal from Task 8 actually triggers process exit.
+Note: `DaemonLive` is provided ONCE. Startup effects and the shutdown wait share the same Layer context. `discoverProjects` is fully rewritten as an Effect function (uses `createSdkClientEffect` internally, not the legacy `createSdkClient`).
 
 **Step 4: Run full test suite and manual smoke test**
 
@@ -1559,12 +1567,17 @@ Remove:
 
 `src/lib/relay/relay-stack.ts:152` creates its own `new ServiceRegistry()` as fallback. Remove this and update `createProjectRelay` to not accept/create a registry.
 
-**Step 3: Verify ALL Drainable services are migrated**
+**Step 3: Verify ALL Drainable services are migrated (BLOCKING pre-check)**
 
-Before deleting, verify every service that implements `Drainable` has been migrated to Layers:
+Before deleting, run: `grep -rn "implements Drainable" src/`
+
+Every match MUST have been migrated to Effect Layers in Tasks 9-10. Known services:
 - Task 9: KeepAwake, VersionChecker, StorageMonitor, PortScanner (4)
 - Task 10: InstanceManager, ProjectRegistry, WebSocketHandler, SSEStream, SessionStatusPoller, MessagePoller, MessagePollerManager (7)
-- **Also verify:** SessionOverrides, RelayTimers — these implement Drainable but may not be covered in Tasks 9/10. Check with `grep -rn "implements Drainable" src/` and ensure ALL matches are migrated.
+- **Must also check:** SessionOverrides, RelayTimers — these may implement Drainable but are NOT listed in Tasks 9/10. If they still implement Drainable:
+  - Either add them to Task 9 (simple drain) or Task 10 (EventEmitter) BEFORE proceeding
+  - OR migrate them inline in this task before deleting ServiceRegistry
+  - Do NOT proceed with deletion until grep returns zero matches for `implements Drainable`
 
 **Step 4: Delete files**
 
@@ -1598,26 +1611,34 @@ git commit -m "chore: delete ServiceRegistry and AsyncTracker (replaced by Effec
 
 **Files:**
 - Modify: `src/lib/instance/sdk-factory.ts` (delete `createSdkClient` compat function)
-- Modify: `src/lib/daemon/daemon.ts` (use Effect version)
+- Verify: `src/lib/daemon/daemon.ts` (should already use Effect version after Task 12)
+- Delete: `test/unit/instance/sdk-factory.test.ts` (imports deleted function)
+- Modify: `test/unit/effect/sdk-factory.test.ts` (remove compat test case)
 
-**Step 1: Update daemon.ts**
+**Step 1: Verify daemon.ts no longer references `createSdkClient`**
 
-Replace `createSdkClient(options)` call (line ~1172) with `Effect.runSync(createSdkClientEffect(options))` or `yield* createSdkClientEffect(options)` if daemon is now in Effect context.
+Task 12 fully rewrites `discoverProjects` internals to use `createSdkClientEffect` inside an Effect pipeline. Verify with: `grep -rn "createSdkClient[^E]" src/lib/daemon/daemon.ts` — expected: no matches. If matches remain, replace them with `yield* createSdkClientEffect(options)` inside the Effect context.
 
 **Step 2: Delete compat wrapper**
 
 In `src/lib/instance/sdk-factory.ts`, delete the `createSdkClient` function and its export. Only `createSdkClientEffect` remains.
 
-**Step 3: Run full test suite**
+**Step 3: Delete old test file and compat test case**
+
+- Delete `test/unit/instance/sdk-factory.test.ts` — all 4 test cases import `createSdkClient`. Coverage is subsumed by `test/unit/effect/sdk-factory.test.ts` (created in Task 4).
+- In `test/unit/effect/sdk-factory.test.ts`, remove the `"legacy createSdkClient still works for daemon compat"` test case — it dynamically imports the now-deleted function.
+
+**Step 4: Run full test suite**
 
 Run: `pnpm check && pnpm test:unit`
 Expected: All pass.
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
-git add src/lib/instance/sdk-factory.ts src/lib/daemon/daemon.ts
-git commit -m "chore: delete createSdkClient compat wrapper"
+git rm test/unit/instance/sdk-factory.test.ts
+git add src/lib/instance/sdk-factory.ts test/unit/effect/sdk-factory.test.ts
+git commit -m "chore: delete createSdkClient compat wrapper and legacy tests"
 ```
 
 ---
