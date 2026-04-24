@@ -17,8 +17,9 @@ import {
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RelayMessage } from "../../shared-types.js";
 
-// Layer is empty for now — will be populated in Task 7.2 when WebSocket
-// message handling migrates to Effect Stream.
+// Frontend transport has no async service dependencies.
+// ManagedRuntime is needed for fiber lifecycle (interrupt stream on reconnect).
+// Extend if async services (logging, metrics) are added later.
 const TransportLayer = Layer.empty;
 
 let runtime: ManagedRuntime.ManagedRuntime<never, never> | null = null;
