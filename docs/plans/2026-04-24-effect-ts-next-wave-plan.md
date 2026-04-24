@@ -217,7 +217,7 @@ describe("daemon config persistence", () => {
     expect(result.dismissedPaths).toEqual(new Set(["/a", "/b"]));
   });
 
-  it("loadConfig returns empty state on missing file", async () => {
+  it("loadConfig returns DaemonState.empty() on missing file", async () => {
     vi.mocked(fs.readFile).mockRejectedValue(
       Object.assign(new Error("ENOENT"), { code: "ENOENT" })
     );
@@ -228,17 +228,23 @@ describe("daemon config persistence", () => {
       )
     );
 
+    // orElseSucceed returns DaemonState.empty(), not {}
     expect(result.pinHash).toBeNull();
     expect(result.keepAwake).toBe(false);
+    expect(result.dismissedPaths.size).toBe(0);
   });
 
-  it("coalesces rapid saves", async () => {
+  it("coalesces rapid saves via atomic Ref.modify", async () => {
     const writeSpy = vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    const renameSpy = vi.mocked(fs.rename).mockResolvedValue(undefined);
 
     await Effect.runPromise(
       Effect.gen(function* () {
-        // Fire 3 rapid persists — should coalesce
-        yield* Effect.all([persistConfig, persistConfig, persistConfig]);
+        // Fire 3 concurrent persists — should coalesce
+        yield* Effect.all(
+          [persistConfig, persistConfig, persistConfig],
+          { concurrency: "unbounded" }
+        );
       }).pipe(
         Effect.provide(makeDaemonStateLive()),
         Effect.provide(TestPersistencePathLive)
@@ -246,7 +252,30 @@ describe("daemon config persistence", () => {
     );
 
     // At most 2 writes (initial + one resave), not 3
-    expect(writeSpy.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(renameSpy.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it("coalesces deterministically when save already in progress", async () => {
+    const writeSpy = vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    const renameSpy = vi.mocked(fs.rename).mockResolvedValue(undefined);
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* DaemonStateTag;
+        // Simulate save already in progress
+        yield* Ref.update(ref, (s) => ({ ...s, pendingSave: true }));
+        // This call should set needsResave, not start a new write
+        yield* persistConfig;
+        const state = yield* Ref.get(ref);
+        expect(state.needsResave).toBe(true);
+      }).pipe(
+        Effect.provide(makeDaemonStateLive()),
+        Effect.provide(TestPersistencePathLive)
+      )
+    );
+
+    // No writes — coalesced into the in-flight save
+    expect(renameSpy).not.toHaveBeenCalled();
   });
 });
 ```
@@ -269,6 +298,11 @@ export class PersistencePathTag extends Context.Tag("PersistencePath")<
   string
 >() {}
 
+// NOTE: SerializedConfig must match the full DaemonConfig from
+// src/lib/daemon/config-persistence.ts (12+ fields including projects,
+// instances, pid, port, tls, debug, etc.). The implementer MUST read
+// config-persistence.ts:22-52 and include ALL fields. This is a
+// simplified skeleton showing the pattern — extend with all fields.
 interface SerializedConfig {
   pinHash: string | null;
   keepAwake: boolean;
@@ -276,6 +310,11 @@ interface SerializedConfig {
   keepAwakeArgs?: string[];
   dismissedPaths: string[];
   persistedSessionCounts: Record<string, number>;
+  // TODO: Add all remaining DaemonConfig fields from config-persistence.ts:
+  // pid, port, tls, debug, dangerouslySkipPermissions,
+  // projects (array of {path, slug, title, addedAt, instanceId, sessionCount}),
+  // instances (array of instance objects)
+  // These require access to ProjectRegistryTag and InstanceManagerTag.
 }
 
 const serializeState = (state: DaemonState): SerializedConfig => ({
@@ -293,42 +332,58 @@ const deserializeConfig = (raw: SerializedConfig): Partial<DaemonState> => ({
   keepAwakeCommand: raw.keepAwakeCommand,
   keepAwakeArgs: raw.keepAwakeArgs,
   dismissedPaths: new Set(raw.dismissedPaths ?? []),
-  persistedSessionCounts: new Map(Object.entries(raw.persistedSessionCounts ?? {})),
+  persistedSessionCounts: new Map(
+    Object.entries(raw.persistedSessionCounts ?? {}).map(([k, v]) => [k, Number(v)])
+  ),
 });
 
-export const loadConfig: Effect.Effect<Partial<DaemonState>, never, PersistencePathTag> =
+export const loadConfig: Effect.Effect<DaemonState, never, PersistencePathTag> =
   Effect.gen(function* () {
     const path = yield* PersistencePathTag;
     return yield* Effect.tryPromise(() => fs.readFile(path, "utf-8")).pipe(
-      Effect.map((raw) => deserializeConfig(JSON.parse(raw))),
-      Effect.orElseSucceed(() => ({}))
+      Effect.map((raw) => ({ ...DaemonState.empty(), ...deserializeConfig(JSON.parse(raw)) })),
+      Effect.orElseSucceed(() => DaemonState.empty())
     );
+  });
+
+// Atomic write: write to temp file, then rename (crash-safe)
+const atomicWrite = (path: string, content: string) =>
+  Effect.gen(function* () {
+    const tmpPath = `${path}.tmp.${process.pid}.${Date.now()}`;
+    const dir = path.substring(0, path.lastIndexOf("/"));
+    yield* Effect.tryPromise(() => fs.mkdir(dir, { recursive: true }));
+    yield* Effect.tryPromise(() => fs.writeFile(tmpPath, content, "utf-8"));
+    yield* Effect.tryPromise(() => fs.rename(tmpPath, path));
   });
 
 export const persistConfig: Effect.Effect<void, never, DaemonStateTag | PersistencePathTag> =
   Effect.gen(function* () {
     const ref = yield* DaemonStateTag;
-    const state = yield* Ref.get(ref);
 
-    // Coalesce: if already saving, mark resave needed
-    if (state.pendingSave) {
-      yield* Ref.update(ref, (s) => ({ ...s, needsResave: true }));
-      return;
-    }
+    // Atomic coalesce: check-and-set pendingSave in one operation
+    const alreadySaving = yield* Ref.modify(ref, (s) => {
+      if (s.pendingSave) return [true, { ...s, needsResave: true }];
+      return [false, { ...s, pendingSave: true }];
+    });
 
-    yield* Ref.update(ref, (s) => ({ ...s, pendingSave: true }));
+    if (alreadySaving) return;
 
     const path = yield* PersistencePathTag;
-    const serialized = JSON.stringify(serializeState(state), null, 2);
 
-    yield* Effect.tryPromise(() => fs.writeFile(path, serialized, "utf-8")).pipe(
+    // Read state FRESH at time of write (not stale snapshot from earlier)
+    const freshState = yield* Ref.get(ref);
+    const serialized = JSON.stringify(serializeState(freshState), null, 2);
+
+    yield* atomicWrite(path, serialized).pipe(
       Effect.catchAllCause(Effect.logWarning)
     );
 
-    const afterSave = yield* Ref.get(ref);
-    yield* Ref.update(ref, (s) => ({ ...s, pendingSave: false, needsResave: false }));
+    // Check if resave needed, reset flags atomically
+    const needsResave = yield* Ref.modify(ref, (s) => {
+      return [s.needsResave, { ...s, pendingSave: false, needsResave: false }];
+    });
 
-    if (afterSave.needsResave) {
+    if (needsResave) {
       yield* persistConfig;
     }
   });
@@ -1954,32 +2009,81 @@ export const reconnectSchedule = Schedule.exponential("1 second").pipe(
 
 /**
  * Create an SSE stream from a URL.
- * Each event is emitted as an SSEEvent.
- * Connection errors emit SSEConnectionError.
- * The stream is interruptible — fiber interruption closes the connection.
+ *
+ * NOTE: EventSource is a browser API — NOT available in Node.js.
+ * The current codebase uses the OpenCode SDK's streaming API or
+ * fetch-based SSE parsing. The implementer MUST check
+ * src/lib/relay/sse-stream.ts to see the actual SSE connection
+ * mechanism (likely SDK async generator or fetch + ReadableStream)
+ * and adapt accordingly. The pattern below shows the Effect.Stream
+ * wrapping — replace the connection mechanism with whatever the
+ * current code uses (e.g., SDK.streamEvents() or fetch + line parser).
  */
 export const sseStream = (
   url: string,
   options?: { headers?: Record<string, string>; lastEventId?: string }
 ): Stream.Stream<SSEEvent, SSEConnectionError> =>
-  Stream.async<SSEEvent, SSEConnectionError>((emit) => {
-    const eventSource = new EventSource(url);
+  Stream.asyncScoped<SSEEvent, SSEConnectionError>((emit) =>
+    Effect.gen(function* () {
+      // Use the SDK or fetch-based SSE, NOT browser EventSource.
+      // Example with fetch-based SSE:
+      const controller = new AbortController();
+      yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()));
 
-    eventSource.onmessage = (e: MessageEvent) => {
-      emit.single({
-        type: e.type || "message",
-        data: e.data,
-        lastEventId: e.lastEventId,
-      });
-    };
+      const response = yield* Effect.tryPromise(() =>
+        fetch(url, {
+          headers: {
+            "Accept": "text/event-stream",
+            ...(options?.lastEventId ? { "Last-Event-ID": options.lastEventId } : {}),
+            ...options?.headers,
+          },
+          signal: controller.signal,
+        })
+      ).pipe(Effect.mapError((e) => new SSEConnectionError(e)));
 
-    eventSource.onerror = (e: Event) => {
-      emit.fail(new SSEConnectionError(e));
-    };
+      if (!response.body) {
+        return yield* Effect.fail(new SSEConnectionError(new Error("No response body")));
+      }
 
-    // Cleanup on interruption
-    return Effect.sync(() => eventSource.close());
-  });
+      // Parse SSE lines from the ReadableStream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      yield* Effect.gen(function* () {
+        while (true) {
+          const { done, value } = yield* Effect.tryPromise(() => reader.read()).pipe(
+            Effect.mapError((e) => new SSEConnectionError(e))
+          );
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() ?? "";
+
+          for (const block of lines) {
+            const event = parseSSEBlock(block);
+            if (event) emit.single(event);
+          }
+        }
+        emit.end();
+      }).pipe(Effect.forkScoped);
+    })
+  );
+
+// Parse a single SSE event block (data: ...\nevent: ...\nid: ...)
+const parseSSEBlock = (block: string): SSEEvent | null => {
+  let data = "";
+  let type = "message";
+  let id: string | undefined;
+  for (const line of block.split("\n")) {
+    if (line.startsWith("data: ")) data += line.slice(6);
+    else if (line.startsWith("event: ")) type = line.slice(7);
+    else if (line.startsWith("id: ")) id = line.slice(4);
+  }
+  if (!data) return null;
+  return { type, data, lastEventId: id };
+};
 
 /**
  * Resilient SSE stream with automatic reconnection and stale detection.
@@ -2502,24 +2606,25 @@ Expected: FAIL — module not found
 
 ```typescript
 // src/lib/effect/instance-manager-service.ts
-import { Context, Effect, Layer, Ref, Fiber, Schedule, Duration } from "effect";
+import { Context, Data, Effect, Layer, Ref, Fiber, Schedule, Duration } from "effect";
+import type { ChildProcess } from "node:child_process";
 
-const MAX_INSTANCES = 5;
+// NOTE: Do NOT redefine InstanceConfig — import from shared-types.ts.
+// The existing type has: { name, port, managed, env?, url? }.
+// Use OpenCodeInstance from shared-types.ts for per-instance state
+// which includes: status, pid, restartCount, createdAt, lastHealthCheck,
+// exitCode, needsRestart. See src/lib/shared-types.ts:597-619.
+import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 
-export interface InstanceConfig {
-  id: string;
-  name: string;
-  port: number;
-  managed: boolean;
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
+export interface InstanceManagerConfig {
+  maxInstances: number; // configurable, default 5
 }
 
 export interface InstanceManagerState {
-  instances: Map<string, InstanceConfig>;
-  healthStatuses: Map<string, boolean>;
+  instances: Map<string, OpenCodeInstance>;
   healthPollers: Map<string, Fiber.RuntimeFiber<void>>;
+  processes: Map<string, ChildProcess>;
+  config: InstanceManagerConfig;
 }
 
 export class InstanceManagerStateTag extends Context.Tag("InstanceManagerState")<
@@ -2527,12 +2632,27 @@ export class InstanceManagerStateTag extends Context.Tag("InstanceManagerState")
   Ref.Ref<InstanceManagerState>
 >() {}
 
-export const makeInstanceManagerStateLive = (): Layer.Layer<InstanceManagerStateTag> =>
+export const makeInstanceManagerStateLive = (
+  config: InstanceManagerConfig = { maxInstances: 5 }
+): Layer.Layer<InstanceManagerStateTag> =>
   Layer.effect(InstanceManagerStateTag, Ref.make({
     instances: new Map(),
-    healthStatuses: new Map(),
     healthPollers: new Map(),
+    processes: new Map(),
+    config,
   }));
+
+// --- Error types (Schema.TaggedError for catchTag support) ---
+
+export class InstanceLimitExceeded extends Data.TaggedError("InstanceLimitExceeded")<{
+  max: number;
+}> {}
+
+export class InstanceNotFound extends Data.TaggedError("InstanceNotFound")<{
+  id: string;
+}> {}
+
+// --- Health polling ---
 
 const healthPollFiber = (instanceId: string) =>
   Effect.gen(function* () {
@@ -2541,17 +2661,24 @@ const healthPollFiber = (instanceId: string) =>
     const checkHealth = Effect.gen(function* () {
       const state = yield* Ref.get(ref);
       const instance = state.instances.get(instanceId);
-      if (!instance) return;
+      // If instance removed, interrupt self to stop polling
+      if (!instance) return yield* Effect.interrupt;
 
-      // HTTP health check against instance port
       const healthy = yield* Effect.tryPromise(
         () => fetch(`http://localhost:${instance.port}/health`).then((r) => r.ok)
       ).pipe(Effect.orElseSucceed(() => false));
 
       yield* Ref.update(ref, (s) => {
-        const healthStatuses = new Map(s.healthStatuses);
-        healthStatuses.set(instanceId, healthy);
-        return { ...s, healthStatuses };
+        const instances = new Map(s.instances);
+        const existing = instances.get(instanceId);
+        if (existing) {
+          instances.set(instanceId, {
+            ...existing,
+            status: healthy ? "healthy" : "unhealthy",
+            lastHealthCheck: Date.now(),
+          });
+        }
+        return { ...s, instances };
       });
     });
 
@@ -2561,63 +2688,262 @@ const healthPollFiber = (instanceId: string) =>
     );
   });
 
-export class InstanceLimitExceeded {
-  readonly _tag = "InstanceLimitExceeded";
-  constructor(readonly max: number) {}
-}
+// --- Process spawning with SIGTERM → SIGKILL escalation ---
 
-export const addInstance = (config: InstanceConfig) =>
+const killProcess = (proc: ChildProcess) =>
+  Effect.gen(function* () {
+    proc.kill("SIGTERM");
+    // Wait up to 5s for graceful shutdown, then SIGKILL
+    yield* Effect.tryPromise(() =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          try { proc.kill("SIGKILL"); } catch {}
+          resolve();
+        }, 5000);
+        proc.once("exit", () => { clearTimeout(timer); resolve(); });
+      })
+    ).pipe(Effect.orElse(() => Effect.void));
+  });
+
+export const spawnInstance = (instanceId: string) =>
   Effect.gen(function* () {
     const ref = yield* InstanceManagerStateTag;
     const state = yield* Ref.get(ref);
+    const instance = state.instances.get(instanceId);
+    if (!instance) return yield* Effect.fail(new InstanceNotFound({ id: instanceId }));
 
-    if (state.instances.size >= MAX_INSTANCES) {
-      return yield* Effect.fail(new InstanceLimitExceeded(MAX_INSTANCES));
-    }
+    // Use Effect.async to await the spawn/error event (not Effect.sync)
+    const proc = yield* Effect.async<ChildProcess, Error>((resume) => {
+      const { spawn } = require("node:child_process");
+      // Current code hardcodes "opencode serve --port N"
+      const child = spawn("opencode", ["serve", "--port", String(instance.port)], {
+        env: { ...process.env, ...instance.env },
+        stdio: "ignore",
+      });
+      child.once("spawn", () => resume(Effect.succeed(child)));
+      child.once("error", (err: Error) => resume(Effect.fail(err)));
+    });
 
-    const fiber = yield* Effect.forkScoped(healthPollFiber(config.id));
+    // Register cleanup: SIGTERM → wait 5s → SIGKILL
+    yield* Effect.addFinalizer(() => killProcess(proc));
 
+    // Store process reference
     yield* Ref.update(ref, (s) => {
+      const processes = new Map(s.processes);
       const instances = new Map(s.instances);
+      processes.set(instanceId, proc);
+      const existing = instances.get(instanceId);
+      if (existing) {
+        instances.set(instanceId, { ...existing, status: "starting", pid: proc.pid });
+      }
+      return { ...s, processes, instances };
+    });
+
+    // Start health polling
+    yield* Effect.forkScoped(healthPollFiber(instanceId));
+
+    return proc;
+  });
+
+// --- Restart with rate limiting ---
+
+const restartSchedule = Schedule.exponential(Duration.seconds(1)).pipe(
+  Schedule.compose(Schedule.recurs(5)),
+  Schedule.compose(Schedule.elapsed.pipe(
+    Schedule.whileOutput(Duration.lessThanOrEqualTo(Duration.minutes(2)))
+  ))
+);
+
+export const restartWithLimit = (instanceId: string) =>
+  spawnInstance(instanceId).pipe(Effect.retry(restartSchedule));
+
+// --- CRUD operations ---
+
+export const addInstance = (id: string, config: InstanceConfig) =>
+  Effect.gen(function* () {
+    const ref = yield* InstanceManagerStateTag;
+
+    // Atomic check-and-insert via Ref.modify
+    const error = yield* Ref.modify(ref, (s) => {
+      if (s.instances.size >= s.config.maxInstances) {
+        return [new InstanceLimitExceeded({ max: s.config.maxInstances }), s];
+      }
+      const instances = new Map(s.instances);
+      const newInstance: OpenCodeInstance = {
+        ...config,
+        id,
+        status: "stopped",
+        pid: undefined,
+        restartCount: 0,
+        createdAt: Date.now(),
+        lastHealthCheck: undefined,
+        exitCode: undefined,
+        needsRestart: false,
+      } as OpenCodeInstance;
+      instances.set(id, newInstance);
+      return [null, { ...s, instances }];
+    });
+
+    if (error) return yield* Effect.fail(error);
+
+    // Start health polling fiber
+    const fiber = yield* Effect.forkScoped(healthPollFiber(id));
+    yield* Ref.update(ref, (s) => {
       const healthPollers = new Map(s.healthPollers);
-      instances.set(config.id, config);
-      healthPollers.set(config.id, fiber);
-      return { ...s, instances, healthPollers };
+      healthPollers.set(id, fiber);
+      return { ...s, healthPollers };
     });
   });
 
 export const removeInstance = (instanceId: string) =>
   Effect.gen(function* () {
     const ref = yield* InstanceManagerStateTag;
-    const state = yield* Ref.get(ref);
-    const fiber = state.healthPollers.get(instanceId);
+
+    // Atomic extract-and-delete via Ref.modify
+    const fiber = yield* Ref.modify(ref, (s) => {
+      const f = s.healthPollers.get(instanceId);
+      const instances = new Map(s.instances);
+      const healthPollers = new Map(s.healthPollers);
+      const processes = new Map(s.processes);
+      instances.delete(instanceId);
+      healthPollers.delete(instanceId);
+      processes.delete(instanceId);
+      return [f ?? null, { ...s, instances, healthPollers, processes }];
+    });
 
     if (fiber) {
       yield* Fiber.interrupt(fiber);
     }
+  });
 
+export const getInstance = (instanceId: string) =>
+  Effect.gen(function* () {
+    const ref = yield* InstanceManagerStateTag;
+    const state = yield* Ref.get(ref);
+    const instance = state.instances.get(instanceId);
+    if (!instance) return yield* Effect.fail(new InstanceNotFound({ id: instanceId }));
+    return instance;
+  });
+
+export const getInstances = Effect.gen(function* () {
+  const ref = yield* InstanceManagerStateTag;
+  const state = yield* Ref.get(ref);
+  return [...state.instances.values()];
+});
+
+export const getInstanceUrl = (instanceId: string) =>
+  Effect.gen(function* () {
+    const instance = yield* getInstance(instanceId);
+    return instance.url ?? `http://localhost:${instance.port}`;
+  });
+
+export const updateInstance = (instanceId: string, updates: Partial<InstanceConfig>) =>
+  Effect.gen(function* () {
+    const ref = yield* InstanceManagerStateTag;
     yield* Ref.update(ref, (s) => {
       const instances = new Map(s.instances);
-      const healthStatuses = new Map(s.healthStatuses);
-      const healthPollers = new Map(s.healthPollers);
-      instances.delete(instanceId);
-      healthStatuses.delete(instanceId);
-      healthPollers.delete(instanceId);
-      return { instances, healthStatuses, healthPollers };
+      const existing = instances.get(instanceId);
+      if (existing) instances.set(instanceId, { ...existing, ...updates });
+      return { ...s, instances };
     });
+  });
+
+export const startInstance = (instanceId: string) =>
+  spawnInstance(instanceId);
+
+export const stopInstance = (instanceId: string) =>
+  Effect.gen(function* () {
+    const ref = yield* InstanceManagerStateTag;
+    const state = yield* Ref.get(ref);
+    const proc = state.processes.get(instanceId);
+    if (proc) {
+      yield* killProcess(proc);
+      yield* Ref.update(ref, (s) => {
+        const processes = new Map(s.processes);
+        const instances = new Map(s.instances);
+        processes.delete(instanceId);
+        const existing = instances.get(instanceId);
+        if (existing) instances.set(instanceId, { ...existing, status: "stopped", pid: undefined });
+        return { ...s, processes, instances };
+      });
+    }
+  });
+
+export const stopAll = Effect.gen(function* () {
+  const ref = yield* InstanceManagerStateTag;
+  const state = yield* Ref.get(ref);
+  yield* Effect.forEach(
+    [...state.healthPollers.values()],
+    (fiber) => Fiber.interrupt(fiber),
+    { concurrency: "unbounded" }
+  );
+  yield* Effect.forEach(
+    [...state.processes.values()],
+    (proc) => killProcess(proc),
+    { concurrency: "unbounded" }
+  );
+});
+```
+
+**Step 4: Update tests to cover additional methods and edge cases**
+
+Add to the test file:
+```typescript
+  it("add-remove-add at max instances succeeds", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // Add 5 instances (max)
+          for (let i = 0; i < 5; i++) {
+            yield* addInstance(`inst-${i}`, {
+              name: `Inst ${i}`, port: 4096 + i, managed: false,
+            } as any);
+          }
+          // Remove one
+          yield* removeInstance("inst-0");
+          // Add one more — should succeed
+          yield* addInstance("inst-new", {
+            name: "New", port: 5000, managed: false,
+          } as any);
+          const ref = yield* InstanceManagerStateTag;
+          const state = yield* Ref.get(ref);
+          expect(state.instances.size).toBe(5);
+        })
+      ).pipe(Effect.provide(makeInstanceManagerStateLive()))
+    );
+  });
+
+  it("max instance error has correct tag for catchTag", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          for (let i = 0; i < 6; i++) {
+            yield* addInstance(`inst-${i}`, {
+              name: `Inst ${i}`, port: 4096 + i, managed: false,
+            } as any);
+          }
+        }).pipe(
+          Effect.catchTag("InstanceLimitExceeded", (e) =>
+            Effect.succeed(`caught: max=${e.max}`)
+          )
+        )
+      ).pipe(Effect.provide(makeInstanceManagerStateLive()))
+    );
+
+    expect(result).toBe("caught: max=5");
   });
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 5: Run test to verify it passes**
 
 Run: `pnpm vitest run test/unit/instance/instance-manager-effect.test.ts`
-Expected: 3 tests PASS
+Expected: 5 tests PASS
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add src/lib/effect/instance-manager-service.ts test/unit/instance/instance-manager-effect.test.ts
-git commit -m "feat(effect): replace InstanceManager with per-instance fibers + acquireRelease"
+git commit -m "feat(effect): replace InstanceManager with per-instance fibers + acquireRelease + SIGTERM/SIGKILL"
 ```
 
 ---
@@ -3063,7 +3389,9 @@ export const withTransaction = <A, E>(
   Effect.acquireUseRelease(
     Effect.tryPromise(() => db.beginTransaction()),
     body,
-    (tx) => Effect.sync(() => {
+    // NOTE: In Effect v3, release receives (resource, exit) — exit indicates
+    // whether body succeeded or failed. Auto-rollback on failure.
+    (tx, exit) => Effect.sync(() => {
       if (!tx.committed) tx.rollback();
     })
   );
@@ -3281,12 +3609,17 @@ export class PtyConnectionTimeout {
   readonly _tag = "PtyConnectionTimeout";
 }
 
+// NOTE: WebSocket is a browser API. In Node.js, use the `ws` package.
+// Import: import WebSocket from "ws";
+// The current codebase already depends on ws — check package.json.
 export const ptyStream = (url: string) =>
   Stream.asyncScoped<PtyEvent, PtyConnectionError | PtyConnectionTimeout>((emit) =>
     Effect.gen(function* () {
+      // Use ws package, not browser WebSocket
+      const WebSocket = (await import("ws")).default;
       const ws = yield* Effect.acquireRelease(
         Effect.sync(() => new WebSocket(url)),
-        (ws) => Effect.sync(() => ws.close())
+        (ws) => Effect.sync(() => { try { ws.close(); } catch {} })
       );
 
       ws.onmessage = (e: MessageEvent) => {
