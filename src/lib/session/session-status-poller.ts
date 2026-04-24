@@ -15,8 +15,8 @@
 // Also maintains in-memory augmentation (subagent propagation, message
 // activity) for the legacy consumer interface.
 
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import { EventEmitter } from "node:events";
+import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -98,7 +98,10 @@ export type SessionStatusPollerEvents = {
 
 // ─── Reconciliation Loop ─────────────────────────────────────────────────────
 
-export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvents> {
+export class SessionStatusPoller
+	extends EventEmitter<SessionStatusPollerEvents>
+	implements Drainable
+{
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly interval: number;
 	private readonly log: Logger;
@@ -113,6 +116,9 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	private previousRaw: Record<string, SessionStatus> = {};
 	private polling = false;
 	private initialized = false;
+
+	/** Pending fire-and-forget promises — awaited in drain(). */
+	private readonly pendingPromises = new Set<Promise<unknown>>();
 
 	/**
 	 * Cache of child→parent mappings discovered by looking up unknown busy
@@ -142,7 +148,8 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	private sseIdleSessions = new Set<string>();
 
 	constructor(registry: ServiceRegistry, options: SessionStatusPollerOptions) {
-		super(registry);
+		super();
+		registry.register(this);
 		this.client = options.client;
 		this.interval = options.interval ?? DEFAULT_RECONCILIATION_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
@@ -212,20 +219,27 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	/** Start polling. Safe to call multiple times (idempotent). */
 	start(): void {
 		if (this.timer) return;
-		this.timer = this.repeating(() => {
-			void this.tracked(this.poll());
+		this.timer = setInterval(() => {
+			void this.trackPromise(this.poll());
 		}, this.interval);
 		// Immediate first poll so statuses are available right away
 		// (avoids a race where a browser connects before the first interval fires)
-		void this.tracked(this.poll());
+		void this.trackPromise(this.poll());
 	}
 
 	/** Stop polling and clear the timer. */
 	stop(): void {
 		if (this.timer) {
-			this.clearTrackedTimer(this.timer);
+			clearInterval(this.timer);
 			this.timer = null;
 		}
+	}
+
+	/** Cancel all work and wait for in-flight operations to settle. */
+	async drain(): Promise<void> {
+		this.stop();
+		await Promise.allSettled([...this.pendingPromises]);
+		this.pendingPromises.clear();
 	}
 
 	/** Get the most recently polled statuses. */
@@ -259,6 +273,13 @@ export class SessionStatusPoller extends TrackedService<SessionStatusPollerEvent
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
+
+	/** Track a fire-and-forget promise for drain. */
+	private trackPromise<T>(promise: Promise<T>): Promise<T> {
+		this.pendingPromises.add(promise);
+		promise.finally(() => this.pendingPromises.delete(promise)).catch(() => {});
+		return promise;
+	}
 
 	private async poll(): Promise<void> {
 		// Guard against overlapping polls

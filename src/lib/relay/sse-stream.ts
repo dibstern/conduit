@@ -3,8 +3,8 @@
 // Replaces SSEConsumer's raw HTTP/SSE parsing with the typed AsyncGenerator
 // returned by the OpenCode SDK. Reconnects with exponential backoff on failure.
 
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import { EventEmitter } from "node:events";
+import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
 import {
@@ -40,7 +40,10 @@ export type SSEStreamEvents = {
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
-export class SSEStream extends TrackedService<SSEStreamEvents> {
+export class SSEStream
+	extends EventEmitter<SSEStreamEvents>
+	implements Drainable
+{
 	private readonly api: SSEStreamOptions["api"];
 	private readonly backoffConfig: BackoffConfig;
 	private readonly healthTracker: HealthTracker;
@@ -51,8 +54,12 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 	/** AbortController for the current SSE connection. Aborted on disconnect(). */
 	private sseAbort: AbortController | null = null;
 
+	/** Pending fire-and-forget promises — awaited in drain(). */
+	private readonly pendingPromises = new Set<Promise<unknown>>();
+
 	constructor(registry: ServiceRegistry, options: SSEStreamOptions) {
-		super(registry);
+		super();
+		registry.register(this);
 		this.api = options.api;
 		this.log = options.log ?? createSilentLogger();
 		this.backoffConfig = {
@@ -71,7 +78,7 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 		this.running = true;
 		this.reconnectAttempt = 0;
 		// Fire-and-forget: consumeLoop handles its own errors via emit + reconnect.
-		this.tracked(
+		this.trackPromise(
 			this.consumeLoop().catch((err) => {
 				if (!this.running) return;
 				const error = err instanceof Error ? err : new Error(String(err));
@@ -89,7 +96,7 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 			this.sseAbort = null;
 		}
 		if (this.reconnectTimer) {
-			this.clearTrackedTimer(this.reconnectTimer);
+			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
 		this.healthTracker.onDisconnected();
@@ -106,12 +113,20 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 	}
 
 	/** Kill SSE stream and drain tracked work. */
-	override async drain(): Promise<void> {
+	async drain(): Promise<void> {
 		await this.disconnect();
-		await super.drain();
+		await Promise.allSettled([...this.pendingPromises]);
+		this.pendingPromises.clear();
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
+
+	/** Track a fire-and-forget promise for drain. */
+	private trackPromise<T>(promise: Promise<T>): Promise<T> {
+		this.pendingPromises.add(promise);
+		promise.finally(() => this.pendingPromises.delete(promise)).catch(() => {});
+		return promise;
+	}
 
 	private async consumeLoop(): Promise<void> {
 		while (this.running) {
@@ -172,7 +187,7 @@ export class SSEStream extends TrackedService<SSEStreamEvents> {
 					`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
 				);
 				await new Promise<void>((resolve) => {
-					this.reconnectTimer = this.delayed(() => {
+					this.reconnectTimer = setTimeout(() => {
 						this.reconnectTimer = null;
 						resolve();
 					}, delay);

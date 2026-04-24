@@ -9,8 +9,8 @@
 // detect activity from external processes (e.g. the OpenCode TUI running
 // in a separate OS process that shares only SQLite).
 
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import { EventEmitter } from "node:events";
+import type { Drainable, ServiceRegistry } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -34,7 +34,10 @@ export interface MessagePollerManagerOptions {
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
 
-export class MessagePollerManager extends TrackedService<MessagePollerManagerEvents> {
+export class MessagePollerManager
+	extends EventEmitter<MessagePollerManagerEvents>
+	implements Drainable
+{
 	private readonly pollers: Map<string, MessagePoller> = new Map();
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly log: Logger;
@@ -45,7 +48,8 @@ export class MessagePollerManager extends TrackedService<MessagePollerManagerEve
 	private readonly _hasViewers: ((sessionId: string) => boolean) | undefined;
 
 	constructor(registry: ServiceRegistry, options: MessagePollerManagerOptions) {
-		super(registry);
+		super();
+		registry.register(this);
 		this.serviceRegistry = registry;
 		this.client = options.client;
 		this.log = options.log ?? createSilentLogger();
@@ -125,10 +129,9 @@ export class MessagePollerManager extends TrackedService<MessagePollerManagerEve
 		this.pollers.clear();
 	}
 
-	/** Drain: stop all child pollers, then drain tracked async work. */
-	override async drain(): Promise<void> {
+	/** Drain: stop all child pollers. */
+	async drain(): Promise<void> {
 		this.stopAll();
-		await super.drain();
 	}
 
 	/** Get the number of active pollers. */
