@@ -136,3 +136,18 @@ Manual drain calls in daemon.ts `stop()` are a temporary bridge until Task 12 wi
 **User decisions:**
 - Task 10: Use Option 3 — direct function calls for sync-critical emit paths, PubSub for broadcast
 - Task 14: Task 12 fully rewrites `discoverProjects` internals using Effect
+
+---
+
+## Re-Audit (Round 2)
+
+Re-audited 7 amended tasks (2, 3, 5, 10, 12, 13, 14).
+
+**Clean:** Tasks 2, 3 (Accept), 12, 14
+**New Amend Plan findings (3):**
+
+| Finding | Task | Amendment Applied |
+|---------|------|-------------------|
+| Task 5: Removing `cause` from RelayErrorFields breaks cause propagation (Schema validation strips unlisted fields) | Task 5 | Reverted: kept `cause` in RelayErrorFields with `Schema.optionalWith(Schema.Unknown)`. Updated `fromCaught` to pass cause in props, not second arg. |
+| Task 13/9: SessionOverrides implements Drainable but not in Task 9 migration list | Task 9 | Added SessionOverrides to Task 9 files, Tags, constructor changes |
+| Task 13/9: RelayTimers implements Drainable but no src/ instantiation sites | Task 9 | Added note: check if dormant, remove `implements Drainable` if unused |

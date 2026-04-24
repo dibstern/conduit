@@ -583,8 +583,10 @@ const RelayErrorFields = {
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
     { default: () => ({}) },
   ),
-  // NOTE: Do NOT add `cause` here — it comes from the Error base class.
-  // Pass cause via constructor option: new OpenCodeConnectionError({ message: "..." }, { cause: err })
+  // cause MUST be in the schema — Schema.TaggedError validates props through
+  // the schema before passing to super(). Unlisted fields are stripped.
+  // Without this, Error.cause is always undefined.
+  cause: Schema.optionalWith(Schema.Unknown, { default: () => undefined }),
 };
 
 // ─── Transport serialization ────────────────────────────────────────────────
@@ -743,7 +745,8 @@ export function fromCaught(err: unknown, code: string, prefix?: string): RelayEr
   return new ErrorClass({
     message: fullMessage,
     context: { originalCode: code },
-  }, { cause: err instanceof Error ? err : undefined });
+    cause: err instanceof Error ? err : undefined,
+  });
 }
 ```
 
@@ -1107,11 +1110,14 @@ git commit -m "feat: add SignalHandlerLayer and ProcessErrorHandlerLayer"
 - Modify: `src/lib/daemon/version-check.ts`
 - Modify: `src/lib/daemon/storage-monitor.ts`
 - Modify: `src/lib/daemon/port-scanner.ts`
+- Modify: `src/lib/relay/session-overrides.ts` (SessionOverrides — simple timer-based drain)
 - Modify: `src/lib/effect/daemon-layers.ts` (add Layer definitions)
 - Modify: `src/lib/effect/services.ts` (add Tags)
 - Test: existing tests for each service (verify still pass)
 
-These 4 services use callback patterns (not EventEmitter) and have simple drain() methods. They are the lowest-risk migration targets.
+These 5 services use callback patterns (not EventEmitter) and have simple drain() methods. They are the lowest-risk migration targets.
+
+**Note:** `RelayTimers` also implements `Drainable` but has no instantiation sites in `src/` (test-only or dormant). Check with `grep -rn "new RelayTimers" src/` — if zero matches, remove `implements Drainable` from it inline during this task. If it IS instantiated somewhere, add it to the migration list.
 
 **Pattern for each service:**
 
@@ -1128,6 +1134,7 @@ export class KeepAwakeTag extends Context.Tag("KeepAwake")<KeepAwakeTag, KeepAwa
 export class VersionCheckerTag extends Context.Tag("VersionChecker")<VersionCheckerTag, VersionChecker>() {}
 export class StorageMonitorTag extends Context.Tag("StorageMonitor")<StorageMonitorTag, StorageMonitor>() {}
 export class PortScannerTag extends Context.Tag("PortScanner")<PortScannerTag, PortScanner>() {}
+export class SessionOverridesTag extends Context.Tag("SessionOverrides")<SessionOverridesTag, SessionOverrides>() {}
 ```
 
 **Step 2: Migrate KeepAwake (template for others)**
@@ -1217,6 +1224,7 @@ For each service class:
 - `VersionChecker(registry, options?)` → `VersionChecker(options?)`
 - `StorageMonitor(registry, options)` → `StorageMonitor(options)`
 - `PortScanner(registry, config, probeFn)` → `PortScanner(config, probeFn)`
+- `SessionOverrides(registry)` → `SessionOverrides()` (instantiated in relay-stack.ts:226)
 
 **Step 4: Update daemon.ts construction sites**
 
