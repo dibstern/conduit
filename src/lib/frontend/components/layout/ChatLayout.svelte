@@ -5,6 +5,7 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
 	import Header from "./Header.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
@@ -354,9 +355,15 @@
 
 		return () => {
 			clearNavigateToSession();
+			interruptStream(); // Interrupt Effect stream fiber before disconnect
 			disconnect();
 		};
 	});
+
+	// ─── Effect runtime disposal on page unload ──────────────────────────────
+	if (typeof window !== "undefined") {
+		window.addEventListener("pagehide", () => disposeRuntime());
+	}
 
 	// ─── Plan mode subscription ───────────────────────────────────────────────
 
