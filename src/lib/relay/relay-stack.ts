@@ -21,7 +21,7 @@ import { formatErrorDetail, RelayError } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
-import { createSdkClient } from "../instance/sdk-factory.js";
+import { createSdkClientEffect } from "../instance/sdk-factory.js";
 import {
 	createLogger,
 	type Logger,
@@ -175,18 +175,20 @@ export async function createProjectRelay(
 
 	// ── Components ──────────────────────────────────────────────────────────
 
-	// ── SDK-based client (Tasks 3–6) ─────────────────────────────────────────
+	// ── SDK-based client (Tasks 3–6, Effect-based from Task 4) ──────────────
 	const {
 		client: sdkClient,
 		fetch: sdkFetch,
 		authHeaders,
-	} = createSdkClient({
-		baseUrl: config.opencodeUrl,
-		...(config.noServer &&
-			config.projectDir != null && {
-				directory: config.projectDir,
-			}),
-	});
+	} = Effect.runSync(
+		createSdkClientEffect({
+			baseUrl: config.opencodeUrl,
+			...(config.noServer &&
+				config.projectDir != null && {
+					directory: config.projectDir,
+				}),
+		}),
+	);
 
 	const gapEndpoints = new GapEndpoints({
 		baseUrl: config.opencodeUrl,
