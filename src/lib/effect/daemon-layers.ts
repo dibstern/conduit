@@ -4,8 +4,25 @@
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
 import { Deferred, Effect, Layer } from "effect";
+import type { DaemonStatus } from "../daemon/daemon.js";
+import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
+import {
+	closeHttpServer,
+	closeIPCServer,
+	closeOnboardingServer,
+	type DaemonLifecycleContext,
+	type OnboardingServerDeps,
+	startHttpServer,
+	startIPCServer,
+	startOnboardingServer,
+} from "../daemon/daemon-lifecycle.js";
 import type { KeepAwakeOptions } from "../daemon/keep-awake.js";
 import { KeepAwake } from "../daemon/keep-awake.js";
+import {
+	removePidFile,
+	removeSocketFile,
+	writePidFile,
+} from "../daemon/pid-manager.js";
 import { PortScanner, type PortScannerConfig } from "../daemon/port-scanner.js";
 import type { StorageMonitorOptions } from "../daemon/storage-monitor.js";
 import { StorageMonitor } from "../daemon/storage-monitor.js";
@@ -154,5 +171,78 @@ export const makeSessionOverridesLive = () =>
 			const instance = new SessionOverrides();
 			yield* Effect.addFinalizer(() => Effect.promise(() => instance.drain()));
 			return instance;
+		}),
+	);
+
+// ─── Server Lifecycle Layers ──────────────────────────────────────────────
+
+/**
+ * HTTP(S) server layer — starts the HTTP (or TLS protocol-detection) server
+ * and tears it down gracefully on scope close.
+ */
+export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
+	Layer.scopedDiscard(
+		Effect.gen(function* () {
+			yield* Effect.promise(() => startHttpServer(ctx));
+			yield* Effect.addFinalizer(() =>
+				Effect.promise(() => closeHttpServer(ctx)),
+			);
+		}),
+	);
+
+/**
+ * IPC (Unix socket) server layer — starts the IPC server with command routing
+ * and closes it on scope close.
+ */
+export const makeIpcServerLive = (
+	ctx: DaemonLifecycleContext,
+	ipcContext: DaemonIPCContext,
+	getStatus: () => DaemonStatus,
+) =>
+	Layer.scopedDiscard(
+		Effect.gen(function* () {
+			yield* Effect.promise(() => startIPCServer(ctx, ipcContext, getStatus));
+			yield* Effect.addFinalizer(() =>
+				Effect.promise(() => closeIPCServer(ctx)),
+			);
+		}),
+	);
+
+/**
+ * Onboarding server layer — starts an HTTP-only onboarding server on port+1
+ * when TLS is active (ctx.tls is present). No-ops gracefully when TLS is not
+ * configured because startOnboardingServer already returns Promise.resolve().
+ */
+export const makeOnboardingServerLive = (
+	ctx: DaemonLifecycleContext,
+	deps: OnboardingServerDeps,
+) =>
+	Layer.scopedDiscard(
+		Effect.gen(function* () {
+			yield* Effect.promise(() => startOnboardingServer(ctx, deps));
+			yield* Effect.addFinalizer(() =>
+				Effect.promise(() => closeOnboardingServer(ctx)),
+			);
+		}),
+	);
+
+/**
+ * PID/socket file layer — writes the PID file on acquisition,
+ * removes PID and socket files on scope close.
+ */
+export const makePidFileLive = (
+	configDir: string,
+	pidPath: string,
+	socketPath: string,
+) =>
+	Layer.scopedDiscard(
+		Effect.gen(function* () {
+			yield* Effect.sync(() => writePidFile(configDir, pidPath));
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => {
+					removePidFile(pidPath);
+					removeSocketFile(socketPath);
+				}),
+			);
 		}),
 	);
