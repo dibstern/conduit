@@ -21,9 +21,16 @@
 - Modify: `test/unit/handlers/message-handlers.test.ts:3,36,1674-1756`
 - Modify: `test/unit/server/ws-router.pbt.test.ts:20,443`
 
-**Step 1: Delete legacy code from handlers/index.ts**
+**Step 1: Delete legacy code and clean up handlers/index.ts**
 
 Delete the `MESSAGE_HANDLERS` record (lines 160-209) and `dispatchMessage()` function (lines 215-231). These are replaced by `EFFECT_MESSAGE_HANDLERS` (lines 318-377) and `dispatchMessageEffect()` (lines 393-410). Also remove their exports.
+
+Additionally clean up:
+- **Dead imports (lines 88-110, 112-153):** These import handler functions (handleGetAgents, handleSwitchModel, etc.) used ONLY by the deleted `MESSAGE_HANDLERS` table. Delete them. **Keep** `import type { PayloadMap } from './payloads.js'` (line 111) — still used by `EFFECT_MESSAGE_HANDLERS` and `dispatchMessageEffect`.
+- **Stale header comment (lines 1-7):** Remove references to `MESSAGE_HANDLERS` and "legacy dispatchMessage".
+- **Stale JSDoc (lines 312-317):** Simplify the comment above `EFFECT_MESSAGE_HANDLERS` — remove the comparison to the deleted `MESSAGE_HANDLERS`.
+- **Orphaned section comments (line 86, lines 155-158):** Remove the "Dispatch Table" divider and the trust-boundary comment — they served the deleted code.
+- **Export `EFFECT_MESSAGE_HANDLERS`:** Add `export` to the `const EFFECT_MESSAGE_HANDLERS` definition (line 318) so tests can import it.
 
 **Do NOT delete:**
 - `EFFECT_MESSAGE_HANDLERS` — active production dispatch table
@@ -220,11 +227,11 @@ git commit -m "fix: align Effect retry-fetch with legacy behavior (linear backof
 
 **Files:**
 - Modify: `src/lib/instance/sdk-factory.ts`
-- Modify: `src/lib/effect/services.ts`
 - Modify: `src/lib/relay/relay-stack.ts`
-- Modify: `src/lib/daemon/daemon.ts`
 - Delete: `src/lib/instance/retry-fetch.ts`
+- Delete: `test/unit/instance/retry-fetch.test.ts`
 - Test: `test/unit/effect/sdk-factory.test.ts`
+- Verify: `test/unit/instance/sdk-factory.test.ts` (existing — must still pass with compat wrapper)
 
 **Step 1: Write the failing test**
 
@@ -385,21 +392,24 @@ const { client, fetch: authedFetch, authHeaders } = Effect.runSync(createSdkClie
 
 Note: `Effect.runSync` is used here because `createSdkClientEffect` wraps `Effect.sync` (pure computation, no async). In W4, this becomes `yield*` inside the daemon's Effect pipeline.
 
-**Step 5: Delete old retry-fetch.ts**
+**Step 5: Delete old retry-fetch.ts and its test**
 
 ```bash
 rm src/lib/instance/retry-fetch.ts
+rm test/unit/instance/retry-fetch.test.ts
 ```
+
+The old test's behavior is now covered by `test/unit/effect/retry-fetch.test.ts` from Task 3.
 
 Verify no remaining imports:
 
-Run: `grep -rn "from.*instance/retry-fetch" src/`
+Run: `grep -rn "from.*instance/retry-fetch" src/ test/`
 Expected: No matches (sdk-factory.ts now imports from `../effect/retry-fetch.js`).
 
 **Step 6: Run tests**
 
-Run: `pnpm vitest run test/unit/effect/sdk-factory.test.ts && pnpm vitest run test/unit/effect/retry-fetch.test.ts`
-Expected: All pass.
+Run: `pnpm vitest run test/unit/effect/sdk-factory.test.ts && pnpm vitest run test/unit/effect/retry-fetch.test.ts && pnpm vitest run test/unit/instance/sdk-factory.test.ts`
+Expected: All pass. The existing sdk-factory.test.ts must still pass with the compat wrapper.
 
 **Step 7: Run full test suite**
 
@@ -410,7 +420,7 @@ Expected: All pass.
 
 ```bash
 git add src/lib/instance/sdk-factory.ts src/lib/relay/relay-stack.ts test/unit/effect/sdk-factory.test.ts
-git rm src/lib/instance/retry-fetch.ts
+git rm src/lib/instance/retry-fetch.ts test/unit/instance/retry-fetch.test.ts
 git commit -m "refactor: convert sdk-factory to Effect, delete old retry-fetch"
 ```
 
@@ -733,17 +743,39 @@ export function wrapError<E extends new (props: { message: string; context?: Rec
 export { redactSensitive, formatErrorDetail } from "./errors-utils.js";
 ```
 
-**Important:** `Schema.TaggedError` (NOT `Schema.TaggedErrorClass`) is the correct API for Effect 3.x. Verify by checking Effect docs or trying both.
+**Important:** Verify the correct Effect 3.x API name — `Schema.TaggedError` vs `Schema.TaggedErrorClass`. Check with `import { Schema } from "effect"; console.log(typeof Schema.TaggedError)` in a test. The `cause` field should NOT be in the Schema fields — it comes from `Error` base class. Remove `cause` from `RelayErrorFields` and pass it via the constructor's second arg or via `{ cause }` option to `super()`.
 
 **Step 4: Update construction sites**
 
 The constructor signature stays the same (single props object) — most sites need no change. The key change is that `RelayError` is no longer a class, so:
 
-1. Replace `RelayError.fromCaught(err, code)` → `fromCaught(err, code)` (now a standalone function). Search: `grep -rn "RelayError.fromCaught" src/` — update all sites.
+1. **Replace `RelayError.fromCaught(err, code)` → `fromCaught(err, code)`.** Search: `grep -rn "RelayError.fromCaught" src/` — update all sites. **Critical: `fromCaught` must preserve the `code` parameter to map to appropriate error subclasses.** The plan's `fromCaught` implementation always creates `OpenCodeConnectionError` — this is WRONG. It must map `code` to the appropriate error class. Implementation:
+
+```typescript
+const CODE_TO_CLASS: Record<string, new (props: { message: string }) => RelayError> = {
+  OPENCODE_UNREACHABLE: OpenCodeConnectionError,
+  SSE_DISCONNECTED: SSEConnectionError,
+  WEBSOCKET_ERROR: WebSocketError,
+  AUTH_FAILED: AuthenticationError,
+  CONFIG_INVALID: ConfigurationError,
+};
+
+export function fromCaught(err: unknown, code: string, prefix?: string): RelayError {
+  const message = err instanceof Error ? err.message : String(err);
+  const fullMessage = prefix ? `${prefix}: ${message}` : message;
+  const ErrorClass = CODE_TO_CLASS[code] ?? OpenCodeConnectionError;
+  return new ErrorClass({
+    message: fullMessage,
+    cause: err instanceof Error ? err : undefined,
+  });
+}
+```
+
+For codes like `"INIT_FAILED"`, `"HANDLER_ERROR"`, `"INTERNAL_ERROR"` that don't map to a specific subclass, `OpenCodeConnectionError` is the fallback. The `.code` getter returns the `_tag` name, NOT the original code string. Downstream assertions checking `code === "INIT_FAILED"` must be updated to check `code === "OpenCodeConnectionError"` (or use `_tag` directly).
 
 2. Remove any `instanceof RelayError` checks. Search: `grep -rn "instanceof RelayError" src/ test/` — update to `_tag` checks or type guards.
 
-3. The `code` property now returns `_tag` (e.g., `"OpenCodeApiError"` instead of `"OPENCODE_API_ERROR"`). Search: `grep -rn "\.code ===" src/ test/` — sites checking `error.code` against old string constants need updating. Based on audit, there are 0 sites in src/ checking RelayError `.code` — only Node.js `ENOENT`/`EADDRINUSE` checks exist.
+3. **Wire format change:** The `code` property now returns `_tag` (e.g., `"OpenCodeApiError"` instead of `"OPENCODE_API_ERROR"`). Search `grep -rn "\.code ===" src/ test/` — update assertions. Check Svelte frontend stores (`grep -rn "\.code" src/lib/frontend/`) for any string comparisons against old error codes. Based on audit, production src/ has no RelayError `.code` checks — only Node.js `ENOENT`/`EADDRINUSE` checks exist. But test files DO check `.code` values (see Task 7).
 
 **Step 5: Run tests**
 
@@ -902,6 +934,8 @@ Update each match:
 - `RelayError.fromCaught` → `fromCaught` (standalone import)
 - `.code === "OLD_VALUE"` → `.code === "NewClassName"` (if any exist)
 
+**Critical: Update INIT_FAILED assertions in client-init.test.ts.** Lines 184, 239, 268, 336, 788 assert `code === "INIT_FAILED"`. After Task 5, `fromCaught(err, "INIT_FAILED")` produces `OpenCodeConnectionError` with `code === "OpenCodeConnectionError"`. Update all these assertions to check for `"OpenCodeConnectionError"` instead of `"INIT_FAILED"`. Search with: `grep -rn "INIT_FAILED\|HANDLER_ERROR\|INTERNAL_ERROR" test/` to find ALL test sites using codes that map to the fallback.
+
 **Step 3: Run all error-related tests**
 
 Run: `pnpm vitest run test/unit/schema/errors.test.ts test/unit/errors.pbt.test.ts test/unit/provider/relay-event-sink.test.ts test/unit/bridges/client-init.test.ts`
@@ -933,26 +967,57 @@ git commit -m "test: update error tests for Schema.TaggedError migration"
 Create `test/unit/effect/daemon-layers.test.ts`:
 
 ```typescript
-import { Effect, Exit, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { Deferred, Effect, Exit, Layer, Scope } from "effect";
+import { describe, expect, it } from "vitest";
+import { SignalHandlerLayer, ProcessErrorHandlerLayer } from "../../../src/lib/effect/daemon-layers.js";
+import { ShutdownSignalTag } from "../../../src/lib/effect/services.js";
 
 describe("SignalHandlerLayer", () => {
-  it("installs handlers on layer build and removes on finalize", async () => {
-    const onCalls: string[] = [];
-    const removeCalls: string[] = [];
-    const mockProcess = {
-      on: (signal: string, _handler: () => void) => { onCalls.push(signal); },
-      removeListener: (signal: string, _handler: () => void) => { removeCalls.push(signal); },
-    };
+  it("installs signal handlers on layer build", async () => {
+    const beforeCount = process.listenerCount("SIGTERM");
+    const program = Effect.scoped(
+      Effect.gen(function* () {
+        const layer = SignalHandlerLayer;
+        const scope = yield* Scope.make();
+        const ctx = yield* Layer.buildWithScope(layer, scope);
+        const newCount = process.listenerCount("SIGTERM");
+        expect(newCount).toBe(beforeCount + 1);
+        yield* Scope.close(scope, Exit.void);
+      }),
+    );
+    await Effect.runPromise(program);
+    // After scope close, listener should be removed
+    expect(process.listenerCount("SIGTERM")).toBe(beforeCount);
+  });
 
-    // Test will be fleshed out after implementation
-    expect(true).toBe(true);
+  it("deferred completes when shutdown signal fires", async () => {
+    const program = Effect.scoped(
+      Effect.gen(function* () {
+        const deferred = yield* ShutdownSignalTag.pipe(
+          Effect.provide(SignalHandlerLayer),
+        );
+        // Deferred should not be done yet
+        const isDone = yield* Deferred.isDone(deferred);
+        expect(isDone).toBe(false);
+      }),
+    );
+    await Effect.runPromise(program);
   });
 });
 
 describe("ProcessErrorHandlerLayer", () => {
-  it("attaches and removes error handlers", async () => {
-    expect(true).toBe(true);
+  it("attaches and removes error handlers on scope lifecycle", async () => {
+    const beforeCount = process.listenerCount("unhandledRejection");
+    const program = Effect.scoped(
+      Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        yield* Layer.buildWithScope(ProcessErrorHandlerLayer, scope);
+        expect(process.listenerCount("unhandledRejection")).toBe(beforeCount + 1);
+        yield* Scope.close(scope, Exit.void);
+      }),
+    );
+    await Effect.runPromise(program);
+    expect(process.listenerCount("unhandledRejection")).toBe(beforeCount);
   });
 });
 ```
@@ -962,45 +1027,58 @@ describe("ProcessErrorHandlerLayer", () => {
 Add to `src/lib/effect/services.ts`:
 
 ```typescript
+import { Deferred } from "effect";
+
 // ─── Daemon lifecycle Tags ─────────────────────────────────────────────────
 
-/** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received */
+/** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received.
+ *  Consumer awaits with `yield* shutdownSignal` to block until signal fires. */
 export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
   ShutdownSignalTag,
-  Effect.Effect<void>
->() {}
-
-/** Daemon config (rehydrated from disk) */
-export class DaemonConfigTag extends Context.Tag("DaemonConfig")<
-  DaemonConfigTag,
-  import("../daemon/config-persistence.js").DaemonConfig
+  Deferred.Deferred<void>
 >() {}
 ```
+
+**Note:** `DaemonConfigTag` already exists in `src/lib/daemon/config-persistence.ts:100-103` with a `ServerConfigLive` Layer. Do NOT create a duplicate. Import from there if needed.
 
 **Step 3: Create daemon-layers.ts**
 
 Create `src/lib/effect/daemon-layers.ts`:
 
 ```typescript
-import { Effect, Layer, Scope } from "effect";
+import { Deferred, Effect, Layer } from "effect";
+import { ShutdownSignalTag } from "./services.js";
 
 /**
- * Installs SIGTERM/SIGINT/SIGHUP handlers. Finalizer removes them.
- * Returns an Effect that resolves when a shutdown signal is received.
+ * Installs SIGTERM/SIGINT handlers. Completes a Deferred on signal.
+ * Finalizer removes handlers to prevent leaks in tests.
+ * Also installs SIGHUP handler (placeholder for config reload).
  */
 export const SignalHandlerLayer = Layer.scoped(
   ShutdownSignalTag,
   Effect.gen(function* () {
-    const shutdown = yield* Effect.promise(
-      () => new Promise<void>((resolve) => {
-        const handler = () => resolve();
-        process.on("SIGTERM", handler);
-        process.on("SIGINT", handler);
+    const deferred = yield* Deferred.make<void>();
+
+    const onShutdown = () => {
+      Deferred.unsafeDone(deferred, Effect.void);
+    };
+    const onReload = () => {
+      // SIGHUP — config reload placeholder (matches existing signal-handlers.ts behavior)
+    };
+
+    process.on("SIGTERM", onShutdown);
+    process.on("SIGINT", onShutdown);
+    process.on("SIGHUP", onReload);
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        process.removeListener("SIGTERM", onShutdown);
+        process.removeListener("SIGINT", onShutdown);
+        process.removeListener("SIGHUP", onReload);
       }),
     );
-    // Can't easily clean up here since we're returning the promise
-    // Signal handlers will be cleaned up when the process exits
-    return Effect.sync(() => shutdown);
+
+    return deferred;
   }),
 );
 
@@ -1029,8 +1107,6 @@ export const ProcessErrorHandlerLayer = Layer.scopedDiscard(
   }),
 );
 ```
-
-Import `ShutdownSignalTag` from services.ts.
 
 **Step 4: Run tests**
 
@@ -1085,17 +1161,63 @@ In `src/lib/daemon/keep-awake.ts`:
 3. Change constructor: remove `registry: ServiceRegistry` parameter and `registry.register(this)` call
 4. Keep `drain()` as a public method (called by finalizer)
 
-In `src/lib/effect/daemon-layers.ts`, add:
+In `src/lib/effect/daemon-layers.ts`, add Layer factories for all 4 services. Each Layer must:
+1. Create the instance
+2. Call `start()` or `activate()` to begin periodic work
+3. Add a finalizer that calls `instance.drain()` (NOT inlined — PortScanner.drain() sets an internal `drained` flag that suppresses callbacks)
 
 ```typescript
 import { KeepAwake, type KeepAwakeOptions } from "../daemon/keep-awake.js";
-import { KeepAwakeTag } from "./services.js";
+import { VersionChecker, type VersionCheckOptions } from "../daemon/version-check.js";
+import { StorageMonitor, type StorageMonitorOptions } from "../daemon/storage-monitor.js";
+import { PortScanner, type PortScannerConfig } from "../daemon/port-scanner.js";
+import { KeepAwakeTag, VersionCheckerTag, StorageMonitorTag, PortScannerTag } from "./services.js";
 
 export const makeKeepAwakeLive = (options?: KeepAwakeOptions) =>
   Layer.scoped(
     KeepAwakeTag,
     Effect.gen(function* () {
       const instance = new KeepAwake(options);
+      instance.activate();
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => instance.drain()),
+      );
+      return instance;
+    }),
+  );
+
+export const makeVersionCheckerLive = (options?: VersionCheckOptions) =>
+  Layer.scoped(
+    VersionCheckerTag,
+    Effect.gen(function* () {
+      const instance = new VersionChecker(options);
+      instance.start();
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => instance.drain()),
+      );
+      return instance;
+    }),
+  );
+
+export const makeStorageMonitorLive = (options: StorageMonitorOptions) =>
+  Layer.scoped(
+    StorageMonitorTag,
+    Effect.gen(function* () {
+      const instance = new StorageMonitor(options);
+      instance.start();
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => instance.drain()),
+      );
+      return instance;
+    }),
+  );
+
+export const makePortScannerLive = (config: PortScannerConfig, probeFn: (port: number) => Promise<boolean>) =>
+  Layer.scoped(
+    PortScannerTag,
+    Effect.gen(function* () {
+      const instance = new PortScanner(config, probeFn);
+      instance.start();
       yield* Effect.addFinalizer(() =>
         Effect.promise(() => instance.drain()),
       );
@@ -1104,25 +1226,53 @@ export const makeKeepAwakeLive = (options?: KeepAwakeOptions) =>
   );
 ```
 
-**Step 3: Apply same pattern to VersionChecker, StorageMonitor, PortScanner**
+**Step 3: Apply constructor changes to all 4 services**
 
-For each:
+For each service class:
 1. Remove `Drainable`/`ServiceRegistry` from imports, constructor, and `implements`
-2. Add `make*Live` in daemon-layers.ts with `Layer.scoped` + `addFinalizer` calling `drain()`
+2. Remove `registry: ServiceRegistry` as first constructor parameter
+3. Remove `registry.register(this)` from constructor body
+4. Keep `drain()` as a public method (called by Layer finalizer)
+
+**Constructor signature changes:**
+- `KeepAwake(registry, options?)` → `KeepAwake(options?)`
+- `VersionChecker(registry, options?)` → `VersionChecker(options?)`
+- `StorageMonitor(registry, options)` → `StorageMonitor(options)`
+- `PortScanner(registry, config, probeFn)` → `PortScanner(config, probeFn)`
 
 **Step 4: Update daemon.ts construction sites**
 
-In `src/lib/daemon/daemon.ts`, each service is constructed like:
+In `src/lib/daemon/daemon.ts`, update ALL construction sites:
+- Line ~744: `new PortScanner(this.serviceRegistry, config, probeFn)` → `new PortScanner(config, probeFn)`
+- Line ~894: `new VersionChecker(this.serviceRegistry, options)` → `new VersionChecker(options)`
+- Line ~907: `new KeepAwake(this.serviceRegistry, options)` → `new KeepAwake(options)`
+- Line ~919: `new StorageMonitor(this.serviceRegistry, options)` → `new StorageMonitor(options)`
+- **Line ~1674:** `new KeepAwake(this.serviceRegistry, {...})` in `setKeepAwakeCommand` IPC handler — also remove `this.serviceRegistry` arg.
+
+**Step 4a: Add bridge drain calls to daemon.ts stop()**
+
+Until Task 12 wires DaemonLive, these 4 services are no longer registered with ServiceRegistry but are also not yet managed by Effect Layers. Add explicit drain calls in `stop()` BEFORE `serviceRegistry.drainAll()`:
+
 ```typescript
-this.keepAwakeManager = new KeepAwake(this.serviceRegistry, options);
+// Bridge: manual drain for services removed from registry (Tasks 9→12)
+await this.keepAwakeManager?.drain();
+await this.versionChecker?.drain();
+await this.storageMonitor?.drain();
+await this.scanner?.drain();
+// Then drain remaining registry services
+await this.serviceRegistry.drainAll();
 ```
-Remove the `this.serviceRegistry` argument. The daemon will eventually use Layers instead of manual construction (Task 13), but for now just remove the registry parameter.
+
+These manual drain calls are removed in Task 12 when Layers take over.
 
 **Step 5: Run existing tests for each service**
 
 Run: `pnpm vitest run test/unit/daemon/keep-awake.test.ts test/unit/daemon/version-check.test.ts test/unit/daemon/storage-monitor.test.ts test/unit/daemon/port-scanner.test.ts`
 
-Update test constructors to remove `ServiceRegistry` argument.
+Update test constructors to remove `ServiceRegistry` argument. Also delete/rewrite tests that verify ServiceRegistry integration:
+- `keep-awake.test.ts` T20 — "registers with the ServiceRegistry" and "drainAll on registry kills the child process" sub-tests
+- `port-scanner.test.ts` — drain tests that create a registry and check registration
+Replace with equivalent Layer-based tests in `test/unit/effect/daemon-layers.test.ts` if needed.
 
 **Step 6: Run full test suite**
 
@@ -1167,11 +1317,27 @@ git commit -m "refactor: migrate leaf Drainable services to Effect Layers"
      | { _tag: "instance_error"; id: string; error: string };
    ```
 4. Add a `pubsub` field: `readonly events: PubSub.PubSub<InstanceEvent>`
-5. Replace `this.emit("event_name", data)` → `Effect.runSync(PubSub.publish(this.events, { _tag: "event_name", ...data }))`
-6. Replace subscriber sites (`.on("event", handler)`) → `PubSub.subscribe` with filter
+5. Replace `this.emit("event_name", data)` → `PubSub.unsafeOffer(this.events, { _tag: "event_name", ...data })` (synchronous, fire-and-forget). **Note:** `PubSub.publish()` returns an `Effect` and cannot be used with `Effect.runSync` (it may suspend). Use `PubSub.unsafeOffer` for synchronous emit replacement, or restructure the calling code to be inside an Effect context.
+6. Replace subscriber sites (`.on("event", handler)`) with PubSub subscription pattern:
+   ```typescript
+   // Old: service.on("status_changed", (instance) => { ... });
+   // New: 
+   const sub = yield* PubSub.subscribe(service.events);
+   yield* Stream.fromQueue(sub).pipe(
+     Stream.filter((e) => e._tag === "status_changed"),
+     Stream.runForEach((e) => Effect.sync(() => handleStatusChange(e.instance))),
+     Effect.forkScoped,  // runs in background, cancelled on scope close
+   );
+   ```
 7. Move `drain()` to `Effect.addFinalizer` in the Layer
+8. Add `PubSub.shutdown(this.events)` to the finalizer to signal subscribers to stop
 
-**Sync → async concern:** `EventEmitter.emit()` is synchronous. `PubSub.publish()` is async. For sites where callers depend on handlers completing before continuing, use direct function calls instead of PubSub. Identify these by checking if code after `emit()` assumes the handler ran.
+**Sync → async concern:** `EventEmitter.emit()` is synchronous. `PubSub.publish()` is async. For sites where callers depend on handlers completing before continuing, use direct function calls instead of PubSub. Specific sites to check:
+- `session-manager.ts:382-386` — calls `broadcastSessionList()` after emit, may assume lifecycle handler already fired
+- Any `emit()` followed immediately by state reads that assume the handler ran
+- Search: `grep -A3 "\.emit(" src/` in each service file to identify emit-then-check patterns
+
+**Subscriber cleanup:** PubSub subscribers need explicit Scope. Wrap subscriber creation in `Effect.scoped` or ensure the subscriber is created inside a scoped Layer. Wiring functions (`handler-deps-wiring.ts`, `poller-wiring.ts`, `session-lifecycle-wiring.ts`, `sse-wiring.ts`) must either be inside Effect context or create scoped subscriptions.
 
 **Order of migration (simplest first):**
 1. SessionStatusPoller (1 emit site)
@@ -1212,6 +1378,8 @@ git commit -m "refactor: migrate SessionStatusPoller from EventEmitter to PubSub
 - Modify: `src/lib/effect/daemon-layers.ts`
 - Modify: `src/lib/daemon/daemon-lifecycle.ts` (minimal — keep functions, wrap in Layer)
 
+**Note on DaemonLifecycleContext:** `DaemonLifecycleContext` is a shared mutable object that multiple server functions read/write (`ctx.httpServer`, `ctx.port`, `ctx.upgradeServer`). This is safe because servers start sequentially (HTTP before WebSocket upgrade before onboarding), not concurrently. Use `Layer.provide` chains (not `Layer.mergeAll`) to enforce this ordering.
+
 **Step 1: Create HttpServerLayer**
 
 ```typescript
@@ -1229,6 +1397,8 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 **Step 2: Create IpcServerLayer and OnboardingServerLayer**
 
 Same pattern — `acquireRelease` wrapping existing `start*Server`/`close*Server` functions from daemon-lifecycle.ts.
+
+**OnboardingServer conditional:** Only starts when TLS is active (`ctx.tls` is present). The existing `startOnboardingServer` already returns `Promise.resolve()` when `!ctx.tls`, so the Layer handles this gracefully — it becomes a no-op Layer when TLS is disabled.
 
 **Step 3: Create PID/socket file cleanup Layer**
 
@@ -1264,36 +1434,85 @@ git commit -m "feat: create Effect Layers for HTTP, IPC, and Onboarding servers"
 
 **Step 1: Create DaemonLive Layer composition**
 
-In `src/lib/effect/daemon-layers.ts`:
+In `src/lib/effect/daemon-layers.ts`. Use `Layer.provide` chains (NOT `Layer.mergeAll`) to express service dependencies:
 
 ```typescript
-export const makeDaemonLive = (options: DaemonOptions) =>
-  Layer.mergeAll(
-    makeConfigLive(options),
-    SignalHandlerLayer,
-    ProcessErrorHandlerLayer,
-    makePidFileLive(options.pidPath, options.socketPath),
-    makeHttpServerLive(options.ctx),
-    makeIpcServerLive(options.ctx),
-    makeOnboardingServerLive(options.ctx, options.onboarding),
+export const makeDaemonLive = (options: DaemonOptions) => {
+  // Leaf layers (no deps on other services)
+  const configLayer = makeConfigLive(options);
+  const signalLayer = SignalHandlerLayer;
+  const errorLayer = ProcessErrorHandlerLayer;
+  const pidLayer = makePidFileLive(options.pidPath, options.socketPath);
+
+  // Server layers (sequential: HTTP → WS upgrade → onboarding)
+  const serversLayer = makeHttpServerLive(options.ctx).pipe(
+    Layer.provideMerge(makeIpcServerLive(options.ctx)),
+    Layer.provideMerge(makeOnboardingServerLive(options.ctx, options.onboarding)),
+  );
+
+  // Background services (depend on config)
+  const backgroundLayer = Layer.mergeAll(
     makeKeepAwakeLive(options.keepAwake),
     makeVersionCheckerLive(options.versionCheck),
     makeStorageMonitorLive(options.storageMon),
     makePortScannerLive(options.portScanner),
+  );
+
+  // Core services (InstanceManager, ProjectRegistry depend on config + servers)
+  const coreLayer = Layer.mergeAll(
     makeInstanceManagerLive(options.instanceMgr),
     makeProjectRegistryLive(options.projectRegistry),
   );
+
+  return Layer.mergeAll(signalLayer, errorLayer, pidLayer).pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(serversLayer),
+    Layer.provideMerge(backgroundLayer),
+    Layer.provideMerge(coreLayer),
+  );
+};
 ```
 
-**Step 2: Replace Daemon.start() with Layer.launch**
+**Step 2: Migrate daemon startup logic**
 
-The `start()` method body becomes Layer composition. The `stop()` method is eliminated — finalizers handle everything. The Daemon class may be significantly simplified or replaced with a standalone `startDaemon` Effect.
+`daemon.ts:start()` does more than service creation — it also:
+- Rehydrates config from disk (instances, projects, dismissed paths, keep-awake)
+- Probes localhost:4096 for smart-default detection
+- Auto-starts managed "default" instance
+- Prefetches session counts
+- Discovers projects
+
+These initialization steps become Effect programs that run AFTER Layer construction but BEFORE the daemon blocks waiting for shutdown. They should be placed in the main program, not in Layers:
+
+```typescript
+const startupEffects = Effect.gen(function* () {
+  // Config rehydration already done by ConfigLayer
+  // Probe-and-convert, auto-start, prefetch, discovery:
+  yield* probeSmartDefault(options);
+  yield* autoStartDefaultInstance(options);
+  yield* prefetchSessionCounts(options);
+  yield* discoverProjects(options);
+});
+```
+
+**Daemon mutable state** (clientCount, dismissedPaths, persistedSessionCounts) can be managed via `Ref` inside the appropriate Layer, or kept as plain fields on a service class managed by a Layer.
 
 **Step 3: Update CLI entry point**
 
+The entry point blocks on the shutdown Deferred, then exits:
+
 ```typescript
-const program = makeDaemonLive(options).pipe(
-  Layer.launch,
+const program = Effect.gen(function* () {
+  // Build all daemon layers
+  yield* Effect.provide(startupEffects, makeDaemonLive(options));
+
+  // Block until shutdown signal
+  const shutdown = yield* ShutdownSignalTag;
+  yield* shutdown;
+  // Scope close triggers all Layer finalizers (reverse order)
+}).pipe(
+  Effect.scoped,
+  Effect.provide(makeDaemonLive(options)),
   Effect.catchAllCause((cause) =>
     Effect.logError("Fatal", Cause.pretty(cause)),
   ),
@@ -1301,6 +1520,8 @@ const program = makeDaemonLive(options).pipe(
 
 Effect.runFork(program);
 ```
+
+Note: This replaces `Layer.launch` with explicit `yield* shutdown` + `Effect.scoped` so that the shutdown signal from Task 8 actually triggers process exit.
 
 **Step 4: Run full test suite and manual smoke test**
 
@@ -1332,19 +1553,31 @@ Remove:
 - `await this.tracker.drain()` (line 1001)
 - All `this.tracker.track(...)` calls (lines 816, 879-886)
 - All `this.serviceRegistry` passes to service constructors
+- The manual bridge drain calls added in Task 9 Step 4a (no longer needed — Layers handle lifecycle)
 
-**Step 2: Delete files**
+**Step 2: Also update relay-stack.ts**
+
+`src/lib/relay/relay-stack.ts:152` creates its own `new ServiceRegistry()` as fallback. Remove this and update `createProjectRelay` to not accept/create a registry.
+
+**Step 3: Verify ALL Drainable services are migrated**
+
+Before deleting, verify every service that implements `Drainable` has been migrated to Layers:
+- Task 9: KeepAwake, VersionChecker, StorageMonitor, PortScanner (4)
+- Task 10: InstanceManager, ProjectRegistry, WebSocketHandler, SSEStream, SessionStatusPoller, MessagePoller, MessagePollerManager (7)
+- **Also verify:** SessionOverrides, RelayTimers — these implement Drainable but may not be covered in Tasks 9/10. Check with `grep -rn "implements Drainable" src/` and ensure ALL matches are migrated.
+
+**Step 4: Delete files**
 
 ```bash
 rm src/lib/daemon/service-registry.ts
 rm src/lib/daemon/async-tracker.ts
 ```
 
-**Step 3: Remove Drainable imports**
+**Step 5: Remove Drainable imports from ALL files**
 
-Run: `grep -rn "from.*service-registry" src/`
+Run: `grep -rn "from.*service-registry\|Drainable" src/`
 
-Update each file that imports `Drainable` or `ServiceRegistry` — remove the import.
+Update EVERY file that imports `Drainable` or `ServiceRegistry` — remove the import. This includes service classes (already migrated in Tasks 9-10), relay-stack.ts, daemon.ts, and any test files.
 
 **Step 4: Run full test suite**
 
