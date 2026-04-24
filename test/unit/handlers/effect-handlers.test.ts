@@ -6,12 +6,22 @@
 
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import type { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
+import type { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
 import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
+// Batch 2 imports
 import {
 	ConfigTag,
+	InstanceMgmtTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
+	PermissionBridgeTag,
+	PtyManagerTag,
+	QuestionBridgeTag,
+	ReadQueryTag,
+	ScanDepsTag,
+	SessionManagerTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -25,21 +35,59 @@ import {
 	handleGetFileListEffect,
 } from "../../../src/lib/handlers/files.js";
 import {
+	handleInstanceAddEffect,
+	handleInstanceRemoveEffect,
+	handleInstanceStartEffect,
+	handleInstanceStopEffect,
+	handleScanNowEffect,
+} from "../../../src/lib/handlers/instance.js";
+import {
 	handleGetModelsEffect,
 	handleSwitchModelEffect,
 } from "../../../src/lib/handlers/model.js";
-
+import {
+	handlePermissionResponseEffect,
+	handleQuestionRejectEffect,
+} from "../../../src/lib/handlers/permissions.js";
+import {
+	handleCancelEffect,
+	handleInputSyncEffect,
+	handleMessageEffect,
+	handleRewindEffect,
+} from "../../../src/lib/handlers/prompt.js";
 import { handleReloadProviderSessionEffect } from "../../../src/lib/handlers/reload.js";
+import {
+	handleListSessionsEffect,
+	handleLoadMoreHistoryEffect,
+	handleRenameSessionEffect,
+	handleSearchSessionsEffect,
+} from "../../../src/lib/handlers/session.js";
 import {
 	handleGetCommandsEffect,
 	handleGetProjectsEffect,
 	handleGetTodoEffect,
 } from "../../../src/lib/handlers/settings.js";
+import {
+	handlePtyCloseEffect,
+	handlePtyInputEffect,
+	handlePtyResizeEffect,
+} from "../../../src/lib/handlers/terminal.js";
+import { handleGetToolContentEffect } from "../../../src/lib/handlers/tool-content.js";
+import type {
+	InstanceManagementDeps,
+	ScanDeps,
+} from "../../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
+import type { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { PermissionId } from "../../../src/lib/shared-types.js";
+import type {
+	OpenCodeDecision,
+	ProjectRelayConfig,
+} from "../../../src/lib/types.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -564,5 +612,922 @@ describe("handleSwitchModelEffect", () => {
 			modelID: "gpt-4",
 		});
 		expect(log.info).toHaveBeenCalled();
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Batch 2 tests — permissions, session, prompt, terminal, instance, tool-content
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Additional mock factories for batch 2 ────────────────────────────────
+
+function mockSessionManager(
+	overrides?: Partial<SessionManager>,
+): SessionManager {
+	return {
+		createSession: vi.fn(async () => ({ id: "new-session-1", title: "" })),
+		deleteSession: vi.fn(async () => {}),
+		renameSession: vi.fn(async () => {}),
+		listSessions: vi.fn(async () => []),
+		searchSessions: vi.fn(async () => []),
+		loadPreRenderedHistory: vi.fn(async () => ({
+			messages: [],
+			hasMore: false,
+		})),
+		sendDualSessionLists: vi.fn(async () => {}),
+		recordMessageActivity: vi.fn(),
+		clearPaginationCursor: vi.fn(),
+		decrementPendingQuestionCount: vi.fn(),
+		...overrides,
+	} as unknown as SessionManager;
+}
+
+function mockPermissionBridge(
+	overrides?: Partial<PermissionBridge>,
+): PermissionBridge {
+	return {
+		onPermissionResponse: vi.fn(() => null),
+		getPending: vi.fn(() => []),
+		...overrides,
+	} as unknown as PermissionBridge;
+}
+
+function mockQuestionBridge(
+	overrides?: Partial<QuestionBridge>,
+): QuestionBridge {
+	return {
+		getPending: vi.fn(() => []),
+		...overrides,
+	} as unknown as QuestionBridge;
+}
+
+function mockPtyManager(overrides?: Partial<PtyManager>): PtyManager {
+	return {
+		closeSession: vi.fn(),
+		sendInput: vi.fn(),
+		hasSession: vi.fn(() => false),
+		...overrides,
+	} as unknown as PtyManager;
+}
+
+// ─── Tool Content handler tests ───────────────────────────────────────────
+
+describe("handleGetToolContentEffect", () => {
+	it("returns tool content when readQuery is available and content exists", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const readQuery = {
+			getToolContent: vi.fn(() => "full tool output text"),
+		} as unknown as import("../../../src/lib/persistence/read-query-service.js").ReadQueryService;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(ReadQueryTag, readQuery),
+		);
+
+		await Effect.runPromise(
+			handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(readQuery.getToolContent).toHaveBeenCalledWith("tool-42");
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "tool_content",
+			sessionId: "session-1",
+			toolId: "tool-42",
+			content: "full tool output text",
+		});
+	});
+
+	it("returns NOT_FOUND when readQuery is absent", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+
+		// No ReadQueryTag provided — serviceOption returns None
+		const layer = Layer.succeed(WebSocketHandlerTag, ws);
+
+		await Effect.runPromise(
+			handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "error",
+			sessionId: "session-1",
+			code: "NOT_FOUND",
+			message: "Full tool content not available",
+		});
+	});
+});
+
+// ─── Terminal handler tests ───────────────────────────────────────────────
+
+describe("handlePtyInputEffect", () => {
+	it("sends input to pty manager", async () => {
+		const ptyManager = mockPtyManager();
+
+		const layer = Layer.succeed(PtyManagerTag, ptyManager);
+
+		await Effect.runPromise(
+			handlePtyInputEffect("client-1", {
+				ptyId: "pty-1",
+				data: "ls\n",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
+	});
+
+	it("does nothing when ptyId is empty", async () => {
+		const ptyManager = mockPtyManager();
+
+		const layer = Layer.succeed(PtyManagerTag, ptyManager);
+
+		await Effect.runPromise(
+			handlePtyInputEffect("client-1", { ptyId: "", data: "ls\n" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ptyManager.sendInput).not.toHaveBeenCalled();
+	});
+});
+
+describe("handlePtyCloseEffect", () => {
+	it("closes PTY session and broadcasts deletion", async () => {
+		const ws = mockWsHandler();
+		const ptyManager = mockPtyManager();
+		const client = {
+			pty: { delete: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(PtyManagerTag, ptyManager),
+		);
+
+		await Effect.runPromise(
+			handlePtyCloseEffect("client-1", { ptyId: "pty-1" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ptyManager.closeSession).toHaveBeenCalledWith("pty-1");
+		expect(client.pty.delete).toHaveBeenCalledWith("pty-1");
+		expect(ws.broadcast).toHaveBeenCalledWith({
+			type: "pty_deleted",
+			ptyId: "pty-1",
+		});
+	});
+});
+
+describe("handlePtyResizeEffect", () => {
+	it("resizes PTY without errors", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const client = {
+			pty: { resize: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+		);
+
+		await Effect.runPromise(
+			handlePtyResizeEffect("client-1", {
+				ptyId: "pty-1",
+				cols: 120,
+				rows: 40,
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(client.pty.resize).toHaveBeenCalledWith("pty-1", 40, 120);
+	});
+
+	it("logs warning on resize failure (non-fatal)", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const client = {
+			pty: {
+				resize: vi.fn(async () => {
+					throw new Error("resize failed");
+				}),
+			},
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+		);
+
+		await Effect.runPromise(
+			handlePtyResizeEffect("client-1", {
+				ptyId: "pty-1",
+				cols: 120,
+				rows: 40,
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(log.warn).toHaveBeenCalled();
+	});
+});
+
+// ─── Instance handler tests ───────────────────────────────────────────────
+
+function mockInstanceMgmt(): InstanceManagementDeps {
+	const mockInstance = {
+		id: "test-instance",
+		name: "Test Instance",
+		port: 3000,
+		status: "stopped" as const,
+		managed: true,
+		restartCount: 0,
+		createdAt: Date.now(),
+	};
+	return {
+		getInstances: vi.fn(() => []),
+		addInstance: vi.fn(() => mockInstance),
+		removeInstance: vi.fn(),
+		startInstance: vi.fn(async () => {}),
+		stopInstance: vi.fn(),
+		updateInstance: vi.fn(() => mockInstance),
+		persistConfig: vi.fn(),
+	};
+}
+
+describe("handleInstanceAddEffect", () => {
+	it("adds instance and broadcasts list", async () => {
+		const ws = mockWsHandler();
+		const instanceMgmt = mockInstanceMgmt();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+		);
+
+		await Effect.runPromise(
+			handleInstanceAddEffect("client-1", { name: "Test Instance" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(instanceMgmt.addInstance).toHaveBeenCalled();
+		expect(ws.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "instance_list" }),
+		);
+		expect(instanceMgmt.persistConfig).toHaveBeenCalled();
+	});
+
+	it("sends error when instanceMgmt is not available", async () => {
+		const ws = mockWsHandler();
+
+		// No InstanceMgmtTag provided — serviceOption returns None
+		const layer = Layer.succeed(WebSocketHandlerTag, ws);
+
+		await Effect.runPromise(
+			handleInstanceAddEffect("client-1", { name: "Test" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "system_error",
+			code: "INSTANCE_ERROR",
+			message: "Instance management not available",
+		});
+	});
+});
+
+describe("handleInstanceRemoveEffect", () => {
+	it("removes instance and broadcasts list", async () => {
+		const ws = mockWsHandler();
+		const instanceMgmt = mockInstanceMgmt();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+		);
+
+		await Effect.runPromise(
+			handleInstanceRemoveEffect("client-1", {
+				instanceId: "test-instance",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(instanceMgmt.removeInstance).toHaveBeenCalledWith("test-instance");
+		expect(instanceMgmt.persistConfig).toHaveBeenCalled();
+	});
+});
+
+describe("handleInstanceStartEffect", () => {
+	it("starts instance and broadcasts list", async () => {
+		const ws = mockWsHandler();
+		const instanceMgmt = mockInstanceMgmt();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+		);
+
+		await Effect.runPromise(
+			handleInstanceStartEffect("client-1", {
+				instanceId: "test-instance",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(instanceMgmt.startInstance).toHaveBeenCalledWith("test-instance");
+		expect(ws.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "instance_list" }),
+		);
+	});
+});
+
+describe("handleInstanceStopEffect", () => {
+	it("stops instance and broadcasts list", async () => {
+		const ws = mockWsHandler();
+		const instanceMgmt = mockInstanceMgmt();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+		);
+
+		await Effect.runPromise(
+			handleInstanceStopEffect("client-1", {
+				instanceId: "test-instance",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(instanceMgmt.stopInstance).toHaveBeenCalledWith("test-instance");
+	});
+});
+
+describe("handleScanNowEffect", () => {
+	it("sends error when scan deps not available", async () => {
+		const ws = mockWsHandler();
+
+		const layer = Layer.succeed(WebSocketHandlerTag, ws);
+
+		await Effect.runPromise(
+			handleScanNowEffect("client-1", {}).pipe(Effect.provide(layer)),
+		);
+
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "system_error",
+			code: "INSTANCE_ERROR",
+			message: "Port scanning not available",
+		});
+	});
+
+	it("sends scan result when available", async () => {
+		const ws = mockWsHandler();
+		const scanDeps: ScanDeps = {
+			triggerScan: vi.fn(async () => ({
+				discovered: [8080],
+				lost: [],
+				active: [3000, 8080],
+			})),
+		};
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(ScanDepsTag, scanDeps),
+		);
+
+		await Effect.runPromise(
+			handleScanNowEffect("client-1", {}).pipe(Effect.provide(layer)),
+		);
+
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "scan_result",
+			discovered: [8080],
+			lost: [],
+			active: [3000, 8080],
+		});
+	});
+});
+
+// ─── Permissions handler tests ────────────────────────────────────────────
+
+describe("handlePermissionResponseEffect", () => {
+	it("processes permission response and broadcasts resolution", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const permissionBridge = mockPermissionBridge({
+			onPermissionResponse: vi.fn(() => ({
+				toolName: "Bash",
+				mapped: "once" as OpenCodeDecision,
+			})),
+		});
+		const client = {
+			permission: { reply: vi.fn(async () => {}) },
+			config: { get: vi.fn(async () => ({})) },
+		} as unknown as OpenCodeAPI;
+		const config = mockConfig();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(ConfigTag, config),
+		);
+
+		await Effect.runPromise(
+			handlePermissionResponseEffect("client-1", {
+				requestId: "perm-1" as PermissionId,
+				decision: "allow",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(permissionBridge.onPermissionResponse).toHaveBeenCalledWith(
+			"perm-1",
+			"allow",
+		);
+		expect(ws.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "permission_resolved",
+				requestId: "perm-1",
+			}),
+		);
+	});
+
+	it("does nothing when bridge returns null", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const permissionBridge = mockPermissionBridge({
+			onPermissionResponse: vi.fn(() => null),
+		});
+		const client = {
+			permission: { reply: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+		const config = mockConfig();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(ConfigTag, config),
+		);
+
+		await Effect.runPromise(
+			handlePermissionResponseEffect("client-1", {
+				requestId: "perm-1" as PermissionId,
+				decision: "allow",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(ws.broadcast).not.toHaveBeenCalled();
+	});
+});
+
+describe("handleQuestionRejectEffect", () => {
+	it("does nothing when toolId is empty", async () => {
+		const ws = mockWsHandler();
+		const log = mockLogger();
+		const client = {} as unknown as OpenCodeAPI;
+		const sessionMgr = mockSessionManager();
+		const overrides = mockOverrides({
+			startProcessingTimeout: vi.fn(),
+		});
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionOverridesTag, overrides),
+		);
+
+		await Effect.runPromise(
+			handleQuestionRejectEffect("client-1", { toolId: "" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ws.broadcast).not.toHaveBeenCalled();
+	});
+
+	it("rejects question via REST API and broadcasts resolution", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const sessionMgr = mockSessionManager();
+		const overrides = mockOverrides({
+			startProcessingTimeout: vi.fn(),
+		});
+		const client = {
+			question: { reject: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionOverridesTag, overrides),
+		);
+
+		await Effect.runPromise(
+			handleQuestionRejectEffect("client-1", { toolId: "que-1" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(client.question.reject).toHaveBeenCalledWith("que-1");
+		expect(ws.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "ask_user_resolved",
+				toolId: "que-1",
+			}),
+		);
+		expect(sessionMgr.decrementPendingQuestionCount).toHaveBeenCalledWith(
+			"session-1",
+		);
+	});
+});
+
+// ─── Session handler tests ───────────────────────────────────────────────
+
+describe("handleListSessionsEffect", () => {
+	it("sends session list to client", async () => {
+		const ws = mockWsHandler();
+		const sessionMgr = mockSessionManager();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+		);
+
+		await Effect.runPromise(
+			handleListSessionsEffect("client-1", {}).pipe(Effect.provide(layer)),
+		);
+
+		expect(sessionMgr.sendDualSessionLists).toHaveBeenCalled();
+	});
+});
+
+describe("handleRenameSessionEffect", () => {
+	it("renames session and logs", async () => {
+		const log = mockLogger();
+		const sessionMgr = mockSessionManager();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+		);
+
+		await Effect.runPromise(
+			handleRenameSessionEffect("client-1", {
+				sessionId: "session-1",
+				title: "New Title",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(sessionMgr.renameSession).toHaveBeenCalledWith(
+			"session-1",
+			"New Title",
+		);
+		expect(log.info).toHaveBeenCalled();
+	});
+
+	it("does nothing when id or title is empty", async () => {
+		const log = mockLogger();
+		const sessionMgr = mockSessionManager();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+		);
+
+		await Effect.runPromise(
+			handleRenameSessionEffect("client-1", {
+				sessionId: "",
+				title: "New Title",
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(sessionMgr.renameSession).not.toHaveBeenCalled();
+	});
+});
+
+describe("handleSearchSessionsEffect", () => {
+	it("searches sessions and sends results", async () => {
+		const ws = mockWsHandler();
+		const results = [{ id: "s1", title: "Match", updatedAt: 0 }];
+		const sessionMgr = mockSessionManager({
+			searchSessions: vi.fn(async () => results),
+		});
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+		);
+
+		await Effect.runPromise(
+			handleSearchSessionsEffect("client-1", { query: "test" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(sessionMgr.searchSessions).toHaveBeenCalledWith("test", undefined);
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "session_list",
+			sessions: results,
+			roots: false,
+			search: true,
+		});
+	});
+});
+
+describe("handleLoadMoreHistoryEffect", () => {
+	it("loads history page and sends to client", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const page = { messages: [], hasMore: false };
+		const sessionMgr = mockSessionManager({
+			loadPreRenderedHistory: vi.fn(async () => page),
+		});
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+		);
+
+		await Effect.runPromise(
+			handleLoadMoreHistoryEffect("client-1", { offset: 50 }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
+			"session-1",
+			50,
+		);
+		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "history_page",
+			sessionId: "session-1",
+			messages: [],
+			hasMore: false,
+		});
+	});
+});
+
+// ─── Prompt handler tests ─────────────────────────────────────────────────
+
+describe("handleCancelEffect", () => {
+	it("clears processing timeout and sends done when no engine", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const overrides = mockOverrides({
+			clearProcessingTimeout: vi.fn(),
+		});
+		const client = {
+			session: { abort: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+		);
+
+		await Effect.runPromise(
+			handleCancelEffect("client-1", {}).pipe(Effect.provide(layer)),
+		);
+
+		expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith("session-1");
+		expect(client.session.abort).toHaveBeenCalledWith("session-1");
+		expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
+			type: "done",
+			sessionId: "session-1",
+			code: 1,
+		});
+	});
+
+	it("does nothing when no active session", async () => {
+		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
+		const log = mockLogger();
+		const overrides = mockOverrides();
+		const client = {} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+		);
+
+		await Effect.runPromise(
+			handleCancelEffect("client-1", {}).pipe(Effect.provide(layer)),
+		);
+
+		expect(ws.sendToSession).not.toHaveBeenCalled();
+	});
+});
+
+describe("handleInputSyncEffect", () => {
+	it("forwards input to other clients in same session", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
+		});
+
+		const layer = Layer.succeed(WebSocketHandlerTag, ws);
+
+		await Effect.runPromise(
+			handleInputSyncEffect("client-1", { text: "hello" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		// Should send to client-2 but NOT client-1 (the sender)
+		expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
+			type: "input_sync",
+			text: "hello",
+			from: "client-1",
+		});
+		expect(ws.sendTo).toHaveBeenCalledTimes(1);
+	});
+
+	it("does nothing when no session", async () => {
+		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
+
+		const layer = Layer.succeed(WebSocketHandlerTag, ws);
+
+		await Effect.runPromise(
+			handleInputSyncEffect("client-1", { text: "hello" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ws.sendTo).not.toHaveBeenCalled();
+	});
+});
+
+describe("handleRewindEffect", () => {
+	it("reverts to a specific message and clears cursor", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const sessionMgr = mockSessionManager();
+		const client = {
+			session: { revert: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(LoggerTag, log),
+		);
+
+		await Effect.runPromise(
+			handleRewindEffect("client-1", { messageId: "msg-1" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(client.session.revert).toHaveBeenCalledWith("session-1", {
+			messageID: "msg-1",
+		});
+		expect(sessionMgr.clearPaginationCursor).toHaveBeenCalledWith("session-1");
+		expect(log.info).toHaveBeenCalled();
+	});
+});
+
+describe("handleMessageEffect", () => {
+	it("sends error when no active session", async () => {
+		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
+		const log = mockLogger();
+		const overrides = mockOverrides();
+		const sessionMgr = mockSessionManager();
+		const config = mockConfig();
+		const permissionBridge = mockPermissionBridge();
+		const questionBridge = mockQuestionBridge();
+		const client = {} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(QuestionBridgeTag, questionBridge),
+		);
+
+		await Effect.runPromise(
+			handleMessageEffect("client-1", { text: "hello" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(ws.sendTo).toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "system_error",
+				code: "NO_SESSION",
+			}),
+		);
+	});
+
+	it("does nothing when text is empty", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const overrides = mockOverrides();
+		const sessionMgr = mockSessionManager();
+		const config = mockConfig();
+		const permissionBridge = mockPermissionBridge();
+		const questionBridge = mockQuestionBridge();
+		const client = {} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(QuestionBridgeTag, questionBridge),
+		);
+
+		await Effect.runPromise(
+			handleMessageEffect("client-1", { text: "" }).pipe(Effect.provide(layer)),
+		);
+
+		expect(ws.sendTo).not.toHaveBeenCalled();
+		expect(ws.sendToSession).not.toHaveBeenCalled();
+	});
+
+	it("sends message via legacy path when no engine", async () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+			getClientsForSession: vi.fn(() => ["client-1"]),
+		});
+		const log = mockLogger();
+		const overrides = mockOverrides({
+			getAgent: vi.fn(() => undefined),
+			getModel: vi.fn(() => undefined),
+			getVariant: vi.fn(() => ""),
+			isModelUserSelected: vi.fn(() => false),
+			startProcessingTimeout: vi.fn(),
+		});
+		const sessionMgr = mockSessionManager();
+		const config = mockConfig();
+		const permissionBridge = mockPermissionBridge();
+		const questionBridge = mockQuestionBridge();
+		const client = {
+			session: { prompt: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(QuestionBridgeTag, questionBridge),
+		);
+
+		await Effect.runPromise(
+			handleMessageEffect("client-1", { text: "hello world" }).pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(client.session.prompt).toHaveBeenCalledWith("session-1", {
+			text: "hello world",
+		});
+		expect(sessionMgr.recordMessageActivity).toHaveBeenCalledWith("session-1");
 	});
 });
