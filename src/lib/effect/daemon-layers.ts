@@ -246,3 +246,94 @@ export const makePidFileLive = (
 			);
 		}),
 	);
+
+// ─── Composed DaemonLive Layer ──────────────────────────────────────────────
+
+/**
+ * Options for composing the full DaemonLive layer.
+ * Each field corresponds to the parameters needed by the individual layer
+ * factories. All runtime-resolved values (lifecycle context, IPC context, etc.)
+ * are passed in so the composition remains a pure Layer expression.
+ */
+export interface DaemonLiveOptions {
+	// PID file management
+	configDir: string;
+	pidPath: string;
+	socketPath: string;
+
+	// Server lifecycle
+	ctx: DaemonLifecycleContext;
+	ipcContext: DaemonIPCContext;
+	getStatus: () => DaemonStatus;
+	onboarding: OnboardingServerDeps;
+
+	// Background services
+	keepAwake?: KeepAwakeOptions;
+	versionCheck?: VersionCheckOptions;
+	storageMon: StorageMonitorOptions;
+	portScanner?: {
+		config: PortScannerConfig;
+		probeFn: (port: number) => Promise<boolean>;
+	};
+}
+
+/**
+ * Compose all daemon lifecycle Layers into a single Layer.
+ *
+ * Layer ordering expresses startup dependencies:
+ *   1. Signal handlers + error handlers + PID file (infrastructure)
+ *   2. Servers: HTTP, IPC, onboarding (sequential: HTTP first)
+ *   3. Background services: keep-awake, version checker, storage monitor, port scanner
+ *
+ * Scope finalizers run in reverse order on shutdown, ensuring servers close
+ * before PID file removal and signal handler cleanup.
+ */
+export const makeDaemonLive = (options: DaemonLiveOptions) => {
+	// Infrastructure layers (no inter-dependencies)
+	const signalLayer = SignalHandlerLayer;
+	const errorLayer = ProcessErrorHandlerLayer;
+	const pidLayer = makePidFileLive(
+		options.configDir,
+		options.pidPath,
+		options.socketPath,
+	);
+
+	// Server layers (sequential: HTTP first, then IPC, then onboarding)
+	const serversLayer = makeHttpServerLive(options.ctx).pipe(
+		Layer.provideMerge(
+			makeIpcServerLive(options.ctx, options.ipcContext, options.getStatus),
+		),
+		Layer.provideMerge(
+			makeOnboardingServerLive(options.ctx, options.onboarding),
+		),
+	);
+
+	// Background services — only include those that are configured
+	const backgroundLayers: Layer.Layer<any, never, never>[] = [];
+	backgroundLayers.push(makeKeepAwakeLive(options.keepAwake));
+	backgroundLayers.push(makeVersionCheckerLive(options.versionCheck));
+	backgroundLayers.push(makeStorageMonitorLive(options.storageMon));
+	if (options.portScanner) {
+		backgroundLayers.push(
+			makePortScannerLive(
+				options.portScanner.config,
+				options.portScanner.probeFn,
+			),
+		);
+	}
+
+	// Compose: infrastructure → servers → background
+	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
+	const infraLayer = Layer.mergeAll(signalLayer, errorLayer, pidLayer);
+
+	// Merge all background layers
+	const backgroundLayer =
+		backgroundLayers.length === 1
+			? backgroundLayers[0]!
+			: backgroundLayers.reduce((acc, layer) => Layer.merge(acc, layer));
+
+	return infraLayer.pipe(
+		Layer.provideMerge(serversLayer),
+		Layer.provideMerge(backgroundLayer),
+	);
+};

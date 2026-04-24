@@ -994,9 +994,10 @@ export class Daemon {
 		await this.flushConfigSave();
 		await saveDaemonConfig(this.buildConfig(), this.configDir);
 
-		// Bridge: manual drain for services removed from ServiceRegistry (Tasks 9->12).
-		// These services are no longer registered with the registry but are not yet
-		// managed by Effect Layers. Explicit drain calls ensure cleanup during shutdown.
+		// Drain leaf services that are managed imperatively in start().
+		// makeDaemonLive (daemon-layers.ts) provides an Effect Layer composition
+		// that handles lifecycle via scope finalizers. When start() is fully
+		// migrated to use Layers, these explicit drain calls can be removed.
 		await this.keepAwakeManager?.drain();
 		await this.versionChecker?.drain();
 		await this.storageMonitor?.drain();
