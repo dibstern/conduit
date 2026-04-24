@@ -24,14 +24,14 @@ describe("Daemon port scanner integration", () => {
 		const registered: number[] = [];
 		const removed: number[] = [];
 
-		scanner.on("scan", (result) => {
+		scanner.onScan = (result) => {
 			for (const port of result.discovered) {
 				registered.push(port);
 			}
 			for (const port of result.lost) {
 				removed.push(port);
 			}
-		});
+		};
 
 		// First scan: discovers port 4098
 		await scanner.scan();

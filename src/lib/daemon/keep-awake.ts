@@ -4,8 +4,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn as defaultSpawn, execFileSync } from "node:child_process";
-import type { ServiceRegistry } from "./service-registry.js";
-import { TrackedService } from "./tracked-service.js";
+import type { Drainable, ServiceRegistry } from "./service-registry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -61,7 +60,7 @@ function defaultWhichSync(cmd: string): string | null {
 /** @internal Exported for testing only */
 export { defaultWhichSync as _defaultWhichSync };
 
-export class KeepAwake extends TrackedService<KeepAwakeEvents> {
+export class KeepAwake implements Drainable {
 	private readonly whichSync: (cmd: string) => string | null;
 	private readonly configCommand: string | undefined;
 	private readonly configArgs: string[] | undefined;
@@ -78,8 +77,14 @@ export class KeepAwake extends TrackedService<KeepAwakeEvents> {
 	private child: ChildProcess | null = null;
 	private active = false;
 
+	// ─── Callbacks ─────────────────────────────────────────────────────────
+	onActivated: (() => void) | null = null;
+	onDeactivated: (() => void) | null = null;
+	onError: ((data: { error: Error }) => void) | null = null;
+	onUnsupported: ((data: { platform: string }) => void) | null = null;
+
 	constructor(registry: ServiceRegistry, options?: KeepAwakeOptions) {
-		super(registry);
+		registry.register(this);
 		this.enabled = options?.enabled ?? true;
 		// Treat empty string as "no command" — fall through to auto-detect
 		this.configCommand = options?.command?.trim() || undefined;
@@ -145,7 +150,7 @@ export class KeepAwake extends TrackedService<KeepAwakeEvents> {
 
 		const resolved = this.resolveCommand();
 		if (!resolved) {
-			this.emit("unsupported", { platform: this.platform });
+			this.onUnsupported?.({ platform: this.platform });
 			return;
 		}
 
@@ -165,7 +170,7 @@ export class KeepAwake extends TrackedService<KeepAwakeEvents> {
 				if (this.active) {
 					this.active = false;
 					this.child = null;
-					this.emit("error", {
+					this.onError?.({
 						error: new Error(`${resolved.command} exited unexpectedly`),
 					});
 				}
@@ -174,14 +179,14 @@ export class KeepAwake extends TrackedService<KeepAwakeEvents> {
 			child.on("error", (err: Error) => {
 				this.active = false;
 				this.child = null;
-				this.emit("error", { error: err });
+				this.onError?.({ error: err });
 			});
 
-			this.emit("activated");
+			this.onActivated?.();
 		} catch (err) {
 			this.active = false;
 			this.child = null;
-			this.emit("error", {
+			this.onError?.({
 				error: err instanceof Error ? err : new Error(String(err)),
 			});
 		}
@@ -209,7 +214,7 @@ export class KeepAwake extends TrackedService<KeepAwakeEvents> {
 			// Process may already be dead
 		}
 
-		this.emit("deactivated");
+		this.onDeactivated?.();
 	}
 
 	/** Is currently keeping awake? */
@@ -240,9 +245,8 @@ export class KeepAwake extends TrackedService<KeepAwakeEvents> {
 		return this.resolveCommand() !== null;
 	}
 
-	/** Kill the child process and drain tracked work. */
-	override async drain(): Promise<void> {
+	/** Kill the child process. */
+	async drain(): Promise<void> {
 		this.deactivate();
-		await super.drain();
 	}
 }

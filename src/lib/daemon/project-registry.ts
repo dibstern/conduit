@@ -3,9 +3,10 @@
 // three independent data structures (projects, projectRelays, pendingRelaySlugs)
 // with a typed discriminated union.
 
+import { EventEmitter } from "node:events";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import type { RelayMessage, StoredProject } from "../types.js";
-import { TrackedService } from "./tracked-service.js";
+import type { Drainable, ServiceRegistry } from "./service-registry.js";
 
 // ─── Discriminated union ────────────────────────────────────────────────────
 
@@ -40,9 +41,18 @@ export type ProjectRegistryEvents = {
 
 // ─── Registry class ─────────────────────────────────────────────────────────
 
-export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
+export class ProjectRegistry
+	extends EventEmitter<ProjectRegistryEvents>
+	implements Drainable
+{
 	private readonly entries = new Map<string, ProjectEntry>();
 	private readonly abortControllers = new Map<string, AbortController>();
+	private readonly pending = new Set<Promise<unknown>>();
+
+	constructor(registry: ServiceRegistry) {
+		super();
+		registry.register(this);
+	}
 
 	// ── Queries ──────────────────────────────────────────────────────────
 
@@ -149,7 +159,7 @@ export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 		const ac = new AbortController();
 		this.abortControllers.set(slug, ac);
 
-		this.tracked(
+		this.trackPromise(
 			createRelay(ac.signal).then(
 				(relay) => {
 					// If removed or replaced while creating, discard
@@ -208,7 +218,7 @@ export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 		const ac = new AbortController();
 		this.abortControllers.set(slug, ac);
 
-		this.tracked(
+		this.trackPromise(
 			createRelay(ac.signal).then(
 				(relay) => {
 					if (!this.abortControllers.has(slug) || ac.signal.aborted) {
@@ -362,69 +372,69 @@ export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 		timeoutMs = 10_000,
 		signal?: AbortSignal,
 	): Promise<ProjectRelay> {
-		return this.tracked(
-			new Promise((resolve, reject) => {
-				const entry = this.entries.get(slug);
+		const promise = new Promise<ProjectRelay>((resolve, reject) => {
+			const entry = this.entries.get(slug);
 
-				if (!entry) {
-					reject(new Error(`Project "${slug}" not found`));
-					return;
-				}
-				if (entry.status === "ready") {
-					resolve(entry.relay);
-					return;
-				}
-				if (entry.status === "error") {
-					reject(new Error(`Project "${slug}" relay failed: ${entry.error}`));
-					return;
-				}
-				if (signal?.aborted) {
-					reject(new Error(`Wait for relay "${slug}" was aborted`));
-					return;
-				}
+			if (!entry) {
+				reject(new Error(`Project "${slug}" not found`));
+				return;
+			}
+			if (entry.status === "ready") {
+				resolve(entry.relay);
+				return;
+			}
+			if (entry.status === "error") {
+				reject(new Error(`Project "${slug}" relay failed: ${entry.error}`));
+				return;
+			}
+			if (signal?.aborted) {
+				reject(new Error(`Wait for relay "${slug}" was aborted`));
+				return;
+			}
 
-				// status === "registering" — wait for resolution
-				const cleanup = () => {
-					this.off("project_ready", onReady);
-					this.off("project_error", onError);
-					this.off("project_removed", onRemoved);
-					if (signal) signal.removeEventListener("abort", onAbort);
-					clearTimeout(timer);
-				};
+			// status === "registering" — wait for resolution
+			const cleanup = () => {
+				this.off("project_ready", onReady);
+				this.off("project_error", onError);
+				this.off("project_removed", onRemoved);
+				if (signal) signal.removeEventListener("abort", onAbort);
+				clearTimeout(timer);
+			};
 
-				const onReady = (readySlug: string, relay: ProjectRelay) => {
-					if (readySlug !== slug) return;
-					cleanup();
-					resolve(relay);
-				};
-				const onError = (errorSlug: string, error: string) => {
-					if (errorSlug !== slug) return;
-					cleanup();
-					reject(new Error(`Project "${slug}" relay failed: ${error}`));
-				};
-				const onRemoved = (removedSlug: string) => {
-					if (removedSlug !== slug) return;
-					cleanup();
-					reject(new Error(`Project "${slug}" was removed`));
-				};
-				const onAbort = () => {
-					cleanup();
-					reject(new Error(`Wait for relay "${slug}" was aborted`));
-				};
+			const onReady = (readySlug: string, relay: ProjectRelay) => {
+				if (readySlug !== slug) return;
+				cleanup();
+				resolve(relay);
+			};
+			const onError = (errorSlug: string, error: string) => {
+				if (errorSlug !== slug) return;
+				cleanup();
+				reject(new Error(`Project "${slug}" relay failed: ${error}`));
+			};
+			const onRemoved = (removedSlug: string) => {
+				if (removedSlug !== slug) return;
+				cleanup();
+				reject(new Error(`Project "${slug}" was removed`));
+			};
+			const onAbort = () => {
+				cleanup();
+				reject(new Error(`Wait for relay "${slug}" was aborted`));
+			};
 
-				this.on("project_ready", onReady);
-				this.on("project_error", onError);
-				this.on("project_removed", onRemoved);
-				if (signal) signal.addEventListener("abort", onAbort, { once: true });
+			this.on("project_ready", onReady);
+			this.on("project_error", onError);
+			this.on("project_removed", onRemoved);
+			if (signal) signal.addEventListener("abort", onAbort, { once: true });
 
-				const timer = setTimeout(() => {
-					cleanup();
-					reject(
-						new Error(`Timed out waiting for relay "${slug}" (${timeoutMs}ms)`),
-					);
-				}, timeoutMs);
-			}),
-		);
+			const timer = setTimeout(() => {
+				cleanup();
+				reject(
+					new Error(`Timed out waiting for relay "${slug}" (${timeoutMs}ms)`),
+				);
+			}, timeoutMs);
+		});
+		this.trackPromise(promise);
+		return promise;
 	}
 
 	// ── Teardown ────────────────────────────────────────────────────────
@@ -448,8 +458,16 @@ export class ProjectRegistry extends TrackedService<ProjectRegistryEvents> {
 		await Promise.all(stops);
 	}
 
-	override async drain(): Promise<void> {
+	async drain(): Promise<void> {
 		await this.stopAll();
-		await super.drain();
+		await Promise.allSettled([...this.pending]);
+		this.pending.clear();
+	}
+
+	// ── Private helpers ─────────────────────────────────────────────────
+
+	private trackPromise(promise: Promise<unknown>): void {
+		this.pending.add(promise);
+		promise.finally(() => this.pending.delete(promise)).catch(() => {});
 	}
 }

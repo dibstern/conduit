@@ -760,7 +760,7 @@ export class Daemon {
 			);
 			this.scanner.excludePorts(managedPorts);
 
-			this.scanner.on("scan", (result: ScanResult) => {
+			this.scanner.onScan = (result: ScanResult) => {
 				for (const port of result.discovered) {
 					// Skip if an instance already occupies this port
 					const existing = this.instanceManager
@@ -809,7 +809,7 @@ export class Daemon {
 						instances,
 					});
 				}
-			});
+			};
 
 			this.scanner.start();
 			// Run initial scan immediately
@@ -909,9 +909,9 @@ export class Daemon {
 			...(this.keepAwakeCommand != null && { command: this.keepAwakeCommand }),
 			...(this.keepAwakeArgs != null && { args: this.keepAwakeArgs }),
 		});
-		this.keepAwakeManager.on("error", ({ error }) => {
+		this.keepAwakeManager.onError = ({ error }) => {
 			this.log.warn("KeepAwake error:", formatErrorDetail(error));
-		});
+		};
 		this.keepAwakeManager.activate();
 
 		// Start storage monitor (Ticket 6.2 AC8)
@@ -1676,9 +1676,9 @@ export class Daemon {
 						command,
 						args,
 					});
-					this.keepAwakeManager.on("error", ({ error }) => {
+					this.keepAwakeManager.onError = ({ error }) => {
 						this.log.warn("KeepAwake error:", formatErrorDetail(error));
-					});
+					};
 					// Auto-activate if currently enabled
 					if (this.keepAwake) {
 						this.keepAwakeManager.activate();

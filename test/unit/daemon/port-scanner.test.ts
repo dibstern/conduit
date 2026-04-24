@@ -89,7 +89,7 @@ describe("PortScanner", () => {
 
 	it("start() triggers periodic scans", async () => {
 		const onScan = vi.fn();
-		scanner.on("scan", onScan);
+		scanner.onScan = onScan;
 		scanner.start();
 
 		await vi.advanceTimersByTimeAsync(10_000);
@@ -132,7 +132,7 @@ describe("PortScanner", () => {
 
 	it("stop() cancels periodic scans", async () => {
 		const onScan = vi.fn();
-		scanner.on("scan", onScan);
+		scanner.onScan = onScan;
 		scanner.start();
 		scanner.stop();
 
@@ -142,7 +142,7 @@ describe("PortScanner", () => {
 
 	it("after drain(), interval no longer fires", async () => {
 		const onScan = vi.fn();
-		scanner.on("scan", onScan);
+		scanner.onScan = onScan;
 		scanner.start();
 
 		// Drain cancels the tracked interval
@@ -174,7 +174,7 @@ describe("PortScanner", () => {
 
 		// After drain, the interval should not fire
 		const onScan = vi.fn();
-		drainScanner.on("scan", onScan);
+		drainScanner.onScan = onScan;
 		await vi.advanceTimersByTimeAsync(30_000);
 		expect(onScan).not.toHaveBeenCalled();
 	});

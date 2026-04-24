@@ -71,11 +71,12 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			expect(ka.isActive()).toBe(false);
 		});
 
-		it("is an EventEmitter", () => {
+		it("exposes callback properties", () => {
 			const ka = new KeepAwake(new ServiceRegistry(), { _platform: "darwin" });
-			expect(typeof ka.on).toBe("function");
-			expect(typeof ka.emit).toBe("function");
-			expect(typeof ka.removeListener).toBe("function");
+			expect(ka.onActivated).toBeNull();
+			expect(ka.onDeactivated).toBeNull();
+			expect(ka.onError).toBeNull();
+			expect(ka.onUnsupported).toBeNull();
 		});
 
 		it("respects enabled: false in constructor", () => {
@@ -143,7 +144,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("activated", () => events.push("activated"));
+			ka.onActivated = () => events.push("activated");
 
 			ka.activate();
 
@@ -183,7 +184,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("deactivated", () => events.push("deactivated"));
+			ka.onDeactivated = () => events.push("deactivated");
 
 			ka.activate();
 			ka.deactivate();
@@ -244,7 +245,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("deactivated", () => events.push("deactivated"));
+			ka.onDeactivated = () => events.push("deactivated");
 
 			ka.activate();
 			expect(ka.isActive()).toBe(true);
@@ -280,7 +281,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("activated", () => events.push("activated"));
+			ka.onActivated = () => events.push("activated");
 
 			ka.setEnabled(true);
 			expect(ka.isEnabled()).toBe(true);
@@ -338,7 +339,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: Array<{ platform: string }> = [];
-			ka.on("unsupported", (info) => events.push(info));
+			ka.onUnsupported = (info) => events.push(info);
 
 			ka.activate();
 
@@ -358,7 +359,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: Array<{ platform: string }> = [];
-			ka.on("unsupported", (info) => events.push(info));
+			ka.onUnsupported = (info) => events.push(info);
 
 			ka.activate();
 
@@ -404,7 +405,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("activated", () => events.push("activated"));
+			ka.onActivated = () => events.push("activated");
 
 			ka.activate();
 			ka.activate();
@@ -441,7 +442,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("deactivated", () => events.push("deactivated"));
+			ka.onDeactivated = () => events.push("deactivated");
 
 			ka.activate();
 			ka.deactivate();
@@ -469,7 +470,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const errors: Error[] = [];
-			ka.on("error", ({ error }) => errors.push(error));
+			ka.onError = ({ error }) => errors.push(error);
 
 			ka.activate();
 			expect(ka.isActive()).toBe(true);
@@ -492,7 +493,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			// Must attach error listener to prevent unhandled error throw from EventEmitter
-			ka.on("error", () => {});
+			ka.onError = () => {};
 
 			ka.activate();
 			expect(ka.isActive()).toBe(true);
@@ -517,7 +518,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			// Must attach error listener to prevent unhandled error throw from EventEmitter
-			ka.on("error", () => {});
+			ka.onError = () => {};
 
 			ka.activate();
 			child1.emit("exit", 1, null);
@@ -540,7 +541,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const errors: Error[] = [];
-			ka.on("error", ({ error }) => errors.push(error));
+			ka.onError = ({ error }) => errors.push(error);
 
 			ka.activate();
 			ka.deactivate();
@@ -561,7 +562,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const errors: Error[] = [];
-			ka.on("error", ({ error }) => errors.push(error));
+			ka.onError = ({ error }) => errors.push(error);
 
 			ka.activate();
 
@@ -633,7 +634,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("activated", () => events.push("activated"));
+			ka.onActivated = () => events.push("activated");
 
 			ka.activate();
 
@@ -647,7 +648,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: string[] = [];
-			ka.on("unsupported", () => events.push("unsupported"));
+			ka.onUnsupported = () => events.push("unsupported");
 
 			ka.activate();
 
@@ -758,7 +759,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const errors: Error[] = [];
-			ka.on("error", ({ error }) => errors.push(error));
+			ka.onError = ({ error }) => errors.push(error);
 
 			ka.activate();
 
@@ -832,7 +833,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: Array<{ platform: string }> = [];
-			ka.on("unsupported", (info) => events.push(info));
+			ka.onUnsupported = (info) => events.push(info);
 
 			ka.activate();
 
@@ -892,7 +893,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const events: Array<{ platform: string }> = [];
-			ka.on("unsupported", (info) => events.push(info));
+			ka.onUnsupported = (info) => events.push(info);
 
 			ka.activate();
 
@@ -1033,9 +1034,9 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const errors: Error[] = [];
-			ka.on("error", ({ error }) => errors.push(error));
+			ka.onError = ({ error }) => errors.push(error);
 			const deactivated: boolean[] = [];
-			ka.on("deactivated", () => deactivated.push(true));
+			ka.onDeactivated = () => deactivated.push(true);
 
 			ka.activate();
 
@@ -1061,7 +1062,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			});
 
 			const errors: Error[] = [];
-			ka.on("error", ({ error }) => errors.push(error));
+			ka.onError = ({ error }) => errors.push(error);
 
 			ka.activate();
 
