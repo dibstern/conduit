@@ -1,5 +1,11 @@
 // ─── Error Handling Foundation (Ticket 0.5, 6.2) ─────────────────────────────
+//
+// Schema.TaggedError-based error hierarchy for the relay layer.
+// Each subclass is a Schema.TaggedError with _tag set to the class name.
+// The RelayError base class is kept as a plain Error subclass for generic
+// error codes used throughout the codebase (e.g. NO_SESSION, INVALID_REQUEST).
 
+import { Schema } from "effect";
 import { formatErrorDetail, redactSensitive } from "./errors-utils.js";
 import type { RelayMessage } from "./shared-types.js";
 
@@ -49,10 +55,451 @@ export type ErrorCode =
 	| "WEBSOCKET_ERROR"
 	| "CONFIG_INVALID";
 
-/** Base error class for all relay errors */
+// ─── Shared Schema fields for TaggedError subclasses ────────────────────────
+
+const RelayErrorFields = {
+	message: Schema.String,
+	userVisible: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+	context: Schema.optionalWith(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		{ default: () => ({}) },
+	),
+	cause: Schema.optionalWith(Schema.Unknown, { default: () => undefined }),
+};
+
+// ─── Mixin: shared serialization methods for TaggedError subclasses ─────────
+// Each Schema.TaggedError subclass mixes in these methods via direct definition.
+
+/** Helper to build context details for serialization */
+function contextDetails(
+	ctx: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+	return Object.keys(ctx).length > 0 ? ctx : undefined;
+}
+
+// ─── Schema.TaggedError subclasses ──────────────────────────────────────────
+
+export class OpenCodeConnectionError extends Schema.TaggedError<OpenCodeConnectionError>()(
+	"OpenCodeConnectionError",
+	{ ...RelayErrorFields },
+) {
+	get statusCode() {
+		return 502;
+	}
+	get code() {
+		return this._tag;
+	}
+
+	toJSON(): { error: { code: string; message: string; details?: unknown } } {
+		const details = contextDetails(this.context);
+		return {
+			error: {
+				code: this._tag,
+				message: this.message,
+				...(details ? { details } : {}),
+			},
+		};
+	}
+
+	toWebSocket(): {
+		type: "error";
+		code: string;
+		message: string;
+		statusCode?: number;
+		details?: Record<string, unknown>;
+	} {
+		const details = contextDetails(this.context);
+		return {
+			type: "error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details = contextDetails(this.context);
+		return {
+			type: "system_error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toLog(): Record<string, unknown> {
+		return {
+			error: this._tag,
+			message: this.message,
+			...redactSensitive(this.context),
+		};
+	}
+}
+
+export class OpenCodeApiError extends Schema.TaggedError<OpenCodeApiError>()(
+	"OpenCodeApiError",
+	{
+		...RelayErrorFields,
+		endpoint: Schema.String,
+		responseStatus: Schema.Number,
+		responseBody: Schema.optionalWith(Schema.Unknown, {
+			default: () => undefined,
+		}),
+	},
+) {
+	// Enrich message for 4xx errors with response body (preserves old behavior)
+	constructor(props: {
+		message: string;
+		endpoint: string;
+		responseStatus: number;
+		responseBody?: unknown;
+		userVisible?: boolean;
+		context?: Record<string, unknown>;
+		cause?: unknown;
+	}) {
+		let enrichedMessage = props.message;
+		if (
+			props.responseBody &&
+			props.responseStatus >= 400 &&
+			props.responseStatus < 500
+		) {
+			const bodyStr =
+				typeof props.responseBody === "string"
+					? props.responseBody
+					: JSON.stringify(props.responseBody);
+			if (bodyStr.length <= 500) {
+				enrichedMessage = `${props.message}: ${bodyStr}`;
+			}
+		}
+		super({ ...props, message: enrichedMessage });
+	}
+
+	get statusCode() {
+		return this.responseStatus >= 500 ? 502 : this.responseStatus;
+	}
+	get code() {
+		return this._tag;
+	}
+
+	toJSON(): { error: { code: string; message: string; details?: unknown } } {
+		const details = contextDetails(this.context);
+		return {
+			error: {
+				code: this._tag,
+				message: this.message,
+				...(details ? { details } : {}),
+			},
+		};
+	}
+
+	toWebSocket(): {
+		type: "error";
+		code: string;
+		message: string;
+		statusCode?: number;
+		details?: Record<string, unknown>;
+	} {
+		const details = contextDetails(this.context);
+		return {
+			type: "error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details = contextDetails(this.context);
+		return {
+			type: "system_error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toLog(): Record<string, unknown> {
+		return {
+			error: this._tag,
+			message: this.message,
+			...redactSensitive(this.context),
+		};
+	}
+}
+
+export class SSEConnectionError extends Schema.TaggedError<SSEConnectionError>()(
+	"SSEConnectionError",
+	{ ...RelayErrorFields },
+) {
+	get statusCode() {
+		return 502;
+	}
+	get code() {
+		return this._tag;
+	}
+
+	toJSON(): { error: { code: string; message: string; details?: unknown } } {
+		const details = contextDetails(this.context);
+		return {
+			error: {
+				code: this._tag,
+				message: this.message,
+				...(details ? { details } : {}),
+			},
+		};
+	}
+
+	toWebSocket(): {
+		type: "error";
+		code: string;
+		message: string;
+		statusCode?: number;
+		details?: Record<string, unknown>;
+	} {
+		const details = contextDetails(this.context);
+		return {
+			type: "error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details = contextDetails(this.context);
+		return {
+			type: "system_error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toLog(): Record<string, unknown> {
+		return {
+			error: this._tag,
+			message: this.message,
+			...redactSensitive(this.context),
+		};
+	}
+}
+
+export class WebSocketError extends Schema.TaggedError<WebSocketError>()(
+	"WebSocketError",
+	{ ...RelayErrorFields },
+) {
+	get statusCode() {
+		return 400;
+	}
+	get code() {
+		return this._tag;
+	}
+
+	toJSON(): { error: { code: string; message: string; details?: unknown } } {
+		const details = contextDetails(this.context);
+		return {
+			error: {
+				code: this._tag,
+				message: this.message,
+				...(details ? { details } : {}),
+			},
+		};
+	}
+
+	toWebSocket(): {
+		type: "error";
+		code: string;
+		message: string;
+		statusCode?: number;
+		details?: Record<string, unknown>;
+	} {
+		const details = contextDetails(this.context);
+		return {
+			type: "error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details = contextDetails(this.context);
+		return {
+			type: "system_error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toLog(): Record<string, unknown> {
+		return {
+			error: this._tag,
+			message: this.message,
+			...redactSensitive(this.context),
+		};
+	}
+}
+
+export class AuthenticationError extends Schema.TaggedError<AuthenticationError>()(
+	"AuthenticationError",
+	{ ...RelayErrorFields },
+) {
+	get statusCode() {
+		return 401;
+	}
+	get code() {
+		return this._tag;
+	}
+
+	toJSON(): { error: { code: string; message: string; details?: unknown } } {
+		const details = contextDetails(this.context);
+		return {
+			error: {
+				code: this._tag,
+				message: this.message,
+				...(details ? { details } : {}),
+			},
+		};
+	}
+
+	toWebSocket(): {
+		type: "error";
+		code: string;
+		message: string;
+		statusCode?: number;
+		details?: Record<string, unknown>;
+	} {
+		const details = contextDetails(this.context);
+		return {
+			type: "error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details = contextDetails(this.context);
+		return {
+			type: "system_error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toLog(): Record<string, unknown> {
+		return {
+			error: this._tag,
+			message: this.message,
+			...redactSensitive(this.context),
+		};
+	}
+}
+
+export class ConfigurationError extends Schema.TaggedError<ConfigurationError>()(
+	"ConfigurationError",
+	{ ...RelayErrorFields },
+) {
+	get statusCode() {
+		return 500;
+	}
+	get code() {
+		return this._tag;
+	}
+
+	toJSON(): { error: { code: string; message: string; details?: unknown } } {
+		const details = contextDetails(this.context);
+		return {
+			error: {
+				code: this._tag,
+				message: this.message,
+				...(details ? { details } : {}),
+			},
+		};
+	}
+
+	toWebSocket(): {
+		type: "error";
+		code: string;
+		message: string;
+		statusCode?: number;
+		details?: Record<string, unknown>;
+	} {
+		const details = contextDetails(this.context);
+		return {
+			type: "error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+		return { ...this.toWebSocket(), sessionId };
+	}
+
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+		const details = contextDetails(this.context);
+		return {
+			type: "system_error",
+			code: this._tag,
+			message: this.message,
+			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+			...(details ? { details } : {}),
+		};
+	}
+
+	toLog(): Record<string, unknown> {
+		return {
+			error: this._tag,
+			message: this.message,
+			...redactSensitive(this.context),
+		};
+	}
+}
+
+// ─── RelayError base class ──────────────────────────────────────────────────
+// Kept as a plain Error subclass for generic error codes used throughout the
+// codebase (e.g. NO_SESSION, INVALID_REQUEST, SEND_FAILED). Unlike the
+// Schema.TaggedError subclasses above, this class supports arbitrary ErrorCode
+// values and is constructed with the traditional `new RelayError(message, opts)`.
+
+/** Base error class for generic relay errors with arbitrary error codes */
 export class RelayError extends Error {
-	/** Tagged discriminant for Effect union support.
-	 *  Base class: equals the ErrorCode.  Subclasses: equals the class name. */
+	/** Tagged discriminant — equals the ErrorCode for generic errors */
 	readonly _tag: string;
 	readonly code: ErrorCode;
 	readonly statusCode: number;
@@ -144,194 +591,102 @@ export class RelayError extends Error {
 	}
 
 	/**
-	 * Create a RelayError from any caught value (AC4: error translation).
-	 * Replaces the standalone `buildErrorResponse()` utility — same behavior
-	 * but produces a proper RelayError instance instead of a plain object.
+	 * Create a relay error from any caught value (AC4: error translation).
+	 * Kept as static method for backward compatibility with existing call sites.
+	 * Returns AnyRelayError because infrastructure codes map to Schema.TaggedError subclasses.
 	 */
 	static fromCaught(
 		err: unknown,
 		code: ErrorCode,
 		prefix?: string,
-	): RelayError {
-		const detail = formatErrorDetail(err);
-		const message = prefix ? `${prefix}: ${detail}` : detail;
-		const cause = err instanceof Error ? err : undefined;
-		return new RelayError(message, {
-			code,
-			...(cause != null && { cause }),
-		});
+	): AnyRelayError {
+		return fromCaught(err, code, prefix);
 	}
 }
 
-export class OpenCodeConnectionError extends RelayError {
-	declare readonly _tag: "OpenCodeConnectionError";
+// ─── AnyRelayError union type ───────────────────────────────────────────────
+// Union of all relay error types (Schema.TaggedError subclasses + generic RelayError).
+// Used as return type for fromCaught/wrapError utilities.
 
-	constructor(props: {
+export type AnyRelayError =
+	| RelayError
+	| OpenCodeConnectionError
+	| OpenCodeApiError
+	| SSEConnectionError
+	| WebSocketError
+	| AuthenticationError
+	| ConfigurationError;
+
+// ─── Standalone fromCaught ──────────────────────────────────────────────────
+
+/** Map well-known infrastructure codes to their Schema.TaggedError subclass */
+const CODE_TO_CLASS: Record<
+	string,
+	new (props: {
 		message: string;
-		cause?: Error;
 		context?: Record<string, unknown>;
-		userVisible?: boolean;
-	}) {
-		super(props.message, {
-			code: "OPENCODE_UNREACHABLE",
-			statusCode: 502,
-			...(props.userVisible != null && { userVisible: props.userVisible }),
-			...(props.cause != null && { cause: props.cause }),
-			context: props.context ?? {},
+		cause?: unknown;
+	}) =>
+		| OpenCodeConnectionError
+		| SSEConnectionError
+		| WebSocketError
+		| AuthenticationError
+		| ConfigurationError
+> = {
+	OPENCODE_UNREACHABLE: OpenCodeConnectionError,
+	SSE_DISCONNECTED: SSEConnectionError,
+	WEBSOCKET_ERROR: WebSocketError,
+	AUTH_FAILED: AuthenticationError,
+	CONFIG_INVALID: ConfigurationError,
+};
+
+/**
+ * Create a relay error from any caught value.
+ * Maps well-known infrastructure codes to their Schema.TaggedError subclass;
+ * falls back to a generic RelayError for other codes.
+ */
+export function fromCaught(
+	err: unknown,
+	code: ErrorCode,
+	prefix?: string,
+): AnyRelayError {
+	const detail = formatErrorDetail(err);
+	const message = prefix ? `${prefix}: ${detail}` : detail;
+	const cause = err instanceof Error ? err : undefined;
+
+	const ErrorClass = CODE_TO_CLASS[code];
+	if (ErrorClass) {
+		return new ErrorClass({
+			message,
+			context: { originalCode: code },
+			cause,
 		});
-		this.name = "OpenCodeConnectionError";
-		(this as { _tag: string })._tag = "OpenCodeConnectionError";
 	}
+
+	return new RelayError(message, {
+		code,
+		...(cause != null && { cause }),
+	});
 }
 
-export class OpenCodeApiError extends RelayError {
-	declare readonly _tag: "OpenCodeApiError";
-	readonly endpoint: string;
-	readonly responseStatus: number;
-	readonly responseBody: unknown;
+// ─── wrapError utility ──────────────────────────────────────────────────────
 
-	constructor(props: {
+/** Wrap a low-level error in a relay error subclass, preserving the cause chain */
+export function wrapError<
+	E extends new (props: {
 		message: string;
-		endpoint: string;
-		responseStatus: number;
-		responseBody?: unknown;
-		cause?: Error;
-		userVisible?: boolean;
-	}) {
-		// For 4xx client errors, include the response body in the message
-		// so callers see actionable details (e.g. Zod validation errors)
-		let enrichedMessage = props.message;
-		if (
-			props.responseBody &&
-			props.responseStatus >= 400 &&
-			props.responseStatus < 500
-		) {
-			const bodyStr =
-				typeof props.responseBody === "string"
-					? props.responseBody
-					: JSON.stringify(props.responseBody);
-			if (bodyStr.length <= 500) {
-				enrichedMessage = `${props.message}: ${bodyStr}`;
-			}
-		}
-
-		super(enrichedMessage, {
-			code: "OPENCODE_API_ERROR",
-			statusCode: props.responseStatus >= 500 ? 502 : props.responseStatus,
-			...(props.userVisible != null && { userVisible: props.userVisible }),
-			context: {
-				endpoint: props.endpoint,
-				responseStatus: props.responseStatus,
-				responseBody: props.responseBody,
-			},
-			...(props.cause != null && { cause: props.cause }),
-		});
-		this.name = "OpenCodeApiError";
-		(this as { _tag: string })._tag = "OpenCodeApiError";
-		this.endpoint = props.endpoint;
-		this.responseStatus = props.responseStatus;
-		this.responseBody = props.responseBody;
-	}
-}
-
-export class SSEConnectionError extends RelayError {
-	declare readonly _tag: "SSEConnectionError";
-
-	constructor(props: {
-		message: string;
-		cause?: Error;
+		cause?: unknown;
 		context?: Record<string, unknown>;
-		userVisible?: boolean;
-	}) {
-		super(props.message, {
-			code: "SSE_DISCONNECTED",
-			statusCode: 502,
-			...(props.userVisible != null && { userVisible: props.userVisible }),
-			...(props.cause != null && { cause: props.cause }),
-			context: props.context ?? {},
-		});
-		this.name = "SSEConnectionError";
-		(this as { _tag: string })._tag = "SSEConnectionError";
-	}
-}
-
-export class WebSocketError extends RelayError {
-	declare readonly _tag: "WebSocketError";
-
-	constructor(props: {
-		message: string;
-		cause?: Error;
-		context?: Record<string, unknown>;
-		userVisible?: boolean;
-	}) {
-		super(props.message, {
-			code: "WEBSOCKET_ERROR",
-			statusCode: 400,
-			...(props.userVisible != null && { userVisible: props.userVisible }),
-			...(props.cause != null && { cause: props.cause }),
-			context: props.context ?? {},
-		});
-		this.name = "WebSocketError";
-		(this as { _tag: string })._tag = "WebSocketError";
-	}
-}
-
-export class AuthenticationError extends RelayError {
-	declare readonly _tag: "AuthenticationError";
-
-	constructor(props: {
-		message: string;
-		cause?: Error;
-		context?: Record<string, unknown>;
-		userVisible?: boolean;
-	}) {
-		super(props.message, {
-			code: "AUTH_FAILED",
-			statusCode: 401,
-			...(props.userVisible != null && { userVisible: props.userVisible }),
-			...(props.cause != null && { cause: props.cause }),
-			context: props.context ?? {},
-		});
-		this.name = "AuthenticationError";
-		(this as { _tag: string })._tag = "AuthenticationError";
-	}
-}
-
-export class ConfigurationError extends RelayError {
-	declare readonly _tag: "ConfigurationError";
-
-	constructor(props: {
-		message: string;
-		cause?: Error;
-		context?: Record<string, unknown>;
-		userVisible?: boolean;
-	}) {
-		super(props.message, {
-			code: "CONFIG_INVALID",
-			statusCode: 500,
-			...(props.userVisible != null && { userVisible: props.userVisible }),
-			...(props.cause != null && { cause: props.cause }),
-			context: props.context ?? {},
-		});
-		this.name = "ConfigurationError";
-		(this as { _tag: string })._tag = "ConfigurationError";
-	}
-}
-
-/** Wrap a low-level error in a RelayError subclass, preserving the cause chain */
-export function wrapError(
+	}) => AnyRelayError,
+>(
 	error: unknown,
-	ErrorClass: new (props: {
-		message: string;
-		cause?: Error;
-		context?: Record<string, unknown>;
-	}) => RelayError,
+	ErrorClass: E,
 	context?: Record<string, unknown>,
-): RelayError {
+): InstanceType<E> {
 	const cause = error instanceof Error ? error : new Error(String(error));
 	return new ErrorClass({
 		message: cause.message,
 		cause,
 		...(context != null && { context }),
-	});
+	}) as InstanceType<E>;
 }

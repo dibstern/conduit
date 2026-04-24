@@ -110,7 +110,7 @@ describe("OpenCodeApiError response body enrichment", () => {
 		expect(err.endpoint).toBe("/session/s1/prompt_async");
 		expect(err.responseStatus).toBe(400);
 		expect(err.responseBody).toEqual(body);
-		expect(err.code).toBe("OPENCODE_API_ERROR");
+		expect(err.code).toBe("OpenCodeApiError");
 		expect(err.name).toBe("OpenCodeApiError");
 		expect(err).toBeInstanceOf(Error);
 	});
