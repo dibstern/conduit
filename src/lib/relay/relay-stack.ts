@@ -16,7 +16,6 @@ import {
 } from "../bridges/client-init.js";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
-import { ServiceRegistry } from "../daemon/service-registry.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -170,9 +169,6 @@ export async function createProjectRelay(
 	const ptyLog = log.child("pty");
 	const pipelineLog = log.child("pipeline");
 
-	// ── Service registry (optional — used by daemon for coordinated drain) ──
-	const serviceRegistry = config.registry ?? new ServiceRegistry();
-
 	// ── Components ──────────────────────────────────────────────────────────
 
 	// ── SDK-based client (Tasks 3–6, Effect-based from Task 4) ──────────────
@@ -279,7 +275,6 @@ export async function createProjectRelay(
 			},
 		}),
 	});
-	serviceRegistry.register(statusPoller);
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
 	const registry = new SessionRegistry(log.child("session-registry"));
@@ -294,7 +289,6 @@ export async function createProjectRelay(
 			interval: config.messagePollerInterval,
 		}),
 	});
-	serviceRegistry.register(pollerManager);
 
 	// ── PTY sessions with server-side scrollback (claude-relay architecture) ──
 	// Each active PTY gets one upstream WebSocket to OpenCode's /pty/:id/connect.
@@ -361,7 +355,6 @@ export async function createProjectRelay(
 				config.verifyClient != null && { verifyClient: config.verifyClient }),
 		},
 	);
-	serviceRegistry.register(wsHandler);
 
 	// ── PTY upstream deps (constructed after wsHandler is available) ────────
 	const ptyDeps: PtyUpstreamDeps = {
@@ -552,7 +545,6 @@ export async function createProjectRelay(
 		api,
 		log: sseLog,
 	});
-	serviceRegistry.register(sseStream);
 
 	// ── Run projector recovery (required before projectEvent works) ──────
 	// ProjectionRunner guards projectEvent() behind a recovery check.
@@ -700,10 +692,10 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
-			// 1. Stop event sources
-			await sseStream.disconnect();
-			pollerManager.stopAll();
-			statusPoller.stop();
+			// 1. Drain event sources (stop + await pending work)
+			await sseStream.drain();
+			await pollerManager.drain();
+			await statusPoller.drain();
 			// 2. Shut down orchestration engine (rejects pending turns)
 			await orchestration.engine.shutdown();
 			// 3. Dispose Effect ManagedRuntime
@@ -711,9 +703,9 @@ export async function createProjectRelay(
 			// 4. Clean up remaining resources
 			clearInterval(timeoutTimer);
 			clearInterval(rateLimitCleanupTimer);
-			overrides.dispose();
+			await overrides.drain();
 			ptyManager.closeAll();
-			wsHandler.close();
+			await wsHandler.drain();
 		},
 	};
 }

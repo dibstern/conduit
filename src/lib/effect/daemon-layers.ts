@@ -1,6 +1,6 @@
 // ─── Daemon Lifecycle Layers ────────────────────────────────────────────────
 // Scoped layers for daemon process lifecycle: signal handling, error handling,
-// and leaf Drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
+// and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
 import { Deferred, Effect, Layer } from "effect";
@@ -95,7 +95,7 @@ export const ProcessErrorHandlerLayer = Layer.scopedDiscard(
 	}),
 );
 
-// ─── Leaf Drainable Service Layers ─────────────────────────────────────────
+// ─── Leaf Drainable Service Layers ──────────────────────────────────────────
 
 /**
  * KeepAwake layer — spawns platform-appropriate keep-awake process, activates it,

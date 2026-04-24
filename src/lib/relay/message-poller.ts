@@ -7,7 +7,6 @@
 // RelayMessages (delta, tool_start, tool_executing, tool_result, thinking_*,
 // result, done, etc.) that feed into the same cache + broadcast pipeline.
 
-import type { Drainable } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -463,7 +462,7 @@ export type MessagePollerEventsCallback = (messages: RelayMessage[]) => void;
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
 
-export class MessagePoller implements Drainable {
+export class MessagePoller {
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly interval: number;
 	private readonly log: Logger;

@@ -38,7 +38,6 @@ import { RequestRouter } from "../server/http-router.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { OpenCodeInstance, StoredProject } from "../types.js";
 import { generateSlug } from "../utils.js";
-import { AsyncTracker } from "./async-tracker.js";
 import {
 	clearCrashInfo,
 	type DaemonConfig,
@@ -75,7 +74,6 @@ import {
 } from "./pid-manager.js";
 import { PortScanner, type ScanResult } from "./port-scanner.js";
 import { ProjectRegistry } from "./project-registry.js";
-import { ServiceRegistry } from "./service-registry.js";
 import {
 	installSignalHandlers,
 	removeSignalHandlers,
@@ -236,9 +234,6 @@ export class Daemon {
 	// Structured logger — initialised in the constructor after setLogLevel()
 	private readonly log: Logger;
 
-	// ── Async lifecycle management ──────────────────────────────────────
-	private serviceRegistry = new ServiceRegistry();
-	private tracker = new AsyncTracker();
 	private shutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Process error handlers — stored so stop() can remove them (prevents listener leak)
@@ -271,9 +266,7 @@ export class Daemon {
 		this.keepAwakeArgs = options?.keepAwakeArgs;
 		this.smartDefault = options?.smartDefault ?? true;
 		this.instanceManager = new InstanceManager();
-		this.serviceRegistry.register(this.instanceManager);
 		this.registry = new ProjectRegistry();
-		this.serviceRegistry.register(this.registry);
 
 		// Auto-persist config on project mutations
 		this.registry.on("project_added", () => this.persistConfig());
@@ -813,8 +806,8 @@ export class Daemon {
 			};
 
 			this.scanner.start();
-			// Run initial scan immediately
-			this.tracker.track(this.scanner.scan());
+			// Run initial scan immediately (fire-and-forget, scanner handles errors)
+			void this.scanner.scan();
 		}
 
 		this.log.info(
@@ -877,14 +870,12 @@ export class Daemon {
 		// is populated even if daemon.json had no saved projects.
 		// Skipped when smartDefault is false (tests that don't want network probing).
 		if (this.smartDefault) {
-			this.tracker.track(
-				this.discoverProjects().catch((err) => {
-					this.log.warn(
-						"Failed to discover projects on startup:",
-						formatErrorDetail(err),
-					);
-				}),
-			);
+			void this.discoverProjects().catch((err) => {
+				this.log.warn(
+					"Failed to discover projects on startup:",
+					formatErrorDetail(err),
+				);
+			});
 		}
 
 		// Clear any previous crash info and save config (Ticket 8.7)
@@ -1003,11 +994,9 @@ export class Daemon {
 		await this.storageMonitor?.drain();
 		await this.scanner?.drain();
 
-		// Drain remaining registry services (InstanceManager, ProjectRegistry, relay services)
-		await this.serviceRegistry.drainAll();
-
-		// Drain Daemon's own tracked promises
-		await this.tracker.drain();
+		// Drain core services (InstanceManager, ProjectRegistry)
+		await this.instanceManager.drain();
+		await this.registry.drain();
 
 		// Null out service references that are NOT readonly
 		this.scanner = null;
@@ -1348,7 +1337,6 @@ export class Daemon {
 				slug: project.slug,
 				noServer: true,
 				signal,
-				registry: this.serviceRegistry,
 				log: createLogger("relay"),
 				getProjects: () => this.getProjects(),
 				addProject: async (dir: string) => {

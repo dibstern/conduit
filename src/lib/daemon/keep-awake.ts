@@ -4,8 +4,6 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn as defaultSpawn, execFileSync } from "node:child_process";
-import type { Drainable } from "./service-registry.js";
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface KeepAwakeOptions {
@@ -60,7 +58,7 @@ function defaultWhichSync(cmd: string): string | null {
 /** @internal Exported for testing only */
 export { defaultWhichSync as _defaultWhichSync };
 
-export class KeepAwake implements Drainable {
+export class KeepAwake {
 	private readonly whichSync: (cmd: string) => string | null;
 	private readonly configCommand: string | undefined;
 	private readonly configArgs: string[] | undefined;

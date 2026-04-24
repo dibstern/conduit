@@ -3,7 +3,6 @@
 // Replaces SSEConsumer's raw HTTP/SSE parsing with the typed AsyncGenerator
 // returned by the OpenCode SDK. Reconnects with exponential backoff on failure.
 
-import type { Drainable } from "../daemon/service-registry.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
 import {
@@ -40,7 +39,7 @@ export interface SSEStreamCallbacks {
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
-export class SSEStream implements Drainable {
+export class SSEStream {
 	private readonly api: SSEStreamOptions["api"];
 	private readonly backoffConfig: BackoffConfig;
 	private readonly healthTracker: HealthTracker;

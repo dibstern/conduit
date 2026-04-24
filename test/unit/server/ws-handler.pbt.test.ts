@@ -3,7 +3,6 @@
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { WebSocketHandler } from "../../../src/lib/server/ws-handler.js";
 
 const require = createRequire(import.meta.url);
@@ -452,17 +451,5 @@ describe("Ticket 2.2 — WebSocket Handler PBT", () => {
 		expect(handlerInternal.clients.size).toBe(0);
 
 		await new Promise<void>((r) => server.close(() => r()));
-	});
-
-	it("P12: WebSocketHandler can be externally registered with ServiceRegistry", () => {
-		const registry = new ServiceRegistry();
-		expect(registry.size).toBe(0);
-
-		const handler = new WebSocketHandler(null, {
-			heartbeatInterval: 60_000,
-		});
-		registry.register(handler);
-		expect(registry.size).toBe(1);
-		handler.close();
 	});
 });

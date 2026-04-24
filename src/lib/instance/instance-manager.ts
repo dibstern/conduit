@@ -4,7 +4,6 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
-import type { Drainable } from "../daemon/service-registry.js";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
 
@@ -43,7 +42,7 @@ export interface InstanceManagerOptions {
 
 // ─── InstanceManager ────────────────────────────────────────────────────────
 
-export class InstanceManager implements Drainable {
+export class InstanceManager {
 	private readonly maxInstances: number;
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;

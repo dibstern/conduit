@@ -6,7 +6,6 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
-import type { Drainable } from "../daemon/service-registry.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../types.js";
 import {
@@ -74,7 +73,7 @@ export interface WebSocketHandlerCallbacks {
 
 // ─── WebSocket Handler ──────────────────────────────────────────────────────
 
-export class WebSocketHandler implements Drainable {
+export class WebSocketHandler {
 	private readonly wss: InstanceType<typeof WebSocketServerClass>;
 	private readonly clients: Map<string, WSType> = new Map();
 	private readonly tracker: ClientTracker;

@@ -4,8 +4,6 @@
 // space issues.
 
 import { statfs as nodeStatfs } from "node:fs/promises";
-import type { Drainable } from "./service-registry.js";
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface StorageMonitorOptions {
@@ -47,7 +45,7 @@ async function defaultStatfs(path: string): Promise<{ available: number }> {
 
 // ─── StorageMonitor ─────────────────────────────────────────────────────────
 
-export class StorageMonitor implements Drainable {
+export class StorageMonitor {
 	private readonly monitorPath: string;
 	private readonly thresholdBytes: number;
 	private readonly intervalMs: number;

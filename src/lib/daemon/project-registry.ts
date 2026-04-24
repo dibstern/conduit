@@ -5,8 +5,6 @@
 
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import type { RelayMessage, StoredProject } from "../types.js";
-import type { Drainable } from "./service-registry.js";
-
 // ─── Discriminated union ────────────────────────────────────────────────────
 
 export interface ProjectRegistering {
@@ -41,7 +39,7 @@ export interface ProjectRegistryCallbacks {
 
 // ─── Registry class ─────────────────────────────────────────────────────────
 
-export class ProjectRegistry implements Drainable {
+export class ProjectRegistry {
 	private readonly entries = new Map<string, ProjectEntry>();
 	private readonly abortControllers = new Map<string, AbortController>();
 	private readonly pending = new Set<Promise<unknown>>();

@@ -9,7 +9,6 @@
 // detect activity from external processes (e.g. the OpenCode TUI running
 // in a separate OS process that shares only SQLite).
 
-import type { Drainable } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -34,7 +33,7 @@ export interface MessagePollerManagerOptions {
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
 
-export class MessagePollerManager implements Drainable {
+export class MessagePollerManager {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly log: Logger;

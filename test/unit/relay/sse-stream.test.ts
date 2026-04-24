@@ -17,7 +17,7 @@ function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
 }
 
 describe("SSEStream", () => {
-	it("can be created without a ServiceRegistry", () => {
+	it("can be created and starts disconnected", () => {
 		const api = makeStubApi([]);
 		const stream = new SSEStream({ api });
 		expect(stream.isConnected()).toBe(false);

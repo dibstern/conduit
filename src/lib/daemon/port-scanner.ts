@@ -1,5 +1,4 @@
 // src/lib/daemon/port-scanner.ts
-import type { Drainable } from "./service-registry.js";
 
 export interface PortScannerConfig {
 	portRange: [number, number];
@@ -21,7 +20,7 @@ export type PortScannerEvents = {
 
 type ProbeFn = (port: number) => Promise<boolean>;
 
-export class PortScanner implements Drainable {
+export class PortScanner {
 	private config: PortScannerConfig;
 	private probeFn: ProbeFn;
 	private discovered = new Set<number>();

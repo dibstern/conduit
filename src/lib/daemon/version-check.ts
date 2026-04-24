@@ -2,7 +2,6 @@
 // Periodically checks npm for newer versions and notifies via callbacks.
 
 import { getVersion } from "../version.js";
-import type { Drainable } from "./service-registry.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -189,7 +188,7 @@ export async function fetchLatestVersion(
 
 // ─── VersionChecker ────────────────────────────────────────────────────────────
 
-export class VersionChecker implements Drainable {
+export class VersionChecker {
 	private readonly packageName: string;
 	private readonly currentVersion: string;
 	private readonly checkInterval: number;

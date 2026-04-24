@@ -15,7 +15,6 @@
 // Also maintains in-memory augmentation (subagent propagation, message
 // activity) for the legacy consumer interface.
 
-import type { Drainable } from "../daemon/service-registry.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -98,7 +97,7 @@ export type StatusChangedCallback = (
 
 // ─── Reconciliation Loop ─────────────────────────────────────────────────────
 
-export class SessionStatusPoller implements Drainable {
+export class SessionStatusPoller {
 	private readonly client: Pick<OpenCodeAPI, "session">;
 	private readonly interval: number;
 	private readonly log: Logger;
