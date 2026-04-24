@@ -231,7 +231,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 		});
 	});
 
-	it("emits update_available when newer version found", async () => {
+	it("calls onUpdateAvailable when newer version found", async () => {
 		const fetcher = mockFetchOk("2.0.0");
 		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
@@ -239,7 +239,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 		});
 
 		const events: Array<{ current: string; latest: string }> = [];
-		checker.on("update_available", (data) => events.push(data));
+		checker.onUpdateAvailable = (data) => events.push(data);
 
 		await checker.check();
 
@@ -247,7 +247,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 		expect(events[0]).toEqual({ current: "1.0.0", latest: "2.0.0" });
 	});
 
-	it("does not emit update_available when no update", async () => {
+	it("does not call onUpdateAvailable when no update", async () => {
 		const fetcher = mockFetchOk("1.0.0");
 		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
@@ -255,7 +255,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 		});
 
 		const events: unknown[] = [];
-		checker.on("update_available", (data) => events.push(data));
+		checker.onUpdateAvailable = (data) => events.push(data);
 
 		await checker.check();
 
@@ -280,14 +280,14 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 		});
 
 		const events: unknown[] = [];
-		checker.on("update_available", (data) => events.push(data));
+		checker.onUpdateAvailable = (data) => events.push(data);
 
 		const result = await checker.check();
 
 		expect(result.updateAvailable).toBe(false);
 		expect(result.current).toBe("2.0.0");
 		expect(result.latest).toBe("1.0.0");
-		// Should not emit update_available for a downgrade
+		// Should not call onUpdateAvailable for a downgrade
 		expect(events).toHaveLength(0);
 	});
 });
@@ -312,7 +312,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 		});
 
 		const events: unknown[] = [];
-		checker.on("update_available", (data) => events.push(data));
+		checker.onUpdateAvailable = (data) => events.push(data);
 
 		checker.start();
 
@@ -495,7 +495,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		vi.useRealTimers();
 	});
 
-	it("emits check_error on network failure, does not throw", async () => {
+	it("calls onCheckError on network failure, does not throw", async () => {
 		const fetcher = mockFetchNetworkError("ECONNREFUSED");
 		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
@@ -504,7 +504,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		});
 
 		const errors: Array<{ error: Error }> = [];
-		checker.on("check_error", (data) => errors.push(data));
+		checker.onCheckError = (data) => errors.push(data);
 
 		checker.start();
 		await vi.advanceTimersByTimeAsync(1);
@@ -537,8 +537,8 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 
 		const errors: Array<{ error: Error }> = [];
 		const updates: Array<{ current: string; latest: string }> = [];
-		checker.on("check_error", (data) => errors.push(data));
-		checker.on("update_available", (data) => updates.push(data));
+		checker.onCheckError = (data) => errors.push(data);
+		checker.onUpdateAvailable = (data) => updates.push(data);
 
 		checker.start();
 
@@ -554,7 +554,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		checker.stop();
 	});
 
-	it("emits check_error on HTTP error, does not throw", async () => {
+	it("calls onCheckError on HTTP error, does not throw", async () => {
 		const fetcher = mockFetchError(500);
 		const checker = new VersionChecker(new ServiceRegistry(), {
 			currentVersion: "1.0.0",
@@ -563,7 +563,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		});
 
 		const errors: Array<{ error: Error }> = [];
-		checker.on("check_error", (data) => errors.push(data));
+		checker.onCheckError = (data) => errors.push(data);
 
 		checker.start();
 		await vi.advanceTimersByTimeAsync(1);
@@ -596,8 +596,8 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 
 		const errors: Array<{ error: Error }> = [];
 		const updates: Array<{ current: string; latest: string }> = [];
-		checker.on("check_error", (data) => errors.push(data));
-		checker.on("update_available", (data) => updates.push(data));
+		checker.onCheckError = (data) => errors.push(data);
+		checker.onUpdateAvailable = (data) => updates.push(data);
 
 		checker.start();
 
@@ -617,9 +617,9 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 	});
 });
 
-// ─── TrackedService integration (drain) ────────────────────────────────────────
+// ─── Drain integration ────────────────────────────────────────────────────────
 
-describe("Ticket 3.4 — TrackedService drain() integration", () => {
+describe("Ticket 3.4 — drain() integration", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 	});

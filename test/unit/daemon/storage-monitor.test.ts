@@ -67,9 +67,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const events: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				events.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) => events.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -91,9 +89,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const events: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				events.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) => events.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -122,12 +118,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -149,9 +142,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -180,12 +172,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 
@@ -222,9 +211,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -252,9 +239,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 
@@ -293,12 +279,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 
@@ -367,9 +350,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -394,9 +376,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -415,9 +396,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());

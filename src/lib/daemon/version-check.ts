@@ -1,9 +1,8 @@
 // ─── Version Check (Ticket 3.4) ────────────────────────────────────────────────
-// Periodically checks npm for newer versions and notifies browsers via events.
+// Periodically checks npm for newer versions and notifies via callbacks.
 
 import { getVersion } from "../version.js";
-import type { ServiceRegistry } from "./service-registry.js";
-import { TrackedService } from "./tracked-service.js";
+import type { Drainable, ServiceRegistry } from "./service-registry.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -190,7 +189,7 @@ export async function fetchLatestVersion(
 
 // ─── VersionChecker ────────────────────────────────────────────────────────────
 
-export class VersionChecker extends TrackedService<VersionCheckEvents> {
+export class VersionChecker implements Drainable {
 	private readonly packageName: string;
 	private readonly currentVersion: string;
 	private readonly checkInterval: number;
@@ -201,9 +200,18 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 	private intervalHandle: ReturnType<typeof setInterval> | null = null;
 	private latestVersion: string | null = null;
 	private updateAvailable = false;
+	private abortController = new AbortController();
+	private pending = new Set<Promise<unknown>>();
+
+	// ─── Callbacks ─────────────────────────────────────────────────────────
+
+	onUpdateAvailable:
+		| ((data: { current: string; latest: string }) => void)
+		| null = null;
+	onCheckError: ((data: { error: Error }) => void) | null = null;
 
 	constructor(registry: ServiceRegistry, options?: VersionCheckOptions) {
-		super(registry);
+		registry.register(this);
 		this.packageName = options?.packageName ?? DEFAULT_PACKAGE_NAME;
 		this.currentVersion = options?.currentVersion ?? getVersion();
 		this.checkInterval = options?.checkInterval ?? DEFAULT_CHECK_INTERVAL;
@@ -216,11 +224,11 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 	start(): void {
 		if (!this.enabled) return;
 
-		// Perform initial check (non-blocking — errors emitted, not thrown)
+		// Perform initial check (non-blocking — errors reported via callback, not thrown)
 		this.runCheck();
 
-		// Schedule periodic checks (tracked — cleared automatically on drain)
-		this.intervalHandle = this.repeating(() => {
+		// Schedule periodic checks — cleared on stop() or drain()
+		this.intervalHandle = setInterval(() => {
 			this.runCheck();
 		}, this.checkInterval);
 	}
@@ -228,7 +236,7 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 	/** Stop periodic checking. */
 	stop(): void {
 		if (this.intervalHandle !== null) {
-			this.clearTrackedTimer(this.intervalHandle);
+			clearInterval(this.intervalHandle);
 			this.intervalHandle = null;
 		}
 	}
@@ -239,7 +247,7 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 			this.packageName,
 			this.registryUrl,
 			this.fetchFn,
-			this.abortSignal,
+			this.abortController.signal,
 		);
 
 		this.latestVersion = latest;
@@ -247,7 +255,7 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 		this.updateAvailable = hasUpdate;
 
 		if (hasUpdate) {
-			this.emit("update_available", {
+			this.onUpdateAvailable?.({
 				current: this.currentVersion,
 				latest,
 			});
@@ -270,15 +278,23 @@ export class VersionChecker extends TrackedService<VersionCheckEvents> {
 		return this.latestVersion;
 	}
 
+	/** Cancel all work: abort in-flight fetches, clear interval, and await pending promises. */
+	async drain(): Promise<void> {
+		this.stop();
+		this.abortController.abort();
+		await Promise.allSettled([...this.pending]);
+		this.pending.clear();
+	}
+
 	// ─── Internal ──────────────────────────────────────────────────────────
 
-	/** Run a check, catching errors and emitting check_error. Tracked for drain. */
+	/** Run a check, catching errors and reporting via callback. Tracked for drain. */
 	private runCheck(): void {
-		this.tracked(
-			this.check().catch((err: unknown) => {
-				const error = err instanceof Error ? err : new Error(String(err));
-				this.emit("check_error", { error });
-			}),
-		);
+		const p = this.check().catch((err: unknown) => {
+			const error = err instanceof Error ? err : new Error(String(err));
+			this.onCheckError?.({ error });
+		});
+		this.pending.add(p);
+		p.finally(() => this.pending.delete(p));
 	}
 }

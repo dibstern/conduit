@@ -894,13 +894,13 @@ export class Daemon {
 		this.versionChecker = new VersionChecker(this.serviceRegistry, {
 			enabled: !process.argv.includes("--no-update"),
 		});
-		this.versionChecker.on("update_available", ({ latest }) => {
+		this.versionChecker.onUpdateAvailable = ({ latest }) => {
 			// Broadcast to all connected browsers
 			this.registry.broadcastToAll({
 				type: "update_available",
 				version: latest,
 			});
-		});
+		};
 		this.versionChecker.start();
 
 		// Initialize keep-awake (macOS caffeinate, Linux systemd-inhibit, or user-configured)
@@ -919,31 +919,31 @@ export class Daemon {
 		this.storageMonitor = new StorageMonitor(this.serviceRegistry, {
 			path: firstProject?.directory ?? process.cwd(),
 		});
-		this.storageMonitor.on(
-			"low_disk_space",
-			({ availableBytes, thresholdBytes }) => {
-				this.log.warn(
-					`Low disk space warning: ${availableBytes / 1024 / 1024}MB available (threshold: ${thresholdBytes / 1024 / 1024}MB)`,
-				);
+		this.storageMonitor.onLowDiskSpace = ({
+			availableBytes,
+			thresholdBytes,
+		}) => {
+			this.log.warn(
+				`Low disk space warning: ${availableBytes / 1024 / 1024}MB available (threshold: ${thresholdBytes / 1024 / 1024}MB)`,
+			);
 
-				// Trigger SQLite event-store eviction to free disk space
-				const summaries = this.registry.evictOldestSessions(3);
-				if (summaries.length > 0) {
-					for (const summary of summaries) {
-						this.log.info(`Eviction: ${summary}`);
-					}
-				} else {
-					this.log.info(
-						"Eviction triggered but no events were eligible for removal",
-					);
+			// Trigger SQLite event-store eviction to free disk space
+			const summaries = this.registry.evictOldestSessions(3);
+			if (summaries.length > 0) {
+				for (const summary of summaries) {
+					this.log.info(`Eviction: ${summary}`);
 				}
-			},
-		);
-		this.storageMonitor.on("disk_space_ok", ({ availableBytes }) => {
+			} else {
+				this.log.info(
+					"Eviction triggered but no events were eligible for removal",
+				);
+			}
+		};
+		this.storageMonitor.onDiskSpaceOk = ({ availableBytes }) => {
 			this.log.info(
 				`Disk space recovered: ${availableBytes / 1024 / 1024}MB available`,
 			);
-		});
+		};
 		this.storageMonitor.start();
 
 		this.log.info(`Daemon fully started in ${elapsed()}`);
