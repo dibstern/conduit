@@ -1,0 +1,548 @@
+// ─── IPC Effect Handlers Tests ────────────────────────────────────────────────
+// Verify that Effect-returning IPC handlers correctly interact with services.
+
+import { FileSystem } from "@effect/platform";
+import { SystemError } from "@effect/platform/Error";
+import { describe, it } from "@effect/vitest";
+import { Effect, Layer, Ref } from "effect";
+import { expect } from "vitest";
+import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
+import type { DaemonState } from "../../../src/lib/effect/daemon-state.js";
+import {
+	DaemonStateTag,
+	makeDaemonStateLive,
+} from "../../../src/lib/effect/daemon-state.js";
+import {
+	handleAddProject,
+	handleGetStatus,
+	handleInstanceAdd,
+	handleInstanceList,
+	handleInstanceRemove,
+	handleInstanceStart,
+	handleInstanceStatus,
+	handleInstanceStop,
+	handleInstanceUpdate,
+	handleListProjects,
+	handleRemoveProject,
+	handleRestartWithConfig,
+	handleSetAgent,
+	handleSetKeepAwake,
+	handleSetKeepAwakeCommand,
+	handleSetModel,
+	handleSetPin,
+	handleSetProjectTitle,
+	handleShutdown,
+} from "../../../src/lib/effect/ipc-handlers.js";
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+	SessionOverridesTag,
+} from "../../../src/lib/effect/services.js";
+import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
+import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
+
+// ─── In-memory test FileSystem ────────────────────────────────────────────────
+
+const makeTestFileSystem = () => {
+	const files = new Map<string, string>();
+
+	const fs: FileSystem.FileSystem = FileSystem.makeNoop({
+		readFileString: (path: string) =>
+			Effect.gen(function* () {
+				const content = files.get(path);
+				if (content === undefined) {
+					return yield* Effect.fail(
+						new SystemError({
+							reason: "NotFound",
+							module: "FileSystem",
+							method: "readFileString",
+							description: `File not found: ${path}`,
+							pathOrDescriptor: path,
+						}),
+					);
+				}
+				return content;
+			}),
+		writeFileString: (path: string, data: string) =>
+			Effect.sync(() => {
+				files.set(path, data);
+			}),
+		rename: (oldPath: string, newPath: string) =>
+			Effect.sync(() => {
+				const content = files.get(oldPath);
+				if (content !== undefined) {
+					files.set(newPath, content);
+					files.delete(oldPath);
+				}
+			}),
+		makeDirectory: () => Effect.void,
+	});
+
+	return { files, layer: Layer.succeed(FileSystem.FileSystem, fs) };
+};
+
+// ─── Mock factories ──────────────────────────────────────────────────────────
+
+const CONFIG_PATH = "/test-config/daemon.json";
+
+const makeMockProjectMgmt = () =>
+	Layer.succeed(ProjectMgmtTag, {
+		getProjects: () => [
+			{ slug: "proj-1", title: "Project 1", directory: "/home/proj-1" },
+		],
+		setProjectInstance: () => {},
+	});
+
+const makeMockInstanceMgmt = (overrides?: Partial<InstanceManagementDeps>) =>
+	Layer.succeed(InstanceMgmtTag, {
+		getInstances: () => [
+			{
+				id: "inst-1",
+				name: "Dev",
+				port: 4096,
+				managed: true,
+				status: "healthy" as const,
+				restartCount: 0,
+				createdAt: Date.now(),
+			},
+		],
+		addInstance: (id, config) => ({
+			id,
+			...config,
+			status: "stopped" as const,
+			restartCount: 0,
+			createdAt: Date.now(),
+		}),
+		removeInstance: () => {},
+		startInstance: () => Promise.resolve(),
+		stopInstance: () => {},
+		updateInstance: (id, updates) => ({
+			id,
+			name: updates.name ?? "Updated",
+			port: updates.port ?? 4096,
+			managed: true,
+			status: "healthy" as const,
+			restartCount: 0,
+			createdAt: Date.now(),
+		}),
+		persistConfig: () => {},
+		...overrides,
+	});
+
+const makeMockSessionOverrides = () =>
+	Layer.succeed(SessionOverridesTag, new SessionOverrides());
+
+const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
+	const testFs = makeTestFileSystem();
+	return Layer.mergeAll(
+		testFs.layer,
+		Layer.succeed(PersistencePathTag, CONFIG_PATH),
+		makeDaemonStateLive(stateOverrides),
+		makeMockProjectMgmt(),
+		makeMockInstanceMgmt(),
+		makeMockSessionOverrides(),
+	);
+};
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+describe("IPC handlers", () => {
+	// ── handleAddProject ──────────────────────────────────────────────────
+
+	describe("handleAddProject", () => {
+		it.effect("adds project and returns slug", () =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonStateTag;
+				// Pre-populate with no projects
+				yield* Ref.update(ref, (s) => ({ ...s, projects: [] }));
+
+				const result = yield* handleAddProject({
+					cmd: "add_project",
+					directory: "/home/new-project",
+				});
+
+				expect(result.ok).toBe(true);
+				expect(result.slug).toBeDefined();
+
+				// Verify project was added to state
+				const state = yield* Ref.get(ref);
+				expect(state.projects.length).toBe(1);
+				expect(state.projects[0]?.path).toBe("/home/new-project");
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("rejects duplicate project directory", () =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonStateTag;
+				yield* Ref.update(ref, (s) => ({
+					...s,
+					projects: [
+						{
+							path: "/home/existing",
+							slug: "existing",
+							addedAt: Date.now(),
+						},
+					],
+				}));
+
+				const result = yield* handleAddProject({
+					cmd: "add_project",
+					directory: "/home/existing",
+				});
+
+				expect(result.ok).toBe(false);
+				expect(result.error).toBeDefined();
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleRemoveProject ──────────────────────────────────────────────
+
+	describe("handleRemoveProject", () => {
+		it.effect("removes project by slug", () =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonStateTag;
+				yield* Ref.update(ref, (s) => ({
+					...s,
+					projects: [
+						{
+							path: "/home/proj",
+							slug: "proj",
+							addedAt: Date.now(),
+						},
+					],
+				}));
+
+				const result = yield* handleRemoveProject({
+					cmd: "remove_project",
+					slug: "proj",
+				});
+
+				expect(result.ok).toBe(true);
+				const state = yield* Ref.get(ref);
+				expect(state.projects.length).toBe(0);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns error for non-existent slug", () =>
+			Effect.gen(function* () {
+				const result = yield* handleRemoveProject({
+					cmd: "remove_project",
+					slug: "nonexistent",
+				});
+
+				expect(result.ok).toBe(false);
+				expect(result.error).toBeDefined();
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleSetPin ─────────────────────────────────────────────────────
+
+	describe("handleSetPin", () => {
+		it.effect("updates pinHash in state", () =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonStateTag;
+
+				const result = yield* handleSetPin({
+					cmd: "set_pin",
+					pin: "1234",
+				});
+
+				expect(result.ok).toBe(true);
+				const state = yield* Ref.get(ref);
+				expect(state.pinHash).not.toBeNull();
+				expect(state.pinHash).not.toBe("1234"); // Should be hashed
+				expect(state.pinHash?.length).toBe(64); // SHA-256 hex length
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleSetKeepAwake ───────────────────────────────────────────────
+
+	describe("handleSetKeepAwake", () => {
+		it.effect("enables keep awake", () =>
+			Effect.gen(function* () {
+				const result = yield* handleSetKeepAwake({
+					cmd: "set_keep_awake",
+					enabled: true,
+				});
+
+				expect(result.ok).toBe(true);
+				const ref = yield* DaemonStateTag;
+				const state = yield* Ref.get(ref);
+				expect(state.keepAwake).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("disables keep awake", () =>
+			Effect.gen(function* () {
+				const result = yield* handleSetKeepAwake({
+					cmd: "set_keep_awake",
+					enabled: false,
+				});
+
+				expect(result.ok).toBe(true);
+				const ref = yield* DaemonStateTag;
+				const state = yield* Ref.get(ref);
+				expect(state.keepAwake).toBe(false);
+			}).pipe(Effect.provide(makeTestLayers({ keepAwake: true }))),
+		);
+	});
+
+	// ── handleShutdown ───────────────────────────────────────────────────
+
+	describe("handleShutdown", () => {
+		it.effect("sets shuttingDown to true", () =>
+			Effect.gen(function* () {
+				const result = yield* handleShutdown({ cmd: "shutdown" });
+
+				expect(result.ok).toBe(true);
+				const ref = yield* DaemonStateTag;
+				const state = yield* Ref.get(ref);
+				expect(state.shuttingDown).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleListProjects ───────────────────────────────────────────────
+
+	describe("handleListProjects", () => {
+		it.effect("returns projects from state", () =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonStateTag;
+				yield* Ref.update(ref, (s) => ({
+					...s,
+					projects: [
+						{ path: "/a", slug: "a", addedAt: 1, title: "A" },
+						{ path: "/b", slug: "b", addedAt: 2, title: "B" },
+					],
+				}));
+
+				const result = yield* handleListProjects({ cmd: "list_projects" });
+
+				expect(result.ok).toBe(true);
+				expect(result.projects).toHaveLength(2);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleGetStatus ──────────────────────────────────────────────────
+
+	describe("handleGetStatus", () => {
+		it.effect("returns daemon status", () =>
+			Effect.gen(function* () {
+				const result = yield* handleGetStatus({ cmd: "get_status" });
+
+				expect(result.ok).toBe(true);
+				expect(result.uptime).toBeDefined();
+				expect(typeof result.uptime).toBe("number");
+				expect(result.port).toBeDefined();
+				expect(result.projectCount).toBeDefined();
+			}).pipe(Effect.provide(makeTestLayers({ port: 3456 }))),
+		);
+	});
+
+	// ── handleSetProjectTitle ────────────────────────────────────────────
+
+	describe("handleSetProjectTitle", () => {
+		it.effect("updates project title", () =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonStateTag;
+				yield* Ref.update(ref, (s) => ({
+					...s,
+					projects: [{ path: "/proj", slug: "proj", addedAt: 1 }],
+				}));
+
+				const result = yield* handleSetProjectTitle({
+					cmd: "set_project_title",
+					slug: "proj",
+					title: "New Title",
+				});
+
+				expect(result.ok).toBe(true);
+				const state = yield* Ref.get(ref);
+				expect(state.projects[0]?.title).toBe("New Title");
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleSetKeepAwakeCommand ────────────────────────────────────────
+
+	describe("handleSetKeepAwakeCommand", () => {
+		it.effect("updates keep awake command in state", () =>
+			Effect.gen(function* () {
+				const result = yield* handleSetKeepAwakeCommand({
+					cmd: "set_keep_awake_command",
+					command: "caffeinate",
+					args: ["-d"],
+				});
+
+				expect(result.ok).toBe(true);
+				const ref = yield* DaemonStateTag;
+				const state = yield* Ref.get(ref);
+				expect(state.keepAwakeCommand).toBe("caffeinate");
+				expect(state.keepAwakeArgs).toEqual(["-d"]);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleSetAgent ───────────────────────────────────────────────────
+
+	describe("handleSetAgent", () => {
+		it.effect("sets agent via SessionOverrides using slug", () =>
+			Effect.gen(function* () {
+				const overrides = yield* SessionOverridesTag;
+
+				const result = yield* handleSetAgent({
+					cmd: "set_agent",
+					slug: "my-project",
+					agent: "claude-3",
+				});
+
+				expect(result.ok).toBe(true);
+				// SessionOverrides.setAgent uses slug as the session identifier
+				expect(overrides.getAgent("my-project")).toBe("claude-3");
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleSetModel ───────────────────────────────────────────────────
+
+	describe("handleSetModel", () => {
+		it.effect("sets model via SessionOverrides using slug", () =>
+			Effect.gen(function* () {
+				const overrides = yield* SessionOverridesTag;
+
+				const result = yield* handleSetModel({
+					cmd: "set_model",
+					slug: "my-project",
+					provider: "anthropic",
+					model: "claude-3-opus",
+				});
+
+				expect(result.ok).toBe(true);
+				const model = overrides.getModel("my-project");
+				expect(model).toBeDefined();
+				expect(model?.providerID).toBe("anthropic");
+				expect(model?.modelID).toBe("claude-3-opus");
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── handleRestartWithConfig ──────────────────────────────────────────
+
+	describe("handleRestartWithConfig", () => {
+		it.effect("sets shuttingDown to true", () =>
+			Effect.gen(function* () {
+				const result = yield* handleRestartWithConfig({
+					cmd: "restart_with_config",
+				});
+
+				expect(result.ok).toBe(true);
+				const ref = yield* DaemonStateTag;
+				const state = yield* Ref.get(ref);
+				expect(state.shuttingDown).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	// ── Instance handlers ────────────────────────────────────────────────
+
+	describe("handleInstanceList", () => {
+		it.effect("returns instances from InstanceMgmt", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceList({ cmd: "instance_list" });
+
+				expect(result.ok).toBe(true);
+				expect(result.instances).toBeDefined();
+				expect(Array.isArray(result.instances)).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	describe("handleInstanceAdd", () => {
+		it.effect("adds a managed instance", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceAdd({
+					cmd: "instance_add",
+					name: "New Instance",
+					managed: true,
+					port: 5000,
+				});
+
+				expect(result.ok).toBe(true);
+				expect(result.instance).toBeDefined();
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	describe("handleInstanceRemove", () => {
+		it.effect("removes an instance", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceRemove({
+					cmd: "instance_remove",
+					id: "inst-1",
+				});
+
+				expect(result.ok).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	describe("handleInstanceStart", () => {
+		it.effect("starts an instance", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceStart({
+					cmd: "instance_start",
+					id: "inst-1",
+				});
+
+				expect(result.ok).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	describe("handleInstanceStop", () => {
+		it.effect("stops an instance", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceStop({
+					cmd: "instance_stop",
+					id: "inst-1",
+				});
+
+				expect(result.ok).toBe(true);
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	describe("handleInstanceStatus", () => {
+		it.effect("returns instance status", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceStatus({
+					cmd: "instance_status",
+					id: "inst-1",
+				});
+
+				expect(result.ok).toBe(true);
+				expect(result.instance).toBeDefined();
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+
+	describe("handleInstanceUpdate", () => {
+		it.effect("updates an instance", () =>
+			Effect.gen(function* () {
+				const result = yield* handleInstanceUpdate({
+					cmd: "instance_update",
+					id: "inst-1",
+					name: "Renamed",
+					port: 9999,
+				});
+
+				expect(result.ok).toBe(true);
+				expect(result.instance).toBeDefined();
+			}).pipe(Effect.provide(makeTestLayers())),
+		);
+	});
+});
