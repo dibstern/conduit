@@ -22,6 +22,10 @@ import {
 	PortScannerTag,
 } from "../../../src/lib/effect/port-scanner-layer.js";
 import {
+	RateLimiterLive,
+	RateLimiterTag,
+} from "../../../src/lib/effect/rate-limiter-layer.js";
+import {
 	StorageMonitorLive,
 	StorageMonitorTag,
 } from "../../../src/lib/effect/storage-monitor-layer.js";
@@ -498,6 +502,33 @@ describe("Leaf service Layers", () => {
 				// After scope close, the service's Refs have been cleaned up.
 				// We verify the exit was successful which proves the finalizer ran.
 			}),
+		);
+	});
+
+	describe("RateLimiter", () => {
+		it.scoped("allows requests under limit", () =>
+			Effect.gen(function* () {
+				const limiter = yield* RateLimiterTag;
+				const r1 = yield* limiter.checkLimit("127.0.0.1");
+				const r2 = yield* limiter.checkLimit("127.0.0.1");
+				expect(r1).toBe(true);
+				expect(r2).toBe(true);
+			}).pipe(
+				Effect.provide(RateLimiterLive({ maxRequests: 5, windowMs: 10_000 })),
+			),
+		);
+
+		it.scoped("blocks requests over limit", () =>
+			Effect.gen(function* () {
+				const limiter = yield* RateLimiterTag;
+				for (let i = 0; i < 5; i++) {
+					yield* limiter.checkLimit("127.0.0.1");
+				}
+				const result = yield* limiter.checkLimit("127.0.0.1"); // 6th request
+				expect(result).toBe(false);
+			}).pipe(
+				Effect.provide(RateLimiterLive({ maxRequests: 5, windowMs: 10_000 })),
+			),
 		);
 	});
 });
