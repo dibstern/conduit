@@ -13,6 +13,7 @@ import { Context, Data, Effect, Ref } from "effect";
 import { type OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { InstanceConfig } from "../shared-types.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
+import { InstanceLimitExceeded } from "./instance-manager-service.js";
 import { InstanceMgmtTag } from "./services.js";
 
 // ─── Errors ────────────────────────────────────────────────────────────────
@@ -20,13 +21,6 @@ import { InstanceMgmtTag } from "./services.js";
 /** Fatal error when crash limit is exceeded — the only error that stops startup. */
 export class CrashLimitExceeded extends Data.TaggedError("CrashLimitExceeded")<{
 	count: number;
-}> {}
-
-/** Error when instance limit is reached during rehydration. */
-export class InstanceLimitExceeded extends Data.TaggedError(
-	"InstanceLimitExceeded",
-)<{
-	message: string;
 }> {}
 
 // ─── CrashCounter service ──────────────────────────────────────────────────
