@@ -8,10 +8,15 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Ref,
 	Scope,
 	TestClock,
 } from "effect";
 import { expect, vi } from "vitest";
+import {
+	PortScannerLive,
+	PortScannerTag,
+} from "../../../src/lib/effect/port-scanner-layer.js";
 import {
 	StorageMonitorLive,
 	StorageMonitorTag,
@@ -262,6 +267,163 @@ describe("Leaf service Layers", () => {
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed("2.0.0")),
 					broadcast: vi.fn().mockReturnValue(Effect.succeed(undefined)),
 					checkInterval: Duration.millis(50),
+				});
+
+				const scope = yield* Scope.make();
+				yield* Layer.buildWithScope(layer, scope);
+				const exit = yield* Effect.exit(Scope.close(scope, Exit.void));
+				expect(Exit.isSuccess(exit)).toBe(true);
+			}),
+		);
+	});
+
+	describe("PortScanner", () => {
+		/** Helper: build the layer, advance clock, run the body, then close scope. */
+		const withPortScanner = (
+			config: {
+				probeFn: (port: number) => Effect.Effect<boolean>;
+				portRange: [number, number];
+				scanInterval: Duration.DurationInput;
+				removalThreshold: number;
+				onDiscovered: (port: number) => Effect.Effect<void>;
+				onLost: (port: number) => Effect.Effect<void>;
+				excludedPorts?: Set<number>;
+			},
+			body: (
+				svc: Context.Tag.Service<typeof PortScannerTag>,
+			) => Effect.Effect<void>,
+		) =>
+			Effect.gen(function* () {
+				const layer = PortScannerLive(config);
+				const scope = yield* Scope.make();
+				const ctx = yield* Layer.buildWithScope(layer, scope);
+				const svc = Context.get(ctx, PortScannerTag);
+
+				// Advance TestClock past zero so the forked fiber's initial scan runs
+				yield* TestClock.adjust(Duration.millis(1));
+
+				yield* body(svc);
+				yield* Scope.close(scope, Exit.void);
+			});
+
+		it.scoped("discovers alive ports and calls onDiscovered", () => {
+			const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
+			const onLost = vi.fn().mockReturnValue(Effect.succeed(undefined));
+			return withPortScanner(
+				{
+					probeFn: (port) => Effect.succeed(port === 3000),
+					portRange: [2999, 3001],
+					scanInterval: Duration.seconds(10),
+					removalThreshold: 3,
+					onDiscovered,
+					onLost,
+				},
+				(svc) =>
+					Effect.gen(function* () {
+						const known = yield* svc.getKnownPorts();
+						expect(known.has(3000)).toBe(true);
+						expect(known.size).toBe(1);
+						expect(onDiscovered).toHaveBeenCalledWith(3000);
+						expect(onLost).not.toHaveBeenCalled();
+					}),
+			);
+		});
+
+		it.scoped(
+			"hysteresis: port not removed until removalThreshold consecutive failures",
+			() => {
+				const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
+				const onLost = vi.fn().mockReturnValue(Effect.succeed(undefined));
+
+				// scanCount tracks which scan we are on so probeFn can vary behavior
+				const scanCountRef = Ref.unsafeMake(0);
+
+				// Scan 0: port 3000 alive (discovered)
+				// Scan 1: port 3000 dead (failure count = 1)
+				// Scan 2: port 3000 dead (failure count = 2, still below threshold of 3)
+				// Scan 3: port 3000 dead (failure count = 3, reaches threshold -> removed)
+				const probeFn = (port: number) =>
+					Effect.gen(function* () {
+						const count = yield* Ref.get(scanCountRef);
+						return port === 3000 && count === 0;
+					});
+
+				return Effect.gen(function* () {
+					const layer = PortScannerLive({
+						probeFn,
+						portRange: [3000, 3000],
+						scanInterval: Duration.seconds(10),
+						removalThreshold: 3,
+						onDiscovered,
+						onLost,
+					});
+
+					const scope = yield* Scope.make();
+					const ctx = yield* Layer.buildWithScope(layer, scope);
+					const svc = Context.get(ctx, PortScannerTag);
+
+					// Scan 0: advance clock to trigger initial scan. Port alive.
+					yield* TestClock.adjust(Duration.millis(1));
+					const afterScan0 = yield* svc.getKnownPorts();
+					expect(afterScan0.has(3000)).toBe(true);
+					expect(onDiscovered).toHaveBeenCalledWith(3000);
+
+					// Scan 1: port now dead. Advance scanCount and trigger next scan.
+					yield* Ref.set(scanCountRef, 1);
+					yield* TestClock.adjust(Duration.seconds(10));
+					const afterScan1 = yield* svc.getKnownPorts();
+					expect(afterScan1.has(3000)).toBe(true); // Still known (1 failure)
+					expect(onLost).not.toHaveBeenCalled();
+
+					// Scan 2: still dead. 2 failures, still below threshold of 3.
+					yield* TestClock.adjust(Duration.seconds(10));
+					const afterScan2 = yield* svc.getKnownPorts();
+					expect(afterScan2.has(3000)).toBe(true); // Still known (2 failures)
+					expect(onLost).not.toHaveBeenCalled();
+
+					// Scan 3: still dead. 3 failures = threshold reached -> removed.
+					yield* TestClock.adjust(Duration.seconds(10));
+					const afterScan3 = yield* svc.getKnownPorts();
+					expect(afterScan3.has(3000)).toBe(false); // Removed
+					expect(onLost).toHaveBeenCalledWith(3000);
+
+					yield* Scope.close(scope, Exit.void);
+				});
+			},
+		);
+
+		it.scoped("excludedPorts are not scanned", () => {
+			const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
+			return withPortScanner(
+				{
+					probeFn: () => Effect.succeed(true),
+					portRange: [3000, 3002],
+					scanInterval: Duration.seconds(10),
+					removalThreshold: 3,
+					onDiscovered,
+					onLost: vi.fn().mockReturnValue(Effect.succeed(undefined)),
+					excludedPorts: new Set([3001]),
+				},
+				(svc) =>
+					Effect.gen(function* () {
+						const known = yield* svc.getKnownPorts();
+						expect(known.has(3000)).toBe(true);
+						expect(known.has(3001)).toBe(false);
+						expect(known.has(3002)).toBe(true);
+						expect(known.size).toBe(2);
+					}),
+			);
+		});
+
+		it.scoped("scope close interrupts background fiber cleanly", () =>
+			Effect.gen(function* () {
+				const layer = PortScannerLive({
+					probeFn: () => Effect.succeed(true),
+					portRange: [3000, 3000],
+					scanInterval: Duration.millis(50),
+					removalThreshold: 3,
+					onDiscovered: () => Effect.succeed(undefined),
+					onLost: () => Effect.succeed(undefined),
 				});
 
 				const scope = yield* Scope.make();
