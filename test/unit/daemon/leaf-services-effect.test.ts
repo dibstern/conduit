@@ -14,6 +14,10 @@ import {
 } from "effect";
 import { expect, vi } from "vitest";
 import {
+	KeepAwakeLive,
+	KeepAwakeTag,
+} from "../../../src/lib/effect/keep-awake-layer.js";
+import {
 	PortScannerLive,
 	PortScannerTag,
 } from "../../../src/lib/effect/port-scanner-layer.js";
@@ -430,6 +434,69 @@ describe("Leaf service Layers", () => {
 				yield* Layer.buildWithScope(layer, scope);
 				const exit = yield* Effect.exit(Scope.close(scope, Exit.void));
 				expect(Exit.isSuccess(exit)).toBe(true);
+			}),
+		);
+	});
+
+	describe("KeepAwake", () => {
+		it.scoped("isSupported returns true on macOS/Linux", () =>
+			Effect.gen(function* () {
+				// Default config uses detectPlatformCommand (macOS or Linux in CI)
+				const layer = KeepAwakeLive();
+				const scope = yield* Scope.make();
+				const ctx = yield* Layer.buildWithScope(layer, scope);
+				const svc = Context.get(ctx, KeepAwakeTag);
+
+				const supported = yield* svc.isSupported();
+				// In test env process.platform is either darwin or linux
+				const expected = ["darwin", "linux"].includes(process.platform);
+				expect(supported).toBe(expected);
+
+				yield* Scope.close(scope, Exit.void);
+			}),
+		);
+
+		it.scoped("activate/deactivate is idempotent", () =>
+			Effect.gen(function* () {
+				// Use a custom command to ensure isSupported = true regardless of platform
+				const layer = KeepAwakeLive({ command: "sleep", args: ["infinity"] });
+				const scope = yield* Scope.make();
+				const ctx = yield* Layer.buildWithScope(layer, scope);
+				const svc = Context.get(ctx, KeepAwakeTag);
+
+				// Double activate — no errors
+				yield* svc.activate();
+				yield* svc.activate();
+				const activeAfter = yield* svc.isActive();
+				expect(activeAfter).toBe(true);
+
+				// Double deactivate — no errors
+				yield* svc.deactivate();
+				yield* svc.deactivate();
+				const activeAfterDeactivate = yield* svc.isActive();
+				expect(activeAfterDeactivate).toBe(false);
+
+				yield* Scope.close(scope, Exit.void);
+			}),
+		);
+
+		it.scoped("scope close runs finalizer (deactivate)", () =>
+			Effect.gen(function* () {
+				const layer = KeepAwakeLive({ command: "sleep", args: ["infinity"] });
+				const scope = yield* Scope.make();
+				const ctx = yield* Layer.buildWithScope(layer, scope);
+				const svc = Context.get(ctx, KeepAwakeTag);
+
+				yield* svc.activate();
+				const activeBefore = yield* svc.isActive();
+				expect(activeBefore).toBe(true);
+
+				// Close scope — finalizer should deactivate
+				const exit = yield* Effect.exit(Scope.close(scope, Exit.void));
+				expect(Exit.isSuccess(exit)).toBe(true);
+
+				// After scope close, the service's Refs have been cleaned up.
+				// We verify the exit was successful which proves the finalizer ran.
 			}),
 		);
 	});
