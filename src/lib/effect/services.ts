@@ -274,5 +274,8 @@ type _ExhaustiveCheck = {
 // Force the compiler to evaluate the mapped type (unused but checked).
 declare const _check: _ExhaustiveCheck;
 
+export { PersistencePathTag } from "./daemon-config-persistence.js";
+export { CrashCounterTag } from "./daemon-startup.js";
 // ─── DaemonState re-export ────────────────────────────────────────────────
 export { DaemonStateTag } from "./daemon-state.js";
+export { RelayCacheTag } from "./relay-cache.js";

@@ -3,7 +3,8 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
-import { Deferred, Effect, Layer } from "effect";
+import { NodeFileSystem } from "@effect/platform-node";
+import { Deferred, Effect, Layer, Ref } from "effect";
 import type { DaemonStatus } from "../daemon/daemon.js";
 import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
 import {
@@ -29,6 +30,13 @@ import { StorageMonitor } from "../daemon/storage-monitor.js";
 import type { VersionCheckOptions } from "../daemon/version-check.js";
 import { VersionChecker } from "../daemon/version-check.js";
 import { SessionOverrides } from "../session/session-overrides.js";
+import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
+import {
+	DaemonStateTag,
+	emptyDaemonState,
+	makeDaemonStateLive,
+} from "./daemon-state.js";
+import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import {
 	KeepAwakeTag,
 	PortScannerTag,
@@ -174,6 +182,36 @@ export const makeSessionOverridesLive = () =>
 		}),
 	);
 
+// ─── DaemonState & RelayCache Layers ──────────────────────────────────────
+
+/**
+ * DaemonState layer — loads config from disk, seeds Ref.
+ * Requires FileSystem.FileSystem in the environment (for testability).
+ * Provides PersistencePathTag internally.
+ */
+export const makeDaemonStateFromDisk = (configPath: string) =>
+	Layer.effect(
+		DaemonStateTag,
+		Effect.gen(function* () {
+			const initial = yield* loadConfig;
+			return yield* Ref.make({ ...emptyDaemonState(), ...initial });
+		}),
+	).pipe(Layer.provide(Layer.succeed(PersistencePathTag, configPath)));
+
+/**
+ * DaemonState layer with NodeFileSystem — convenience for production use.
+ * Loads config from disk using the real filesystem.
+ */
+export const makeDaemonStateFromDiskNode = (configPath: string) =>
+	makeDaemonStateFromDisk(configPath).pipe(Layer.provide(NodeFileSystem.layer));
+
+/**
+ * RelayCache layer — wraps makeRelayCacheLive with a factory function.
+ * Re-exported for convenience in makeDaemonLive composition.
+ */
+export const makeRelayCacheLayer = (factory: RelayFactory) =>
+	makeRelayCacheLive(factory);
+
 // ─── Server Lifecycle Layers ──────────────────────────────────────────────
 
 /**
@@ -275,6 +313,12 @@ export interface DaemonLiveOptions {
 		config: PortScannerConfig;
 		probeFn: (port: number) => Promise<boolean>;
 	};
+
+	// DaemonState + RelayCache (Tasks 1-4 integration)
+	/** Path to daemon.json config file. When set, loads config from disk. */
+	configPath?: string;
+	/** Factory for creating relay instances per slug. */
+	relayFactory?: RelayFactory;
 }
 
 /**
@@ -308,32 +352,43 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		),
 	);
 
-	// Background services — only include those that are configured
-	const backgroundLayers: Layer.Layer<any, never, never>[] = [];
-	backgroundLayers.push(makeKeepAwakeLive(options.keepAwake));
-	backgroundLayers.push(makeVersionCheckerLive(options.versionCheck));
-	backgroundLayers.push(makeStorageMonitorLive(options.storageMon));
-	if (options.portScanner) {
-		backgroundLayers.push(
-			makePortScannerLive(
-				options.portScanner.config,
-				options.portScanner.probeFn,
-			),
-		);
-	}
+	// Background services — always-present layers merged first, optional added via reduce
+	const baseBgLayer = Layer.mergeAll(
+		makeKeepAwakeLive(options.keepAwake),
+		makeVersionCheckerLive(options.versionCheck),
+		makeStorageMonitorLive(options.storageMon),
+	);
+	const backgroundLayer = options.portScanner
+		? Layer.merge(
+				baseBgLayer,
+				makePortScannerLive(
+					options.portScanner.config,
+					options.portScanner.probeFn,
+				),
+			)
+		: baseBgLayer;
 
-	// Compose: infrastructure → servers → background
+	// State layer — DaemonState from disk (with real FS) or empty defaults
+	const stateLayer = options.configPath
+		? makeDaemonStateFromDiskNode(options.configPath)
+		: makeDaemonStateLive();
+
+	// Compose: infrastructure → servers → background → state → relay cache
 	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
 	const infraLayer = Layer.mergeAll(signalLayer, errorLayer, pidLayer);
 
-	// Merge all background layers
-	const backgroundLayer =
-		backgroundLayers.length === 1
-			? backgroundLayers[0]!
-			: backgroundLayers.reduce((acc, layer) => Layer.merge(acc, layer));
-
-	return infraLayer.pipe(
+	let composed = infraLayer.pipe(
 		Layer.provideMerge(serversLayer),
 		Layer.provideMerge(backgroundLayer),
+		Layer.provideMerge(stateLayer),
 	);
+
+	// RelayCache layer — only include if a factory is provided
+	if (options.relayFactory) {
+		composed = composed.pipe(
+			Layer.provideMerge(makeRelayCacheLayer(options.relayFactory)),
+		);
+	}
+
+	return composed;
 };
