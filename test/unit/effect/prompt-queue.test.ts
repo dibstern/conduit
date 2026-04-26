@@ -1,24 +1,23 @@
 // test/unit/effect/prompt-queue.test.ts
 
+import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Queue } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
 
 describe("Effect Queue replaces PromptQueue", () => {
-	it("enqueue and dequeue in order", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("enqueue and dequeue in order", () =>
+		Effect.gen(function* () {
 			const queue = yield* Queue.unbounded<string>();
 			yield* Queue.offer(queue, "first");
 			yield* Queue.offer(queue, "second");
 			const a = yield* Queue.take(queue);
 			const b = yield* Queue.take(queue);
-			return [a, b];
-		});
-		const result = await Effect.runPromise(program);
-		expect(result).toEqual(["first", "second"]);
-	});
+			expect([a, b]).toEqual(["first", "second"]);
+		}),
+	);
 
-	it("take blocks until item available", async () => {
-		const program = Effect.gen(function* () {
+	it.live("take blocks until item available", () =>
+		Effect.gen(function* () {
 			const queue = yield* Queue.unbounded<string>();
 			yield* Effect.fork(
 				Effect.flatMap(Effect.sleep("50 millis"), () =>
@@ -26,31 +25,26 @@ describe("Effect Queue replaces PromptQueue", () => {
 				),
 			);
 			const val = yield* Queue.take(queue);
-			return val;
-		});
-		const result = await Effect.runPromise(program);
-		expect(result).toBe("delayed");
-	});
+			expect(val).toBe("delayed");
+		}),
+	);
 
-	it("shutdown signals end to consumers", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("shutdown signals end to consumers", () =>
+		Effect.gen(function* () {
 			const queue = yield* Queue.unbounded<string>();
 			yield* Queue.offer(queue, "item");
 			yield* Queue.shutdown(queue);
-			return yield* Queue.isShutdown(queue);
-		});
-		const result = await Effect.runPromise(program);
-		expect(result).toBe(true);
-	});
+			const result = yield* Queue.isShutdown(queue);
+			expect(result).toBe(true);
+		}),
+	);
 
-	it("take on shutdown queue returns failure", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("take on shutdown queue returns failure", () =>
+		Effect.gen(function* () {
 			const queue = yield* Queue.unbounded<string>();
 			yield* Queue.shutdown(queue);
 			const exit = yield* Effect.exit(Queue.take(queue));
-			return Exit.isFailure(exit);
-		});
-		const result = await Effect.runPromise(program);
-		expect(result).toBe(true);
-	});
+			expect(Exit.isFailure(exit)).toBe(true);
+		}),
+	);
 });

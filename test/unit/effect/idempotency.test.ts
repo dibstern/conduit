@@ -1,10 +1,12 @@
 // test/unit/effect/idempotency.test.ts
+
+import { describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
 
 describe("Idempotency tracking with Ref<Set>", () => {
-	it("rejects duplicate command IDs", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("rejects duplicate command IDs", () =>
+		Effect.gen(function* () {
 			const processed = yield* Ref.make(new Set<string>());
 			const maxSize = 5;
 
@@ -23,17 +25,14 @@ describe("Idempotency tracking with Ref<Set>", () => {
 			const r1 = yield* tryProcess("cmd-1");
 			const r2 = yield* tryProcess("cmd-1"); // duplicate
 			const r3 = yield* tryProcess("cmd-2");
-			return { r1, r2, r3 };
-		});
+			expect(r1).toBe(true);
+			expect(r2).toBe(false);
+			expect(r3).toBe(true);
+		}),
+	);
 
-		const result = await Effect.runPromise(program);
-		expect(result.r1).toBe(true);
-		expect(result.r2).toBe(false);
-		expect(result.r3).toBe(true);
-	});
-
-	it("evicts oldest entries when exceeding max size (FIFO)", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("evicts oldest entries when exceeding max size (FIFO)", () =>
+		Effect.gen(function* () {
 			const processed = yield* Ref.make(new Set<string>());
 			const maxSize = 3;
 
@@ -66,18 +65,15 @@ describe("Idempotency tracking with Ref<Set>", () => {
 
 			// Snapshot to verify set contents
 			const finalSet = yield* Ref.get(processed);
-			return { rA, rC, rD, finalSet };
-		});
+			expect(rA).toBe(true); // evicted, re-accepted
+			expect(rC).toBe(false); // still tracked
+			expect(rD).toBe(false); // still tracked
+			expect(finalSet.size).toBe(3); // never exceeds maxSize
+		}),
+	);
 
-		const result = await Effect.runPromise(program);
-		expect(result.rA).toBe(true); // evicted, re-accepted
-		expect(result.rC).toBe(false); // still tracked
-		expect(result.rD).toBe(false); // still tracked
-		expect(result.finalSet.size).toBe(3); // never exceeds maxSize
-	});
-
-	it("accepts commands without IDs (no tracking)", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("accepts commands without IDs (no tracking)", () =>
+		Effect.gen(function* () {
 			const processed = yield* Ref.make(new Set<string>());
 
 			const tryProcess = (id: string | undefined) => {
@@ -92,11 +88,8 @@ describe("Idempotency tracking with Ref<Set>", () => {
 
 			const r1 = yield* tryProcess(undefined);
 			const r2 = yield* tryProcess(undefined);
-			return { r1, r2 };
-		});
-
-		const result = await Effect.runPromise(program);
-		expect(result.r1).toBe(true);
-		expect(result.r2).toBe(true);
-	});
+			expect(r1).toBe(true);
+			expect(r2).toBe(true);
+		}),
+	);
 });

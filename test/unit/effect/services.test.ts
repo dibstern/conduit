@@ -1,5 +1,6 @@
+import { describe, it } from "@effect/vitest";
 import { Context, Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
 
 import {
 	ClaudeEventPersistTag,
@@ -174,27 +175,21 @@ describe("Service Tags", () => {
 
 	// ── Effect integration ───────────────────────────────────────────────────
 
-	it("Tag resolves from a provided Context", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("Tag resolves from a provided Context", () =>
+		Effect.gen(function* () {
 			const clientId = yield* ClientIdTag;
-			return clientId;
-		});
+			expect(clientId).toBe("test-client-42");
+		}).pipe(Effect.provide(Context.make(ClientIdTag, "test-client-42"))),
+	);
 
-		const ctx = Context.make(ClientIdTag, "test-client-42");
-		const result = await Effect.runPromise(Effect.provide(program, ctx));
-		expect(result).toBe("test-client-42");
-	});
-
-	it("Tag causes missing-service error without Context", async () => {
-		const program = Effect.gen(function* () {
-			const clientId = yield* ClientIdTag;
-			return clientId;
-		});
-
-		// Running without providing the required context should fail.
-		// Cast to bypass the compile-time requirement check — we want the runtime error.
-		await expect(
-			Effect.runPromise(program as Effect.Effect<string>),
-		).rejects.toThrow();
-	});
+	it.effect("Tag causes missing-service error without Context", () =>
+		Effect.gen(function* () {
+			const exit = yield* Effect.exit(
+				Effect.gen(function* () {
+					yield* ClientIdTag;
+				}) as Effect.Effect<void>,
+			);
+			expect(exit._tag).toBe("Failure");
+		}),
+	);
 });

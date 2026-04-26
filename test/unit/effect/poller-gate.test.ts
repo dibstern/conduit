@@ -1,9 +1,10 @@
+import { describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
 
 describe("Poller gating with Ref-based state machine", () => {
-	it("tracks SSE active/silent state via Ref<boolean>", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("tracks SSE active/silent state via Ref<boolean>", () =>
+		Effect.gen(function* () {
 			const sseActive = yield* Ref.make(true);
 
 			// Initially SSE is active
@@ -20,19 +21,17 @@ describe("Poller gating with Ref-based state machine", () => {
 			const afterActive = yield* Ref.get(sseActive);
 			expect(afterActive).toBe(true);
 
-			return { initial, afterSilent, afterActive };
-		});
+			const result = { initial, afterSilent, afterActive };
+			expect(result).toEqual({
+				initial: true,
+				afterSilent: false,
+				afterActive: true,
+			});
+		}),
+	);
 
-		const result = await Effect.runPromise(program);
-		expect(result).toEqual({
-			initial: true,
-			afterSilent: false,
-			afterActive: true,
-		});
-	});
-
-	it("overlap guard prevents concurrent polls via Ref<boolean>", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("overlap guard prevents concurrent polls via Ref<boolean>", () =>
+		Effect.gen(function* () {
 			const polling = yield* Ref.make(false);
 			const pollCount = yield* Ref.make(0);
 
@@ -54,16 +53,13 @@ describe("Poller gating with Ref-based state machine", () => {
 			const r1 = yield* tryPoll;
 			const count = yield* Ref.get(pollCount);
 
-			return { acquired: r1, count };
-		});
+			expect(r1).toBe(true);
+			expect(count).toBe(1);
+		}),
+	);
 
-		const result = await Effect.runPromise(program);
-		expect(result.acquired).toBe(true);
-		expect(result.count).toBe(1);
-	});
-
-	it("timestamp tracking via Ref<number>", async () => {
-		const program = Effect.gen(function* () {
+	it.effect("timestamp tracking via Ref<number>", () =>
+		Effect.gen(function* () {
 			const lastSSEEventAt = yield* Ref.make(0);
 			const lastContentAt = yield* Ref.make(0);
 
@@ -77,10 +73,7 @@ describe("Poller gating with Ref-based state machine", () => {
 			const contentTs = yield* Ref.get(lastContentAt);
 
 			// Content arrived after SSE — staleness = 50ms
-			return { staleness: contentTs - sseTs };
-		});
-
-		const result = await Effect.runPromise(program);
-		expect(result.staleness).toBe(50);
-	});
+			expect(contentTs - sseTs).toBe(50);
+		}),
+	);
 });

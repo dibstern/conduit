@@ -9,8 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "@effect/vitest";
 import { Effect, Either, Schema } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { expect } from "vitest";
 import {
 	DaemonConfigSchema,
 	DaemonConfigTag,
@@ -172,28 +173,24 @@ describe("ServerConfigLive", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("creates defaults when daemon.json is missing", async () => {
-		const program = Effect.gen(function* () {
-			return yield* DaemonConfigTag;
-		});
+	it.effect("creates defaults when daemon.json is missing", () =>
+		Effect.gen(function* () {
+			const config = yield* DaemonConfigTag;
 
-		const config = await Effect.runPromise(
-			program.pipe(Effect.provide(ServerConfigLive(tempDir))),
-		);
+			expect(config.pid).toBe(process.pid);
+			expect(config.port).toBe(2633);
+			expect(config.pinHash).toBeNull();
+			expect(config.projects).toEqual([]);
 
-		expect(config.pid).toBe(process.pid);
-		expect(config.port).toBe(2633);
-		expect(config.pinHash).toBeNull();
-		expect(config.projects).toEqual([]);
+			// Should also have written the file
+			const written = JSON.parse(
+				readFileSync(join(tempDir, "daemon.json"), "utf-8"),
+			);
+			expect(written.port).toBe(2633);
+		}).pipe(Effect.provide(ServerConfigLive(tempDir))),
+	);
 
-		// Should also have written the file
-		const written = JSON.parse(
-			readFileSync(join(tempDir, "daemon.json"), "utf-8"),
-		);
-		expect(written.port).toBe(2633);
-	});
-
-	it("reads and validates existing daemon.json", async () => {
+	it.effect("reads and validates existing daemon.json", () => {
 		mkdirSync(tempDir, { recursive: true });
 		const saved = {
 			pid: 99,
@@ -208,22 +205,18 @@ describe("ServerConfigLive", () => {
 		};
 		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(saved), "utf-8");
 
-		const program = Effect.gen(function* () {
-			return yield* DaemonConfigTag;
-		});
+		return Effect.gen(function* () {
+			const config = yield* DaemonConfigTag;
 
-		const config = await Effect.runPromise(
-			program.pipe(Effect.provide(ServerConfigLive(tempDir))),
-		);
-
-		expect(config.pid).toBe(99);
-		expect(config.port).toBe(8080);
-		expect(config.tls).toBe(true);
-		expect(config.projects).toHaveLength(1);
-		expect(config.instances).toHaveLength(1);
+			expect(config.pid).toBe(99);
+			expect(config.port).toBe(8080);
+			expect(config.tls).toBe(true);
+			expect(config.projects).toHaveLength(1);
+			expect(config.instances).toHaveLength(1);
+		}).pipe(Effect.provide(ServerConfigLive(tempDir)));
 	});
 
-	it("fails on invalid daemon.json", async () => {
+	it.effect("fails on invalid daemon.json", () => {
 		mkdirSync(tempDir, { recursive: true });
 		writeFileSync(
 			join(tempDir, "daemon.json"),
@@ -231,16 +224,15 @@ describe("ServerConfigLive", () => {
 			"utf-8",
 		);
 
-		const program = Effect.gen(function* () {
-			return yield* DaemonConfigTag;
-		});
-
-		await expect(
-			Effect.runPromise(
-				program.pipe(
+		return Effect.gen(function* () {
+			const exit = yield* Effect.exit(
+				Effect.gen(function* () {
+					yield* DaemonConfigTag;
+				}).pipe(
 					Effect.provide(ServerConfigLive(tempDir)),
-				) as Effect.Effect<unknown>,
-			),
-		).rejects.toThrow();
+				) as Effect.Effect<void>,
+			);
+			expect(exit._tag).toBe("Failure");
+		});
 	});
 });

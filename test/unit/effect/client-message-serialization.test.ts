@@ -1,5 +1,6 @@
+import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
 import {
 	activeClients,
 	getClientSemaphore,
@@ -8,53 +9,53 @@ import {
 } from "../../../src/lib/server/client-semaphore.js";
 
 describe("Per-client semaphore serialization", () => {
-	it("serializes concurrent handlers for same client", async () => {
-		const order: string[] = [];
-		const semaphore = Effect.unsafeMakeSemaphore(1);
+	it.live("serializes concurrent handlers for same client", () =>
+		Effect.gen(function* () {
+			const order: string[] = [];
+			const semaphore = Effect.unsafeMakeSemaphore(1);
 
-		const handler1 = semaphore.withPermits(1)(
-			Effect.gen(function* () {
-				order.push("h1-start");
-				yield* Effect.sleep("50 millis");
-				order.push("h1-end");
-			}),
-		);
-		const handler2 = semaphore.withPermits(1)(
-			Effect.sync(() => {
-				order.push("h2-start");
-				order.push("h2-end");
-			}),
-		);
+			const handler1 = semaphore.withPermits(1)(
+				Effect.gen(function* () {
+					order.push("h1-start");
+					yield* Effect.sleep("50 millis");
+					order.push("h1-end");
+				}),
+			);
+			const handler2 = semaphore.withPermits(1)(
+				Effect.sync(() => {
+					order.push("h2-start");
+					order.push("h2-end");
+				}),
+			);
 
-		await Effect.runPromise(
-			Effect.all([handler1, handler2], { concurrency: 2 }),
-		);
-		expect(order).toEqual(["h1-start", "h1-end", "h2-start", "h2-end"]);
-	});
+			yield* Effect.all([handler1, handler2], { concurrency: 2 });
+			expect(order).toEqual(["h1-start", "h1-end", "h2-start", "h2-end"]);
+		}),
+	);
 
-	it("allows parallel execution for different clients", async () => {
-		const order: string[] = [];
-		const sem1 = Effect.unsafeMakeSemaphore(1);
-		const sem2 = Effect.unsafeMakeSemaphore(1);
+	it.live("allows parallel execution for different clients", () =>
+		Effect.gen(function* () {
+			const order: string[] = [];
+			const sem1 = Effect.unsafeMakeSemaphore(1);
+			const sem2 = Effect.unsafeMakeSemaphore(1);
 
-		const handler1 = sem1.withPermits(1)(
-			Effect.gen(function* () {
-				yield* Effect.sleep("50 millis");
-				order.push("c1");
-			}),
-		);
-		const handler2 = sem2.withPermits(1)(
-			Effect.sync(() => {
-				order.push("c2");
-			}),
-		);
+			const handler1 = sem1.withPermits(1)(
+				Effect.gen(function* () {
+					yield* Effect.sleep("50 millis");
+					order.push("c1");
+				}),
+			);
+			const handler2 = sem2.withPermits(1)(
+				Effect.sync(() => {
+					order.push("c2");
+				}),
+			);
 
-		await Effect.runPromise(
-			Effect.all([handler1, handler2], { concurrency: 2 }),
-		);
-		// c2 should finish before c1 because they are on separate semaphores
-		expect(order).toEqual(["c2", "c1"]);
-	});
+			yield* Effect.all([handler1, handler2], { concurrency: 2 });
+			// c2 should finish before c1 because they are on separate semaphores
+			expect(order).toEqual(["c2", "c1"]);
+		}),
+	);
 
 	it("getClientSemaphore returns the same semaphore for same client", () => {
 		const sem1 = getClientSemaphore("test-same-1");

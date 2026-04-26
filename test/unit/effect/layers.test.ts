@@ -1,5 +1,6 @@
+import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
 import type { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
 import {
@@ -143,238 +144,167 @@ function makeBaseDeps(): HandlerLayerDeps {
 // ─── Individual Layer tests ──────────────────────────────────────────────────
 
 describe("Individual Layer factories", () => {
-	it("makeOpenCodeAPILive provides OpenCodeAPITag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* OpenCodeAPITag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeOpenCodeAPILive(mockApi))),
-		);
-		expect(result).toBe(mockApi);
-	});
+	it.effect("makeOpenCodeAPILive provides OpenCodeAPITag", () =>
+		Effect.gen(function* () {
+			const result = yield* OpenCodeAPITag;
+			expect(result).toBe(mockApi);
+		}).pipe(Effect.provide(makeOpenCodeAPILive(mockApi))),
+	);
 
-	it("makeSessionManagerLive provides SessionManagerTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* SessionManagerTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeSessionManagerLive(mockSessionMgr))),
-		);
-		expect(result).toBe(mockSessionMgr);
-	});
+	it.effect("makeSessionManagerLive provides SessionManagerTag", () =>
+		Effect.gen(function* () {
+			const result = yield* SessionManagerTag;
+			expect(result).toBe(mockSessionMgr);
+		}).pipe(Effect.provide(makeSessionManagerLive(mockSessionMgr))),
+	);
 
-	it("makeWebSocketHandlerLive provides WebSocketHandlerTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* WebSocketHandlerTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeWebSocketHandlerLive(mockWsHandler))),
-		);
-		expect(result).toBe(mockWsHandler);
-	});
+	it.effect("makeWebSocketHandlerLive provides WebSocketHandlerTag", () =>
+		Effect.gen(function* () {
+			const result = yield* WebSocketHandlerTag;
+			expect(result).toBe(mockWsHandler);
+		}).pipe(Effect.provide(makeWebSocketHandlerLive(mockWsHandler))),
+	);
 
-	it("makePermissionBridgeLive provides PermissionBridgeTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* PermissionBridgeTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(
-				Effect.provide(makePermissionBridgeLive(mockPermissionBridge)),
-			),
-		);
-		expect(result).toBe(mockPermissionBridge);
-	});
+	it.effect("makePermissionBridgeLive provides PermissionBridgeTag", () =>
+		Effect.gen(function* () {
+			const result = yield* PermissionBridgeTag;
+			expect(result).toBe(mockPermissionBridge);
+		}).pipe(Effect.provide(makePermissionBridgeLive(mockPermissionBridge))),
+	);
 
-	it("makeQuestionBridgeLive provides QuestionBridgeTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* QuestionBridgeTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeQuestionBridgeLive(mockQuestionBridge))),
-		);
-		expect(result).toBe(mockQuestionBridge);
-	});
+	it.effect("makeQuestionBridgeLive provides QuestionBridgeTag", () =>
+		Effect.gen(function* () {
+			const result = yield* QuestionBridgeTag;
+			expect(result).toBe(mockQuestionBridge);
+		}).pipe(Effect.provide(makeQuestionBridgeLive(mockQuestionBridge))),
+	);
 
-	it("makeSessionOverridesLive provides SessionOverridesTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* SessionOverridesTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeSessionOverridesLive(mockOverrides))),
-		);
-		expect(result).toBe(mockOverrides);
-	});
+	it.effect("makeSessionOverridesLive provides SessionOverridesTag", () =>
+		Effect.gen(function* () {
+			const result = yield* SessionOverridesTag;
+			expect(result).toBe(mockOverrides);
+		}).pipe(Effect.provide(makeSessionOverridesLive(mockOverrides))),
+	);
 
-	it("makePtyManagerLive provides PtyManagerTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* PtyManagerTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makePtyManagerLive(mockPtyManager))),
-		);
-		expect(result).toBe(mockPtyManager);
-	});
+	it.effect("makePtyManagerLive provides PtyManagerTag", () =>
+		Effect.gen(function* () {
+			const result = yield* PtyManagerTag;
+			expect(result).toBe(mockPtyManager);
+		}).pipe(Effect.provide(makePtyManagerLive(mockPtyManager))),
+	);
 
-	it("makeConfigLive provides ConfigTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ConfigTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeConfigLive(mockConfig))),
-		);
-		expect(result).toBe(mockConfig);
-	});
+	it.effect("makeConfigLive provides ConfigTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ConfigTag;
+			expect(result).toBe(mockConfig);
+		}).pipe(Effect.provide(makeConfigLive(mockConfig))),
+	);
 
-	it("makeLoggerLive provides LoggerTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* LoggerTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeLoggerLive(mockLogger))),
-		);
-		expect(result).toBe(mockLogger);
-	});
+	it.effect("makeLoggerLive provides LoggerTag", () =>
+		Effect.gen(function* () {
+			const result = yield* LoggerTag;
+			expect(result).toBe(mockLogger);
+		}).pipe(Effect.provide(makeLoggerLive(mockLogger))),
+	);
 
-	it("makeStatusPollerLive provides StatusPollerTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* StatusPollerTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeStatusPollerLive(mockStatusPoller))),
-		);
-		expect(result).toBe(mockStatusPoller);
-	});
+	it.effect("makeStatusPollerLive provides StatusPollerTag", () =>
+		Effect.gen(function* () {
+			const result = yield* StatusPollerTag;
+			expect(result).toBe(mockStatusPoller);
+		}).pipe(Effect.provide(makeStatusPollerLive(mockStatusPoller))),
+	);
 
-	it("makeSessionRegistryLive provides SessionRegistryTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* SessionRegistryTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeSessionRegistryLive(mockRegistry))),
-		);
-		expect(result).toBe(mockRegistry);
-	});
+	it.effect("makeSessionRegistryLive provides SessionRegistryTag", () =>
+		Effect.gen(function* () {
+			const result = yield* SessionRegistryTag;
+			expect(result).toBe(mockRegistry);
+		}).pipe(Effect.provide(makeSessionRegistryLive(mockRegistry))),
+	);
 
-	it("makePollerManagerLive provides PollerManagerTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* PollerManagerTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makePollerManagerLive(mockPollerManager))),
-		);
-		expect(result).toBe(mockPollerManager);
-	});
+	it.effect("makePollerManagerLive provides PollerManagerTag", () =>
+		Effect.gen(function* () {
+			const result = yield* PollerManagerTag;
+			expect(result).toBe(mockPollerManager);
+		}).pipe(Effect.provide(makePollerManagerLive(mockPollerManager))),
+	);
 
-	it("makeConnectPtyUpstreamLive provides ConnectPtyUpstreamTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ConnectPtyUpstreamTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(
-				Effect.provide(makeConnectPtyUpstreamLive(mockConnectPtyUpstream)),
-			),
-		);
-		expect(result).toBe(mockConnectPtyUpstream);
-	});
+	it.effect("makeConnectPtyUpstreamLive provides ConnectPtyUpstreamTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ConnectPtyUpstreamTag;
+			expect(result).toBe(mockConnectPtyUpstream);
+		}).pipe(Effect.provide(makeConnectPtyUpstreamLive(mockConnectPtyUpstream))),
+	);
 
-	it("makeForkMetaLive provides ForkMetaTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ForkMetaTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeForkMetaLive(mockForkMeta))),
-		);
-		expect(result).toBe(mockForkMeta);
-	});
+	it.effect("makeForkMetaLive provides ForkMetaTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ForkMetaTag;
+			expect(result).toBe(mockForkMeta);
+		}).pipe(Effect.provide(makeForkMetaLive(mockForkMeta))),
+	);
 
-	it("makeOrchestrationEngineLive provides OrchestrationEngineTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* OrchestrationEngineTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(
-				Effect.provide(makeOrchestrationEngineLive(mockOrchestrationEngine)),
-			),
-		);
-		expect(result).toBe(mockOrchestrationEngine);
-	});
+	it.effect("makeOrchestrationEngineLive provides OrchestrationEngineTag", () =>
+		Effect.gen(function* () {
+			const result = yield* OrchestrationEngineTag;
+			expect(result).toBe(mockOrchestrationEngine);
+		}).pipe(
+			Effect.provide(makeOrchestrationEngineLive(mockOrchestrationEngine)),
+		),
+	);
 
 	// ── Persistence extension Layers ─────────────────────────────────────────
 
-	it("makeReadQueryLive provides ReadQueryTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ReadQueryTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeReadQueryLive(mockReadQuery))),
-		);
-		expect(result).toBe(mockReadQuery);
-	});
+	it.effect("makeReadQueryLive provides ReadQueryTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ReadQueryTag;
+			expect(result).toBe(mockReadQuery);
+		}).pipe(Effect.provide(makeReadQueryLive(mockReadQuery))),
+	);
 
-	it("makeClaudeEventPersistLive provides ClaudeEventPersistTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ClaudeEventPersistTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(
-				Effect.provide(makeClaudeEventPersistLive(mockEventPersist)),
-			),
-		);
-		expect(result).toBe(mockEventPersist);
-	});
+	it.effect("makeClaudeEventPersistLive provides ClaudeEventPersistTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ClaudeEventPersistTag;
+			expect(result).toBe(mockEventPersist);
+		}).pipe(Effect.provide(makeClaudeEventPersistLive(mockEventPersist))),
+	);
 
-	it("makeProviderStateServiceLive provides ProviderStateServiceTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ProviderStateServiceTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(
-				Effect.provide(makeProviderStateServiceLive(mockProviderState)),
-			),
-		);
-		expect(result).toBe(mockProviderState);
-	});
+	it.effect(
+		"makeProviderStateServiceLive provides ProviderStateServiceTag",
+		() =>
+			Effect.gen(function* () {
+				const result = yield* ProviderStateServiceTag;
+				expect(result).toBe(mockProviderState);
+			}).pipe(Effect.provide(makeProviderStateServiceLive(mockProviderState))),
+	);
 
 	// ── Daemon-only Layers ───────────────────────────────────────────────────
 
-	it("makeInstanceMgmtLive provides InstanceMgmtTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* InstanceMgmtTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeInstanceMgmtLive(mockInstanceMgmt))),
-		);
-		expect(result).toBe(mockInstanceMgmt);
-	});
+	it.effect("makeInstanceMgmtLive provides InstanceMgmtTag", () =>
+		Effect.gen(function* () {
+			const result = yield* InstanceMgmtTag;
+			expect(result).toBe(mockInstanceMgmt);
+		}).pipe(Effect.provide(makeInstanceMgmtLive(mockInstanceMgmt))),
+	);
 
-	it("makeProjectMgmtLive provides ProjectMgmtTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ProjectMgmtTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeProjectMgmtLive(mockProjectMgmt))),
-		);
-		expect(result).toBe(mockProjectMgmt);
-	});
+	it.effect("makeProjectMgmtLive provides ProjectMgmtTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ProjectMgmtTag;
+			expect(result).toBe(mockProjectMgmt);
+		}).pipe(Effect.provide(makeProjectMgmtLive(mockProjectMgmt))),
+	);
 
-	it("makeScanDepsLive provides ScanDepsTag", async () => {
-		const program = Effect.gen(function* () {
-			return yield* ScanDepsTag;
-		});
-		const result = await Effect.runPromise(
-			program.pipe(Effect.provide(makeScanDepsLive(mockScanDeps))),
-		);
-		expect(result).toBe(mockScanDeps);
-	});
+	it.effect("makeScanDepsLive provides ScanDepsTag", () =>
+		Effect.gen(function* () {
+			const result = yield* ScanDepsTag;
+			expect(result).toBe(mockScanDeps);
+		}).pipe(Effect.provide(makeScanDepsLive(mockScanDeps))),
+	);
 });
 
 // ─── makeHandlerLayer composition tests ──────────────────────────────────────
 
 describe("makeHandlerLayer", () => {
-	it("provides all 15 core Tags", async () => {
-		const layer = makeHandlerLayer(makeBaseDeps());
-
-		const program = Effect.gen(function* () {
+	it.effect("provides all 15 core Tags", () =>
+		Effect.gen(function* () {
 			const api = yield* OpenCodeAPITag;
 			const sm = yield* SessionManagerTag;
 			const ws = yield* WebSocketHandlerTag;
@@ -390,84 +320,88 @@ describe("makeHandlerLayer", () => {
 			const cpu = yield* ConnectPtyUpstreamTag;
 			const fm = yield* ForkMetaTag;
 			const oe = yield* OrchestrationEngineTag;
-			return [api, sm, ws, pb, qb, so, pm, cfg, log, sp, reg, plm, cpu, fm, oe];
-		});
+			const result = [
+				api,
+				sm,
+				ws,
+				pb,
+				qb,
+				so,
+				pm,
+				cfg,
+				log,
+				sp,
+				reg,
+				plm,
+				cpu,
+				fm,
+				oe,
+			];
+			expect(result).toHaveLength(15);
+			expect(result.every((v) => v !== undefined)).toBe(true);
+		}).pipe(Effect.provide(makeHandlerLayer(makeBaseDeps()))),
+	);
 
-		const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
-		expect(result).toHaveLength(15);
-		expect(result.every((v) => v !== undefined)).toBe(true);
-	});
-
-	it("provides the exact instances that were passed in", async () => {
+	it.effect("provides the exact instances that were passed in", () => {
 		const deps = makeBaseDeps();
-		const layer = makeHandlerLayer(deps);
-
-		const program = Effect.gen(function* () {
+		return Effect.gen(function* () {
 			const api = yield* OpenCodeAPITag;
 			const ws = yield* WebSocketHandlerTag;
-			return { api, ws };
-		});
-
-		const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
-		expect(result.api).toBe(deps.client);
-		expect(result.ws).toBe(deps.wsHandler);
+			expect(api).toBe(deps.client);
+			expect(ws).toBe(deps.wsHandler);
+		}).pipe(Effect.provide(makeHandlerLayer(deps)));
 	});
 
-	it("includes optional persistence Tags when provided", async () => {
-		const layer = makeHandlerLayer({
-			...makeBaseDeps(),
-			readQuery: mockReadQuery,
-			claudeEventPersist: mockEventPersist,
-			providerStateService: mockProviderState,
-		});
-
-		const program = Effect.gen(function* () {
+	it.effect("includes optional persistence Tags when provided", () =>
+		Effect.gen(function* () {
 			const rq = yield* ReadQueryTag;
 			const cep = yield* ClaudeEventPersistTag;
 			const ps = yield* ProviderStateServiceTag;
-			return { rq, cep, ps };
-		});
+			expect(rq).toBe(mockReadQuery);
+			expect(cep).toBe(mockEventPersist);
+			expect(ps).toBe(mockProviderState);
+		}).pipe(
+			Effect.provide(
+				makeHandlerLayer({
+					...makeBaseDeps(),
+					readQuery: mockReadQuery,
+					claudeEventPersist: mockEventPersist,
+					providerStateService: mockProviderState,
+				}),
+			),
+		),
+	);
 
-		const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
-		expect(result.rq).toBe(mockReadQuery);
-		expect(result.cep).toBe(mockEventPersist);
-		expect(result.ps).toBe(mockProviderState);
-	});
-
-	it("includes optional daemon Tags when provided", async () => {
-		const layer = makeHandlerLayer({
-			...makeBaseDeps(),
-			instanceMgmt: mockInstanceMgmt,
-			projectMgmt: mockProjectMgmt,
-			scanDeps: mockScanDeps,
-		});
-
-		const program = Effect.gen(function* () {
+	it.effect("includes optional daemon Tags when provided", () =>
+		Effect.gen(function* () {
 			const im = yield* InstanceMgmtTag;
 			const pm = yield* ProjectMgmtTag;
 			const sd = yield* ScanDepsTag;
-			return { im, pm, sd };
-		});
-
-		const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
-		expect(result.im).toBe(mockInstanceMgmt);
-		expect(result.pm).toBe(mockProjectMgmt);
-		expect(result.sd).toBe(mockScanDeps);
-	});
-
-	it("omits optional Tags when not provided", async () => {
-		const layer = makeHandlerLayer(makeBaseDeps());
-
-		// Accessing an optional Tag that was not provided should fail
-		const program = Effect.gen(function* () {
-			const rq = yield* ReadQueryTag;
-			return rq;
-		});
-
-		await expect(
-			Effect.runPromise(
-				program.pipe(Effect.provide(layer)) as Effect.Effect<unknown>,
+			expect(im).toBe(mockInstanceMgmt);
+			expect(pm).toBe(mockProjectMgmt);
+			expect(sd).toBe(mockScanDeps);
+		}).pipe(
+			Effect.provide(
+				makeHandlerLayer({
+					...makeBaseDeps(),
+					instanceMgmt: mockInstanceMgmt,
+					projectMgmt: mockProjectMgmt,
+					scanDeps: mockScanDeps,
+				}),
 			),
-		).rejects.toThrow();
-	});
+		),
+	);
+
+	it.effect("omits optional Tags when not provided", () =>
+		Effect.gen(function* () {
+			const exit = yield* Effect.exit(
+				Effect.gen(function* () {
+					yield* ReadQueryTag;
+				}).pipe(
+					Effect.provide(makeHandlerLayer(makeBaseDeps())),
+				) as Effect.Effect<void>,
+			);
+			expect(exit._tag).toBe("Failure");
+		}),
+	);
 });

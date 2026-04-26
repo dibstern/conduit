@@ -4,8 +4,9 @@
 // Layer. Each test provides minimal mock services via Layer.succeed, runs
 // the Effect to completion, and asserts on captured calls.
 
+import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { expect, vi } from "vitest";
 import type { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
 import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
@@ -145,36 +146,40 @@ function mockOverrides(
 // ─── Agent handler tests ───────────────────────────────────────────────────
 
 describe("handleGetAgentsEffect", () => {
-	it("fetches agents via OpenCodeAPI and sends filtered list to client", async () => {
-		const ws = mockWsHandler();
-		const mockAgents = [
-			{ name: "build", id: "build", mode: "primary" as const },
-			{ name: "title", id: "title", mode: "subagent" as const, hidden: true },
-			{ name: "plan", id: "plan", mode: "all" as const },
-		];
-		const client = {
-			app: { agents: vi.fn(async () => mockAgents) },
-		} as unknown as OpenCodeAPI;
+	it.effect(
+		"fetches agents via OpenCodeAPI and sends filtered list to client",
+		() => {
+			const ws = mockWsHandler();
+			const mockAgents = [
+				{ name: "build", id: "build", mode: "primary" as const },
+				{ name: "title", id: "title", mode: "subagent" as const, hidden: true },
+				{ name: "plan", id: "plan", mode: "all" as const },
+			];
+			const client = {
+				app: { agents: vi.fn(async () => mockAgents) },
+			} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+			);
 
-		await Effect.runPromise(
-			handleGetAgentsEffect("client-1", {}).pipe(Effect.provide(layer)),
-		);
-
-		expect(client.app.agents).toHaveBeenCalledOnce();
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "agent_list",
-			agents: filterAgents(mockAgents),
-		});
-	});
+			return handleGetAgentsEffect("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.app.agents).toHaveBeenCalledOnce();
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "agent_list",
+						agents: filterAgents(mockAgents),
+					});
+				}),
+			);
+		},
+	);
 });
 
 describe("handleSwitchAgentEffect", () => {
-	it("sets agent override when client has a session", async () => {
+	it.effect("sets agent override when client has a session", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
@@ -187,17 +192,16 @@ describe("handleSwitchAgentEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handleSwitchAgentEffect("client-1", { agentId: "plan" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleSwitchAgentEffect("client-1", { agentId: "plan" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(overrides.setAgent).toHaveBeenCalledWith("session-42", "plan");
+				expect(log.info).toHaveBeenCalledOnce();
+			}),
 		);
-
-		expect(overrides.setAgent).toHaveBeenCalledWith("session-42", "plan");
-		expect(log.info).toHaveBeenCalledOnce();
 	});
 
-	it("warns when no session is assigned", async () => {
+	it.effect("warns when no session is assigned", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const overrides = mockOverrides();
 		const log = mockLogger();
@@ -208,17 +212,16 @@ describe("handleSwitchAgentEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handleSwitchAgentEffect("client-1", { agentId: "build" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleSwitchAgentEffect("client-1", { agentId: "build" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(overrides.setAgent).not.toHaveBeenCalled();
+				expect(log.warn).toHaveBeenCalledOnce();
+			}),
 		);
-
-		expect(overrides.setAgent).not.toHaveBeenCalled();
-		expect(log.warn).toHaveBeenCalledOnce();
 	});
 
-	it("does nothing when agentId is empty", async () => {
+	it.effect("does nothing when agentId is empty", () => {
 		const ws = mockWsHandler();
 		const overrides = mockOverrides();
 		const log = mockLogger();
@@ -229,21 +232,20 @@ describe("handleSwitchAgentEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handleSwitchAgentEffect("client-1", { agentId: "" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleSwitchAgentEffect("client-1", { agentId: "" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(overrides.setAgent).not.toHaveBeenCalled();
+				expect(log.info).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(overrides.setAgent).not.toHaveBeenCalled();
-		expect(log.info).not.toHaveBeenCalled();
 	});
 });
 
 // ─── Settings handler tests ────────────────────────────────────────────────
 
 describe("handleGetCommandsEffect", () => {
-	it("fetches commands and sends to client", async () => {
+	it.effect("fetches commands and sends to client", () => {
 		const ws = mockWsHandler();
 		const mockCommands = [{ name: "test" }];
 		const client = {
@@ -255,37 +257,39 @@ describe("handleGetCommandsEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		await Effect.runPromise(
-			handleGetCommandsEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleGetCommandsEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.app.commands).toHaveBeenCalledOnce();
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "command_list",
+					commands: mockCommands,
+				});
+			}),
 		);
-
-		expect(client.app.commands).toHaveBeenCalledOnce();
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "command_list",
-			commands: mockCommands,
-		});
 	});
 });
 
 describe("handleGetTodoEffect", () => {
-	it("sends empty todo list", async () => {
+	it.effect("sends empty todo list", () => {
 		const ws = mockWsHandler();
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		await Effect.runPromise(
-			handleGetTodoEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleGetTodoEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "todo_state",
+					items: [],
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "todo_state",
-			items: [],
-		});
 	});
 });
 
 describe("handleGetProjectsEffect", () => {
-	it("uses config.getProjects when available", async () => {
+	it.effect("uses config.getProjects when available", () => {
 		const ws = mockWsHandler();
 		const projects = [
 			{ slug: "proj-1", title: "Project 1", directory: "/path" },
@@ -301,51 +305,56 @@ describe("handleGetProjectsEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		await Effect.runPromise(
-			handleGetProjectsEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleGetProjectsEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "project_list",
+					projects,
+					current: "test-project",
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "project_list",
-			projects,
-			current: "test-project",
-		});
 	});
 
-	it("falls back to client.app.projects when getProjects is not available", async () => {
-		const ws = mockWsHandler();
-		const config = mockConfig();
-		const client = {
-			app: {
-				projects: vi.fn(async () => [
-					{ id: "p1", name: "Proj 1", path: "/proj1" },
-				]),
-			},
-		} as unknown as OpenCodeAPI;
+	it.effect(
+		"falls back to client.app.projects when getProjects is not available",
+		() => {
+			const ws = mockWsHandler();
+			const config = mockConfig();
+			const client = {
+				app: {
+					projects: vi.fn(async () => [
+						{ id: "p1", name: "Proj 1", path: "/proj1" },
+					]),
+				},
+			} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ConfigTag, config),
-		);
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(ConfigTag, config),
+			);
 
-		await Effect.runPromise(
-			handleGetProjectsEffect("client-1", {}).pipe(Effect.provide(layer)),
-		);
-
-		expect(client.app.projects).toHaveBeenCalledOnce();
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "project_list",
-			projects: [{ slug: "p1", title: "Proj 1", directory: "/proj1" }],
-			current: "test-project",
-		});
-	});
+			return handleGetProjectsEffect("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.app.projects).toHaveBeenCalledOnce();
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "project_list",
+						projects: [{ slug: "p1", title: "Proj 1", directory: "/proj1" }],
+						current: "test-project",
+					});
+				}),
+			);
+		},
+	);
 });
 
 // ─── File handler tests ────────────────────────────────────────────────────
 
 describe("handleGetFileContentEffect", () => {
-	it("reads file content and sends to client", async () => {
+	it.effect("reads file content and sends to client", () => {
 		const ws = mockWsHandler();
 		const client = {
 			file: {
@@ -358,21 +367,20 @@ describe("handleGetFileContentEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		await Effect.runPromise(
-			handleGetFileContentEffect("client-1", { path: "README.md" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleGetFileContentEffect("client-1", { path: "README.md" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.file.read).toHaveBeenCalledWith("README.md");
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "file_content",
+					path: "README.md",
+					content: "hello world",
+				});
+			}),
 		);
-
-		expect(client.file.read).toHaveBeenCalledWith("README.md");
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "file_content",
-			path: "README.md",
-			content: "hello world",
-		});
 	});
 
-	it("does nothing when path is empty", async () => {
+	it.effect("does nothing when path is empty", () => {
 		const ws = mockWsHandler();
 		const client = {
 			file: { read: vi.fn() },
@@ -383,19 +391,18 @@ describe("handleGetFileContentEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		await Effect.runPromise(
-			handleGetFileContentEffect("client-1", { path: "" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleGetFileContentEffect("client-1", { path: "" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.file.read).not.toHaveBeenCalled();
+				expect(ws.sendTo).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(client.file.read).not.toHaveBeenCalled();
-		expect(ws.sendTo).not.toHaveBeenCalled();
 	});
 });
 
 describe("handleGetFileListEffect", () => {
-	it("lists files and filters with gitignore rules", async () => {
+	it.effect("lists files and filters with gitignore rules", () => {
 		const ws = mockWsHandler();
 		const client = {
 			file: {
@@ -413,25 +420,26 @@ describe("handleGetFileListEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		await Effect.runPromise(
-			handleGetFileListEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleGetFileListEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "file_list",
+					path: ".",
+					entries: [
+						{ name: "src", type: "directory" },
+						{ name: "README.md", type: "file" },
+					],
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "file_list",
-			path: ".",
-			entries: [
-				{ name: "src", type: "directory" },
-				{ name: "README.md", type: "file" },
-			],
-		});
 	});
 });
 
 // ─── Reload handler tests ──────────────────────────────────────────────────
 
 describe("handleReloadProviderSessionEffect", () => {
-	it("sends error when no active session", async () => {
+	it.effect("sends error when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const engine = {
@@ -453,22 +461,21 @@ describe("handleReloadProviderSessionEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		await Effect.runPromise(
-			handleReloadProviderSessionEffect("client-1", {}).pipe(
-				Effect.provide(layer),
-			),
-		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "system_error",
-				code: "NO_SESSION",
+		return handleReloadProviderSessionEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "system_error",
+						code: "NO_SESSION",
+					}),
+				);
 			}),
 		);
 	});
 
-	it("reloads provider session and refreshes models/commands", async () => {
+	it.effect("reloads provider session and refreshes models/commands", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
@@ -500,29 +507,31 @@ describe("handleReloadProviderSessionEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		await Effect.runPromise(
-			handleReloadProviderSessionEffect("client-1", {}).pipe(
-				Effect.provide(layer),
-			),
-		);
+		return handleReloadProviderSessionEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				// Should have dispatched end_session
+				expect(engine.dispatch).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "end_session",
+						sessionId: "session-42",
+					}),
+				);
 
-		// Should have dispatched end_session
-		expect(engine.dispatch).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "end_session", sessionId: "session-42" }),
+				// Should have sent provider_session_reloaded
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "provider_session_reloaded",
+					sessionId: "session-42",
+				});
+			}),
 		);
-
-		// Should have sent provider_session_reloaded
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "provider_session_reloaded",
-			sessionId: "session-42",
-		});
 	});
 });
 
 // ─── Model handler tests ──────────────────────────────────────────────────
 
 describe("handleGetModelsEffect", () => {
-	it("fetches providers and sends model_list to client", async () => {
+	it.effect("fetches providers and sends model_list to client", () => {
 		const ws = mockWsHandler();
 		const engine = {
 			dispatch: vi.fn(async () => ({ models: [] })),
@@ -553,26 +562,27 @@ describe("handleGetModelsEffect", () => {
 			Layer.succeed(OrchestrationEngineTag, engine),
 		);
 
-		await Effect.runPromise(
-			handleGetModelsEffect("client-1", {}).pipe(Effect.provide(layer)),
-		);
-
-		expect(client.provider.list).toHaveBeenCalledOnce();
-		// Verify model_list was sent with correct providers
-		expect(ws.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "model_list",
-				providers: expect.arrayContaining([
-					expect.objectContaining({ id: "openai" }),
-				]),
+		return handleGetModelsEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.provider.list).toHaveBeenCalledOnce();
+				// Verify model_list was sent with correct providers
+				expect(ws.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "model_list",
+						providers: expect.arrayContaining([
+							expect.objectContaining({ id: "openai" }),
+						]),
+					}),
+				);
 			}),
 		);
 	});
 });
 
 describe("handleSwitchModelEffect", () => {
-	it("sets model override when client has a session", async () => {
+	it.effect("sets model override when client has a session", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
@@ -600,18 +610,19 @@ describe("handleSwitchModelEffect", () => {
 			Layer.succeed(OrchestrationEngineTag, engine),
 		);
 
-		await Effect.runPromise(
-			handleSwitchModelEffect("client-1", {
-				modelId: "gpt-4",
-				providerId: "openai",
-			}).pipe(Effect.provide(layer)),
+		return handleSwitchModelEffect("client-1", {
+			modelId: "gpt-4",
+			providerId: "openai",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(overrides.setModel).toHaveBeenCalledWith("session-42", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				expect(log.info).toHaveBeenCalled();
+			}),
 		);
-
-		expect(overrides.setModel).toHaveBeenCalledWith("session-42", {
-			providerID: "openai",
-			modelID: "gpt-4",
-		});
-		expect(log.info).toHaveBeenCalled();
 	});
 });
 
@@ -673,35 +684,37 @@ function mockPtyManager(overrides?: Partial<PtyManager>): PtyManager {
 // ─── Tool Content handler tests ───────────────────────────────────────────
 
 describe("handleGetToolContentEffect", () => {
-	it("returns tool content when readQuery is available and content exists", async () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const readQuery = {
-			getToolContent: vi.fn(() => "full tool output text"),
-		} as unknown as import("../../../src/lib/persistence/read-query-service.js").ReadQueryService;
+	it.effect(
+		"returns tool content when readQuery is available and content exists",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const readQuery = {
+				getToolContent: vi.fn(() => "full tool output text"),
+			} as unknown as import("../../../src/lib/persistence/read-query-service.js").ReadQueryService;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ReadQueryTag, readQuery),
-		);
+			const layer = Layer.mergeAll(
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(ReadQueryTag, readQuery),
+			);
 
-		await Effect.runPromise(
-			handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
+			return handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
 				Effect.provide(layer),
-			),
-		);
+				Effect.tap(() => {
+					expect(readQuery.getToolContent).toHaveBeenCalledWith("tool-42");
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "tool_content",
+						sessionId: "session-1",
+						toolId: "tool-42",
+						content: "full tool output text",
+					});
+				}),
+			);
+		},
+	);
 
-		expect(readQuery.getToolContent).toHaveBeenCalledWith("tool-42");
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "tool_content",
-			sessionId: "session-1",
-			toolId: "tool-42",
-			content: "full tool output text",
-		});
-	});
-
-	it("returns NOT_FOUND when readQuery is absent", async () => {
+	it.effect("returns NOT_FOUND when readQuery is absent", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -709,56 +722,55 @@ describe("handleGetToolContentEffect", () => {
 		// No ReadQueryTag provided — serviceOption returns None
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		await Effect.runPromise(
-			handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "error",
+					sessionId: "session-1",
+					code: "NOT_FOUND",
+					message: "Full tool content not available",
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "error",
-			sessionId: "session-1",
-			code: "NOT_FOUND",
-			message: "Full tool content not available",
-		});
 	});
 });
 
 // ─── Terminal handler tests ───────────────────────────────────────────────
 
 describe("handlePtyInputEffect", () => {
-	it("sends input to pty manager", async () => {
+	it.effect("sends input to pty manager", () => {
 		const ptyManager = mockPtyManager();
 
 		const layer = Layer.succeed(PtyManagerTag, ptyManager);
 
-		await Effect.runPromise(
-			handlePtyInputEffect("client-1", {
-				ptyId: "pty-1",
-				data: "ls\n",
-			}).pipe(Effect.provide(layer)),
+		return handlePtyInputEffect("client-1", {
+			ptyId: "pty-1",
+			data: "ls\n",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
+			}),
 		);
-
-		expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
 	});
 
-	it("does nothing when ptyId is empty", async () => {
+	it.effect("does nothing when ptyId is empty", () => {
 		const ptyManager = mockPtyManager();
 
 		const layer = Layer.succeed(PtyManagerTag, ptyManager);
 
-		await Effect.runPromise(
-			handlePtyInputEffect("client-1", { ptyId: "", data: "ls\n" }).pipe(
-				Effect.provide(layer),
-			),
+		return handlePtyInputEffect("client-1", { ptyId: "", data: "ls\n" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ptyManager.sendInput).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(ptyManager.sendInput).not.toHaveBeenCalled();
 	});
 });
 
 describe("handlePtyCloseEffect", () => {
-	it("closes PTY session and broadcasts deletion", async () => {
+	it.effect("closes PTY session and broadcasts deletion", () => {
 		const ws = mockWsHandler();
 		const ptyManager = mockPtyManager();
 		const client = {
@@ -771,23 +783,22 @@ describe("handlePtyCloseEffect", () => {
 			Layer.succeed(PtyManagerTag, ptyManager),
 		);
 
-		await Effect.runPromise(
-			handlePtyCloseEffect("client-1", { ptyId: "pty-1" }).pipe(
-				Effect.provide(layer),
-			),
+		return handlePtyCloseEffect("client-1", { ptyId: "pty-1" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ptyManager.closeSession).toHaveBeenCalledWith("pty-1");
+				expect(client.pty.delete).toHaveBeenCalledWith("pty-1");
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "pty_deleted",
+					ptyId: "pty-1",
+				});
+			}),
 		);
-
-		expect(ptyManager.closeSession).toHaveBeenCalledWith("pty-1");
-		expect(client.pty.delete).toHaveBeenCalledWith("pty-1");
-		expect(ws.broadcast).toHaveBeenCalledWith({
-			type: "pty_deleted",
-			ptyId: "pty-1",
-		});
 	});
 });
 
 describe("handlePtyResizeEffect", () => {
-	it("resizes PTY without errors", async () => {
+	it.effect("resizes PTY without errors", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -802,18 +813,19 @@ describe("handlePtyResizeEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handlePtyResizeEffect("client-1", {
-				ptyId: "pty-1",
-				cols: 120,
-				rows: 40,
-			}).pipe(Effect.provide(layer)),
+		return handlePtyResizeEffect("client-1", {
+			ptyId: "pty-1",
+			cols: 120,
+			rows: 40,
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.pty.resize).toHaveBeenCalledWith("pty-1", 40, 120);
+			}),
 		);
-
-		expect(client.pty.resize).toHaveBeenCalledWith("pty-1", 40, 120);
 	});
 
-	it("logs warning on resize failure (non-fatal)", async () => {
+	it.effect("logs warning on resize failure (non-fatal)", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -832,15 +844,16 @@ describe("handlePtyResizeEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handlePtyResizeEffect("client-1", {
-				ptyId: "pty-1",
-				cols: 120,
-				rows: 40,
-			}).pipe(Effect.provide(layer)),
+		return handlePtyResizeEffect("client-1", {
+			ptyId: "pty-1",
+			cols: 120,
+			rows: 40,
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(log.warn).toHaveBeenCalled();
+			}),
 		);
-
-		expect(log.warn).toHaveBeenCalled();
 	});
 });
 
@@ -868,7 +881,7 @@ function mockInstanceMgmt(): InstanceManagementDeps {
 }
 
 describe("handleInstanceAddEffect", () => {
-	it("adds instance and broadcasts list", async () => {
+	it.effect("adds instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
 
@@ -877,41 +890,39 @@ describe("handleInstanceAddEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		await Effect.runPromise(
-			handleInstanceAddEffect("client-1", { name: "Test Instance" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleInstanceAddEffect("client-1", { name: "Test Instance" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(instanceMgmt.addInstance).toHaveBeenCalled();
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "instance_list" }),
+				);
+				expect(instanceMgmt.persistConfig).toHaveBeenCalled();
+			}),
 		);
-
-		expect(instanceMgmt.addInstance).toHaveBeenCalled();
-		expect(ws.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "instance_list" }),
-		);
-		expect(instanceMgmt.persistConfig).toHaveBeenCalled();
 	});
 
-	it("sends error when instanceMgmt is not available", async () => {
+	it.effect("sends error when instanceMgmt is not available", () => {
 		const ws = mockWsHandler();
 
 		// No InstanceMgmtTag provided — serviceOption returns None
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		await Effect.runPromise(
-			handleInstanceAddEffect("client-1", { name: "Test" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleInstanceAddEffect("client-1", { name: "Test" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "system_error",
+					code: "INSTANCE_ERROR",
+					message: "Instance management not available",
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "system_error",
-			code: "INSTANCE_ERROR",
-			message: "Instance management not available",
-		});
 	});
 });
 
 describe("handleInstanceRemoveEffect", () => {
-	it("removes instance and broadcasts list", async () => {
+	it.effect("removes instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
 
@@ -920,19 +931,22 @@ describe("handleInstanceRemoveEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		await Effect.runPromise(
-			handleInstanceRemoveEffect("client-1", {
-				instanceId: "test-instance",
-			}).pipe(Effect.provide(layer)),
+		return handleInstanceRemoveEffect("client-1", {
+			instanceId: "test-instance",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(instanceMgmt.removeInstance).toHaveBeenCalledWith(
+					"test-instance",
+				);
+				expect(instanceMgmt.persistConfig).toHaveBeenCalled();
+			}),
 		);
-
-		expect(instanceMgmt.removeInstance).toHaveBeenCalledWith("test-instance");
-		expect(instanceMgmt.persistConfig).toHaveBeenCalled();
 	});
 });
 
 describe("handleInstanceStartEffect", () => {
-	it("starts instance and broadcasts list", async () => {
+	it.effect("starts instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
 
@@ -941,21 +955,24 @@ describe("handleInstanceStartEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		await Effect.runPromise(
-			handleInstanceStartEffect("client-1", {
-				instanceId: "test-instance",
-			}).pipe(Effect.provide(layer)),
-		);
-
-		expect(instanceMgmt.startInstance).toHaveBeenCalledWith("test-instance");
-		expect(ws.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "instance_list" }),
+		return handleInstanceStartEffect("client-1", {
+			instanceId: "test-instance",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(instanceMgmt.startInstance).toHaveBeenCalledWith(
+					"test-instance",
+				);
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "instance_list" }),
+				);
+			}),
 		);
 	});
 });
 
 describe("handleInstanceStopEffect", () => {
-	it("stops instance and broadcasts list", async () => {
+	it.effect("stops instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
 
@@ -964,34 +981,36 @@ describe("handleInstanceStopEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		await Effect.runPromise(
-			handleInstanceStopEffect("client-1", {
-				instanceId: "test-instance",
-			}).pipe(Effect.provide(layer)),
+		return handleInstanceStopEffect("client-1", {
+			instanceId: "test-instance",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(instanceMgmt.stopInstance).toHaveBeenCalledWith("test-instance");
+			}),
 		);
-
-		expect(instanceMgmt.stopInstance).toHaveBeenCalledWith("test-instance");
 	});
 });
 
 describe("handleScanNowEffect", () => {
-	it("sends error when scan deps not available", async () => {
+	it.effect("sends error when scan deps not available", () => {
 		const ws = mockWsHandler();
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		await Effect.runPromise(
-			handleScanNowEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleScanNowEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "system_error",
+					code: "INSTANCE_ERROR",
+					message: "Port scanning not available",
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "system_error",
-			code: "INSTANCE_ERROR",
-			message: "Port scanning not available",
-		});
 	});
 
-	it("sends scan result when available", async () => {
+	it.effect("sends scan result when available", () => {
 		const ws = mockWsHandler();
 		const scanDeps: ScanDeps = {
 			triggerScan: vi.fn(async () => ({
@@ -1006,23 +1025,24 @@ describe("handleScanNowEffect", () => {
 			Layer.succeed(ScanDepsTag, scanDeps),
 		);
 
-		await Effect.runPromise(
-			handleScanNowEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleScanNowEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "scan_result",
+					discovered: [8080],
+					lost: [],
+					active: [3000, 8080],
+				});
+			}),
 		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "scan_result",
-			discovered: [8080],
-			lost: [],
-			active: [3000, 8080],
-		});
 	});
 });
 
 // ─── Permissions handler tests ────────────────────────────────────────────
 
 describe("handlePermissionResponseEffect", () => {
-	it("processes permission response and broadcasts resolution", async () => {
+	it.effect("processes permission response and broadcasts resolution", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1047,26 +1067,27 @@ describe("handlePermissionResponseEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		await Effect.runPromise(
-			handlePermissionResponseEffect("client-1", {
-				requestId: "perm-1" as PermissionId,
-				decision: "allow",
-			}).pipe(Effect.provide(layer)),
-		);
-
-		expect(permissionBridge.onPermissionResponse).toHaveBeenCalledWith(
-			"perm-1",
-			"allow",
-		);
-		expect(ws.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_resolved",
-				requestId: "perm-1",
+		return handlePermissionResponseEffect("client-1", {
+			requestId: "perm-1" as PermissionId,
+			decision: "allow",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(permissionBridge.onPermissionResponse).toHaveBeenCalledWith(
+					"perm-1",
+					"allow",
+				);
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "permission_resolved",
+						requestId: "perm-1",
+					}),
+				);
 			}),
 		);
 	});
 
-	it("does nothing when bridge returns null", async () => {
+	it.effect("does nothing when bridge returns null", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1087,19 +1108,20 @@ describe("handlePermissionResponseEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		await Effect.runPromise(
-			handlePermissionResponseEffect("client-1", {
-				requestId: "perm-1" as PermissionId,
-				decision: "allow",
-			}).pipe(Effect.provide(layer)),
+		return handlePermissionResponseEffect("client-1", {
+			requestId: "perm-1" as PermissionId,
+			decision: "allow",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.broadcast).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(ws.broadcast).not.toHaveBeenCalled();
 	});
 });
 
 describe("handleQuestionRejectEffect", () => {
-	it("does nothing when toolId is empty", async () => {
+	it.effect("does nothing when toolId is empty", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
 		const client = {} as unknown as OpenCodeAPI;
@@ -1116,16 +1138,15 @@ describe("handleQuestionRejectEffect", () => {
 			Layer.succeed(SessionOverridesTag, overrides),
 		);
 
-		await Effect.runPromise(
-			handleQuestionRejectEffect("client-1", { toolId: "" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleQuestionRejectEffect("client-1", { toolId: "" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.broadcast).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(ws.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("rejects question via REST API and broadcasts resolution", async () => {
+	it.effect("rejects question via REST API and broadcasts resolution", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1146,21 +1167,20 @@ describe("handleQuestionRejectEffect", () => {
 			Layer.succeed(SessionOverridesTag, overrides),
 		);
 
-		await Effect.runPromise(
-			handleQuestionRejectEffect("client-1", { toolId: "que-1" }).pipe(
-				Effect.provide(layer),
-			),
-		);
-
-		expect(client.question.reject).toHaveBeenCalledWith("que-1");
-		expect(ws.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "ask_user_resolved",
-				toolId: "que-1",
+		return handleQuestionRejectEffect("client-1", { toolId: "que-1" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.question.reject).toHaveBeenCalledWith("que-1");
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "ask_user_resolved",
+						toolId: "que-1",
+					}),
+				);
+				expect(sessionMgr.decrementPendingQuestionCount).toHaveBeenCalledWith(
+					"session-1",
+				);
 			}),
-		);
-		expect(sessionMgr.decrementPendingQuestionCount).toHaveBeenCalledWith(
-			"session-1",
 		);
 	});
 });
@@ -1168,7 +1188,7 @@ describe("handleQuestionRejectEffect", () => {
 // ─── Session handler tests ───────────────────────────────────────────────
 
 describe("handleListSessionsEffect", () => {
-	it("sends session list to client", async () => {
+	it.effect("sends session list to client", () => {
 		const ws = mockWsHandler();
 		const sessionMgr = mockSessionManager();
 
@@ -1177,16 +1197,17 @@ describe("handleListSessionsEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		await Effect.runPromise(
-			handleListSessionsEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleListSessionsEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(sessionMgr.sendDualSessionLists).toHaveBeenCalled();
+			}),
 		);
-
-		expect(sessionMgr.sendDualSessionLists).toHaveBeenCalled();
 	});
 });
 
 describe("handleRenameSessionEffect", () => {
-	it("renames session and logs", async () => {
+	it.effect("renames session and logs", () => {
 		const log = mockLogger();
 		const sessionMgr = mockSessionManager();
 
@@ -1195,21 +1216,22 @@ describe("handleRenameSessionEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		await Effect.runPromise(
-			handleRenameSessionEffect("client-1", {
-				sessionId: "session-1",
-				title: "New Title",
-			}).pipe(Effect.provide(layer)),
+		return handleRenameSessionEffect("client-1", {
+			sessionId: "session-1",
+			title: "New Title",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(sessionMgr.renameSession).toHaveBeenCalledWith(
+					"session-1",
+					"New Title",
+				);
+				expect(log.info).toHaveBeenCalled();
+			}),
 		);
-
-		expect(sessionMgr.renameSession).toHaveBeenCalledWith(
-			"session-1",
-			"New Title",
-		);
-		expect(log.info).toHaveBeenCalled();
 	});
 
-	it("does nothing when id or title is empty", async () => {
+	it.effect("does nothing when id or title is empty", () => {
 		const log = mockLogger();
 		const sessionMgr = mockSessionManager();
 
@@ -1218,19 +1240,20 @@ describe("handleRenameSessionEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		await Effect.runPromise(
-			handleRenameSessionEffect("client-1", {
-				sessionId: "",
-				title: "New Title",
-			}).pipe(Effect.provide(layer)),
+		return handleRenameSessionEffect("client-1", {
+			sessionId: "",
+			title: "New Title",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(sessionMgr.renameSession).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(sessionMgr.renameSession).not.toHaveBeenCalled();
 	});
 });
 
 describe("handleSearchSessionsEffect", () => {
-	it("searches sessions and sends results", async () => {
+	it.effect("searches sessions and sends results", () => {
 		const ws = mockWsHandler();
 		const results = [{ id: "s1", title: "Match", updatedAt: 0 }];
 		const sessionMgr = mockSessionManager({
@@ -1242,24 +1265,26 @@ describe("handleSearchSessionsEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		await Effect.runPromise(
-			handleSearchSessionsEffect("client-1", { query: "test" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleSearchSessionsEffect("client-1", { query: "test" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(sessionMgr.searchSessions).toHaveBeenCalledWith(
+					"test",
+					undefined,
+				);
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "session_list",
+					sessions: results,
+					roots: false,
+					search: true,
+				});
+			}),
 		);
-
-		expect(sessionMgr.searchSessions).toHaveBeenCalledWith("test", undefined);
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "session_list",
-			sessions: results,
-			roots: false,
-			search: true,
-		});
 	});
 });
 
 describe("handleLoadMoreHistoryEffect", () => {
-	it("loads history page and sends to client", async () => {
+	it.effect("loads history page and sends to client", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1273,29 +1298,28 @@ describe("handleLoadMoreHistoryEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		await Effect.runPromise(
-			handleLoadMoreHistoryEffect("client-1", { offset: 50 }).pipe(
-				Effect.provide(layer),
-			),
+		return handleLoadMoreHistoryEffect("client-1", { offset: 50 }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
+					"session-1",
+					50,
+				);
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "history_page",
+					sessionId: "session-1",
+					messages: [],
+					hasMore: false,
+				});
+			}),
 		);
-
-		expect(sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
-			"session-1",
-			50,
-		);
-		expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "history_page",
-			sessionId: "session-1",
-			messages: [],
-			hasMore: false,
-		});
 	});
 });
 
 // ─── Prompt handler tests ─────────────────────────────────────────────────
 
 describe("handleCancelEffect", () => {
-	it("clears processing timeout and sends done when no engine", async () => {
+	it.effect("clears processing timeout and sends done when no engine", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1314,20 +1338,23 @@ describe("handleCancelEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handleCancelEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleCancelEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+					"session-1",
+				);
+				expect(client.session.abort).toHaveBeenCalledWith("session-1");
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+			}),
 		);
-
-		expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith("session-1");
-		expect(client.session.abort).toHaveBeenCalledWith("session-1");
-		expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
-			type: "done",
-			sessionId: "session-1",
-			code: 1,
-		});
 	});
 
-	it("does nothing when no active session", async () => {
+	it.effect("does nothing when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const overrides = mockOverrides();
@@ -1340,16 +1367,17 @@ describe("handleCancelEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handleCancelEffect("client-1", {}).pipe(Effect.provide(layer)),
+		return handleCancelEffect("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendToSession).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(ws.sendToSession).not.toHaveBeenCalled();
 	});
 });
 
 describe("handleInputSyncEffect", () => {
-	it("forwards input to other clients in same session", async () => {
+	it.effect("forwards input to other clients in same session", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
@@ -1357,38 +1385,36 @@ describe("handleInputSyncEffect", () => {
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		await Effect.runPromise(
-			handleInputSyncEffect("client-1", { text: "hello" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleInputSyncEffect("client-1", { text: "hello" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				// Should send to client-2 but NOT client-1 (the sender)
+				expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
+					type: "input_sync",
+					text: "hello",
+					from: "client-1",
+				});
+				expect(ws.sendTo).toHaveBeenCalledTimes(1);
+			}),
 		);
-
-		// Should send to client-2 but NOT client-1 (the sender)
-		expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
-			type: "input_sync",
-			text: "hello",
-			from: "client-1",
-		});
-		expect(ws.sendTo).toHaveBeenCalledTimes(1);
 	});
 
-	it("does nothing when no session", async () => {
+	it.effect("does nothing when no session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		await Effect.runPromise(
-			handleInputSyncEffect("client-1", { text: "hello" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleInputSyncEffect("client-1", { text: "hello" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(ws.sendTo).not.toHaveBeenCalled();
 	});
 });
 
 describe("handleRewindEffect", () => {
-	it("reverts to a specific message and clears cursor", async () => {
+	it.effect("reverts to a specific message and clears cursor", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1405,22 +1431,23 @@ describe("handleRewindEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		await Effect.runPromise(
-			handleRewindEffect("client-1", { messageId: "msg-1" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleRewindEffect("client-1", { messageId: "msg-1" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
+					messageID: "msg-1",
+				});
+				expect(sessionMgr.clearPaginationCursor).toHaveBeenCalledWith(
+					"session-1",
+				);
+				expect(log.info).toHaveBeenCalled();
+			}),
 		);
-
-		expect(client.session.revert).toHaveBeenCalledWith("session-1", {
-			messageID: "msg-1",
-		});
-		expect(sessionMgr.clearPaginationCursor).toHaveBeenCalledWith("session-1");
-		expect(log.info).toHaveBeenCalled();
 	});
 });
 
 describe("handleMessageEffect", () => {
-	it("sends error when no active session", async () => {
+	it.effect("sends error when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const overrides = mockOverrides();
@@ -1441,22 +1468,21 @@ describe("handleMessageEffect", () => {
 			Layer.succeed(QuestionBridgeTag, questionBridge),
 		);
 
-		await Effect.runPromise(
-			handleMessageEffect("client-1", { text: "hello" }).pipe(
-				Effect.provide(layer),
-			),
-		);
-
-		expect(ws.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "system_error",
-				code: "NO_SESSION",
+		return handleMessageEffect("client-1", { text: "hello" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "system_error",
+						code: "NO_SESSION",
+					}),
+				);
 			}),
 		);
 	});
 
-	it("does nothing when text is empty", async () => {
+	it.effect("does nothing when text is empty", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -1479,15 +1505,16 @@ describe("handleMessageEffect", () => {
 			Layer.succeed(QuestionBridgeTag, questionBridge),
 		);
 
-		await Effect.runPromise(
-			handleMessageEffect("client-1", { text: "" }).pipe(Effect.provide(layer)),
+		return handleMessageEffect("client-1", { text: "" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).not.toHaveBeenCalled();
+				expect(ws.sendToSession).not.toHaveBeenCalled();
+			}),
 		);
-
-		expect(ws.sendTo).not.toHaveBeenCalled();
-		expect(ws.sendToSession).not.toHaveBeenCalled();
 	});
 
-	it("sends message via legacy path when no engine", async () => {
+	it.effect("sends message via legacy path when no engine", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 			getClientsForSession: vi.fn(() => ["client-1"]),
@@ -1519,15 +1546,16 @@ describe("handleMessageEffect", () => {
 			Layer.succeed(QuestionBridgeTag, questionBridge),
 		);
 
-		await Effect.runPromise(
-			handleMessageEffect("client-1", { text: "hello world" }).pipe(
-				Effect.provide(layer),
-			),
+		return handleMessageEffect("client-1", { text: "hello world" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.session.prompt).toHaveBeenCalledWith("session-1", {
+					text: "hello world",
+				});
+				expect(sessionMgr.recordMessageActivity).toHaveBeenCalledWith(
+					"session-1",
+				);
+			}),
 		);
-
-		expect(client.session.prompt).toHaveBeenCalledWith("session-1", {
-			text: "hello world",
-		});
-		expect(sessionMgr.recordMessageActivity).toHaveBeenCalledWith("session-1");
 	});
 });
