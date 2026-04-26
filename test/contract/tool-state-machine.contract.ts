@@ -1,10 +1,17 @@
 // ─── AC6: Tool Part State Machine Validation ─────────────────────────────
-// Validates tool execution state transitions via the OpenAPI spec and
-// SSE event schema definitions. Full lifecycle observation requires sending
-// a message that triggers tool use, which is tested when a session is active.
+// Validates tool execution state transitions via the committed OpenAPI snapshot
+// and SSE event schema definitions. Starting with OpenCode v1.14.x the live
+// /doc endpoint only exposes global-level schemas, so project-scoped schemas
+// (Message, Part, ToolPart, Session, Events, etc.) are validated against the
+// committed snapshot. Full lifecycle observation requires sending a message
+// that triggers tool use, which is tested when a session is active.
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { apiGet, checkServerHealth } from "./helpers/server-connection.js";
+import {
+	apiGet,
+	checkServerHealth,
+	loadSnapshotSpec,
+} from "./helpers/server-connection.js";
 
 let serverAvailable = false;
 
@@ -25,12 +32,10 @@ function skipIfNoServer() {
 }
 
 describe("AC6 — Tool Part State Machine Validation", () => {
-	describe("Message part structure from OpenAPI spec", () => {
+	describe("Message part structure from snapshot spec", () => {
 		it("message schema defines parts array", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, Record<string, unknown>> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			// Look for Message schema
@@ -43,12 +48,10 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 		});
 	});
 
-	describe("Part type definitions from OpenAPI spec", () => {
+	describe("Part type definitions from snapshot spec", () => {
 		it("spec defines part-related schemas (ToolCall, TextPart, etc.)", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, Record<string, unknown>> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			const schemaNames = Object.keys(schemas);
@@ -67,9 +70,7 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 	describe("SSE event types for tool lifecycle", () => {
 		it("spec defines message.part.updated event type", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, Record<string, unknown>> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			const schemaNames = Object.keys(schemas);
@@ -86,13 +87,10 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 
 		it("event stream endpoint exists for receiving tool events", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				paths: Record<string, unknown>;
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
-			// In SDK 1.4.x / OpenCode 1.3.13+, only global event streams
-			// are in the global /doc spec.  Project-scoped /event is no
-			// longer listed here.
+			// The snapshot (captured from v1.3.13) includes global event
+			// stream paths that the live /doc no longer lists.
 			expect(doc.paths).toHaveProperty("/global/event");
 			expect(doc.paths).toHaveProperty("/global/sync-event");
 		});
@@ -101,9 +99,7 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 	describe("Tool state values", () => {
 		it("our expected part types are represented in the spec", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, Record<string, unknown>> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			// Stringify the schemas to search for our expected part types
 			const schemasStr = JSON.stringify(doc.components?.schemas ?? {});
@@ -117,9 +113,7 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 
 		it("spec contains tool status values we depend on", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemasStr = JSON.stringify(doc.components?.schemas ?? {});
 
@@ -134,13 +128,8 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 	describe("Message and part schemas", () => {
 		it("spec defines Message schema with part-related types", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
-			// In SDK 1.4.x / OpenCode 1.3.13+, session endpoints are
-			// project-scoped and not in the global /doc spec.  But the
-			// global spec still defines the Message, Part, and ToolPart schemas.
 			const schemas = doc.components?.schemas ?? {};
 			expect(schemas).toHaveProperty("Message");
 			expect(schemas).toHaveProperty("Part");
@@ -149,9 +138,7 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 
 		it("spec defines message part event schemas", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			expect(schemas).toHaveProperty("Event.message.part.updated");
@@ -162,9 +149,7 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 	describe("Session and prompt schemas", () => {
 		it("spec defines Session schema for prompt operations", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			expect(schemas).toHaveProperty("Session");
@@ -173,9 +158,7 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 
 		it("spec defines tool state schemas for lifecycle tracking", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			expect(schemas).toHaveProperty("ToolState");

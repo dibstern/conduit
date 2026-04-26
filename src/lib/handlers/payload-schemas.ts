@@ -77,7 +77,7 @@ export const PayloadSchemas: {
 	}),
 
 	fork_session: Schema.Struct({
-		sessionId: Schema.String,
+		sessionId: Schema.optional(Schema.String),
 		messageId: Schema.optional(Schema.String),
 	}),
 

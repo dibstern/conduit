@@ -8,6 +8,28 @@ import { resolve } from "node:path";
 export const OPENCODE_BASE_URL =
 	process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
+/**
+ * Load the committed OpenAPI snapshot that contains the full schema
+ * definitions (Session, Message, Permission, Question, Event, etc.).
+ *
+ * Starting with OpenCode v1.14.x the live `/doc` endpoint only exposes
+ * global-level schemas (auth, errors). Project-scoped schemas are no longer
+ * included there, but the committed snapshot still captures the full API
+ * contract we depend on.
+ */
+export function loadSnapshotSpec(): {
+	openapi: string;
+	info: { title: string; version: string };
+	paths: Record<string, Record<string, unknown>>;
+	components?: { schemas?: Record<string, unknown> };
+} {
+	const snapshotPath = resolve(
+		import.meta.dirname ?? __dirname,
+		"../../fixtures/opencode-api-snapshot.json",
+	);
+	return JSON.parse(readFileSync(snapshotPath, "utf-8"));
+}
+
 /** Build auth headers if OPENCODE_SERVER_PASSWORD is set. */
 export function authHeaders(): Record<string, string> {
 	const pw = process.env["OPENCODE_SERVER_PASSWORD"];

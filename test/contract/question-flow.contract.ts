@@ -4,7 +4,11 @@
 // so we validate API shapes and empty-state behavior.
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { apiGet, checkServerHealth } from "./helpers/server-connection.js";
+import {
+	apiGet,
+	checkServerHealth,
+	loadSnapshotSpec,
+} from "./helpers/server-connection.js";
 
 let serverAvailable = false;
 
@@ -39,24 +43,20 @@ describe("AC4 — Question Flow Shape Validation", () => {
 		});
 	});
 
+	// NOTE: Starting with OpenCode v1.14.x the live /doc endpoint only
+	// exposes global-level schemas. Question schemas are validated
+	// against the committed snapshot which captures the full contract.
 	describe("Question reply schema shape", () => {
-		it("OpenAPI spec defines QuestionRequest schema", async () => {
+		it("snapshot spec defines QuestionRequest schema", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 			const schemas = doc.components?.schemas ?? {};
-			// In SDK 1.4.x / OpenCode 1.3.13+, question endpoints are
-			// project-scoped and not in the global /doc spec.  But the
-			// global spec still defines the QuestionRequest schema.
 			expect(schemas).toHaveProperty("QuestionRequest");
 		});
 
 		it("question reply schema defines QuestionAnswer", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 			const schemas = doc.components?.schemas ?? {};
 			expect(schemas).toHaveProperty("QuestionAnswer");
 		});
@@ -65,9 +65,7 @@ describe("AC4 — Question Flow Shape Validation", () => {
 	describe("Question reject schema shape", () => {
 		it("question event schemas include asked, replied, and rejected", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 			const schemas = doc.components?.schemas ?? {};
 			expect(schemas).toHaveProperty("Event.question.asked");
 			expect(schemas).toHaveProperty("Event.question.replied");
@@ -75,12 +73,10 @@ describe("AC4 — Question Flow Shape Validation", () => {
 		});
 	});
 
-	describe("Question SSE event shape (from OpenAPI spec)", () => {
-		it("OpenAPI spec defines question-related schemas", async () => {
+	describe("Question SSE event shape (from snapshot spec)", () => {
+		it("snapshot spec defines question-related schemas", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, unknown> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			const schemaNames = Object.keys(schemas);
@@ -93,12 +89,10 @@ describe("AC4 — Question Flow Shape Validation", () => {
 		});
 	});
 
-	describe("Question structure from OpenAPI spec", () => {
+	describe("Question structure from snapshot spec", () => {
 		it("question schema defines expected fields", async () => {
 			if (skipIfNoServer()) return;
-			const doc = await apiGet<{
-				components?: { schemas?: Record<string, Record<string, unknown>> };
-			}>("/doc");
+			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
 			// Find question-related schemas
