@@ -47,6 +47,19 @@ describe("Auth middleware", () => {
     return Layer.succeed(AuthManagerTag, auth);
   };
 
+  // AUDIT FIX (R2-38-3): Tests must exercise the actual middleware HTTP flow,
+  // not just AuthManager methods. The executing agent MUST create mock
+  // HttpServerRequest objects and pass them through withAuthGate to verify:
+  //
+  // 1. No PIN set → inner handler called (passthrough)
+  // 2. PIN set + valid cookie → inner handler called
+  // 3. PIN set + valid x-relay-pin header → inner handler called + Set-Cookie
+  // 4. PIN set + no auth + API route → 401 JSON response
+  // 5. PIN set + no auth + browser route → 302 redirect to /auth
+  // 6. PIN set + locked out IP → 429 response
+  //
+  // Use HttpServerRequest.make or similar to create test requests with
+  // specific headers/cookies. Verify response status codes and headers.
   describe("withAuthGate", () => {
     it.effect("passes through when no PIN is set", () =>
       Effect.gen(function* () {
@@ -256,12 +269,31 @@ export const authStatusRoute = HttpRouter.get(
   "/api/auth/status",
   Effect.gen(function* () {
     const auth = yield* AuthManagerTag;
+
+    // AUDIT FIX (R2-38-1): When no PIN is set, auth is disabled — return
+    // authenticated: true to match old RequestRouter behavior. Frontend
+    // depends on this to skip login UI when auth is disabled.
+    if (!auth.hasPin()) {
+      return yield* HttpServerResponse.json({ hasPin: false, authenticated: true });
+    }
+
     const req = yield* HttpServerRequest.HttpServerRequest;
     const cookies = parseCookies(req.headers["cookie"]);
     const sessionCookie = cookies["relay_session"];
-    const authenticated = sessionCookie
-      ? auth.validateCookie(sessionCookie)
-      : false;
+
+    // AUDIT FIX (R2-38-2): Check cookie first, then fall back to
+    // x-relay-pin header — matches old checkAuth() behavior so API
+    // clients using header auth see authenticated: true.
+    let authenticated = false;
+    if (sessionCookie && auth.validateCookie(sessionCookie)) {
+      authenticated = true;
+    } else {
+      const pinHeader = req.headers["x-relay-pin"];
+      if (typeof pinHeader === "string") {
+        const ip = getClientIp(req);
+        authenticated = auth.authenticate(pinHeader, ip).ok;
+      }
+    }
 
     return yield* HttpServerResponse.json({
       hasPin: auth.hasPin(),
@@ -596,6 +628,16 @@ The router composition must order routes carefully:
 
 **Step 4:** Update tests to cover new routes.
 
+> **AUDIT FIX (R2-40-1):** The executing agent MUST add actual test implementations,
+> not just "update tests." At minimum cover:
+> - `GET /` root redirect: single project → 302 to `/p/{slug}/`, multiple → serves SPA
+> - `DELETE /api/projects/:slug` with valid slug, missing slug, missing provider
+> - `GET /p/:slug/api/*` delegation to ProjectApiDelegateProvider
+> - `GET /p/:slug/dashboard` serves SPA (non-API project route)
+> - `GET /auth` and `GET /setup` serve SPA without auth gate
+> - `GET /some-file.js` static catch-all goes through auth gate
+> - Auth-gated route returns 401/302 when unauthenticated
+
 Commit: `feat(effect): complete Effect HTTP router with auth, static, and project routes`
 
 ---
@@ -632,7 +674,15 @@ import { expect } from "vitest";
 import { Effect, Layer } from "effect";
 import { HttpClient, HttpServer } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
-// Test that the full Effect router serves health, auth, projects, static files
+// AUDIT FIX (R2-41-1): The executing agent MUST write actual integration tests,
+// not just imports. At minimum:
+// 1. Create a test Layer with all provider tags satisfied (AuthManagerTag,
+//    StaticDirTag, ProjectsProvider, etc.) using test doubles
+// 2. Use NodeHttpServer.makeHandler + HttpClient to make real HTTP requests
+// 3. Test: GET /health returns 200, GET /api/auth/status returns correct JSON,
+//    POST /auth with valid PIN returns cookie, static file serving works,
+//    auth gate blocks unauthenticated requests
+// 4. Test error paths: invalid JSON body, missing routes → 404
 ```
 
 **Step 2: Modify daemon-main.ts**
@@ -820,13 +870,23 @@ export const makeWsTransportLive = (
         socket: Duplex,
         head: Buffer,
       ): Effect.Effect<import("ws").WebSocket> =>
+        // AUDIT FIX (R2-42-4): Guard against double-resume. Socket error
+        // can fire after successful upgrade. Remove error listener on success,
+        // or use a `resumed` boolean to ignore late errors.
         Effect.async<import("ws").WebSocket, Error>((resume) => {
+          let resumed = false;
+          const onError = (err: Error) => {
+            if (!resumed) {
+              resumed = true;
+              resume(Effect.fail(err));
+            }
+          };
+          socket.on("error", onError);
           wss.handleUpgrade(req, socket, head, (ws) => {
+            resumed = true;
+            socket.removeListener("error", onError);
             wss.emit("connection", ws, req);
             resume(Effect.succeed(ws));
-          });
-          socket.on("error", (err) => {
-            resume(Effect.fail(err));
           });
         });
 
@@ -837,32 +897,55 @@ export const makeWsTransportLive = (
 
 **Step 3:** Add heartbeat fiber helper:
 
+> **AUDIT FIX (R2-42-1):** The old `ws-handler.ts` heartbeat has a full
+> ping/pong alive-tracking protocol: marks `isAlive = false` → sends ping →
+> on next tick terminates connections that didn't respond with pong. Without
+> this, dead connections (half-open TCP) are never detected, causing memory
+> leaks and stale client counts. The heartbeat below MUST replicate this
+> protocol, not just ping.
+>
+> **AUDIT FIX (R2-42-2):** `client.ws` is the WsConn type from
+> ws-handler-service. The executing agent MUST verify whether WsConn exposes
+> the underlying `ws.WebSocket` for calling `ping()` and registering `pong`
+> listeners. If WsConn wraps it, either extend the interface or access the
+> raw socket via a typed accessor (not `as any`).
+>
+> **AUDIT FIX (R2-42-3):** `Schedule.spaced` takes a number (milliseconds)
+> or `Duration.millis(n)`, NOT a template literal string. Use
+> `Schedule.spaced(intervalMs)`.
+
 ```typescript
 // Heartbeat: pings all connected clients on a schedule.
 // Uses ws-handler-service to enumerate clients.
-import { WsHandlerStateTag } from "./ws-handler-service.js";
+// Implements full alive-tracking protocol matching old ws-handler.ts behavior.
+import { WsHandlerStateTag, removeClient } from "./ws-handler-service.js";
 import { Schedule } from "effect";
 
 export const makeHeartbeatFiber = (intervalMs = 30_000) =>
   Effect.gen(function* () {
     const ref = yield* WsHandlerStateTag;
     const clients = yield* Ref.get(ref);
-    // Ping each connected client
+    // For each connected client:
+    // 1. If isAlive is false from last tick → connection is dead, terminate it
+    // 2. Set isAlive = false
+    // 3. Send ping (pong handler sets isAlive = true)
     yield* Effect.forEach(
-      HashMap.values(clients),
-      (client) =>
-        Effect.try({
-          try: () => {
-            if (client.ws.readyState === 1) {
-              (client.ws as any).ping?.();
-            }
-          },
-          catch: () => undefined,
+      HashMap.entries(clients),
+      ([clientId, client]) =>
+        Effect.gen(function* () {
+          // The executing agent must implement isAlive tracking:
+          // - Add isAlive: boolean to client state in ws-handler-service
+          // - Register ws.on("pong") handler to set isAlive = true on connection
+          // - Here: check isAlive, if false → terminate, else mark false + ping
+          if (client.ws.readyState === 1) {
+            // Access underlying ws.WebSocket for ping() — see R2-42-2
+            // (client.ws as import("ws").WebSocket).ping();
+          }
         }).pipe(Effect.orElseSucceed(() => undefined)),
       { concurrency: "unbounded", discard: true },
     );
   }).pipe(
-    Effect.repeat(Schedule.spaced(`${intervalMs} millis`)),
+    Effect.repeat(Schedule.spaced(intervalMs)),
     Effect.annotateLogs("component", "ws-heartbeat"),
   );
 ```
@@ -945,7 +1028,19 @@ wss.on("connection", (ws, req) => {
 - `monitoring-wiring.ts`, `poller-wiring.ts`, `session-lifecycle-wiring.ts`, `timer-wiring.ts` — change `import type { WebSocketHandler }` to import the bridge type
 - Delete `test/unit/server/ws-handler.pbt.test.ts` and `test/unit/server/ws-handler-sessions.test.ts` (replaced by `ws-handler-effect.test.ts`)
 
-**Step 4:** Verify: `pnpm test && pnpm check`
+**Step 4:** Write bridge-level tests.
+
+> **AUDIT FIX (R2-43-1):** The executing agent MUST write tests for the bridge
+> pattern, not just "update relevant relay tests." At minimum:
+> - Create WsHandlerState layer with test doubles
+> - Register mock WS clients via addClient
+> - Verify broadcast reaches all clients
+> - Verify sendTo targets correct client only
+> - Verify removeClient cleans up state
+> - Verify concurrent ws events (rapid connect/disconnect) don't corrupt state
+> - Test the ManagedRuntime lifecycle: creation, usage, disposal
+
+**Step 5:** Verify: `pnpm test && pnpm check`
 
 Commit: `refactor(effect): wire relay to Effect WS transport, delete ws-handler.ts`
 
@@ -986,58 +1081,112 @@ No separate commit — this is part of Task 41's commit.
 
 ## Task 45: Frontend validation integration
 
+> **AUDIT FIX (U45-1 revised):** User chose async lazy-load with pre-loading
+> during the app loading screen. The ~50KB Schema module stays code-split out
+> of the main bundle. The app pre-loads the decoder before opening the WS
+> connection, so the decoder is always cached and synchronous by the time
+> messages arrive. No reordering risk. No bundle bloat.
+>
+> **AUDIT FIX (R2-45-ASK-1):** `effect-boundary.ts` is kept and used — it is
+> the decoder source. Not dead code.
+
 **Files:**
-- Modify: `src/lib/frontend/transport/runtime.ts`
+- Modify: `src/lib/frontend/effect-boundary.ts` (add `preloadDecoder` + sync `decodeMessage` exports)
+- Modify: `src/lib/frontend/transport/runtime.ts` (pre-load decoder during init, use in message handler)
 - Test: `test/unit/frontend/runtime-validation.test.ts`
 
-**Context:** Phase 5 Task 36 created `effect-boundary.ts` with `validateIncomingMessage`. The `wsMessageStream` function in `runtime.ts` currently does:
-```typescript
-const msg = JSON.parse(evt.data) as RelayMessage;
-emit(Effect.succeed(Chunk.of(msg)));
-```
-
-This task wires in validation so malformed messages are caught at the boundary.
+**Context:** Phase 5 Task 36 created `effect-boundary.ts` with `validateIncomingMessage` (async lazy-load decoder). This task:
+1. Adds a `preloadDecoder()` export so the app can eagerly load during loading screen
+2. Adds a synchronous `decodeMessage(raw)` export for use after preload
+3. Wires the message handler to use the pre-loaded synchronous decoder
+4. Keeps ~50KB out of the main bundle via code-splitting
 
 **Step 1: Write the test**
 
 ```typescript
 // test/unit/frontend/runtime-validation.test.ts
 import { describe, it, expect } from "vitest";
-import { wsMessageStream } from "../../../src/lib/frontend/transport/runtime.js";
+
+describe("effect-boundary preload + decode", () => {
+  it("preloadDecoder resolves and caches decoder", async () => {
+    const { preloadDecoder, decodeMessage } = await import(
+      "../../../src/lib/frontend/effect-boundary.js"
+    );
+    await preloadDecoder();
+    // After preload, decodeMessage should work synchronously
+    const result = decodeMessage({ type: "get_sessions" });
+    expect(result.type).toBe("get_sessions");
+  });
+
+  it("decodeMessage passes through unknown types (graceful degradation)", async () => {
+    const { preloadDecoder, decodeMessage } = await import(
+      "../../../src/lib/frontend/effect-boundary.js"
+    );
+    await preloadDecoder();
+    const raw = { type: "future_unknown_type", data: 123 };
+    const result = decodeMessage(raw);
+    // Unknown types pass through unchanged for forward compat
+    expect(result).toEqual(raw);
+  });
+
+  it("decodeMessage throws if called before preload", async () => {
+    // The executing agent should test this edge case — verify
+    // decodeMessage throws a clear error if preloadDecoder wasn't called
+  });
+});
 
 describe("wsMessageStream with validation", () => {
-  it("parses valid relay messages", async () => {
-    // Create a mock WebSocket that emits a valid message
-    // Verify the stream produces the parsed message
-  });
-
-  it("skips invalid JSON gracefully", async () => {
-    // Create a mock WebSocket that emits invalid JSON
-    // Verify the stream skips without erroring
-  });
-
-  it("passes through unknown message types", async () => {
-    // Create a mock WebSocket that emits { type: "future_type" }
-    // Verify the stream passes it through (graceful degradation)
-  });
+  // AUDIT FIX (R2-45-3): The executing agent MUST write real test
+  // implementations, not skeleton comments. At minimum:
+  // 1. Create a mock WebSocket that emits MessageEvents
+  // 2. Pre-load decoder, then consume stream
+  // 3. Test: valid message → decoded in stream output
+  // 4. Test: invalid JSON → silently skipped, no stream error
+  // 5. Test: unknown type → passes through unchanged
+  // 6. Test: malformed known type (e.g. { type: "delta" } missing sessionId)
+  //    → verify behavior (pass through or skip)
 });
 ```
 
-**Step 2: Modify runtime.ts**
+**Step 2: Modify effect-boundary.ts**
 
-> **AUDIT FIX (U45-1):** User chose synchronous eager import (approach 2) to
-> guarantee message ordering. Adds ~50KB to main bundle but eliminates async
-> complexity and first-message reordering risk.
+Add synchronous `decodeMessage` and `preloadDecoder` exports alongside existing `validateIncomingMessage`:
 
 ```typescript
-// At top of runtime.ts, add static imports:
-import { RelayMessageSchema } from "../shared-types.js";
-import { Schema, Either } from "effect";
+// src/lib/frontend/effect-boundary.ts
+// ... existing lazy-load code stays ...
 
-// Create decoder once at module load (synchronous, no lazy import)
-const decodeRelayMessage = Schema.decodeUnknownEither(RelayMessageSchema);
+// ─── Pre-load API for app init ──────────────────────────────────────────────
+// Call preloadDecoder() during loading screen. After it resolves, decodeMessage()
+// works synchronously — no async, no reordering.
 
-// In wsMessageStream, change:
+export const preloadDecoder = async (): Promise<void> => {
+  await getDecoder(); // populates _decoder cache
+};
+
+export const decodeMessage = (raw: unknown): unknown => {
+  if (!_decoder) {
+    throw new Error("decodeMessage called before preloadDecoder() resolved");
+  }
+  return _decoder(raw);
+};
+```
+
+**Step 3: Modify runtime.ts**
+
+> **AUDIT FIX (R2-45-1):** Import path from runtime.ts must be
+> `../../effect-boundary.js` (not `../shared-types.js` — wrong depth).
+
+```typescript
+// At top of runtime.ts:
+import { preloadDecoder, decodeMessage } from "../../effect-boundary.js";
+
+// During app/transport init (before WS connection opens):
+// The executing agent must find the appropriate init point — likely where
+// the loading screen is shown — and add:
+await preloadDecoder();
+
+// In wsMessageStream message handler, change:
 // BEFORE:
 socket.addEventListener("message", (evt) => {
   try {
@@ -1052,10 +1201,9 @@ socket.addEventListener("message", (evt) => {
 socket.addEventListener("message", (evt) => {
   try {
     const raw = JSON.parse(evt.data);
-    // Synchronous Schema validation — known types get validated,
-    // unknown types pass through unchanged (graceful degradation)
-    const result = decodeRelayMessage(raw);
-    const msg = (Either.isRight(result) ? result.right : raw) as RelayMessage;
+    // Synchronous — decoder was pre-loaded during loading screen.
+    // Known types get validated; unknown types pass through for forward compat.
+    const msg = decodeMessage(raw) as RelayMessage;
     emit(Effect.succeed(Chunk.of(msg)));
   } catch {
     // skip bad JSON
@@ -1063,10 +1211,11 @@ socket.addEventListener("message", (evt) => {
 });
 ```
 
-> **NOTE:** This adds `effect` and `RelayMessageSchema` to the main frontend
-> bundle (~50KB gzipped). The `effect-boundary.ts` lazy-load module from
-> Phase 5 Task 36 is still available for consumers that prefer code-splitting,
-> but the stream uses the synchronous path for ordering guarantees.
+> **NOTE:** The `as RelayMessage` cast is on `decodeMessage(raw)` which returns
+> either a validated known type or the raw unknown type passed through. The cast
+> is necessary because the stream expects `RelayMessage`, but the executing agent
+> should be aware this is a deliberate type widening for forward compatibility —
+> unknown message types will have the raw shape, not the schema-validated shape.
 
 Commit: `feat(effect): integrate Schema validation into frontend WS message stream`
 
