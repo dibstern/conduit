@@ -22,6 +22,7 @@ import {
 	Supervisor,
 } from "effect";
 
+import type { DaemonOptions } from "../daemon/daemon-types.js";
 import {
 	type CrashLimitExceeded,
 	runStartupSequence,
@@ -143,3 +144,42 @@ export const makeDaemonProgramLayer = (
 			yield* Effect.never; // Keep alive until interrupted
 		}).pipe(Effect.annotateLogs("component", "daemon-main")),
 	).pipe(Layer.provide(daemonLayer));
+
+// ─── Imperative bridge: startDaemonProcess ───────────────────────────────
+// Thin wrapper that constructs a Daemon instance and starts it.
+// This is the entry point for both "daemon" (background) and "foreground"
+// CLI modes. Once all services have Effect-native Layer implementations
+// (InstanceManager, ProjectRegistry, etc.), this function will be replaced
+// by `Layer.launch(makeDaemonProgramLayer(...))`.
+
+/**
+ * Start the daemon process. Lazily imports the Daemon class to keep
+ * daemon-main.ts free of heavy transitive deps at module-load time.
+ *
+ * Returns the running Daemon instance (needed by foreground mode for
+ * addProject / discoverProjects / getStatus / port).
+ */
+export async function startDaemonProcess(
+	options: DaemonOptions,
+): Promise<DaemonHandle> {
+	const { Daemon } = await import("../daemon/daemon.js");
+	const daemon = new Daemon(options);
+	await daemon.start();
+	return daemon;
+}
+
+/**
+ * Structural type covering the Daemon instance methods used by cli-core.ts
+ * in foreground mode. Keeps the public contract narrow so the Daemon class
+ * can eventually be replaced without changing callers.
+ */
+export interface DaemonHandle {
+	readonly port: number;
+	addProject(
+		directory: string,
+		slug?: string,
+		instanceId?: string,
+	): Promise<import("../types.js").StoredProject>;
+	discoverProjects(): Promise<void>;
+	getStatus(): import("../daemon/daemon-types.js").DaemonStatus;
+}

@@ -6,7 +6,7 @@ import { type ChildProcess, spawn as cpSpawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT, RELAY_ENV_KEYS } from "../env.js";
-import type { DaemonOptions, SpawnConfig } from "./daemon.js";
+import type { DaemonOptions, SpawnConfig } from "./daemon-types.js";
 
 // ─── buildSpawnConfig ───────────────────────────────────────────────────────
 

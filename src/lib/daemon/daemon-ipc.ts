@@ -10,7 +10,7 @@ import type {
 	OpenCodeInstance,
 	StoredProject,
 } from "../types.js";
-import type { DaemonStatus } from "./daemon.js";
+import type { DaemonStatus } from "./daemon-types.js";
 
 // ─── Context interface ──────────────────────────────────────────────────────
 // Narrow surface the IPC handlers need from the Daemon instance.

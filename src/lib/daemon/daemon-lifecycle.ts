@@ -21,8 +21,8 @@ import { formatErrorDetail } from "../errors.js";
 import { createLogger } from "../logger.js";
 import { serveStaticFile, tryServeStatic } from "../server/static-files.js";
 import type { SetupInfoResponse } from "../shared-types.js";
-import type { DaemonStatus } from "./daemon.js";
 import { buildIPCHandlers, type DaemonIPCContext } from "./daemon-ipc.js";
+import type { DaemonStatus } from "./daemon-types.js";
 import {
 	createCommandRouter,
 	parseCommand,

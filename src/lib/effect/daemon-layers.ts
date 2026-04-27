@@ -5,7 +5,6 @@
 
 import { NodeFileSystem } from "@effect/platform-node";
 import { Deferred, Effect, Layer, Ref } from "effect";
-import type { DaemonStatus } from "../daemon/daemon.js";
 import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
 import {
 	closeHttpServer,
@@ -17,6 +16,7 @@ import {
 	startIPCServer,
 	startOnboardingServer,
 } from "../daemon/daemon-lifecycle.js";
+import type { DaemonStatus } from "../daemon/daemon-types.js";
 import {
 	removePidFile,
 	removeSocketFile,

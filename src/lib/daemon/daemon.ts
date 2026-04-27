@@ -2,7 +2,7 @@
 // Background daemon that persists across terminal sessions. Manages the HTTP
 // server, multiple projects, and communicates with CLI via Unix socket IPC.
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import type { Server as HttpServer } from "node:http";
 import type { Server as NetServer, Socket } from "node:net";
 import { homedir } from "node:os";
@@ -26,9 +26,7 @@ import { formatErrorDetail } from "../errors.js";
 import { InstanceManager } from "../instance/instance-manager.js";
 import {
 	createLogger,
-	type LogFormat,
 	type Logger,
-	type LogLevel,
 	setLogFormat,
 	setLogLevel,
 } from "../logger.js";
@@ -59,15 +57,20 @@ import {
 	buildSpawnConfig as buildSpawnConfigImpl,
 	spawnDaemon,
 } from "./daemon-spawn.js";
+import type {
+	DaemonOptions,
+	DaemonStatus,
+	SpawnConfig,
+} from "./daemon-types.js";
 import {
 	findFreePort,
+	isDaemonRunning,
 	isOpencodeInstalled,
 	probeOpenCode,
 	probeOpenCodePort,
 } from "./daemon-utils.js";
 import { KeepAwake } from "./keep-awake.js";
 import {
-	cleanupStalePidFiles,
 	removePidFile,
 	removeSocketFile,
 	writePidFile,
@@ -98,72 +101,16 @@ const DEFAULT_STATIC_DIR = existsSync(_candidate)
 	? _candidate
 	: join(process.cwd(), "dist", "frontend");
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types (re-exported from daemon-types.ts) ──────────────────────────────
+// Canonical definitions live in daemon-types.ts so that lightweight consumers
+// (daemon-ipc.ts, daemon-lifecycle.ts, daemon-spawn.ts, daemon-layers.ts)
+// can import types without pulling in the full Daemon class.
 
-export interface DaemonOptions {
-	port?: number;
-	/** Bind address for the HTTP server (default: "127.0.0.1"). Set to "0.0.0.0" to listen on all interfaces. */
-	host?: string;
-	configDir?: string;
-	socketPath?: string;
-	logPath?: string;
-	pidPath?: string;
-	pinHash?: string;
-	tlsEnabled?: boolean;
-	keepAwake?: boolean;
-	/** User-provided keep-awake command (overrides auto-detection). */
-	keepAwakeCommand?: string;
-	/** Args for user-provided keep-awake command. */
-	keepAwakeArgs?: string[];
-	/** OpenCode server URL (e.g., "http://localhost:4096") */
-	opencodeUrl?: string;
-	/** Override the static file directory (default: dist/frontend relative to cwd) */
-	staticDir?: string;
-	/**
-	 * Enable smart default detection in start().
-	 * When true (default) and no opencodeUrl is provided, probes localhost:4096
-	 * to decide whether to connect as unmanaged or spawn as managed.
-	 * Also controls the port scanner (auto-discovery of OpenCode instances)
-	 * and startup project discovery from running instances.
-	 * Set to false in tests that don't want network probing.
-	 */
-	smartDefault?: boolean;
-	/** Log level override (default: info). */
-	logLevel?: LogLevel;
-	/** Log format override (default: json for daemon, pretty for foreground). */
-	logFormat?: LogFormat;
-}
-
-export interface DaemonStatus {
-	ok: boolean;
-	uptime: number;
-	port: number;
-	host: string;
-	/** Tailscale IP if detected, for share URL construction. */
-	tailscaleIP?: string;
-	/** First LAN IP (non-Tailscale routable address), for share URL construction. */
-	lanIP?: string;
-	projectCount: number;
-	sessionCount: number;
-	clientCount: number;
-	pinEnabled: boolean;
-	tlsEnabled: boolean;
-	keepAwake: boolean;
-	projects: Array<{
-		slug: string;
-		directory: string;
-		title: string;
-		status?: string;
-		lastUsed?: number;
-	}>;
-}
-
-/** Spawn configuration built by buildSpawnConfig() — testable without mocking */
-export interface SpawnConfig {
-	execPath: string;
-	args: string[];
-	options: import("node:child_process").SpawnOptions;
-}
+export type {
+	DaemonOptions,
+	DaemonStatus,
+	SpawnConfig,
+} from "./daemon-types.js";
 
 // ─── Daemon ─────────────────────────────────────────────────────────────────
 
@@ -1535,56 +1482,9 @@ export class Daemon {
 
 	// ─── Static methods ─────────────────────────────────────────────────────
 
-	/** Check if a daemon is already running */
-	static async isRunning(socketPath?: string): Promise<boolean> {
-		const resolvedSocketPath =
-			socketPath ?? join(DEFAULT_CONFIG_DIR, "relay.sock");
-		const pidPath = resolvedSocketPath.replace(/relay\.sock$/, "daemon.pid");
-
-		// Check PID file
-		let pid: number | null = null;
-		try {
-			const content = readFileSync(pidPath, "utf-8").trim();
-			pid = Number.parseInt(content, 10);
-		} catch {
-			// No PID file — try socket directly (PID file may have been
-			// cleaned up while the daemon is still running)
-		}
-
-		if (pid !== null && !Number.isNaN(pid)) {
-			// Check if PID is alive
-			try {
-				process.kill(pid, 0);
-			} catch {
-				// Process doesn't exist — stale
-				cleanupStalePidFiles(pidPath, resolvedSocketPath);
-				return false;
-			}
-		}
-
-		// Verify via socket connection (works even without PID file)
-		const { connect } = await import("node:net");
-		return new Promise((resolve) => {
-			const client = connect(resolvedSocketPath);
-			const timeout = setTimeout(() => {
-				client.destroy();
-				resolve(false);
-			}, 2000);
-
-			client.on("connect", () => {
-				clearTimeout(timeout);
-				client.destroy();
-				resolve(true);
-			});
-
-			client.on("error", () => {
-				clearTimeout(timeout);
-				if (pid !== null) {
-					cleanupStalePidFiles(pidPath, resolvedSocketPath);
-				}
-				resolve(false);
-			});
-		});
+	/** Check if a daemon is already running. Delegates to isDaemonRunning(). */
+	static isRunning(socketPath?: string): Promise<boolean> {
+		return isDaemonRunning(socketPath);
 	}
 
 	/**
