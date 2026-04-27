@@ -931,11 +931,22 @@ export const makeWsTransportLive = (
 > leaks and stale client counts. The heartbeat below MUST replicate this
 > protocol, not just ping.
 >
-> **AUDIT FIX (R2-42-2):** `client.ws` is the WsConn type from
-> ws-handler-service. The executing agent MUST verify whether WsConn exposes
-> the underlying `ws.WebSocket` for calling `ping()` and registering `pong`
-> listeners. If WsConn wraps it, either extend the interface or access the
-> raw socket via a typed accessor (not `as any`).
+> **AUDIT FIX (R2-42-2 — RESOLVED):** `WsConn` interface in ws-handler-service
+> only has `send`, `readyState`, `close`. It lacks `ping()` and `terminate()`
+> needed for heartbeat. The executing agent MUST extend `WsConn`:
+> ```typescript
+> export interface WsConn {
+>   send(data: string): void;
+>   readyState: number;
+>   close(code?: number, reason?: string): void;
+>   ping?(): void;        // Optional — only present on real ws.WebSocket
+>   terminate?(): void;   // Optional — forceful close without handshake
+> }
+> ```
+> Then the heartbeat uses optional chaining: `client.ws.ping?.()` and
+> `client.ws.terminate?.()`. This keeps WsConn testable (mocks don't need
+> ping/terminate) while allowing real ws.WebSocket instances to pass through.
+> The `ws` library's WebSocket has both methods — confirmed in ws types.
 >
 > **AUDIT FIX (R2-42-3):** `Schedule.spaced` takes a number (milliseconds)
 > or `Duration.millis(n)`, NOT a template literal string. Use
@@ -989,6 +1000,8 @@ Commit: `feat(effect): add WebSocket transport Layer wrapping ws library`
 - Modify: `src/lib/relay/poller-wiring.ts` (update type import)
 - Modify: `src/lib/relay/session-lifecycle-wiring.ts` (update type import)
 - Modify: `src/lib/relay/timer-wiring.ts` (update type import)
+- Modify: `src/lib/relay/handler-deps-wiring.ts` (update type import — uses `.on()` events)
+- Verify: `src/lib/relay/sse-wiring.ts`, `src/lib/relay/pty-upstream.ts` (heavy `wsHandler.` consumers via deps — no import change needed, but bridge must satisfy their usage)
 - Delete: `src/lib/server/ws-handler.ts`
 - Test: update relevant relay tests
 
@@ -1001,13 +1014,51 @@ Commit: `feat(effect): add WebSocket transport Layer wrapping ws library`
 5. Wire `ws.on("close")` and `ws.on("error")` to `removeClient`
 6. Update the `ProjectRelay` interface — `wsHandler` property type changes from `WebSocketHandler` to the new bridge
 
-**Key: The wiring files use `WebSocketHandler` type for:**
+**Key: COMPLETE bridge method mapping (all `wsHandler.` usages across codebase):**
+
+State/messaging methods (bridge to ws-handler-service Effect functions via ManagedRuntime.runSync):
 - `wsHandler.broadcast(message)` → `broadcast` from ws-handler-service
 - `wsHandler.sendTo(clientId, message)` → `sendTo` from ws-handler-service
+- `wsHandler.sendToSession(sessionId, message)` → `sendToSession` from ws-handler-service (used in monitoring-wiring:131, sse-wiring:365,578)
 - `wsHandler.broadcastPerSessionEvent(sessionId, message)` → `broadcastPerSessionEvent` from ws-handler-service
 - `wsHandler.markClientBootstrapped(clientId)` → `markClientBootstrapped` from ws-handler-service
 - `wsHandler.getClientCount()` → `getClientCount` from ws-handler-service
+- `wsHandler.getClientsForSession(sessionId)` → `getSessionViewers` from ws-handler-service (used in monitoring-wiring:145, poller-wiring:81, sse-wiring:382)
 - `wsHandler.setClientSession(clientId, sessionId)` → `bindClientSession` from ws-handler-service
+
+Transport/lifecycle methods (bridge to WsTransportTag or direct implementation):
+- `wsHandler.handleUpgrade(req, socket, head)` → delegate to `WsTransportTag.handleUpgrade` (used in relay-stack:757,766)
+- `wsHandler.close()` → close the ManagedRuntime + wss (used in relay-stack:549 for shutdown)
+
+Event emitter methods (bridge TrackedService `.on()` pattern):
+- `wsHandler.on("client_connected", cb)` → used in handler-deps-wiring:119
+- `wsHandler.on("client_disconnected", cb)` → used in handler-deps-wiring:131
+- `wsHandler.on("message", cb)` → used in handler-deps-wiring:201
+
+**Event system bridge design:** The old `WebSocketHandler` extends `TrackedService` (EventEmitter pattern). The bridge MUST provide an equivalent. Options:
+- (a) Simple EventEmitter: `const events = new EventEmitter()` on the bridge object, emit during `wss.on("connection")` handler. Bridge `.on()` delegates to this emitter.
+- (b) Effect PubSub: overkill for imperative consumers — choose (a).
+
+The `wss.on("connection")` handler in Step 2 must emit these events:
+```typescript
+wss.on("connection", (ws, req) => {
+  const clientId = generateClientId();
+  const requestedSessionId = extractSessionFromUrl(req.url);
+  runtime.runSync(addClient(clientId, ws));
+  events.emit("client_connected", { clientId, requestedSessionId });
+
+  ws.on("message", (data) => {
+    const msg = parseIncomingMessage(data);
+    if (msg) events.emit("message", { clientId, handler: msg.handler, payload: msg.payload });
+  });
+
+  ws.on("close", () => {
+    const sessionId = runtime.runSync(getClientSession(clientId));
+    runtime.runSync(removeClient(clientId));
+    events.emit("client_disconnected", { clientId, sessionId });
+  });
+});
+```
 
 > **AUDIT FIX (R3-43-1):** The old `WebSocketHandler` also has
 > `getClientsForSession(sessionId)` which is used by wiring files but NOT
@@ -1179,15 +1230,27 @@ describe("effect-boundary preload + decode", () => {
 });
 
 describe("wsMessageStream with validation", () => {
-  // AUDIT FIX (R2-45-3): The executing agent MUST write real test
-  // implementations, not skeleton comments. At minimum:
-  // 1. Create a mock WebSocket that emits MessageEvents
-  // 2. Pre-load decoder, then consume stream
-  // 3. Test: valid message → decoded in stream output
-  // 4. Test: invalid JSON → silently skipped, no stream error
-  // 5. Test: unknown type → passes through unchanged
-  // 6. Test: malformed known type (e.g. { type: "delta" } missing sessionId)
-  //    → verify behavior (pass through or skip)
+  // AUDIT FIX (R2-45-3 + R4-45-1): The executing agent MUST write FULL test
+  // implementations — not comments. Provide a MockWebSocket class:
+  //
+  // class MockWebSocket extends EventTarget {
+  //   constructor(public readyState = WebSocket.OPEN) { super(); }
+  //   close() { this.readyState = WebSocket.CLOSED; }
+  //   emitMessage(data: string) {
+  //     this.dispatchEvent(new MessageEvent("message", { data }));
+  //   }
+  // }
+  //
+  // Then write tests that:
+  // 1. Create MockWebSocket, call preloadDecoder(), create stream, emit messages
+  // 2. Collect stream output via Stream.runCollect or toArray
+  // 3. Assert: valid known type (e.g. { type: "delta", sessionId: "s1", text: "hi" })
+  //    → appears in collected output with correct shape
+  // 4. Assert: invalid JSON string "not json{" → silently skipped, stream continues
+  // 5. Assert: unknown type { type: "future_type", data: 1 } → passes through unchanged
+  // 6. Assert: malformed known type { type: "delta" } (missing sessionId) → passes
+  //    through raw (graceful degradation, not dropped)
+  // 7. Assert: stream completes when socket closes
 });
 ```
 
@@ -1265,11 +1328,19 @@ socket.addEventListener("message", (evt) => {
 });
 ```
 
-> **NOTE:** The `as RelayMessage` cast is on `decodeMessage(raw)` which returns
-> either a validated known type or the raw unknown type passed through. The cast
-> is necessary because the stream expects `RelayMessage`, but the executing agent
-> should be aware this is a deliberate type widening for forward compatibility —
-> unknown message types will have the raw shape, not the schema-validated shape.
+> **AUDIT FIX (R4-45-2):** The `as RelayMessage` cast is INTENTIONAL but must
+> be understood: `decodeMessage(raw)` returns validated data for known types OR
+> raw passthrough for unknown/malformed types. The cast is safe because:
+> 1. All messages have a `type` field (JSON parse succeeded + has structure)
+> 2. Downstream switch statements on `msg.type` already ignore unknown types
+> 3. Malformed known types (e.g. `{ type: "delta" }` missing fields) pass through
+>    raw — downstream code accesses optional fields safely via existing guards
+>
+> This is deliberate type widening for forward compatibility. The alternative
+> (dropping failed decodes) would break when the server adds new message types
+> that the frontend schema doesn't know yet. Do NOT change this to drop messages.
+> The executing agent should verify that downstream consumers don't destructure
+> without null checks on fields that could be missing in the passthrough case.
 
 Commit: `feat(effect): integrate Schema validation into frontend WS message stream`
 
@@ -1278,7 +1349,12 @@ Commit: `feat(effect): integrate Schema validation into frontend WS message stre
 ## Task 46: Delete old files, cleanup, and final verification
 
 **Files to delete:**
-- `src/lib/server/static-files.ts` (replaced by `static-file-handler.ts`)
+- ~~`src/lib/server/static-files.ts`~~ — **DO NOT DELETE.** `daemon-lifecycle.ts:22`
+  imports `serveStaticFile`/`tryServeStatic` for the HTTP onboarding server
+  (pre-TLS setup page at `/setup`). This is a separate server from the main
+  daemon and still needs the Node-native static file helpers. Deletion would
+  break onboarding. The Effect `static-file-handler.ts` serves the MAIN daemon
+  only — the onboarding server is not Effect-based.
 - Old test files for deleted modules:
   - `test/unit/server/server.pbt.test.ts`
   - `test/unit/server/push-routes.test.ts` (if it depends on RelayServer)
@@ -1300,7 +1376,7 @@ grep -r "from.*server/ws-handler" src/ --include="*.ts" | grep -v node_modules
 # Expected: 0 (all consumers updated)
 
 grep -r "from.*server/static-files" src/ --include="*.ts" | grep -v node_modules
-# Expected: 0 (replaced by static-file-handler.ts)
+# Expected: 1 (daemon-lifecycle.ts onboarding server — intentionally kept)
 ```
 
 **Verification suite:**
@@ -1343,7 +1419,7 @@ This is **merge milestone M4b**.
 | 43 | Wire relay to Effect WS, delete ws-handler | `ws-handler.ts` | **High** |
 | 44 | *(merged into Task 41)* | — | — |
 | 45 | Frontend validation (async pre-load during loading screen) | — | Low |
-| 46 | Delete old files + verification | `static-files.ts`, old tests | Medium |
+| 46 | Delete old files + verification | old tests (NOT static-files.ts) | Medium |
 
 > **Tasks 38-41 are ATOMIC.** They replace the entire HTTP request path (including WS upgrade auth from merged Task 44).
 > **Tasks 42-43 are ATOMIC.** They replace the WS transport.
