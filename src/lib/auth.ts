@@ -1,6 +1,70 @@
 // ─── PIN Authentication & Rate Limiting (Ticket 2.4, 8.4) ───────────────────
 
 import { createHash, randomBytes } from "node:crypto";
+import { Data, Effect } from "effect";
+
+// ─── Effect Error Types ───────────────────────────────────────────────────────
+
+export class AuthenticationError extends Data.TaggedError(
+	"AuthenticationError",
+)<{
+	reason: "invalid_pin" | "locked_out" | "no_pin_set";
+	retryAfter?: number;
+}> {}
+
+// ─── Effect-based Functions ───────────────────────────────────────────────────
+
+/**
+ * Hash a PIN with domain-specific prefix, wrapped in Effect.sync.
+ * Pure computation — cannot fail.
+ */
+export const hashPinEffect = (pin: string): Effect.Effect<string> =>
+	Effect.sync(() => hashPin(pin));
+
+/**
+ * Verify a PIN against a stored hash.
+ * Uses Effect.sync since crypto hashing is synchronous and infallible.
+ */
+export const verifyPinEffect = (
+	hash: string,
+	pin: string,
+): Effect.Effect<boolean> => Effect.sync(() => hashPin(pin) === hash);
+
+/**
+ * Authenticate a PIN attempt through an AuthManager, returning the AuthResult
+ * on success or failing with AuthenticationError on failure.
+ */
+export const authenticateEffect = (
+	manager: AuthManager,
+	pin: string,
+	ip: string,
+): Effect.Effect<AuthResult, AuthenticationError> =>
+	Effect.sync(() => manager.authenticate(pin, ip)).pipe(
+		Effect.flatMap((result) => {
+			if (result.ok) return Effect.succeed(result);
+			if (result.locked && result.retryAfter !== undefined) {
+				return Effect.fail(
+					new AuthenticationError({
+						reason: "locked_out",
+						retryAfter: result.retryAfter,
+					}),
+				);
+			}
+			if (result.locked) {
+				return Effect.fail(new AuthenticationError({ reason: "locked_out" }));
+			}
+			return Effect.fail(new AuthenticationError({ reason: "invalid_pin" }));
+		}),
+	);
+
+/**
+ * Validate a session cookie through an AuthManager.
+ * Pure synchronous check wrapped in Effect.sync.
+ */
+export const validateCookieEffect = (
+	manager: AuthManager,
+	cookie: string,
+): Effect.Effect<boolean> => Effect.sync(() => manager.validateCookie(cookie));
 
 export interface AuthResult {
 	ok: boolean;
