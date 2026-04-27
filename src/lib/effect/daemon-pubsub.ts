@@ -37,50 +37,29 @@ export const DaemonEventBusLive = Layer.effect(
 
 // ─── Publisher Helpers ──────────────────────────────────────────────────────
 
+const publish = (event: DaemonEvent) =>
+	DaemonEventBusTag.pipe(Effect.flatMap((bus) => PubSub.publish(bus, event)));
+
 export const publishStatusChanged = (statuses: Record<string, string>) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.StatusChanged({ statuses }));
-	});
+	publish(DaemonEvent.StatusChanged({ statuses }));
 
 export const publishVersionUpdate = (current: string, latest: string) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.VersionUpdate({ current, latest }));
-	});
+	publish(DaemonEvent.VersionUpdate({ current, latest }));
 
 export const publishInstanceAdded = (instanceId: string) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.InstanceAdded({ instanceId }));
-	});
+	publish(DaemonEvent.InstanceAdded({ instanceId }));
 
 export const publishInstanceRemoved = (instanceId: string) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.InstanceRemoved({ instanceId }));
-	});
+	publish(DaemonEvent.InstanceRemoved({ instanceId }));
 
 export const publishInstanceStatusChanged = (instanceId: string) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(
-			bus,
-			DaemonEvent.InstanceStatusChanged({ instanceId }),
-		);
-	});
+	publish(DaemonEvent.InstanceStatusChanged({ instanceId }));
 
 export const publishDiskSpaceLow = (usage: number) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.DiskSpaceLow({ usage }));
-	});
+	publish(DaemonEvent.DiskSpaceLow({ usage }));
 
 export const publishDiskSpaceOk = (usage: number) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.DiskSpaceOk({ usage }));
-	});
+	publish(DaemonEvent.DiskSpaceOk({ usage }));
 
 // ─── Subscriber ─────────────────────────────────────────────────────────────
 

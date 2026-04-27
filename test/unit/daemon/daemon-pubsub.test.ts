@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue } from "effect";
-import { expect } from "vitest";
+import { assert, expect } from "vitest";
 import {
 	DaemonEventBusLive,
 	publishInstanceAdded,
@@ -37,9 +37,8 @@ describe("DaemonEventBus", () => {
 			yield* publishInstanceAdded("inst-42");
 			const result = yield* Queue.take(sub);
 			expect(result._tag).toBe("InstanceAdded");
-			if (result._tag === "InstanceAdded") {
-				expect(result.instanceId).toBe("inst-42");
-			}
+			assert(result._tag === "InstanceAdded");
+			expect(result.instanceId).toBe("inst-42");
 		}).pipe(Effect.provide(Layer.fresh(DaemonEventBusLive))),
 	);
 });
