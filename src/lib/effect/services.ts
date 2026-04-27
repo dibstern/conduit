@@ -347,4 +347,5 @@ export { RateLimiterTag } from "./rate-limiter-layer.js";
 export { RelayCacheTag } from "./relay-cache.js";
 // ─── Phase 2 Effect-native Tag re-exports ─────────────────────────────────
 export { SessionManagerStateTag } from "./session-manager-state.js";
+export { SessionRegistryStateTag } from "./session-registry-state.js";
 export { PollerPubSubTag, PollerStateTag } from "./session-status-poller.js";
