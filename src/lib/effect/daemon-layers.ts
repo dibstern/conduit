@@ -31,6 +31,7 @@ import {
 	makeDaemonStateLive,
 } from "./daemon-state.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
+import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive } from "./port-scanner-layer.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import { SessionOverridesTag, ShutdownSignalTag } from "./services.js";
@@ -327,7 +328,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		? makeDaemonStateFromDiskNode(options.configPath)
 		: makeDaemonStateLive();
 
-	// Compose: infrastructure → servers → background → state → relay cache
+	// Compose: PinoLoggerLive (bottom) → infrastructure → servers → background → state → relay cache
+	// PinoLoggerLive is the foundation: all Effect.log* calls route to Pino.
 	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
 	const infraLayer = Layer.mergeAll(signalLayer, errorLayer, pidLayer);
 
@@ -336,6 +338,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(backgroundLayer),
 		Layer.provideMerge(stateLayer),
 		Layer.provideMerge(DaemonEventBusLive),
+		Layer.provideMerge(PinoLoggerLive),
 	);
 
 	// RelayCache layer — only include if a factory is provided
