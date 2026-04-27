@@ -537,9 +537,10 @@ export async function createProjectRelay(
 			: undefined;
 
 	// ── Effect ManagedRuntime (bridge between imperative and Effect worlds) ──
-	// Includes Effect-native state Layers (SessionManagerStateTag,
-	// PollerManagerStateTag) so Effect handlers can gradually migrate to
-	// Ref-based state access alongside the imperative bridge services.
+	// makeHandlerLayer() always includes Effect-native state Layers
+	// (SessionManagerStateTag, PollerManagerStateTag, DaemonEventBusTag,
+	// OverridesStateTag) so Effect handlers can gradually migrate to
+	// Ref/PubSub-based state access alongside the imperative bridge services.
 	const effectRuntime = createRelayRuntime({
 		wsHandler,
 		client: api,
@@ -556,8 +557,6 @@ export async function createProjectRelay(
 		connectPtyUpstream,
 		forkMeta,
 		orchestrationEngine: orchestration.engine,
-		includeSessionManagerState: true,
-		includePollerManagerState: true,
 		...(readQuery != null && { readQuery }),
 		...(claudeEventPersist != null && { claudeEventPersist }),
 		...(providerStateService != null && { providerStateService }),

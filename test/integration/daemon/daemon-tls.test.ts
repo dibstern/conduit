@@ -19,9 +19,9 @@ import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { startHttpServer } from "../../../src/lib/daemon/daemon-lifecycle.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 
 // ─── Generate test certs (same pattern as server.pbt.test.ts) ────────────────
 
@@ -250,7 +250,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "key.pem"), testKey);
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 
-			const d = new Daemon({
+			const d = await startDaemonProcess({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -261,7 +261,6 @@ describe("Daemon TLS integration", () => {
 				smartDefault: false,
 			});
 
-			await d.start();
 			const port = d.port;
 
 			// HTTPS GET /health should work
@@ -287,7 +286,7 @@ describe("Daemon TLS integration", () => {
 			// the fallback CA root lookup when mkcert is not installed.
 			writeFileSync(join(daemonCertDir, "rootCA.pem"), testCert);
 
-			const d = new Daemon({
+			const d = await startDaemonProcess({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -298,7 +297,6 @@ describe("Daemon TLS integration", () => {
 				smartDefault: false,
 			});
 
-			await d.start();
 			const port = d.port;
 
 			// /ca/download should return the CA certificate (DER-encoded for iOS)
@@ -319,7 +317,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "key.pem"), testKey);
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 
-			const d = new Daemon({
+			const d = await startDaemonProcess({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -331,8 +329,6 @@ describe("Daemon TLS integration", () => {
 				// No explicit host — should auto-bind to 0.0.0.0
 			});
 
-			await d.start();
-
 			const status = d.getStatus();
 			expect(status.host).toBe("0.0.0.0");
 
@@ -341,7 +337,7 @@ describe("Daemon TLS integration", () => {
 	);
 
 	it("daemon without TLS stays bound to 127.0.0.1", async () => {
-		const d = new Daemon({
+		const d = await startDaemonProcess({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -351,8 +347,6 @@ describe("Daemon TLS integration", () => {
 			tlsEnabled: false,
 			smartDefault: false,
 		});
-
-		await d.start();
 
 		const status = d.getStatus();
 		expect(status.host).toBe("127.0.0.1");
@@ -368,7 +362,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "key.pem"), testKey);
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 
-			const d = new Daemon({
+			const d = await startDaemonProcess({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -379,8 +373,6 @@ describe("Daemon TLS integration", () => {
 				tlsEnabled: true,
 				smartDefault: false,
 			});
-
-			await d.start();
 
 			const status = d.getStatus();
 			expect(status.host).toBe("127.0.0.1");
@@ -398,7 +390,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 			writeFileSync(join(daemonCertDir, "rootCA.pem"), testCert);
 
-			const d = new Daemon({
+			const d = await startDaemonProcess({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -409,7 +401,6 @@ describe("Daemon TLS integration", () => {
 				smartDefault: false,
 			});
 
-			await d.start();
 			const mainPort = d.port;
 			const onboardingPort = mainPort + 1;
 

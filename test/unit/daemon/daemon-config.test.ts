@@ -64,6 +64,7 @@ describe("DaemonEnvConfig", () => {
 
 			expect(config.opencodePassword).toBeDefined();
 			expect(Redacted.isRedacted(config.opencodePassword)).toBe(true);
+			// biome-ignore lint/style/noNonNullAssertion: previous assertion guarantees defined
 			expect(Redacted.value(config.opencodePassword!)).toBe("super-secret");
 		}).pipe(
 			Effect.provide(testLayer([["OPENCODE_SERVER_PASSWORD", "super-secret"]])),

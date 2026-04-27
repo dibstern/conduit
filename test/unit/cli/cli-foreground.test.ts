@@ -1,55 +1,47 @@
 // ─── Tests: --foreground handler in run() ────────────────────────────────────
 //
-// The --foreground handler creates a Daemon internally (no DI seam).
-// We mock the Daemon class at the module level to test the handler logic
+// The --foreground handler calls startDaemonProcess internally (no DI seam).
+// We mock startDaemonProcess at the module level to test the handler logic
 // without starting real HTTP/IPC servers.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── Mock Daemon ─────────────────────────────────────────────────────────────
+// ─── Mock startDaemonProcess ────────────────────────────────────────────────
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in the factory
-const { mockStart, mockAddProject, MockDaemonClass, mockEnv } = vi.hoisted(
-	() => {
-		const mockStart = vi.fn().mockResolvedValue(undefined);
-		const mockStop = vi.fn().mockResolvedValue(undefined);
-		const mockAddProject = vi
-			.fn()
-			.mockResolvedValue({ slug: "test-project", directory: "/test/project" });
-		const mockDiscoverProjects = vi.fn().mockResolvedValue(undefined);
+const { mockAddProject, mockStartDaemonProcess, mockEnv } = vi.hoisted(() => {
+	const mockAddProject = vi
+		.fn()
+		.mockResolvedValue({ slug: "test-project", directory: "/test/project" });
+	const mockDiscoverProjects = vi.fn().mockResolvedValue(undefined);
 
-		const MockDaemonClass = Object.assign(
-			vi.fn().mockImplementation((opts: { port?: number }) => ({
-				start: mockStart,
-				stop: mockStop,
+	const mockStartDaemonProcess = vi
+		.fn()
+		.mockImplementation((opts: { port?: number }) =>
+			Promise.resolve({
 				addProject: mockAddProject,
 				discoverProjects: mockDiscoverProjects,
 				getStatus: vi
 					.fn()
 					.mockReturnValue({ tlsEnabled: true, host: "0.0.0.0" }),
 				port: opts?.port ?? 2633,
-			})),
-			{
-				// Preserve static methods used by run() for default wiring
-				isRunning: vi.fn().mockResolvedValue(false),
-				spawn: vi.fn().mockResolvedValue({ pid: 1, port: 2633 }),
-				buildSpawnConfig: vi.fn(),
-			},
+			}),
 		);
 
-		// Mutable ENV override — defaults to undefined (no override)
-		const mockEnv = { opencodeUrl: undefined as string | undefined };
+	// Mutable ENV override — defaults to undefined (no override)
+	const mockEnv = { opencodeUrl: undefined as string | undefined };
 
-		return { mockStart, mockStop, mockAddProject, MockDaemonClass, mockEnv };
-	},
-);
+	return { mockAddProject, mockStartDaemonProcess, mockEnv };
+});
 
-vi.mock("../../../src/lib/daemon/daemon.js", async (importOriginal) => {
+vi.mock("../../../src/lib/effect/daemon-main.js", async (importOriginal) => {
 	const original =
-		await importOriginal<typeof import("../../../src/lib/daemon/daemon.js")>();
+		await importOriginal<
+			typeof import("../../../src/lib/effect/daemon-main.js")
+		>();
 	return {
 		...original,
-		Daemon: MockDaemonClass,
+		startDaemonProcess: mockStartDaemonProcess,
 	};
 });
 
@@ -71,7 +63,6 @@ vi.mock("../../../src/lib/env.js", async (importOriginal) => {
 
 // Import AFTER vi.mock (vitest hoists the mock)
 import { run } from "../../../src/bin/cli-core.js";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -127,14 +118,14 @@ describe("--foreground handler", () => {
 		expect(joined).toContain("Ready.");
 	});
 
-	it("creates Daemon with correct port and opencodeUrl from --oc-port", async () => {
+	it("calls startDaemonProcess with correct port and opencodeUrl from --oc-port", async () => {
 		const io = createMockIO("/my/project");
 
 		await run(["--foreground", "--port", "3000", "--oc-port", "5000"], io);
 
-		// Verify Daemon was constructed with correct options
+		// Verify startDaemonProcess was called with correct options
 		// host is omitted when not explicitly set (daemon auto-selects based on TLS)
-		expect(Daemon).toHaveBeenCalledWith({
+		expect(mockStartDaemonProcess).toHaveBeenCalledWith({
 			port: 3000,
 			opencodeUrl: "http://localhost:5000",
 			tlsEnabled: true,
@@ -149,8 +140,8 @@ describe("--foreground handler", () => {
 
 		await run(["--foreground", "--port", "3000", "--oc-port", "9999"], io);
 
-		// Verify Daemon was constructed with env var URL, not --oc-port
-		expect(Daemon).toHaveBeenCalledWith({
+		// Verify startDaemonProcess was called with env var URL, not --oc-port
+		expect(mockStartDaemonProcess).toHaveBeenCalledWith({
 			port: 3000,
 			opencodeUrl: "http://opencode:4096",
 			tlsEnabled: true,
@@ -163,21 +154,14 @@ describe("--foreground handler", () => {
 		expect(joined).toContain("http://opencode:4096");
 	});
 
-	it("calls daemon.start() then daemon.addProject(cwd)", async () => {
+	it("calls addProject(cwd) after startup", async () => {
 		const io = createMockIO("/workspace/app");
 
 		await run(["--foreground"], io);
 
-		// Verify lifecycle: start() called before addProject()
-		expect(mockStart).toHaveBeenCalledOnce();
+		// Verify lifecycle: startDaemonProcess called, then addProject
+		expect(mockStartDaemonProcess).toHaveBeenCalledOnce();
 		expect(mockAddProject).toHaveBeenCalledWith("/workspace/app");
-
-		// Verify ordering: start was called before addProject
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const startOrder = mockStart.mock.invocationCallOrder[0]!;
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const addOrder = mockAddProject.mock.invocationCallOrder[0]!;
-		expect(startOrder).toBeLessThan(addOrder);
 	});
 
 	it("outputs OpenCode URL and Relay URL", async () => {
@@ -207,7 +191,7 @@ describe("--foreground handler", () => {
 
 		// Default port is 2633, default oc-port is 4096
 		// host is omitted when not explicitly set (daemon auto-selects based on TLS)
-		expect(Daemon).toHaveBeenCalledWith({
+		expect(mockStartDaemonProcess).toHaveBeenCalledWith({
 			port: 2633,
 			opencodeUrl: "http://localhost:4096",
 			tlsEnabled: true,
