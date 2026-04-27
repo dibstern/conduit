@@ -17,7 +17,7 @@ import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-interface PortScannerConfig {
+export interface PortScannerConfig {
 	probeFn: (port: number) => Effect.Effect<boolean>;
 	portRange: [number, number];
 	scanInterval: Duration.DurationInput;

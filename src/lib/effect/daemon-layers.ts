@@ -17,18 +17,11 @@ import {
 	startIPCServer,
 	startOnboardingServer,
 } from "../daemon/daemon-lifecycle.js";
-import type { KeepAwakeOptions } from "../daemon/keep-awake.js";
-import { KeepAwake } from "../daemon/keep-awake.js";
 import {
 	removePidFile,
 	removeSocketFile,
 	writePidFile,
 } from "../daemon/pid-manager.js";
-import { PortScanner, type PortScannerConfig } from "../daemon/port-scanner.js";
-import type { StorageMonitorOptions } from "../daemon/storage-monitor.js";
-import { StorageMonitor } from "../daemon/storage-monitor.js";
-import type { VersionCheckOptions } from "../daemon/version-check.js";
-import { VersionChecker } from "../daemon/version-check.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
 import { DaemonEventBusLive } from "./daemon-pubsub.js";
@@ -37,15 +30,12 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "./daemon-state.js";
+import { KeepAwakeLive } from "./keep-awake-layer.js";
+import { PortScannerLive } from "./port-scanner-layer.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
-import {
-	KeepAwakeTag,
-	PortScannerTag,
-	SessionOverridesTag,
-	ShutdownSignalTag,
-	StorageMonitorTag,
-	VersionCheckerTag,
-} from "./services.js";
+import { SessionOverridesTag, ShutdownSignalTag } from "./services.js";
+import { StorageMonitorLive } from "./storage-monitor-layer.js";
+import { VersionCheckerLive } from "./version-checker-layer.js";
 
 /**
  * Installs SIGTERM/SIGINT handlers. Completes a Deferred on signal.
@@ -104,70 +94,42 @@ export const ProcessErrorHandlerLayer = Layer.scopedDiscard(
 	}),
 );
 
-// ─── Leaf Drainable Service Layers ──────────────────────────────────────────
+// ─── Leaf Service Layers (Effect-native) ─────────────────────────────────────
+// These delegate to the pure Effect Layer factories defined in the *-layer.ts
+// modules. The old imperative-class bridge layers have been removed.
 
 /**
- * KeepAwake layer — spawns platform-appropriate keep-awake process, activates it,
- * and drains (kills child process) on scope close.
+ * KeepAwake layer — uses the pure Effect KeepAwakeLive layer.
+ * Background fiber is fork-scoped; interrupted automatically on scope close.
  */
-export const makeKeepAwakeLive = (options?: KeepAwakeOptions) =>
-	Layer.scoped(
-		KeepAwakeTag,
-		Effect.gen(function* () {
-			const instance = new KeepAwake(options);
-			instance.activate();
-			yield* Effect.addFinalizer(() => Effect.promise(() => instance.drain()));
-			return instance;
-		}),
-	);
+export const makeKeepAwakeLive = (options?: {
+	command?: string;
+	args?: string[];
+}) => KeepAwakeLive(options);
 
 /**
- * VersionChecker layer — starts periodic npm version checks,
- * drains (stops interval, aborts fetches) on scope close.
+ * VersionChecker layer — uses the pure Effect VersionCheckerLive layer.
+ * Background fiber checks periodically and broadcasts updates.
  */
-export const makeVersionCheckerLive = (options?: VersionCheckOptions) =>
-	Layer.scoped(
-		VersionCheckerTag,
-		Effect.gen(function* () {
-			const instance = new VersionChecker(options);
-			instance.start();
-			yield* Effect.addFinalizer(() => Effect.promise(() => instance.drain()));
-			return instance;
-		}),
-	);
+export const makeVersionCheckerLive = (
+	config: Parameters<typeof VersionCheckerLive>[0],
+) => VersionCheckerLive(config);
 
 /**
- * StorageMonitor layer — starts periodic disk space polling,
- * drains (stops interval, awaits pending checks) on scope close.
+ * StorageMonitor layer — uses the pure Effect StorageMonitorLive layer.
+ * Background fiber checks disk usage and evicts when above high-water mark.
  */
-export const makeStorageMonitorLive = (options: StorageMonitorOptions) =>
-	Layer.scoped(
-		StorageMonitorTag,
-		Effect.gen(function* () {
-			const instance = new StorageMonitor(options);
-			instance.start();
-			yield* Effect.addFinalizer(() => Effect.promise(() => instance.drain()));
-			return instance;
-		}),
-	);
+export const makeStorageMonitorLive = (
+	config: Parameters<typeof StorageMonitorLive>[0],
+) => StorageMonitorLive(config);
 
 /**
- * PortScanner layer — starts periodic port scanning for OpenCode instances,
- * drains (stops interval, awaits pending scans) on scope close.
+ * PortScanner layer — uses the pure Effect PortScannerLive layer.
+ * Background fiber scans ports with hysteresis-based removal.
  */
 export const makePortScannerLive = (
-	config: PortScannerConfig,
-	probeFn: (port: number) => Promise<boolean>,
-) =>
-	Layer.scoped(
-		PortScannerTag,
-		Effect.gen(function* () {
-			const instance = new PortScanner(config, probeFn);
-			instance.start();
-			yield* Effect.addFinalizer(() => Effect.promise(() => instance.drain()));
-			return instance;
-		}),
-	);
+	config: Parameters<typeof PortScannerLive>[0],
+) => PortScannerLive(config);
 
 /**
  * SessionOverrides layer — manages per-session state (model, agent, timeout),
@@ -306,14 +268,11 @@ export interface DaemonLiveOptions {
 	getStatus: () => DaemonStatus;
 	onboarding: OnboardingServerDeps;
 
-	// Background services
-	keepAwake?: KeepAwakeOptions;
-	versionCheck?: VersionCheckOptions;
-	storageMon: StorageMonitorOptions;
-	portScanner?: {
-		config: PortScannerConfig;
-		probeFn: (port: number) => Promise<boolean>;
-	};
+	// Background services — Effect-native config types
+	keepAwake?: Parameters<typeof KeepAwakeLive>[0];
+	versionCheck: Parameters<typeof VersionCheckerLive>[0];
+	storageMon: Parameters<typeof StorageMonitorLive>[0];
+	portScanner?: Parameters<typeof PortScannerLive>[0];
 
 	// DaemonState + RelayCache (Tasks 1-4 integration)
 	/** Path to daemon.json config file. When set, loads config from disk. */
@@ -360,13 +319,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		makeStorageMonitorLive(options.storageMon),
 	);
 	const backgroundLayer = options.portScanner
-		? Layer.merge(
-				baseBgLayer,
-				makePortScannerLive(
-					options.portScanner.config,
-					options.portScanner.probeFn,
-				),
-			)
+		? Layer.merge(baseBgLayer, makePortScannerLive(options.portScanner))
 		: baseBgLayer;
 
 	// State layer — DaemonState from disk (with real FS) or empty defaults

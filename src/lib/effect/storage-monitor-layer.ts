@@ -10,7 +10,7 @@ import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-interface StorageMonitorConfig {
+export interface StorageMonitorConfig {
 	getStorageUsage: () => Effect.Effect<number>;
 	persistence: { evictOldEvents: () => Effect.Effect<void> };
 	checkInterval: Duration.DurationInput;

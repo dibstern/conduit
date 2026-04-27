@@ -11,10 +11,6 @@ import { Context, type Deferred } from "effect";
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
-import type { KeepAwake } from "../daemon/keep-awake.js";
-import type { PortScanner } from "../daemon/port-scanner.js";
-import type { StorageMonitor } from "../daemon/storage-monitor.js";
-import type { VersionChecker } from "../daemon/version-check.js";
 import type {
 	HandlerDeps,
 	InstanceManagementDeps,
@@ -167,26 +163,13 @@ export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
 >() {}
 
 // ─── Daemon leaf-service Tags ─────────────────────────────────────────────
+// Re-exported from the Effect-native layer files. These are the canonical Tags
+// that consumers should use. The old imperative class wrappers are removed.
 
-export class KeepAwakeTag extends Context.Tag("KeepAwake")<
-	KeepAwakeTag,
-	KeepAwake
->() {}
-
-export class VersionCheckerTag extends Context.Tag("VersionChecker")<
-	VersionCheckerTag,
-	VersionChecker
->() {}
-
-export class StorageMonitorTag extends Context.Tag("StorageMonitor")<
-	StorageMonitorTag,
-	StorageMonitor
->() {}
-
-export class PortScannerTag extends Context.Tag("PortScanner")<
-	PortScannerTag,
-	PortScanner
->() {}
+export { KeepAwakeTag } from "./keep-awake-layer.js";
+export { PortScannerTag } from "./port-scanner-layer.js";
+export { StorageMonitorTag } from "./storage-monitor-layer.js";
+export { VersionCheckerTag } from "./version-checker-layer.js";
 
 // ─── Daemon-only Tags ──────────────────────────────────────────────────────
 

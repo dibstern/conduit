@@ -10,7 +10,7 @@ import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-interface VersionCheckerConfig {
+export interface VersionCheckerConfig {
 	getCurrentVersion: () => string;
 	fetchLatestVersion: () => Effect.Effect<string | null>;
 	broadcast: (msg: {
