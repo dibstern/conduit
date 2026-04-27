@@ -104,6 +104,10 @@ function mockWsHandler(
 		getClientSession: vi.fn(() => undefined),
 		getClientsForSession: vi.fn(() => []),
 		sendToSession: vi.fn(),
+		broadcastPerSessionEvent: vi.fn(),
+		markClientBootstrapped: vi.fn(),
+		getClientCount: vi.fn(() => 0),
+		getClientIds: vi.fn(() => []),
 		...overrides,
 	};
 }

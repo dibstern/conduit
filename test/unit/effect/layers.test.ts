@@ -83,6 +83,10 @@ const mockWsHandler = {
 	getClientSession: () => undefined,
 	getClientsForSession: () => [],
 	sendToSession: () => {},
+	broadcastPerSessionEvent: () => {},
+	markClientBootstrapped: () => {},
+	getClientCount: () => 0,
+	getClientIds: () => [],
 };
 const mockPermissionBridge = {
 	trackPending: () => {},
