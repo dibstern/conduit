@@ -341,6 +341,7 @@ export { InstanceManagerStateTag } from "./instance-manager-service.js";
 export { PollerManagerStateTag } from "./message-poller.js";
 export { IdempotencySetTag } from "./orchestration-service.js";
 export { PersistenceServiceTag } from "./persistence-service.js";
+export { ProjectRegistryTag } from "./project-registry-service.js";
 export { PushManagerTag } from "./push-service.js";
 export { RateLimiterTag } from "./rate-limiter-layer.js";
 export { RelayCacheTag } from "./relay-cache.js";
