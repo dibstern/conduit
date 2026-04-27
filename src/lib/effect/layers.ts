@@ -27,6 +27,7 @@ import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { ProjectRelayConfig } from "../types.js";
 
+import { makePollerManagerStateLive } from "./message-poller.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
 import {
 	ClaudeEventPersistTag,
@@ -57,6 +58,7 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "./services.js";
+import { makeSessionManagerStateLive } from "./session-manager-state.js";
 
 // ─── Individual Layer factories ──────────────────────────────────────────────
 // Each factory takes the existing imperative instance and wraps it in a Layer.
@@ -161,6 +163,15 @@ export interface HandlerLayerDeps {
 	readonly instanceMgmt?: InstanceManagementDeps;
 	readonly projectMgmt?: ProjectManagementDeps;
 	readonly scanDeps?: ScanDeps;
+
+	// Effect-native state Layers (optional — included when the relay wants
+	// Effect handlers to access Ref-backed state alongside the imperative
+	// bridge services). These are self-constructing Layers (Ref.make or
+	// FiberMap.make), not imperative instances.
+	/** When true, include SessionManagerStateTag (Ref<SessionManagerState>). */
+	readonly includeSessionManagerState?: boolean;
+	/** When true, include PollerManagerStateTag (FiberMap<string>). */
+	readonly includePollerManagerState?: boolean;
 }
 
 /**
@@ -225,6 +236,19 @@ export const makeHandlerLayer = (deps: HandlerLayerDeps) => {
 		result,
 		RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
 	);
+
+	// ── Effect-native state Layers ─────────────────────────────────────────
+	// These are self-constructing — they create their own Ref/FiberMap
+	// internally, so no imperative instance is passed in. They live alongside
+	// the imperative bridge services, allowing Effect handlers to gradually
+	// migrate to Ref-based state access.
+
+	if (deps.includeSessionManagerState) {
+		result = Layer.merge(result, makeSessionManagerStateLive());
+	}
+	if (deps.includePollerManagerState) {
+		result = Layer.merge(result, makePollerManagerStateLive());
+	}
 
 	return result;
 };
