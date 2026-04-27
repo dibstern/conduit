@@ -307,7 +307,7 @@ const ReloadProviderSessionMsg = Schema.Struct({
 });
 
 // ─── Combined union schema ──────────────────────────────────────────────────
-// Covers all 43 IncomingMessageType values from ws-router.ts.
+// Covers all 49 IncomingMessageType values from ws-router.ts.
 
 export const IncomingWsMessage = Schema.Union(
 	// Prompt / Messages

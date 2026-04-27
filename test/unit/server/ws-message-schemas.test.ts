@@ -246,7 +246,7 @@ describe("IncomingWsMessage schema rejections", () => {
 // ─── Exhaustiveness: every IncomingMessageType has a schema ──────────────────
 
 describe("IncomingWsMessage coverage", () => {
-	// All 43 incoming message types from ws-router.ts (the source of truth).
+	// All 49 incoming message types from ws-router.ts (the source of truth).
 	// This test ensures IncomingWsMessage covers every one.
 	const ALL_INCOMING_TYPES = [
 		"message",
