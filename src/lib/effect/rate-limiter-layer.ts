@@ -1,9 +1,6 @@
 // ─── RateLimiter Effect Layer ───────────────────────────────────────────────
 // Sliding window token bucket. Uses HashMap for per-IP buckets.
 // Background cleanup fiber evicts stale entries every 60s.
-//
-// Defines its own Tag that will coexist with the one in services.ts until
-// Phase 3 consumer migration.
 
 import {
 	Context,
@@ -15,8 +12,16 @@ import {
 	Schedule,
 } from "effect";
 
+/** Result from a rate-limit check. */
+export interface RateLimitResult {
+	/** Whether the request is allowed. */
+	allowed: boolean;
+	/** If rejected, how many ms until the next slot opens. */
+	retryAfterMs?: number;
+}
+
 interface RateLimiterService {
-	checkLimit: (ip: string) => Effect.Effect<boolean>;
+	checkLimit: (ip: string) => Effect.Effect<RateLimitResult>;
 }
 
 export class RateLimiterTag extends Context.Tag("RateLimiter")<
@@ -39,19 +44,22 @@ interface RateLimiterConfig {
 
 const tryConsume =
 	(ip: string, config: RateLimiterConfig, now: number) =>
-	(state: RateLimiterState): [boolean, RateLimiterState] => {
+	(state: RateLimiterState): [RateLimitResult, RateLimiterState] => {
 		const existing = HashMap.get(state.buckets, ip);
 		const entry =
 			existing._tag === "Some" ? existing.value : { tokens: [] as number[] };
 		const validTokens = entry.tokens.filter((t) => now - t < config.windowMs);
 		if (validTokens.length >= config.maxRequests) {
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+			const oldest = validTokens[0]!;
+			const retryAfterMs = oldest + config.windowMs - now;
 			return [
-				false,
+				{ allowed: false, retryAfterMs },
 				{ buckets: HashMap.set(state.buckets, ip, { tokens: validTokens }) },
 			];
 		}
 		return [
-			true,
+			{ allowed: true },
 			{
 				buckets: HashMap.set(state.buckets, ip, {
 					tokens: [...validTokens, now],

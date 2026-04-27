@@ -28,6 +28,7 @@ import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { ProjectRelayConfig } from "../types.js";
 
+import { RateLimiterLive } from "./rate-limiter-layer.js";
 import {
 	ClaudeEventPersistTag,
 	ConfigTag,
@@ -217,6 +218,13 @@ export const makeHandlerLayer = (deps: HandlerLayerDeps) => {
 	if (deps.scanDeps != null) {
 		result = Layer.merge(result, makeScanDepsLive(deps.scanDeps));
 	}
+
+	// RateLimiterLive is a scoped Layer with its own cleanup fiber — no
+	// imperative instance needed. Cleanup runs every 60s inside the scope.
+	result = Layer.merge(
+		result,
+		RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
+	);
 
 	return result;
 };

@@ -1,8 +1,8 @@
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { RateLimiter } from "../server/rate-limiter.js";
 
 /**
- * Wraps per-relay periodic timers (permission timeout check, rate limiter cleanup).
+ * Wraps per-relay periodic timers (permission timeout check).
+ * Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
  * Not currently instantiated in src/ — test-only/dormant.
  */
 export class RelayTimers {
@@ -10,7 +10,6 @@ export class RelayTimers {
 
 	constructor(
 		private permissionBridge: PermissionBridge,
-		private rateLimiter: RateLimiter,
 		private onPermissionTimeout: (id: string) => void,
 	) {}
 
@@ -22,12 +21,6 @@ export class RelayTimers {
 					this.onPermissionTimeout(entry.id);
 				}
 			}, 30_000),
-		);
-
-		this.timers.add(
-			setInterval(() => {
-				this.rateLimiter.cleanup();
-			}, 60_000),
 		);
 	}
 

@@ -1,11 +1,10 @@
 // ─── Timer Wiring (G5) ───────────────────────────────────────────────────────
-// Sets up periodic timers: permission timeout checks and rate limiter cleanup.
-// Returns interval handles for stop() cleanup.
+// Sets up periodic timers: permission timeout checks.
+// Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { RateLimiter } from "../server/rate-limiter.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { PermissionId } from "../shared-types.js";
 
@@ -13,7 +12,6 @@ import type { PermissionId } from "../shared-types.js";
 
 export interface TimerWiringDeps {
 	permissionBridge: PermissionBridge;
-	rateLimiter: RateLimiter;
 	wsHandler: WebSocketHandler;
 }
 
@@ -21,13 +19,12 @@ export interface TimerWiringDeps {
 
 export interface TimerWiringResult {
 	timeoutTimer: ReturnType<typeof setInterval>;
-	rateLimitCleanupTimer: ReturnType<typeof setInterval>;
 }
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
 
 export function wireTimers(deps: TimerWiringDeps): TimerWiringResult {
-	const { permissionBridge, rateLimiter, wsHandler } = deps;
+	const { permissionBridge, wsHandler } = deps;
 
 	// ── Permission/question timeout checks ──────────────────────────────────
 
@@ -53,18 +50,5 @@ export function wireTimers(deps: TimerWiringDeps): TimerWiringResult {
 		timeoutTimer.unref();
 	}
 
-	// Periodic cleanup of stale rate-limiter entries (every 60s)
-	const rateLimitCleanupTimer = setInterval(() => {
-		rateLimiter.cleanup();
-	}, 60_000);
-
-	if (
-		rateLimitCleanupTimer &&
-		typeof rateLimitCleanupTimer === "object" &&
-		"unref" in rateLimitCleanupTimer
-	) {
-		rateLimitCleanupTimer.unref();
-	}
-
-	return { timeoutTimer, rateLimitCleanupTimer };
+	return { timeoutTimer };
 }

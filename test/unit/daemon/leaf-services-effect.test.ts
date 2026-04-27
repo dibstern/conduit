@@ -511,8 +511,8 @@ describe("Leaf service Layers", () => {
 				const limiter = yield* RateLimiterTag;
 				const r1 = yield* limiter.checkLimit("127.0.0.1");
 				const r2 = yield* limiter.checkLimit("127.0.0.1");
-				expect(r1).toBe(true);
-				expect(r2).toBe(true);
+				expect(r1.allowed).toBe(true);
+				expect(r2.allowed).toBe(true);
 			}).pipe(
 				Effect.provide(RateLimiterLive({ maxRequests: 5, windowMs: 10_000 })),
 			),
@@ -525,7 +525,8 @@ describe("Leaf service Layers", () => {
 					yield* limiter.checkLimit("127.0.0.1");
 				}
 				const result = yield* limiter.checkLimit("127.0.0.1"); // 6th request
-				expect(result).toBe(false);
+				expect(result.allowed).toBe(false);
+				expect(result.retryAfterMs).toBeGreaterThan(0);
 			}).pipe(
 				Effect.provide(RateLimiterLive({ maxRequests: 5, windowMs: 10_000 })),
 			),

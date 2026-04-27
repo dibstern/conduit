@@ -16,6 +16,7 @@ import {
 } from "../bridges/client-init.js";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
+import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -42,7 +43,6 @@ import {
 } from "../server/client-semaphore.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
-import { RateLimiter } from "../server/rate-limiter.js";
 import { RelayServer } from "../server/server.js";
 import { WebSocketHandler } from "../server/ws-handler.js";
 import { SessionManager } from "../session/session-manager.js";
@@ -378,8 +378,7 @@ export async function createProjectRelay(
 			})()
 		: undefined;
 
-	// ── Per-client rate limiter & question bridge ──────────────────────────
-	const rateLimiter = new RateLimiter();
+	// ── Question bridge ────────────────────────────────────────────────────
 	const questionBridge = new QuestionBridge();
 
 	// ── Client init deps + connection handlers ──────────────────────────────
@@ -492,7 +491,12 @@ export async function createProjectRelay(
 	wsHandler.on("message", ({ clientId, handler, payload }) => {
 		// Rate-limit check (synchronous — stays outside the semaphore)
 		if (handler === "message") {
-			const result = rateLimiter.check(clientId);
+			const result = effectRuntime.runSync(
+				Effect.gen(function* () {
+					const limiter = yield* RateLimiterTag;
+					return yield* limiter.checkLimit(clientId);
+				}),
+			);
 			if (!result.allowed) {
 				wsHandler.sendTo(clientId, {
 					type: "system_error",
@@ -664,10 +668,10 @@ export async function createProjectRelay(
 		onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
 	});
 
-	// ── Timer wiring (G5: permission timeouts + rate limiter cleanup) ────────
-	const { timeoutTimer, rateLimitCleanupTimer } = wireTimers({
+	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
+	// Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
+	const { timeoutTimer } = wireTimers({
 		permissionBridge,
-		rateLimiter,
 		wsHandler,
 	});
 
@@ -698,11 +702,10 @@ export async function createProjectRelay(
 			await statusPoller.drain();
 			// 2. Shut down orchestration engine (rejects pending turns)
 			await orchestration.engine.shutdown();
-			// 3. Dispose Effect ManagedRuntime
+			// 3. Dispose Effect ManagedRuntime (also tears down RateLimiter cleanup fiber)
 			await effectRuntime.dispose();
 			// 4. Clean up remaining resources
 			clearInterval(timeoutTimer);
-			clearInterval(rateLimitCleanupTimer);
 			await overrides.drain();
 			ptyManager.closeAll();
 			await wsHandler.drain();
