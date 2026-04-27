@@ -284,15 +284,19 @@ export const authStatusRoute = HttpRouter.get(
     // AUDIT FIX (R2-38-2): Check cookie first, then fall back to
     // x-relay-pin header — matches old checkAuth() behavior so API
     // clients using header auth see authenticated: true.
+    //
+    // AUDIT FIX (R3-38-1): Do NOT call auth.authenticate() here — it
+    // consumes a rate-limit attempt. A status-check endpoint must not
+    // decrement attempts. For x-relay-pin header, use auth.validatePin()
+    // (non-consuming) if available, or auth.validateCookie() only.
+    // The executing agent MUST check AuthManager's API for a non-consuming
+    // PIN validation method. If none exists, either:
+    //   (a) Add one to AuthManager (e.g., auth.checkPin(pin): boolean)
+    //   (b) Only check cookies in the status route (header auth still
+    //       works via withAuthGate, just not reflected in status response)
     let authenticated = false;
     if (sessionCookie && auth.validateCookie(sessionCookie)) {
       authenticated = true;
-    } else {
-      const pinHeader = req.headers["x-relay-pin"];
-      if (typeof pinHeader === "string") {
-        const ip = getClientIp(req);
-        authenticated = auth.authenticate(pinHeader, ip).ok;
-      }
     }
 
     return yield* HttpServerResponse.json({
@@ -423,8 +427,11 @@ export const serveStaticFile = (requestPath: string) =>
       : requestPath.replace(/^\//, "");
 
     // Prevent directory traversal
+    // AUDIT FIX (R3-39-1): Add trailing separator to prevent /foo matching /foobar.
+    // Without this, staticDir="/foo" would allow access to "/foobar/evil.txt".
+    const resolvedBase = pathModule.resolve(staticDir) + pathModule.sep;
     const resolved = pathModule.resolve(staticDir, filePath);
-    if (!resolved.startsWith(pathModule.resolve(staticDir))) {
+    if (!resolved.startsWith(resolvedBase) && resolved !== pathModule.resolve(staticDir)) {
       return yield* HttpServerResponse.text("Forbidden", { status: 403 });
     }
 
@@ -537,15 +544,26 @@ export class ProjectApiDelegateProvider extends Context.Tag("ProjectApiDelegateP
 const deleteProjectRoute = HttpRouter.del("/api/projects/:slug",
   Effect.gen(function* () {
     const params = yield* HttpRouter.params;
-    const slug = params["slug"];
-    if (!slug) {
+    const rawSlug = params["slug"];
+    if (!rawSlug) {
       return yield* HttpServerResponse.json({ error: "Missing slug" }, { status: 400 });
     }
+    // AUDIT FIX (R3-40-1): Decode URI component — old code uses
+    // decodeURIComponent(match[1]!). Slugs with special chars need decoding.
+    const slug = decodeURIComponent(rawSlug);
     const provider = yield* Effect.serviceOption(RemoveProjectProvider);
     if (Option.isNone(provider)) {
       return yield* HttpServerResponse.json({ error: "Not implemented" }, { status: 501 });
     }
-    yield* provider.value.removeProject(slug);
+    // AUDIT FIX (R3-40-2): Handle removeProject errors — old code catches
+    // and returns 404. Without this, errors bubble as 500.
+    const result = yield* provider.value.removeProject(slug).pipe(
+      Effect.map(() => true),
+      Effect.catchAll(() => Effect.succeed(false)),
+    );
+    if (!result) {
+      return yield* HttpServerResponse.json({ error: "Project not found" }, { status: 404 });
+    }
     return yield* HttpServerResponse.json({ ok: true });
   })
 );
@@ -725,8 +743,17 @@ Replace the `startHttpServer(ctx)` call to use the Effect handler:
 ```typescript
 // The daemon-lifecycle.ts startHttpServer creates the Node server
 // but now uses the Effect handler instead of router.handleRequest
-ctx.requestHandler = handler;
 ```
+
+> **AUDIT FIX (R3-41-1):** The plan used `ctx.requestHandler = handler` but
+> the actual daemon-lifecycle context uses `ctx.router` with a `handleRequest`
+> method, not a generic handler field. The executing agent MUST:
+> 1. Read `daemon-lifecycle.ts` to find how the request handler is consumed
+> 2. Find the exact field/method name (likely `ctx.router.handleRequest`)
+> 3. Either wrap the Effect handler in an adapter that matches the expected
+>    interface, OR modify daemon-lifecycle.ts to accept a generic
+>    `(req: IncomingMessage, res: ServerResponse) => void` handler.
+> Do NOT use `ctx.requestHandler = handler` — verify the actual API.
 
 **Step 3:** Update `daemon-lifecycle.ts` `startHttpServer` to accept an Effect handler.
 
@@ -982,6 +1009,14 @@ Commit: `feat(effect): add WebSocket transport Layer wrapping ws library`
 - `wsHandler.getClientCount()` → `getClientCount` from ws-handler-service
 - `wsHandler.setClientSession(clientId, sessionId)` → `bindClientSession` from ws-handler-service
 
+> **AUDIT FIX (R3-43-1):** The old `WebSocketHandler` also has
+> `getClientsForSession(sessionId)` which is used by wiring files but NOT
+> listed in the mapping above. The executing agent MUST:
+> 1. Grep for ALL `wsHandler.` method calls across wiring files
+> 2. Verify every method is bridged — the list above may be incomplete
+> 3. Check ws-handler-service.ts exports for matching functions
+> 4. If a method has no ws-handler-service equivalent, add one or inline it
+
 The bridge wraps Effect functions into synchronous calls using `Effect.runSync` on a scoped ManagedRuntime, matching the existing imperative call sites.
 
 **Step 1:** Create the imperative bridge:
@@ -1027,6 +1062,14 @@ wss.on("connection", (ws, req) => {
 **Step 3:** Delete `src/lib/server/ws-handler.ts`. Update all imports:
 - `monitoring-wiring.ts`, `poller-wiring.ts`, `session-lifecycle-wiring.ts`, `timer-wiring.ts` — change `import type { WebSocketHandler }` to import the bridge type
 - Delete `test/unit/server/ws-handler.pbt.test.ts` and `test/unit/server/ws-handler-sessions.test.ts` (replaced by `ws-handler-effect.test.ts`)
+
+> **AUDIT FIX (R3-46-1):** Additional files import `WebSocketHandler` from
+> `ws-handler.ts` but are NOT listed above:
+> - `test/unit/relay/phase-0b-ordering.test.ts`
+> - `test/unit/relay/phase-0b-session-list-first.test.ts`
+> - `src/lib/relay/handler-deps-wiring.ts` (type import)
+> The executing agent MUST grep for ALL `WebSocketHandler` imports and
+> update or delete every consumer — not just the four wiring files listed.
 
 **Step 4:** Write bridge-level tests.
 
@@ -1160,13 +1203,24 @@ Add synchronous `decodeMessage` and `preloadDecoder` exports alongside existing 
 // Call preloadDecoder() during loading screen. After it resolves, decodeMessage()
 // works synchronously — no async, no reordering.
 
+// AUDIT FIX (R3-45-1): If preloadDecoder fails (network error loading chunk),
+// _decoder stays null and decodeMessage throws on every message. The outer
+// try/catch in the message handler silently drops ALL messages. Add error
+// handling: on failure, set a fallback decoder that passes raw data through
+// (same as "unknown type" graceful degradation). Log warning but don't crash.
 export const preloadDecoder = async (): Promise<void> => {
-  await getDecoder(); // populates _decoder cache
+  try {
+    await getDecoder(); // populates _decoder cache
+  } catch (err) {
+    console.warn("[effect-boundary] Failed to load Schema decoder, falling back to passthrough:", err);
+    _decoder = (raw: unknown) => raw; // graceful degradation
+  }
 };
 
 export const decodeMessage = (raw: unknown): unknown => {
   if (!_decoder) {
-    throw new Error("decodeMessage called before preloadDecoder() resolved");
+    // Should not happen if preloadDecoder was awaited, but handle gracefully
+    return raw;
   }
   return _decoder(raw);
 };
@@ -1288,7 +1342,7 @@ This is **merge milestone M4b**.
 | 42 | WS transport Layer (ws library in Effect) | — | Medium |
 | 43 | Wire relay to Effect WS, delete ws-handler | `ws-handler.ts` | **High** |
 | 44 | *(merged into Task 41)* | — | — |
-| 45 | Frontend validation (sync eager import) | — | Low |
+| 45 | Frontend validation (async pre-load during loading screen) | — | Low |
 | 46 | Delete old files + verification | `static-files.ts`, old tests | Medium |
 
 > **Tasks 38-41 are ATOMIC.** They replace the entire HTTP request path (including WS upgrade auth from merged Task 44).
