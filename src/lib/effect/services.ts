@@ -333,6 +333,7 @@ type _ExhaustiveCheck = {
 declare const _check: _ExhaustiveCheck;
 
 export { PersistencePathTag } from "./daemon-config-persistence.js";
+export { SupervisorTag } from "./daemon-main.js";
 export { DaemonEventBusTag } from "./daemon-pubsub.js";
 export { CrashCounterTag } from "./daemon-startup.js";
 // ─── DaemonState re-export ────────────────────────────────────────────────

@@ -13,7 +13,9 @@
 //   - Effect.never — keeps the fiber alive until SIGINT/SIGTERM
 //   - Layer.provide(daemonLayer) — provides all deps to the program
 
+import type { Fiber } from "effect";
 import {
+	Context,
 	Effect,
 	Layer,
 	RuntimeFlags,
@@ -37,6 +39,25 @@ import {
 	ProjectMgmtTag,
 	type RelayCacheTag,
 } from "./services.js";
+
+// ─── SupervisorTag ───────────────────────────────────────────────────────
+// Context.Tag for the daemon-wide Supervisor.track instance.
+// Allows any fiber in the daemon scope to query tracked fiber diagnostics.
+
+export class SupervisorTag extends Context.Tag("DaemonSupervisor")<
+	SupervisorTag,
+	Supervisor.Supervisor<Array<Fiber.RuntimeFiber<unknown, unknown>>>
+>() {}
+
+/**
+ * Live Layer that creates a Supervisor.track instance and provides it
+ * via SupervisorTag. Use `Layer.provide(makeSupervisorLive)` to make
+ * the supervisor available to the daemon program.
+ */
+export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
+	SupervisorTag,
+	Supervisor.track,
+);
 
 // ─── DaemonDeps type ──────────────────────────────────────────────────────
 // Minimal at Phase 1, listing only Tags available from Tasks 1-5.
@@ -123,8 +144,8 @@ export const makeDaemonProgramLayer = (
 				),
 			);
 
-			// Fork background tasks under supervision
-			const supervisor = yield* Supervisor.track;
+			// Fork background tasks under supervision (supervisor from context)
+			const supervisor = yield* SupervisorTag;
 			yield* Effect.supervised(
 				Effect.gen(function* () {
 					yield* Effect.forkScoped(projectDiscovery);
@@ -143,7 +164,7 @@ export const makeDaemonProgramLayer = (
 			yield* Effect.logInfo("Daemon started — awaiting interruption");
 			yield* Effect.never; // Keep alive until interrupted
 		}).pipe(Effect.annotateLogs("component", "daemon-main")),
-	).pipe(Layer.provide(daemonLayer));
+	).pipe(Layer.provide(Layer.merge(daemonLayer, makeSupervisorLive)));
 
 // ─── Imperative bridge: startDaemonProcess ───────────────────────────────
 // Thin wrapper that constructs a Daemon instance and starts it.
