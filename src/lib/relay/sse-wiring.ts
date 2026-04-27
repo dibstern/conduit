@@ -9,7 +9,6 @@ import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { DualWriteHook } from "../persistence/dual-write-hook.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
@@ -53,9 +52,25 @@ export function extractSessionId(event: SSEEvent): string | undefined {
 
 // ─── SSE Wiring Dependencies ─────────────────────────────────────────────────
 
+/** Narrowed SessionManager capabilities needed by SSE wiring. */
+interface SessionManagerLike {
+	recordMessageActivity(sessionId: string, timestamp?: number): void;
+	incrementPendingQuestionCount(sessionId: string): void;
+	addToParentMap(childId: string, parentId: string): void;
+	sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: {
+			statuses?:
+				| Record<string, import("../instance/sdk-types.js").SessionStatus>
+				| undefined;
+		},
+	): Promise<void>;
+	setPendingQuestionCounts(counts: Map<string, number>): void;
+}
+
 export interface SSEWiringDeps {
 	translator: Translator;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerLike;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
 	wsHandler: {

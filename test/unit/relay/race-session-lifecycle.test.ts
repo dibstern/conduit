@@ -12,7 +12,16 @@ import {
 	type SessionLifecycleWiringDeps,
 	wireSessionLifecycle,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
-import type { SessionManagerEvents } from "../../../src/lib/session/session-manager.js";
+import type { RelayMessage } from "../../../src/lib/types.js";
+
+/** Event map matching SessionManager's EventEmitter signatures. */
+interface SessionManagerEvents {
+	broadcast: [RelayMessage];
+	session_lifecycle: [
+		| { type: "created"; sessionId: string }
+		| { type: "deleted"; sessionId: string },
+	];
+}
 
 /**
  * Build minimal deps for wireSessionLifecycle, with controllable

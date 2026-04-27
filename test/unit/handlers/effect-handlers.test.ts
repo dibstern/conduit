@@ -9,7 +9,10 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import type { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
-import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
+import type {
+	SessionManagerShape,
+	WebSocketHandlerShape,
+} from "../../../src/lib/effect/services.js";
 // Batch 2 imports
 import {
 	ConfigTag,
@@ -82,7 +85,6 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
-import type { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type {
@@ -633,8 +635,8 @@ describe("handleSwitchModelEffect", () => {
 // ─── Additional mock factories for batch 2 ────────────────────────────────
 
 function mockSessionManager(
-	overrides?: Partial<SessionManager>,
-): SessionManager {
+	overrides?: Partial<SessionManagerShape>,
+): SessionManagerShape {
 	return {
 		createSession: vi.fn(async () => ({ id: "new-session-1", title: "" })),
 		deleteSession: vi.fn(async () => {}),
@@ -650,7 +652,7 @@ function mockSessionManager(
 		clearPaginationCursor: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
 		...overrides,
-	} as unknown as SessionManager;
+	} as unknown as SessionManagerShape;
 }
 
 function mockPermissionBridge(

@@ -17,6 +17,7 @@ import {
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
 import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
+import type { SessionManagerShape } from "../effect/services.js";
 import {
 	createStatusPollerService,
 	makePollerPubSubLive,
@@ -89,7 +90,7 @@ export interface ProjectRelay {
 	wsHandler: WebSocketHandler;
 	sseStream: SSEStream;
 	client: OpenCodeAPI;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
 	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
@@ -142,7 +143,7 @@ export interface RelayStack {
 	wsHandler: WebSocketHandler;
 	sseStream: SSEStream;
 	client: OpenCodeAPI;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
 	permissionBridge: PermissionBridge;
 
@@ -217,7 +218,7 @@ export async function createProjectRelay(
 
 	const translator = createTranslator();
 	const permissionBridge = new PermissionBridge();
-	const sessionMgr: SessionManager = new SessionManager({
+	const sessionMgr = new SessionManager({
 		client: api,
 		log: sessionLog,
 		directory: config.projectDir,

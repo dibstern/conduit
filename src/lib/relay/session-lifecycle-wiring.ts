@@ -8,7 +8,7 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
-import type { SessionManager } from "../session/session-manager.js";
+import type { RelayMessage } from "../types.js";
 import {
 	type createTranslator,
 	rebuildTranslatorFromHistory,
@@ -22,10 +22,23 @@ interface PollerManagerLike {
 	stopPolling(sessionId: string): void;
 }
 
+/** Narrowed SessionManager capabilities needed by session lifecycle wiring. */
+interface SessionManagerLike {
+	on(event: "broadcast", handler: (msg: RelayMessage) => void): this;
+	on(
+		event: "session_lifecycle",
+		handler: (
+			ev:
+				| { type: "created"; sessionId: string }
+				| { type: "deleted"; sessionId: string },
+		) => void,
+	): this;
+}
+
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface SessionLifecycleWiringDeps {
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerLike;
 	wsHandler: WebSocketHandler;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;

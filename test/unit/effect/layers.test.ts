@@ -28,6 +28,7 @@ import {
 	makeStatusPollerLive,
 	makeWebSocketHandlerLive,
 } from "../../../src/lib/effect/layers.js";
+import type { SessionManagerShape } from "../../../src/lib/effect/services.js";
 import {
 	ClaudeEventPersistTag,
 	ConfigTag,
@@ -63,7 +64,6 @@ import type { ReadQueryService } from "../../../src/lib/persistence/read-query-s
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../../../src/lib/provider/relay-event-sink.js";
 import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
-import type { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { SessionRegistry } from "../../../src/lib/session/session-registry.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
@@ -73,7 +73,9 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 // — just enough structure to verify Layer wiring passes the correct instance.
 
 const mockApi = { sdk: {} } as unknown as OpenCodeAPI;
-const mockSessionMgr = { initialize: () => {} } as unknown as SessionManager;
+const mockSessionMgr = {
+	initialize: () => {},
+} as unknown as SessionManagerShape;
 const mockWsHandler = {
 	broadcast: () => {},
 	sendTo: () => {},

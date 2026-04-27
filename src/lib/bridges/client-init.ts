@@ -15,7 +15,6 @@ import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import {
 	type SessionSwitchDeps,
@@ -26,6 +25,30 @@ import type { OpenCodeInstance, RelayMessage } from "../types.js";
 import type { PermissionBridge } from "./permission-bridge.js";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
+
+/** Narrowed SessionManager capabilities needed by client-init. */
+interface SessionManagerLike {
+	getDefaultSessionId(title?: string): Promise<string>;
+	sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: {
+			statuses?:
+				| Record<string, import("../instance/sdk-types.js").SessionStatus>
+				| undefined;
+		},
+	): Promise<void>;
+	// Methods used through SessionSwitchDeps (passed to switchClientToSession)
+	loadPreRenderedHistory(
+		sessionId: string,
+		offset?: number,
+	): Promise<{
+		messages: import("../shared-types.js").HistoryMessage[];
+		hasMore: boolean;
+		total?: number;
+	}>;
+	seedPaginationCursor(sessionId: string, messageId: string): void;
+	getLastMessageAtMap?(): ReadonlyMap<string, number>;
+}
 
 export interface ClientInitDeps {
 	wsHandler: {
@@ -40,7 +63,7 @@ export interface ClientInitDeps {
 		markClientBootstrapped: (clientId: string) => void;
 	};
 	client: OpenCodeAPI;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
 	permissionBridge: Pick<PermissionBridge, "getPending" | "recoverPending">;

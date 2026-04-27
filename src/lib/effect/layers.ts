@@ -23,7 +23,6 @@ import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -49,6 +48,7 @@ import {
 	QuestionBridgeTag,
 	ReadQueryTag,
 	ScanDepsTag,
+	type SessionManagerShape,
 	SessionManagerTag,
 	SessionOverridesTag,
 	SessionRegistryTag,
@@ -64,7 +64,7 @@ import {
 export const makeOpenCodeAPILive = (instance: OpenCodeAPI) =>
 	Layer.succeed(OpenCodeAPITag, instance);
 
-export const makeSessionManagerLive = (instance: SessionManager) =>
+export const makeSessionManagerLive = (instance: SessionManagerShape) =>
 	Layer.succeed(SessionManagerTag, instance);
 
 export const makeWebSocketHandlerLive = (instance: WebSocketHandlerShape) =>
@@ -138,7 +138,7 @@ export interface HandlerLayerDeps {
 	// Core (always present)
 	readonly wsHandler: WebSocketHandlerShape;
 	readonly client: OpenCodeAPI;
-	readonly sessionMgr: SessionManager;
+	readonly sessionMgr: SessionManagerShape;
 	readonly permissionBridge: PermissionBridge;
 	readonly questionBridge: QuestionBridge;
 	readonly overrides: SessionOverrides;

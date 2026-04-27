@@ -507,7 +507,7 @@ describe("instance_list resilience", () => {
 
 		// Make earlier init steps fail
 		vi.mocked(deps.client.session.get).mockRejectedValue(new Error("fail"));
-		vi.mocked(deps.sessionMgr.listSessions).mockRejectedValue(
+		vi.mocked(deps.sessionMgr.sendDualSessionLists).mockRejectedValue(
 			new Error("fail"),
 		);
 		vi.mocked(deps.client.app.agents).mockRejectedValue(new Error("fail"));

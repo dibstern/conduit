@@ -18,16 +18,21 @@ import type {
 	ScanDeps,
 } from "../handlers/types.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { ProviderStateService } from "../persistence/provider-state-service.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
-import type { ProjectRelayConfig, RelayMessage } from "../types.js";
+import type { HistoryMessage } from "../shared-types.js";
+import type {
+	ProjectRelayConfig,
+	RelayMessage,
+	SessionInfo,
+} from "../types.js";
 
 // ─── Shape interfaces for inline/structural types ──────────────────────────
 
@@ -64,6 +69,76 @@ export interface ForkMetaShape {
 	getForkEntry(sessionId: string): ForkEntry | undefined;
 }
 
+/**
+ * Shape for the sessionMgr field — all SessionManager capabilities used
+ * by handlers, session-switch, and wiring modules.
+ *
+ * Replaces the concrete SessionManager class import so consumers depend
+ * on a structural interface, not the implementation.
+ */
+export interface SessionManagerShape {
+	// ── Queries ────────────────────────────────────────────────────────
+	listSessions(options?: {
+		statuses?: Record<string, SessionStatus>;
+		roots?: boolean;
+	}): Promise<SessionInfo[]>;
+	searchSessions(
+		query: string,
+		options?: { roots?: boolean },
+	): Promise<SessionInfo[]>;
+	loadPreRenderedHistory(
+		sessionId: string,
+		offset?: number,
+	): Promise<{
+		messages: HistoryMessage[];
+		hasMore: boolean;
+		total?: number;
+	}>;
+	getDefaultSessionId(title?: string): Promise<string>;
+	getLastKnownSessionCount(): number;
+	getSessionParentMap(): Map<string, string>;
+	getLastMessageAtMap(): ReadonlyMap<string, number>;
+	getForkEntry(sessionId: string): ForkEntry | undefined;
+
+	// ── Mutations ──────────────────────────────────────────────────────
+	createSession(
+		title?: string,
+		opts?: { silent?: boolean },
+	): Promise<SessionDetail>;
+	deleteSession(sessionId: string, opts?: { silent?: boolean }): Promise<void>;
+	renameSession(sessionId: string, title: string): Promise<void>;
+	initialize(title?: string): Promise<string>;
+	recordMessageActivity(sessionId: string, timestamp?: number): void;
+	addToParentMap(childId: string, parentId: string): void;
+	setForkEntry(sessionId: string, entry: ForkEntry): void;
+
+	// ── Pagination ─────────────────────────────────────────────────────
+	clearPaginationCursor(sessionId: string): void;
+	seedPaginationCursor(sessionId: string, messageId: string): void;
+
+	// ── Pending questions ──────────────────────────────────────────────
+	incrementPendingQuestionCount(sessionId: string): void;
+	decrementPendingQuestionCount(sessionId: string): void;
+	setPendingQuestionCounts(counts: Map<string, number>): void;
+
+	// ── Broadcasts ─────────────────────────────────────────────────────
+	sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: { statuses?: Record<string, SessionStatus> | undefined },
+	): Promise<void>;
+
+	// ── EventEmitter (used by session-lifecycle-wiring) ────────────────
+	on(event: "broadcast", handler: (msg: RelayMessage) => void): this;
+	on(
+		event: "session_lifecycle",
+		handler: (
+			ev:
+				| { type: "created"; sessionId: string }
+				| { type: "deleted"; sessionId: string },
+		) => void,
+	): this;
+}
+
 // ─── Core Tags (always present) ────────────────────────────────────────────
 
 export class OpenCodeAPITag extends Context.Tag("OpenCodeAPI")<
@@ -73,7 +148,7 @@ export class OpenCodeAPITag extends Context.Tag("OpenCodeAPI")<
 
 export class SessionManagerTag extends Context.Tag("SessionManager")<
 	SessionManagerTag,
-	SessionManager
+	SessionManagerShape
 >() {}
 
 export class WebSocketHandlerTag extends Context.Tag("WebSocketHandler")<
@@ -206,7 +281,7 @@ type _AssertCoverage = {
 		: K extends "client"
 			? OpenCodeAPI
 			: K extends "sessionMgr"
-				? SessionManager
+				? SessionManagerShape
 				: K extends "permissionBridge"
 					? PermissionBridge
 					: K extends "questionBridge"

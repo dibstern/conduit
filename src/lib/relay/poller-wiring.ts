@@ -7,7 +7,6 @@ import type { SessionStatusPollerService } from "../effect/session-status-poller
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
@@ -32,12 +31,17 @@ interface PollerManagerLike {
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
+/** Narrowed SessionManager capabilities needed by poller wiring. */
+interface SessionManagerLike {
+	getSessionParentMap(): Map<string, string>;
+}
+
 export interface PollerWiringDeps {
 	pollerManager: PollerManagerLike;
 	sseStream: SSEStream;
 	statusPoller: SessionStatusPollerService;
 	wsHandler: WebSocketHandler;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerLike;
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	config: {

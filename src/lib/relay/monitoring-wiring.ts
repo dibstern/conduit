@@ -10,7 +10,6 @@ import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../shared-types.js";
@@ -44,10 +43,23 @@ interface PollerManagerLike {
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
+/** Narrowed SessionManager capabilities needed by monitoring wiring. */
+interface SessionManagerLike {
+	sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: {
+			statuses?:
+				| Record<string, import("../instance/sdk-types.js").SessionStatus>
+				| undefined;
+		},
+	): Promise<void>;
+	getSessionParentMap(): Map<string, string>;
+}
+
 export interface MonitoringWiringDeps {
 	client: OpenCodeAPI;
 	wsHandler: WebSocketHandler;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
 	statusPoller: SessionStatusPollerService;
 	pollerManager: PollerManagerLike;
