@@ -275,7 +275,17 @@ type _ExhaustiveCheck = {
 declare const _check: _ExhaustiveCheck;
 
 export { PersistencePathTag } from "./daemon-config-persistence.js";
+export { DaemonEventBusTag } from "./daemon-pubsub.js";
 export { CrashCounterTag } from "./daemon-startup.js";
 // ─── DaemonState re-export ────────────────────────────────────────────────
 export { DaemonStateTag } from "./daemon-state.js";
+export { InstanceManagerStateTag } from "./instance-manager-service.js";
+export { PollerManagerStateTag } from "./message-poller.js";
+export { IdempotencySetTag } from "./orchestration-service.js";
+export { PersistenceServiceTag } from "./persistence-service.js";
+export { PushManagerTag } from "./push-service.js";
+export { RateLimiterTag } from "./rate-limiter-layer.js";
 export { RelayCacheTag } from "./relay-cache.js";
+// ─── Phase 2 Effect-native Tag re-exports ─────────────────────────────────
+export { SessionManagerStateTag } from "./session-manager-state.js";
+export { PollerStateTag } from "./session-status-poller.js";

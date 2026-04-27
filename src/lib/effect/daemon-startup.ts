@@ -13,7 +13,6 @@ import { Context, Data, Effect, Ref } from "effect";
 import { type OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { InstanceConfig } from "../shared-types.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
-import { InstanceLimitExceeded } from "./instance-manager-service.js";
 import { InstanceMgmtTag } from "./services.js";
 
 // ─── Errors ────────────────────────────────────────────────────────────────

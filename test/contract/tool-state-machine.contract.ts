@@ -8,7 +8,6 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 import {
-	apiGet,
 	checkServerHealth,
 	loadSnapshotSpec,
 } from "./helpers/server-connection.js";

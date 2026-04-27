@@ -28,8 +28,6 @@ export class SessionOverrides {
 
 	private readonly sessions: Map<string, SessionState> = new Map();
 
-	constructor() {}
-
 	// ─── Internal ──────────────────────────────────────────────────────────
 
 	private getOrCreate(sessionId: string): SessionState {

@@ -31,6 +31,7 @@ import type { VersionCheckOptions } from "../daemon/version-check.js";
 import { VersionChecker } from "../daemon/version-check.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
+import { DaemonEventBusLive } from "./daemon-pubsub.js";
 import {
 	DaemonStateTag,
 	emptyDaemonState,
@@ -381,6 +382,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(serversLayer),
 		Layer.provideMerge(backgroundLayer),
 		Layer.provideMerge(stateLayer),
+		Layer.provideMerge(DaemonEventBusLive),
 	);
 
 	// RelayCache layer — only include if a factory is provided
