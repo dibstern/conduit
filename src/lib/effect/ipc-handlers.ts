@@ -247,10 +247,13 @@ export const handleInstanceRemove = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.try(() => {
-			mgmt.removeInstance(cmd.id);
-			mgmt.persistConfig();
-			return { ok: true } as IPCResponse;
+		return yield* Effect.try({
+			try: () => {
+				mgmt.removeInstance(cmd.id);
+				mgmt.persistConfig();
+				return { ok: true } as IPCResponse;
+			},
+			catch: (e) => e,
 		}).pipe(
 			Effect.catchAll((e) =>
 				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
@@ -264,7 +267,10 @@ export const handleInstanceStart = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.tryPromise(() => mgmt.startInstance(cmd.id)).pipe(
+		return yield* Effect.tryPromise({
+			try: () => mgmt.startInstance(cmd.id),
+			catch: (e) => e,
+		}).pipe(
 			Effect.map(() => ({ ok: true }) as IPCResponse),
 			Effect.catchAll((e) =>
 				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
@@ -278,9 +284,12 @@ export const handleInstanceStop = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.try(() => {
-			mgmt.stopInstance(cmd.id);
-			return { ok: true } as IPCResponse;
+		return yield* Effect.try({
+			try: () => {
+				mgmt.stopInstance(cmd.id);
+				return { ok: true } as IPCResponse;
+			},
+			catch: (e) => e,
 		}).pipe(
 			Effect.catchAll((e) =>
 				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
@@ -309,19 +318,22 @@ export const handleInstanceUpdate = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.try(() => {
-			const updates: {
-				name?: string;
-				env?: Record<string, string>;
-				port?: number;
-			} = {};
-			if (cmd.name !== undefined) updates.name = cmd.name;
-			if (cmd.env !== undefined)
-				updates.env = cmd.env as Record<string, string>;
-			if (cmd.port !== undefined) updates.port = cmd.port;
-			const instance = mgmt.updateInstance(cmd.id, updates);
-			mgmt.persistConfig();
-			return { ok: true, instance } as IPCResponse;
+		return yield* Effect.try({
+			try: () => {
+				const updates: {
+					name?: string;
+					env?: Record<string, string>;
+					port?: number;
+				} = {};
+				if (cmd.name !== undefined) updates.name = cmd.name;
+				if (cmd.env !== undefined)
+					updates.env = cmd.env as Record<string, string>;
+				if (cmd.port !== undefined) updates.port = cmd.port;
+				const instance = mgmt.updateInstance(cmd.id, updates);
+				mgmt.persistConfig();
+				return { ok: true, instance } as IPCResponse;
+			},
+			catch: (e) => e,
 		}).pipe(
 			Effect.catchAll((e) =>
 				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
