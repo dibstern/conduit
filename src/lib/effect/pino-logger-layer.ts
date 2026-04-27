@@ -77,12 +77,17 @@ export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 // ─── Pre-built singleton for production use ─────────────────────────────────
 // Uses the existing Pino logger infrastructure with an "effect" tag.
 
-import { createLogger } from "../logger.js";
+import { _getRawPinoChild } from "../logger.js";
 
 /**
  * Production PinoLoggerLive layer — routes all Effect.log* calls through
  * the project's standard Pino logger tagged as "effect".
+ *
+ * Uses the raw Pino child instance (not the project Logger wrapper) so that
+ * `.child(bindings)` receives a `Record<string, unknown>` correctly — the
+ * wrapper's `.child()` expects a single string tag and would lose structured
+ * annotation bindings.
  */
 export const PinoLoggerLive: Layer.Layer<never> = makePinoLoggerLive(
-	createLogger("effect") as unknown as PinoLogger,
+	_getRawPinoChild("effect") as unknown as PinoLogger,
 );

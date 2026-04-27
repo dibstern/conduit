@@ -251,3 +251,17 @@ export function createTestLogger(): Logger {
 export function _getOutputStream(): Writable {
 	return outputStream;
 }
+
+/**
+ * Return the raw Pino child instance for the given tag.
+ *
+ * Unlike `createLogger()`, this does **not** wrap the instance with the
+ * project's `Logger` interface — callers get the native pino API whose
+ * `.child(bindings)` accepts `Record<string, unknown>`.
+ *
+ * Primary consumer: `PinoLoggerLive` in `src/lib/effect/pino-logger-layer.ts`.
+ * @internal
+ */
+export function _getRawPinoChild(tag: string): PinoInstance {
+	return getRootPino().child({ component: [tag] });
+}
