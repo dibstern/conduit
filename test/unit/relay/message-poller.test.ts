@@ -4,12 +4,14 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	buildSeedSnapshot,
 	diffAndSynthesize,
-	MessagePoller,
-	type MessagePollerOptions,
 	type PartSnapshot,
 	synthesizeTextPart,
 	synthesizeToolPart,
 } from "../../../src/lib/relay/message-poller.js";
+import {
+	MessagePoller,
+	type MessagePollerOptions,
+} from "../../../src/lib/relay/message-poller-impl.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 // ─── Constants (mirror source) ──────────────────────────────────────────────

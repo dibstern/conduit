@@ -14,7 +14,6 @@ import {
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
-import type { MessagePollerManager } from "./message-poller-manager.js";
 import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
@@ -22,10 +21,19 @@ import type { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEStream } from "./sse-stream.js";
 import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 
+/** Structural interface for the message poller manager's capabilities needed by poller wiring. */
+interface PollerManagerLike {
+	on(
+		event: "events",
+		callback: (messages: RelayMessage[], sessionId: string) => void,
+	): void;
+	notifySSEEvent(sessionId: string): void;
+}
+
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface PollerWiringDeps {
-	pollerManager: MessagePollerManager;
+	pollerManager: PollerManagerLike;
 	sseStream: SSEStream;
 	statusPoller: SessionStatusPollerService;
 	wsHandler: WebSocketHandler;

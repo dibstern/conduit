@@ -5,6 +5,7 @@ import type { Effect } from "effect";
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
+import type { PollerManagerShape } from "../effect/services.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { RelayError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -14,7 +15,6 @@ import type { ProviderStateService } from "../persistence/provider-state-service
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
-import type { MessagePollerManager } from "../relay/message-poller-manager.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
@@ -83,7 +83,7 @@ export interface HandlerDeps {
 	/** Shared session registry for client→session viewer tracking */
 	registry: SessionRegistry;
 	/** Message poller manager — used to start REST polling when viewing sessions */
-	pollerManager: Pick<MessagePollerManager, "isPolling" | "startPolling">;
+	pollerManager: PollerManagerShape;
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;
 	/** Fork-point metadata store — used to persist forkMessageId and parentID */
 	forkMeta: {

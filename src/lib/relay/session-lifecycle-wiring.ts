@@ -5,6 +5,7 @@
 
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
@@ -12,9 +13,14 @@ import {
 	type createTranslator,
 	rebuildTranslatorFromHistory,
 } from "./event-translator.js";
-import type { MessagePollerManager } from "./message-poller-manager.js";
 import type { MonitoringState } from "./monitoring-types.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
+
+/** Structural interface for the message poller manager's capabilities needed by session lifecycle wiring. */
+interface PollerManagerLike {
+	startPolling(sessionId: string, seedMessages?: Message[]): void;
+	stopPolling(sessionId: string): void;
+}
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
@@ -23,7 +29,7 @@ export interface SessionLifecycleWiringDeps {
 	wsHandler: WebSocketHandler;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
-	pollerManager: MessagePollerManager;
+	pollerManager: PollerManagerLike;
 	statusPoller: SessionStatusPollerService;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	getMonitoringState: () => MonitoringState;

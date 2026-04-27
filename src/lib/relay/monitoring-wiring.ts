@@ -6,6 +6,7 @@
 
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
@@ -19,7 +20,6 @@ import {
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
-import type { MessagePollerManager } from "./message-poller-manager.js";
 import {
 	assembleContext,
 	evaluateAll,
@@ -36,6 +36,12 @@ import { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEStream } from "./sse-stream.js";
 import { sendPushForEvent } from "./sse-wiring.js";
 
+/** Structural interface for the message poller manager's capabilities needed by monitoring wiring. */
+interface PollerManagerLike {
+	startPolling(sessionId: string, seedMessages?: Message[]): void;
+	stopPolling(sessionId: string): void;
+}
+
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface MonitoringWiringDeps {
@@ -44,7 +50,7 @@ export interface MonitoringWiringDeps {
 	sessionMgr: SessionManager;
 	overrides: SessionOverrides;
 	statusPoller: SessionStatusPollerService;
-	pollerManager: MessagePollerManager;
+	pollerManager: PollerManagerLike;
 	registry: SessionRegistry;
 	sseStream: SSEStream;
 	config: {

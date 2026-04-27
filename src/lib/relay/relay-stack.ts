@@ -67,7 +67,7 @@ import {
 	type RelayRuntime,
 } from "./effect-relay-runtime.js";
 import { createTranslator } from "./event-translator.js";
-import { MessagePollerManager } from "./message-poller-manager.js";
+import { MessagePollerManager } from "./message-poller-impl.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
 import { wirePollers } from "./poller-wiring.js";
 import { PtyManager } from "./pty-manager.js";

@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { MessagePollerManager } from "../../../src/lib/relay/message-poller-manager.js";
+import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
 
 /**
  * Create a mock OpenCode client for testing.

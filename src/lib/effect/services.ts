@@ -46,7 +46,7 @@ export interface StatusPollerShape {
 	isProcessing(sessionId: string): boolean;
 }
 
-/** Shape for the pollerManager field — Pick<MessagePollerManager, "isPolling" | "startPolling">. */
+/** Shape for the pollerManager field — isPolling + startPolling capabilities. */
 export interface PollerManagerShape {
 	isPolling(sessionId: string): boolean;
 	startPolling(sessionId: string): void;
