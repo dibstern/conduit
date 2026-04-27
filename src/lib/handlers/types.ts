@@ -5,6 +5,7 @@ import type { Effect } from "effect";
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { RelayError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
@@ -18,7 +19,6 @@ import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
 import type { PayloadMap } from "./payloads.js";
@@ -79,7 +79,7 @@ export interface HandlerDeps {
 	config: ProjectRelayConfig;
 	log: Logger;
 	/** Session status poller for processing state */
-	statusPoller: Pick<SessionStatusPoller, "isProcessing">;
+	statusPoller: Pick<SessionStatusPollerService, "isProcessing">;
 	/** Shared session registry for client→session viewer tracking */
 	registry: SessionRegistry;
 	/** Message poller manager — used to start REST polling when viewing sessions */

@@ -41,7 +41,7 @@ export interface WebSocketHandlerShape {
 	sendToSession(sessionId: string, msg: RelayMessage): void;
 }
 
-/** Shape for the statusPoller field — Pick<SessionStatusPoller, "isProcessing">. */
+/** Shape for the statusPoller field — Pick<SessionStatusPollerService, "isProcessing">. */
 export interface StatusPollerShape {
 	isProcessing(sessionId: string): boolean;
 }
@@ -271,4 +271,4 @@ export { RateLimiterTag } from "./rate-limiter-layer.js";
 export { RelayCacheTag } from "./relay-cache.js";
 // ─── Phase 2 Effect-native Tag re-exports ─────────────────────────────────
 export { SessionManagerStateTag } from "./session-manager-state.js";
-export { PollerStateTag } from "./session-status-poller.js";
+export { PollerPubSubTag, PollerStateTag } from "./session-status-poller.js";

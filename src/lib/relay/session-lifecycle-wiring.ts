@@ -3,11 +3,11 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import {
 	type createTranslator,
 	rebuildTranslatorFromHistory,
@@ -24,7 +24,7 @@ export interface SessionLifecycleWiringDeps {
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
 	pollerManager: MessagePollerManager;
-	statusPoller: SessionStatusPoller;
+	statusPoller: SessionStatusPollerService;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	getMonitoringState: () => MonitoringState;
 	setMonitoringState: (state: MonitoringState) => void;

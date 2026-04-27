@@ -7,6 +7,7 @@
 // independently testable and relay-stack stays slim.
 
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -16,7 +17,6 @@ import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
@@ -46,7 +46,7 @@ export interface ClientInitDeps {
 	permissionBridge: Pick<PermissionBridge, "getPending" | "recoverPending">;
 	/** Optional poller for session processing state */
 	statusPoller?: Pick<
-		SessionStatusPoller,
+		SessionStatusPollerService,
 		"isProcessing" | "getCurrentStatuses"
 	>;
 	/** Optional supplier of the current OpenCode instance list */

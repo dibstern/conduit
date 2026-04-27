@@ -3,11 +3,11 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
@@ -27,7 +27,7 @@ import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 export interface PollerWiringDeps {
 	pollerManager: MessagePollerManager;
 	sseStream: SSEStream;
-	statusPoller: SessionStatusPoller;
+	statusPoller: SessionStatusPollerService;
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
 	pipelineDeps: PipelineDeps;

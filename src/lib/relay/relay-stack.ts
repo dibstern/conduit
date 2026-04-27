@@ -9,7 +9,7 @@ import { stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { Effect } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import {
 	type ClientInitDeps,
 	handleClientConnected,
@@ -17,6 +17,13 @@ import {
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
 import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
+import {
+	createStatusPollerService,
+	makePollerPubSubLive,
+	makePollerStateLive,
+	type PollDeps,
+	type SessionStatusPollerService,
+} from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -29,6 +36,10 @@ import {
 	setLogLevel,
 } from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
+import {
+	canonicalEvent,
+	type SessionStatusValue,
+} from "../persistence/events.js";
 import type { PersistenceLayer } from "../persistence/persistence-layer.js";
 import { ProviderStateService } from "../persistence/provider-state-service.js";
 import { ReadQueryService } from "../persistence/read-query-service.js";
@@ -48,7 +59,6 @@ import { WebSocketHandler } from "../server/ws-handler.js";
 import { SessionManager } from "../session/session-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
-import { SessionStatusPoller } from "../session/session-status-poller.js";
 import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -252,28 +262,91 @@ export async function createProjectRelay(
 		? new ProviderStateService(config.persistence.db)
 		: undefined;
 
-	// ── Session status reconciliation loop ──────────────────────────────────
+	// ── Session status reconciliation loop (Effect-native) ─────────────────
 	// Background job that detects and corrects status mismatches between
 	// the projected SQLite state and OpenCode's REST API. Default interval
 	// is 7s (was 500ms when this was a real-time polling source).
-	const statusPoller: SessionStatusPoller = new SessionStatusPoller({
-		client: api,
+	//
+	// Uses the Effect-native PollerStateTag + PollerPubSubTag for state and
+	// event broadcasting, with a thin imperative facade for wiring code.
+
+	const sqliteReader = readQuery
+		? new SessionStatusSqliteReader(readQuery)
+		: undefined;
+
+	const pollerPollDeps: PollDeps = {
+		getRawStatuses: () =>
+			sqliteReader
+				? Effect.sync(() => sqliteReader.getSessionStatuses())
+				: Effect.tryPromise(() => api.session.statuses()),
+		getSessionParentMap: (): Map<string, string> =>
+			sessionMgr.getSessionParentMap(),
+		resolveParent: (sessionId: string) =>
+			Effect.tryPromise(async () => {
+				const session = await api.session.get(sessionId);
+				return session.parentID;
+			}).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+		...(config.persistence != null && readQuery != null
+			? {
+					reconciliation: {
+						getRestStatuses: () =>
+							Effect.tryPromise(() => api.session.statuses()),
+						getProjectedSessions: () => readQuery.listSessions(),
+						injectCorrectiveEvent: (sessionId: string, status: string) =>
+							Effect.sync(() => {
+								const event = canonicalEvent(
+									"session.status",
+									sessionId,
+									{
+										sessionId,
+										status: status as SessionStatusValue,
+									},
+									{
+										metadata: {
+											synthetic: true,
+											source: "reconciliation-loop",
+										},
+									},
+								);
+								// biome-ignore lint/style/noNonNullAssertion: persistence checked above
+								const stored = config.persistence!.eventStore.append(event);
+								// biome-ignore lint/style/noNonNullAssertion: persistence checked above
+								config.persistence!.projectionRunner.projectEvent(stored);
+							}),
+					},
+				}
+			: {}),
+	};
+
+	// Build a layer providing PollerState + PollerPubSub for the facade runtime.
+	// Layer.memoize ensures a single Ref + PubSub instance across all uses.
+	const pollerLayer = Layer.mergeAll(
+		makePollerStateLive(),
+		makePollerPubSubLive(),
+	);
+	const pollerManagedRuntime = ManagedRuntime.make(pollerLayer);
+
+	// Mini-runtime adapter for the imperative facade
+	const pollerMiniRuntime = {
+		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides its own context
+		runSync: <A, E>(effect: Effect.Effect<A, E, any>): A =>
+			pollerManagedRuntime.runSync(effect),
+		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides its own context
+		runPromise: <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
+			pollerManagedRuntime.runPromise(effect),
+	};
+
+	const statusPoller: SessionStatusPollerService = createStatusPollerService({
+		pollDeps: pollerPollDeps,
+		...(config.persistence != null &&
+			readQuery != null &&
+			pollerPollDeps.reconciliation != null && {
+				reconciliationDeps: pollerPollDeps.reconciliation,
+			}),
 		...(config.statusPollerInterval != null && {
 			interval: config.statusPollerInterval,
 		}),
-		log: statusLog,
-		getSessionParentMap: (): Map<string, string> =>
-			sessionMgr.getSessionParentMap(),
-		...(readQuery != null && {
-			readQuery,
-			sqliteReader: new SessionStatusSqliteReader(readQuery),
-		}),
-		...(config.persistence != null && {
-			persistence: {
-				eventStore: config.persistence.eventStore,
-				projectionRunner: config.persistence.projectionRunner,
-			},
-		}),
+		runtime: pollerMiniRuntime,
 	});
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
@@ -702,8 +775,9 @@ export async function createProjectRelay(
 			await statusPoller.drain();
 			// 2. Shut down orchestration engine (rejects pending turns)
 			await orchestration.engine.shutdown();
-			// 3. Dispose Effect ManagedRuntime (also tears down RateLimiter cleanup fiber)
+			// 3. Dispose Effect ManagedRuntimes
 			await effectRuntime.dispose();
+			await pollerManagedRuntime.dispose();
 			// 4. Clean up remaining resources
 			clearInterval(timeoutTimer);
 			await overrides.drain();

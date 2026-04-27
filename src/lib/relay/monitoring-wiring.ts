@@ -4,6 +4,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
@@ -11,7 +12,6 @@ import type { WebSocketHandler } from "../server/ws-handler.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { RelayMessage } from "../shared-types.js";
 import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
@@ -43,7 +43,7 @@ export interface MonitoringWiringDeps {
 	wsHandler: WebSocketHandler;
 	sessionMgr: SessionManager;
 	overrides: SessionOverrides;
-	statusPoller: SessionStatusPoller;
+	statusPoller: SessionStatusPollerService;
 	pollerManager: MessagePollerManager;
 	registry: SessionRegistry;
 	sseStream: SSEStream;
