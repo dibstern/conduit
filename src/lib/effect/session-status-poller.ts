@@ -332,7 +332,7 @@ export const poll = (deps: PollDeps) =>
 		if (state.polling) return;
 		yield* Ref.update(ref, (s) => ({ ...s, polling: true }));
 
-		try {
+		const pollBody = Effect.gen(function* () {
 			const raw = yield* deps.getRawStatuses();
 
 			// Resolve unknown parents for busy sessions
@@ -471,9 +471,11 @@ export const poll = (deps: PollDeps) =>
 					),
 				);
 			}
-		} finally {
-			yield* Ref.update(ref, (s) => ({ ...s, polling: false }));
-		}
+		});
+
+		yield* pollBody.pipe(
+			Effect.ensuring(Ref.update(ref, (s) => ({ ...s, polling: false }))),
+		);
 	}).pipe(
 		Effect.annotateLogs("component", "status-poller"),
 		Effect.withSpan("statusPoller.poll"),
@@ -672,19 +674,22 @@ export function createStatusPollerService(config: {
 							yield* Effect.forever(
 								Effect.gen(function* () {
 									const event = yield* subscription.take;
-									try {
+									yield* Effect.try(() => {
 										const result = callback(
 											event.statuses,
 											event.statusesChanged,
 										);
-										if (result instanceof Promise) {
-											yield* Effect.tryPromise(() => result).pipe(
-												Effect.catchAll(() => Effect.void),
-											);
-										}
-									} catch {
-										// Callback errors are silently swallowed (matches old behavior)
-									}
+										return result;
+									}).pipe(
+										Effect.flatMap((result) =>
+											result instanceof Promise
+												? Effect.tryPromise(() => result).pipe(
+														Effect.catchAll(() => Effect.void),
+													)
+												: Effect.void,
+										),
+										Effect.catchAll(() => Effect.void),
+									);
 								}),
 							);
 						}),

@@ -46,17 +46,11 @@ export const ptyStream = (url: string) =>
 								perMessageDeflate: false,
 							}),
 					),
-					(ws) =>
-						Effect.sync(() => {
-							try {
-								ws.close();
-							} catch {
-								// Ignore close errors during cleanup
-							}
-						}),
+					(ws) => Effect.sync(() => ws.close()).pipe(Effect.ignore),
 				);
 
 				ws.on("message", (data: Buffer) => {
+					// try/catch OK here — sync callback bridge, not Effect context
 					try {
 						const event = JSON.parse(data.toString()) as PtyEvent;
 						emit.single(event);

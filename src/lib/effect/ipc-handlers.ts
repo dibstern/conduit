@@ -247,13 +247,15 @@ export const handleInstanceRemove = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		try {
+		return yield* Effect.try(() => {
 			mgmt.removeInstance(cmd.id);
 			mgmt.persistConfig();
-			return { ok: true };
-		} catch (e) {
-			return { ok: false, error: String(e) };
-		}
+			return { ok: true } as IPCResponse;
+		}).pipe(
+			Effect.catchAll((e) =>
+				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			),
+		);
 	});
 
 export const handleInstanceStart = (
@@ -262,12 +264,12 @@ export const handleInstanceStart = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		try {
-			yield* Effect.promise(() => mgmt.startInstance(cmd.id));
-			return { ok: true };
-		} catch (e) {
-			return { ok: false, error: String(e) };
-		}
+		return yield* Effect.tryPromise(() => mgmt.startInstance(cmd.id)).pipe(
+			Effect.map(() => ({ ok: true }) as IPCResponse),
+			Effect.catchAll((e) =>
+				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			),
+		);
 	});
 
 export const handleInstanceStop = (
@@ -276,12 +278,14 @@ export const handleInstanceStop = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		try {
+		return yield* Effect.try(() => {
 			mgmt.stopInstance(cmd.id);
-			return { ok: true };
-		} catch (e) {
-			return { ok: false, error: String(e) };
-		}
+			return { ok: true } as IPCResponse;
+		}).pipe(
+			Effect.catchAll((e) =>
+				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			),
+		);
 	});
 
 export const handleInstanceStatus = (
@@ -305,7 +309,7 @@ export const handleInstanceUpdate = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		try {
+		return yield* Effect.try(() => {
 			const updates: {
 				name?: string;
 				env?: Record<string, string>;
@@ -317,10 +321,12 @@ export const handleInstanceUpdate = (
 			if (cmd.port !== undefined) updates.port = cmd.port;
 			const instance = mgmt.updateInstance(cmd.id, updates);
 			mgmt.persistConfig();
-			return { ok: true, instance };
-		} catch (e) {
-			return { ok: false, error: String(e) };
-		}
+			return { ok: true, instance } as IPCResponse;
+		}).pipe(
+			Effect.catchAll((e) =>
+				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			),
+		);
 	});
 
 // ─── Session override handlers ──────────────────────────────────────────────
