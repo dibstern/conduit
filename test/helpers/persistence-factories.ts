@@ -1,3 +1,6 @@
+import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
+import { Layer } from "effect";
+import { makePersistenceServiceLive } from "../../src/lib/effect/persistence-service.js";
 import { EventStore } from "../../src/lib/persistence/event-store.js";
 import {
 	type CanonicalEvent,
@@ -286,3 +289,34 @@ export function createTestHarness(): TestHarness {
 		close: () => db.close(),
 	};
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Effect Layer Test Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Convenience layers for @effect/vitest tests that need persistence services.
+// The imperative `createTestHarness()` above is preserved for existing tests.
+
+/**
+ * In-memory SQLite layer for Effect tests.
+ * Provides @effect/sql's SqlClient.SqlClient backed by an in-memory database.
+ * Use with `Layer.provideMerge(makePersistenceServiceLive, TestSqlLayer)`.
+ */
+export const TestSqlLayer = EffectSqliteClient.layer({ filename: ":memory:" });
+
+/**
+ * Composed Layer providing both SqlClient and PersistenceService for Effect tests.
+ *
+ * Usage:
+ *   it.effect("my persistence test", () =>
+ *     Effect.gen(function* () {
+ *       const persistence = yield* PersistenceServiceTag;
+ *       yield* persistence.migrate;
+ *       // ... test logic ...
+ *     }).pipe(Effect.provide(TestPersistenceLayer)),
+ *   );
+ */
+export const TestPersistenceLayer = Layer.provideMerge(
+	makePersistenceServiceLive,
+	TestSqlLayer,
+);
