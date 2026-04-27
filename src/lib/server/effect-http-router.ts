@@ -1,18 +1,19 @@
 // ─── Effect HTTP Router ─────────────────────────────────────────────────────
 // Effect-based HTTP router using @effect/platform, created alongside the
-// existing RequestRouter (http-router.ts). This is a proof-of-concept
-// covering core routes; the full migration happens incrementally.
+// existing RequestRouter (http-router.ts). Covers all JSON API routes;
+// auth gate, static files, and SPA serving remain in the imperative router
+// until the full daemon entry point migration.
 //
-// Routes migrated:
-//   GET  /health, /api/status   — health check
-//   GET  /info                  — version info
-//   GET  /api/projects          — project list
-//   GET  /api/push/vapid-key    — VAPID public key
-//   POST /api/push/subscribe    — push subscription
-//   GET  /ca/download           — CA certificate download
-//
-// The existing http-router.ts continues to serve all traffic.
-// This router is wired up in Task 6.3.
+// Routes:
+//   GET  /health, /api/status     — health check
+//   GET  /info                    — version info
+//   GET  /api/projects            — project list
+//   GET  /api/push/vapid-key      — VAPID public key
+//   POST /api/push/subscribe      — push subscription
+//   POST /api/push/unsubscribe    — push unsubscription
+//   GET  /api/themes              — theme list
+//   GET  /api/setup-info          — setup/onboarding info
+//   GET  /ca/download             — CA certificate download
 
 import { readFile } from "node:fs/promises";
 import {
@@ -30,6 +31,8 @@ import type {
 	InfoResponse,
 	ProjectsListResponse,
 	PushOkResponse,
+	SetupInfoResponse,
+	ThemesResponse,
 	VapidKeyResponse,
 } from "../shared-types.js";
 import { getVersion } from "../version.js";
@@ -67,6 +70,7 @@ export class PushProvider extends Context.Tag("PushProvider")<
 	{
 		readonly getPublicKey: () => string | undefined;
 		readonly addSubscription: (endpoint: string, subscription: unknown) => void;
+		readonly removeSubscription: (endpoint: string) => void;
 	}
 >() {}
 
@@ -76,6 +80,23 @@ export class CaCertProvider extends Context.Tag("CaCertProvider")<
 	{
 		readonly caCertDer: Buffer | undefined;
 		readonly caRootPath: string | undefined;
+	}
+>() {}
+
+/** Theme loader provider — may not be available in test environments. */
+export class ThemeProvider extends Context.Tag("ThemeProvider")<
+	ThemeProvider,
+	{
+		readonly loadThemes: () => Promise<ThemesResponse>;
+	}
+>() {}
+
+/** Setup info provider — exposes server connectivity details. */
+export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
+	SetupInfoProvider,
+	{
+		readonly port: number;
+		readonly isTls: boolean;
 	}
 >() {}
 
@@ -108,7 +129,7 @@ function jsonError(
 	);
 }
 
-// ─── Push subscription body schema ──────────────────────────────────────────
+// ─── Request body schemas ───────────────────────────────────────────────────
 
 const PushSubscribeBody = Schema.Struct({
 	subscription: Schema.Struct({
@@ -120,6 +141,10 @@ const PushSubscribeBody = Schema.Struct({
 			}),
 		),
 	}),
+});
+
+const PushUnsubscribeBody = Schema.Struct({
+	endpoint: Schema.String,
 });
 
 // ─── Route handlers ─────────────────────────────────────────────────────────
@@ -238,13 +263,79 @@ const caDownloadHandler = Effect.gen(function* () {
 	});
 });
 
+/** POST /api/push/unsubscribe */
+const pushUnsubscribeHandler = Effect.gen(function* () {
+	const maybePush = yield* Effect.serviceOption(PushProvider);
+
+	if (Option.isNone(maybePush)) {
+		return yield* jsonError(
+			404,
+			"NOT_AVAILABLE",
+			"Push notifications not available",
+		);
+	}
+
+	const push = maybePush.value;
+	const body = yield* HttpServerRequest.schemaBodyJson(PushUnsubscribeBody);
+
+	push.removeSubscription(body.endpoint);
+	return yield* HttpServerResponse.json({ ok: true } satisfies PushOkResponse);
+});
+
+/** GET /api/themes */
+const themesHandler = Effect.gen(function* () {
+	const maybeThemes = yield* Effect.serviceOption(ThemeProvider);
+
+	if (Option.isNone(maybeThemes)) {
+		return yield* jsonError(
+			404,
+			"NOT_AVAILABLE",
+			"Theme loading not available",
+		);
+	}
+
+	const themes = yield* Effect.tryPromise({
+		try: () => maybeThemes.value.loadThemes(),
+		catch: () => new Error("Failed to load themes"),
+	});
+
+	return yield* HttpServerResponse.json(themes);
+});
+
+/** GET /api/setup-info */
+const setupInfoHandler = Effect.gen(function* () {
+	const maybeSetup = yield* Effect.serviceOption(SetupInfoProvider);
+
+	if (Option.isNone(maybeSetup)) {
+		return yield* jsonError(404, "NOT_AVAILABLE", "Setup info not available");
+	}
+
+	const setup = maybeSetup.value;
+	const request = yield* HttpServerRequest.HttpServerRequest;
+	const hostHeader = request.headers["host"] ?? `localhost:${setup.port}`;
+	const hostBase = hostHeader.replace(/:\d+$/, "");
+	const httpsUrl = `https://${hostBase}:${setup.port}`;
+	const httpUrl = `http://${hostBase}:${setup.port}`;
+
+	// Check for ?mode=lan query parameter
+	const url = new URL(request.url, `http://${hostHeader}`);
+	const lanMode = url.searchParams.get("mode") === "lan";
+
+	return yield* HttpServerResponse.json({
+		httpsUrl,
+		httpUrl,
+		hasCert: setup.isTls,
+		lanMode,
+	} satisfies SetupInfoResponse);
+});
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 /**
- * Effect-based HTTP router with core routes.
+ * Effect-based HTTP router with all JSON API routes.
  *
  * Requires: ProjectsProvider (always).
- * Optional: HealthProvider, PushProvider, CaCertProvider.
+ * Optional: HealthProvider, PushProvider, CaCertProvider, ThemeProvider, SetupInfoProvider.
  *
  * Apply CORS middleware via `effectRouterWithCors` for production use.
  */
@@ -262,6 +353,13 @@ export const effectRouter = HttpRouter.empty.pipe(
 	// Push notification endpoints
 	HttpRouter.get("/api/push/vapid-key", vapidKeyHandler),
 	HttpRouter.post("/api/push/subscribe", pushSubscribeHandler),
+	HttpRouter.post("/api/push/unsubscribe", pushUnsubscribeHandler),
+
+	// Theme list
+	HttpRouter.get("/api/themes", themesHandler),
+
+	// Setup info (onboarding)
+	HttpRouter.get("/api/setup-info", setupInfoHandler),
 
 	// CA certificate download
 	HttpRouter.get("/ca/download", caDownloadHandler),

@@ -41,6 +41,7 @@ const TestHealthLayer = Layer.succeed(HealthProvider, {
 const TestPushLayer = Layer.succeed(PushProvider, {
 	getPublicKey: () => "test-vapid-public-key",
 	addSubscription: () => {},
+	removeSubscription: () => {},
 });
 
 const TestCaCertLayer = Layer.succeed(CaCertProvider, {
@@ -199,6 +200,7 @@ describe("Effect HTTP Router", () => {
 				addSubscription: (endpoint: string, sub: unknown) => {
 					subscriptions.push({ endpoint, sub });
 				},
+				removeSubscription: () => {},
 			});
 
 			const handler = tracked(
