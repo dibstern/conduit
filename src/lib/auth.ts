@@ -138,6 +138,12 @@ export class AuthManager {
 		return this.pin !== null;
 	}
 
+	/** Non-consuming PIN check for status probes. Does not mutate rate limits. */
+	checkPin(pin: string): boolean {
+		if (!this.pin) return true;
+		return hashPin(pin) === this.pin;
+	}
+
 	/** Authenticate a PIN attempt from an IP address */
 	authenticate(pin: string, ip: string): AuthResult {
 		if (!this.pin) {

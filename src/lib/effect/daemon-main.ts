@@ -13,6 +13,11 @@
 //   - Effect.never — keeps the fiber alive until SIGINT/SIGTERM
 //   - Layer.provide(daemonLayer) — provides all deps to the program
 
+import {
+	NodeFileSystem,
+	NodeHttpServer,
+	NodePath,
+} from "@effect/platform-node";
 import type { Fiber } from "effect";
 import {
 	Context,
@@ -232,10 +237,24 @@ import { InstanceManager } from "../instance/instance-manager.js";
 import { createLogger, setLogFormat, setLogLevel } from "../logger.js";
 import { PersistenceLayer } from "../persistence/persistence-layer.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
-import { RequestRouter } from "../server/http-router.js";
+import {
+	CaCertProvider,
+	effectRouterWithCors,
+	HealthProvider,
+	ProjectsProvider,
+	PushProvider,
+	RemoveProjectProvider,
+	type RouterProjectInfo,
+	SetupInfoProvider,
+	ThemeProvider,
+} from "../server/effect-http-router.js";
+import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
+import { loadThemeFiles } from "../server/theme-loader.js";
 import type { OpenCodeInstance, StoredProject } from "../types.js";
 import { generateSlug } from "../utils.js";
+import { AuthManagerTag } from "./auth-middleware.js";
+import { StaticDirTag } from "./static-file-handler.js";
 
 /**
  * Default frontend directory resolved relative to this file.
@@ -346,7 +365,6 @@ export async function startDaemonProcess(
 	let keepAwakeManager: KeepAwake | null = null;
 	let storageMonitor: StorageMonitor | null = null;
 	let scanner: PortScanner | null = null;
-	let router: RequestRouter | null = null;
 	let _onUnhandledRejection: ((err: unknown) => void) | null = null;
 	let _onUncaughtException: ((err: Error) => void) | null = null;
 
@@ -1074,45 +1092,78 @@ export async function startDaemonProcess(
 	);
 
 	// ── HTTP request router ───────────────────────────────────────────────
-	router = new RequestRouter({
-		auth,
-		staticDir,
-		getProjects: () => {
-			return registry.allProjects().map((project) => {
-				// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
-				const entry = registry.get(project.slug)!;
-				const relay = entry.status === "ready" ? entry.relay : undefined;
-				return {
-					slug: project.slug,
-					directory: project.directory,
-					title: project.title,
-					status: entry.status,
-					...(entry.status === "error" && { error: entry.error }),
-					clients: relay?.wsHandler.getClientCount() ?? 0,
-					sessions:
-						relay?.sessionMgr.getLastKnownSessionCount() ||
-						persistedSessionCounts.get(project.slug) ||
-						0,
-					isProcessing: relay?.isAnySessionProcessing() ?? false,
-				} satisfies import("../server/http-router.js").RouterProject;
-			});
+	const getRouterProjects = (): RouterProjectInfo[] =>
+		registry.allProjects().map((project) => {
+			// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
+			const entry = registry.get(project.slug)!;
+			const relay = entry.status === "ready" ? entry.relay : undefined;
+			return {
+				slug: project.slug,
+				directory: project.directory,
+				title: project.title,
+				status: entry.status,
+				...(entry.status === "error" && { error: entry.error }),
+				clients: relay?.wsHandler.getClientCount() ?? 0,
+				sessions:
+					relay?.sessionMgr.getLastKnownSessionCount() ||
+					persistedSessionCounts.get(project.slug) ||
+					0,
+				isProcessing: relay?.isAnySessionProcessing() ?? false,
+			} satisfies RouterProjectInfo;
+		});
+
+	// biome-ignore lint/suspicious/noExplicitAny: optional daemon providers are merged conditionally.
+	let routerLayer: Layer.Layer<any, never, never> = Layer.mergeAll(
+		Layer.succeed(AuthManagerTag, auth),
+		Layer.succeed(StaticDirTag, staticDir),
+		Layer.succeed(ProjectsProvider, { getProjects: getRouterProjects }),
+		Layer.succeed(RemoveProjectProvider, {
+			removeProject: (slug: string) =>
+				Effect.tryPromise(() => removeProject(slug)),
+		}),
+		Layer.succeed(SetupInfoProvider, { port, isTls: tlsEnabled }),
+		Layer.succeed(HealthProvider, { getHealthResponse: () => getStatus() }),
+		Layer.succeed(ThemeProvider, { loadThemes: loadThemeFiles }),
+		NodeFileSystem.layer,
+		NodePath.layer,
+	);
+	if (pushManager != null) {
+		routerLayer = Layer.merge(
+			routerLayer,
+			Layer.succeed(PushProvider, {
+				getPublicKey: () => pushManager?.getPublicKey() ?? undefined,
+				addSubscription: (endpoint, subscription) =>
+					pushManager?.addSubscription(
+						endpoint,
+						subscription as Parameters<
+							PushNotificationManager["addSubscription"]
+						>[1],
+					),
+				removeSubscription: (endpoint) =>
+					pushManager?.removeSubscription(endpoint),
+			}),
+		);
+	}
+	if (tlsCerts?.caRoot != null || tlsCerts?.caCertDer != null) {
+		routerLayer = Layer.merge(
+			routerLayer,
+			Layer.succeed(CaCertProvider, {
+				caCertDer: tlsCerts?.caCertDer ?? undefined,
+				caRootPath: tlsCerts?.caRoot ?? undefined,
+			}),
+		);
+	}
+
+	const effectHandler = Effect.runSync(
+		NodeHttpServer.makeHandler(
+			effectRouterWithCors.pipe(Effect.provide(routerLayer)),
+		),
+	);
+	ctx.router = {
+		handleRequest: async (req, res) => {
+			effectHandler(req, res);
 		},
-		removeProject: (slug) => removeProject(slug),
-		port,
-		isTls: tlsEnabled,
-		...(pushManager != null && { pushManager }),
-		...(tlsCerts?.caRoot != null && { caRootPath: tlsCerts.caRoot }),
-		...(tlsCerts?.caCertDer != null && { caCertDer: tlsCerts.caCertDer }),
-		authExemptPaths: [
-			"/setup",
-			"/health",
-			"/api/status",
-			"/api/setup-info",
-			"/api/themes",
-		],
-		getHealthResponse: () => getStatus(),
-	});
-	ctx.router = router;
+	};
 
 	// ── Start HTTP server ─────────────────────────────────────────────────
 	// Sync port/host into ctx before starting (they may have changed from TLS detection)
@@ -1146,7 +1197,15 @@ export async function startDaemonProcess(
 		}
 		// biome-ignore lint/style/noNonNullAssertion: regex matched successfully so capture group 1 is always present
 		const slug = match[1]!;
-		if (auth.hasPin() && !router?.checkAuth(req)) {
+		const cookies = parseCookies(req.headers.cookie ?? "");
+		const sessionCookie = cookies["relay_session"] ?? "";
+		const pinHeader = req.headers["x-relay-pin"];
+		const authenticated =
+			!auth.hasPin() ||
+			auth.validateCookie(sessionCookie) ||
+			(typeof pinHeader === "string" &&
+				auth.authenticate(pinHeader, getClientIp(req)).ok);
+		if (!authenticated) {
 			log.warn({ slug }, "WS upgrade rejected: auth failed");
 			socket.destroy();
 			return;

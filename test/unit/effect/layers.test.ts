@@ -87,6 +87,11 @@ const mockWsHandler = {
 	markClientBootstrapped: () => {},
 	getClientCount: () => 0,
 	getClientIds: () => [],
+	handleUpgrade: () => {},
+	close: () => {},
+	drain: async () => {},
+	on: () => {},
+	once: () => {},
 };
 const mockPermissionBridge = {
 	trackPending: () => {},

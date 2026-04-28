@@ -5,17 +5,33 @@
 // Extracted from skeleton.ts so integration tests exercise the exact same
 // wiring as production. skeleton.ts is now a thin CLI wrapper around this.
 
+import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
+import {
+	createServer,
+	type IncomingMessage,
+	type Server,
+	type ServerResponse,
+} from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { homedir, networkInterfaces } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+	NodeFileSystem,
+	NodeHttpServer,
+	NodePath,
+} from "@effect/platform-node";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { AuthManager } from "../auth.js";
 import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../bridges/client-init.js";
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
+import { AuthManagerTag } from "../effect/auth-middleware.js";
 import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
 import type { SessionManagerShape } from "../effect/services.js";
 import {
@@ -25,6 +41,8 @@ import {
 	type PollDeps,
 	type SessionStatusPollerService,
 } from "../effect/session-status-poller.js";
+import { StaticDirTag } from "../effect/static-file-handler.js";
+import { ENV } from "../env.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -53,10 +71,22 @@ import {
 	getClientSemaphore,
 	removeClient,
 } from "../server/client-semaphore.js";
+import {
+	CaCertProvider,
+	effectRouterWithCors,
+	ProjectApiDelegateProvider,
+	ProjectsProvider,
+	PushProvider,
+	RemoveProjectProvider,
+	type RouterProjectInfo,
+	SetupInfoProvider,
+	ThemeProvider,
+} from "../server/effect-http-router.js";
+import { EffectWsHandler } from "../server/effect-ws-handler.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
-import { RelayServer } from "../server/server.js";
-import { WebSocketHandler } from "../server/ws-handler.js";
+import { loadThemeFiles } from "../server/theme-loader.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { SessionManager } from "../session/session-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
@@ -85,9 +115,212 @@ const requireWs = createRequire(import.meta.url);
 const wsLib = requireWs("ws");
 const WebSocketClass = wsLib.WebSocket as typeof import("ws").WebSocket;
 
+const _staticCandidate = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"..",
+	"..",
+	"frontend",
+);
+const DEFAULT_STATIC_DIR = existsSync(_staticCandidate)
+	? _staticCandidate
+	: join(process.cwd(), "dist", "frontend");
+
+interface StandaloneProjectEntry {
+	slug: string;
+	directory: string;
+	title: string;
+	getClientCount?: () => number;
+	getSessionCount?: () => number;
+	getIsProcessing?: () => boolean;
+}
+
+interface StandaloneServerUrls {
+	local: string;
+	network: string[];
+}
+
+export class EffectRelayServer {
+	private server: Server | null = null;
+	private readonly port: number;
+	private actualPort: number;
+	private readonly host: string;
+	private readonly auth = new AuthManager();
+	private readonly projects = new Map<string, StandaloneProjectEntry>();
+	private readonly staticDir: string;
+	private readonly protocol: "https" | "http";
+	private readonly options: {
+		port?: number;
+		host?: string;
+		staticDir?: string;
+		pin?: string;
+		tls?: { key: Buffer; cert: Buffer; caRoot?: string };
+		pushManager?: PushNotificationManager;
+	};
+
+	constructor(
+		options: {
+			port?: number;
+			host?: string;
+			staticDir?: string;
+			pin?: string;
+			tls?: { key: Buffer; cert: Buffer; caRoot?: string };
+			pushManager?: PushNotificationManager;
+		} = {},
+	) {
+		this.options = options;
+		this.port = options.port ?? 2633;
+		this.actualPort = this.port;
+		this.host = options.host ?? ENV.host;
+		this.staticDir = options.staticDir ?? DEFAULT_STATIC_DIR;
+		this.protocol = options.tls ? "https" : "http";
+		if (options.pin) this.auth.setPin(options.pin);
+	}
+
+	addProject(project: StandaloneProjectEntry): void {
+		this.projects.set(project.slug, project);
+	}
+
+	removeProject(slug: string): boolean {
+		return this.projects.delete(slug);
+	}
+
+	getProjects(): StandaloneProjectEntry[] {
+		return Array.from(this.projects.values());
+	}
+
+	getAuth(): AuthManager {
+		return this.auth;
+	}
+
+	getHttpServer(): Server | null {
+		return this.server;
+	}
+
+	getUrls(): StandaloneServerUrls {
+		const local = `${this.protocol}://localhost:${this.actualPort}`;
+		const network: string[] = [];
+		for (const entries of Object.values(networkInterfaces())) {
+			if (!entries) continue;
+			for (const entry of entries) {
+				if (entry.family === "IPv4" && !entry.internal) {
+					network.push(
+						`${this.protocol}://${entry.address}:${this.actualPort}`,
+					);
+				}
+			}
+		}
+		return { local, network };
+	}
+
+	async start(): Promise<void> {
+		const getProjects = (): RouterProjectInfo[] =>
+			Array.from(this.projects.values()).map((p) => ({
+				slug: p.slug,
+				directory: p.directory,
+				title: p.title,
+				clients: p.getClientCount?.() ?? 0,
+				sessions: p.getSessionCount?.() ?? 0,
+				isProcessing: p.getIsProcessing?.() ?? false,
+			}));
+
+		// biome-ignore lint/suspicious/noExplicitAny: optional standalone providers are merged conditionally.
+		let routerLayer: Layer.Layer<any, never, never> = Layer.mergeAll(
+			Layer.succeed(AuthManagerTag, this.auth),
+			Layer.succeed(StaticDirTag, this.staticDir),
+			Layer.succeed(ProjectsProvider, { getProjects }),
+			Layer.succeed(RemoveProjectProvider, {
+				removeProject: (slug: string) =>
+					Effect.sync(() => {
+						if (!this.removeProject(slug)) throw new Error("Project not found");
+					}),
+			}),
+			Layer.succeed(ProjectApiDelegateProvider, {
+				delegateApiRequest: () =>
+					Effect.fail(new Error("Project API route not found")),
+			}),
+			Layer.succeed(SetupInfoProvider, {
+				port: this.actualPort,
+				isTls: this.protocol === "https",
+			}),
+			Layer.succeed(ThemeProvider, { loadThemes: loadThemeFiles }),
+			NodeFileSystem.layer,
+			NodePath.layer,
+		);
+		if (this.options.pushManager != null) {
+			routerLayer = Layer.merge(
+				routerLayer,
+				Layer.succeed(PushProvider, {
+					getPublicKey: () =>
+						this.options.pushManager?.getPublicKey() ?? undefined,
+					addSubscription: (endpoint, subscription) =>
+						this.options.pushManager?.addSubscription(
+							endpoint,
+							subscription as Parameters<
+								PushNotificationManager["addSubscription"]
+							>[1],
+						),
+					removeSubscription: (endpoint) =>
+						this.options.pushManager?.removeSubscription(endpoint),
+				}),
+			);
+		}
+		if (this.options.tls?.caRoot != null) {
+			routerLayer = Layer.merge(
+				routerLayer,
+				Layer.succeed(CaCertProvider, {
+					caCertDer: undefined,
+					caRootPath: this.options.tls.caRoot,
+				}),
+			);
+		}
+
+		const effectHandler = Effect.runSync(
+			NodeHttpServer.makeHandler(
+				effectRouterWithCors.pipe(Effect.provide(routerLayer)),
+			),
+		);
+
+		await new Promise<void>((resolveStart, rejectStart) => {
+			const handler = (req: IncomingMessage, res: ServerResponse) =>
+				effectHandler(req, res);
+
+			this.server = this.options.tls
+				? createHttpsServer(
+						{ key: this.options.tls.key, cert: this.options.tls.cert },
+						handler,
+					)
+				: createServer(handler);
+
+			this.server.on("error", rejectStart);
+			this.server.listen(this.port, this.host, () => {
+				const addr = this.server?.address();
+				if (addr && typeof addr !== "string") this.actualPort = addr.port;
+				resolveStart();
+			});
+		});
+	}
+
+	async stop(): Promise<void> {
+		await new Promise<void>((resolveStop) => {
+			const server = this.server;
+			if (!server) {
+				resolveStop();
+				return;
+			}
+			server.close(() => {
+				this.server = null;
+				resolveStop();
+			});
+			server.closeIdleConnections?.();
+			server.closeAllConnections?.();
+		});
+	}
+}
+
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
-	wsHandler: WebSocketHandler;
+	wsHandler: WebSocketHandlerShape;
 	sseStream: SSEStream;
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
@@ -139,8 +372,8 @@ export interface RelayStackConfig {
 // ─── Stack ───────────────────────────────────────────────────────────────────
 
 export interface RelayStack {
-	server: RelayServer;
-	wsHandler: WebSocketHandler;
+	server: EffectRelayServer;
+	wsHandler: WebSocketHandlerShape;
 	sseStream: SSEStream;
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
@@ -419,16 +652,16 @@ export async function createProjectRelay(
 
 	// ── WebSocket handler ───────────────────────────────────────────────────
 
-	const wsHandler = new WebSocketHandler(
-		config.noServer ? null : config.httpServer,
-		{
-			registry,
-			// In noServer mode, the daemon's upgrade handler checks auth before
-			// calling handleUpgrade(). Skip verifyClient to avoid double auth.
-			...(!config.noServer &&
-				config.verifyClient != null && { verifyClient: config.verifyClient }),
-		},
-	);
+	// ws-handler-service effects must remain synchronous for bridge read calls
+	// (`getClientCount`, `getClientsForSession`, etc.); mutations run as
+	// promises at the transport edge.
+	const wsHandler = new EffectWsHandler({
+		registry,
+		...(!config.noServer && {
+			server: config.httpServer,
+			...(config.verifyClient != null && { verifyClient: config.verifyClient }),
+		}),
+	});
 
 	// ── PTY upstream deps (constructed after wsHandler is available) ────────
 	const ptyDeps: PtyUpstreamDeps = {
@@ -797,7 +1030,7 @@ export async function createProjectRelay(
 /**
  * Create a full relay stack with its own HTTP server.
  *
- * Creates a RelayServer, registers the project, starts the server, then
+ * Creates an Effect-backed HTTP server, registers the project, starts the server, then
  * delegates to `createProjectRelay()` for all relay wiring. Used by
  * skeleton.ts for standalone operation.
  */
@@ -821,7 +1054,7 @@ export async function createRelayStack(
 
 	// ── HTTP server ─────────────────────────────────────────────────────────
 
-	const server = new RelayServer({
+	const server = new EffectRelayServer({
 		port: config.port,
 		...(config.host != null && { host: config.host }),
 		...(config.pin && { pin: config.pin }),

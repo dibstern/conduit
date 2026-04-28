@@ -1,7 +1,7 @@
 // ─── WebSocket Store ─────────────────────────────────────────────────────────
 // Manages WebSocket connection lifecycle and centralized message dispatch.
-// Creates WebSocket synchronously in connect() — no async pre-flight barrier.
-// Server-side waitForRelay() handles relay readiness on the upgrade path.
+// Creates WebSocket synchronously in connect(). The transport module preloads
+// the message decoder; server-side waitForRelay() handles relay readiness.
 
 import { Effect, Stream } from "effect";
 import {
@@ -142,8 +142,8 @@ function fetchRelayStatus(slug: string): void {
 /**
  * Establish WebSocket connection.
  *
- * Creates the WebSocket synchronously — no async pre-flight barrier.
- * The server's waitForRelay() handles relay readiness on the upgrade path.
+ * Creates the WebSocket synchronously. The server's waitForRelay() handles
+ * relay readiness on the upgrade path.
  * A non-blocking relay status fetch runs in parallel for UI display only.
  */
 export function connect(slug?: string): void {
@@ -177,7 +177,6 @@ export function connect(slug?: string): void {
 		`slug=${slug ?? "standalone"}, attempt=${wsState.attempts}`,
 	);
 
-	// Create WebSocket immediately — no async gap.
 	doConnect(slug);
 
 	// Non-blocking relay status check for UI enrichment (shows

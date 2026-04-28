@@ -9,7 +9,7 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { WebSocketHandler } from "../server/ws-handler.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../shared-types.js";
@@ -58,7 +58,7 @@ interface SessionManagerLike {
 
 export interface MonitoringWiringDeps {
 	client: OpenCodeAPI;
-	wsHandler: WebSocketHandler;
+	wsHandler: WebSocketHandlerShape;
 	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
 	statusPoller: SessionStatusPollerService;

@@ -16,6 +16,7 @@ import {
 } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RelayMessage } from "../../shared-types.js";
+import { decodeMessage, preloadDecoder } from "../effect-boundary.js";
 
 // Frontend transport has no async service dependencies.
 // ManagedRuntime is needed for fiber lifecycle (interrupt stream on reconnect).
@@ -24,6 +25,8 @@ const TransportLayer = Layer.empty;
 
 let runtime: ManagedRuntime.ManagedRuntime<never, never> | null = null;
 let activeStreamFiber: RuntimeFiber<void, unknown> | null = null;
+
+void preloadDecoder();
 
 /** Get or create the long-lived runtime (app lifetime). */
 export async function getRuntime() {
@@ -58,7 +61,8 @@ export const wsMessageStream = (
 	Stream.async<RelayMessage, Error>((emit) => {
 		const onMessage = (evt: MessageEvent) => {
 			try {
-				const parsed = JSON.parse(evt.data) as RelayMessage;
+				const raw = JSON.parse(evt.data);
+				const parsed = decodeMessage(raw) as RelayMessage;
 				emit(Effect.succeed(Chunk.of(parsed)));
 			} catch {
 				// Bad JSON — skip message, don't kill stream

@@ -7,7 +7,7 @@ import type { SessionStatusPollerService } from "../effect/session-status-poller
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
-import type { WebSocketHandler } from "../server/ws-handler.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../types.js";
 import {
 	type createTranslator,
@@ -39,7 +39,7 @@ interface SessionManagerLike {
 
 export interface SessionLifecycleWiringDeps {
 	sessionMgr: SessionManagerLike;
-	wsHandler: WebSocketHandler;
+	wsHandler: WebSocketHandlerShape;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
 	pollerManager: PollerManagerLike;

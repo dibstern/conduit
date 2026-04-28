@@ -3,9 +3,16 @@
 // Uses HttpApp.toWebHandlerLayer to run route handlers against
 // the Web Fetch API Request/Response, avoiding a real HTTP server.
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HttpApp } from "@effect/platform";
+import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Layer } from "effect";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AuthManager } from "../../../src/lib/auth.js";
+import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
 import {
 	CaCertProvider,
 	effectRouter,
@@ -49,6 +56,20 @@ const TestCaCertLayer = Layer.succeed(CaCertProvider, {
 	caRootPath: undefined,
 });
 
+let staticDir = "";
+
+beforeAll(async () => {
+	staticDir = await mkdtemp(join(tmpdir(), "conduit-effect-router-"));
+});
+
+const baseRouterLayer = () =>
+	Layer.mergeAll(
+		Layer.succeed(AuthManagerTag, new AuthManager()),
+		Layer.succeed(StaticDirTag, staticDir),
+		NodeFileSystem.layer,
+		NodePath.layer,
+	);
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -57,7 +78,10 @@ const TestCaCertLayer = Layer.succeed(CaCertProvider, {
  */
 // biome-ignore lint/suspicious/noExplicitAny: Layer type params vary per test — `any` is intentional
 function makeHandler(layer: Layer.Layer<any, any, never>) {
-	return HttpApp.toWebHandlerLayer(effectRouter, layer);
+	return HttpApp.toWebHandlerLayer(
+		effectRouter,
+		Layer.merge(layer, baseRouterLayer()),
+	);
 }
 
 async function jsonBody(response: Response): Promise<unknown> {
@@ -78,6 +102,7 @@ function tracked(layer: Layer.Layer<any, any, never>) {
 
 afterAll(async () => {
 	await Promise.all(disposers.map((d) => d()));
+	if (staticDir) await rm(staticDir, { recursive: true, force: true });
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -283,7 +308,7 @@ describe("Effect HTTP Router", () => {
 		it("effectRouterWithCors adds CORS headers to responses", async () => {
 			const { handler, dispose } = HttpApp.toWebHandlerLayer(
 				effectRouterWithCors,
-				TestProjectsLayer,
+				Layer.merge(TestProjectsLayer, baseRouterLayer()),
 			);
 			disposers.push(dispose);
 

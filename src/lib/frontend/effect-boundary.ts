@@ -16,6 +16,8 @@
 
 let _decoder: ((raw: unknown) => unknown) | null = null;
 
+const passthroughDecoder = (raw: unknown): unknown => raw;
+
 const getDecoder = async (): Promise<(raw: unknown) => unknown> => {
 	if (_decoder) return _decoder;
 
@@ -51,3 +53,26 @@ export const validateIncomingMessage = async (
 	const decode = await getDecoder();
 	return decode(raw);
 };
+
+/**
+ * Pre-load the schema decoder before opening the WebSocket. If the lazy chunk
+ * fails to load, fall back to passthrough so the app keeps receiving messages.
+ */
+export const preloadDecoder = async (): Promise<void> => {
+	try {
+		await getDecoder();
+	} catch (err) {
+		console.warn(
+			"[effect-boundary] Failed to load Schema decoder; using passthrough",
+			err,
+		);
+		_decoder = passthroughDecoder;
+	}
+};
+
+/**
+ * Synchronous decode path for the WebSocket stream after preloadDecoder().
+ * If preload has not happened, gracefully pass raw data through.
+ */
+export const decodeMessage = (raw: unknown): unknown =>
+	_decoder ? _decoder(raw) : raw;

@@ -25,6 +25,7 @@ import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { PtyManager } from "../relay/pty-manager.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { HistoryMessage } from "../shared-types.js";
@@ -36,23 +37,7 @@ import type {
 
 // ─── Shape interfaces for inline/structural types ──────────────────────────
 
-/** Shape for the wsHandler field — WebSocket broadcast/unicast capabilities. */
-export interface WebSocketHandlerShape {
-	broadcast(msg: RelayMessage): void;
-	sendTo(clientId: string, msg: RelayMessage): void;
-	setClientSession(clientId: string, sessionId: string): void;
-	getClientSession(clientId: string): string | undefined;
-	getClientsForSession(sessionId: string): string[];
-	sendToSession(sessionId: string, msg: RelayMessage): void;
-	/** Phase 0b: project-scoped per-session event firehose with bootstrap buffering. */
-	broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
-	/** Phase 0b: mark client as bootstrapped and flush buffered events. */
-	markClientBootstrapped(clientId: string): void;
-	/** Get the current number of connected clients. */
-	getClientCount(): number;
-	/** Get all connected client IDs. */
-	getClientIds(): string[];
-}
+export type { WebSocketHandlerShape };
 
 /** Shape for the statusPoller field — Pick<SessionStatusPollerService, "isProcessing">. */
 export interface StatusPollerShape {

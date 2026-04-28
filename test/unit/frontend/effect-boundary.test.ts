@@ -102,4 +102,29 @@ describe("Frontend Effect boundary", () => {
 		expect(r1).toHaveProperty("type", "delta");
 		expect(r2).toHaveProperty("type", "status");
 	});
+
+	it("preloads and decodes synchronously", async () => {
+		const { decodeMessage, preloadDecoder } = await import(
+			"../../../src/lib/frontend/effect-boundary.js"
+		);
+		await preloadDecoder();
+
+		const result = decodeMessage({
+			type: "delta",
+			sessionId: "s1",
+			text: "cached",
+		});
+
+		expect(result).toHaveProperty("type", "delta");
+		expect(result).toHaveProperty("text", "cached");
+	});
+
+	it("sync decoder passes unknown messages through", async () => {
+		const { decodeMessage, preloadDecoder } = await import(
+			"../../../src/lib/frontend/effect-boundary.js"
+		);
+		await preloadDecoder();
+		const raw = { type: "future_unknown_type", data: 123 };
+		expect(decodeMessage(raw)).toEqual(raw);
+	});
 });

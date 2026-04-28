@@ -10,20 +10,30 @@
 //   GET  /api/themes
 //   GET  /api/setup-info
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	HttpApp,
 	HttpClient,
 	HttpClientRequest,
 	HttpServer,
 } from "@effect/platform";
-import { NodeHttpServer } from "@effect/platform-node";
+import {
+	NodeFileSystem,
+	NodeHttpServer,
+	NodePath,
+} from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { afterAll, expect } from "vitest";
+import { afterAll, beforeAll, expect } from "vitest";
+import { AuthManager } from "../../../src/lib/auth.js";
+import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
 import {
 	HttpServerConfigTag,
 	HttpServerLive,
 } from "../../../src/lib/effect/http-server-layer.js";
+import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
 import {
 	effectRouter,
 	effectRouterWithCors,
@@ -93,19 +103,37 @@ const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
 	isTls: false,
 });
 
+let staticDir = "";
+
+beforeAll(async () => {
+	staticDir = await mkdtemp(join(tmpdir(), "conduit-http-layer-"));
+});
+
+const baseRouterLayer = () =>
+	Layer.mergeAll(
+		Layer.succeed(AuthManagerTag, new AuthManager()),
+		Layer.succeed(StaticDirTag, staticDir),
+		NodeFileSystem.layer,
+		NodePath.layer,
+	);
+
 // ─── Web Handler Helpers (for unit-style route tests) ──────────────────────
 
 const disposers: Array<() => Promise<void>> = [];
 
 // biome-ignore lint/suspicious/noExplicitAny: Layer type params vary per test
 function tracked(layer: Layer.Layer<any, any, never>) {
-	const h = HttpApp.toWebHandlerLayer(effectRouter, layer);
+	const h = HttpApp.toWebHandlerLayer(
+		effectRouter,
+		Layer.merge(layer, baseRouterLayer()),
+	);
 	disposers.push(h.dispose);
 	return h.handler;
 }
 
 afterAll(async () => {
 	await Promise.all(disposers.map((d) => d()));
+	if (staticDir) await rm(staticDir, { recursive: true, force: true });
 });
 
 // ─── Route Tests: Push Unsubscribe ─────────────────────────────────────────
@@ -260,6 +288,7 @@ describe("HTTP Server Layer", () => {
 		TestPushLayer,
 		TestThemeLayer,
 		TestSetupInfoLayer,
+		baseRouterLayer(),
 	);
 
 	// Build a test layer: layerTest provides HttpServer + HttpClient,
@@ -383,6 +412,7 @@ describe("HttpServerLive layer construction", () => {
 			const fullLayer = HttpServerLive.pipe(
 				Layer.provide(configLayer),
 				Layer.provide(TestProjectsLayer),
+				Layer.provide(baseRouterLayer()),
 			);
 
 			// Layer.build constructs the layer within the current scope,

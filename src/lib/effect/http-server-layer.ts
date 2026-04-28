@@ -20,8 +20,10 @@ import {
 	effectRouterWithCors,
 	type ProjectsProvider,
 } from "../server/effect-http-router.js";
+import type { AuthManagerTag } from "./auth-middleware.js";
 import type { DaemonEnvConfig } from "./daemon-config.js";
 import { DaemonEnvConfigTag } from "./daemon-config.js";
+import type { StaticDirTag } from "./static-file-handler.js";
 
 // ─── HttpServerConfig Tag ──────────────────────────────────────────────────
 // A focused config slice for the HTTP server layer, decoupled from the
@@ -95,7 +97,7 @@ const makeServerFactory = (
 export const HttpServerLive: Layer.Layer<
 	never,
 	HttpServerError.ServeError,
-	HttpServerConfigTag | ProjectsProvider
+	AuthManagerTag | HttpServerConfigTag | ProjectsProvider | StaticDirTag
 > = Layer.unwrapEffect(
 	Effect.gen(function* () {
 		const config = yield* HttpServerConfigTag;
@@ -122,5 +124,5 @@ export const HttpServerLive: Layer.Layer<
 export const HttpServerFromEnvLive: Layer.Layer<
 	never,
 	HttpServerError.ServeError,
-	DaemonEnvConfigTag | ProjectsProvider
+	AuthManagerTag | DaemonEnvConfigTag | ProjectsProvider | StaticDirTag
 > = HttpServerLive.pipe(Layer.provide(HttpServerConfigFromEnv));

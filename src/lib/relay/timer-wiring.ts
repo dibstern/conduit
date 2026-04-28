@@ -5,14 +5,14 @@
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { WebSocketHandler } from "../server/ws-handler.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { PermissionId } from "../shared-types.js";
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
 export interface TimerWiringDeps {
 	permissionBridge: PermissionBridge;
-	wsHandler: WebSocketHandler;
+	wsHandler: WebSocketHandlerShape;
 }
 
 // ─── Return type ─────────────────────────────────────────────────────────────

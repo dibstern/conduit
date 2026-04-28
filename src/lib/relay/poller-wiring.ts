@@ -6,7 +6,7 @@
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { WebSocketHandler } from "../server/ws-handler.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
@@ -40,7 +40,7 @@ export interface PollerWiringDeps {
 	pollerManager: PollerManagerLike;
 	sseStream: SSEStream;
 	statusPoller: SessionStatusPollerService;
-	wsHandler: WebSocketHandler;
+	wsHandler: WebSocketHandlerShape;
 	sessionMgr: SessionManagerLike;
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;

@@ -31,6 +31,8 @@ export interface WsConn {
 	send(data: string): void;
 	readyState: number;
 	close(code?: number, reason?: string): void;
+	ping?(): void;
+	terminate?(): void;
 }
 
 /** WS_OPEN readyState constant (matches ws.OPEN = 1). */
@@ -53,6 +55,11 @@ export interface ClientState {
 	 * Until true, per-session events are buffered in `bootstrapQueue`.
 	 */
 	bootstrapped: boolean;
+	/**
+	 * Heartbeat liveness. New clients start alive; each heartbeat marks them
+	 * stale before pinging, and the transport marks them alive again on pong.
+	 */
+	isAlive: boolean;
 	/**
 	 * Serialized JSON strings buffered during bootstrap.
 	 * Flushed in order when `markClientBootstrapped` is called.
@@ -97,12 +104,40 @@ export const addClient = (clientId: string, ws: WsConn) =>
 				ws,
 				sessionId: undefined,
 				bootstrapped: false,
+				isAlive: true,
 				bootstrapQueue: [],
 			}),
 		);
 		const map = yield* Ref.get(ref);
 		return HashMap.size(map);
 	}).pipe(Effect.annotateLogs("clientId", clientId));
+
+/** Mark a client alive after receiving a WebSocket pong. */
+export const markClientAlive = (clientId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* WsHandlerStateTag;
+		yield* Ref.update(ref, (map) => {
+			const entry = HashMap.get(map, clientId);
+			if (Option.isNone(entry)) return map;
+			return HashMap.set(map, clientId, {
+				...entry.value,
+				isAlive: true,
+			});
+		});
+	}).pipe(Effect.annotateLogs("clientId", clientId));
+
+/** Close all tracked clients and clear handler state. */
+export const closeAllClients = (code = 1001, reason = "Server shutting down") =>
+	Effect.gen(function* () {
+		const ref = yield* WsHandlerStateTag;
+		const map = yield* Ref.get(ref);
+		for (const [_clientId, state] of map) {
+			yield* Effect.sync(() => state.ws.close(code, reason)).pipe(
+				Effect.catchAll(() => Effect.void),
+			);
+		}
+		yield* Ref.set(ref, HashMap.empty<string, ClientState>());
+	});
 
 /**
  * Remove a client connection and clean up all per-client state.

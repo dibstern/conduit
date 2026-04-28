@@ -24,11 +24,18 @@ import {
 } from "@effect/platform";
 import type { HttpBodyError } from "@effect/platform/HttpBody";
 import { Context, Effect, Option, Schema } from "effect";
+import {
+	authRoute,
+	authStatusRoute,
+	withAuthGate,
+} from "../effect/auth-middleware.js";
+import { serveStaticFile } from "../effect/static-file-handler.js";
 import type {
 	ApiError,
 	DashboardProjectResponse,
 	HealthResponse,
 	InfoResponse,
+	ProjectStatusResponse,
 	ProjectsListResponse,
 	PushOkResponse,
 	SetupInfoResponse,
@@ -97,6 +104,28 @@ export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 	{
 		readonly port: number;
 		readonly isTls: boolean;
+	}
+>() {}
+
+/** Project removal provider — daemon mode only. */
+export class RemoveProjectProvider extends Context.Tag("RemoveProjectProvider")<
+	RemoveProjectProvider,
+	{
+		readonly removeProject: (slug: string) => Effect.Effect<void, unknown>;
+	}
+>() {}
+
+/** Standalone project API delegation provider — optional. */
+export class ProjectApiDelegateProvider extends Context.Tag(
+	"ProjectApiDelegateProvider",
+)<
+	ProjectApiDelegateProvider,
+	{
+		readonly delegateApiRequest: (
+			slug: string,
+			subPath: string,
+			req: HttpServerRequest.HttpServerRequest,
+		) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
 	}
 >() {}
 
@@ -329,6 +358,94 @@ const setupInfoHandler = Effect.gen(function* () {
 	} satisfies SetupInfoResponse);
 });
 
+const authPageHandler = serveStaticFile("/index.html");
+const setupPageHandler = serveStaticFile("/index.html");
+
+const rootHandler = Effect.gen(function* () {
+	const { getProjects } = yield* ProjectsProvider;
+	const projects = getProjects();
+	if (projects.length === 1 && projects[0]) {
+		return HttpServerResponse.empty({
+			status: 302,
+			headers: { Location: `/p/${projects[0].slug}/` },
+		});
+	}
+	return yield* serveStaticFile("/index.html");
+});
+
+const deleteProjectHandler = Effect.gen(function* () {
+	const params = yield* HttpRouter.params;
+	const rawSlug = params["slug"];
+	if (!rawSlug) {
+		return yield* jsonError(400, "BAD_REQUEST", "Missing project slug");
+	}
+
+	const remove = yield* Effect.serviceOption(RemoveProjectProvider);
+	if (Option.isNone(remove)) {
+		return yield* jsonError(
+			501,
+			"NOT_SUPPORTED",
+			"Removing projects is not supported in this mode",
+		);
+	}
+
+	const slug = decodeURIComponent(rawSlug);
+	const removed = yield* remove.value.removeProject(slug).pipe(
+		Effect.as(true),
+		Effect.catchAll(() => Effect.succeed(false)),
+	);
+	if (!removed) {
+		return yield* jsonError(404, "NOT_FOUND", "Project not found");
+	}
+
+	return yield* HttpServerResponse.json({ ok: true });
+});
+
+const projectRouteHandler = Effect.gen(function* () {
+	const params = yield* HttpRouter.params;
+	const rawSlug = params["slug"];
+	if (!rawSlug) return yield* jsonError(400, "BAD_REQUEST", "Missing slug");
+	const slug = decodeURIComponent(rawSlug);
+	const req = yield* HttpServerRequest.HttpServerRequest;
+	const host = req.headers["host"] ?? "localhost";
+	const pathname = new URL(req.url, `http://${host}`).pathname;
+	const subPath = pathname.slice(`/p/${rawSlug}`.length) || "/";
+	const { getProjects } = yield* ProjectsProvider;
+	const project = getProjects().find((p) => p.slug === slug);
+
+	if (!project) {
+		return yield* jsonError(404, "NOT_FOUND", `Project "${slug}" not found`);
+	}
+
+	if (subPath === "/api/status") {
+		return yield* HttpServerResponse.json({
+			status: project.status ?? "ready",
+			...(project.error != null && { error: project.error }),
+		} satisfies ProjectStatusResponse);
+	}
+
+	if (subPath.startsWith("/api/")) {
+		const delegate = yield* Effect.serviceOption(ProjectApiDelegateProvider);
+		if (Option.isSome(delegate)) {
+			return yield* delegate.value.delegateApiRequest(
+				slug,
+				subPath.slice(4),
+				req,
+			);
+		}
+		return yield* jsonError(404, "NOT_FOUND", "Project API route not found");
+	}
+
+	return yield* serveStaticFile("/index.html");
+});
+
+const staticCatchAllHandler = Effect.gen(function* () {
+	const req = yield* HttpServerRequest.HttpServerRequest;
+	const host = req.headers["host"] ?? "localhost";
+	const pathname = new URL(req.url, `http://${host}`).pathname;
+	return yield* serveStaticFile(pathname);
+});
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 /**
@@ -339,21 +456,13 @@ const setupInfoHandler = Effect.gen(function* () {
  *
  * Apply CORS middleware via `effectRouterWithCors` for production use.
  */
-export const effectRouter = HttpRouter.empty.pipe(
+const publicRoutes = HttpRouter.empty.pipe(
 	// Health check — two paths, same handler
 	HttpRouter.get("/health", healthHandler),
 	HttpRouter.get("/api/status", healthHandler),
 
 	// Version info
 	HttpRouter.get("/info", infoHandler),
-
-	// Projects list
-	HttpRouter.get("/api/projects", projectsHandler),
-
-	// Push notification endpoints
-	HttpRouter.get("/api/push/vapid-key", vapidKeyHandler),
-	HttpRouter.post("/api/push/subscribe", pushSubscribeHandler),
-	HttpRouter.post("/api/push/unsubscribe", pushUnsubscribeHandler),
 
 	// Theme list
 	HttpRouter.get("/api/themes", themesHandler),
@@ -363,6 +472,32 @@ export const effectRouter = HttpRouter.empty.pipe(
 
 	// CA certificate download
 	HttpRouter.get("/ca/download", caDownloadHandler),
+
+	HttpRouter.get("/auth", authPageHandler),
+	HttpRouter.get("/setup", setupPageHandler),
+	HttpRouter.concat(authRoute),
+	HttpRouter.concat(authStatusRoute),
+);
+
+const protectedRoutes = HttpRouter.empty.pipe(
+	HttpRouter.get("/api/projects", projectsHandler),
+	HttpRouter.del("/api/projects/:slug", deleteProjectHandler),
+	HttpRouter.get("/api/push/vapid-key", vapidKeyHandler),
+	HttpRouter.post("/api/push/subscribe", pushSubscribeHandler),
+	HttpRouter.post("/api/push/unsubscribe", pushUnsubscribeHandler),
+	HttpRouter.get("/", rootHandler),
+	HttpRouter.get("/p/:slug/*", projectRouteHandler),
+	HttpRouter.use((handler) => withAuthGate(handler)),
+);
+
+const staticCatchAll = HttpRouter.empty.pipe(
+	HttpRouter.get("*", staticCatchAllHandler),
+);
+
+export const effectRouter = HttpRouter.empty.pipe(
+	HttpRouter.concat(publicRoutes),
+	HttpRouter.concat(protectedRoutes),
+	HttpRouter.concat(staticCatchAll),
 );
 
 /**
