@@ -819,7 +819,7 @@ Commit: `feat(effect): complete Effect HTTP router with auth, static, and projec
 > The daemon is a class at `src/lib/daemon/daemon.ts` (not `src/lib/effect/daemon-main.ts`).
 > There is no separate `daemon-layers.ts` file. `daemon-lifecycle.ts` is at
 > `src/lib/daemon/daemon-lifecycle.ts` (not `src/lib/server/`).
-> The daemon uses `class Daemon extends TrackedService` with instance fields
+> The daemon uses `class Daemon` (plain class, does NOT extend TrackedService) with instance fields
 > (`this.router`, `this.auth`, `this.registry`), not a functional `startDaemonProcess`.
 
 **Context:** `Daemon.start()` currently:

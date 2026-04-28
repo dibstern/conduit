@@ -147,3 +147,40 @@ The plan shows `Effect.fn("ws.heartbeat")(function* () {...})()` with a double-c
 | AP-3: Concrete WebSocketHandler type | Task 43 | Added Step 0: extract `WebSocketHandlerShape` interface to `ws-handler-shape.ts`. Listed all files needing type import update. Added full interface definition with all methods found via grep (80+ call sites). Added `R5-43-1` note. |
 | AP-4: TrackedService/ServiceRegistry gap | Task 43 | Added `R5-43-2` note requiring executing agent to check TrackedService API, verify ServiceRegistry integration needs, and either register bridge or document opt-out. |
 | AP-5: ws import via dynamic import() | Task 42 | Replaced `Effect.tryPromise(() => import("ws"))` with `Effect.try(() => createRequire(...))`. Added `createRequire` import. Added `R5-42-1` note documenting known CJS/ESM inconsistency. |
+
+---
+
+## Re-Audit (Round 6) — Verification of Round 5 Amendments
+
+> **Date:** 2026-04-28
+> **Scope:** Targeted re-audit of R5-40-1, R5-41-1, R5-41-2, R5-42-1, R5-43-1, R5-43-2
+
+### Amend Plan (1)
+
+**R6-41-1:** R5-41-1 note incorrectly states "class Daemon extends TrackedService" — the actual class is `export class Daemon {` (plain class, no superclass). Fixed inline.
+
+### Accept (7)
+
+1. **R5-40-1 verified:** Static catch-all in public routes is safe. Static files contain no sensitive data (SPA client-side code). All data access goes through auth-gated API routes. Old router behavior (http-router.ts:234) confirmed: static files intentionally bypass auth gate.
+
+2. **R5-41-1/R5-41-2 verified:** File paths now correct (`src/lib/daemon/daemon.ts`, `src/lib/daemon/daemon-lifecycle.ts`). Line numbers approximate but accurate (~630, ~688). `DaemonLifecycleContext.router` type confirmed as `{ handleRequest(req, res): Promise<void> } | null`. The wrapper pattern matches.
+
+3. **R5-42-1 verified:** `createRequire` + `Effect.try` is the correct pattern. `require("ws")` is synchronous, so `Effect.try` (not `Effect.tryPromise`) is right. Project uses ESM (`import.meta.url` works). Pattern matches existing ws-handler.ts:23-28.
+
+4. **R5-43-1 verified:** WebSocketHandlerShape interface is complete for external consumers. `getClientIds()` is only used internally (ws-handler.ts:303) and not by any external consumer — correctly omitted from shape. `IncomingMessageType` is a string union; using `string` in the shape is intentionally wider for forward compatibility.
+
+5. **R5-43-2 verified:** `ServiceRegistry` is simple — only provides `register(Drainable)` and `drainAll()`. `TrackedService` auto-registers and provides `drain()` via `AsyncTracker`. The bridge needs to implement `Drainable.drain()` for graceful shutdown coordination. The R5-43-2 guidance correctly directs the executing agent to investigate and decide.
+
+6. **Event shapes verified:** `client_connected` and `client_disconnected` event callback shapes match `WebSocketHandlerEvents` in ws-handler.ts:56-84. `clientCount` and optional `requestedSessionId`/`sessionId` fields are present.
+
+7. **No stale references:** No remaining mentions of `daemon-main.ts`, `daemon-layers.ts`, `startDaemonProcess`, or `src/lib/server/daemon-lifecycle.ts` outside the corrective R5-41-1 note.
+
+### Summary
+
+| Action | Count |
+|---|---|
+| **Amend Plan** | 1 (minor: Daemon class inheritance claim — fixed inline) |
+| **Ask User** | 0 |
+| **Accept** | 7 |
+
+**Result:** All 5 round-5 amendments verified correct. One minor factual error fixed inline (R6-41-1). Audit is clean.
