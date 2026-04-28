@@ -4,7 +4,7 @@
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
 import { NodeFileSystem } from "@effect/platform-node";
-import { Deferred, Effect, Layer, Ref } from "effect";
+import { Data, Deferred, Effect, Layer, Ref } from "effect";
 import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
 import {
 	closeHttpServer,
@@ -37,6 +37,24 @@ import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import { SessionOverridesTag, ShutdownSignalTag } from "./services.js";
 import { StorageMonitorLive } from "./storage-monitor-layer.js";
 import { VersionCheckerLive } from "./version-checker-layer.js";
+
+export class DaemonLifecycleLayerError extends Data.TaggedError(
+	"DaemonLifecycleLayerError",
+)<{
+	operation: string;
+	cause: unknown;
+}> {}
+
+const startLifecycleServer = (operation: string, start: () => Promise<void>) =>
+	Effect.tryPromise({
+		try: start,
+		catch: (cause) => new DaemonLifecycleLayerError({ operation, cause }),
+	});
+
+// close* lifecycle helpers resolve on no-op, normal close, or shutdown timeout;
+// they do not reject, so defects here indicate a bug in the close helper itself.
+const closeLifecycleServer = (close: () => Promise<void>) =>
+	Effect.promise(close);
 
 /**
  * Installs SIGTERM/SIGINT handlers. Completes a Deferred on signal.
@@ -185,9 +203,11 @@ export const makeRelayCacheLayer = (factory: RelayFactory) =>
 export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			yield* Effect.promise(() => startHttpServer(ctx));
+			yield* startLifecycleServer("startHttpServer", () =>
+				startHttpServer(ctx),
+			);
 			yield* Effect.addFinalizer(() =>
-				Effect.promise(() => closeHttpServer(ctx)),
+				closeLifecycleServer(() => closeHttpServer(ctx)),
 			);
 		}),
 	);
@@ -203,9 +223,11 @@ export const makeIpcServerLive = (
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			yield* Effect.promise(() => startIPCServer(ctx, ipcContext, getStatus));
+			yield* startLifecycleServer("startIPCServer", () =>
+				startIPCServer(ctx, ipcContext, getStatus),
+			);
 			yield* Effect.addFinalizer(() =>
-				Effect.promise(() => closeIPCServer(ctx)),
+				closeLifecycleServer(() => closeIPCServer(ctx)),
 			);
 		}),
 	);
@@ -221,9 +243,11 @@ export const makeOnboardingServerLive = (
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			yield* Effect.promise(() => startOnboardingServer(ctx, deps));
+			yield* startLifecycleServer("startOnboardingServer", () =>
+				startOnboardingServer(ctx, deps),
+			);
 			yield* Effect.addFinalizer(() =>
-				Effect.promise(() => closeOnboardingServer(ctx)),
+				closeLifecycleServer(() => closeOnboardingServer(ctx)),
 			);
 		}),
 	);

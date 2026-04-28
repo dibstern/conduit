@@ -445,6 +445,28 @@ export async function startDaemonProcess(
 		while (_pendingSave) await _pendingSave;
 	}
 
+	function applyRestartConfig(config: Record<string, unknown>): void {
+		if (typeof config["port"] === "number") port = config["port"];
+		if (typeof config["tls"] === "boolean") tlsEnabled = config["tls"];
+		if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
+			pinHash = config["pinHash"];
+			if (pinHash) auth.setPinHash(pinHash);
+		}
+		if (typeof config["keepAwake"] === "boolean") {
+			keepAwake = config["keepAwake"];
+			keepAwakeManager?.setEnabled(keepAwake);
+		}
+		if (typeof config["keepAwakeCommand"] === "string") {
+			keepAwakeCommand = config["keepAwakeCommand"];
+		}
+		if (
+			Array.isArray(config["keepAwakeArgs"]) &&
+			config["keepAwakeArgs"].every((arg) => typeof arg === "string")
+		) {
+			keepAwakeArgs = config["keepAwakeArgs"];
+		}
+	}
+
 	// ── Registry event listeners ──────────────────────────────────────────
 	registry.on("project_added", () => persistConfig());
 	registry.on("project_ready", () => persistConfig());
@@ -1026,6 +1048,9 @@ export async function startDaemonProcess(
 		persistConfig: () => persistConfig(),
 		scheduleShutdown: () => {
 			shutdownTimer = setTimeout(() => stop(), DAEMON_SHUTDOWN_DELAY_MS);
+		},
+		applyConfig: (config: Record<string, unknown>) => {
+			applyRestartConfig(config);
 		},
 		getInstances: () => instanceManager.getInstances(),
 		getInstance: (id: string) => instanceManager.getInstance(id),

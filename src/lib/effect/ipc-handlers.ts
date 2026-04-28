@@ -34,6 +34,31 @@ type PersistDeps = DaemonStateTag | FileSystem.FileSystem | PersistencePathTag;
 const hashPin = (pin: string): string =>
 	createHash("sha256").update(pin).digest("hex");
 
+const applyRestartConfig = (
+	state: import("./daemon-state.js").DaemonState,
+	config: Record<string, unknown> | undefined,
+) => {
+	if (config === undefined) return state;
+	return {
+		...state,
+		...(typeof config["port"] === "number" ? { port: config["port"] } : {}),
+		...(typeof config["tls"] === "boolean" ? { tls: config["tls"] } : {}),
+		...(typeof config["pinHash"] === "string" || config["pinHash"] === null
+			? { pinHash: config["pinHash"] }
+			: {}),
+		...(typeof config["keepAwake"] === "boolean"
+			? { keepAwake: config["keepAwake"] }
+			: {}),
+		...(typeof config["keepAwakeCommand"] === "string"
+			? { keepAwakeCommand: config["keepAwakeCommand"] }
+			: {}),
+		...(Array.isArray(config["keepAwakeArgs"]) &&
+		config["keepAwakeArgs"].every((arg) => typeof arg === "string")
+			? { keepAwakeArgs: config["keepAwakeArgs"] }
+			: {}),
+	};
+};
+
 // ─── Project handlers ────────────────────────────────────────────────────────
 
 export const handleAddProject = (
@@ -144,7 +169,7 @@ export const handleSetKeepAwake = (
 		}));
 
 		yield* persistConfig;
-		return { ok: true };
+		return { ok: true, supported: true, active: cmd.enabled };
 	});
 
 export const handleSetKeepAwakeCommand = (
@@ -205,8 +230,21 @@ export const handleGetStatus = (
 			ok: true,
 			uptime: Math.floor((Date.now() - state.startTime) / 1000),
 			port: state.port,
+			host: state.host,
 			projectCount: state.projects.length,
+			sessionCount: state.projects.reduce(
+				(total, project) => total + (project.sessionCount ?? 0),
+				0,
+			),
 			clientCount: state.clientCount,
+			pinEnabled: state.pinHash !== null,
+			tlsEnabled: state.tls,
+			keepAwake: state.keepAwake,
+			projects: state.projects.map((project) => ({
+				slug: project.slug,
+				directory: project.path,
+				title: project.title ?? project.slug,
+			})),
 		};
 	});
 
@@ -369,13 +407,13 @@ export const handleSetModel = (
 // ─── Restart handler ─────────────────────────────────────────────────────────
 
 export const handleRestartWithConfig = (
-	_cmd: CmdOf<"restart_with_config">,
+	cmd: CmdOf<"restart_with_config">,
 ): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 
 		yield* Ref.update(ref, (s) => ({
-			...s,
+			...applyRestartConfig(s, cmd.config),
 			shuttingDown: true,
 		}));
 

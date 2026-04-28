@@ -82,7 +82,7 @@ export type IPCCommand =
 	| { cmd: "get_status" }
 	| { cmd: "list_projects" }
 	| { cmd: "shutdown" }
-	| { cmd: "restart_with_config" }
+	| { cmd: "restart_with_config"; config?: Record<string, unknown> }
 	| { cmd: "add_project"; directory: string }
 	| { cmd: "remove_project"; slug: string }
 	| { cmd: "set_project_title"; slug: string; title: string }

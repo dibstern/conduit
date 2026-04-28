@@ -39,6 +39,13 @@ describe("IPC Command Schema validation", () => {
 		expect(result?.cmd).toBe("get_status");
 	});
 
+	it("parseCommand leaves _tag AddProject requests to the RPC dispatcher", () => {
+		const result = parseCommand(
+			'{"_tag":"AddProject","directory":"/home/user/project"}',
+		);
+		expect(result).toBeNull();
+	});
+
 	// ─── No-field commands ─────────────────────────────────────────────────
 
 	it("decodes get_status command", () => {
@@ -67,6 +74,17 @@ describe("IPC Command Schema validation", () => {
 			cmd: "restart_with_config",
 		});
 		expect(Either.isRight(result)).toBe(true);
+	});
+
+	it("decodes restart_with_config command with config overrides", () => {
+		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
+			cmd: "restart_with_config",
+			config: { tls: true, port: 2634 },
+		});
+		expect(Either.isRight(result)).toBe(true);
+		if (Either.isRight(result) && result.right.cmd === "restart_with_config") {
+			expect(result.right.config).toEqual({ tls: true, port: 2634 });
+		}
 	});
 
 	it("decodes instance_list command", () => {

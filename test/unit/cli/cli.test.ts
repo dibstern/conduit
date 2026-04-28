@@ -1002,6 +1002,77 @@ describe("T11: sendIPCCommand", () => {
 			server.close();
 		}
 	});
+
+	it("sendIPCCommand serializes commands with _tag request format", async () => {
+		const { createServer } = await import("node:net");
+		const { mkdtempSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+
+		const dir = mkdtempSync(join(tmpdir(), "ipc-rpc-format-"));
+		const sockPath = join(dir, "relay.sock");
+		let received: unknown;
+
+		const server = createServer((conn) => {
+			let buf = "";
+			conn.on("data", (d: Buffer) => {
+				buf += d.toString();
+				if (buf.includes("\n")) {
+					received = JSON.parse(buf.trim());
+					conn.write('{"ok":true}\n');
+					conn.destroy();
+				}
+			});
+		});
+
+		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
+
+		try {
+			const result = await sendIPCCommand(sockPath, {
+				cmd: "add_project",
+				directory: "/tmp/conduit-project",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(received).toEqual({
+				_tag: "AddProject",
+				directory: "/tmp/conduit-project",
+			});
+		} finally {
+			server.close();
+		}
+	});
+
+	it("sendIPCCommand rejects malformed IPC responses", async () => {
+		const { createServer } = await import("node:net");
+		const { mkdtempSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+
+		const dir = mkdtempSync(join(tmpdir(), "ipc-malformed-response-"));
+		const sockPath = join(dir, "relay.sock");
+
+		const server = createServer((conn) => {
+			let buf = "";
+			conn.on("data", (d: Buffer) => {
+				buf += d.toString();
+				if (buf.includes("\n")) {
+					conn.write('{"status":"ok"}\n');
+					conn.destroy();
+				}
+			});
+		});
+
+		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
+
+		try {
+			await expect(
+				sendIPCCommand(sockPath, { cmd: "get_status" }),
+			).rejects.toThrow("Invalid IPC response");
+		} finally {
+			server.close();
+		}
+	});
 });
 
 // ─── --help ───────────────────────────────────────────────────────────

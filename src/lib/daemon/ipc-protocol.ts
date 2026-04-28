@@ -82,6 +82,9 @@ const SetModelSchema = Schema.Struct({
 
 const RestartWithConfigSchema = Schema.Struct({
 	cmd: Schema.Literal("restart_with_config"),
+	config: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
 });
 
 const InstanceListSchema = Schema.Struct({
@@ -447,7 +450,7 @@ export function createCommandRouter(handlers: {
 		provider: string,
 		model: string,
 	) => Promise<IPCResponse>;
-	restartWithConfig: () => Promise<IPCResponse>;
+	restartWithConfig: (config?: Record<string, unknown>) => Promise<IPCResponse>;
 	instanceList: () => Promise<IPCResponse>;
 	instanceAdd: (
 		name: string,
@@ -497,7 +500,7 @@ export function createCommandRouter(handlers: {
 			case "set_model":
 				return handlers.setModel(cmd.slug, cmd.provider, cmd.model);
 			case "restart_with_config":
-				return handlers.restartWithConfig();
+				return handlers.restartWithConfig(cmd.config);
 			case "instance_list":
 				return handlers.instanceList();
 			case "instance_add":
