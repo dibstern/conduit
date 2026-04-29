@@ -177,6 +177,15 @@ Expected: All 4 functions exported.
 - **Status values:** `"healthy"` / `"unhealthy"` per the `InstanceStatus` type.
 - **Configurable intervals:** `InstanceManagerConfig` extended with `healthPollIntervalMs`, `maxRestartsPerWindow`, `restartWindowMs`.
 
+**Step 0: Fix existing `Date.now()` in `addInstance`**
+
+> **AUDIT FIX (AP-R4-1):** The existing `addInstance` function at line ~106 of `instance-manager-service.ts` uses `Date.now()`, which is invisible to `TestClock`. Replace with `yield* Clock.currentTimeMillis`. If `addInstance` is not already an `Effect.gen`, convert it. This ensures all timestamp logic in the file is TestClock-compatible.
+
+```bash
+rg "Date\.now\(\)" src/lib/effect/instance-manager-service.ts
+# Replace every occurrence with: yield* Clock.currentTimeMillis
+```
+
 **Step 1: Read the old implementation**
 
 Read `src/lib/instance/instance-manager.ts`. Key details:
@@ -224,6 +233,8 @@ readonly restartTimestamps: HashMap<string, ReadonlyArray<number>>;
 
 **Step 5: Write the failing tests**
 
+> **AUDIT FIX (AP-R4-2):** All tests in this task MUST use `it.scoped` (not `it.effect`) because `FiberMap.make()` requires `Scope.Scope` in its effect signature (`Effect.Effect<FiberMap<K>, never, Scope.Scope>`). Using `it.effect` will fail with an unsatisfied Scope requirement.
+
 ```typescript
 // test/unit/effect/instance-manager-service.test.ts
 import { describe, expect } from "@effect/vitest";
@@ -241,7 +252,7 @@ describe("InstanceManager health polling", () => {
   // Test layer: mock HTTP fetch, Ref<state>, FiberMap, PubSub
   // ... build testLayer with Layer.mergeAll(...)
 
-  it.effect("detects healthy instance via raw HTTP fetch", () =>
+  it.scoped("detects healthy instance via raw HTTP fetch", () =>
     Effect.gen(function* () {
       // Setup: instance on port 3000 in state
       yield* startHealthPoller("inst-1");
@@ -253,7 +264,7 @@ describe("InstanceManager health polling", () => {
     }).pipe(Effect.provide(Layer.fresh(testLayer)))
   );
 
-  it.effect("marks instance unhealthy on fetch failure", () =>
+  it.scoped("marks instance unhealthy on fetch failure", () =>
     Effect.gen(function* () {
       // Setup: instance on unreachable port
       yield* startHealthPoller("inst-1");
@@ -262,7 +273,7 @@ describe("InstanceManager health polling", () => {
     }).pipe(Effect.provide(Layer.fresh(testLayer)))
   );
 
-  it.effect("stopHealthPoller interrupts the polling fiber", () =>
+  it.scoped("stopHealthPoller interrupts the polling fiber", () =>
     Effect.gen(function* () {
       yield* startHealthPoller("inst-1");
       yield* stopHealthPoller("inst-1");
@@ -272,7 +283,7 @@ describe("InstanceManager health polling", () => {
     }).pipe(Effect.provide(Layer.fresh(testLayer)))
   );
 
-  it.effect("publishes status_changed via DaemonEventBusTag on transition", () =>
+  it.scoped("publishes status_changed via DaemonEventBusTag on transition", () =>
     Effect.gen(function* () {
       const bus = yield* DaemonEventBusTag;
       // Subscribe before starting
@@ -280,7 +291,7 @@ describe("InstanceManager health polling", () => {
     }).pipe(Effect.provide(Layer.fresh(testLayer)))
   );
 
-  it.effect("stops polling if instance removed during async check", () =>
+  it.scoped("stops polling if instance removed during async check", () =>
     Effect.gen(function* () {
       yield* startHealthPoller("inst-1");
       // Remove instance from state
@@ -290,7 +301,7 @@ describe("InstanceManager health polling", () => {
 });
 
 describe("InstanceManager restart scheduling", () => {
-  it.effect("restarts instance after backoff delay", () =>
+  it.scoped("restarts instance after backoff delay", () =>
     Effect.gen(function* () {
       yield* scheduleRestart("inst-1");
       yield* TestClock.adjust(Duration.seconds(2)); // First backoff: 1s * 2^0 = 1s
@@ -298,7 +309,7 @@ describe("InstanceManager restart scheduling", () => {
     }).pipe(Effect.provide(Layer.fresh(testLayer)))
   );
 
-  it.effect("gives up after maxRestartsPerWindow exceeded", () =>
+  it.scoped("gives up after maxRestartsPerWindow exceeded", () =>
     Effect.gen(function* () {
       // Trigger maxRestartsPerWindow+1 restarts within window
       // Verify instance marked "stopped"
@@ -306,7 +317,7 @@ describe("InstanceManager restart scheduling", () => {
     }).pipe(Effect.provide(Layer.fresh(testLayer)))
   );
 
-  it.effect("removeInstance cancels both poller and restart fibers", () =>
+  it.scoped("removeInstance cancels both poller and restart fibers", () =>
     Effect.gen(function* () {
       yield* startHealthPoller("inst-1");
       yield* scheduleRestart("inst-1");
@@ -855,47 +866,53 @@ git add -A && git commit -m "refactor(effect): rewrite relay-stack to use self-c
 
 **Step 1: Read the current daemon-main.ts and daemon-layers.ts**
 
-Understand the gap between:
-- `daemon-main.ts` (imperative entry, 1541 lines)
-- `daemon-layers.ts` (Layer definitions, 377 lines, NOT used as entry)
+> **AUDIT FIX (AP-R4-3):** `makeDaemonLive(options: DaemonLiveOptions)` already exists at `daemon-layers.ts:320-376`. It composes infrastructure (signal handlers, error handlers, PID file), servers (HTTP, IPC, onboarding), background services, state, DaemonEventBusLive, PinoLoggerLive, and relay cache. Do NOT create a parallel composition — modify the existing one.
 
-**Step 2: Design the Layer composition**
+> **AUDIT FIX (AP-R4-4):** `DaemonLiveOptions` requires imperative types (`DaemonLifecycleContext`, `DaemonIPCContext`, `OnboardingServerDeps`, `getStatus` callback) from old modules. A pure `Layer.launch` approach requires all deps to be Layers. This conversion is too large for a single task. Use a **phased approach**: keep imperative option construction in this task, use `Layer.launch(makeDaemonLive(options))` as the entry point. Full conversion of `DaemonLiveOptions` to self-constructing Layers happens when daemon-lifecycle.ts and daemon-ipc.ts are replaced.
+
+Understand the gap between:
+- `daemon-main.ts` (imperative entry, 1540 lines — constructs `DaemonLiveOptions` imperatively)
+- `daemon-layers.ts` (Layer definitions, 377 lines — `makeDaemonLive` already composes all Layers)
+
+**Step 2: Replace imperative startup with `Layer.launch`**
 
 > **AUDIT FIX (AP-R2-12):** Conventions say "Use `Layer.launch` for the top-level daemon program." `Layer.launch` constructs the Layer, runs until interrupted (SIGINT/SIGTERM), then tears down all finalizers in reverse order — exactly the daemon lifecycle.
 
-```typescript
-// daemon-main.ts — replace imperative startup with:
-// Background service Layers are functions that take config — call them:
-const DaemonLive = Layer.mergeAll(
-  // Infrastructure
-  PinoLoggerLive,
-  // State
-  makeDaemonStateFromDiskNode(configPath),
-  DaemonEventBusLive,
-  // Background services (each is a function returning Layer.scoped)
-  KeepAwakeLive(),                              // optional config
-  VersionCheckerLive({ checkIntervalMs: ... }), // read from daemon config
-  StorageMonitorLive({ ... }),
-  PortScannerLive({ ... }),
-  // Per-project relay state
-  RelayStateLive,
-).pipe(
-  Layer.provide(DaemonEnvConfigLive),
-  Layer.provide(NodeFileSystem.layer),
-);
-```
-
-**Step 3: Use `Layer.launch` as the entry point**
+The existing `makeDaemonLive(options)` already handles composition. The change is in `daemon-main.ts` — replace the imperative startup sequence with:
 
 ```typescript
-// Layer.launch constructs DaemonLive, blocks until SIGINT/SIGTERM,
-// then runs all Layer finalizers in reverse order.
-// No manual Deferred.await or signal handler wiring needed.
-const DaemonProgram = Layer.launch(DaemonLive);
+// daemon-main.ts — keep the imperative DaemonLiveOptions construction for now,
+// but replace the startup/shutdown wiring with Layer.launch:
 
-// CLI entry:
+// 1. Build options imperatively (existing code — retain for now)
+const options: DaemonLiveOptions = {
+  configDir, pidPath, socketPath,
+  ctx: lifecycleCtx,
+  ipcContext,
+  getStatus: () => currentStatus,
+  onboarding: onboardingDeps,
+  keepAwake: keepAwakeConfig,
+  versionCheck: versionCheckConfig,
+  storageMon: storageMonConfig,
+  portScanner: portScannerConfig,
+  configPath: daemonConfigPath,
+  relayFactory,
+};
+
+// 2. Use Layer.launch instead of manual Deferred.await + signal handlers
+const DaemonProgram = Layer.launch(makeDaemonLive(options));
 Effect.runFork(DaemonProgram);
 ```
+
+**Step 3: Delete imperative shutdown/signal wiring from daemon-main.ts**
+
+`Layer.launch` handles SIGINT/SIGTERM → Layer teardown automatically. Delete:
+- Manual `process.on("SIGINT", ...)` / `process.on("SIGTERM", ...)` handlers
+- Manual `Deferred.await` for server-ready signals
+- Manual `await runtime.dispose()` calls
+- Any imperative shutdown sequencing
+
+These are now handled by `makeDaemonLive`'s Layer finalizers (which already exist in daemon-layers.ts).
 
 Note: `Layer.launch` returns `Effect<never, E, RIn>`. Background tasks (project discovery, health polling) should be started as fibers inside `Layer.scoped` Layers — they are automatically interrupted on shutdown.
 
@@ -969,23 +986,47 @@ Pattern for each file (e.g., `session.ts`):
 3. Update the `EFFECT_MESSAGE_HANDLERS` dispatch table in `index.ts`
 4. Run `pnpm check` after each file
 
-**Step 3: Clean up types**
+**Step 3: Convert `resolveSession` to use Effect Tags**
+
+> **AUDIT FIX (AP-R4-5):** `resolveSession` and `resolveSessionForLog` in `resolve-session.ts` depend on `HandlerDeps` (3 occurrences). Deleting `HandlerDeps` without converting these functions breaks compilation. Convert them first.
+
+```bash
+# Verify dependency:
+rg "HandlerDeps" src/lib/handlers/resolve-session.ts
+```
+
+Convert both functions to read deps from Effect Tags instead of `HandlerDeps`:
+```typescript
+// resolve-session.ts — BEFORE:
+export function resolveSession(deps: HandlerDeps, clientId: string) { ... }
+
+// AFTER: Effect-native version using Tags
+export const resolveSession = (clientId: string) =>
+  Effect.gen(function* () {
+    const registry = yield* SessionRegistryStateTag;
+    // ... resolve session from registry state
+  });
+```
+
+Update all callers of `resolveSession` to use the Effect version. Run `pnpm check` after.
+
+**Step 4: Clean up types**
 
 - Delete `HandlerDeps` interface from `types.ts`
 - Delete `MessageHandler` type
 - Delete `EffectHandler` type if the rename makes it redundant
 
-**Step 4: Update index.ts exports**
+**Step 5: Update index.ts exports**
 
 Remove all old handler exports. Only export Effect-based handlers and `dispatchMessageEffect`.
 
-**Step 5: Verify**
+**Step 6: Verify**
 
 ```bash
 pnpm check && pnpm test:unit
 ```
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add -A && git commit -m "refactor(effect): remove Promise-based handler variants, Effect-only dispatch"
@@ -1005,9 +1046,9 @@ git add -A && git commit -m "refactor(effect): remove Promise-based handler vari
 - Delete: `src/lib/session/session-status-poller.ts`
 - Delete: `src/lib/session/session-switch.ts`
 - Delete: `src/lib/relay/message-poller-impl.ts`
-- Delete: `src/lib/daemon/daemon-lifecycle.ts` (if fully replaced)
-- Delete: `src/lib/daemon/daemon-ipc.ts` (if fully replaced)
-- Delete: Any other old modules identified in Task 1 as "blocked"
+- **RETAIN:** `src/lib/daemon/daemon-lifecycle.ts` — still imported by `daemon-layers.ts` for server start/close functions (`startHttpServer`, `closeHttpServer`, `startIPCServer`, `closeIPCServer`, `startOnboardingServer`, `closeOnboardingServer`, `DaemonLifecycleContext`, `OnboardingServerDeps`). Cannot delete until these are replaced with Effect-native server Layers.
+- **RETAIN:** `src/lib/daemon/daemon-ipc.ts` — still imported by `daemon-layers.ts` for `DaemonIPCContext` type. Cannot delete until `DaemonLiveOptions` is refactored to use Effect Tags.
+- Delete: Any other old modules identified in Task 1 as "blocked" (except the two above)
 - Modify: `src/lib/relay/effect-relay-runtime.ts` (simplify or delete — runtime now created directly)
 - Test: Run full test suite
 
@@ -1099,19 +1140,38 @@ Replace imperative state tracking with Ref-based state in Effect.
 
 The SSE stream callback pattern → Effect Stream consumption with `Stream.runForEach`.
 
-**Step 6: Test each conversion**
+**Step 6: Compose wiring Layers into RelayStateLive**
+
+> **AUDIT FIX (AP-R4-7):** Without this step, the 5 wiring Layers exist as dead code — never included in any Layer tree.
+
+Update `relay-layer.ts` (from Task 5) to include all wiring Layers:
+
+```typescript
+// src/lib/effect/relay-layer.ts — add wiring Layers to RelayStateLive
+export const RelayStateLive = Layer.mergeAll(
+  // ...existing state layers from Task 5...
+  // Wiring Layers (Task 9 — all independent, use mergeAll)
+  PermissionTimeoutLive,
+  SessionLifecycleWiringLive,
+  PollerWiringLive,
+  MonitoringWiringLive,
+  SSEWiringLive,
+);
+```
+
+**Step 7: Test each conversion**
 
 ```bash
 pnpm vitest run test/unit/effect/relay-wiring.test.ts -v
 ```
 
-**Step 7: Verify**
+**Step 8: Verify**
 
 ```bash
 pnpm check && pnpm test:unit
 ```
 
-**Step 8: Commit per wiring function (5 commits)**
+**Step 9: Commit per wiring function (5 commits)**
 
 ```bash
 git add -A && git commit -m "refactor(effect): convert wireTimers to Effect Layer"
@@ -1301,6 +1361,18 @@ pnpm check && pnpm test && pnpm build && pnpm test:e2e && pnpm dev
 **Incomplete audits (5 of 7):**
 
 Tasks 1, 4-5, 6-8, 9-11, and Effect-TS compliance auditors completed investigation but did not produce written report files. The executing agent should verify each task's code against actual codebase state before implementing.
+
+### Round 4 (2026-04-29)
+
+**Amend Plan (7 findings):**
+
+- **AP-R4-1** — Task 3: existing `Date.now()` at instance-manager-service.ts:106 in `addInstance` breaks TestClock. Fixed: added Step 0 to replace with `Clock.currentTimeMillis`.
+- **AP-R4-2** — Task 3: tests used `it.effect` but `FiberMap.make()` requires `Scope.Scope`. Fixed: changed all to `it.scoped`.
+- **AP-R4-3** — Task 6: plan proposed creating `DaemonLive` from scratch, but `makeDaemonLive(options)` already exists at daemon-layers.ts:320-376 with full composition. Fixed: rewrote to modify existing function.
+- **AP-R4-4** — Task 6: `DaemonLiveOptions` takes imperative types incompatible with pure `Layer.launch`. Fixed: phased approach — keep imperative construction, use `Layer.launch(makeDaemonLive(options))`.
+- **AP-R4-5** — Task 7: deleting `HandlerDeps` breaks `resolveSession`/`resolveSessionForLog` in resolve-session.ts (3 occurrences). Fixed: added Step 3 to convert these functions to Effect Tags before deletion.
+- **AP-R4-6** — Task 8: `daemon-layers.ts` imports from `daemon-lifecycle.ts` (server start/close) and `daemon-ipc.ts` (IPC context type). Fixed: marked both as RETAIN — cannot delete until imports replaced.
+- **AP-R4-7** — Task 9: wiring Layers not composed into any Layer tree. Fixed: added Step 6 to compose into `RelayStateLive` in relay-layer.ts.
 
 ### Round 2 (2026-04-29)
 
