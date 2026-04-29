@@ -5,11 +5,7 @@
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type { PayloadMap } from "./payloads.js";
-export type { HandlerDeps, MessageHandler } from "./types.js";
-
-// ─── Session resolution ──────────────────────────────────────────────────────
-
-export { resolveSession, resolveSessionForLog } from "./resolve-session.js";
+export type { HandlerDeps } from "./types.js";
 
 // ─── Handler modules ─────────────────────────────────────────────────────────
 
@@ -84,71 +80,74 @@ export { handleGetToolContent } from "./tool-content.js";
 
 import { Effect, Schema } from "effect";
 import { WebSocketError } from "../errors.js";
-import { handleGetAgentsEffect, handleSwitchAgentEffect } from "./agent.js";
 import {
-	handleGetFileContentEffect,
-	handleGetFileListEffect,
-	handleGetFileTreeEffect,
+	handleGetAgents as handleGetAgentsImpl,
+	handleSwitchAgent as handleSwitchAgentImpl,
+} from "./agent.js";
+import {
+	handleGetFileContent as handleGetFileContentImpl,
+	handleGetFileList as handleGetFileListImpl,
+	handleGetFileTree as handleGetFileTreeImpl,
 } from "./files.js";
 import {
-	handleInstanceAddEffect,
-	handleInstanceRemoveEffect,
-	handleInstanceRenameEffect,
-	handleInstanceStartEffect,
-	handleInstanceStopEffect,
-	handleInstanceUpdateEffect,
-	handleProxyDetectEffect,
-	handleScanNowEffect,
-	handleSetProjectInstanceEffect,
+	handleInstanceAdd as handleInstanceAddImpl,
+	handleInstanceRemove as handleInstanceRemoveImpl,
+	handleInstanceRename as handleInstanceRenameImpl,
+	handleInstanceStart as handleInstanceStartImpl,
+	handleInstanceStop as handleInstanceStopImpl,
+	handleInstanceUpdate as handleInstanceUpdateImpl,
+	handleProxyDetect as handleProxyDetectImpl,
+	handleScanNow as handleScanNowImpl,
+	handleSetProjectInstance as handleSetProjectInstanceImpl,
 } from "./instance.js";
 import {
-	handleGetModelsEffect,
-	handleSetDefaultModelEffect,
-	handleSwitchModelEffect,
-	handleSwitchVariantEffect,
+	handleGetModels as handleGetModelsImpl,
+	handleSetDefaultModel as handleSetDefaultModelImpl,
+	handleSwitchModel as handleSwitchModelImpl,
+	handleSwitchVariant as handleSwitchVariantImpl,
 } from "./model.js";
 import { PayloadSchemas } from "./payload-schemas.js";
 import type { PayloadMap } from "./payloads.js";
 import {
-	handleAskUserResponseEffect,
-	handlePermissionResponseEffect,
-	handleQuestionRejectEffect,
+	handleAskUserResponse as handleAskUserResponseImpl,
+	handlePermissionResponse as handlePermissionResponseImpl,
+	handleQuestionReject as handleQuestionRejectImpl,
 } from "./permissions.js";
 import {
-	handleCancelEffect,
-	handleInputSyncEffect,
-	handleMessageEffect,
-	handleRewindEffect,
+	handleCancel as handleCancelImpl,
+	handleInputSync as handleInputSyncImpl,
+	handleMessage as handleMessageImpl,
+	handleRewind as handleRewindImpl,
 } from "./prompt.js";
-import { handleReloadProviderSessionEffect } from "./reload.js";
+import { handleReloadProviderSession as handleReloadProviderSessionImpl } from "./reload.js";
 import {
-	handleDeleteSessionEffect,
-	handleForkSessionEffect,
-	handleListSessionsEffect,
-	handleLoadMoreHistoryEffect,
-	handleNewSessionEffect,
-	handleRenameSessionEffect,
-	handleSearchSessionsEffect,
-	handleSwitchSessionEffect,
-	handleViewSessionEffect,
+	handleDeleteSession as handleDeleteSessionImpl,
+	handleForkSession as handleForkSessionImpl,
+	handleListSessions as handleListSessionsImpl,
+	handleLoadMoreHistory as handleLoadMoreHistoryImpl,
+	handleNewSession as handleNewSessionImpl,
+	handleRenameSession as handleRenameSessionImpl,
+	handleSearchSessions as handleSearchSessionsImpl,
+	handleSwitchSession as handleSwitchSessionImpl,
+	handleViewSession as handleViewSessionImpl,
 } from "./session.js";
 import {
-	handleAddProjectEffect,
-	handleGetCommandsEffect,
-	handleGetProjectsEffect,
-	handleGetTodoEffect,
-	handleListDirectoriesEffect,
-	handleRemoveProjectEffect,
-	handleRenameProjectEffect,
+	handleAddProject as handleAddProjectImpl,
+	handleGetCommands as handleGetCommandsImpl,
+	handleGetProjects as handleGetProjectsImpl,
+	handleGetTodo as handleGetTodoImpl,
+	handleListDirectories as handleListDirectoriesImpl,
+	handleRemoveProject as handleRemoveProjectImpl,
+	handleRenameProject as handleRenameProjectImpl,
 } from "./settings.js";
 import {
-	handlePtyCloseEffect,
-	handlePtyCreateEffect,
-	handlePtyInputEffect,
-	handlePtyResizeEffect,
-	handleTerminalCommandEffect,
+	handlePtyClose as handlePtyCloseImpl,
+	handlePtyCreate as handlePtyCreateImpl,
+	handlePtyInput as handlePtyInputImpl,
+	handlePtyResize as handlePtyResizeImpl,
+	handleTerminalCommand as handleTerminalCommandImpl,
 } from "./terminal.js";
-import { handleGetToolContentEffect } from "./tool-content.js";
+import { handleGetToolContent as handleGetToolContentImpl } from "./tool-content.js";
 
 type AnyEffectHandler = (
 	clientId: string,
@@ -167,63 +166,63 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	AnyEffectHandler
 > = {
 	// Prompt
-	message: handleMessageEffect,
-	cancel: handleCancelEffect,
-	rewind: handleRewindEffect,
-	input_sync: handleInputSyncEffect,
+	message: handleMessageImpl,
+	cancel: handleCancelImpl,
+	rewind: handleRewindImpl,
+	input_sync: handleInputSyncImpl,
 	// Permissions
-	permission_response: handlePermissionResponseEffect,
-	ask_user_response: handleAskUserResponseEffect,
-	question_reject: handleQuestionRejectEffect,
+	permission_response: handlePermissionResponseImpl,
+	ask_user_response: handleAskUserResponseImpl,
+	question_reject: handleQuestionRejectImpl,
 	// Sessions
-	new_session: handleNewSessionEffect,
-	switch_session: handleSwitchSessionEffect,
-	view_session: handleViewSessionEffect,
-	delete_session: handleDeleteSessionEffect,
-	rename_session: handleRenameSessionEffect,
-	fork_session: handleForkSessionEffect,
-	list_sessions: handleListSessionsEffect,
-	search_sessions: handleSearchSessionsEffect,
-	load_more_history: handleLoadMoreHistoryEffect,
+	new_session: handleNewSessionImpl,
+	switch_session: handleSwitchSessionImpl,
+	view_session: handleViewSessionImpl,
+	delete_session: handleDeleteSessionImpl,
+	rename_session: handleRenameSessionImpl,
+	fork_session: handleForkSessionImpl,
+	list_sessions: handleListSessionsImpl,
+	search_sessions: handleSearchSessionsImpl,
+	load_more_history: handleLoadMoreHistoryImpl,
 	// Agents
-	get_agents: handleGetAgentsEffect,
-	switch_agent: handleSwitchAgentEffect,
+	get_agents: handleGetAgentsImpl,
+	switch_agent: handleSwitchAgentImpl,
 	// Models
-	get_models: handleGetModelsEffect,
-	switch_model: handleSwitchModelEffect,
-	set_default_model: handleSetDefaultModelEffect,
-	switch_variant: handleSwitchVariantEffect,
+	get_models: handleGetModelsImpl,
+	switch_model: handleSwitchModelImpl,
+	set_default_model: handleSetDefaultModelImpl,
+	switch_variant: handleSwitchVariantImpl,
 	// Settings
-	get_commands: handleGetCommandsEffect,
-	get_projects: handleGetProjectsEffect,
-	add_project: handleAddProjectEffect,
-	list_directories: handleListDirectoriesEffect,
-	remove_project: handleRemoveProjectEffect,
-	rename_project: handleRenameProjectEffect,
-	get_todo: handleGetTodoEffect,
+	get_commands: handleGetCommandsImpl,
+	get_projects: handleGetProjectsImpl,
+	add_project: handleAddProjectImpl,
+	list_directories: handleListDirectoriesImpl,
+	remove_project: handleRemoveProjectImpl,
+	rename_project: handleRenameProjectImpl,
+	get_todo: handleGetTodoImpl,
 	// Files
-	get_file_list: handleGetFileListEffect,
-	get_file_content: handleGetFileContentEffect,
-	get_file_tree: handleGetFileTreeEffect,
-	get_tool_content: handleGetToolContentEffect,
+	get_file_list: handleGetFileListImpl,
+	get_file_content: handleGetFileContentImpl,
+	get_file_tree: handleGetFileTreeImpl,
+	get_tool_content: handleGetToolContentImpl,
 	// Terminal
-	terminal_command: handleTerminalCommandEffect,
-	pty_create: handlePtyCreateEffect,
-	pty_input: handlePtyInputEffect,
-	pty_resize: handlePtyResizeEffect,
-	pty_close: handlePtyCloseEffect,
+	terminal_command: handleTerminalCommandImpl,
+	pty_create: handlePtyCreateImpl,
+	pty_input: handlePtyInputImpl,
+	pty_resize: handlePtyResizeImpl,
+	pty_close: handlePtyCloseImpl,
 	// Instance management
-	instance_add: handleInstanceAddEffect,
-	instance_remove: handleInstanceRemoveEffect,
-	instance_start: handleInstanceStartEffect,
-	instance_stop: handleInstanceStopEffect,
-	instance_update: handleInstanceUpdateEffect,
-	instance_rename: handleInstanceRenameEffect,
-	set_project_instance: handleSetProjectInstanceEffect,
-	proxy_detect: handleProxyDetectEffect,
-	scan_now: handleScanNowEffect,
+	instance_add: handleInstanceAddImpl,
+	instance_remove: handleInstanceRemoveImpl,
+	instance_start: handleInstanceStartImpl,
+	instance_stop: handleInstanceStopImpl,
+	instance_update: handleInstanceUpdateImpl,
+	instance_rename: handleInstanceRenameImpl,
+	set_project_instance: handleSetProjectInstanceImpl,
+	proxy_detect: handleProxyDetectImpl,
+	scan_now: handleScanNowImpl,
 	// Reload
-	reload_provider_session: handleReloadProviderSessionEffect,
+	reload_provider_session: handleReloadProviderSessionImpl,
 };
 
 /**

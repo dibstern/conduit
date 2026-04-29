@@ -10,60 +10,11 @@ import {
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
-import { handleGetModels, handleGetModelsEffect } from "./model.js";
+import { handleGetModels } from "./model.js";
 import type { PayloadMap } from "./payloads.js";
-import { resolveSession } from "./resolve-session.js";
-import { handleGetCommands, handleGetCommandsEffect } from "./settings.js";
-import type { HandlerDeps } from "./types.js";
+import { handleGetCommands } from "./settings.js";
 
-export async function handleReloadProviderSession(
-	deps: HandlerDeps,
-	clientId: string,
-	_payload: PayloadMap["reload_provider_session"],
-): Promise<void> {
-	const activeId = resolveSession(deps, clientId);
-	if (!activeId) {
-		deps.wsHandler.sendTo(
-			clientId,
-			new RelayError("No active session to reload", {
-				code: "NO_SESSION",
-			}).toSystemError(),
-		);
-		return;
-	}
-
-	deps.log.info(
-		`client=${clientId} session=${activeId} Reloading provider session`,
-	);
-
-	if (deps.orchestrationEngine) {
-		try {
-			await deps.orchestrationEngine.dispatch({
-				type: "end_session",
-				sessionId: activeId,
-			});
-		} catch (err) {
-			// Don't abort -- still refresh lists so the client isn't stuck.
-			deps.log.warn(`endSession failed: ${formatErrorDetail(err)}`);
-		}
-	}
-
-	// Refresh both models (triggers fresh Claude discover()) and commands so the
-	// client's command palette picks up new skills/commands from disk.
-	await handleGetModels(deps, clientId, {});
-	await handleGetCommands(deps, clientId, {});
-
-	deps.wsHandler.sendTo(clientId, {
-		type: "provider_session_reloaded",
-		sessionId: activeId,
-	});
-}
-
-// ─── Effect-based handler implementation ───────────────────────────────────
-// This will replace the above function once the dispatch table is rewired
-// in Task 5.3. Until then it coexists alongside the original handler.
-
-export const handleReloadProviderSessionEffect = (
+export const handleReloadProviderSession = (
 	clientId: string,
 	_payload: PayloadMap["reload_provider_session"],
 ) =>
@@ -99,9 +50,9 @@ export const handleReloadProviderSessionEffect = (
 			log.warn(`endSession failed: ${formatErrorDetail(engineResult.left)}`);
 		}
 
-		// Refresh models and commands via their Effect implementations
-		yield* handleGetModelsEffect(clientId, {});
-		yield* handleGetCommandsEffect(clientId, {});
+		// Refresh models and commands
+		yield* handleGetModels(clientId, {});
+		yield* handleGetCommands(clientId, {});
 
 		wsHandler.sendTo(clientId, {
 			type: "provider_session_reloaded",

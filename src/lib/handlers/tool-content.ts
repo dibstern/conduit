@@ -4,51 +4,8 @@
 import { Effect } from "effect";
 import { ReadQueryTag, WebSocketHandlerTag } from "../effect/services.js";
 import type { PayloadMap } from "./payloads.js";
-import { resolveSession } from "./resolve-session.js";
-import type { HandlerDeps } from "./types.js";
 
-export async function handleGetToolContent(
-	deps: HandlerDeps,
-	clientId: string,
-	payload: PayloadMap["get_tool_content"],
-): Promise<void> {
-	const { toolId } = payload;
-	const sessionId = resolveSession(deps, clientId) ?? "";
-	if (typeof toolId !== "string") {
-		deps.wsHandler.sendTo(clientId, {
-			type: "error",
-			sessionId,
-			code: "INVALID_PARAMS",
-			message: "Missing or invalid toolId parameter",
-		});
-		return;
-	}
-
-	// Read tool content from SQLite via ReadQueryService.
-	// Returns NOT_FOUND when readQuery is absent (persistence not configured).
-	const content = deps.readQuery?.getToolContent(toolId);
-	if (content !== undefined) {
-		deps.wsHandler.sendTo(clientId, {
-			type: "tool_content",
-			sessionId,
-			toolId,
-			content,
-		});
-	} else {
-		deps.wsHandler.sendTo(clientId, {
-			type: "error",
-			sessionId,
-			code: "NOT_FOUND",
-			message: "Full tool content not available",
-		});
-	}
-}
-
-// ─── Effect-based handler implementation ───────────────────────────────────
-// This will replace the above function once the dispatch table is rewired
-// in Task 5.3. Until then it coexists alongside the original handler.
-
-export const handleGetToolContentEffect = (
+export const handleGetToolContent = (
 	clientId: string,
 	payload: PayloadMap["get_tool_content"],
 ) =>

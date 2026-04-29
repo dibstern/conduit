@@ -1,6 +1,6 @@
 // ─── Effect Handler Tests (Batch 1) ─────────────────────────────────────────
-// Verifies that the new *Effect handler implementations produce the same
-// observable side effects as the original handlers when run against a mock
+// Verifies that the Effect handler implementations produce the expected
+// observable side effects when run against a mock
 // Layer. Each test provides minimal mock services via Layer.succeed, runs
 // the Effect to completion, and asserts on captured calls.
 
@@ -31,52 +31,52 @@ import {
 } from "../../../src/lib/effect/services.js";
 import {
 	filterAgents,
-	handleGetAgentsEffect,
-	handleSwitchAgentEffect,
+	handleGetAgents,
+	handleSwitchAgent,
 } from "../../../src/lib/handlers/agent.js";
 import {
-	handleGetFileContentEffect,
-	handleGetFileListEffect,
+	handleGetFileContent,
+	handleGetFileList,
 } from "../../../src/lib/handlers/files.js";
 import {
-	handleInstanceAddEffect,
-	handleInstanceRemoveEffect,
-	handleInstanceStartEffect,
-	handleInstanceStopEffect,
-	handleScanNowEffect,
+	handleInstanceAdd,
+	handleInstanceRemove,
+	handleInstanceStart,
+	handleInstanceStop,
+	handleScanNow,
 } from "../../../src/lib/handlers/instance.js";
 import {
-	handleGetModelsEffect,
-	handleSwitchModelEffect,
+	handleGetModels,
+	handleSwitchModel,
 } from "../../../src/lib/handlers/model.js";
 import {
-	handlePermissionResponseEffect,
-	handleQuestionRejectEffect,
+	handlePermissionResponse,
+	handleQuestionReject,
 } from "../../../src/lib/handlers/permissions.js";
 import {
-	handleCancelEffect,
-	handleInputSyncEffect,
-	handleMessageEffect,
-	handleRewindEffect,
+	handleCancel,
+	handleInputSync,
+	handleMessage,
+	handleRewind,
 } from "../../../src/lib/handlers/prompt.js";
-import { handleReloadProviderSessionEffect } from "../../../src/lib/handlers/reload.js";
+import { handleReloadProviderSession } from "../../../src/lib/handlers/reload.js";
 import {
-	handleListSessionsEffect,
-	handleLoadMoreHistoryEffect,
-	handleRenameSessionEffect,
-	handleSearchSessionsEffect,
+	handleListSessions,
+	handleLoadMoreHistory,
+	handleRenameSession,
+	handleSearchSessions,
 } from "../../../src/lib/handlers/session.js";
 import {
-	handleGetCommandsEffect,
-	handleGetProjectsEffect,
-	handleGetTodoEffect,
+	handleGetCommands,
+	handleGetProjects,
+	handleGetTodo,
 } from "../../../src/lib/handlers/settings.js";
 import {
-	handlePtyCloseEffect,
-	handlePtyInputEffect,
-	handlePtyResizeEffect,
+	handlePtyClose,
+	handlePtyInput,
+	handlePtyResize,
 } from "../../../src/lib/handlers/terminal.js";
-import { handleGetToolContentEffect } from "../../../src/lib/handlers/tool-content.js";
+import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type {
 	InstanceManagementDeps,
 	ScanDeps,
@@ -156,7 +156,7 @@ function mockOverrides(
 
 // ─── Agent handler tests ───────────────────────────────────────────────────
 
-describe("handleGetAgentsEffect", () => {
+describe("handleGetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and sends filtered list to client",
 		() => {
@@ -175,7 +175,7 @@ describe("handleGetAgentsEffect", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 			);
 
-			return handleGetAgentsEffect("client-1", {}).pipe(
+			return handleGetAgents("client-1", {}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(client.app.agents).toHaveBeenCalledOnce();
@@ -189,7 +189,7 @@ describe("handleGetAgentsEffect", () => {
 	);
 });
 
-describe("handleSwitchAgentEffect", () => {
+describe("handleSwitchAgent", () => {
 	it.effect("sets agent override when client has a session", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
@@ -203,7 +203,7 @@ describe("handleSwitchAgentEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleSwitchAgentEffect("client-1", { agentId: "plan" }).pipe(
+		return handleSwitchAgent("client-1", { agentId: "plan" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(overrides.setAgent).toHaveBeenCalledWith("session-42", "plan");
@@ -223,7 +223,7 @@ describe("handleSwitchAgentEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleSwitchAgentEffect("client-1", { agentId: "build" }).pipe(
+		return handleSwitchAgent("client-1", { agentId: "build" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(overrides.setAgent).not.toHaveBeenCalled();
@@ -243,7 +243,7 @@ describe("handleSwitchAgentEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleSwitchAgentEffect("client-1", { agentId: "" }).pipe(
+		return handleSwitchAgent("client-1", { agentId: "" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(overrides.setAgent).not.toHaveBeenCalled();
@@ -255,7 +255,7 @@ describe("handleSwitchAgentEffect", () => {
 
 // ─── Settings handler tests ────────────────────────────────────────────────
 
-describe("handleGetCommandsEffect", () => {
+describe("handleGetCommands", () => {
 	it.effect("fetches commands and sends to client", () => {
 		const ws = mockWsHandler();
 		const mockCommands = [{ name: "test" }];
@@ -268,7 +268,7 @@ describe("handleGetCommandsEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		return handleGetCommandsEffect("client-1", {}).pipe(
+		return handleGetCommands("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.app.commands).toHaveBeenCalledOnce();
@@ -281,13 +281,13 @@ describe("handleGetCommandsEffect", () => {
 	});
 });
 
-describe("handleGetTodoEffect", () => {
+describe("handleGetTodo", () => {
 	it.effect("sends empty todo list", () => {
 		const ws = mockWsHandler();
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleGetTodoEffect("client-1", {}).pipe(
+		return handleGetTodo("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -299,7 +299,7 @@ describe("handleGetTodoEffect", () => {
 	});
 });
 
-describe("handleGetProjectsEffect", () => {
+describe("handleGetProjects", () => {
 	it.effect("uses config.getProjects when available", () => {
 		const ws = mockWsHandler();
 		const projects = [
@@ -316,7 +316,7 @@ describe("handleGetProjectsEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		return handleGetProjectsEffect("client-1", {}).pipe(
+		return handleGetProjects("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -347,7 +347,7 @@ describe("handleGetProjectsEffect", () => {
 				Layer.succeed(ConfigTag, config),
 			);
 
-			return handleGetProjectsEffect("client-1", {}).pipe(
+			return handleGetProjects("client-1", {}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(client.app.projects).toHaveBeenCalledOnce();
@@ -364,7 +364,7 @@ describe("handleGetProjectsEffect", () => {
 
 // ─── File handler tests ────────────────────────────────────────────────────
 
-describe("handleGetFileContentEffect", () => {
+describe("handleGetFileContent", () => {
 	it.effect("reads file content and sends to client", () => {
 		const ws = mockWsHandler();
 		const client = {
@@ -378,7 +378,7 @@ describe("handleGetFileContentEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		return handleGetFileContentEffect("client-1", { path: "README.md" }).pipe(
+		return handleGetFileContent("client-1", { path: "README.md" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.file.read).toHaveBeenCalledWith("README.md");
@@ -402,7 +402,7 @@ describe("handleGetFileContentEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		return handleGetFileContentEffect("client-1", { path: "" }).pipe(
+		return handleGetFileContent("client-1", { path: "" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.file.read).not.toHaveBeenCalled();
@@ -412,7 +412,7 @@ describe("handleGetFileContentEffect", () => {
 	});
 });
 
-describe("handleGetFileListEffect", () => {
+describe("handleGetFileList", () => {
 	it.effect("lists files and filters with gitignore rules", () => {
 		const ws = mockWsHandler();
 		const client = {
@@ -431,7 +431,7 @@ describe("handleGetFileListEffect", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		return handleGetFileListEffect("client-1", {}).pipe(
+		return handleGetFileList("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -449,7 +449,7 @@ describe("handleGetFileListEffect", () => {
 
 // ─── Reload handler tests ──────────────────────────────────────────────────
 
-describe("handleReloadProviderSessionEffect", () => {
+describe("handleReloadProviderSession", () => {
 	it.effect("sends error when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
@@ -472,7 +472,7 @@ describe("handleReloadProviderSessionEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		return handleReloadProviderSessionEffect("client-1", {}).pipe(
+		return handleReloadProviderSession("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith(
@@ -518,7 +518,7 @@ describe("handleReloadProviderSessionEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		return handleReloadProviderSessionEffect("client-1", {}).pipe(
+		return handleReloadProviderSession("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				// Should have dispatched end_session
@@ -541,7 +541,7 @@ describe("handleReloadProviderSessionEffect", () => {
 
 // ─── Model handler tests ──────────────────────────────────────────────────
 
-describe("handleGetModelsEffect", () => {
+describe("handleGetModels", () => {
 	it.effect("fetches providers and sends model_list to client", () => {
 		const ws = mockWsHandler();
 		const engine = {
@@ -573,7 +573,7 @@ describe("handleGetModelsEffect", () => {
 			Layer.succeed(OrchestrationEngineTag, engine),
 		);
 
-		return handleGetModelsEffect("client-1", {}).pipe(
+		return handleGetModels("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.provider.list).toHaveBeenCalledOnce();
@@ -592,7 +592,7 @@ describe("handleGetModelsEffect", () => {
 	});
 });
 
-describe("handleSwitchModelEffect", () => {
+describe("handleSwitchModel", () => {
 	it.effect("sets model override when client has a session", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
@@ -621,7 +621,7 @@ describe("handleSwitchModelEffect", () => {
 			Layer.succeed(OrchestrationEngineTag, engine),
 		);
 
-		return handleSwitchModelEffect("client-1", {
+		return handleSwitchModel("client-1", {
 			modelId: "gpt-4",
 			providerId: "openai",
 		}).pipe(
@@ -694,7 +694,7 @@ function mockPtyManager(overrides?: Partial<PtyManager>): PtyManager {
 
 // ─── Tool Content handler tests ───────────────────────────────────────────
 
-describe("handleGetToolContentEffect", () => {
+describe("handleGetToolContent", () => {
 	it.effect(
 		"returns tool content when readQuery is available and content exists",
 		() => {
@@ -710,7 +710,7 @@ describe("handleGetToolContentEffect", () => {
 				Layer.succeed(ReadQueryTag, readQuery),
 			);
 
-			return handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
+			return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(readQuery.getToolContent).toHaveBeenCalledWith("tool-42");
@@ -733,7 +733,7 @@ describe("handleGetToolContentEffect", () => {
 		// No ReadQueryTag provided — serviceOption returns None
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleGetToolContentEffect("client-1", { toolId: "tool-42" }).pipe(
+		return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -749,13 +749,13 @@ describe("handleGetToolContentEffect", () => {
 
 // ─── Terminal handler tests ───────────────────────────────────────────────
 
-describe("handlePtyInputEffect", () => {
+describe("handlePtyInput", () => {
 	it.effect("sends input to pty manager", () => {
 		const ptyManager = mockPtyManager();
 
 		const layer = Layer.succeed(PtyManagerTag, ptyManager);
 
-		return handlePtyInputEffect("client-1", {
+		return handlePtyInput("client-1", {
 			ptyId: "pty-1",
 			data: "ls\n",
 		}).pipe(
@@ -771,7 +771,7 @@ describe("handlePtyInputEffect", () => {
 
 		const layer = Layer.succeed(PtyManagerTag, ptyManager);
 
-		return handlePtyInputEffect("client-1", { ptyId: "", data: "ls\n" }).pipe(
+		return handlePtyInput("client-1", { ptyId: "", data: "ls\n" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ptyManager.sendInput).not.toHaveBeenCalled();
@@ -780,7 +780,7 @@ describe("handlePtyInputEffect", () => {
 	});
 });
 
-describe("handlePtyCloseEffect", () => {
+describe("handlePtyClose", () => {
 	it.effect("closes PTY session and broadcasts deletion", () => {
 		const ws = mockWsHandler();
 		const ptyManager = mockPtyManager();
@@ -794,7 +794,7 @@ describe("handlePtyCloseEffect", () => {
 			Layer.succeed(PtyManagerTag, ptyManager),
 		);
 
-		return handlePtyCloseEffect("client-1", { ptyId: "pty-1" }).pipe(
+		return handlePtyClose("client-1", { ptyId: "pty-1" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ptyManager.closeSession).toHaveBeenCalledWith("pty-1");
@@ -808,7 +808,7 @@ describe("handlePtyCloseEffect", () => {
 	});
 });
 
-describe("handlePtyResizeEffect", () => {
+describe("handlePtyResize", () => {
 	it.effect("resizes PTY without errors", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -824,7 +824,7 @@ describe("handlePtyResizeEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handlePtyResizeEffect("client-1", {
+		return handlePtyResize("client-1", {
 			ptyId: "pty-1",
 			cols: 120,
 			rows: 40,
@@ -855,7 +855,7 @@ describe("handlePtyResizeEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handlePtyResizeEffect("client-1", {
+		return handlePtyResize("client-1", {
 			ptyId: "pty-1",
 			cols: 120,
 			rows: 40,
@@ -891,7 +891,7 @@ function mockInstanceMgmt(): InstanceManagementDeps {
 	};
 }
 
-describe("handleInstanceAddEffect", () => {
+describe("handleInstanceAdd", () => {
 	it.effect("adds instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
@@ -901,7 +901,7 @@ describe("handleInstanceAddEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		return handleInstanceAddEffect("client-1", { name: "Test Instance" }).pipe(
+		return handleInstanceAdd("client-1", { name: "Test Instance" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(instanceMgmt.addInstance).toHaveBeenCalled();
@@ -919,7 +919,7 @@ describe("handleInstanceAddEffect", () => {
 		// No InstanceMgmtTag provided — serviceOption returns None
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleInstanceAddEffect("client-1", { name: "Test" }).pipe(
+		return handleInstanceAdd("client-1", { name: "Test" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -932,7 +932,7 @@ describe("handleInstanceAddEffect", () => {
 	});
 });
 
-describe("handleInstanceRemoveEffect", () => {
+describe("handleInstanceRemove", () => {
 	it.effect("removes instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
@@ -942,7 +942,7 @@ describe("handleInstanceRemoveEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		return handleInstanceRemoveEffect("client-1", {
+		return handleInstanceRemove("client-1", {
 			instanceId: "test-instance",
 		}).pipe(
 			Effect.provide(layer),
@@ -956,7 +956,7 @@ describe("handleInstanceRemoveEffect", () => {
 	});
 });
 
-describe("handleInstanceStartEffect", () => {
+describe("handleInstanceStart", () => {
 	it.effect("starts instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
@@ -966,7 +966,7 @@ describe("handleInstanceStartEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		return handleInstanceStartEffect("client-1", {
+		return handleInstanceStart("client-1", {
 			instanceId: "test-instance",
 		}).pipe(
 			Effect.provide(layer),
@@ -982,7 +982,7 @@ describe("handleInstanceStartEffect", () => {
 	});
 });
 
-describe("handleInstanceStopEffect", () => {
+describe("handleInstanceStop", () => {
 	it.effect("stops instance and broadcasts list", () => {
 		const ws = mockWsHandler();
 		const instanceMgmt = mockInstanceMgmt();
@@ -992,7 +992,7 @@ describe("handleInstanceStopEffect", () => {
 			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 
-		return handleInstanceStopEffect("client-1", {
+		return handleInstanceStop("client-1", {
 			instanceId: "test-instance",
 		}).pipe(
 			Effect.provide(layer),
@@ -1003,13 +1003,13 @@ describe("handleInstanceStopEffect", () => {
 	});
 });
 
-describe("handleScanNowEffect", () => {
+describe("handleScanNow", () => {
 	it.effect("sends error when scan deps not available", () => {
 		const ws = mockWsHandler();
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleScanNowEffect("client-1", {}).pipe(
+		return handleScanNow("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -1036,7 +1036,7 @@ describe("handleScanNowEffect", () => {
 			Layer.succeed(ScanDepsTag, scanDeps),
 		);
 
-		return handleScanNowEffect("client-1", {}).pipe(
+		return handleScanNow("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -1052,7 +1052,7 @@ describe("handleScanNowEffect", () => {
 
 // ─── Permissions handler tests ────────────────────────────────────────────
 
-describe("handlePermissionResponseEffect", () => {
+describe("handlePermissionResponse", () => {
 	it.effect("processes permission response and broadcasts resolution", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1078,7 +1078,7 @@ describe("handlePermissionResponseEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		return handlePermissionResponseEffect("client-1", {
+		return handlePermissionResponse("client-1", {
 			requestId: "perm-1" as PermissionId,
 			decision: "allow",
 		}).pipe(
@@ -1119,7 +1119,7 @@ describe("handlePermissionResponseEffect", () => {
 			Layer.succeed(ConfigTag, config),
 		);
 
-		return handlePermissionResponseEffect("client-1", {
+		return handlePermissionResponse("client-1", {
 			requestId: "perm-1" as PermissionId,
 			decision: "allow",
 		}).pipe(
@@ -1131,7 +1131,7 @@ describe("handlePermissionResponseEffect", () => {
 	});
 });
 
-describe("handleQuestionRejectEffect", () => {
+describe("handleQuestionReject", () => {
 	it.effect("does nothing when toolId is empty", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
@@ -1149,7 +1149,7 @@ describe("handleQuestionRejectEffect", () => {
 			Layer.succeed(SessionOverridesTag, overrides),
 		);
 
-		return handleQuestionRejectEffect("client-1", { toolId: "" }).pipe(
+		return handleQuestionReject("client-1", { toolId: "" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.broadcast).not.toHaveBeenCalled();
@@ -1178,7 +1178,7 @@ describe("handleQuestionRejectEffect", () => {
 			Layer.succeed(SessionOverridesTag, overrides),
 		);
 
-		return handleQuestionRejectEffect("client-1", { toolId: "que-1" }).pipe(
+		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.question.reject).toHaveBeenCalledWith("que-1");
@@ -1198,7 +1198,7 @@ describe("handleQuestionRejectEffect", () => {
 
 // ─── Session handler tests ───────────────────────────────────────────────
 
-describe("handleListSessionsEffect", () => {
+describe("handleListSessions", () => {
 	it.effect("sends session list to client", () => {
 		const ws = mockWsHandler();
 		const sessionMgr = mockSessionManager();
@@ -1208,7 +1208,7 @@ describe("handleListSessionsEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		return handleListSessionsEffect("client-1", {}).pipe(
+		return handleListSessions("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(sessionMgr.sendDualSessionLists).toHaveBeenCalled();
@@ -1217,7 +1217,7 @@ describe("handleListSessionsEffect", () => {
 	});
 });
 
-describe("handleRenameSessionEffect", () => {
+describe("handleRenameSession", () => {
 	it.effect("renames session and logs", () => {
 		const log = mockLogger();
 		const sessionMgr = mockSessionManager();
@@ -1227,7 +1227,7 @@ describe("handleRenameSessionEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		return handleRenameSessionEffect("client-1", {
+		return handleRenameSession("client-1", {
 			sessionId: "session-1",
 			title: "New Title",
 		}).pipe(
@@ -1251,7 +1251,7 @@ describe("handleRenameSessionEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		return handleRenameSessionEffect("client-1", {
+		return handleRenameSession("client-1", {
 			sessionId: "",
 			title: "New Title",
 		}).pipe(
@@ -1263,7 +1263,7 @@ describe("handleRenameSessionEffect", () => {
 	});
 });
 
-describe("handleSearchSessionsEffect", () => {
+describe("handleSearchSessions", () => {
 	it.effect("searches sessions and sends results", () => {
 		const ws = mockWsHandler();
 		const results = [{ id: "s1", title: "Match", updatedAt: 0 }];
@@ -1276,7 +1276,7 @@ describe("handleSearchSessionsEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		return handleSearchSessionsEffect("client-1", { query: "test" }).pipe(
+		return handleSearchSessions("client-1", { query: "test" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(sessionMgr.searchSessions).toHaveBeenCalledWith(
@@ -1294,7 +1294,7 @@ describe("handleSearchSessionsEffect", () => {
 	});
 });
 
-describe("handleLoadMoreHistoryEffect", () => {
+describe("handleLoadMoreHistory", () => {
 	it.effect("loads history page and sends to client", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1309,7 +1309,7 @@ describe("handleLoadMoreHistoryEffect", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 		);
 
-		return handleLoadMoreHistoryEffect("client-1", { offset: 50 }).pipe(
+		return handleLoadMoreHistory("client-1", { offset: 50 }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
@@ -1329,7 +1329,7 @@ describe("handleLoadMoreHistoryEffect", () => {
 
 // ─── Prompt handler tests ─────────────────────────────────────────────────
 
-describe("handleCancelEffect", () => {
+describe("handleCancel", () => {
 	it.effect("clears processing timeout and sends done when no engine", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1349,7 +1349,7 @@ describe("handleCancelEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleCancelEffect("client-1", {}).pipe(
+		return handleCancel("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith(
@@ -1378,7 +1378,7 @@ describe("handleCancelEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleCancelEffect("client-1", {}).pipe(
+		return handleCancel("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendToSession).not.toHaveBeenCalled();
@@ -1387,7 +1387,7 @@ describe("handleCancelEffect", () => {
 	});
 });
 
-describe("handleInputSyncEffect", () => {
+describe("handleInputSync", () => {
 	it.effect("forwards input to other clients in same session", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1396,7 +1396,7 @@ describe("handleInputSyncEffect", () => {
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleInputSyncEffect("client-1", { text: "hello" }).pipe(
+		return handleInputSync("client-1", { text: "hello" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				// Should send to client-2 but NOT client-1 (the sender)
@@ -1415,7 +1415,7 @@ describe("handleInputSyncEffect", () => {
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleInputSyncEffect("client-1", { text: "hello" }).pipe(
+		return handleInputSync("client-1", { text: "hello" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).not.toHaveBeenCalled();
@@ -1424,7 +1424,7 @@ describe("handleInputSyncEffect", () => {
 	});
 });
 
-describe("handleRewindEffect", () => {
+describe("handleRewind", () => {
 	it.effect("reverts to a specific message and clears cursor", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1442,7 +1442,7 @@ describe("handleRewindEffect", () => {
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleRewindEffect("client-1", { messageId: "msg-1" }).pipe(
+		return handleRewind("client-1", { messageId: "msg-1" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
@@ -1457,7 +1457,7 @@ describe("handleRewindEffect", () => {
 	});
 });
 
-describe("handleMessageEffect", () => {
+describe("handleMessage", () => {
 	it.effect("sends error when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
@@ -1479,7 +1479,7 @@ describe("handleMessageEffect", () => {
 			Layer.succeed(QuestionBridgeTag, questionBridge),
 		);
 
-		return handleMessageEffect("client-1", { text: "hello" }).pipe(
+		return handleMessage("client-1", { text: "hello" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith(
@@ -1516,7 +1516,7 @@ describe("handleMessageEffect", () => {
 			Layer.succeed(QuestionBridgeTag, questionBridge),
 		);
 
-		return handleMessageEffect("client-1", { text: "" }).pipe(
+		return handleMessage("client-1", { text: "" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).not.toHaveBeenCalled();
@@ -1557,7 +1557,7 @@ describe("handleMessageEffect", () => {
 			Layer.succeed(QuestionBridgeTag, questionBridge),
 		);
 
-		return handleMessageEffect("client-1", { text: "hello world" }).pipe(
+		return handleMessage("client-1", { text: "hello world" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.session.prompt).toHaveBeenCalledWith("session-1", {

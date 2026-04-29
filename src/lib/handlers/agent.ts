@@ -9,8 +9,6 @@ import {
 } from "../effect/services.js";
 import type { Agent } from "../instance/sdk-types.js";
 import type { PayloadMap } from "./payloads.js";
-import { resolveSessionForLog } from "./resolve-session.js";
-import type { HandlerDeps } from "./types.js";
 
 /**
  * Filter agents for the mode switcher UI.
@@ -57,42 +55,7 @@ export function filterAgents(
 		}));
 }
 
-export async function handleGetAgents(
-	deps: HandlerDeps,
-	clientId: string,
-	_payload: PayloadMap["get_agents"],
-): Promise<void> {
-	const rawAgents = await deps.client.app.agents();
-	const agents = filterAgents(rawAgents);
-	deps.wsHandler.sendTo(clientId, { type: "agent_list", agents });
-}
-
-export async function handleSwitchAgent(
-	deps: HandlerDeps,
-	clientId: string,
-	payload: PayloadMap["switch_agent"],
-): Promise<void> {
-	const { agentId } = payload;
-	if (agentId) {
-		const clientSession = deps.wsHandler.getClientSession(clientId);
-		if (clientSession) {
-			deps.overrides.setAgent(clientSession, agentId);
-		} else {
-			deps.log.warn(
-				`client=${clientId} switch_agent with no session — ignoring`,
-			);
-		}
-		deps.log.info(
-			`client=${clientId} session=${resolveSessionForLog(deps, clientId)} Switched to: ${agentId}`,
-		);
-	}
-}
-
-// ─── Effect-based handler implementations ──────────────────────────────────
-// These will replace the above functions once the dispatch table is rewired
-// in Task 5.3. Until then they coexist alongside the original handlers.
-
-export const handleGetAgentsEffect = (
+export const handleGetAgents = (
 	clientId: string,
 	_payload: PayloadMap["get_agents"],
 ) =>
@@ -105,7 +68,7 @@ export const handleGetAgentsEffect = (
 		wsHandler.sendTo(clientId, { type: "agent_list", agents });
 	});
 
-export const handleSwitchAgentEffect = (
+export const handleSwitchAgent = (
 	clientId: string,
 	payload: PayloadMap["switch_agent"],
 ) =>

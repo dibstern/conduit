@@ -1,7 +1,6 @@
 // ─── Handler Types ───────────────────────────────────────────────────────────
 // Shared types used by all handler modules.
 
-import type { Effect } from "effect";
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
@@ -10,7 +9,6 @@ import type {
 	SessionManagerShape,
 } from "../effect/services.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
-import type { RelayError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
@@ -23,7 +21,6 @@ import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
-import type { PayloadMap } from "./payloads.js";
 
 /** Instance management capability group — only available in daemon mode. */
 export interface InstanceManagementDeps {
@@ -115,30 +112,6 @@ export interface HandlerDeps {
 	/** Provider state service for resume cursor persistence (optional). */
 	providerStateService?: ProviderStateService;
 }
-
-export type MessageHandler<K extends keyof PayloadMap = keyof PayloadMap> = (
-	deps: HandlerDeps,
-	clientId: string,
-	payload: PayloadMap[K],
-) => Promise<void>;
-
-/**
- * Effect-based handler type — the target signature for migrated handlers.
- *
- * Unlike `MessageHandler`, deps come from Effect context via Tags (yielded
- * inside the Effect.gen body) rather than passed as a function argument.
- * The `R` type parameter captures the required service context.
- *
- * Handlers in this batch export `*Effect` functions alongside the existing
- * `MessageHandler` exports. The dispatch table will be rewired in Task 5.3.
- */
-export type EffectHandler<
-	K extends keyof PayloadMap = keyof PayloadMap,
-	R = never,
-> = (
-	clientId: string,
-	payload: PayloadMap[K],
-) => Effect.Effect<void, RelayError, R>;
 
 // Re-export PromptOptions so prompt.ts can use it without a separate import
 export type { PromptOptions };
