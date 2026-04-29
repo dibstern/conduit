@@ -5,7 +5,6 @@
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type { PayloadMap } from "./payloads.js";
-export type { HandlerDeps } from "./types.js";
 
 // ─── Handler modules ─────────────────────────────────────────────────────────
 

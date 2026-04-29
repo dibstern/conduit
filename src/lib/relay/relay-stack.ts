@@ -32,32 +32,32 @@ import {
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
-import {
-	makeClaudeEventPersistLive,
-	makeConfigLive,
-	makeConnectPtyUpstreamLive,
-	makeForkMetaLive,
-	makeInstanceMgmtLive,
-	makeLoggerLive,
-	makeOpenCodeAPILive,
-	makeOrchestrationEngineLive,
-	makePermissionBridgeLive,
-	makePollerManagerLive,
-	makeProjectMgmtLive,
-	makeProviderStateServiceLive,
-	makePtyManagerLive,
-	makeQuestionBridgeLive,
-	makeReadQueryLive,
-	makeScanDepsLive,
-	makeSessionManagerLive,
-	makeSessionOverridesLive,
-	makeSessionRegistryLive,
-	makeStatusPollerLive,
-	makeWebSocketHandlerLive,
-} from "../effect/layers.js";
 import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
-import type { SessionManagerShape } from "../effect/services.js";
+import {
+	ClaudeEventPersistTag,
+	ConfigTag,
+	ConnectPtyUpstreamTag,
+	ForkMetaTag,
+	InstanceMgmtTag,
+	LoggerTag,
+	OpenCodeAPITag,
+	OrchestrationEngineTag,
+	PermissionBridgeTag,
+	PollerManagerTag,
+	ProjectMgmtTag,
+	ProviderStateServiceTag,
+	PtyManagerTag,
+	QuestionBridgeTag,
+	ReadQueryTag,
+	ScanDepsTag,
+	type SessionManagerShape,
+	SessionManagerTag,
+	SessionOverridesTag,
+	SessionRegistryTag,
+	StatusPollerTag,
+	WebSocketHandlerTag,
+} from "../effect/services.js";
 import {
 	createStatusPollerService,
 	makePollerPubSubLive,
@@ -118,7 +118,17 @@ import { SessionRegistry } from "../session/session-registry.js";
 import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
-import type { RelayRuntime } from "./effect-relay-runtime.js";
+
+/** Runtime bridge between imperative relay-stack and Effect handler pipeline. */
+interface RelayRuntime {
+	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
+	runtime: ManagedRuntime.ManagedRuntime<any, never>;
+	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
+	runSync: <A, E>(effect: Effect.Effect<A, E, any>) => A;
+	dispatch: (clientId: string, type: string, raw: unknown) => Promise<void>;
+	dispose: () => Promise<void>;
+}
+
 import { createTranslator } from "./event-translator.js";
 import { MessagePollerManager } from "./message-poller-impl.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
@@ -798,52 +808,61 @@ export async function createProjectRelay(
 
 	// Required bridge layers (imperative instances → Effect Tags)
 	const coreBridgeLayers = Layer.mergeAll(
-		makeOpenCodeAPILive(api),
-		makeSessionManagerLive(sessionMgr),
-		makeWebSocketHandlerLive(wsHandler),
-		makePermissionBridgeLive(permissionBridge),
-		makeQuestionBridgeLive(questionBridge),
-		makeSessionOverridesLive(overrides),
-		makePtyManagerLive(ptyManager),
-		makeConfigLive(config),
-		makeLoggerLive(log),
-		makeStatusPollerLive(statusPoller),
-		makeSessionRegistryLive(registry),
-		makePollerManagerLive(pollerManager),
-		makeConnectPtyUpstreamLive(connectPtyUpstream),
-		makeForkMetaLive(forkMeta),
-		makeOrchestrationEngineLive(orchestration.engine),
+		Layer.succeed(OpenCodeAPITag, api),
+		Layer.succeed(SessionManagerTag, sessionMgr),
+		Layer.succeed(WebSocketHandlerTag, wsHandler),
+		Layer.succeed(PermissionBridgeTag, permissionBridge),
+		Layer.succeed(QuestionBridgeTag, questionBridge),
+		Layer.succeed(SessionOverridesTag, overrides),
+		Layer.succeed(PtyManagerTag, ptyManager),
+		Layer.succeed(ConfigTag, config),
+		Layer.succeed(LoggerTag, log),
+		Layer.succeed(StatusPollerTag, statusPoller),
+		Layer.succeed(SessionRegistryTag, registry),
+		Layer.succeed(PollerManagerTag, pollerManager),
+		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
+		Layer.succeed(ForkMetaTag, forkMeta),
+		Layer.succeed(OrchestrationEngineTag, orchestration.engine),
 	);
 
 	// Optional bridge layers (only included when deps are present)
 	// biome-ignore lint/suspicious/noExplicitAny: Layer generics complex; callers infer correctly
 	let bridgeLayers: Layer.Layer<any, never, never> = coreBridgeLayers;
 	if (readQuery != null) {
-		bridgeLayers = Layer.merge(bridgeLayers, makeReadQueryLive(readQuery));
+		bridgeLayers = Layer.merge(
+			bridgeLayers,
+			Layer.succeed(ReadQueryTag, readQuery),
+		);
 	}
 	if (claudeEventPersist != null) {
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
-			makeClaudeEventPersistLive(claudeEventPersist),
+			Layer.succeed(ClaudeEventPersistTag, claudeEventPersist),
 		);
 	}
 	if (providerStateService != null) {
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
-			makeProviderStateServiceLive(providerStateService),
+			Layer.succeed(ProviderStateServiceTag, providerStateService),
 		);
 	}
 	if (instanceMgmt != null) {
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
-			makeInstanceMgmtLive(instanceMgmt),
+			Layer.succeed(InstanceMgmtTag, instanceMgmt),
 		);
 	}
 	if (projectMgmt != null) {
-		bridgeLayers = Layer.merge(bridgeLayers, makeProjectMgmtLive(projectMgmt));
+		bridgeLayers = Layer.merge(
+			bridgeLayers,
+			Layer.succeed(ProjectMgmtTag, projectMgmt),
+		);
 	}
 	if (scanDeps != null) {
-		bridgeLayers = Layer.merge(bridgeLayers, makeScanDepsLive(scanDeps));
+		bridgeLayers = Layer.merge(
+			bridgeLayers,
+			Layer.succeed(ScanDepsTag, scanDeps),
+		);
 	}
 
 	// Compose: self-constructing state layers + imperative bridge layers
