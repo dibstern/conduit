@@ -32,7 +32,31 @@ import {
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
+import {
+	makeClaudeEventPersistLive,
+	makeConfigLive,
+	makeConnectPtyUpstreamLive,
+	makeForkMetaLive,
+	makeInstanceMgmtLive,
+	makeLoggerLive,
+	makeOpenCodeAPILive,
+	makeOrchestrationEngineLive,
+	makePermissionBridgeLive,
+	makePollerManagerLive,
+	makeProjectMgmtLive,
+	makeProviderStateServiceLive,
+	makePtyManagerLive,
+	makeQuestionBridgeLive,
+	makeReadQueryLive,
+	makeScanDepsLive,
+	makeSessionManagerLive,
+	makeSessionOverridesLive,
+	makeSessionRegistryLive,
+	makeStatusPollerLive,
+	makeWebSocketHandlerLive,
+} from "../effect/layers.js";
 import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
+import { RelayStateLive } from "../effect/relay-layer.js";
 import type { SessionManagerShape } from "../effect/services.js";
 import {
 	createStatusPollerService,
@@ -44,6 +68,7 @@ import {
 import { StaticDirTag } from "../effect/static-file-handler.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
+import { dispatchMessageEffect } from "../handlers/index.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
@@ -93,10 +118,7 @@ import { SessionRegistry } from "../session/session-registry.js";
 import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
-import {
-	createRelayRuntime,
-	type RelayRuntime,
-} from "./effect-relay-runtime.js";
+import type { RelayRuntime } from "./effect-relay-runtime.js";
 import { createTranslator } from "./event-translator.js";
 import { MessagePollerManager } from "./message-poller-impl.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
@@ -769,34 +791,77 @@ export async function createProjectRelay(
 			? { triggerScan: config.triggerScan }
 			: undefined;
 
-	// ── Effect ManagedRuntime (bridge between imperative and Effect worlds) ──
-	// makeHandlerLayer() always includes Effect-native state Layers
-	// (SessionManagerStateTag, PollerManagerStateTag, DaemonEventBusTag,
-	// OverridesStateTag) so Effect handlers can gradually migrate to
-	// Ref/PubSub-based state access alongside the imperative bridge services.
-	const effectRuntime = createRelayRuntime({
-		wsHandler,
-		client: api,
-		sessionMgr,
-		permissionBridge,
-		questionBridge,
-		overrides,
-		ptyManager,
-		config,
-		log,
-		statusPoller,
-		registry,
-		pollerManager,
-		connectPtyUpstream,
-		forkMeta,
-		orchestrationEngine: orchestration.engine,
-		...(readQuery != null && { readQuery }),
-		...(claudeEventPersist != null && { claudeEventPersist }),
-		...(providerStateService != null && { providerStateService }),
-		...(instanceMgmt != null && { instanceMgmt }),
-		...(projectMgmt != null && { projectMgmt }),
-		...(scanDeps != null && { scanDeps }),
-	});
+	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
+	// RelayStateLive provides all self-constructing Effect-native state Layers.
+	// Bridge layers wrap already-constructed imperative instances via
+	// Layer.succeed(Tag, instance). Both are merged into a single Layer tree.
+
+	// Required bridge layers (imperative instances → Effect Tags)
+	const coreBridgeLayers = Layer.mergeAll(
+		makeOpenCodeAPILive(api),
+		makeSessionManagerLive(sessionMgr),
+		makeWebSocketHandlerLive(wsHandler),
+		makePermissionBridgeLive(permissionBridge),
+		makeQuestionBridgeLive(questionBridge),
+		makeSessionOverridesLive(overrides),
+		makePtyManagerLive(ptyManager),
+		makeConfigLive(config),
+		makeLoggerLive(log),
+		makeStatusPollerLive(statusPoller),
+		makeSessionRegistryLive(registry),
+		makePollerManagerLive(pollerManager),
+		makeConnectPtyUpstreamLive(connectPtyUpstream),
+		makeForkMetaLive(forkMeta),
+		makeOrchestrationEngineLive(orchestration.engine),
+	);
+
+	// Optional bridge layers (only included when deps are present)
+	// biome-ignore lint/suspicious/noExplicitAny: Layer generics complex; callers infer correctly
+	let bridgeLayers: Layer.Layer<any, never, never> = coreBridgeLayers;
+	if (readQuery != null) {
+		bridgeLayers = Layer.merge(bridgeLayers, makeReadQueryLive(readQuery));
+	}
+	if (claudeEventPersist != null) {
+		bridgeLayers = Layer.merge(
+			bridgeLayers,
+			makeClaudeEventPersistLive(claudeEventPersist),
+		);
+	}
+	if (providerStateService != null) {
+		bridgeLayers = Layer.merge(
+			bridgeLayers,
+			makeProviderStateServiceLive(providerStateService),
+		);
+	}
+	if (instanceMgmt != null) {
+		bridgeLayers = Layer.merge(
+			bridgeLayers,
+			makeInstanceMgmtLive(instanceMgmt),
+		);
+	}
+	if (projectMgmt != null) {
+		bridgeLayers = Layer.merge(bridgeLayers, makeProjectMgmtLive(projectMgmt));
+	}
+	if (scanDeps != null) {
+		bridgeLayers = Layer.merge(bridgeLayers, makeScanDepsLive(scanDeps));
+	}
+
+	// Compose: self-constructing state layers + imperative bridge layers
+	const fullLayer = Layer.merge(RelayStateLive, bridgeLayers);
+	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
+
+	// RelayRuntime adapter — same interface as the old createRelayRuntime()
+	const effectRuntime: RelayRuntime = {
+		runtime: relayManagedRuntime,
+		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
+		runSync: <A, E>(effect: Effect.Effect<A, E, any>) =>
+			relayManagedRuntime.runSync(effect),
+		dispatch: (clientId: string, type: string, raw: unknown) =>
+			relayManagedRuntime.runPromise(
+				dispatchMessageEffect(clientId, type, raw),
+			),
+		dispose: () => relayManagedRuntime.dispose(),
+	};
 
 	// ── WebSocket message handler ───────────────────────────────────────────
 	wsHandler.on("message", ({ clientId, handler, payload }) => {
