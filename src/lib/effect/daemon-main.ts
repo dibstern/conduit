@@ -23,13 +23,15 @@ import {
 	Context,
 	Effect,
 	Layer,
+	ManagedRuntime,
 	RuntimeFlags,
 	RuntimeFlagsPatch,
 	Schedule,
 	Supervisor,
 } from "effect";
-
 import type { DaemonOptions } from "../daemon/daemon-types.js";
+import type { DaemonLiveOptions } from "./daemon-layers.js";
+import { makeDaemonLive } from "./daemon-layers.js";
 import {
 	type CrashLimitExceeded,
 	runStartupSequence,
@@ -202,15 +204,7 @@ import {
 	syncRecentProjects,
 } from "../daemon/config-persistence.js";
 import { CrashCounter } from "../daemon/crash-counter.js";
-import {
-	closeHttpServer,
-	closeIPCServer,
-	closeOnboardingServer,
-	type DaemonLifecycleContext,
-	startHttpServer,
-	startIPCServer,
-	startOnboardingServer,
-} from "../daemon/daemon-lifecycle.js";
+import type { DaemonLifecycleContext } from "../daemon/daemon-lifecycle.js";
 import {
 	findFreePort,
 	isOpencodeInstalled,
@@ -218,17 +212,8 @@ import {
 	probeOpenCodePort,
 } from "../daemon/daemon-utils.js";
 import { KeepAwake } from "../daemon/keep-awake.js";
-import {
-	removePidFile,
-	removeSocketFile,
-	writePidFile,
-} from "../daemon/pid-manager.js";
 import { PortScanner, type ScanResult } from "../daemon/port-scanner.js";
 import { ProjectRegistry } from "../daemon/project-registry.js";
-import {
-	installSignalHandlers,
-	removeSignalHandlers,
-} from "../daemon/signal-handlers.js";
 import { StorageMonitor } from "../daemon/storage-monitor.js";
 import { VersionChecker } from "../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../env.js";
@@ -343,9 +328,8 @@ export async function startDaemonProcess(
 		);
 	}
 
-	// ── PID file ──────────────────────────────────────────────────────────
-	writePidFile(configDir, pidPath);
-	log.debug(`[startup:${elapsed()}] PID file + crash counter done`);
+	// PID file is now managed by makePidFileLive (via makeDaemonLive).
+	log.debug(`[startup:${elapsed()}] Crash counter done`);
 
 	// ── Mutable state ─────────────────────────────────────────────────────
 	let port = options.port ?? DEFAULT_PORT;
@@ -365,8 +349,9 @@ export async function startDaemonProcess(
 	let keepAwakeManager: KeepAwake | null = null;
 	let storageMonitor: StorageMonitor | null = null;
 	let scanner: PortScanner | null = null;
-	let _onUnhandledRejection: ((err: unknown) => void) | null = null;
-	let _onUncaughtException: ((err: Error) => void) | null = null;
+	// Layer-managed runtime — set after router setup, used by stop().
+	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic resolved at construction
+	let daemonRuntime: ManagedRuntime.ManagedRuntime<any, any> | null = null;
 
 	const persistedSessionCounts = new Map<string, number>();
 	const dismissedPaths = new Set<string>();
@@ -781,20 +766,11 @@ export async function startDaemonProcess(
 			clearTimeout(shutdownTimer);
 			shutdownTimer = null;
 		}
-		removeSignalHandlers();
-		if (_onUnhandledRejection) {
-			process.removeListener("unhandledRejection", _onUnhandledRejection);
-			_onUnhandledRejection = null;
-		}
-		if (_onUncaughtException) {
-			process.removeListener("uncaughtException", _onUncaughtException);
-			_onUncaughtException = null;
-		}
 		if (_eventLoopTimer) clearInterval(_eventLoopTimer);
 		_eventLoopTimer = null;
 		await flushConfigSave();
 		await saveDaemonConfig(buildConfig(), configDir);
-		await keepAwakeManager?.drain();
+		// Drain imperative background services (not yet Layer-managed)
 		await versionChecker?.drain();
 		await storageMonitor?.drain();
 		await scanner?.drain();
@@ -804,19 +780,10 @@ export async function startDaemonProcess(
 		versionChecker = null;
 		storageMonitor = null;
 		keepAwakeManager = null;
-		for (const client of ctx.ipcClients) {
-			try {
-				client.destroy();
-			} catch {
-				/* already closed */
-			}
-		}
-		ctx.ipcClients.clear();
-		await closeIPCServer(ctx);
-		await closeOnboardingServer(ctx);
-		await closeHttpServer(ctx);
-		removePidFile(pidPath);
-		removeSocketFile(socketPath);
+		// Dispose the Layer-managed runtime — tears down in reverse order:
+		// servers (HTTP, IPC, onboarding), signal handlers, error handlers,
+		// PID/socket file cleanup, KeepAwake, DaemonState, DaemonEventBus.
+		if (daemonRuntime) await daemonRuntime.dispose();
 		shuttingDown = false;
 	}
 
@@ -1069,8 +1036,8 @@ export async function startDaemonProcess(
 		) => instanceManager.updateInstance(id, updates),
 	};
 
-	await startIPCServer(ctx, ipcContext, getStatus);
-	log.debug(`[startup:${elapsed()}] IPC server listening`);
+	// IPC server is now started by makeIpcServerLive (via makeDaemonLive).
+	log.debug(`[startup:${elapsed()}] IPC context built`);
 
 	// ── Push notifications ────────────────────────────────────────────────
 	try {
@@ -1190,23 +1157,59 @@ export async function startDaemonProcess(
 		},
 	};
 
-	// ── Start HTTP server ─────────────────────────────────────────────────
-	// Sync port/host into ctx before starting (they may have changed from TLS detection)
+	// ── Layer-managed daemon lifecycle ────────────────────────────────────
+	// Sync port/host into ctx before Layer construction starts servers.
 	ctx.port = port;
 	ctx.host = host;
-	await startHttpServer(ctx);
+
+	const onboardingDeps = {
+		caRootPath: tlsCerts?.caRoot ?? null,
+		caCertDer: tlsCerts?.caCertDer ?? null,
+		staticDir,
+	};
+
+	const daemonLiveOptions: DaemonLiveOptions = {
+		configDir,
+		pidPath,
+		socketPath,
+		ctx,
+		ipcContext,
+		getStatus,
+		onboarding: onboardingDeps,
+		// KeepAwake config — Layer version will be created during construction.
+		// VersionChecker, StorageMonitor, PortScanner stay imperative for now.
+		keepAwake: keepAwakeCommand
+			? {
+					command: keepAwakeCommand,
+					...(keepAwakeArgs != null && { args: keepAwakeArgs }),
+				}
+			: undefined,
+		configPath: join(configDir, "daemon.json"),
+		relayFactory: (slug: string) =>
+			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
+				Effect.map((p) => ({
+					slug: p.slug,
+					wsHandler: { handleUpgrade: () => {} },
+					stop: () => {},
+				})),
+				Effect.catchAll(() =>
+					Effect.succeed({
+						slug,
+						wsHandler: { handleUpgrade: () => {} },
+						stop: () => {},
+					}),
+				),
+			),
+	};
+
+	// Create and build the daemon Layer — starts servers, installs signal/error
+	// handlers, writes PID file, creates DaemonState, DaemonEventBus, PinoLogger.
+	daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
+	await daemonRuntime.runPromise(Effect.void);
+
 	// Read back the actual port (important when port 0 is used)
 	port = ctx.port;
-	log.debug(`[startup:${elapsed()}] HTTP server listening`);
-
-	// ── Onboarding server ─────────────────────────────────────────────────
-	if (tlsEnabled) {
-		await startOnboardingServer(ctx, {
-			caRootPath: tlsCerts?.caRoot ?? null,
-			caCertDer: tlsCerts?.caCertDer ?? null,
-			staticDir,
-		});
-	}
+	log.debug(`[startup:${elapsed()}] Servers started via Layer`);
 
 	// ── WebSocket upgrade routing ─────────────────────────────────────────
 	const wsServer = ctx.upgradeServer ?? ctx.httpServer;
@@ -1376,25 +1379,8 @@ export async function startDaemonProcess(
 		}
 	});
 
-	// ── Signal handlers ───────────────────────────────────────────────────
-	installSignalHandlers(() => {
-		stop();
-	});
-
-	_onUnhandledRejection = (err) => {
-		log.error(
-			{ error: err instanceof Error ? err.message : String(err) },
-			"Unhandled rejection (daemon kept alive)",
-		);
-	};
-	_onUncaughtException = (err) => {
-		log.error(
-			{ error: err.message, stack: err.stack },
-			"Uncaught exception (daemon kept alive)",
-		);
-	};
-	process.on("unhandledRejection", _onUnhandledRejection);
-	process.on("uncaughtException", _onUncaughtException);
+	// Signal handlers and error handlers are now managed by
+	// SignalHandlerLayer and ProcessErrorHandlerLayer (via makeDaemonLive).
 
 	startTime = Date.now();
 

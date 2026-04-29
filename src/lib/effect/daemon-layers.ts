@@ -293,10 +293,10 @@ export interface DaemonLiveOptions {
 	getStatus: () => DaemonStatus;
 	onboarding: OnboardingServerDeps;
 
-	// Background services — Effect-native config types
+	// Background services — Effect-native config types (all optional for phased migration)
 	keepAwake?: Parameters<typeof KeepAwakeLive>[0];
-	versionCheck: Parameters<typeof VersionCheckerLive>[0];
-	storageMon: Parameters<typeof StorageMonitorLive>[0];
+	versionCheck?: Parameters<typeof VersionCheckerLive>[0];
+	storageMon?: Parameters<typeof StorageMonitorLive>[0];
 	portScanner?: Parameters<typeof PortScannerLive>[0];
 
 	// DaemonState + RelayCache (Tasks 1-4 integration)
@@ -337,15 +337,24 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		),
 	);
 
-	// Background services — always-present layers merged first, optional added via reduce
-	const baseBgLayer = Layer.mergeAll(
-		makeKeepAwakeLive(options.keepAwake),
-		makeVersionCheckerLive(options.versionCheck),
-		makeStorageMonitorLive(options.storageMon),
-	);
-	const backgroundLayer = options.portScanner
-		? Layer.merge(baseBgLayer, makePortScannerLive(options.portScanner))
-		: baseBgLayer;
+	// Background services — all optional for phased migration.
+	// biome-ignore lint/suspicious/noExplicitAny: Layer generics complex during conditional composition
+	const bgParts: Array<Layer.Layer<any, any, never>> = [];
+	if (options.keepAwake !== undefined) {
+		bgParts.push(makeKeepAwakeLive(options.keepAwake));
+	}
+	if (options.versionCheck) {
+		bgParts.push(makeVersionCheckerLive(options.versionCheck));
+	}
+	if (options.storageMon) {
+		bgParts.push(makeStorageMonitorLive(options.storageMon));
+	}
+	if (options.portScanner) {
+		bgParts.push(makePortScannerLive(options.portScanner));
+	}
+	// biome-ignore lint/suspicious/noExplicitAny: mergeAll requires at least 1 element; skip if empty
+	const backgroundLayer: Layer.Layer<any, any, never> | null =
+		bgParts.length > 0 ? bgParts.reduce((acc, l) => Layer.merge(acc, l)) : null;
 
 	// State layer — DaemonState from disk (with real FS) or empty defaults
 	const stateLayer = options.configPath
@@ -359,11 +368,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	let composed = infraLayer.pipe(
 		Layer.provideMerge(serversLayer),
-		Layer.provideMerge(backgroundLayer),
 		Layer.provideMerge(stateLayer),
 		Layer.provideMerge(DaemonEventBusLive),
 		Layer.provideMerge(PinoLoggerLive),
 	);
+
+	// Background services — only include if configs were provided
+	if (backgroundLayer) {
+		composed = composed.pipe(Layer.provideMerge(backgroundLayer));
+	}
 
 	// RelayCache layer — only include if a factory is provided
 	if (options.relayFactory) {
