@@ -20,6 +20,7 @@ export type DaemonEvent = Data.TaggedEnum<{
 	InstanceStatusChanged: { readonly instanceId: string };
 	DiskSpaceLow: { readonly usage: number };
 	DiskSpaceOk: { readonly usage: number };
+	InstanceError: { readonly instanceId: string; readonly error: string };
 }>;
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();
@@ -60,6 +61,9 @@ export const publishDiskSpaceLow = (usage: number) =>
 
 export const publishDiskSpaceOk = (usage: number) =>
 	publish(DaemonEvent.DiskSpaceOk({ usage }));
+
+export const publishInstanceError = (instanceId: string, error: string) =>
+	publish(DaemonEvent.InstanceError({ instanceId, error }));
 
 // ─── Subscriber ─────────────────────────────────────────────────────────────
 

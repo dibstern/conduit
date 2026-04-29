@@ -10,7 +10,7 @@ import {
 	Effect,
 	Layer,
 	type Option,
-	Redacted,
+	type Redacted,
 } from "effect";
 
 // ─── Service interface ──────────────────────────────────────────────────────
