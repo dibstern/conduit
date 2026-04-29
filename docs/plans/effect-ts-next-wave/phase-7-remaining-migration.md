@@ -342,7 +342,8 @@ export const startHealthPoller = (instanceId: string) =>
   Effect.gen(function* () {
     const stateRef = yield* InstanceManagerStateTag;
     const fibers = yield* PollerFibersTag;
-    const config = yield* InstanceManagerConfigTag;
+    // Config is embedded in InstanceManagerState (no separate ConfigTag)
+    const { config } = yield* Ref.get(stateRef);
 
     const pollEffect = Effect.gen(function* () {
       // Read instance from state to get port
@@ -408,7 +409,8 @@ export const scheduleRestart = (instanceId: string) =>
   Effect.gen(function* () {
     const stateRef = yield* InstanceManagerStateTag;
     const fibers = yield* PollerFibersTag;
-    const config = yield* InstanceManagerConfigTag;
+    // Config is embedded in InstanceManagerState (no separate ConfigTag)
+    const { config } = yield* Ref.get(stateRef);
 
     // AUDIT FIX (AP-R2-5): Use Clock.currentTimeMillis for TestClock compatibility
     const now = yield* Clock.currentTimeMillis;
@@ -538,7 +540,8 @@ git add -A && git commit -m "feat(effect): add health polling and restart schedu
 This task creates `*Live` Layers for the state Tags. Consumers are progressively converted to use state Tags directly (Tasks 5-7). Bridge Tags + old classes are deleted in Task 8.
 
 **Services — state Tags to ensure have self-constructing Live Layers:**
-- `SessionManagerStateTag` — already provided by `SessionManagerServiceLive` in `session-manager-service.ts` (provides `SessionManagerServiceTag` with 4 Effect methods: `listSessions`, `createSession`, `deleteSession`, `recordMessageActivity`)
+- `SessionManagerStateTag` — already self-constructing via `makeSessionManagerStateLive()` in `session-manager-state.ts`
+- `SessionManagerServiceTag` — already provided by `SessionManagerServiceLive` in `session-manager-service.ts` (4 Effect methods: `listSessions`, `createSession`, `deleteSession`, `recordMessageActivity`; these functions require `SessionManagerStateTag` at call time)
 - `SessionRegistryStateTag` — already self-constructing via `makeSessionRegistryStateLive()` in `session-registry-state.ts`
 - `OverridesStateTag` — already self-constructing via `makeOverridesStateLive()` in `session-overrides-state.ts`
 - `PollerManagerStateTag` — already self-constructing via `makePollerManagerStateLive()` in `message-poller.ts`
@@ -574,10 +577,10 @@ The old `src/lib/relay/pty-manager.ts` (`PtyManager` class) has no Effect replac
 ```typescript
 // src/lib/effect/pty-manager-service.ts
 import { Context, Effect, HashMap, Layer, Ref } from "effect";
-import type { PtySession } from "../relay/pty-manager.js";
+import type { PtySessionState } from "../relay/pty-manager.js";
 
 export interface PtyManagerState {
-  sessions: HashMap.HashMap<string, PtySession>;
+  sessions: HashMap.HashMap<string, PtySessionState>;
 }
 
 export class PtyManagerStateTag extends Context.Tag("PtyManagerState")<
@@ -591,7 +594,7 @@ export const PtyManagerStateLive: Layer.Layer<PtyManagerStateTag> = Layer.effect
 );
 
 // Effect-native functions operating on PtyManagerStateTag:
-export const registerPtySession = (sessionId: string, session: PtySession) =>
+export const registerPtySession = (sessionId: string, session: PtySessionState) =>
   Effect.gen(function* () {
     const ref = yield* PtyManagerStateTag;
     yield* Ref.update(ref, (s) => ({
@@ -708,7 +711,8 @@ export const RelayStateLive = Layer.mergeAll(
   // Session state
   makeSessionRegistryStateLive(),
   makeOverridesStateLive(),
-  // Session manager Effect service (provides SessionManagerServiceTag)
+  makeSessionManagerStateLive(),  // provides SessionManagerStateTag
+  // Session manager Effect service (provides SessionManagerServiceTag — needs StateTag at call time)
   SessionManagerServiceLive,
   // Poller state
   makePollerManagerStateLive(),
@@ -725,10 +729,21 @@ export const RelayStateLive = Layer.mergeAll(
   // Rate limiter
   RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
 );
-// NOTE: OpenCodeAPITag, ConfigTag, LoggerTag, PermissionBridgeTag,
-// QuestionBridgeTag, ConnectPtyUpstreamTag, ForkMetaTag, OrchestrationEngineTag
-// are still provided externally via Layer.succeed in createProjectRelay (Step 3).
-// These are converted to self-constructing Layers in Tasks 9/10.
+// NOTE: The following Tags are still provided externally via Layer.succeed
+// in createProjectRelay (Step 3) during the transition period:
+//
+// External deps (stay as Layer.succeed):
+//   OpenCodeAPITag, ConfigTag, LoggerTag
+//
+// Bridge Tags (deleted in Task 8 when consumers are converted):
+//   SessionManagerTag, SessionRegistryTag, SessionOverridesTag,
+//   WebSocketHandlerTag, PtyManagerTag, StatusPollerTag, PollerManagerTag,
+//   PermissionBridgeTag, QuestionBridgeTag, ConnectPtyUpstreamTag,
+//   ForkMetaTag, OrchestrationEngineTag
+//
+// Optional persistence/daemon Tags (if enabled):
+//   ReadQueryTag, ClaudeEventPersistTag, ProviderStateServiceTag,
+//   InstanceMgmtTag, ProjectMgmtTag, ScanDepsTag
 ```
 
 **Step 3: Rewrite `createProjectRelay` to use `RelayStateLive`**
@@ -850,18 +865,19 @@ Understand the gap between:
 
 ```typescript
 // daemon-main.ts — replace imperative startup with:
+// Background service Layers are functions that take config — call them:
 const DaemonLive = Layer.mergeAll(
   // Infrastructure
   PinoLoggerLive,
   // State
   makeDaemonStateFromDiskNode(configPath),
   DaemonEventBusLive,
-  // Background services (as Layer.scopedDiscard — run as background fibers)
-  KeepAwakeLive,
-  VersionCheckerLive,
-  StorageMonitorLive,
-  PortScannerLive,
-  // Per-project relay (created per project)
+  // Background services (each is a function returning Layer.scoped)
+  KeepAwakeLive(),                              // optional config
+  VersionCheckerLive({ checkIntervalMs: ... }), // read from daemon config
+  StorageMonitorLive({ ... }),
+  PortScannerLive({ ... }),
+  // Per-project relay state
   RelayStateLive,
 ).pipe(
   Layer.provide(DaemonEnvConfigLive),
@@ -1318,3 +1334,19 @@ Tasks 1, 4-5, 6-8, 9-11, and Effect-TS compliance auditors completed investigati
 - `HashMap.modify` confirmed in Effect 3.21 (erroneously flagged during investigation)
 - `FiberMap.has` returns `Effect<boolean>` (Round 1 fix AP-7 correctly applied)
 - `ManagedRuntime.make`, `MetricState.counter`, `Layer.launch` all confirmed in Effect 3.21
+
+### Round 3 (2026-04-29)
+
+**Amend Plan (6 findings):**
+
+- **AP-R3-1** — Task 3: `InstanceManagerConfigTag` doesn't exist. Config is embedded in `InstanceManagerState.config`. Fixed: replaced `yield* InstanceManagerConfigTag` with `const { config } = yield* Ref.get(stateRef)`.
+- **AP-R3-2** — Task 4: wrong Tag attribution. Plan said `SessionManagerStateTag` is "provided by `SessionManagerServiceLive`" — wrong, it's from `makeSessionManagerStateLive()` in `session-manager-state.ts`. Fixed.
+- **AP-R3-3** — Task 4: `PtySession` type doesn't exist, actual type is `PtySessionState`. Fixed: all occurrences replaced.
+- **AP-R3-4** — Task 5: `RelayStateLive` missing `makeSessionManagerStateLive()`. `SessionManagerServiceLive` only packages function references — the functions need `SessionManagerStateTag` at call time. Fixed: added to composition.
+- **AP-R3-5** — Task 5: NOTE listing externally-provided bridge Tags was incomplete (8 of 22). Fixed: expanded to list all bridge Tags, external deps, and optional Tags.
+- **AP-R3-6** — Task 6: background service Layers (`KeepAwakeLive`, `VersionCheckerLive`, `StorageMonitorLive`, `PortScannerLive`) are functions requiring config arguments, not bare values. Fixed: call with `()` / `(config)`.
+
+**Accept (2 findings):**
+
+- Task 5 test code uses bridge Tags — acceptable as transition-period smoke test
+- `SessionManagerServiceLive` has zero declared Layer requirements (deferred to call site) — correct Effect behavior, confusion resolved by fixing AP-R3-2 and AP-R3-4
