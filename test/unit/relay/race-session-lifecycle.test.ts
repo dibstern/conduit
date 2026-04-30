@@ -1,5 +1,12 @@
 // ─── Race Condition: session_lifecycle create→delete interleaving ────────────
 //
+// These tests validate the imperative wireSessionLifecycle() function.
+// The Effect-native replacement (SessionLifecycleWiringLive) uses sequential
+// PubSub stream processing, eliminating the deletedSessions race guard.
+// See test/unit/effect/session-lifecycle-wiring.test.ts for those tests.
+//
+// When wireSessionLifecycle() is deleted (Phase 7 cleanup), delete this file.
+//
 // Tests the REAL wireSessionLifecycle function from session-lifecycle-wiring.ts.
 // Mocks only I/O boundaries: client.getMessages (network), pollerManager (HTTP
 // polling loops), statusPoller, sseTracker, wsHandler, monitoring state.
