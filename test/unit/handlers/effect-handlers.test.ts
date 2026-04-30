@@ -1221,10 +1221,12 @@ describe("handleRenameSession", () => {
 	it.effect("renames session and logs", () => {
 		const log = mockLogger();
 		const sessionMgr = mockSessionManager();
+		const ws = mockWsHandler();
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
 		return handleRenameSession("client-1", {
@@ -1245,10 +1247,12 @@ describe("handleRenameSession", () => {
 	it.effect("does nothing when id or title is empty", () => {
 		const log = mockLogger();
 		const sessionMgr = mockSessionManager();
+		const ws = mockWsHandler();
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
 		return handleRenameSession("client-1", {

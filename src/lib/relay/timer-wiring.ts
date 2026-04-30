@@ -1,54 +1,48 @@
 // ─── Timer Wiring (G5) ───────────────────────────────────────────────────────
-// Sets up periodic timers: permission timeout checks.
+// Permission timeout checks as a scoped Effect Layer.
 // Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
 //
-// Extracted from createProjectRelay() — all closure captures are explicit params.
+// Fiber is automatically interrupted on scope close (ManagedRuntime.dispose).
 
-import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
+import { Duration, Effect, Layer, Schedule } from "effect";
+import {
+	PermissionBridgeTag,
+	WebSocketHandlerTag,
+} from "../effect/services.js";
 import type { PermissionId } from "../shared-types.js";
 
-// ─── Deps interface ──────────────────────────────────────────────────────────
+// ─── Effect Layer ───────────────────────────────────────────────────────────
 
-export interface TimerWiringDeps {
-	permissionBridge: PermissionBridge;
-	wsHandler: WebSocketHandlerShape;
-}
+/**
+ * Scoped Layer that checks for timed-out permissions every 30 seconds
+ * and broadcasts resolution messages to all connected clients.
+ *
+ * Requires: PermissionBridgeTag, WebSocketHandlerTag (provided via bridge or native Layers).
+ */
+export const PermissionTimeoutLive: Layer.Layer<
+	never,
+	never,
+	PermissionBridgeTag | WebSocketHandlerTag
+> = Layer.scopedDiscard(
+	Effect.gen(function* () {
+		const permissionBridge = yield* PermissionBridgeTag;
+		const wsHandler = yield* WebSocketHandlerTag;
 
-// ─── Return type ─────────────────────────────────────────────────────────────
-
-export interface TimerWiringResult {
-	timeoutTimer: ReturnType<typeof setInterval>;
-}
-
-// ─── Wiring function ─────────────────────────────────────────────────────────
-
-export function wireTimers(deps: TimerWiringDeps): TimerWiringResult {
-	const { permissionBridge, wsHandler } = deps;
-
-	// ── Permission/question timeout checks ──────────────────────────────────
-
-	const timeoutTimer = setInterval(() => {
-		const timedOutPerms = permissionBridge.checkTimeouts();
-		for (const entry of timedOutPerms) {
-			wsHandler.broadcast({
-				type: "permission_resolved",
-				sessionId: entry.sessionId,
-				requestId: entry.id as PermissionId,
-				decision: "timeout",
-			});
-		}
-		// Question timeouts are handled by OpenCode itself — no bridge tracking needed.
-	}, 30_000);
-
-	// Don't let the timer keep the process alive
-	if (
-		timeoutTimer &&
-		typeof timeoutTimer === "object" &&
-		"unref" in timeoutTimer
-	) {
-		timeoutTimer.unref();
-	}
-
-	return { timeoutTimer };
-}
+		yield* Effect.forkScoped(
+			Effect.repeat(
+				Effect.sync(() => {
+					const timedOutPerms = permissionBridge.checkTimeouts();
+					for (const entry of timedOutPerms) {
+						wsHandler.broadcast({
+							type: "permission_resolved",
+							sessionId: entry.sessionId,
+							requestId: entry.id as PermissionId,
+							decision: "timeout",
+						});
+					}
+				}),
+				Schedule.fixed(Duration.seconds(30)),
+			),
+		);
+	}),
+);

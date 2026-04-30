@@ -24,6 +24,7 @@ import type { ProviderStateService } from "../persistence/provider-state-service
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
+import type { Translator } from "../relay/event-translator.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
@@ -213,6 +214,11 @@ export class ForkMetaTag extends Context.Tag("ForkMeta")<
 export class OrchestrationEngineTag extends Context.Tag("OrchestrationEngine")<
 	OrchestrationEngineTag,
 	OrchestrationEngine
+>() {}
+
+export class TranslatorTag extends Context.Tag("Translator")<
+	TranslatorTag,
+	Translator
 >() {}
 
 // ─── Persistence extension Tags (when SQLite configured) ───────────────────
