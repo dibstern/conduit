@@ -137,10 +137,11 @@ import { PtyManager } from "./pty-manager.js";
 import type { PtyUpstreamDeps } from "./pty-upstream.js";
 import { connectPtyUpstream as connectPtyUpstreamImpl } from "./pty-upstream.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
-import { wireSessionLifecycle } from "./session-lifecycle-wiring.js";
+import { SessionEventBridgeLive } from "./session-event-bridge.js";
+import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
-import { wireTimers } from "./timer-wiring.js";
+import { PermissionTimeoutLive } from "./timer-wiring.js";
 
 // ─── WebSocket library for upstream PTY connections ─────────────────────────
 const requireWs = createRequire(import.meta.url);
@@ -865,13 +866,24 @@ export async function createProjectRelay(
 		);
 	}
 
-	// Compose: self-constructing state layers + imperative bridge layers
-	const fullLayer = Layer.merge(RelayStateLive, bridgeLayers);
-	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	// Compose: self-constructing state layers + imperative bridge layers.
+	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
+	// SessionEventBridgeLive, SessionLifecycleWiringLive) are added after
+	// wireMonitoring() returns (provides sseTracker, getMonitoringState).
+	const baseLayers = Layer.merge(RelayStateLive, bridgeLayers);
 
-	// RelayRuntime adapter — same interface as the old createRelayRuntime()
+	// Late-binding runtime: ManagedRuntime is created after wireMonitoring().
+	// effectRuntime methods reference relayManagedRuntime via closure — safe
+	// because all callers are callbacks (WebSocket handlers) that fire after
+	// full initialization.
+	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime type is complex, callers use typed effects
+	// biome-ignore lint/style/useConst: assigned after wireMonitoring
+	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
+
 	const effectRuntime: RelayRuntime = {
-		runtime: relayManagedRuntime,
+		get runtime() {
+			return relayManagedRuntime;
+		},
 		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
 		runSync: <A, E>(effect: Effect.Effect<A, E, any>) =>
 			relayManagedRuntime.runSync(effect),
@@ -1032,19 +1044,22 @@ export async function createProjectRelay(
 	// Bind the late-binding done-dedup callback now that monitoring wiring exists.
 	doneDeliveredRef.fn = bindDoneDelivered;
 
-	// ── Session lifecycle wiring (G4: broadcast + session_lifecycle) ─────────
-	wireSessionLifecycle({
-		sessionMgr,
-		wsHandler,
-		client: api,
+	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
+	// Deferred until after wireMonitoring() because SessionLifecycleWiringLive
+	// needs sseTracker, getMonitoringState, setMonitoringState from its output.
+	const sessionLifecycleWiringLayer = makeSessionLifecycleWiringLive({
 		translator,
-		pollerManager,
-		statusPoller,
 		sseTracker,
 		getMonitoringState,
 		setMonitoringState,
-		sessionLog,
 	});
+	const wiringLayers = Layer.mergeAll(
+		PermissionTimeoutLive,
+		SessionEventBridgeLive,
+		sessionLifecycleWiringLayer,
+	).pipe(Layer.provide(baseLayers));
+	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
+	relayManagedRuntime = ManagedRuntime.make(fullLayer);
 
 	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
 	wirePollers({
@@ -1064,11 +1079,8 @@ export async function createProjectRelay(
 	});
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
+	// PermissionTimeoutLive is composed into RelayStateLive — no imperative wiring.
 	// Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
-	const { timeoutTimer } = wireTimers({
-		permissionBridge,
-		wsHandler,
-	});
 
 	// ── Return project relay ────────────────────────────────────────────────
 
@@ -1101,7 +1113,7 @@ export async function createProjectRelay(
 			await effectRuntime.dispose();
 			await pollerManagedRuntime.dispose();
 			// 4. Clean up remaining resources
-			clearInterval(timeoutTimer);
+			// Permission timeout timer is managed by PermissionTimeoutLive (auto-interrupted on dispose).
 			await overrides.drain();
 			ptyManager.closeAll();
 			await wsHandler.drain();
