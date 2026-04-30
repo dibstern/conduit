@@ -79,6 +79,7 @@ export const makeTracingLive = (
 	// the @effect/opentelemetry Resource tag. Effect's Tracer picks it up
 	// via the global OTel API so Effect.withSpan calls emit real spans.
 	const sdkLayer = NodeSdk.layer(() => ({
+		// biome-ignore lint/style/noNonNullAssertion: length check guarantees element exists
 		spanProcessor: processors.length === 1 ? processors[0]! : processors,
 		resource: {
 			serviceName: "conduit",

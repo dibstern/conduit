@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noExplicitAny: decoded union members need `as any` to access variant-specific fields in tests
 // ─── WebSocket Incoming Message Schema Tests ─────────────────────────────────
 // Tests for Effect Schema validation of ALL incoming WebSocket message types.
 // The IncomingWsMessage union schema validates the full message (type + payload),
