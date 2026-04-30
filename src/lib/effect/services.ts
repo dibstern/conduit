@@ -130,6 +130,15 @@ export interface SessionManagerShape {
 				| { type: "deleted"; sessionId: string },
 		) => void,
 	): this;
+	off(event: "broadcast", handler: (msg: RelayMessage) => void): this;
+	off(
+		event: "session_lifecycle",
+		handler: (
+			ev:
+				| { type: "created"; sessionId: string }
+				| { type: "deleted"; sessionId: string },
+		) => void,
+	): this;
 }
 
 // ─── Core Tags (always present) ────────────────────────────────────────────
