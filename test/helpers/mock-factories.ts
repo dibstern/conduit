@@ -317,7 +317,9 @@ export function createMockHandlerDeps(
 		config: createMockConfig(),
 		log: createSilentLogger(),
 		connectPtyUpstream: vi.fn().mockResolvedValue(undefined),
-		statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
+		statusPoller: {
+			isProcessing: vi.fn().mockReturnValue(false),
+		},
 		registry: {
 			hasViewers: vi.fn().mockReturnValue(false),
 			addViewer: vi.fn(),
@@ -326,6 +328,7 @@ export function createMockHandlerDeps(
 		pollerManager: {
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),
+			stopPolling: vi.fn(),
 		},
 		forkMeta: {
 			setForkEntry: vi.fn(),
@@ -804,10 +807,12 @@ export function makeTestHandlerLayer(
 	const log = opts?.log ?? makeMockLogger();
 	const statusPoller: StatusPollerShape = opts?.statusPoller ?? {
 		isProcessing: vi.fn(() => false),
+		clearMessageActivity: vi.fn(),
 	};
 	const pollerManager: PollerManagerShape = opts?.pollerManager ?? {
 		isPolling: vi.fn(() => true),
 		startPolling: vi.fn(),
+		stopPolling: vi.fn(),
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);

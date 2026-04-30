@@ -18,7 +18,11 @@ import type {
 	ScanDeps,
 } from "../handlers/types.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
+import type {
+	Message,
+	SessionDetail,
+	SessionStatus,
+} from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { ProviderStateService } from "../persistence/provider-state-service.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
@@ -40,15 +44,17 @@ import type {
 
 export type { WebSocketHandlerShape };
 
-/** Shape for the statusPoller field — Pick<SessionStatusPollerService, "isProcessing">. */
+/** Shape for the statusPoller field — methods needed by effect handlers and lifecycle wiring. */
 export interface StatusPollerShape {
 	isProcessing(sessionId: string): boolean;
+	clearMessageActivity(sessionId: string): void;
 }
 
 /** Shape for the pollerManager field — isPolling + startPolling capabilities. */
 export interface PollerManagerShape {
 	isPolling(sessionId: string): boolean;
-	startPolling(sessionId: string): void;
+	startPolling(sessionId: string, seedMessages?: Message[]): void;
+	stopPolling(sessionId: string): void;
 }
 
 /** Shape for the connectPtyUpstream function. */
