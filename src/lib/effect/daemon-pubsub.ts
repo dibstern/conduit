@@ -21,6 +21,10 @@ export type DaemonEvent = Data.TaggedEnum<{
 	DiskSpaceLow: { readonly usage: number };
 	DiskSpaceOk: { readonly usage: number };
 	InstanceError: { readonly instanceId: string; readonly error: string };
+	// Session lifecycle events (used by relay wiring Layers)
+	SessionCreated: { readonly sessionId: string };
+	SessionDeleted: { readonly sessionId: string };
+	RelayBroadcast: { readonly message: unknown };
 }>;
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();
@@ -64,6 +68,15 @@ export const publishDiskSpaceOk = (usage: number) =>
 
 export const publishInstanceError = (instanceId: string, error: string) =>
 	publish(DaemonEvent.InstanceError({ instanceId, error }));
+
+export const publishSessionCreated = (sessionId: string) =>
+	publish(DaemonEvent.SessionCreated({ sessionId }));
+
+export const publishSessionDeleted = (sessionId: string) =>
+	publish(DaemonEvent.SessionDeleted({ sessionId }));
+
+export const publishRelayBroadcast = (message: unknown) =>
+	publish(DaemonEvent.RelayBroadcast({ message }));
 
 // ─── Subscriber ─────────────────────────────────────────────────────────────
 
