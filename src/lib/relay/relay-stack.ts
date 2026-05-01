@@ -876,7 +876,6 @@ export async function createProjectRelay(
 	// effectRuntime methods reference relayManagedRuntime via closure — safe
 	// because all callers are callbacks (WebSocket handlers) that fire after
 	// full initialization.
-	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime type is complex, callers use typed effects
 	// biome-ignore lint/style/useConst: assigned after wireMonitoring
 	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
 

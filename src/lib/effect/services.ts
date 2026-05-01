@@ -347,7 +347,9 @@ type _ExhaustiveCheck = {
 declare const _check: _ExhaustiveCheck;
 
 export { PersistencePathTag } from "./daemon-config-persistence.js";
-export { SupervisorTag } from "./daemon-main.js";
+// NOTE: SupervisorTag intentionally NOT re-exported here — import directly
+// from daemon-main.js. Re-exporting created a circular dependency:
+//   services → daemon-main → daemon-layers → services (ShutdownSignalTag undefined)
 export { DaemonEventBusTag } from "./daemon-pubsub.js";
 export { CrashCounterTag } from "./daemon-startup.js";
 // ─── DaemonState re-export ────────────────────────────────────────────────

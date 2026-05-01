@@ -401,10 +401,11 @@ describe("Daemon TLS integration", () => {
 				smartDefault: false,
 			});
 
-			const mainPort = d.port;
-			const onboardingPort = mainPort + 1;
+			const obPort = d.onboardingPort;
+			expect(obPort).not.toBeNull();
+			const onboardingPort = obPort as number;
 
-			// HTTP GET on port+1 /ca/download should return the CA cert (DER-encoded)
+			// HTTP GET on onboarding port /ca/download should return the CA cert (DER-encoded)
 			const ca = await httpGet(onboardingPort, "/ca/download");
 			expect(ca.status).toBe(200);
 			expect(ca.body.length).toBeGreaterThan(0);

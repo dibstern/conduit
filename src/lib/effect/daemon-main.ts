@@ -264,6 +264,8 @@ const DEFAULT_STATIC_DIR = existsSync(_candidate)
  */
 export interface DaemonHandle {
 	readonly port: number;
+	/** Port of the HTTP-only onboarding server (when TLS active), or null. */
+	readonly onboardingPort: number | null;
 	addProject(
 		directory: string,
 		slug?: string,
@@ -1513,6 +1515,12 @@ export async function startDaemonProcess(
 	return {
 		get port() {
 			return port;
+		},
+		get onboardingPort() {
+			const server = ctx.onboardingServer;
+			if (!server) return null;
+			const addr = server.address();
+			return typeof addr === "object" && addr ? addr.port : null;
 		},
 		addProject,
 		discoverProjects,
