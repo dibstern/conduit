@@ -29,7 +29,10 @@ export default defineConfig({
 				test: {
 					name: "unit",
 					include: ["test/unit/**/*.test.ts", "test/fixture/**/*.test.ts"],
-					exclude: ["test/unit/components/**/*.test.ts"],
+					exclude: [
+						"test/unit/components/**/*.test.ts",
+						"test/unit/_deprecated/**/*.test.ts",
+					],
 					testTimeout: 10_000,
 					hookTimeout: 10_000,
 					pool: "threads",

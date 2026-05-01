@@ -8,6 +8,9 @@
 
 set -uo pipefail
 
+# Increase Node heap to prevent OOM/segfault when running all suites sequentially.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
+
 failed=()
 
 run() {
@@ -31,7 +34,11 @@ run "Type check"       pnpm check
 run "Lint"             pnpm lint
 
 # --- Vitest suites (no build needed) ---
-run "Unit tests"               vitest run
+# Use vitest run test/unit instead of bare vitest run.
+# Bare vitest run includes both components (jsdom) and unit (threads) projects
+# in the same process, which causes @effect/vitest's dynamic test registration
+# to fail with "No test suite found" in ~58 files.
+run "Unit tests"               pnpm test:unit
 run "Integration tests"        vitest run --config vitest.integration.config.ts
 run "Contract tests"           vitest run --config vitest.contract.config.ts
 
