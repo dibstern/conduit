@@ -49,7 +49,13 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 )<{
 	operation: string;
 	cause: unknown;
-}> {}
+}> {
+	get message(): string {
+		const inner =
+			this.cause instanceof Error ? this.cause.message : String(this.cause);
+		return `${this.operation} failed: ${inner}`;
+	}
+}
 
 const startLifecycleServer = (operation: string, start: () => Promise<void>) =>
 	Effect.tryPromise({
