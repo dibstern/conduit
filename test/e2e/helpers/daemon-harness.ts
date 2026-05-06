@@ -1,8 +1,9 @@
 // ─── Daemon E2E Harness ──────────────────────────────────────────────────────
-// Starts a real Daemon pointed at a real OpenCode instance.
-// Unlike E2EHarness (which wraps RelayStack), this provides the full daemon
-// experience: project routing, instance management, health polling, and the
-// dashboard. Browser tests connect to the daemon's own HTTP server.
+// Starts a real daemon (via startDaemonProcess) pointed at a real OpenCode
+// instance. Unlike E2EHarness (which wraps RelayStack), this provides the
+// full daemon experience: project routing, instance management, health
+// polling, and the dashboard. Browser tests connect to the daemon's own
+// HTTP server.
 //
 // Requires:
 //   - OpenCode running at localhost:4096 (or OPENCODE_URL)
@@ -12,13 +13,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
 export interface DaemonHarness {
-	/** The running Daemon instance */
-	daemon: Daemon;
+	/** The running daemon handle */
+	daemon: DaemonHandle;
 	/** The daemon's HTTP port (OS-assigned) */
 	port: number;
 	/** Base URL for Playwright navigation (e.g. "http://127.0.0.1:54321") */
@@ -65,7 +67,7 @@ export function hasOpenCodePassword(): boolean {
 /**
  * Create a daemon E2E harness pointed at a real OpenCode instance.
  *
- * Starts a Daemon with:
+ * Starts a daemon with:
  * - Ephemeral port (port: 0)
  * - Temp directory for config/socket/pid/log
  * - Built frontend from dist/frontend/
@@ -85,7 +87,7 @@ export async function createDaemonHarness(
 	// Create temp directory for daemon config, socket, PID file, and logs
 	const tmpDir = mkdtempSync(join(tmpdir(), "e2e-daemon-"));
 
-	const daemon = new Daemon({
+	const daemon = await startDaemonProcess({
 		port: 0,
 		host: "127.0.0.1",
 		configDir: tmpDir,
@@ -97,16 +99,11 @@ export async function createDaemonHarness(
 		logLevel: "error",
 	});
 
-	await daemon.start();
-
 	// Register a project so the browser has a route to navigate to
 	const project = await daemon.addProject(projectDir, opts?.projectSlug);
 	const projectSlug = project.slug;
 
 	// Wait for the default instance to become healthy.
-	// The daemon constructor injects an auth-aware health checker that reads
-	// OPENCODE_SERVER_PASSWORD from process.env, so this should succeed when
-	// the password is configured.
 	await waitForHealthy(daemon, healthTimeout);
 
 	const port = daemon.port;
@@ -136,13 +133,14 @@ export async function createDaemonHarness(
 
 /** Poll daemon instances until at least one is healthy. */
 async function waitForHealthy(
-	daemon: Daemon,
+	daemon: DaemonHandle,
 	timeoutMs: number,
 ): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
 		const instances = daemon.getInstances();
-		if (instances.some((i) => i.status === "healthy")) return;
+		if (instances.some((i: { status: string }) => i.status === "healthy"))
+			return;
 		await new Promise((r) => setTimeout(r, 250));
 	}
 	const status = daemon.getInstances()[0]?.status ?? "no instance";

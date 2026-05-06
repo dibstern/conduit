@@ -11,7 +11,6 @@ import {
 	type DaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -31,7 +30,7 @@ describe("InstanceManager performance", () => {
 	});
 
 	it("handles 50 instances without excessive timer accumulation", async () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			maxInstances: 50,
 			healthPollIntervalMs: 60_000, // Long interval to avoid actual polling
 		});
@@ -91,7 +90,7 @@ describe("InstanceManager performance", () => {
 	});
 
 	it("addInstance + removeInstance is O(1) per operation", () => {
-		const mgr = new InstanceManager(new ServiceRegistry(), {
+		const mgr = new InstanceManager({
 			maxInstances: 1000,
 		});
 

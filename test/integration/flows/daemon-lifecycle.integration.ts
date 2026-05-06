@@ -1,10 +1,9 @@
 /**
  * Integration test: Daemon start/stop lifecycle cleans up all async work.
  *
- * Starts a real Daemon (PortScanner, VersionChecker, StorageMonitor,
- * InstanceManager, ProjectRegistry — all with real timers), stops it, and
- * verifies no lingering server/socket handles remain and the HTTP server
- * is unreachable. This is the end-to-end proof that the async lifecycle
+ * Starts a real daemon (via startDaemonProcess), stops it, and verifies
+ * no lingering server/socket handles remain and the HTTP server is
+ * unreachable. This is the end-to-end proof that the async lifecycle
  * refactor works: the process WILL exit after stop().
  */
 
@@ -13,7 +12,8 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 import { setLogLevel } from "../../../src/lib/logger.js";
 
 // Suppress info-level log noise
@@ -39,7 +39,7 @@ async function httpStatus(url: string): Promise<number | string> {
 
 describe("Daemon lifecycle (real services, real timers)", () => {
 	let tmpDir: string;
-	let daemon: Daemon | null = null;
+	let daemon: DaemonHandle | null = null;
 
 	afterEach(async () => {
 		if (daemon) {
@@ -58,7 +58,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 	it("stop() closes HTTP server — no more connections accepted", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-lifecycle-"));
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -68,7 +68,6 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 			smartDefault: false,
 		});
 
-		await daemon.start();
 		const port = daemon.getStatus().port;
 
 		// Daemon HTTP is alive
@@ -89,7 +88,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		const pidPath = join(tmpDir, "daemon.pid");
 		const socketPath = join(tmpDir, "relay.sock");
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			configDir: tmpDir,
 			socketPath,
 			pidPath,
@@ -98,8 +97,6 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 			keepAwake: false,
 			smartDefault: false,
 		});
-
-		await daemon.start();
 
 		// Files exist while running
 		expect(existsSync(pidPath)).toBe(true);
@@ -115,7 +112,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 	it("stop() with a registered project cleans up relay services too", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-lifecycle-"));
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -125,7 +122,6 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 			smartDefault: false,
 		});
 
-		await daemon.start();
 		const port = daemon.getStatus().port;
 
 		// Add a project — creates a relay stack with its own services

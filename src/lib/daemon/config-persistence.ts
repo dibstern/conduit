@@ -8,6 +8,8 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { Context, Effect, Layer, Option, Schema } from "effect";
+
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import type { RecentProject } from "../types.js";
 import {
@@ -55,6 +57,98 @@ export interface CrashInfo {
 	reason: string;
 	timestamp: number;
 }
+
+// ─── Schema ─────────────────────────────────────────────────────────────────
+
+const DaemonProjectSchema = Schema.Struct({
+	path: Schema.String,
+	slug: Schema.String,
+	title: Schema.optional(Schema.String),
+	addedAt: Schema.Number,
+	instanceId: Schema.optional(Schema.String),
+	sessionCount: Schema.optional(Schema.Number),
+});
+
+const DaemonInstanceSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	port: Schema.Number,
+	managed: Schema.Boolean,
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	url: Schema.optional(Schema.String),
+});
+
+export const DaemonConfigSchema = Schema.Struct({
+	pid: Schema.Number,
+	port: Schema.Number,
+	pinHash: Schema.NullOr(Schema.String),
+	tls: Schema.Boolean,
+	debug: Schema.Boolean,
+	keepAwake: Schema.Boolean,
+	keepAwakeCommand: Schema.optional(Schema.String),
+	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
+	dangerouslySkipPermissions: Schema.Boolean,
+	projects: Schema.Array(DaemonProjectSchema),
+	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
+	dismissedPaths: Schema.optional(Schema.Array(Schema.String)),
+});
+
+// ─── Service Tag & Layer ────────────────────────────────────────────────────
+
+export class DaemonConfigTag extends Context.Tag("DaemonConfig")<
+	DaemonConfigTag,
+	DaemonConfig
+>() {}
+
+/** Default config for first-startup when no daemon.json exists. */
+function defaultDaemonConfig(): DaemonConfig {
+	return {
+		pid: process.pid,
+		port: 2633,
+		pinHash: null,
+		tls: false,
+		debug: false,
+		keepAwake: false,
+		dangerouslySkipPermissions: false,
+		projects: [],
+	};
+}
+
+/**
+ * Layer that reads daemon.json (or creates defaults on first startup),
+ * validates through DaemonConfigSchema, and provides the result via
+ * DaemonConfigTag. Write-path functions remain imperative.
+ */
+export const ServerConfigLive = (configDir?: string) =>
+	Layer.effect(
+		DaemonConfigTag,
+		Effect.gen(function* () {
+			const dir = configDir ?? DEFAULT_CONFIG_DIR;
+			const raw = yield* Effect.try(() =>
+				readFileSync(join(dir, "daemon.json"), "utf-8"),
+			).pipe(Effect.option);
+			if (Option.isNone(raw)) {
+				const defaults = defaultDaemonConfig();
+				yield* Effect.try(() => {
+					mkdirSync(dir, { recursive: true });
+					writeFileSync(
+						join(dir, "daemon.json"),
+						JSON.stringify(defaults, null, 2),
+						"utf-8",
+					);
+				});
+				return defaults;
+			}
+			const json = yield* Effect.try(() => JSON.parse(raw.value));
+			// Cast: Schema.optional produces `T | undefined` but
+			// DaemonConfig uses exact optional properties (key absent, never
+			// undefined). The schema guarantees structural correctness.
+			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(json);
+			return decoded as unknown as DaemonConfig;
+		}),
+	);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

@@ -129,10 +129,10 @@ export class OpenCodeAPI {
 		} catch (err) {
 			// Network-level failure (fetch failed, DNS error, timeout, etc.)
 			const cause = err instanceof Error ? err : new Error(String(err));
-			throw new OpenCodeConnectionError(
-				`OpenCode unreachable during ${label}: ${cause.message}`,
-				{ cause },
-			);
+			throw new OpenCodeConnectionError({
+				message: `OpenCode unreachable during ${label}: ${cause.message}`,
+				cause,
+			});
 		}
 
 		if (result.error !== undefined) {
@@ -144,7 +144,8 @@ export class OpenCodeAPI {
 				result.response && "url" in result.response
 					? String(result.response.url)
 					: label;
-			throw new OpenCodeApiError(`API error during ${label}`, {
+			throw new OpenCodeApiError({
+				message: `API error during ${label}`,
 				endpoint: url,
 				responseStatus: status,
 				responseBody: result.error,

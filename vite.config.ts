@@ -89,6 +89,11 @@ export default defineConfig({
 				// Service worker must be at /sw.js with no content hash
 				entryFileNames: (chunk) =>
 					chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js",
+				manualChunks: {
+					// Isolate Effect.ts into its own chunk for lazy-loading.
+					// @effect/schema is merged into `effect` as of Effect 3.x.
+					effect: ["effect"],
+				},
 			},
 		},
 	},

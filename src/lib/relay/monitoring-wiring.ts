@@ -4,14 +4,14 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { WebSocketHandler } from "../server/ws-handler.js";
-import type { SessionManager } from "../session/session-manager.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { RelayMessage } from "../shared-types.js";
 import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
@@ -19,7 +19,6 @@ import {
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
-import type { MessagePollerManager } from "./message-poller-manager.js";
 import {
 	assembleContext,
 	evaluateAll,
@@ -36,15 +35,34 @@ import { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEStream } from "./sse-stream.js";
 import { sendPushForEvent } from "./sse-wiring.js";
 
+/** Structural interface for the message poller manager's capabilities needed by monitoring wiring. */
+interface PollerManagerLike {
+	startPolling(sessionId: string, seedMessages?: Message[]): void;
+	stopPolling(sessionId: string): void;
+}
+
 // ─── Deps interface ──────────────────────────────────────────────────────────
+
+/** Narrowed SessionManager capabilities needed by monitoring wiring. */
+interface SessionManagerLike {
+	sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: {
+			statuses?:
+				| Record<string, import("../instance/sdk-types.js").SessionStatus>
+				| undefined;
+		},
+	): Promise<void>;
+	getSessionParentMap(): Map<string, string>;
+}
 
 export interface MonitoringWiringDeps {
 	client: OpenCodeAPI;
-	wsHandler: WebSocketHandler;
-	sessionMgr: SessionManager;
+	wsHandler: WebSocketHandlerShape;
+	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
-	statusPoller: SessionStatusPoller;
-	pollerManager: MessagePollerManager;
+	statusPoller: SessionStatusPollerService;
+	pollerManager: PollerManagerLike;
 	registry: SessionRegistry;
 	sseStream: SSEStream;
 	config: {

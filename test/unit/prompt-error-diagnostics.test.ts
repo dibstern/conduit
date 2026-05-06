@@ -11,14 +11,12 @@ describe("OpenCodeApiError response body enrichment", () => {
 			success: false,
 			error: { issues: [{ code: "invalid_type", path: ["parts"] }] },
 		};
-		const err = new OpenCodeApiError(
-			"POST /session/s1/prompt_async failed with 400",
-			{
-				endpoint: "/session/s1/prompt_async",
-				responseStatus: 400,
-				responseBody: zodError,
-			},
-		);
+		const err = new OpenCodeApiError({
+			message: "POST /session/s1/prompt_async failed with 400",
+			endpoint: "/session/s1/prompt_async",
+			responseStatus: 400,
+			responseBody: zodError,
+		});
 
 		expect(err.message).toContain(
 			"POST /session/s1/prompt_async failed with 400",
@@ -28,7 +26,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 	});
 
 	it("includes string response body in message for 400 errors", () => {
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/session/s1/prompt_async",
 			responseStatus: 400,
 			responseBody: "Bad Request: parts is required",
@@ -40,7 +39,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 
 	it("includes response body for other 4xx errors (401, 403, 404, 422)", () => {
 		for (const status of [401, 403, 404, 422]) {
-			const err = new OpenCodeApiError(`Failed with ${status}`, {
+			const err = new OpenCodeApiError({
+				message: `Failed with ${status}`,
 				endpoint: "/test",
 				responseStatus: status,
 				responseBody: { error: "unauthorized" },
@@ -52,7 +52,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 	});
 
 	it("does NOT mutate message for 5xx server errors", () => {
-		const err = new OpenCodeApiError("POST failed with 500", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 500",
 			endpoint: "/session/s1/prompt_async",
 			responseStatus: 500,
 			responseBody: { error: "Internal server error" },
@@ -63,7 +64,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 	});
 
 	it("does NOT mutate message when responseBody is undefined", () => {
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/session/s1/prompt_async",
 			responseStatus: 400,
 			responseBody: undefined,
@@ -73,7 +75,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 	});
 
 	it("does NOT mutate message when responseBody is null", () => {
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/session/s1/prompt_async",
 			responseStatus: 400,
 			responseBody: null,
@@ -84,7 +87,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 
 	it("truncates very long response bodies (> 500 chars)", () => {
 		const longBody = "x".repeat(600);
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/test",
 			responseStatus: 400,
 			responseBody: longBody,
@@ -96,7 +100,8 @@ describe("OpenCodeApiError response body enrichment", () => {
 
 	it("preserves all OpenCodeApiError properties", () => {
 		const body = { issues: [{ code: "invalid_type" }] };
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/session/s1/prompt_async",
 			responseStatus: 400,
 			responseBody: body,
@@ -105,13 +110,14 @@ describe("OpenCodeApiError response body enrichment", () => {
 		expect(err.endpoint).toBe("/session/s1/prompt_async");
 		expect(err.responseStatus).toBe(400);
 		expect(err.responseBody).toEqual(body);
-		expect(err.code).toBe("OPENCODE_API_ERROR");
+		expect(err.code).toBe("OpenCodeApiError");
 		expect(err.name).toBe("OpenCodeApiError");
 		expect(err).toBeInstanceOf(Error);
 	});
 
 	it("toWebSocket includes enriched message", () => {
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/test",
 			responseStatus: 400,
 			responseBody: "validation failed",
@@ -119,19 +125,20 @@ describe("OpenCodeApiError response body enrichment", () => {
 
 		const ws = err.toWebSocket();
 		expect(ws.type).toBe("error");
-		expect(ws.code).toBe("OPENCODE_API_ERROR");
+		expect(ws.code).toBe("OpenCodeApiError");
 		expect(ws.message).toContain("validation failed");
 	});
 
 	it("toJSON includes enriched message", () => {
-		const err = new OpenCodeApiError("POST failed with 400", {
+		const err = new OpenCodeApiError({
+			message: "POST failed with 400",
 			endpoint: "/test",
 			responseStatus: 400,
 			responseBody: "validation failed",
 		});
 
 		const json = err.toJSON();
-		expect(json.error.code).toBe("OPENCODE_API_ERROR");
+		expect(json.error.code).toBe("OpenCodeApiError");
 		expect(json.error.message).toContain("validation failed");
 	});
 });

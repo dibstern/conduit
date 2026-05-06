@@ -10,7 +10,7 @@ import type {
 	OpenCodeInstance,
 	StoredProject,
 } from "../types.js";
-import type { DaemonStatus } from "./daemon.js";
+import type { DaemonStatus } from "./daemon-types.js";
 
 // ─── Context interface ──────────────────────────────────────────────────────
 // Narrow surface the IPC handlers need from the Daemon instance.
@@ -46,6 +46,8 @@ export interface DaemonIPCContext {
 	persistConfig(): void;
 	/** Schedule a graceful daemon shutdown. */
 	scheduleShutdown(): void;
+	/** Apply restart-time daemon config overrides before scheduling shutdown. */
+	applyConfig?(config: Record<string, unknown>): void;
 	/** Return all registered OpenCode instances. */
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Look up a single instance by ID. */
@@ -87,7 +89,7 @@ export interface IPCHandlerMap {
 		provider: string,
 		model: string,
 	) => Promise<IPCResponse>;
-	restartWithConfig: () => Promise<IPCResponse>;
+	restartWithConfig: (config?: Record<string, unknown>) => Promise<IPCResponse>;
 	instanceList: () => Promise<IPCResponse>;
 	instanceAdd: (
 		name: string,
@@ -205,7 +207,13 @@ export function buildIPCHandlers(
 			return { ok: true };
 		},
 
-		restartWithConfig: async (): Promise<IPCResponse> => {
+		restartWithConfig: async (
+			config?: Record<string, unknown>,
+		): Promise<IPCResponse> => {
+			if (config !== undefined) {
+				ctx.applyConfig?.(config);
+				ctx.persistConfig();
+			}
 			// Schedule shutdown and return ok
 			ctx.scheduleShutdown();
 			return { ok: true };
@@ -294,9 +302,9 @@ export function buildIPCHandlers(
 				if (name !== undefined) updates.name = name;
 				if (env !== undefined) updates.env = env;
 				if (port !== undefined) updates.port = port;
-				ctx.updateInstance(instanceId, updates);
+				const instance = ctx.updateInstance(instanceId, updates);
 				ctx.persistConfig();
-				return { ok: true };
+				return { ok: true, instance };
 			} catch (err) {
 				return { ok: false, error: formatErrorDetail(err) };
 			}

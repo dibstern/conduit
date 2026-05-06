@@ -3,7 +3,6 @@
 // per-session processing timeout, clearSession/dispose lifecycle.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
@@ -20,22 +19,22 @@ afterEach(() => {
 
 describe("SessionOverrides — initial state", () => {
 	it("defaultModel is undefined initially", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		expect(overrides.defaultModel).toBeUndefined();
 	});
 
 	it("getModel returns undefined for unknown session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		expect(overrides.getModel("unknown")).toBeUndefined();
 	});
 
 	it("getAgent returns undefined for unknown session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		expect(overrides.getAgent("unknown")).toBeUndefined();
 	});
 
 	it("isModelUserSelected returns false for unknown session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		expect(overrides.isModelUserSelected("unknown")).toBe(false);
 	});
 });
@@ -44,7 +43,7 @@ describe("SessionOverrides — initial state", () => {
 
 describe("SessionOverrides — defaultModel", () => {
 	it("setDefaultModel stores the default", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setDefaultModel({ providerID: "anthropic", modelID: "claude-4" });
 		expect(overrides.defaultModel).toEqual({
 			providerID: "anthropic",
@@ -53,7 +52,7 @@ describe("SessionOverrides — defaultModel", () => {
 	});
 
 	it("getModel returns defaultModel for sessions with no per-session override", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setDefaultModel({ providerID: "anthropic", modelID: "claude-4" });
 		expect(overrides.getModel("any-session")).toEqual({
 			providerID: "anthropic",
@@ -62,14 +61,14 @@ describe("SessionOverrides — defaultModel", () => {
 	});
 
 	it("per-session model takes priority over defaultModel", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setDefaultModel({ providerID: "anthropic", modelID: "claude-4" });
 		overrides.setModel("sess-1", { providerID: "openai", modelID: "gpt-5" });
 		expect(overrides.getModel("sess-1")?.modelID).toBe("gpt-5");
 	});
 
 	it("clearSession restores to defaultModel", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setDefaultModel({ providerID: "anthropic", modelID: "claude-4" });
 		overrides.setModel("sess-1", { providerID: "openai", modelID: "gpt-5" });
 		overrides.clearSession("sess-1");
@@ -77,7 +76,7 @@ describe("SessionOverrides — defaultModel", () => {
 	});
 
 	it("clearSession with no defaultModel returns undefined for getModel", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModel("sess-1", { providerID: "openai", modelID: "gpt-5" });
 		overrides.clearSession("sess-1");
 		expect(overrides.getModel("sess-1")).toBeUndefined();
@@ -88,13 +87,13 @@ describe("SessionOverrides — defaultModel", () => {
 
 describe("SessionOverrides — per-session agent", () => {
 	it("sets agent for a specific session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setAgent("sess-1", "code");
 		expect(overrides.getAgent("sess-1")).toBe("code");
 	});
 
 	it("different sessions have independent agents", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setAgent("sess-1", "code");
 		overrides.setAgent("sess-2", "plan");
 		expect(overrides.getAgent("sess-1")).toBe("code");
@@ -102,7 +101,7 @@ describe("SessionOverrides — per-session agent", () => {
 	});
 
 	it("overwrites a previous agent for the same session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setAgent("sess-1", "code");
 		overrides.setAgent("sess-1", "plan");
 		expect(overrides.getAgent("sess-1")).toBe("plan");
@@ -113,7 +112,7 @@ describe("SessionOverrides — per-session agent", () => {
 
 describe("SessionOverrides — per-session model", () => {
 	it("setModel sets model and marks modelUserSelected for that session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModel("sess-1", {
 			providerID: "anthropic",
 			modelID: "claude-4",
@@ -126,7 +125,7 @@ describe("SessionOverrides — per-session model", () => {
 	});
 
 	it("different sessions have independent models", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModel("sess-1", {
 			providerID: "anthropic",
 			modelID: "claude-4",
@@ -137,7 +136,7 @@ describe("SessionOverrides — per-session model", () => {
 	});
 
 	it("setModelDefault sets model WITHOUT marking modelUserSelected", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModelDefault("sess-1", {
 			providerID: "anthropic",
 			modelID: "claude-4",
@@ -147,7 +146,7 @@ describe("SessionOverrides — per-session model", () => {
 	});
 
 	it("setModelDefault does not clear existing modelUserSelected flag", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModel("sess-1", {
 			providerID: "anthropic",
 			modelID: "claude-4",
@@ -162,7 +161,7 @@ describe("SessionOverrides — per-session model", () => {
 	});
 
 	it("isModelUserSelected is false for sessions with only setModelDefault", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModelDefault("sess-1", {
 			providerID: "anthropic",
 			modelID: "claude-4",
@@ -175,7 +174,7 @@ describe("SessionOverrides — per-session model", () => {
 
 describe("SessionOverrides — clearSession", () => {
 	it("clears model, agent, and modelUserSelected for the session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setAgent("sess-1", "code");
 		overrides.setModel("sess-1", {
 			providerID: "anthropic",
@@ -187,7 +186,7 @@ describe("SessionOverrides — clearSession", () => {
 	});
 
 	it("does not affect other sessions", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setModel("sess-1", {
 			providerID: "anthropic",
 			modelID: "claude-4",
@@ -198,7 +197,7 @@ describe("SessionOverrides — clearSession", () => {
 	});
 
 	it("clears the processing timeout for that session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const callback = vi.fn();
 		overrides.startProcessingTimeout("sess-1", callback);
 		overrides.clearSession("sess-1");
@@ -207,7 +206,7 @@ describe("SessionOverrides — clearSession", () => {
 	});
 
 	it("is safe to call for unknown session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.clearSession("unknown"); // should not throw
 	});
 });
@@ -216,7 +215,7 @@ describe("SessionOverrides — clearSession", () => {
 
 describe("SessionOverrides — per-session processing timeout", () => {
 	it("calls callback after 120s for the specific session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const callback = vi.fn();
 		overrides.startProcessingTimeout("sess-1", callback);
 
@@ -228,7 +227,7 @@ describe("SessionOverrides — per-session processing timeout", () => {
 	});
 
 	it("two sessions have independent timeouts", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const cb1 = vi.fn();
 		const cb2 = vi.fn();
 		overrides.startProcessingTimeout("sess-1", cb1);
@@ -242,7 +241,7 @@ describe("SessionOverrides — per-session processing timeout", () => {
 	});
 
 	it("clearProcessingTimeout prevents callback from firing", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const callback = vi.fn();
 		overrides.startProcessingTimeout("sess-1", callback);
 		overrides.clearProcessingTimeout("sess-1");
@@ -252,7 +251,7 @@ describe("SessionOverrides — per-session processing timeout", () => {
 	});
 
 	it("startProcessingTimeout cancels a previous timeout for the same session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const cb1 = vi.fn();
 		const cb2 = vi.fn();
 		overrides.startProcessingTimeout("sess-1", cb1);
@@ -264,12 +263,12 @@ describe("SessionOverrides — per-session processing timeout", () => {
 	});
 
 	it("clearProcessingTimeout is safe when no timer is active", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.clearProcessingTimeout("sess-1"); // should not throw
 	});
 
 	it("clearProcessingTimeout is safe for unknown session", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.clearProcessingTimeout("unknown"); // should not throw
 	});
 });
@@ -278,7 +277,7 @@ describe("SessionOverrides — per-session processing timeout", () => {
 
 describe("SessionOverrides — resetProcessingTimeout", () => {
 	it("resets the timer back to 120s with the same callback", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const callback = vi.fn();
 		overrides.startProcessingTimeout("sess-1", callback);
 
@@ -299,13 +298,13 @@ describe("SessionOverrides — resetProcessingTimeout", () => {
 	});
 
 	it("is a no-op when no timer is active", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		// Should not throw
 		overrides.resetProcessingTimeout("sess-1");
 	});
 
 	it("is a no-op for unknown sessions", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.startProcessingTimeout("sess-1", vi.fn());
 		// Resetting a different session should not affect sess-1
 		overrides.resetProcessingTimeout("unknown");
@@ -313,7 +312,7 @@ describe("SessionOverrides — resetProcessingTimeout", () => {
 	});
 
 	it("does not affect other sessions' timers", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const cb1 = vi.fn();
 		const cb2 = vi.fn();
 		overrides.startProcessingTimeout("sess-1", cb1);
@@ -336,7 +335,7 @@ describe("SessionOverrides — resetProcessingTimeout", () => {
 	});
 
 	it("is a no-op after clearProcessingTimeout", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const callback = vi.fn();
 		overrides.startProcessingTimeout("sess-1", callback);
 		overrides.clearProcessingTimeout("sess-1");
@@ -353,7 +352,7 @@ describe("SessionOverrides — resetProcessingTimeout", () => {
 
 describe("SessionOverrides — dispose", () => {
 	it("clears all processing timeouts across all sessions", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		const cb1 = vi.fn();
 		const cb2 = vi.fn();
 		overrides.startProcessingTimeout("sess-1", cb1);
@@ -366,7 +365,7 @@ describe("SessionOverrides — dispose", () => {
 	});
 
 	it("is safe to call multiple times", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.dispose();
 		overrides.dispose();
 	});
@@ -376,38 +375,38 @@ describe("SessionOverrides — dispose", () => {
 
 describe("SessionOverrides — variant", () => {
 	it("defaults to empty string", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		expect(overrides.defaultVariant).toBe("");
 	});
 
 	it("setVariant(sessionId, variant) sets per-session variant", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setVariant("sess-1", "high");
 		expect(overrides.getVariant("sess-1")).toBe("high");
 	});
 
 	it("getVariant falls back to defaultVariant when session has no override", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.defaultVariant = "low";
 		expect(overrides.getVariant("sess-new")).toBe("low");
 	});
 
 	it("per-session variant takes precedence over defaultVariant", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.defaultVariant = "low";
 		overrides.setVariant("sess-1", "max");
 		expect(overrides.getVariant("sess-1")).toBe("max");
 	});
 
 	it("clearSession removes per-session variant", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setVariant("sess-1", "high");
 		overrides.clearSession("sess-1");
 		expect(overrides.getVariant("sess-1")).toBe("");
 	});
 
 	it("setting empty string clears variant", () => {
-		const overrides = new SessionOverrides(new ServiceRegistry());
+		const overrides = new SessionOverrides();
 		overrides.setVariant("sess-1", "high");
 		overrides.setVariant("sess-1", "");
 		expect(overrides.getVariant("sess-1")).toBe("");
@@ -418,8 +417,7 @@ describe("SessionOverrides — variant", () => {
 
 describe("SessionOverrides — drain", () => {
 	it("clears all processing timeouts via drain()", async () => {
-		const registry = new ServiceRegistry();
-		const overrides = new SessionOverrides(registry);
+		const overrides = new SessionOverrides();
 		const cb1 = vi.fn();
 		const cb2 = vi.fn();
 		const cb3 = vi.fn();
@@ -435,25 +433,17 @@ describe("SessionOverrides — drain", () => {
 		expect(cb3).not.toHaveBeenCalled();
 	});
 
-	it("drainAll on registry clears all SessionOverrides timeouts", async () => {
-		const registry = new ServiceRegistry();
-		const overrides = new SessionOverrides(registry);
+	it("drain clears all SessionOverrides timeouts", async () => {
+		const overrides = new SessionOverrides();
 		const cb1 = vi.fn();
 		const cb2 = vi.fn();
 		overrides.startProcessingTimeout("sess-1", cb1);
 		overrides.startProcessingTimeout("sess-2", cb2);
 
-		await registry.drainAll();
+		await overrides.drain();
 
 		vi.advanceTimersByTime(200_000);
 		expect(cb1).not.toHaveBeenCalled();
 		expect(cb2).not.toHaveBeenCalled();
-	});
-
-	it("registers itself in the ServiceRegistry on construction", () => {
-		const registry = new ServiceRegistry();
-		expect(registry.size).toBe(0);
-		new SessionOverrides(registry);
-		expect(registry.size).toBe(1);
 	});
 });

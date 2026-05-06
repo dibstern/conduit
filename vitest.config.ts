@@ -27,9 +27,31 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
+					name: "unit-sqlite",
+					include: [
+						"test/unit/effect/sqlite-transactions.test.ts",
+						"test/unit/persistence/**/*.test.ts",
+						"test/unit/pipeline/thinking-lifecycle-pipeline.test.ts",
+					],
+					// forks isolates better-sqlite3 native module in separate
+					// processes, preventing SIGSEGV from shared-memory corruption.
+					pool: "forks",
+					poolOptions: { forks: { singleFork: true } },
+					testTimeout: 10_000,
+					hookTimeout: 10_000,
+				},
+			},
+			{
+				extends: true,
+				test: {
 					name: "unit",
 					include: ["test/unit/**/*.test.ts", "test/fixture/**/*.test.ts"],
-					exclude: ["test/unit/components/**/*.test.ts"],
+					exclude: [
+						"test/unit/components/**/*.test.ts",
+						"test/unit/effect/sqlite-transactions.test.ts",
+						"test/unit/persistence/**/*.test.ts",
+						"test/unit/pipeline/thinking-lifecycle-pipeline.test.ts",
+					],
 					testTimeout: 10_000,
 					hookTimeout: 10_000,
 					pool: "threads",

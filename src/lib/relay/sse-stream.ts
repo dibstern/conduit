@@ -1,18 +1,11 @@
-// ─── SSE Stream (Task 13) ────────────────────────────────────────────────────
+// ─── SSE Stream (Effect-based) ───────────────────────────────────────────────
 // SDK-backed SSE consumer using api.event.subscribe().
-// Replaces SSEConsumer's raw HTTP/SSE parsing with the typed AsyncGenerator
-// returned by the OpenCode SDK. Reconnects with exponential backoff on failure.
+// Internally powered by Effect Fiber + Schedule for lifecycle and reconnection.
+// Keeps the callback-based public API for compatibility with relay wiring.
 
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
+import { Duration, Effect, Fiber, Schedule } from "effect";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
-import {
-	type BackoffConfig,
-	calculateBackoffDelay,
-	createHealthTracker,
-	type HealthTracker,
-} from "./sse-backoff.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,160 +17,258 @@ export interface SSEStreamOptions {
 			}): Promise<{ stream: AsyncGenerator<unknown> }>;
 		};
 	};
-	backoff?: Partial<BackoffConfig>;
+	/** Base reconnection delay in ms (default: 1000). */
+	baseDelay?: number;
+	/** Maximum reconnection delay in ms (default: 30_000). */
+	maxDelay?: number;
+	/** Mark stream as stale if no event within this window (default: 60_000). */
 	staleThreshold?: number;
 	log?: Logger;
 }
 
-export type SSEStreamEvents = {
-	event: [unknown];
-	connected: [];
-	disconnected: [Error | undefined];
-	reconnecting: [{ attempt: number; delay: number }];
-	error: [Error];
-	heartbeat: [];
-};
+/** Callback signatures for each SSEStream broadcast event type. */
+export interface SSEStreamCallbacks {
+	event: (data: unknown) => void;
+	connected: () => void;
+	disconnected: (error: Error | undefined) => void;
+	reconnecting: (info: { attempt: number; delay: number }) => void;
+	error: (error: Error) => void;
+	heartbeat: () => void;
+}
+
+// ─── Reconnect schedule factory ─────────────────────────────────────────────
+
+function makeReconnectSchedule(baseDelay: number, maxDelay: number) {
+	return Schedule.exponential(Duration.millis(baseDelay)).pipe(
+		Schedule.jittered,
+		Schedule.whileOutput((d) => Duration.toMillis(d) <= maxDelay),
+		// Cap total retry time at 5 minutes of continuous failures
+		Schedule.upTo(Duration.minutes(5)),
+	);
+}
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
-export class SSEStream extends TrackedService<SSEStreamEvents> {
+export class SSEStream {
 	private readonly api: SSEStreamOptions["api"];
-	private readonly backoffConfig: BackoffConfig;
-	private readonly healthTracker: HealthTracker;
 	private readonly log: Logger;
+	private readonly baseDelay: number;
+	private readonly maxDelay: number;
+	private readonly staleThreshold: number;
+
 	private running = false;
-	private reconnectAttempt = 0;
-	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-	/** AbortController for the current SSE connection. Aborted on disconnect(). */
+	private connected = false;
+	private lastEventAt: number | null = null;
+	private reconnectCount = 0;
+
+	/** AbortController for the current SSE connection. */
 	private sseAbort: AbortController | null = null;
 
-	constructor(registry: ServiceRegistry, options: SSEStreamOptions) {
-		super(registry);
+	/** Effect fiber running the consume loop. */
+	private fiber: Fiber.RuntimeFiber<void, never> | null = null;
+
+	/** Pending fire-and-forget promises — awaited in drain(). */
+	private readonly pendingPromises = new Set<Promise<unknown>>();
+
+	/** Registered callbacks keyed by event type. */
+	private readonly callbacks: {
+		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
+	} = {
+		event: [],
+		connected: [],
+		disconnected: [],
+		reconnecting: [],
+		error: [],
+		heartbeat: [],
+	};
+
+	constructor(options: SSEStreamOptions) {
 		this.api = options.api;
 		this.log = options.log ?? createSilentLogger();
-		this.backoffConfig = {
-			baseDelay: options.backoff?.baseDelay ?? 1000,
-			maxDelay: options.backoff?.maxDelay ?? 30000,
-			multiplier: options.backoff?.multiplier ?? 2,
-		};
-		this.healthTracker = createHealthTracker({
-			staleThreshold: options.staleThreshold ?? 60_000,
-		});
+		this.baseDelay = options.baseDelay ?? 1000;
+		this.maxDelay = options.maxDelay ?? 30_000;
+		this.staleThreshold = options.staleThreshold ?? 60_000;
 	}
 
-	/** Start consuming SSE events. Does not throw — errors are emitted. */
+	/** Register a callback for a specific broadcast event type. */
+	on<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		callback: SSEStreamCallbacks[K],
+	): void {
+		this.callbacks[event].push(callback);
+	}
+
+	/** Start consuming SSE events. Does not throw — errors are notified via callbacks. */
 	async connect(): Promise<void> {
 		if (this.running) return;
 		this.running = true;
-		this.reconnectAttempt = 0;
-		// Fire-and-forget: consumeLoop handles its own errors via emit + reconnect.
-		this.tracked(
-			this.consumeLoop().catch((err) => {
-				if (!this.running) return;
-				const error = err instanceof Error ? err : new Error(String(err));
-				this.emit("error", error);
-			}),
-		);
+		this.reconnectCount = 0;
+
+		// Launch the Effect-based consume loop as a daemon fiber
+		const program = this.consumeLoop();
+
+		this.fiber = Effect.runFork(program);
 	}
 
 	/** Stop consuming and clean up. */
 	async disconnect(): Promise<void> {
 		this.running = false;
-		// Abort the SSE fetch/reader so consumeLoop's `for await` unblocks.
+		this.connected = false;
+
+		// Abort the SSE fetch/reader so the async generator terminates
 		if (this.sseAbort) {
 			this.sseAbort.abort();
 			this.sseAbort = null;
 		}
-		if (this.reconnectTimer) {
-			this.clearTrackedTimer(this.reconnectTimer);
-			this.reconnectTimer = null;
+
+		// Interrupt the Effect fiber
+		if (this.fiber) {
+			await Effect.runPromise(Fiber.interrupt(this.fiber)).catch(() => {});
+			this.fiber = null;
 		}
-		this.healthTracker.onDisconnected();
 	}
 
 	/** Get connection health snapshot. */
 	getHealth(): ConnectionHealth & { stale: boolean } {
-		return this.healthTracker.getHealth();
+		return {
+			connected: this.connected,
+			lastEventAt: this.lastEventAt,
+			reconnectCount: this.reconnectCount,
+			stale: this.isStale(),
+		};
 	}
 
 	/** Check if actively connected and consuming. */
 	isConnected(): boolean {
-		return this.running && this.healthTracker.getHealth().connected;
+		return this.running && this.connected;
 	}
 
 	/** Kill SSE stream and drain tracked work. */
-	override async drain(): Promise<void> {
+	async drain(): Promise<void> {
 		await this.disconnect();
-		await super.drain();
+		await Promise.allSettled([...this.pendingPromises]);
+		this.pendingPromises.clear();
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
-	private async consumeLoop(): Promise<void> {
-		while (this.running) {
-			try {
-				// Create a fresh AbortController per connection attempt so
-				// disconnect() can cancel the underlying fetch/reader.
-				this.sseAbort = new AbortController();
+	private isStale(): boolean {
+		if (!this.connected) return false;
+		if (this.lastEventAt === null) return false;
+		return Date.now() - this.lastEventAt > this.staleThreshold;
+	}
+
+	/** Invoke all registered callbacks for a given event type. */
+	private notify<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		...args: Parameters<SSEStreamCallbacks[K]>
+	): void {
+		for (const cb of this.callbacks[event]) {
+			(cb as (...a: unknown[]) => void)(...args);
+		}
+	}
+
+	/**
+	 * Effect-based consume loop with automatic reconnection.
+	 *
+	 * Uses Effect.retry with an exponential schedule for reconnection.
+	 * Each connection attempt creates a fresh AbortController and consumes
+	 * the SDK's AsyncGenerator as a stream.
+	 */
+	private consumeLoop(): Effect.Effect<void, never, never> {
+		const schedule = makeReconnectSchedule(this.baseDelay, this.maxDelay);
+
+		// Single connection attempt — connects, consumes events, returns on error
+		const singleConnection: Effect.Effect<void, Error, never> = Effect.async<
+			void,
+			Error
+		>((resume) => {
+			// Guard: if not running, resolve immediately
+			if (!this.running) {
+				resume(Effect.void);
+				return;
+			}
+
+			this.sseAbort = new AbortController();
+			const abort = this.sseAbort;
+
+			const run = async () => {
 				const { stream } = await this.api.event.subscribe({
-					signal: this.sseAbort.signal,
+					signal: abort.signal,
 				});
-				this.reconnectAttempt = 0;
-				this.healthTracker.onConnected();
-				this.emit("connected");
+
+				this.reconnectCount =
+					this.connected === false && this.reconnectCount > 0
+						? this.reconnectCount
+						: 0;
+				this.connected = true;
+				this.notify("connected");
 
 				for await (const event of stream) {
 					if (!this.running) break;
+
 					const evt = event as { type?: string };
-					this.healthTracker.onEvent();
+					this.lastEventAt = Date.now();
 
 					if (
 						evt.type === "server.heartbeat" ||
 						evt.type === "server.connected"
 					) {
-						this.emit("heartbeat");
+						this.notify("heartbeat");
 						continue;
 					}
 
-					this.emit("event", event);
+					this.notify("event", event);
 				}
 
-				// Stream ended gracefully — reconnect if still running
+				// Stream ended gracefully — signal reconnect if still running
 				if (this.running) {
-					this.healthTracker.onDisconnected();
-					this.emit("disconnected", undefined);
+					this.connected = false;
+					this.notify("disconnected", undefined);
+					resume(Effect.fail(new Error("SSE stream ended")));
+				} else {
+					resume(Effect.void);
 				}
-			} catch (err) {
-				if (!this.running) return;
-				const error = err instanceof Error ? err : new Error(String(err));
-				if (error.name === "AbortError") return;
-				this.healthTracker.onDisconnected();
-				this.emit("disconnected", error);
-				this.emit("error", error);
-			}
+			};
 
-			// Schedule reconnection with exponential backoff
-			if (this.running) {
-				const delay = calculateBackoffDelay(
-					this.reconnectAttempt,
-					this.backoffConfig,
-				);
-				this.reconnectAttempt++;
-				this.healthTracker.onReconnect();
-				this.emit("reconnecting", {
-					attempt: this.reconnectAttempt,
-					delay,
-				});
-				this.log.debug(
-					`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
-				);
-				await new Promise<void>((resolve) => {
-					this.reconnectTimer = this.delayed(() => {
-						this.reconnectTimer = null;
-						resolve();
-					}, delay);
-				});
-			}
-		}
+			run().catch((err) => {
+				if (!this.running) {
+					resume(Effect.void);
+					return;
+				}
+				const error = err instanceof Error ? err : new Error(String(err));
+				if (error.name === "AbortError") {
+					resume(Effect.void);
+					return;
+				}
+				this.connected = false;
+				this.notify("disconnected", error);
+				this.notify("error", error);
+				resume(Effect.fail(error));
+			});
+		});
+
+		// Wrap with retry using the Effect Schedule, notifying reconnection callbacks
+		return singleConnection.pipe(
+			Effect.tapError(() =>
+				Effect.sync(() => {
+					if (!this.running) return;
+					this.reconnectCount++;
+					const delay = Math.min(
+						this.baseDelay * 2 ** (this.reconnectCount - 1),
+						this.maxDelay,
+					);
+					this.notify("reconnecting", {
+						attempt: this.reconnectCount,
+						delay,
+					});
+					this.log.debug(
+						`Reconnecting in ~${delay}ms (attempt ${this.reconnectCount})`,
+					);
+				}),
+			),
+			Effect.retry(schedule),
+			Effect.catchAll(() => Effect.void),
+		);
 	}
 }

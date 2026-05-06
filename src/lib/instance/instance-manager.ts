@@ -4,8 +4,6 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
 
@@ -21,12 +19,13 @@ export type InstanceHealthChecker = (
 	instance: OpenCodeInstance,
 ) => Promise<boolean>;
 
-export type InstanceManagerEvents = {
-	instance_added: [instance: OpenCodeInstance];
-	instance_removed: [id: string];
-	status_changed: [instance: OpenCodeInstance];
-	instance_error: [payload: { id: string; error: string }];
-};
+/** Callback signatures for each InstanceManager event type. */
+export interface InstanceManagerCallbacks {
+	instance_added: (instance: OpenCodeInstance) => void;
+	instance_removed: (id: string) => void;
+	status_changed: (instance: OpenCodeInstance) => void;
+	instance_error: (payload: { id: string; error: string }) => void;
+}
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -43,7 +42,7 @@ export interface InstanceManagerOptions {
 
 // ─── InstanceManager ────────────────────────────────────────────────────────
 
-export class InstanceManager extends TrackedService<InstanceManagerEvents> {
+export class InstanceManager {
 	private readonly maxInstances: number;
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;
@@ -72,13 +71,42 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	>();
 	/** Restart timestamps per instance for rate-limiting. */
 	private readonly restartTimestamps = new Map<string, number[]>();
+	/** Pending fire-and-forget promises — awaited in drain(). */
+	private readonly pendingPromises = new Set<Promise<unknown>>();
 
-	constructor(registry: ServiceRegistry, options: InstanceManagerOptions = {}) {
-		super(registry);
+	/** Registered callbacks keyed by event type. */
+	private readonly callbacks: {
+		[K in keyof InstanceManagerCallbacks]: InstanceManagerCallbacks[K][];
+	} = {
+		instance_added: [],
+		instance_removed: [],
+		status_changed: [],
+		instance_error: [],
+	};
+
+	constructor(options: InstanceManagerOptions = {}) {
 		this.maxInstances = options.maxInstances ?? 5;
 		this.maxRestartsPerWindow = options.maxRestartsPerWindow ?? 3;
 		this.restartWindowMs = options.restartWindowMs ?? 60_000;
 		this.healthPollIntervalMs = options.healthPollIntervalMs ?? 5_000;
+	}
+
+	/** Register a callback for a specific event type. */
+	on<K extends keyof InstanceManagerCallbacks>(
+		event: K,
+		callback: InstanceManagerCallbacks[K],
+	): void {
+		this.callbacks[event].push(callback);
+	}
+
+	/** Invoke all registered callbacks for a given event type. */
+	private notify<K extends keyof InstanceManagerCallbacks>(
+		event: K,
+		...args: Parameters<InstanceManagerCallbacks[K]>
+	): void {
+		for (const cb of this.callbacks[event]) {
+			(cb as (...a: unknown[]) => void)(...args);
+		}
 	}
 
 	// ─── Dependency injection ────────────────────────────────────────────
@@ -142,7 +170,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 			this.startHealthPolling(id);
 		}
 
-		this.emit("instance_added", instance);
+		this.notify("instance_added", instance);
 		return instance;
 	}
 
@@ -163,7 +191,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 
 		this.instances.delete(id);
 		this.externalUrls.delete(id);
-		this.emit("instance_removed", id);
+		this.notify("instance_removed", id);
 	}
 
 	/**
@@ -216,7 +244,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		}
 
 		if (changed) {
-			this.emit("status_changed", instance);
+			this.notify("status_changed", instance);
 		}
 
 		return instance;
@@ -283,7 +311,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		// Transition to "starting"
 		instance.status = "starting";
 		instance.needsRestart = false;
-		this.emit("status_changed", instance);
+		this.notify("status_changed", instance);
 
 		try {
 			// Spawn the process
@@ -334,7 +362,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 			if (healthy) {
 				instance.status = "healthy";
 				instance.lastHealthCheck = Date.now();
-				this.emit("status_changed", instance);
+				this.notify("status_changed", instance);
 			}
 
 			// Start periodic health polling
@@ -349,7 +377,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 			}
 			instance.status = "stopped";
 			delete instance.pid;
-			this.emit("status_changed", instance);
+			this.notify("status_changed", instance);
 			throw err;
 		}
 	}
@@ -386,7 +414,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		instance.status = "stopped";
 		delete instance.pid;
 		instance.needsRestart = false;
-		this.emit("status_changed", instance);
+		this.notify("status_changed", instance);
 	}
 
 	/**
@@ -407,7 +435,8 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	/** Cancel all work and wait for in-flight operations to settle. */
 	async drain(): Promise<void> {
 		this.stopAll();
-		await super.drain();
+		await Promise.allSettled([...this.pendingPromises]);
+		this.pendingPromises.clear();
 	}
 
 	// ─── Health polling (private) ───────────────────────────────────────────
@@ -417,7 +446,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		// Clear any existing interval first
 		this.stopHealthPolling(id);
 
-		const interval = this.repeating(async () => {
+		const interval = setInterval(async () => {
 			const instance = this.instances.get(id);
 			if (!instance) {
 				this.stopHealthPolling(id);
@@ -453,7 +482,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 
 			if (previousStatus !== newStatus) {
 				current.status = newStatus;
-				this.emit("status_changed", current);
+				this.notify("status_changed", current);
 			}
 		}, this.healthPollIntervalMs);
 
@@ -464,7 +493,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	private stopHealthPolling(id: string): void {
 		const interval = this.healthIntervals.get(id);
 		if (interval) {
-			this.clearTrackedTimer(interval);
+			clearInterval(interval);
 			this.healthIntervals.delete(id);
 		}
 	}
@@ -473,7 +502,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 	private cancelPendingRestart(id: string): void {
 		const timer = this.pendingRestarts.get(id);
 		if (timer) {
-			this.clearTrackedTimer(timer);
+			clearTimeout(timer);
 			this.pendingRestarts.delete(id);
 		}
 	}
@@ -515,7 +544,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		if (code === 0) {
 			instance.status = "stopped";
 			instance.exitCode = 0;
-			this.emit("status_changed", instance);
+			this.notify("status_changed", instance);
 			return;
 		}
 
@@ -527,7 +556,7 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		}
 		instance.restartCount++;
 		instance.status = "unhealthy";
-		this.emit("status_changed", instance);
+		this.notify("status_changed", instance);
 
 		// Rate-limit restarts
 		const now = Date.now();
@@ -538,8 +567,8 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 
 		if (recent.length >= this.maxRestartsPerWindow) {
 			instance.status = "stopped";
-			this.emit("status_changed", instance);
-			this.emit("instance_error", {
+			this.notify("status_changed", instance);
+			this.notify("instance_error", {
 				id,
 				error: `Crashed ${recent.length} times in ${this.restartWindowMs / 1000}s — giving up`,
 			});
@@ -548,20 +577,23 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 
 		// Restart with exponential backoff: 1s, 2s, 4s, ... capped at 30s
 		const backoffMs = Math.min(1000 * 2 ** (recent.length - 1), 30_000);
-		const timer = this.delayed(async () => {
+		const timer = setTimeout(() => {
 			this.pendingRestarts.delete(id);
-			try {
-				// Reset status so startInstance doesn't return early
-				instance.status = "stopped";
-				await this.startInstance(id);
-			} catch (err) {
-				instance.status = "stopped";
-				this.emit("status_changed", instance);
-				this.emit("instance_error", {
-					id,
-					error: `Restart failed: ${formatErrorDetail(err)}`,
-				});
-			}
+			const p = (async () => {
+				try {
+					// Reset status so startInstance doesn't return early
+					instance.status = "stopped";
+					await this.startInstance(id);
+				} catch (err) {
+					instance.status = "stopped";
+					this.notify("status_changed", instance);
+					this.notify("instance_error", {
+						id,
+						error: `Restart failed: ${formatErrorDetail(err)}`,
+					});
+				}
+			})();
+			this.trackPromise(p);
 		}, backoffMs);
 
 		this.pendingRestarts.set(id, timer);
@@ -597,10 +629,16 @@ export class InstanceManager extends TrackedService<InstanceManagerEvents> {
 		_instance: OpenCodeInstance,
 	): Promise<boolean> {
 		try {
-			const res = await this.fetch(`http://localhost:${port}/health`);
+			const res = await fetch(`http://localhost:${port}/health`);
 			return res.ok;
 		} catch {
 			return false;
 		}
+	}
+
+	/** Track a fire-and-forget promise for drain. */
+	private trackPromise<T>(promise: Promise<T>): void {
+		this.pendingPromises.add(promise);
+		promise.finally(() => this.pendingPromises.delete(promise)).catch(() => {});
 	}
 }

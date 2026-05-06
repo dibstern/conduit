@@ -4,6 +4,8 @@
 // Routes commands to the correct adapter via ProviderRegistry.
 // Manages session-to-provider mapping.
 
+import { Effect, Ref } from "effect";
+
 import { createLogger } from "../logger.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import type {
@@ -89,10 +91,12 @@ export interface OrchestrationEngineOptions {
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindings = new Map<string, string>();
-	private readonly processedCommands = new Set<string>();
+	private readonly processedCommands: Ref.Ref<Set<string>>;
+	private static readonly PROCESSED_COMMANDS_MAX = 10_000;
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.processedCommands = Effect.runSync(Ref.make(new Set<string>()));
 	}
 
 	/**
@@ -106,9 +110,15 @@ export class OrchestrationEngine {
 	async dispatch(command: ResolveQuestionCommand): Promise<void>;
 	async dispatch(command: EndSessionCommand): Promise<void>;
 	async dispatch(command: OrchestrationCommand): Promise<OrchestrationResult> {
-		// Idempotency check
+		// Idempotency check via Effect Ref<Set>
 		if (command.commandId) {
-			if (this.processedCommands.has(command.commandId)) {
+			const isDuplicate = Effect.runSync(
+				Ref.modify(this.processedCommands, (set) => {
+					if (set.has(command.commandId as string)) return [true, set] as const;
+					return [false, set] as const;
+				}),
+			);
+			if (isDuplicate) {
 				throw new Error(`Duplicate command: ${command.commandId}`);
 			}
 		}
@@ -142,10 +152,25 @@ export class OrchestrationEngine {
 			}
 		}
 
-		// Record the command as processed (after successful execution)
+		// Record the command as processed (after successful execution) via
+		// atomic Ref.modify with inline FIFO eviction.
 		if (command.commandId) {
-			this.processedCommands.add(command.commandId);
-			this.pruneProcessedCommands();
+			const id = command.commandId;
+			Effect.runSync(
+				Ref.modify(this.processedCommands, (set) => {
+					const next = new Set(set);
+					next.add(id);
+					if (next.size > OrchestrationEngine.PROCESSED_COMMANDS_MAX) {
+						const evictCount = OrchestrationEngine.PROCESSED_COMMANDS_MAX / 2;
+						let count = 0;
+						for (const entry of next) {
+							if (count++ >= evictCount) break;
+							next.delete(entry);
+						}
+					}
+					return [undefined, next] as const;
+				}),
+			);
 		}
 
 		return result;
@@ -292,7 +317,7 @@ export class OrchestrationEngine {
 		log.info("OrchestrationEngine shutting down");
 		await this.registry.shutdownAll();
 		this.sessionBindings.clear();
-		this.processedCommands.clear();
+		Effect.runSync(Ref.set(this.processedCommands, new Set<string>()));
 	}
 
 	// ─── Internal ─────────────────────────────────────────────────────────
@@ -305,20 +330,6 @@ export class OrchestrationEngine {
 		return providerId;
 	}
 
-	/**
-	 * Evict the oldest half of processed command IDs when the set exceeds
-	 * the threshold. Set preserves insertion order, so iteration starts
-	 * from the oldest entry. Transitional safeguard until Phase 7 wires
-	 * this to the SQLite-backed CommandReceiptRepository.
-	 */
-	private pruneProcessedCommands(): void {
-		const MAX = 10_000;
-		if (this.processedCommands.size <= MAX) return;
-		const evictCount = MAX / 2;
-		let count = 0;
-		for (const id of this.processedCommands) {
-			if (count++ >= evictCount) break;
-			this.processedCommands.delete(id);
-		}
-	}
+	// pruneProcessedCommands() removed — FIFO eviction is now inlined
+	// in the Ref.modify call within dispatch().
 }

@@ -26,6 +26,8 @@
 		"node_modules",
 		"dist",
 		"src/lib/frontend",
+		"src/lib/_deprecated/**",
+		"test/unit/_deprecated/**",
 		"test/unit/frontend/sw-push.test.ts",
 		"test/unit/frontend/sw-notification-click.test.ts"
 	]

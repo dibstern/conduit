@@ -23,7 +23,7 @@ describe("Integration: Message Lifecycle", () => {
 	beforeEach(async () => {
 		harness.mock.resetQueues();
 		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
+		await new Promise((r) => setTimeout(r, 1000));
 	});
 
 	it("complete lifecycle: send → processing → delta → done", async () => {

@@ -1,9 +1,14 @@
 // ─── Agent Handlers ──────────────────────────────────────────────────────────
 
+import { Effect } from "effect";
+import {
+	LoggerTag,
+	OpenCodeAPITag,
+	SessionOverridesTag,
+	WebSocketHandlerTag,
+} from "../effect/services.js";
 import type { Agent } from "../instance/sdk-types.js";
 import type { PayloadMap } from "./payloads.js";
-import { resolveSessionForLog } from "./resolve-session.js";
-import type { HandlerDeps } from "./types.js";
 
 /**
  * Filter agents for the mode switcher UI.
@@ -50,33 +55,39 @@ export function filterAgents(
 		}));
 }
 
-export async function handleGetAgents(
-	deps: HandlerDeps,
+export const handleGetAgents = (
 	clientId: string,
 	_payload: PayloadMap["get_agents"],
-): Promise<void> {
-	const rawAgents = await deps.client.app.agents();
-	const agents = filterAgents(rawAgents);
-	deps.wsHandler.sendTo(clientId, { type: "agent_list", agents });
-}
+) =>
+	Effect.gen(function* () {
+		const client = yield* OpenCodeAPITag;
+		const wsHandler = yield* WebSocketHandlerTag;
 
-export async function handleSwitchAgent(
-	deps: HandlerDeps,
+		const rawAgents = yield* Effect.tryPromise(() => client.app.agents());
+		const agents = filterAgents(rawAgents);
+		wsHandler.sendTo(clientId, { type: "agent_list", agents });
+	});
+
+export const handleSwitchAgent = (
 	clientId: string,
 	payload: PayloadMap["switch_agent"],
-): Promise<void> {
-	const { agentId } = payload;
-	if (agentId) {
-		const clientSession = deps.wsHandler.getClientSession(clientId);
-		if (clientSession) {
-			deps.overrides.setAgent(clientSession, agentId);
-		} else {
-			deps.log.warn(
-				`client=${clientId} switch_agent with no session — ignoring`,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const overrides = yield* SessionOverridesTag;
+		const log = yield* LoggerTag;
+
+		const { agentId } = payload;
+		if (agentId) {
+			const clientSession = wsHandler.getClientSession(clientId);
+			if (clientSession) {
+				overrides.setAgent(clientSession, agentId);
+			} else {
+				log.warn(`client=${clientId} switch_agent with no session — ignoring`);
+			}
+			const sessionForLog = wsHandler.getClientSession(clientId) ?? "?";
+			log.info(
+				`client=${clientId} session=${sessionForLog} Switched to: ${agentId}`,
 			);
 		}
-		deps.log.info(
-			`client=${clientId} session=${resolveSessionForLog(deps, clientId)} Switched to: ${agentId}`,
-		);
-	}
-}
+	});

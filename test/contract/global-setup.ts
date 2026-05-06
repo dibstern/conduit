@@ -11,6 +11,8 @@ let instance: SpawnedOpenCode | undefined;
 
 export async function setup(): Promise<void> {
 	console.log("[contract] Starting ephemeral OpenCode instance...");
+	// Wait for any lingering servers from previous test suites to release ports
+	await new Promise((r) => setTimeout(r, 500));
 	instance = await spawnOpenCode({ timeoutMs: 60_000 });
 
 	// Point contract test helpers at the ephemeral instance.

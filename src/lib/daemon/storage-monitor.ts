@@ -1,11 +1,9 @@
 // ─── Storage Monitor (Ticket 6.2 AC8) ───────────────────────────────────────
-// Periodically checks available disk space and emits events on transitions
-// between low/ok states. Used by the Daemon to warn about disk space issues.
+// Periodically checks available disk space and notifies via callbacks on
+// transitions between low/ok states. Used by the Daemon to warn about disk
+// space issues.
 
 import { statfs as nodeStatfs } from "node:fs/promises";
-import type { ServiceRegistry } from "./service-registry.js";
-import { TrackedService } from "./tracked-service.js";
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface StorageMonitorOptions {
@@ -47,7 +45,7 @@ async function defaultStatfs(path: string): Promise<{ available: number }> {
 
 // ─── StorageMonitor ─────────────────────────────────────────────────────────
 
-export class StorageMonitor extends TrackedService<StorageMonitorEvents> {
+export class StorageMonitor {
 	private readonly monitorPath: string;
 	private readonly thresholdBytes: number;
 	private readonly intervalMs: number;
@@ -56,9 +54,14 @@ export class StorageMonitor extends TrackedService<StorageMonitorEvents> {
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private wasLow: boolean | null = null; // null = no check yet
 	private checking = false;
+	private pending = new Set<Promise<unknown>>();
 
-	constructor(registry: ServiceRegistry, options: StorageMonitorOptions) {
-		super(registry);
+	// ─── Callbacks ─────────────────────────────────────────────────────────
+
+	onLowDiskSpace: ((event: LowDiskSpaceEvent) => void) | null = null;
+	onDiskSpaceOk: ((event: DiskSpaceOkEvent) => void) | null = null;
+
+	constructor(options: StorageMonitorOptions) {
 		this.monitorPath = options.path;
 		this.thresholdBytes = options.thresholdBytes ?? DEFAULT_THRESHOLD_BYTES;
 		this.intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
@@ -70,23 +73,36 @@ export class StorageMonitor extends TrackedService<StorageMonitorEvents> {
 	/** Start periodic polling. First check runs immediately, then on interval. */
 	start(): void {
 		// Run the first check immediately
-		this.tracked(this.check());
+		this.trackPromise(this.check());
 
 		// Set up periodic polling
-		this.timer = this.repeating(() => {
-			this.tracked(this.check());
+		this.timer = setInterval(() => {
+			this.trackPromise(this.check());
 		}, this.intervalMs);
 	}
 
 	/** Stop polling (idempotent). */
 	stop(): void {
 		if (this.timer !== null) {
-			this.clearTrackedTimer(this.timer);
+			clearInterval(this.timer);
 			this.timer = null;
 		}
 	}
 
+	/** Cancel the interval and await all pending checks. */
+	async drain(): Promise<void> {
+		this.stop();
+		await Promise.allSettled([...this.pending]);
+		this.pending.clear();
+	}
+
 	// ─── Private ─────────────────────────────────────────────────────────────
+
+	/** Track a promise for drain. */
+	private trackPromise(promise: Promise<unknown>): void {
+		this.pending.add(promise);
+		promise.finally(() => this.pending.delete(promise));
+	}
 
 	private async check(): Promise<void> {
 		if (this.checking) return;
@@ -102,14 +118,14 @@ export class StorageMonitor extends TrackedService<StorageMonitorEvents> {
 		if (isLow && this.wasLow !== true) {
 			// Transition to low (from ok/unknown)
 			this.wasLow = true;
-			this.emit("low_disk_space", {
+			this.onLowDiskSpace?.({
 				availableBytes: available,
 				thresholdBytes: this.thresholdBytes,
 			} satisfies LowDiskSpaceEvent);
 		} else if (!isLow && this.wasLow === true) {
 			// Transition to ok (from low)
 			this.wasLow = false;
-			this.emit("disk_space_ok", {
+			this.onDiskSpaceOk?.({
 				availableBytes: available,
 			} satisfies DiskSpaceOkEvent);
 		} else if (!isLow && this.wasLow === null) {

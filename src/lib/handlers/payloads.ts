@@ -28,7 +28,7 @@ export interface PayloadMap {
 	view_session: { sessionId: string };
 	delete_session: { sessionId: string };
 	rename_session: { sessionId: string; title: string };
-	fork_session: { sessionId: string; messageId?: string };
+	fork_session: { sessionId?: string; messageId?: string };
 	list_sessions: Record<string, never>;
 	search_sessions: { query: string; roots?: boolean };
 	load_more_history: { sessionId?: string; offset: number };

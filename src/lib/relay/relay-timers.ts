@@ -1,32 +1,33 @@
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { ServiceRegistry } from "../daemon/service-registry.js";
-import { TrackedService } from "../daemon/tracked-service.js";
-import type { RateLimiter } from "../server/rate-limiter.js";
 
 /**
- * Wraps per-relay periodic timers (permission timeout check, rate limiter cleanup)
- * in a TrackedService for lifecycle management.
+ * Wraps per-relay periodic timers (permission timeout check).
+ * Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
+ * Not currently instantiated in src/ — test-only/dormant.
  */
-export class RelayTimers extends TrackedService {
+export class RelayTimers {
+	private readonly timers = new Set<ReturnType<typeof setInterval>>();
+
 	constructor(
-		registry: ServiceRegistry,
 		private permissionBridge: PermissionBridge,
-		private rateLimiter: RateLimiter,
 		private onPermissionTimeout: (id: string) => void,
-	) {
-		super(registry);
-	}
+	) {}
 
 	start(): void {
-		this.repeating(() => {
-			const timedOut = this.permissionBridge.checkTimeouts();
-			for (const entry of timedOut) {
-				this.onPermissionTimeout(entry.id);
-			}
-		}, 30_000);
+		this.timers.add(
+			setInterval(() => {
+				const timedOut = this.permissionBridge.checkTimeouts();
+				for (const entry of timedOut) {
+					this.onPermissionTimeout(entry.id);
+				}
+			}, 30_000),
+		);
+	}
 
-		this.repeating(() => {
-			this.rateLimiter.cleanup();
-		}, 60_000);
+	async drain(): Promise<void> {
+		for (const id of this.timers) {
+			clearInterval(id);
+		}
+		this.timers.clear();
 	}
 }

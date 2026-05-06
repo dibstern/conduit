@@ -77,6 +77,7 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 
 		const toolStarted = events.find((e) => e.type === "tool.started");
 		expect(toolStarted).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: test assertion — toolStarted checked above
 		expect(toolStarted!.data.input).toEqual({
 			tool: "Read",
 			filePath: "/src/main.ts",

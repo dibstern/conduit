@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { PortScanner } from "../../../src/lib/daemon/port-scanner.js";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 
 describe("Daemon port scanner integration", () => {
 	it("PortScanner wires discovered ports to addInstance pattern", async () => {
@@ -11,7 +10,6 @@ describe("Daemon port scanner integration", () => {
 			.mockImplementation((port: number) => Promise.resolve(port === 4098));
 
 		const scanner = new PortScanner(
-			new ServiceRegistry(),
 			{
 				portRange: [4096, 4100],
 				intervalMs: 10_000,
@@ -24,14 +22,14 @@ describe("Daemon port scanner integration", () => {
 		const registered: number[] = [];
 		const removed: number[] = [];
 
-		scanner.on("scan", (result) => {
+		scanner.onScan = (result) => {
 			for (const port of result.discovered) {
 				registered.push(port);
 			}
 			for (const port of result.lost) {
 				removed.push(port);
 			}
-		});
+		};
 
 		// First scan: discovers port 4098
 		await scanner.scan();
@@ -50,7 +48,6 @@ describe("Daemon port scanner integration", () => {
 		const mockProbe = vi.fn().mockResolvedValue(true);
 
 		const scanner = new PortScanner(
-			new ServiceRegistry(),
 			{
 				portRange: [4096, 4100],
 				intervalMs: 10_000,

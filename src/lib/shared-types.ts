@@ -7,19 +7,26 @@
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
 export type { PartType, ToolStatus };
 
+import { Schema } from "effect";
+
+// ─── Branded identifiers ────────────────────────────────────────────────────
+
 /**
  * Branded type for request/response correlation IDs.
  * Prevents accidentally passing a session ID where a correlation ID is expected.
- * Erased at runtime — zero cost.
+ * Schema brand — decoded at construction sites, zero-cost cast elsewhere.
  */
-export type RequestId = string & { readonly __brand: "RequestId" };
+export const RequestId = Schema.String.pipe(Schema.brand("RequestId"));
+export type RequestId = typeof RequestId.Type;
 
 /**
  * Branded type for OpenCode permission entity IDs (e.g., "per_cd6d6dc8...").
  * Prevents accidentally passing a session ID or correlation ID where a
- * permission ID is expected. Erased at runtime — zero cost.
+ * permission ID is expected. Schema brand — decoded at construction sites,
+ * zero-cost cast elsewhere.
  */
-export type PermissionId = string & { readonly __brand: "PermissionId" };
+export const PermissionId = Schema.String.pipe(Schema.brand("PermissionId"));
+export type PermissionId = typeof PermissionId.Type;
 
 // ─── Base16 Theme ───────────────────────────────────────────────────────────
 
@@ -264,7 +271,753 @@ export interface FileVersion {
 	[key: string]: unknown;
 }
 
+// ─── Relay WebSocket message schemas ────────────────────────────────────────
+// Schema definitions for each RelayMessage variant. Built with @effect/schema
+// to provide runtime validation and type derivation.
+
+// -- Helper schemas for embedded types --
+
+const ToolStateSchema = Schema.Struct({
+	status: Schema.optional(
+		Schema.Literal("pending", "running", "completed", "error"),
+	),
+	input: Schema.optional(Schema.Unknown),
+	output: Schema.optional(Schema.String),
+	error: Schema.optional(Schema.String),
+});
+
+const PartTypeSchema = Schema.Literal(
+	"text",
+	"reasoning",
+	"file",
+	"tool",
+	"step-start",
+	"step-finish",
+	"snapshot",
+	"patch",
+	"agent",
+	"retry",
+	"compaction",
+	"subtask",
+	"thinking",
+);
+
+const HistoryMessagePartSchema = Schema.Struct({
+	id: Schema.String,
+	type: PartTypeSchema,
+	text: Schema.optional(Schema.String),
+	renderedHtml: Schema.optional(Schema.String),
+	state: Schema.optional(ToolStateSchema),
+	callID: Schema.optional(Schema.String),
+	tool: Schema.optional(Schema.String),
+	time: Schema.optional(Schema.Unknown),
+});
+
+const HistoryMessageSchema = Schema.Struct({
+	id: Schema.String,
+	role: Schema.Literal("user", "assistant"),
+	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
+	time: Schema.optional(
+		Schema.Struct({
+			created: Schema.optional(Schema.Number),
+			completed: Schema.optional(Schema.Number),
+		}),
+	),
+	cost: Schema.optional(Schema.Number),
+	tokens: Schema.optional(
+		Schema.Struct({
+			input: Schema.optional(Schema.Number),
+			output: Schema.optional(Schema.Number),
+			cache: Schema.optional(
+				Schema.Struct({
+					read: Schema.optional(Schema.Number),
+					write: Schema.optional(Schema.Number),
+				}),
+			),
+		}),
+	),
+});
+
+const AskUserQuestionSchema = Schema.Struct({
+	question: Schema.String,
+	header: Schema.String,
+	options: Schema.Array(
+		Schema.Struct({
+			label: Schema.String,
+			description: Schema.optional(Schema.String),
+		}),
+	),
+	multiSelect: Schema.Boolean,
+	custom: Schema.optional(Schema.Boolean),
+});
+
+const UsageInfoSchema = Schema.Struct({
+	input: Schema.Number,
+	output: Schema.Number,
+	cache_read: Schema.Number,
+	cache_creation: Schema.Number,
+});
+
+const SessionInfoSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	messageCount: Schema.optional(Schema.Number),
+	processing: Schema.optional(Schema.Boolean),
+	parentID: Schema.optional(Schema.String),
+	forkMessageId: Schema.optional(Schema.String),
+	forkPointTimestamp: Schema.optional(Schema.Number),
+	pendingQuestionCount: Schema.optional(Schema.Number),
+});
+
+const ProviderInfoSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	configured: Schema.Boolean,
+	models: Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			provider: Schema.String,
+			cost: Schema.optional(
+				Schema.Struct({
+					input: Schema.optional(Schema.Number),
+					output: Schema.optional(Schema.Number),
+				}),
+			),
+			limit: Schema.optional(
+				Schema.Struct({
+					context: Schema.optional(Schema.Number),
+					output: Schema.optional(Schema.Number),
+				}),
+			),
+			variants: Schema.optional(Schema.Array(Schema.String)),
+		}),
+	),
+});
+
+const AgentInfoSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	description: Schema.optional(Schema.String),
+});
+
+const CommandInfoSchema = Schema.Struct({
+	name: Schema.String,
+	description: Schema.optional(Schema.String),
+	args: Schema.optional(Schema.String),
+});
+
+const ProjectInfoSchema = Schema.Struct({
+	slug: Schema.String,
+	title: Schema.String,
+	directory: Schema.String,
+	clientCount: Schema.optional(Schema.Number),
+	instanceId: Schema.optional(Schema.String),
+});
+
+const FileEntrySchema = Schema.Struct({
+	name: Schema.String,
+	type: Schema.Literal("file", "directory"),
+	size: Schema.optional(Schema.Number),
+	modified: Schema.optional(Schema.Number),
+});
+
+const PtyInfoSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	command: Schema.String,
+	cwd: Schema.String,
+	status: Schema.Literal("running", "exited"),
+	pid: Schema.Number,
+});
+
+const TodoItemSchema = Schema.Struct({
+	id: Schema.String,
+	subject: Schema.String,
+	description: Schema.optional(Schema.String),
+	status: Schema.Literal("pending", "in_progress", "completed", "cancelled"),
+});
+
+const FileVersionSchema = Schema.Struct({
+	id: Schema.String,
+	path: Schema.String,
+	content: Schema.String,
+	timestamp: Schema.Number,
+	source: Schema.Literal("edit", "write", "external"),
+	toolName: Schema.optional(Schema.String),
+	description: Schema.optional(Schema.String),
+});
+
+const InstanceStatusSchema = Schema.Literal(
+	"starting",
+	"healthy",
+	"unhealthy",
+	"stopped",
+);
+
+const OpenCodeInstanceSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	port: Schema.Number,
+	managed: Schema.Boolean,
+	status: InstanceStatusSchema,
+	pid: Schema.optional(Schema.Number),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	needsRestart: Schema.optional(Schema.Boolean),
+	exitCode: Schema.optional(Schema.Number),
+	lastHealthCheck: Schema.optional(Schema.Number),
+	restartCount: Schema.Number,
+	createdAt: Schema.Number,
+});
+
+// -- Individual message variant schemas --
+
+// ── Streaming ──────────────────────────────────────────────────────────
+const DeltaSchema = Schema.Struct({
+	type: Schema.Literal("delta"),
+	sessionId: Schema.String,
+	text: Schema.String,
+	messageId: Schema.optional(Schema.String),
+});
+
+const ThinkingStartSchema = Schema.Struct({
+	type: Schema.Literal("thinking_start"),
+	sessionId: Schema.String,
+	messageId: Schema.optional(Schema.String),
+});
+
+const ThinkingDeltaSchema = Schema.Struct({
+	type: Schema.Literal("thinking_delta"),
+	sessionId: Schema.String,
+	text: Schema.String,
+	messageId: Schema.optional(Schema.String),
+});
+
+const ThinkingStopSchema = Schema.Struct({
+	type: Schema.Literal("thinking_stop"),
+	sessionId: Schema.String,
+	messageId: Schema.optional(Schema.String),
+});
+
+// ── Tools ──────────────────────────────────────────────────────────────
+const ToolStartSchema = Schema.Struct({
+	type: Schema.Literal("tool_start"),
+	sessionId: Schema.String,
+	id: Schema.String,
+	name: Schema.String,
+	messageId: Schema.optional(Schema.String),
+});
+
+const ToolExecutingSchema = Schema.Struct({
+	type: Schema.Literal("tool_executing"),
+	sessionId: Schema.String,
+	id: Schema.String,
+	name: Schema.String,
+	input: Schema.Union(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		Schema.Undefined,
+	),
+	metadata: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
+	messageId: Schema.optional(Schema.String),
+});
+
+const ToolResultSchema = Schema.Struct({
+	type: Schema.Literal("tool_result"),
+	sessionId: Schema.String,
+	id: Schema.String,
+	content: Schema.String,
+	is_error: Schema.Boolean,
+	isTruncated: Schema.optional(Schema.Boolean),
+	fullContentLength: Schema.optional(Schema.Number),
+	messageId: Schema.optional(Schema.String),
+});
+
+const ToolContentSchema = Schema.Struct({
+	type: Schema.Literal("tool_content"),
+	sessionId: Schema.String,
+	toolId: Schema.String,
+	content: Schema.String,
+});
+
+// ── Permissions / Questions ────────────────────────────────────────────
+const PermissionRequestSchema = Schema.Struct({
+	type: Schema.Literal("permission_request"),
+	sessionId: Schema.String,
+	requestId: PermissionId,
+	toolName: Schema.String,
+	toolInput: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	toolUseId: Schema.optional(Schema.String),
+	always: Schema.optional(Schema.Array(Schema.String)),
+});
+
+const PermissionResolvedSchema = Schema.Struct({
+	type: Schema.Literal("permission_resolved"),
+	sessionId: Schema.String,
+	requestId: PermissionId,
+	decision: Schema.String,
+});
+
+const AskUserSchema = Schema.Struct({
+	type: Schema.Literal("ask_user"),
+	sessionId: Schema.String,
+	toolId: Schema.String,
+	questions: Schema.Array(AskUserQuestionSchema),
+	toolUseId: Schema.optional(Schema.String),
+});
+
+const AskUserResolvedSchema = Schema.Struct({
+	type: Schema.Literal("ask_user_resolved"),
+	toolId: Schema.String,
+	sessionId: Schema.String,
+});
+
+const AskUserErrorSchema = Schema.Struct({
+	type: Schema.Literal("ask_user_error"),
+	sessionId: Schema.String,
+	toolId: Schema.String,
+	message: Schema.String,
+});
+
+// ── Session lifecycle ──────────────────────────────────────────────────
+const ResultSchema = Schema.Struct({
+	type: Schema.Literal("result"),
+	usage: UsageInfoSchema,
+	cost: Schema.Number,
+	duration: Schema.Number,
+	sessionId: Schema.String,
+	messageId: Schema.optional(Schema.String),
+});
+
+const StatusSchema = Schema.Struct({
+	type: Schema.Literal("status"),
+	sessionId: Schema.String,
+	status: Schema.String,
+});
+
+const DoneSchema = Schema.Struct({
+	type: Schema.Literal("done"),
+	sessionId: Schema.String,
+	code: Schema.Number,
+});
+
+// session_switched: events are RelayMessage[] at the type level (see manual
+// union below).  We use Schema.Unknown for array elements here to avoid a
+// circular Schema.suspend reference that causes TS7022 implicit-any errors.
+// Individual events are validated independently when they arrive over WS.
+const SessionSwitchedSchema = Schema.Struct({
+	type: Schema.Literal("session_switched"),
+	id: Schema.String,
+	sessionId: Schema.String,
+	requestId: Schema.optional(RequestId),
+	events: Schema.optional(Schema.Array(Schema.Unknown)),
+	eventsHasMore: Schema.optional(Schema.Boolean),
+	history: Schema.optional(
+		Schema.Struct({
+			messages: Schema.Array(HistoryMessageSchema),
+			hasMore: Schema.Boolean,
+			total: Schema.optional(Schema.Number),
+		}),
+	),
+	inputText: Schema.optional(Schema.String),
+});
+
+const SessionListSchema = Schema.Struct({
+	type: Schema.Literal("session_list"),
+	sessions: Schema.Array(SessionInfoSchema),
+	roots: Schema.Boolean,
+	search: Schema.optional(Schema.Boolean),
+});
+
+const SessionForkedSchema = Schema.Struct({
+	type: Schema.Literal("session_forked"),
+	sessionId: Schema.String,
+	session: SessionInfoSchema,
+	parentId: Schema.String,
+	parentTitle: Schema.String,
+});
+
+const HistoryPageSchema = Schema.Struct({
+	type: Schema.Literal("history_page"),
+	sessionId: Schema.String,
+	messages: Schema.Array(HistoryMessageSchema),
+	hasMore: Schema.Boolean,
+	total: Schema.optional(Schema.Number),
+});
+
+// ── Model / Agent / Commands ───────────────────────────────────────────
+const ModelInfoMsgSchema = Schema.Struct({
+	type: Schema.Literal("model_info"),
+	model: Schema.String,
+	provider: Schema.String,
+});
+
+const DefaultModelInfoSchema = Schema.Struct({
+	type: Schema.Literal("default_model_info"),
+	model: Schema.String,
+	provider: Schema.String,
+});
+
+const ModelListSchema = Schema.Struct({
+	type: Schema.Literal("model_list"),
+	providers: Schema.Array(ProviderInfoSchema),
+});
+
+const AgentListSchema = Schema.Struct({
+	type: Schema.Literal("agent_list"),
+	agents: Schema.Array(AgentInfoSchema),
+	activeAgentId: Schema.optional(Schema.String),
+});
+
+const CommandListSchema = Schema.Struct({
+	type: Schema.Literal("command_list"),
+	commands: Schema.Array(CommandInfoSchema),
+});
+
+// ── Projects ───────────────────────────────────────────────────────────
+const ProjectListSchema = Schema.Struct({
+	type: Schema.Literal("project_list"),
+	projects: Schema.Array(ProjectInfoSchema),
+	current: Schema.optional(Schema.String),
+	addedSlug: Schema.optional(Schema.String),
+});
+
+const DirectoryListSchema = Schema.Struct({
+	type: Schema.Literal("directory_list"),
+	path: Schema.String,
+	entries: Schema.Array(Schema.String),
+});
+
+// ── File browser ───────────────────────────────────────────────────────
+const FileListSchema = Schema.Struct({
+	type: Schema.Literal("file_list"),
+	path: Schema.String,
+	entries: Schema.Array(FileEntrySchema),
+});
+
+const FileContentSchema = Schema.Struct({
+	type: Schema.Literal("file_content"),
+	path: Schema.String,
+	content: Schema.String,
+	binary: Schema.optional(Schema.Boolean),
+});
+
+const FileTreeSchema = Schema.Struct({
+	type: Schema.Literal("file_tree"),
+	entries: Schema.Array(Schema.String),
+});
+
+const FileChangedSchema = Schema.Struct({
+	type: Schema.Literal("file_changed"),
+	path: Schema.String,
+	changeType: Schema.Literal("edited", "external"),
+});
+
+// ── Part lifecycle ─────────────────────────────────────────────────────
+const PartRemovedSchema = Schema.Struct({
+	type: Schema.Literal("part_removed"),
+	sessionId: Schema.String,
+	partId: Schema.String,
+	messageId: Schema.String,
+});
+
+const MessageRemovedSchema = Schema.Struct({
+	type: Schema.Literal("message_removed"),
+	sessionId: Schema.String,
+	messageId: Schema.String,
+});
+
+// ── PTY / Terminal ─────────────────────────────────────────────────────
+const PtyCreatedSchema = Schema.Struct({
+	type: Schema.Literal("pty_created"),
+	pty: PtyInfoSchema,
+});
+
+const PtyOutputSchema = Schema.Struct({
+	type: Schema.Literal("pty_output"),
+	ptyId: Schema.String,
+	data: Schema.String,
+});
+
+const PtyExitedSchema = Schema.Struct({
+	type: Schema.Literal("pty_exited"),
+	ptyId: Schema.String,
+	exitCode: Schema.Number,
+});
+
+const PtyDeletedSchema = Schema.Struct({
+	type: Schema.Literal("pty_deleted"),
+	ptyId: Schema.String,
+});
+
+const PtyListSchema = Schema.Struct({
+	type: Schema.Literal("pty_list"),
+	ptys: Schema.Array(PtyInfoSchema),
+});
+
+// ── Todo ────────────────────────────────────────────────────────────────
+const TodoStateSchema = Schema.Struct({
+	type: Schema.Literal("todo_state"),
+	items: Schema.Array(TodoItemSchema),
+});
+
+// ── Connection status ────────────────────────────────────────────────
+const ConnectionStatusSchema = Schema.Struct({
+	type: Schema.Literal("connection_status"),
+	status: Schema.Literal("disconnected", "reconnecting", "connected"),
+});
+
+// ── Plan mode ────────────────────────────────────────────────────────
+const PlanEnterSchema = Schema.Struct({
+	type: Schema.Literal("plan_enter"),
+});
+
+const PlanExitSchema = Schema.Struct({
+	type: Schema.Literal("plan_exit"),
+});
+
+const PlanContentSchema = Schema.Struct({
+	type: Schema.Literal("plan_content"),
+	content: Schema.String,
+});
+
+const PlanApprovalSchema = Schema.Struct({
+	type: Schema.Literal("plan_approval"),
+});
+
+// ── Banners ────────────────────────────────────────────────────────────
+const SkipPermissionsSchema = Schema.Struct({
+	type: Schema.Literal("skip_permissions"),
+});
+
+const BannerSchema = Schema.Struct({
+	type: Schema.Literal("banner"),
+	config: Schema.Struct({
+		id: Schema.optional(Schema.String),
+		variant: Schema.optional(Schema.String),
+		icon: Schema.optional(Schema.String),
+		text: Schema.optional(Schema.String),
+		dismissible: Schema.optional(Schema.Boolean),
+	}),
+});
+
+// ── File history / Rewind ────────────────────────────────────────────
+const FileHistoryResultSchema = Schema.Struct({
+	type: Schema.Literal("file_history_result"),
+	path: Schema.String,
+	versions: Schema.Array(FileVersionSchema),
+});
+
+const RewindResultSchema = Schema.Struct({
+	type: Schema.Literal("rewind_result"),
+	mode: Schema.String,
+});
+
+// ── Cache / Replay ────────────────────────────────────────────────────
+const UserMessageSchema = Schema.Struct({
+	type: Schema.Literal("user_message"),
+	sessionId: Schema.String,
+	text: Schema.String,
+});
+
+// ── Session deletion ──────────────────────────────────────────────────
+const SessionDeletedSchema = Schema.Struct({
+	type: Schema.Literal("session_deleted"),
+	sessionId: Schema.String,
+});
+
+// ── Misc ────────────────────────────────────────────────────────────────
+const ErrorSchema = Schema.Struct({
+	type: Schema.Literal("error"),
+	sessionId: Schema.String,
+	code: Schema.String,
+	message: Schema.String,
+	statusCode: Schema.optional(Schema.Number),
+	details: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
+});
+
+const SystemErrorSchema = Schema.Struct({
+	type: Schema.Literal("system_error"),
+	code: Schema.String,
+	message: Schema.String,
+	statusCode: Schema.optional(Schema.Number),
+	details: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
+});
+
+const ClientCountSchema = Schema.Struct({
+	type: Schema.Literal("client_count"),
+	count: Schema.Number,
+});
+
+const InputSyncSchema = Schema.Struct({
+	type: Schema.Literal("input_sync"),
+	text: Schema.String,
+	from: Schema.optional(Schema.String),
+});
+
+const UpdateAvailableSchema = Schema.Struct({
+	type: Schema.Literal("update_available"),
+	version: Schema.optional(Schema.String),
+});
+
+// ── Instance Management ──────────────────────────────────────────────
+const InstanceListSchema = Schema.Struct({
+	type: Schema.Literal("instance_list"),
+	instances: Schema.Array(OpenCodeInstanceSchema),
+});
+
+const InstanceStatusMsgSchema = Schema.Struct({
+	type: Schema.Literal("instance_status"),
+	instanceId: Schema.String,
+	status: InstanceStatusSchema,
+});
+
+const InstanceUpdateSchema = Schema.Struct({
+	type: Schema.Literal("instance_update"),
+	instanceId: Schema.String,
+	name: Schema.optional(Schema.String),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	port: Schema.optional(Schema.Number),
+});
+
+// ── Provider session reload ─────────────────────────────────────────
+const ProviderSessionReloadedSchema = Schema.Struct({
+	type: Schema.Literal("provider_session_reloaded"),
+	sessionId: Schema.String,
+});
+
+// ── Variant / thinking level ────────────────────────────────────────
+const VariantInfoSchema = Schema.Struct({
+	type: Schema.Literal("variant_info"),
+	variant: Schema.optional(Schema.String),
+	variants: Schema.optional(Schema.Array(Schema.String)),
+});
+
+const ProxyDetectedSchema = Schema.Struct({
+	type: Schema.Literal("proxy_detected"),
+	found: Schema.Boolean,
+	port: Schema.Number,
+});
+
+const ScanResultSchema = Schema.Struct({
+	type: Schema.Literal("scan_result"),
+	discovered: Schema.Array(Schema.Number),
+	lost: Schema.Array(Schema.Number),
+	active: Schema.Array(Schema.Number),
+});
+
+// ── Cross-session notifications ──────────────────────────────────────
+const NotificationEventSchema = Schema.Struct({
+	type: Schema.Literal("notification_event"),
+	eventType: Schema.String,
+	message: Schema.optional(Schema.String),
+	sessionId: Schema.optional(Schema.String),
+});
+
+// -- Combined RelayMessage schema union --
+
+export const RelayMessageSchema = Schema.Union(
+	// Streaming
+	DeltaSchema,
+	ThinkingStartSchema,
+	ThinkingDeltaSchema,
+	ThinkingStopSchema,
+	// Tools
+	ToolStartSchema,
+	ToolExecutingSchema,
+	ToolResultSchema,
+	ToolContentSchema,
+	// Permissions / Questions
+	PermissionRequestSchema,
+	PermissionResolvedSchema,
+	AskUserSchema,
+	AskUserResolvedSchema,
+	AskUserErrorSchema,
+	// Session lifecycle
+	ResultSchema,
+	StatusSchema,
+	DoneSchema,
+	SessionSwitchedSchema,
+	SessionListSchema,
+	SessionForkedSchema,
+	HistoryPageSchema,
+	// Model / Agent / Commands
+	ModelInfoMsgSchema,
+	DefaultModelInfoSchema,
+	ModelListSchema,
+	AgentListSchema,
+	CommandListSchema,
+	// Projects
+	ProjectListSchema,
+	DirectoryListSchema,
+	// File browser
+	FileListSchema,
+	FileContentSchema,
+	FileTreeSchema,
+	FileChangedSchema,
+	// Part lifecycle
+	PartRemovedSchema,
+	MessageRemovedSchema,
+	// PTY / Terminal
+	PtyCreatedSchema,
+	PtyOutputSchema,
+	PtyExitedSchema,
+	PtyDeletedSchema,
+	PtyListSchema,
+	// Todo
+	TodoStateSchema,
+	// Connection status
+	ConnectionStatusSchema,
+	// Plan mode
+	PlanEnterSchema,
+	PlanExitSchema,
+	PlanContentSchema,
+	PlanApprovalSchema,
+	// Banners
+	SkipPermissionsSchema,
+	BannerSchema,
+	// File history / Rewind
+	FileHistoryResultSchema,
+	RewindResultSchema,
+	// Cache / Replay
+	UserMessageSchema,
+	// Session deletion
+	SessionDeletedSchema,
+	// Misc
+	ErrorSchema,
+	SystemErrorSchema,
+	ClientCountSchema,
+	InputSyncSchema,
+	UpdateAvailableSchema,
+	// Instance Management
+	InstanceListSchema,
+	InstanceStatusMsgSchema,
+	InstanceUpdateSchema,
+	// Provider session reload
+	ProviderSessionReloadedSchema,
+	// Variant / thinking level
+	VariantInfoSchema,
+	ProxyDetectedSchema,
+	ScanResultSchema,
+	// Cross-session notifications
+	NotificationEventSchema,
+);
+
 // ─── Relay WebSocket messages ───────────────────────────────────────────────
+// The manual union below is the primary type used throughout the codebase.
+// RelayMessageSchema (above) provides runtime validation and is exported
+// alongside for consumers that want schema-based decoding.
 
 export type RelayMessage =
 	// ── Streaming ──────────────────────────────────────────────────────────

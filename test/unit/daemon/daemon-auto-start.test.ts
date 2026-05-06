@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock daemon-utils before importing Daemon
+// Mock daemon-utils before importing startDaemonProcess
 vi.mock("../../../src/lib/daemon/daemon-utils.js", async (importOriginal) => {
 	const original =
 		await importOriginal<
@@ -21,11 +21,12 @@ vi.mock("../../../src/lib/daemon/daemon-utils.js", async (importOriginal) => {
 	};
 });
 
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
 import {
 	isOpencodeInstalled,
 	probeOpenCode,
 } from "../../../src/lib/daemon/daemon-utils.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);
@@ -46,7 +47,7 @@ function daemonOpts(tmpDir: string) {
 
 describe("daemon auto-start (probe-and-convert)", () => {
 	let tmpDir: string;
-	let daemon: Daemon;
+	let daemon: DaemonHandle;
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir();
@@ -65,16 +66,14 @@ describe("daemon auto-start (probe-and-convert)", () => {
 	it("keeps unmanaged when OpenCode is reachable", async () => {
 		mockProbe.mockResolvedValue(true);
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
 		});
 
-		await daemon.start();
-
 		const instances = daemon.getInstances();
-		const inst = instances.find((i) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "default");
 		expect(inst).toBeDefined();
 		expect(inst?.managed).toBe(false);
 		expect(mockInstalled).not.toHaveBeenCalled();
@@ -84,16 +83,14 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
 		});
 
-		await daemon.start();
-
 		const instances = daemon.getInstances();
-		const inst = instances.find((i) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "default");
 		expect(inst).toBeDefined();
 		expect(inst?.managed).toBe(true);
 	});
@@ -102,31 +99,29 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		daemon = new Daemon({
-			...daemonOpts(tmpDir),
-			opencodeUrl: "http://localhost:4096",
-			smartDefault: true,
-		});
-
-		await expect(daemon.start()).rejects.toThrow(/opencode.*not found/i);
+		await expect(
+			startDaemonProcess({
+				...daemonOpts(tmpDir),
+				opencodeUrl: "http://localhost:4096",
+				smartDefault: true,
+			}),
+		).rejects.toThrow(/opencode.*not found/i);
 	});
 
 	it("skips probe-and-convert when smartDefault is false", async () => {
 		mockProbe.mockResolvedValue(false);
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
 		});
 
-		await daemon.start();
-
 		// Should NOT have probed since smartDefault is off
 		expect(mockProbe).not.toHaveBeenCalled();
 
 		const instances = daemon.getInstances();
-		const inst = instances.find((i) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "default");
 		// Stays unmanaged because smart default is disabled
 		expect(inst?.managed).toBe(false);
 	});
@@ -135,29 +130,27 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		daemon = new Daemon({
-			...daemonOpts(tmpDir),
-			// No opencodeUrl — triggers the smart default path
-			smartDefault: true,
-		});
-
-		await expect(daemon.start()).rejects.toThrow(/opencode.*not found/i);
+		await expect(
+			startDaemonProcess({
+				...daemonOpts(tmpDir),
+				// No opencodeUrl — triggers the smart default path
+				smartDefault: true,
+			}),
+		).rejects.toThrow(/opencode.*not found/i);
 	});
 
 	it("preserves instance name during conversion", async () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
 
-		daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
 		});
 
-		await daemon.start();
-
 		const instances = daemon.getInstances();
-		const inst = instances.find((i) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "default");
 		expect(inst?.name).toBe("Default");
 	});
 });

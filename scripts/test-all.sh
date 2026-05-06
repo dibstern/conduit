@@ -8,6 +8,9 @@
 
 set -uo pipefail
 
+# Increase Node heap to prevent OOM/segfault when running all suites sequentially.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
+
 failed=()
 
 run() {
@@ -30,10 +33,17 @@ run() {
 run "Type check"       pnpm check
 run "Lint"             pnpm lint
 
+# Wait for child processes to exit and ports to settle between suites.
+wait_for_cleanup() {
+  sleep 1
+}
+
 # --- Vitest suites (no build needed) ---
-run "Unit tests"               vitest run
-run "Integration tests"        vitest run --config vitest.integration.config.ts
-run "Contract tests"           vitest run --config vitest.contract.config.ts
+run "Unit tests"               pnpm test:unit
+wait_for_cleanup
+run "Integration tests"        pnpm test:integration
+wait_for_cleanup
+run "Contract tests"           pnpm test:contract
 
 # --- Build (needed by E2E and storybook visual tests below) ---
 run "Build"            pnpm build

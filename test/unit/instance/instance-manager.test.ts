@@ -14,7 +14,6 @@
 
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type {
 	InstanceConfig,
@@ -72,7 +71,7 @@ function createMockHealthChecker(healthy = true) {
 describe("InstanceManager", () => {
 	describe("constructor", () => {
 		it("uses default maxInstances of 5", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			// Add 5 instances — should work
 			for (let i = 0; i < 5; i++) {
 				mgr.addInstance(`inst-${i}`, managedConfig({ port: 4096 + i }));
@@ -84,7 +83,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("accepts custom maxInstances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxInstances: 2,
 			});
 			mgr.addInstance("a", managedConfig({ port: 4096 }));
@@ -99,7 +98,7 @@ describe("InstanceManager", () => {
 
 	describe("addInstance", () => {
 		it("creates an instance with status 'stopped'", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			const inst = mgr.getInstance("dev");
 			expect(inst).toBeDefined();
@@ -120,7 +119,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("rejects duplicate IDs", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			expect(() => mgr.addInstance("dev", managedConfig())).toThrow(
 				/already exists/i,
@@ -128,7 +127,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("rejects when max instances reached", () => {
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxInstances: 1,
 			});
 			mgr.addInstance("a", managedConfig());
@@ -138,14 +137,14 @@ describe("InstanceManager", () => {
 		});
 
 		it("throws for invalid url", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(() =>
 				mgr.addInstance("bad-url", externalConfig({ url: "not-a-valid-url" })),
 			).toThrow(/invalid url/i);
 		});
 
 		it("stores env from config", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig({ env: { API_KEY: "sk-test" } }));
 			const inst = mgr.getInstance("dev");
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -153,7 +152,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("returns the created instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const inst = mgr.addInstance("dev", managedConfig());
 			expect(inst.id).toBe("dev");
 			expect(inst.status).toBe("stopped");
@@ -164,12 +163,12 @@ describe("InstanceManager", () => {
 
 	describe("getInstances", () => {
 		it("returns empty array when no instances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(mgr.getInstances()).toEqual([]);
 		});
 
 		it("returns all instances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("a", managedConfig({ port: 4096 }));
 			mgr.addInstance("b", managedConfig({ port: 4097 }));
 			const all = mgr.getInstances();
@@ -180,7 +179,7 @@ describe("InstanceManager", () => {
 
 	describe("getInstance", () => {
 		it("returns instance by ID", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			const inst = mgr.getInstance("dev");
 			expect(inst).toBeDefined();
@@ -189,7 +188,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("returns undefined for unknown ID", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(mgr.getInstance("nope")).toBeUndefined();
 		});
 	});
@@ -198,7 +197,7 @@ describe("InstanceManager", () => {
 
 	describe("removeInstance", () => {
 		it("removes an existing instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			mgr.removeInstance("dev");
 			expect(mgr.getInstance("dev")).toBeUndefined();
@@ -206,12 +205,12 @@ describe("InstanceManager", () => {
 		});
 
 		it("throws for unknown ID", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(() => mgr.removeInstance("nope")).toThrow(/not found/i);
 		});
 
 		it("allows re-adding after removal", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			mgr.removeInstance("dev");
 			mgr.addInstance("dev", managedConfig());
@@ -223,14 +222,14 @@ describe("InstanceManager", () => {
 
 	describe("updateInstance", () => {
 		it("updates instance name", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			mgr.updateInstance("test-1", { name: "Renamed" });
 			expect(mgr.getInstance("test-1")?.name).toBe("Renamed");
 		});
 
 		it("updates instance env", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			mgr.updateInstance("test-1", { env: { XDG_DATA_HOME: "/custom/path" } });
 			expect(mgr.getInstance("test-1")?.env).toEqual({
@@ -239,21 +238,21 @@ describe("InstanceManager", () => {
 		});
 
 		it("updates instance port", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			mgr.updateInstance("test-1", { port: 6000 });
 			expect(mgr.getInstance("test-1")?.port).toBe(6000);
 		});
 
 		it("throws for unknown instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(() => mgr.updateInstance("nope", { name: "X" })).toThrow(
 				/not found/i,
 			);
 		});
 
 		it("sets needsRestart when env changes on running instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			// Simulate running state
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -264,7 +263,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("sets needsRestart when port changes on running instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test", port: 5000 }));
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			const inst = mgr.getInstance("test-1")!;
@@ -274,14 +273,14 @@ describe("InstanceManager", () => {
 		});
 
 		it("does not set needsRestart when instance is stopped", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			mgr.updateInstance("test-1", { env: { FOO: "bar" } });
 			expect(mgr.getInstance("test-1")?.needsRestart).toBeFalsy();
 		});
 
 		it("does not set needsRestart for name-only change on running instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			const inst = mgr.getInstance("test-1")!;
@@ -291,7 +290,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("clears needsRestart on stopInstance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			const inst = mgr.getInstance("test-1")!;
@@ -302,7 +301,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("emits status_changed when needsRestart set", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			const inst = mgr.getInstance("test-1")!;
@@ -315,7 +314,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("does not emit status_changed when nothing changes", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			const events: OpenCodeInstance[] = [];
 			mgr.on("status_changed", (i) => events.push(i));
@@ -328,13 +327,13 @@ describe("InstanceManager", () => {
 
 	describe("getInstanceUrl", () => {
 		it("returns http://localhost:{port} for managed instances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig({ port: 4096 }));
 			expect(mgr.getInstanceUrl("dev")).toBe("http://localhost:4096");
 		});
 
 		it("returns custom URL for external instances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance(
 				"ext",
 				externalConfig({ url: "https://opencode.example.com" }),
@@ -343,7 +342,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("falls back to localhost URL for external without custom URL", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("ext", {
 				name: "External Instance",
 				port: 9090,
@@ -353,7 +352,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("throws for unknown ID", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(() => mgr.getInstanceUrl("nope")).toThrow(/not found/i);
 		});
 	});
@@ -362,7 +361,7 @@ describe("InstanceManager", () => {
 
 	describe("stopInstance", () => {
 		it("sets status to 'stopped'", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			// Manually set to healthy to test stop
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -378,12 +377,12 @@ describe("InstanceManager", () => {
 		});
 
 		it("throws for unknown ID", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(() => mgr.stopInstance("nope")).toThrow(/not found/i);
 		});
 
 		it("is idempotent for already-stopped instances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			// Already stopped by default
 			mgr.stopInstance("dev");
@@ -396,7 +395,7 @@ describe("InstanceManager", () => {
 
 	describe("stopAll", () => {
 		it("stops all non-stopped instances", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("a", managedConfig({ port: 4096 }));
 			mgr.addInstance("b", managedConfig({ port: 4097 }));
 			mgr.addInstance("c", managedConfig({ port: 4098 }));
@@ -421,13 +420,13 @@ describe("InstanceManager", () => {
 		});
 
 		it("does nothing when no instances exist", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			expect(() => mgr.stopAll()).not.toThrow();
 		});
 
 		it("clears health polling for instances with status 'stopped' (A2 fix)", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const healthChecker = createMockHealthChecker(true);
@@ -462,7 +461,7 @@ describe("InstanceManager", () => {
 
 		it("drain() calls stopAll and clears tracked timers", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const healthChecker = createMockHealthChecker(true);
@@ -499,7 +498,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("transitions managed instance to starting then healthy", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const mockProc = createMockProcess(12345);
 			mgr.setSpawner(createMockSpawner(mockProc));
 			mgr.setHealthChecker(createMockHealthChecker(true));
@@ -519,7 +518,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("throws for external instance", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("ext", externalConfig());
 
 			await expect(mgr.startInstance("ext")).rejects.toThrow(
@@ -528,13 +527,13 @@ describe("InstanceManager", () => {
 		});
 
 		it("throws for unknown instance", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 
 			await expect(mgr.startInstance("nope")).rejects.toThrow(/not found/i);
 		});
 
 		it("is idempotent for healthy instance", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const spawner = createMockSpawner();
 			mgr.setSpawner(spawner);
 			mgr.setHealthChecker(createMockHealthChecker(true));
@@ -550,7 +549,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("is idempotent for starting instance", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			// Spawner that never resolves (simulates long start)
 			let resolveSpawner!: (val: {
 				pid: number;
@@ -582,7 +581,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("sets lastHealthCheck when initial check succeeds", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.setSpawner(createMockSpawner());
 			mgr.setHealthChecker(createMockHealthChecker(true));
 
@@ -607,7 +606,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("kills the spawned process and transitions to stopped", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const mockProc = createMockProcess(55555);
 			mgr.setSpawner(createMockSpawner(mockProc));
 			mgr.setHealthChecker(createMockHealthChecker(true));
@@ -631,7 +630,7 @@ describe("InstanceManager", () => {
 
 		it("clears health polling on stop", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const healthChecker = createMockHealthChecker(true);
 			mgr.setSpawner(createMockSpawner());
 			mgr.setHealthChecker(healthChecker);
@@ -662,7 +661,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("kills all spawned processes and stops health polling", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const procA = createMockProcess(11111);
 			const procB = createMockProcess(22222);
 			let callCount = 0;
@@ -696,7 +695,7 @@ describe("InstanceManager", () => {
 
 	describe("events", () => {
 		it("emits 'instance_added' on addInstance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const handler = vi.fn();
 			mgr.on("instance_added", handler);
 
@@ -709,7 +708,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("emits 'instance_removed' on removeInstance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 
 			const handler = vi.fn();
@@ -722,7 +721,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("emits 'status_changed' on stopInstance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			// Set to healthy first
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -743,7 +742,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("emits 'status_changed' for each instance in stopAll", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("a", managedConfig({ port: 4096 }));
 			mgr.addInstance("b", managedConfig({ port: 4097 }));
 			// Set both to healthy
@@ -761,7 +760,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("does not emit 'status_changed' for already-stopped instances in stopAll", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("a", managedConfig({ port: 4096 }));
 			// a is already stopped by default
 
@@ -784,7 +783,7 @@ describe("InstanceManager", () => {
 
 		it("restarts instance when process exits with non-zero code", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -837,7 +836,7 @@ describe("InstanceManager", () => {
 
 		it("does not restart on clean exit (code 0)", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -891,7 +890,7 @@ describe("InstanceManager", () => {
 
 		it("does not restart when instance was stopped intentionally", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -944,7 +943,7 @@ describe("InstanceManager", () => {
 
 		it("gives up after max restarts in window and emits instance_error", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 2,
 				restartWindowMs: 60_000,
 			});
@@ -1007,7 +1006,7 @@ describe("InstanceManager", () => {
 
 		it("uses exponential backoff between restarts", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 10,
 				restartWindowMs: 60_000,
 			});
@@ -1069,7 +1068,7 @@ describe("InstanceManager", () => {
 
 		it("increments restartCount on each crash", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -1124,7 +1123,7 @@ describe("InstanceManager", () => {
 
 		it("records exitCode on crash", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -1168,7 +1167,7 @@ describe("InstanceManager", () => {
 
 		it("sets status to unhealthy immediately on crash", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -1212,7 +1211,7 @@ describe("InstanceManager", () => {
 
 		it("cancels pending restart when stopInstance is called during backoff", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -1271,7 +1270,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("stops process before removing instance", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const mockProc = createMockProcess(77777);
 			mgr.setSpawner(createMockSpawner(mockProc));
 			mgr.setHealthChecker(createMockHealthChecker(true));
@@ -1289,7 +1288,7 @@ describe("InstanceManager", () => {
 
 		it("cancels pending restart timers on remove", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 5,
 				restartWindowMs: 60_000,
 			});
@@ -1346,7 +1345,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("kills old process when starting unhealthy instance", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const oldProc = createMockProcess(11111);
 			const newProc = createMockProcess(22222);
 			let callCount = 0;
@@ -1378,7 +1377,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("resets to stopped if spawner rejects", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.setSpawner(vi.fn().mockRejectedValue(new Error("spawn failed")));
 			mgr.setHealthChecker(createMockHealthChecker(true));
 
@@ -1398,7 +1397,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("cleans up process if health check throws after spawn", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const mockProc = createMockProcess(33333);
 			mgr.setSpawner(
 				vi.fn().mockResolvedValue({ pid: 33333, process: mockProc }),
@@ -1427,13 +1426,13 @@ describe("InstanceManager", () => {
 
 	describe("getExternalUrl", () => {
 		it("returns URL for external instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("ext", externalConfig({ url: "https://example.com" }));
 			expect(mgr.getExternalUrl("ext")).toBe("https://example.com");
 		});
 
 		it("returns undefined for managed instance", () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			expect(mgr.getExternalUrl("dev")).toBeUndefined();
 		});
@@ -1450,7 +1449,7 @@ describe("InstanceManager", () => {
 		it("does not start health polling if process exited (unhealthy) before health check completes", async () => {
 			vi.useFakeTimers();
 			// maxRestartsPerWindow: 0 ensures crash gives up immediately (no backoff restart)
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 				maxRestartsPerWindow: 0,
 			});
@@ -1507,7 +1506,7 @@ describe("InstanceManager", () => {
 
 		it("does not overwrite 'unhealthy' status when healthy=true and process died during health check", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 				maxRestartsPerWindow: 0,
 			});
@@ -1568,7 +1567,7 @@ describe("InstanceManager", () => {
 
 		it("does not start health polling if process exited (stopped) before health check completes", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 
@@ -1630,7 +1629,7 @@ describe("InstanceManager", () => {
 
 		it("gives up exactly at maxRestartsPerWindow crashes (not one beyond)", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				maxRestartsPerWindow: 3,
 				restartWindowMs: 60_000,
 			});
@@ -1704,7 +1703,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("spawner rejects reset instance to stopped status", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			// Simulate what the fixed defaultSpawner does: reject on error
 			mgr.setSpawner(vi.fn().mockRejectedValue(new Error("spawn ENOENT")));
 			mgr.setHealthChecker(createMockHealthChecker(true));
@@ -1719,7 +1718,7 @@ describe("InstanceManager", () => {
 		});
 
 		it("spawner resolves with pid on successful spawn", async () => {
-			const mgr = new InstanceManager(new ServiceRegistry());
+			const mgr = new InstanceManager();
 			const mockProc = createMockProcess(42000);
 			mgr.setSpawner(createMockSpawner(mockProc));
 			mgr.setHealthChecker(createMockHealthChecker(true));
@@ -1744,7 +1743,7 @@ describe("InstanceManager", () => {
 
 		it("stops health polling interval when poll detects unhealthy status set externally", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const mockProc = createMockProcess(99998);
@@ -1782,7 +1781,7 @@ describe("InstanceManager", () => {
 
 		it("does not update status when already unhealthy (guard returns early)", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const mockProc = createMockProcess(99997);
@@ -1818,7 +1817,7 @@ describe("InstanceManager", () => {
 
 		it("poll continues and transitions to unhealthy when health check fails during 'starting' status", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const mockProc = createMockProcess(99996);
@@ -1872,7 +1871,7 @@ describe("InstanceManager", () => {
 
 		it("health poll eventually transitions 'starting' to 'healthy' when initial check fails", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const mockProc = createMockProcess(44444);
@@ -1910,7 +1909,7 @@ describe("InstanceManager", () => {
 
 		it("poll transitions 'starting' to 'unhealthy' then stops when health checks keep failing", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 			const mockProc = createMockProcess(44445);
@@ -1958,7 +1957,7 @@ describe("InstanceManager", () => {
 			expect(noAuthRes.status).toBe(401);
 
 			// Use real defaultHealthChecker (no injection) — should get 401 → unhealthy
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 
@@ -1990,7 +1989,7 @@ describe("InstanceManager", () => {
 			if (noAuthRes.ok) return; // server doesn't require auth
 			expect(noAuthRes.status).toBe(401);
 
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 
@@ -2044,7 +2043,7 @@ describe("InstanceManager", () => {
 
 		it("unmanaged instance transitions to healthy when health check passes", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 
@@ -2071,7 +2070,7 @@ describe("InstanceManager", () => {
 
 		it("unmanaged instance transitions to unhealthy when health check fails", async () => {
 			vi.useFakeTimers();
-			const mgr = new InstanceManager(new ServiceRegistry(), {
+			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
 			});
 

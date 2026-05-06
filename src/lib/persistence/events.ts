@@ -1,19 +1,23 @@
 // src/lib/persistence/events.ts
 import { randomUUID } from "node:crypto";
+import { Schema } from "effect";
 
 // ─── Branded ID Types ───────────────────────────────────────────────────────
 
-export type EventId = string & { readonly __brand: "EventId" };
-export type CommandId = string & { readonly __brand: "CommandId" };
+export const EventId = Schema.String.pipe(Schema.brand("EventId"));
+export type EventId = typeof EventId.Type;
+
+export const CommandId = Schema.String.pipe(Schema.brand("CommandId"));
+export type CommandId = typeof CommandId.Type;
 
 // ─── ID Generators ──────────────────────────────────────────────────────────
 
 export function createEventId(): EventId {
-	return `evt_${randomUUID()}` as EventId;
+	return Schema.decodeSync(EventId)(`evt_${randomUUID()}`);
 }
 
 export function createCommandId(): CommandId {
-	return `cmd_${randomUUID()}` as CommandId;
+	return Schema.decodeSync(CommandId)(`cmd_${randomUUID()}`);
 }
 
 // ─── Constrained String Unions ──────────────────────────────────────────────
@@ -309,6 +313,289 @@ export function canonicalEvent<K extends CanonicalEventType>(
 	} as unknown as Extract<CanonicalEvent, { type: K }>;
 }
 
+// ─── Event Metadata Schema ─────────────────────────────────────────────────
+
+export const EventMetadataSchema = Schema.Struct({
+	commandId: Schema.optional(Schema.String),
+	causationEventId: Schema.optional(Schema.String),
+	correlationId: Schema.optional(Schema.String),
+	adapterKey: Schema.optional(Schema.String),
+	providerTurnId: Schema.optional(Schema.String),
+	synthetic: Schema.optional(Schema.Boolean),
+	source: Schema.optional(Schema.String),
+	sseBatchId: Schema.optional(Schema.String),
+	sseBatchSize: Schema.optional(Schema.Number),
+	schemaVersion: Schema.optional(Schema.Number),
+});
+
+// ─── Payload Schemas ───────────────────────────────────────────────────────
+
+const MessageRoleSchema = Schema.Literal("user", "assistant");
+const SessionStatusSchema = Schema.Literal("idle", "busy", "retry", "error");
+const PermissionDecisionSchema = Schema.Literal("once", "always", "reject");
+
+const TokensSchema = Schema.Struct({
+	input: Schema.optional(Schema.Number),
+	output: Schema.optional(Schema.Number),
+	cacheRead: Schema.optional(Schema.Number),
+	cacheWrite: Schema.optional(Schema.Number),
+});
+
+const MessageCreatedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	role: MessageRoleSchema,
+	sessionId: Schema.String,
+	turnId: Schema.optional(Schema.String),
+});
+
+const TextDeltaPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+	text: Schema.String,
+});
+
+const ThinkingStartPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+});
+
+const ThinkingDeltaPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+	text: Schema.String,
+});
+
+const ThinkingEndPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+});
+
+// CanonicalToolInput is a complex discriminated union with 13 variants.
+// Use Schema.Unknown as a temporary escape hatch per task instructions.
+const ToolStartedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+	toolName: Schema.String,
+	callId: Schema.String,
+	input: Schema.Unknown,
+});
+
+const ToolRunningPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+});
+
+const ToolCompletedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+	result: Schema.Unknown,
+	duration: Schema.Number,
+});
+
+// Historical compat — open record with required messageId and partId
+const ToolInputUpdatedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+}).pipe(
+	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+);
+
+const TurnCompletedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	cost: Schema.optional(Schema.Number),
+	tokens: Schema.optional(TokensSchema),
+	duration: Schema.optional(Schema.Number),
+});
+
+const TurnErrorPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	error: Schema.String,
+	code: Schema.optional(Schema.String),
+});
+
+const TurnInterruptedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+});
+
+const SessionCreatedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	title: Schema.String,
+	provider: Schema.String,
+});
+
+const SessionRenamedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	title: Schema.String,
+});
+
+const SessionStatusPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	status: SessionStatusSchema,
+	turnId: Schema.optional(Schema.String),
+});
+
+const SessionProviderChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	oldProvider: Schema.String,
+	newProvider: Schema.String,
+});
+
+const PermissionAskedPayloadSchema = Schema.Struct({
+	id: Schema.String,
+	sessionId: Schema.String,
+	toolName: Schema.String,
+	input: Schema.Unknown,
+});
+
+const PermissionResolvedPayloadSchema = Schema.Struct({
+	id: Schema.String,
+	decision: PermissionDecisionSchema,
+});
+
+const QuestionAskedPayloadSchema = Schema.Struct({
+	id: Schema.String,
+	sessionId: Schema.String,
+	questions: Schema.Unknown,
+});
+
+const QuestionResolvedPayloadSchema = Schema.Struct({
+	id: Schema.String,
+	answers: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+});
+
+// ─── Per-event-type Envelope Schemas ───────────────────────────────────────
+
+function eventEnvelope<
+	T extends CanonicalEventType,
+	S extends Schema.Schema.Any,
+>(type: T, dataSchema: S) {
+	return Schema.Struct({
+		eventId: Schema.String,
+		sessionId: Schema.String,
+		type: Schema.Literal(type),
+		data: dataSchema,
+		metadata: EventMetadataSchema,
+		provider: Schema.String,
+		createdAt: Schema.Number,
+	});
+}
+
+const MessageCreatedEventSchema = eventEnvelope(
+	"message.created",
+	MessageCreatedPayloadSchema,
+);
+const TextDeltaEventSchema = eventEnvelope(
+	"text.delta",
+	TextDeltaPayloadSchema,
+);
+const ThinkingStartEventSchema = eventEnvelope(
+	"thinking.start",
+	ThinkingStartPayloadSchema,
+);
+const ThinkingDeltaEventSchema = eventEnvelope(
+	"thinking.delta",
+	ThinkingDeltaPayloadSchema,
+);
+const ThinkingEndEventSchema = eventEnvelope(
+	"thinking.end",
+	ThinkingEndPayloadSchema,
+);
+const ToolStartedEventSchema = eventEnvelope(
+	"tool.started",
+	ToolStartedPayloadSchema,
+);
+const ToolRunningEventSchema = eventEnvelope(
+	"tool.running",
+	ToolRunningPayloadSchema,
+);
+const ToolCompletedEventSchema = eventEnvelope(
+	"tool.completed",
+	ToolCompletedPayloadSchema,
+);
+const ToolInputUpdatedEventSchema = eventEnvelope(
+	"tool.input_updated",
+	ToolInputUpdatedPayloadSchema,
+);
+const TurnCompletedEventSchema = eventEnvelope(
+	"turn.completed",
+	TurnCompletedPayloadSchema,
+);
+const TurnErrorEventSchema = eventEnvelope(
+	"turn.error",
+	TurnErrorPayloadSchema,
+);
+const TurnInterruptedEventSchema = eventEnvelope(
+	"turn.interrupted",
+	TurnInterruptedPayloadSchema,
+);
+const SessionCreatedEventSchema = eventEnvelope(
+	"session.created",
+	SessionCreatedPayloadSchema,
+);
+const SessionRenamedEventSchema = eventEnvelope(
+	"session.renamed",
+	SessionRenamedPayloadSchema,
+);
+const SessionStatusEventSchema = eventEnvelope(
+	"session.status",
+	SessionStatusPayloadSchema,
+);
+const SessionProviderChangedEventSchema = eventEnvelope(
+	"session.provider_changed",
+	SessionProviderChangedPayloadSchema,
+);
+const PermissionAskedEventSchema = eventEnvelope(
+	"permission.asked",
+	PermissionAskedPayloadSchema,
+);
+const PermissionResolvedEventSchema = eventEnvelope(
+	"permission.resolved",
+	PermissionResolvedPayloadSchema,
+);
+const QuestionAskedEventSchema = eventEnvelope(
+	"question.asked",
+	QuestionAskedPayloadSchema,
+);
+const QuestionResolvedEventSchema = eventEnvelope(
+	"question.resolved",
+	QuestionResolvedPayloadSchema,
+);
+
+// ─── Canonical Event Schema (Union of all 20 event types) ──────────────────
+
+export const CanonicalEventSchema = Schema.Union(
+	MessageCreatedEventSchema,
+	TextDeltaEventSchema,
+	ThinkingStartEventSchema,
+	ThinkingDeltaEventSchema,
+	ThinkingEndEventSchema,
+	ToolStartedEventSchema,
+	ToolRunningEventSchema,
+	ToolCompletedEventSchema,
+	ToolInputUpdatedEventSchema,
+	TurnCompletedEventSchema,
+	TurnErrorEventSchema,
+	TurnInterruptedEventSchema,
+	SessionCreatedEventSchema,
+	SessionRenamedEventSchema,
+	SessionStatusEventSchema,
+	SessionProviderChangedEventSchema,
+	PermissionAskedEventSchema,
+	PermissionResolvedEventSchema,
+	QuestionAskedEventSchema,
+	QuestionResolvedEventSchema,
+);
+
+// ─── Stored Event Schema ───────────────────────────────────────────────────
+
+export const StoredEventSchema = Schema.extend(
+	CanonicalEventSchema,
+	Schema.Struct({
+		sequence: Schema.Number,
+		streamVersion: Schema.Number,
+	}),
+);
+
 // ─── Runtime Payload Validation ─────────────────────────────────────────────
 
 import { PersistenceError } from "./errors.js";
@@ -342,15 +629,15 @@ export function validateEventPayload(event: CanonicalEvent): void {
 	const data = event.data as unknown as Record<string, unknown>;
 	const missing = required.filter((field) => data[field] === undefined);
 	if (missing.length > 0) {
-		throw new PersistenceError(
-			"SCHEMA_VALIDATION_FAILED",
-			`Event ${event.type} missing required fields: ${missing.join(", ")}`,
-			{
+		throw new PersistenceError({
+			code: "SCHEMA_VALIDATION_FAILED",
+			message: `Event ${event.type} missing required fields: ${missing.join(", ")}`,
+			context: {
 				eventId: event.eventId,
 				sessionId: event.sessionId,
 				type: event.type,
 				missing,
 			},
-		);
+		});
 	}
 }

@@ -15,7 +15,8 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
@@ -78,7 +79,7 @@ function filterTestSlugs(allSlugs: string[]): string[] {
 
 // ─── Test setup ──────────────────────────────────────────────────────────────
 
-let daemon: Daemon;
+let daemon: DaemonHandle;
 let baseUrl: string;
 let tmpDir: string;
 const projectDirs: string[] = [];
@@ -105,7 +106,7 @@ test.beforeAll(async () => {
 		projectDirs.push(dir);
 	}
 
-	daemon = new Daemon({
+	daemon = await startDaemonProcess({
 		port: 0,
 		host: "127.0.0.1",
 		configDir: join(tmpDir, "config"),
@@ -116,8 +117,6 @@ test.beforeAll(async () => {
 		staticDir,
 		logLevel: "error",
 	});
-
-	await daemon.start();
 
 	// Add projects with staggered timestamps so ordering is deterministic.
 	// alpha is oldest, gamma is newest.
@@ -131,7 +130,12 @@ test.beforeAll(async () => {
 	// Wait for at least one healthy instance
 	const deadline = Date.now() + 15_000;
 	while (Date.now() < deadline) {
-		if (daemon.getInstances().some((i) => i.status === "healthy")) break;
+		if (
+			daemon
+				.getInstances()
+				.some((i: { status: string }) => i.status === "healthy")
+		)
+			break;
 		await sleep(250);
 	}
 

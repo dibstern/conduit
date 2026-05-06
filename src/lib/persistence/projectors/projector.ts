@@ -23,16 +23,16 @@ export function assertHandledOrIgnored(
 	event: StoredEvent,
 ): void {
 	if ((projector.handles as readonly string[]).includes(event.type)) {
-		throw new PersistenceError(
-			"PROJECTION_FAILED",
-			`Projector "${projector.name}" declares it handles "${event.type}" but has no implementation`,
-			{
+		throw new PersistenceError({
+			code: "PROJECTION_FAILED",
+			message: `Projector "${projector.name}" declares it handles "${event.type}" but has no implementation`,
+			context: {
 				projectorName: projector.name,
 				eventType: event.type,
 				sequence: event.sequence,
 				sessionId: event.sessionId,
 			},
-		);
+		});
 	}
 }
 

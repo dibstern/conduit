@@ -4,6 +4,7 @@ import {
 	type SQLInputValue,
 	type StatementSync,
 } from "node:sqlite";
+import { Effect, Exit } from "effect";
 
 /**
  * Thin wrapper around Node 22+ `node:sqlite` DatabaseSync.
@@ -154,6 +155,59 @@ export class SqliteClient {
 		} finally {
 			this.transactionDepth--;
 		}
+	}
+
+	/**
+	 * Effect-based transaction method. Mirrors `runInTransaction` semantics:
+	 * - depth 0: BEGIN / COMMIT / ROLLBACK
+	 * - depth > 0: SAVEPOINT / RELEASE / ROLLBACK TO (nested)
+	 */
+	runInTransactionEffect<A, E>(
+		effect: Effect.Effect<A, E>,
+	): Effect.Effect<A, E> {
+		if (this.transactionDepth === 0) {
+			return Effect.acquireUseRelease(
+				Effect.sync(() => {
+					this.transactionDepth++;
+					this.db.exec("BEGIN");
+				}),
+				() => effect,
+				(_, exit) =>
+					Effect.sync(() => {
+						try {
+							if (Exit.isSuccess(exit)) {
+								this.db.exec("COMMIT");
+							} else {
+								this.db.exec("ROLLBACK");
+							}
+						} finally {
+							this.transactionDepth--;
+						}
+					}),
+			);
+		}
+
+		const name = `sp_${++this.savepointCounter}`;
+		return Effect.acquireUseRelease(
+			Effect.sync(() => {
+				this.transactionDepth++;
+				this.db.exec(`SAVEPOINT ${name}`);
+			}),
+			() => effect,
+			(_, exit) =>
+				Effect.sync(() => {
+					try {
+						if (Exit.isSuccess(exit)) {
+							this.db.exec(`RELEASE ${name}`);
+						} else {
+							this.db.exec(`ROLLBACK TO ${name}`);
+							this.db.exec(`RELEASE ${name}`);
+						}
+					} finally {
+						this.transactionDepth--;
+					}
+				}),
+		);
 	}
 
 	close(): void {

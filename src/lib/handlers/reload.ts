@@ -3,52 +3,59 @@
 // prompt picks up newly-added skills/commands from disk. Also refreshes the
 // models and commands lists so the client's command palette stays current.
 
+import { Effect } from "effect";
+import {
+	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
+} from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { handleGetModels } from "./model.js";
 import type { PayloadMap } from "./payloads.js";
-import { resolveSession } from "./resolve-session.js";
 import { handleGetCommands } from "./settings.js";
-import type { HandlerDeps } from "./types.js";
 
-export async function handleReloadProviderSession(
-	deps: HandlerDeps,
+export const handleReloadProviderSession = (
 	clientId: string,
 	_payload: PayloadMap["reload_provider_session"],
-): Promise<void> {
-	const activeId = resolveSession(deps, clientId);
-	if (!activeId) {
-		deps.wsHandler.sendTo(
-			clientId,
-			new RelayError("No active session to reload", {
-				code: "NO_SESSION",
-			}).toSystemError(),
-		);
-		return;
-	}
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const log = yield* LoggerTag;
 
-	deps.log.info(
-		`client=${clientId} session=${activeId} Reloading provider session`,
-	);
-
-	if (deps.orchestrationEngine) {
-		try {
-			await deps.orchestrationEngine.dispatch({
-				type: "end_session",
-				sessionId: activeId,
-			});
-		} catch (err) {
-			// Don't abort -- still refresh lists so the client isn't stuck.
-			deps.log.warn(`endSession failed: ${formatErrorDetail(err)}`);
+		const activeId = wsHandler.getClientSession(clientId);
+		if (!activeId) {
+			wsHandler.sendTo(
+				clientId,
+				new RelayError("No active session to reload", {
+					code: "NO_SESSION",
+				}).toSystemError(),
+			);
+			return;
 		}
-	}
 
-	// Refresh both models (triggers fresh Claude discover()) and commands so the
-	// client's command palette picks up new skills/commands from disk.
-	await handleGetModels(deps, clientId, {});
-	await handleGetCommands(deps, clientId, {});
+		log.info(
+			`client=${clientId} session=${activeId} Reloading provider session`,
+		);
 
-	deps.wsHandler.sendTo(clientId, {
-		type: "provider_session_reloaded",
-		sessionId: activeId,
+		// Try to end the orchestration engine session (optional service)
+		const engineResult = yield* Effect.either(
+			Effect.gen(function* () {
+				const engine = yield* OrchestrationEngineTag;
+				yield* Effect.tryPromise(() =>
+					engine.dispatch({ type: "end_session", sessionId: activeId }),
+				);
+			}),
+		);
+		if (engineResult._tag === "Left") {
+			log.warn(`endSession failed: ${formatErrorDetail(engineResult.left)}`);
+		}
+
+		// Refresh models and commands
+		yield* handleGetModels(clientId, {});
+		yield* handleGetCommands(clientId, {});
+
+		wsHandler.sendTo(clientId, {
+			type: "provider_session_reloaded",
+			sessionId: activeId,
+		});
 	});
-}

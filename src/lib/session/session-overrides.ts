@@ -3,8 +3,6 @@
 // processing timeout. Each session has independent overrides. A global
 // defaultModel provides the fallback when no per-session model is set.
 
-import { TrackedService } from "../daemon/tracked-service.js";
-
 export interface ModelOverride {
 	providerID: string;
 	modelID: string;
@@ -21,7 +19,7 @@ interface SessionState {
 	processingTimeoutCallback: (() => void) | null;
 }
 
-export class SessionOverrides extends TrackedService {
+export class SessionOverrides {
 	/** Global default model — new sessions inherit this when no per-session model is set. */
 	defaultModel: ModelOverride | undefined = undefined;
 
@@ -108,7 +106,7 @@ export class SessionOverrides extends TrackedService {
 	clearSession(sessionId: string): void {
 		const state = this.sessions.get(sessionId);
 		if (state?.processingTimer) {
-			this.clearTrackedTimer(state.processingTimer);
+			clearTimeout(state.processingTimer);
 		}
 		this.sessions.delete(sessionId);
 	}
@@ -119,10 +117,10 @@ export class SessionOverrides extends TrackedService {
 	startProcessingTimeout(sessionId: string, onTimeout: () => void): void {
 		const s = this.getOrCreate(sessionId);
 		if (s.processingTimer) {
-			this.clearTrackedTimer(s.processingTimer);
+			clearTimeout(s.processingTimer);
 		}
 		s.processingTimeoutCallback = onTimeout;
-		s.processingTimer = this.delayed(() => {
+		s.processingTimer = setTimeout(() => {
 			s.processingTimer = null;
 			s.processingTimeoutCallback = null;
 			onTimeout();
@@ -139,8 +137,8 @@ export class SessionOverrides extends TrackedService {
 		const state = this.sessions.get(sessionId);
 		if (state?.processingTimer !== null && state?.processingTimeoutCallback) {
 			const cb = state.processingTimeoutCallback;
-			this.clearTrackedTimer(state.processingTimer);
-			state.processingTimer = this.delayed(() => {
+			clearTimeout(state.processingTimer);
+			state.processingTimer = setTimeout(() => {
 				state.processingTimer = null;
 				state.processingTimeoutCallback = null;
 				cb();
@@ -152,7 +150,7 @@ export class SessionOverrides extends TrackedService {
 	clearProcessingTimeout(sessionId: string): void {
 		const state = this.sessions.get(sessionId);
 		if (state?.processingTimer) {
-			this.clearTrackedTimer(state.processingTimer);
+			clearTimeout(state.processingTimer);
 			state.processingTimer = null;
 		}
 		if (state) {
@@ -171,15 +169,14 @@ export class SessionOverrides extends TrackedService {
 	dispose(): void {
 		for (const [, state] of this.sessions) {
 			if (state.processingTimer) {
-				this.clearTrackedTimer(state.processingTimer);
+				clearTimeout(state.processingTimer);
 			}
 		}
 		this.sessions.clear();
 	}
 
-	/** Cancel all tracked work (timers, promises) and dispose session state. */
-	override async drain(): Promise<void> {
+	/** Cancel all tracked work (timers) and dispose session state. */
+	async drain(): Promise<void> {
 		this.dispose();
-		await super.drain();
 	}
 }

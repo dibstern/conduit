@@ -82,7 +82,7 @@ export type IPCCommand =
 	| { cmd: "get_status" }
 	| { cmd: "list_projects" }
 	| { cmd: "shutdown" }
-	| { cmd: "restart_with_config" }
+	| { cmd: "restart_with_config"; config?: Record<string, unknown> }
 	| { cmd: "add_project"; directory: string }
 	| { cmd: "remove_project"; slug: string }
 	| { cmd: "set_project_title"; slug: string; title: string }
@@ -293,13 +293,6 @@ export interface ProjectRelayConfig {
 	 * Default: 750ms. Tests can use a shorter interval for faster feedback.
 	 */
 	messagePollerInterval?: number;
-	/**
-	 * Optional service registry for tracking drainable services.
-	 * When provided, relay services (pollers, SSE consumer, etc.) register
-	 * themselves so the daemon can drain them all on shutdown.
-	 * Standalone/test usage works without it.
-	 */
-	registry?: import("./daemon/service-registry.js").ServiceRegistry;
 	/** Optional: shared PersistenceLayer for SQLite event store. */
 	persistence?: import("./persistence/persistence-layer.js").PersistenceLayer;
 }

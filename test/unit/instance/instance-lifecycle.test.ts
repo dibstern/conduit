@@ -1,16 +1,16 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	type DaemonConfig,
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
 import { buildIPCHandlers } from "../../../src/lib/daemon/daemon-ipc.js";
 import { createCommandRouter } from "../../../src/lib/daemon/ipc-protocol.js";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig, StoredProject } from "../../../src/lib/types.js";
 
@@ -54,24 +54,44 @@ function makeIPCContext(manager: InstanceManager, _configDir: string) {
 
 describe("instance lifecycle integration", () => {
 	let tmpDir: string;
+	let daemon: DaemonHandle | null = null;
 
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "instance-lifecycle-"));
 	});
 
-	it("daemon with opencodeUrl creates default instance", () => {
-		const daemon = new Daemon({
+	afterEach(async () => {
+		try {
+			await daemon?.stop();
+		} catch {
+			// ignore
+		}
+		daemon = null;
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("daemon with opencodeUrl creates default instance", async () => {
+		daemon = await startDaemonProcess({
 			port: 0,
 			configDir: tmpDir,
+			socketPath: join(tmpDir, "relay.sock"),
+			pidPath: join(tmpDir, "daemon.pid"),
 			opencodeUrl: "http://localhost:4096",
+			smartDefault: false,
 		});
 		expect(daemon.getInstances()).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		expect(daemon.getInstances()[0]!.id).toBe("default");
 	});
 
-	it("daemon without opencodeUrl has no instances", () => {
-		const daemon = new Daemon({ port: 0, configDir: tmpDir });
+	it("daemon without opencodeUrl has no instances (smartDefault=false)", async () => {
+		daemon = await startDaemonProcess({
+			port: 0,
+			configDir: tmpDir,
+			socketPath: join(tmpDir, "relay.sock"),
+			pidPath: join(tmpDir, "daemon.pid"),
+			smartDefault: false,
+		});
 		expect(daemon.getInstances()).toHaveLength(0);
 	});
 
@@ -108,10 +128,13 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("addProject assigns instanceId from available instances", async () => {
-		const daemon = new Daemon({
+		daemon = await startDaemonProcess({
 			port: 0,
 			configDir: tmpDir,
+			socketPath: join(tmpDir, "relay.sock"),
+			pidPath: join(tmpDir, "daemon.pid"),
 			opencodeUrl: "http://localhost:4096",
+			smartDefault: false,
 		});
 		const project = await daemon.addProject("/tmp/lifecycle-test");
 		expect(project.instanceId).toBe("default");
@@ -120,7 +143,7 @@ describe("instance lifecycle integration", () => {
 	// ─── IPC round-trip tests ─────────────────────────────────────────────────
 
 	it("instance_add IPC command returns ok:true with instance data", async () => {
-		const manager = new InstanceManager(new ServiceRegistry());
+		const manager = new InstanceManager();
 		const ctx = makeIPCContext(manager, tmpDir);
 		const handlers = buildIPCHandlers(ctx, () => ({
 			ok: true,
@@ -162,7 +185,7 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("instance_remove IPC command after adding returns ok:true", async () => {
-		const manager = new InstanceManager(new ServiceRegistry());
+		const manager = new InstanceManager();
 		const ctx = makeIPCContext(manager, tmpDir);
 		const handlers = buildIPCHandlers(ctx, () => ({
 			ok: true,

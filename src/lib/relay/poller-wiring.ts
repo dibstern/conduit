@@ -3,18 +3,16 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { WebSocketHandler } from "../server/ws-handler.js";
-import type { SessionManager } from "../session/session-manager.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
+import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
-import type { MessagePollerManager } from "./message-poller-manager.js";
 import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
@@ -22,14 +20,28 @@ import type { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEStream } from "./sse-stream.js";
 import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 
+/** Structural interface for the message poller manager's capabilities needed by poller wiring. */
+interface PollerManagerLike {
+	on(
+		event: "events",
+		callback: (messages: RelayMessage[], sessionId: string) => void,
+	): void;
+	notifySSEEvent(sessionId: string): void;
+}
+
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
+/** Narrowed SessionManager capabilities needed by poller wiring. */
+interface SessionManagerLike {
+	getSessionParentMap(): Map<string, string>;
+}
+
 export interface PollerWiringDeps {
-	pollerManager: MessagePollerManager;
+	pollerManager: PollerManagerLike;
 	sseStream: SSEStream;
-	statusPoller: SessionStatusPoller;
-	wsHandler: WebSocketHandler;
-	sessionMgr: SessionManager;
+	statusPoller: SessionStatusPollerService;
+	wsHandler: WebSocketHandlerShape;
+	sessionMgr: SessionManagerLike;
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	config: {

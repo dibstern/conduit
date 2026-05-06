@@ -113,15 +113,15 @@ export class ReadQueryService {
 			);
 			return row?.content;
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getToolContent failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getToolContent failed",
+				context: {
 					method: "getToolContent",
 					toolId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -142,15 +142,15 @@ export class ReadQueryService {
 				forkPointEvent: row.fork_point_event,
 			};
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getForkMetadata failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getForkMetadata failed",
+				context: {
 					method: "getForkMetadata",
 					sessionId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -172,15 +172,15 @@ export class ReadQueryService {
 				"SELECT * FROM sessions ORDER BY updated_at DESC",
 			);
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.listSessions failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.listSessions failed",
+				context: {
 					method: "listSessions",
 					opts,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -195,15 +195,15 @@ export class ReadQueryService {
 			);
 			return row?.status;
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getSessionStatus failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getSessionStatus failed",
+				context: {
 					method: "getSessionStatus",
 					sessionId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -219,14 +219,14 @@ export class ReadQueryService {
 			}
 			return result;
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getAllSessionStatuses failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getAllSessionStatuses failed",
+				context: {
 					method: "getAllSessionStatuses",
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -303,16 +303,16 @@ export class ReadQueryService {
 				[sessionId],
 			);
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getSessionMessages failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getSessionMessages failed",
+				context: {
 					method: "getSessionMessages",
 					sessionId,
 					opts,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -324,15 +324,15 @@ export class ReadQueryService {
 				[sessionId],
 			);
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getSessionTurns failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getSessionTurns failed",
+				context: {
 					method: "getSessionTurns",
 					sessionId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -345,14 +345,14 @@ export class ReadQueryService {
 				"SELECT * FROM pending_approvals WHERE status = 'pending' ORDER BY created_at ASC",
 			);
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getPendingApprovals failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getPendingApprovals failed",
+				context: {
 					method: "getPendingApprovals",
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -364,15 +364,15 @@ export class ReadQueryService {
 				[sessionId],
 			);
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getPendingApprovalsForSession failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getPendingApprovalsForSession failed",
+				context: {
 					method: "getPendingApprovalsForSession",
 					sessionId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -386,15 +386,15 @@ export class ReadQueryService {
 				[messageId],
 			);
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getMessageParts failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getMessageParts failed",
+				context: {
 					method: "getMessageParts",
 					messageId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 
@@ -442,15 +442,15 @@ export class ReadQueryService {
 				parts: partsByMessage.get(m.id) ?? [],
 			}));
 		} catch (err) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"ReadQueryService.getSessionMessagesWithParts failed",
-				{
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getSessionMessagesWithParts failed",
+				context: {
 					method: "getSessionMessagesWithParts",
 					sessionId,
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 	}
 }

@@ -4,6 +4,11 @@
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
+import type {
+	PollerManagerShape,
+	SessionManagerShape,
+} from "../effect/services.js";
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
@@ -11,15 +16,11 @@ import type { ProviderStateService } from "../persistence/provider-state-service
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
-import type { MessagePollerManager } from "../relay/message-poller-manager.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
-import type { PayloadMap } from "./payloads.js";
 
 /** Instance management capability group — only available in daemon mode. */
 export interface InstanceManagementDeps {
@@ -69,7 +70,7 @@ export interface HandlerDeps {
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 	};
 	client: OpenCodeAPI;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerShape;
 	permissionBridge: PermissionBridge;
 	questionBridge: QuestionBridge;
 	overrides: SessionOverrides;
@@ -77,11 +78,11 @@ export interface HandlerDeps {
 	config: ProjectRelayConfig;
 	log: Logger;
 	/** Session status poller for processing state */
-	statusPoller: Pick<SessionStatusPoller, "isProcessing">;
+	statusPoller: Pick<SessionStatusPollerService, "isProcessing">;
 	/** Shared session registry for client→session viewer tracking */
 	registry: SessionRegistry;
 	/** Message poller manager — used to start REST polling when viewing sessions */
-	pollerManager: Pick<MessagePollerManager, "isPolling" | "startPolling">;
+	pollerManager: PollerManagerShape;
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;
 	/** Fork-point metadata store — used to persist forkMessageId and parentID */
 	forkMeta: {
@@ -111,12 +112,6 @@ export interface HandlerDeps {
 	/** Provider state service for resume cursor persistence (optional). */
 	providerStateService?: ProviderStateService;
 }
-
-export type MessageHandler<K extends keyof PayloadMap = keyof PayloadMap> = (
-	deps: HandlerDeps,
-	clientId: string,
-	payload: PayloadMap[K],
-) => Promise<void>;
 
 // Re-export PromptOptions so prompt.ts can use it without a separate import
 export type { PromptOptions };

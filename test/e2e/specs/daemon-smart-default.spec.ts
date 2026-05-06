@@ -1,6 +1,6 @@
 // ─── Daemon Smart Default E2E Tests ──────────────────────────────────────────
 // Full integration tests for the smart default instance detection.
-// Creates a Daemon WITHOUT an explicit opencodeUrl — it must auto-detect
+// Creates a daemon WITHOUT an explicit opencodeUrl — it must auto-detect
 // the running OpenCode instance at localhost:4096 via probeOpenCode().
 //
 // Verifies:
@@ -18,11 +18,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test as base, expect } from "@playwright/test";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
 
 interface SmartDaemonInfo {
-	daemon: Daemon;
+	daemon: DaemonHandle;
 	port: number;
 	baseUrl: string;
 	projectUrl: string;
@@ -52,7 +53,7 @@ const test = base.extend<
 			const tmpDir = mkdtempSync(join(tmpdir(), "e2e-smart-default-"));
 
 			// KEY: no opencodeUrl, smartDefault: true (the default)
-			const daemon = new Daemon({
+			const daemon = await startDaemonProcess({
 				port: 0,
 				host: "127.0.0.1",
 				configDir: tmpDir,
@@ -63,8 +64,6 @@ const test = base.extend<
 				logLevel: "error",
 				// No opencodeUrl! Smart default should auto-detect.
 			});
-
-			await daemon.start();
 
 			// Register a project so we have a route
 			const project = await daemon.addProject(process.cwd());
@@ -77,7 +76,8 @@ const test = base.extend<
 			const timeout = 15_000;
 			while (Date.now() - start < timeout) {
 				const instances = daemon.getInstances();
-				if (instances.some((i) => i.status === "healthy")) break;
+				if (instances.some((i: { status: string }) => i.status === "healthy"))
+					break;
 				await new Promise((r) => setTimeout(r, 250));
 			}
 
@@ -114,7 +114,9 @@ test.describe("Smart Default Detection", () => {
 		const instances = daemon.getInstances();
 
 		// Should have exactly one "default" instance
-		const defaultInst = instances.find((i) => i.id === "default");
+		const defaultInst = instances.find(
+			(i: { id: string }) => i.id === "default",
+		);
 		expect(defaultInst).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(defaultInst!.name).toBe("Default");

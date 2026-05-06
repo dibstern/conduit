@@ -1,7 +1,7 @@
 // ─── Property-Based Tests: Error Handling Foundation (Ticket 0.5) ────────────
 //
 // Properties tested:
-// P1: RelayError hierarchy — all subclasses are instanceof RelayError and Error
+// P1: Error hierarchy — all errors are instanceof Error with _tag discriminant
 //     → Source: AC1 (structured error classes)
 // P2: toJSON() always produces valid { error: { code, message } } shape
 //     → Source: AC2 (error formatting for HTTP)
@@ -11,7 +11,7 @@
 //     → Source: AC2 (sensitive data filtering)
 // P5: wrapError preserves the cause chain
 //     → Source: AC4 (error wrapping utility)
-// P6: Error code is always a non-empty string
+// P6: Error _tag is always a non-empty string
 //     → Source: AC1 (machine-readable error code)
 
 import fc from "fast-check";
@@ -91,20 +91,20 @@ const arbRelayError = fc
 			new RelayError(message, { code, statusCode, context }),
 	);
 
-// ─── Generators: subclass errors ────────────────────────────────────────────
+// ─── Generators: subclass errors (Schema.TaggedError) ──────────────────────
 
 const errorSubclasses = [
-	{ Class: OpenCodeConnectionError, expectedCode: "OPENCODE_UNREACHABLE" },
-	{ Class: SSEConnectionError, expectedCode: "SSE_DISCONNECTED" },
-	{ Class: WebSocketError, expectedCode: "WEBSOCKET_ERROR" },
-	{ Class: AuthenticationError, expectedCode: "AUTH_FAILED" },
-	{ Class: ConfigurationError, expectedCode: "CONFIG_INVALID" },
+	{ Class: OpenCodeConnectionError, expectedTag: "OpenCodeConnectionError" },
+	{ Class: SSEConnectionError, expectedTag: "SSEConnectionError" },
+	{ Class: WebSocketError, expectedTag: "WebSocketError" },
+	{ Class: AuthenticationError, expectedTag: "AuthenticationError" },
+	{ Class: ConfigurationError, expectedTag: "ConfigurationError" },
 ] as const;
 
-// ─── P1: Inheritance hierarchy ──────────────────────────────────────────────
+// ─── P1: Error hierarchy ──────────────────────────────────────────────────
 
 describe("Ticket 0.5 — Error Handling PBT", () => {
-	describe("P1: RelayError hierarchy (AC1)", () => {
+	describe("P1: Error hierarchy (AC1)", () => {
 		it("property: all RelayError instances are instanceof Error", () => {
 			fc.assert(
 				fc.property(arbRelayError, (err) => {
@@ -115,13 +115,13 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 			);
 		});
 
-		it("property: all subclasses are instanceof RelayError and Error", () => {
+		it("property: all Schema.TaggedError subclasses are instanceof Error with _tag", () => {
 			fc.assert(
 				fc.property(edgeCaseString, (message) => {
-					for (const { Class } of errorSubclasses) {
-						const err = new Class(message);
+					for (const { Class, expectedTag } of errorSubclasses) {
+						const err = new Class({ message });
 						expect(err).toBeInstanceOf(Error);
-						expect(err).toBeInstanceOf(RelayError);
+						expect(err._tag).toBe(expectedTag);
 						expect(err).toBeInstanceOf(Class);
 					}
 				}),
@@ -136,13 +136,14 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					fc.string({ minLength: 1, maxLength: 50 }),
 					fc.integer({ min: 200, max: 599 }),
 					(message, endpoint, responseStatus) => {
-						const err = new OpenCodeApiError(message, {
+						const err = new OpenCodeApiError({
+							message,
 							endpoint,
 							responseStatus,
 						});
 						expect(err.endpoint).toBe(endpoint);
 						expect(err.responseStatus).toBe(responseStatus);
-						expect(err).toBeInstanceOf(RelayError);
+						expect(err._tag).toBe("OpenCodeApiError");
 					},
 				),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -162,7 +163,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					expect(json.error).toHaveProperty("message");
 					expect(typeof json.error.code).toBe("string");
 					expect(typeof json.error.message).toBe("string");
-					expect(json.error.code).toBe(err.code);
+					expect(json.error.code).toBe(err._tag);
 					expect(json.error.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -175,7 +176,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					const json = err.toJSON();
 					const serialized = JSON.stringify(json);
 					const parsed = JSON.parse(serialized);
-					expect(parsed.error.code).toBe(err.code);
+					expect(parsed.error.code).toBe(err._tag);
 					expect(parsed.error.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -191,7 +192,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 				fc.property(arbRelayError, (err) => {
 					const ws = err.toWebSocket();
 					expect(ws.type).toBe("error");
-					expect(ws.code).toBe(err.code);
+					expect(ws.code).toBe(err._tag);
 					expect(ws.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -285,7 +286,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 				fc.property(edgeCaseString, arbContext, (message, context) => {
 					const original = new Error(message);
 					const wrapped = wrapError(original, OpenCodeConnectionError, context);
-					expect(wrapped).toBeInstanceOf(RelayError);
+					expect(wrapped).toBeInstanceOf(Error);
 					expect(wrapped).toBeInstanceOf(OpenCodeConnectionError);
 					expect(wrapped.cause).toBe(original);
 					expect(wrapped.message).toBe(message);
@@ -305,7 +306,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					),
 					(thrown) => {
 						const wrapped = wrapError(thrown, SSEConnectionError);
-						expect(wrapped).toBeInstanceOf(RelayError);
+						expect(wrapped).toBeInstanceOf(Error);
 						expect(wrapped.cause).toBeInstanceOf(Error);
 					},
 				),
@@ -314,16 +315,16 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 		});
 	});
 
-	// ─── P6: Error codes are non-empty ────────────────────────────────────
+	// ─── P6: Error _tag is always non-empty ────────────────────────────────
 
-	describe("P6: Error codes are always non-empty strings (AC1)", () => {
-		it("property: all subclass error codes are non-empty", () => {
+	describe("P6: Error _tag is always a non-empty string (AC1)", () => {
+		it("property: all Schema.TaggedError subclass _tags are non-empty", () => {
 			fc.assert(
 				fc.property(edgeCaseString, (message) => {
-					for (const { Class, expectedCode } of errorSubclasses) {
-						const err = new Class(message);
-						expect(err.code).toBe(expectedCode);
-						expect(err.code.length).toBeGreaterThan(0);
+					for (const { Class, expectedTag } of errorSubclasses) {
+						const err = new Class({ message });
+						expect(err._tag).toBe(expectedTag);
+						expect(err._tag.length).toBeGreaterThan(0);
 					}
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },

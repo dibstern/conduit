@@ -213,12 +213,13 @@ export class ProjectionRunner {
 	projectEvent(event: StoredEvent): void {
 		// (CH4) Lifecycle check: hard error if projecting before recovery.
 		if (!this._recovered) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"recover() must be called before projectEvent(). " +
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message:
+					"recover() must be called before projectEvent(). " +
 					"Ensure recover() is called in relay-stack.ts before SSE wiring.",
-				{ sequence: event.sequence, type: event.type },
-			);
+				context: { sequence: event.sequence, type: event.type },
+			});
 		}
 
 		const matching = this.projectorsByEventType.get(event.type) ?? [];
@@ -265,15 +266,16 @@ export class ProjectionRunner {
 	projectBatch(events: readonly StoredEvent[]): void {
 		if (events.length === 0) return;
 		if (!this._recovered) {
-			throw new PersistenceError(
-				"PROJECTION_FAILED",
-				"recover() must be called before projectBatch(). " +
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message:
+					"recover() must be called before projectBatch(). " +
 					"Ensure recover() is called in relay-stack.ts before SSE wiring.",
-				{
+				context: {
 					eventCount: events.length,
 					firstSequence: events[0]?.sequence ?? 0,
 				},
-			);
+			});
 		}
 
 		this.db.runInTransaction(() => {
@@ -705,16 +707,16 @@ export class ProjectionRunner {
 
 	private rowToStoredEvent(row: EventRow): StoredEvent {
 		if (!CANONICAL_EVENT_TYPES.includes(row.type as CanonicalEventType)) {
-			throw new PersistenceError(
-				"UNKNOWN_EVENT_TYPE",
-				`Unknown event type in database: ${row.type}`,
-				{
+			throw new PersistenceError({
+				code: "UNKNOWN_EVENT_TYPE",
+				message: `Unknown event type in database: ${row.type}`,
+				context: {
 					sequence: row.sequence,
 					eventId: row.event_id,
 					sessionId: row.session_id,
 					type: row.type,
 				},
-			);
+			});
 		}
 
 		let data: unknown;
@@ -722,10 +724,10 @@ export class ProjectionRunner {
 		try {
 			data = JSON.parse(row.data);
 		} catch (err) {
-			throw new PersistenceError(
-				"DESERIALIZATION_FAILED",
-				"Failed to parse event data JSON",
-				{
+			throw new PersistenceError({
+				code: "DESERIALIZATION_FAILED",
+				message: "Failed to parse event data JSON",
+				context: {
 					sequence: row.sequence,
 					eventId: row.event_id,
 					sessionId: row.session_id,
@@ -733,21 +735,21 @@ export class ProjectionRunner {
 					rawData: row.data.slice(0, 200),
 					parseError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 		try {
 			metadata = JSON.parse(row.metadata);
 		} catch (err) {
-			throw new PersistenceError(
-				"DESERIALIZATION_FAILED",
-				"Failed to parse event metadata JSON",
-				{
+			throw new PersistenceError({
+				code: "DESERIALIZATION_FAILED",
+				message: "Failed to parse event metadata JSON",
+				context: {
 					sequence: row.sequence,
 					eventId: row.event_id,
 					rawMetadata: row.metadata.slice(0, 200),
 					parseError: err instanceof Error ? err.message : String(err),
 				},
-			);
+			});
 		}
 
 		return {

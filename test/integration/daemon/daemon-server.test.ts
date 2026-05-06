@@ -16,7 +16,8 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Daemon } from "../../../src/lib/daemon/daemon.js";
+import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,8 +58,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 	});
 
 	it("WS upgrade blocks on registering project, calls handleUpgrade when relay becomes ready", async () => {
-		const d = new Daemon(daemonOpts(tmpDir));
-		await d.start();
+		const d = await startDaemonProcess(daemonOpts(tmpDir));
 		const port = d.port;
 
 		// Add project without relay (simulates no OpenCode instance available)
@@ -116,8 +116,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 	});
 
 	it("WS upgrade for non-existent slug destroys socket immediately", async () => {
-		const d = new Daemon(daemonOpts(tmpDir));
-		await d.start();
+		const d = await startDaemonProcess(daemonOpts(tmpDir));
 		const port = d.port;
 
 		const error = await new Promise<Error>((resolve) => {
@@ -150,8 +149,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 	});
 
 	it("WS upgrade returns HTTP 503 when relay fails to become ready", async () => {
-		const d = new Daemon(daemonOpts(tmpDir));
-		await d.start();
+		const d = await startDaemonProcess(daemonOpts(tmpDir));
 		const port = d.port;
 
 		// Add a project, then make it enter "error" state
@@ -210,8 +208,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 	});
 
 	it("WS upgrade on URL that does not match /p/{slug}/ws destroys socket", async () => {
-		const d = new Daemon(daemonOpts(tmpDir));
-		await d.start();
+		const d = await startDaemonProcess(daemonOpts(tmpDir));
 		const port = d.port;
 
 		const error = await new Promise<Error>((resolve) => {
@@ -247,19 +244,25 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 
 describe("instance status broadcast", () => {
 	let tmpDir: string;
+	let daemon: DaemonHandle | null = null;
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir("daemon-broadcast-");
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		try {
+			await daemon?.stop();
+		} catch {
+			// ignore
+		}
+		daemon = null;
 		cleanTmpDir(tmpDir);
 	});
 
-	it("getInstances returns registered instances", () => {
-		const daemon = new Daemon({
-			port: 0,
-			configDir: tmpDir,
+	it("getInstances returns registered instances", async () => {
+		daemon = await startDaemonProcess({
+			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 		});
 		const instances = daemon.getInstances();
@@ -268,16 +271,14 @@ describe("instance status broadcast", () => {
 		expect(instances[0]!.id).toBe("default");
 	});
 
-	it("status_changed listener is wired (does not throw without relays)", () => {
-		const daemon = new Daemon({
-			port: 0,
-			configDir: tmpDir,
+	it("status_changed listener is wired (does not throw without relays)", async () => {
+		daemon = await startDaemonProcess({
+			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 		});
 
-		// The instanceManager emits status_changed events internally.
-		// Verify the daemon constructor wired the listener without errors
-		// by checking getInstances works and the daemon was created successfully.
+		// The daemon wires status_changed events internally.
+		// Verify getInstances works and the daemon was started successfully.
 		expect(daemon.getInstances()).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(daemon.getInstances()[0]!.status).toBe("stopped");
@@ -303,9 +304,8 @@ describe("instance status broadcast", () => {
 		}
 		expect(noAuthRes.status).toBe(401);
 
-		const daemon = new Daemon({
-			port: 0,
-			configDir: tmpDir,
+		daemon = await startDaemonProcess({
+			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 		});
 
@@ -313,7 +313,7 @@ describe("instance status broadcast", () => {
 		// starts immediately (every 5s). Wait for it to transition to healthy.
 		await new Promise<void>((resolve) => {
 			const check = setInterval(() => {
-				const inst = daemon.getInstances()[0];
+				const inst = daemon?.getInstances()[0];
 				if (inst && inst.status === "healthy") {
 					clearInterval(check);
 					resolve();

@@ -5,7 +5,10 @@
 
 import { resolve } from "node:path";
 import { getTailscaleIP } from "../lib/cli/tls.js";
-import { Daemon, type DaemonOptions } from "../lib/daemon/daemon.js";
+import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
+import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
+import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
+import { startDaemonProcess } from "../lib/effect/daemon-main.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCCommand, IPCResponse } from "../lib/types.js";
@@ -82,16 +85,19 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		((cmd: IPCCommand) => sendIPCCommand(DEFAULT_SOCKET_PATH, cmd));
 
 	const checkDaemon =
-		options?.isDaemonRunning ?? (() => Daemon.isRunning(DEFAULT_SOCKET_PATH));
+		options?.isDaemonRunning ?? (() => isDaemonRunning(DEFAULT_SOCKET_PATH));
 
-	const spawnDaemon =
+	const spawnDaemonFn =
 		options?.spawnDaemon ??
 		((opts?: DaemonOptions) =>
-			Daemon.spawn({
-				port: args.port,
-				...(args.host ? { host: args.host } : {}),
-				...opts,
-			}));
+			spawnDaemon(
+				{
+					port: args.port,
+					...(args.host ? { host: args.host } : {}),
+					...opts,
+				},
+				isDaemonRunning,
+			));
 
 	const qr = options?.generateQR ?? generateQR;
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
@@ -113,7 +119,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
 		const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
 		const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
-		const daemon = new Daemon({
+		await startDaemonProcess({
 			port: daemonPort,
 			...(daemonHost ? { host: daemonHost } : {}),
 			configDir: daemonConfigDir,
@@ -128,8 +134,6 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			logLevel: args.logLevel,
 			logFormat: args.logFormat ?? "json",
 		});
-
-		await daemon.start();
 		// Daemon keeps the process alive via its HTTP + IPC servers.
 		// Signal handlers installed by daemon.start() will call daemon.stop().
 		return;
@@ -155,7 +159,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		stdout.write(`\nConduit (foreground)\n`);
 		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
 
-		const daemon = new Daemon({
+		const daemon = await startDaemonProcess({
 			port: args.port,
 			...(args.host ? { host: args.host } : {}),
 			opencodeUrl,
@@ -166,7 +170,6 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			logFormat: args.logFormat ?? "pretty",
 		});
 
-		await daemon.start();
 		await daemon.addProject(cwd);
 
 		// Discover projects from OpenCode's project registry
@@ -628,7 +631,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			exit,
 			ipcSend,
 			checkDaemon,
-			spawnDaemon,
+			spawnDaemon: spawnDaemonFn,
 			getAddr,
 			generateQR: qr,
 		});
@@ -640,7 +643,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	let running = await checkDaemon();
 	if (!running) {
 		try {
-			const result = await spawnDaemon({
+			const result = await spawnDaemonFn({
 				port: args.port,
 				opencodeUrl: `http://localhost:${args.ocPort}`,
 			});

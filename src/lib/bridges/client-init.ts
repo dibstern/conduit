@@ -7,6 +7,7 @@
 // independently testable and relay-stack stays slim.
 
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -14,9 +15,7 @@ import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionManager } from "../session/session-manager.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
-import type { SessionStatusPoller } from "../session/session-status-poller.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
@@ -26,6 +25,30 @@ import type { OpenCodeInstance, RelayMessage } from "../types.js";
 import type { PermissionBridge } from "./permission-bridge.js";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
+
+/** Narrowed SessionManager capabilities needed by client-init. */
+interface SessionManagerLike {
+	getDefaultSessionId(title?: string): Promise<string>;
+	sendDualSessionLists(
+		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
+		options?: {
+			statuses?:
+				| Record<string, import("../instance/sdk-types.js").SessionStatus>
+				| undefined;
+		},
+	): Promise<void>;
+	// Methods used through SessionSwitchDeps (passed to switchClientToSession)
+	loadPreRenderedHistory(
+		sessionId: string,
+		offset?: number,
+	): Promise<{
+		messages: import("../shared-types.js").HistoryMessage[];
+		hasMore: boolean;
+		total?: number;
+	}>;
+	seedPaginationCursor(sessionId: string, messageId: string): void;
+	getLastMessageAtMap?(): ReadonlyMap<string, number>;
+}
 
 export interface ClientInitDeps {
 	wsHandler: {
@@ -40,13 +63,13 @@ export interface ClientInitDeps {
 		markClientBootstrapped: (clientId: string) => void;
 	};
 	client: OpenCodeAPI;
-	sessionMgr: SessionManager;
+	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
 	permissionBridge: Pick<PermissionBridge, "getPending" | "recoverPending">;
 	/** Optional poller for session processing state */
 	statusPoller?: Pick<
-		SessionStatusPoller,
+		SessionStatusPollerService,
 		"isProcessing" | "getCurrentStatuses"
 	>;
 	/** Optional supplier of the current OpenCode instance list */

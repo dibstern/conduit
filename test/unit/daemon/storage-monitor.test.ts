@@ -10,7 +10,6 @@
 // T7:  Custom threshold works
 
 import { describe, expect, it, vi } from "vitest";
-import { ServiceRegistry } from "../../../src/lib/daemon/service-registry.js";
 import type {
 	DiskSpaceOkEvent,
 	LowDiskSpaceEvent,
@@ -59,7 +58,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const belowThreshold = threshold - 1;
 			const statfs = mockStatfs(belowThreshold);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 60_000,
@@ -67,9 +66,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const events: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				events.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) => events.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -85,15 +82,13 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 		it("emits low_disk_space when space is exactly 0", async () => {
 			const statfs = mockStatfs(0);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				_statfs: statfs,
 			});
 
 			const events: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				events.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) => events.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -113,7 +108,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const aboveThreshold = threshold + 1;
 			const statfs = mockStatfs(aboveThreshold);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 60_000,
@@ -122,12 +117,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -141,7 +133,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const threshold = 100 * 1024 * 1024;
 			const statfs = mockStatfs(threshold);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 60_000,
@@ -149,9 +141,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -171,7 +162,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const high = threshold + 1_000_000;
 			const { fn: statfs, next } = mockStatfsControlled([low, high]);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 10,
@@ -180,12 +171,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 
@@ -214,7 +202,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const threshold = 100 * 1024 * 1024;
 			const statfs = mockStatfs(threshold + 1_000_000);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 60_000,
@@ -222,9 +210,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -244,7 +230,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const low3 = threshold - 3;
 			const { fn: statfs, next } = mockStatfsControlled([low1, low2, low3]);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 10,
@@ -252,9 +238,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 
@@ -284,7 +269,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			// low -> high (recovery) -> low (re-drop)
 			const { fn: statfs, next } = mockStatfsControlled([low, high, low]);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 10,
@@ -293,12 +278,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
 			const okEvents: DiskSpaceOkEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
-			monitor.on("disk_space_ok", (data: DiskSpaceOkEvent) =>
-				okEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
+			monitor.onDiskSpaceOk = (data: DiskSpaceOkEvent) => okEvents.push(data);
 
 			monitor.start();
 
@@ -330,7 +312,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 	describe("T6: stop() is idempotent (calling stop twice doesn't throw)", () => {
 		it("does not throw on double stop", () => {
 			const statfs = mockStatfs(1_000_000_000);
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				_statfs: statfs,
 			});
@@ -342,7 +324,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 		it("does not throw when stop called before start", () => {
 			const statfs = mockStatfs(1_000_000_000);
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				_statfs: statfs,
 			});
@@ -359,7 +341,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const belowCustom = customThreshold - 1;
 			const statfs = mockStatfs(belowCustom);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: customThreshold,
 				intervalMs: 60_000,
@@ -367,9 +349,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -386,7 +367,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const available = 200 * 1024 * 1024;
 			const statfs = mockStatfs(available);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: customThreshold,
 				intervalMs: 60_000,
@@ -394,9 +375,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -408,16 +388,15 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			const justBelow100mb = 100 * 1024 * 1024 - 1;
 			const statfs = mockStatfs(justBelow100mb);
 
-			const monitor = new StorageMonitor(new ServiceRegistry(), {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				intervalMs: 60_000,
 				_statfs: statfs,
 			});
 
 			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.on("low_disk_space", (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data),
-			);
+			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
+				lowEvents.push(data);
 
 			monitor.start();
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
@@ -434,12 +413,11 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 	describe("T8: After drain(), interval no longer fires", () => {
 		it("does not call check after drain()", async () => {
 			const threshold = 100 * 1024 * 1024;
-			const registry = new ServiceRegistry();
 			const statfs = vi.fn(async (_path: string) => ({
 				available: threshold + 1_000_000,
 			}));
 
-			const monitor = new StorageMonitor(registry, {
+			const monitor = new StorageMonitor({
 				path: "/tmp",
 				thresholdBytes: threshold,
 				intervalMs: 10, // Short interval so it would fire quickly
@@ -450,8 +428,8 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			// Wait for the initial check to complete
 			await vi.waitFor(() => expect(statfs).toHaveBeenCalledTimes(1));
 
-			// Drain the registry — should cancel the interval
-			await registry.drainAll();
+			// Drain the monitor directly — should cancel the interval
+			await monitor.drain();
 
 			// Record call count after drain
 			const callsAfterDrain = statfs.mock.calls.length;

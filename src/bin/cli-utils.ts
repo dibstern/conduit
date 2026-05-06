@@ -8,6 +8,10 @@ import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 
 import {
+	commandToTaggedRequestPayload,
+	isIpcResponse,
+} from "../lib/effect/ipc-requests.js";
+import {
 	DEFAULT_CONFIG_DIR,
 	DEFAULT_OC_PORT,
 	DEFAULT_PORT,
@@ -304,7 +308,7 @@ function sendIPCOnce(
 		}, timeoutMs);
 
 		client.on("connect", () => {
-			client.write(`${JSON.stringify(cmd)}\n`);
+			client.write(`${JSON.stringify(commandToTaggedRequestPayload(cmd))}\n`);
 		});
 
 		client.on("data", (chunk: Buffer) => {
@@ -315,7 +319,12 @@ function sendIPCOnce(
 				const line = buffer.slice(0, newlineIndex).trim();
 				client.destroy();
 				try {
-					resolve(JSON.parse(line));
+					const parsed = JSON.parse(line);
+					if (!isIpcResponse(parsed)) {
+						reject(new Error(`Invalid IPC response: ${line}`));
+						return;
+					}
+					resolve(parsed);
 				} catch {
 					reject(new Error(`Invalid JSON response: ${line}`));
 				}

@@ -1,6 +1,4 @@
 // src/lib/daemon/port-scanner.ts
-import type { ServiceRegistry } from "./service-registry.js";
-import { TrackedService } from "./tracked-service.js";
 
 export interface PortScannerConfig {
 	portRange: [number, number];
@@ -22,20 +20,20 @@ export type PortScannerEvents = {
 
 type ProbeFn = (port: number) => Promise<boolean>;
 
-export class PortScanner extends TrackedService<PortScannerEvents> {
+export class PortScanner {
 	private config: PortScannerConfig;
 	private probeFn: ProbeFn;
 	private discovered = new Set<number>();
 	private failureCounts = new Map<number, number>();
 	private excluded = new Set<number>();
 	private timer: ReturnType<typeof setInterval> | null = null;
+	private pending = new Set<Promise<unknown>>();
+	private drained = false;
 
-	constructor(
-		registry: ServiceRegistry,
-		config: PortScannerConfig,
-		probeFn: ProbeFn,
-	) {
-		super(registry);
+	// ─── Callbacks ─────────────────────────────────────────────────────────
+	onScan: ((result: ScanResult) => void) | null = null;
+
+	constructor(config: PortScannerConfig, probeFn: ProbeFn) {
 		this.config = config;
 		this.probeFn = probeFn;
 	}
@@ -87,19 +85,32 @@ export class PortScanner extends TrackedService<PortScannerEvents> {
 		}
 
 		const result: ScanResult = { discovered: newlyDiscovered, lost, active };
-		this.emit("scan", result);
+		if (!this.drained) {
+			this.onScan?.(result);
+		}
 		return result;
 	}
 
 	start(): void {
 		this.stop();
-		this.timer = this.repeating(() => void this.scan(), this.config.intervalMs);
+		this.timer = setInterval(() => {
+			const p = this.scan().catch(() => {});
+			this.pending.add(p);
+			p.finally(() => this.pending.delete(p));
+		}, this.config.intervalMs);
 	}
 
 	stop(): void {
 		if (this.timer) {
-			this.clearTrackedTimer(this.timer);
+			clearInterval(this.timer);
 			this.timer = null;
 		}
+	}
+
+	async drain(): Promise<void> {
+		this.drained = true;
+		this.stop();
+		await Promise.allSettled([...this.pending]);
+		this.pending.clear();
 	}
 }

@@ -1,9 +1,15 @@
 // ─── WebSocket Store ─────────────────────────────────────────────────────────
 // Manages WebSocket connection lifecycle and centralized message dispatch.
-// Creates WebSocket synchronously in connect() — no async pre-flight barrier.
-// Server-side waitForRelay() handles relay readiness on the upgrade path.
+// Creates WebSocket synchronously in connect(). The transport module preloads
+// the message decoder; server-side waitForRelay() handles relay readiness.
 
-import type { ConnectionStatus, RelayMessage } from "../types.js";
+import { Effect, Stream } from "effect";
+import {
+	getRuntime,
+	setActiveStreamFiber,
+	wsMessageStream,
+} from "../transport/runtime.js";
+import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { phaseToIdle } from "./chat.svelte.js";
 import { clearInstanceState } from "./instance.svelte.js";
@@ -136,8 +142,8 @@ function fetchRelayStatus(slug: string): void {
 /**
  * Establish WebSocket connection.
  *
- * Creates the WebSocket synchronously — no async pre-flight barrier.
- * The server's waitForRelay() handles relay readiness on the upgrade path.
+ * Creates the WebSocket synchronously. The server's waitForRelay() handles
+ * relay readiness on the upgrade path.
  * A non-blocking relay status fetch runs in parallel for UI display only.
  */
 export function connect(slug?: string): void {
@@ -171,7 +177,6 @@ export function connect(slug?: string): void {
 		`slug=${slug ?? "standalone"}, attempt=${wsState.attempts}`,
 	);
 
-	// Create WebSocket immediately — no async gap.
 	doConnect(slug);
 
 	// Non-blocking relay status check for UI enrichment (shows
@@ -259,40 +264,43 @@ function doConnect(slug: string | undefined): void {
 		wsDebugLog("ws:error", wsState.status);
 	});
 
-	ws.addEventListener("message", (event) => {
-		if (_ws !== ws) return;
+	// ── Message handling via Effect Stream ──────────────────────────────────
+	// The stream handles JSON parsing and cleanup. Self-healing and dispatch
+	// happen in the runForEach callback synchronously per message.
+	getRuntime().then((runtime) => {
+		const fiber = runtime.runFork(
+			Stream.runForEach(wsMessageStream(ws), (msg) =>
+				Effect.sync(() => {
+					if (_ws !== ws) return;
 
-		// Self-healing: if messages arrive but status isn't connected, fix it.
-		// Handles edge cases where onopen might be missed.
-		if (wsState.status !== "connected" && wsState.status !== "processing") {
-			wsDebugLog("self-heal", wsState.status);
-			if (_connectTimeout) {
-				clearTimeout(_connectTimeout);
-				_connectTimeout = null;
-			}
-			setStatus("connected", "Connected");
-			wsState.attempts = 0;
-			wsState.relayStatus = undefined;
-			wsState.relayError = undefined;
-			_reconnectDelay = RECONNECT_BASE_MS;
-		}
+					// Self-healing: if messages arrive but status isn't connected, fix it.
+					if (
+						wsState.status !== "connected" &&
+						wsState.status !== "processing"
+					) {
+						wsDebugLog("self-heal", wsState.status);
+						if (_connectTimeout) {
+							clearTimeout(_connectTimeout);
+							_connectTimeout = null;
+						}
+						setStatus("connected", "Connected");
+						wsState.attempts = 0;
+						wsState.relayStatus = undefined;
+						wsState.relayError = undefined;
+						_reconnectDelay = RECONNECT_BASE_MS;
+					}
 
-		let msg: RelayMessage;
-		try {
-			msg = JSON.parse(event.data) as RelayMessage;
-		} catch {
-			log.warn("Failed to parse message:", event.data);
-			wsDebugLogMessage(wsState.status);
-			return;
-		}
+					wsDebugLogMessage(wsState.status, msg.type, msg);
 
-		wsDebugLogMessage(wsState.status, msg.type, msg);
-
-		try {
-			handleMessage(msg);
-		} catch (err) {
-			log.warn("Handler error for", msg.type, err);
-		}
+					try {
+						handleMessage(msg);
+					} catch (err) {
+						log.warn("Handler error for", msg.type, err);
+					}
+				}),
+			),
+		);
+		setActiveStreamFiber(fiber);
 	});
 }
 
