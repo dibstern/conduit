@@ -3,9 +3,9 @@ import { Deferred, Effect, Exit, Layer, Scope } from "effect";
 import { expect } from "vitest";
 import {
 	ProcessErrorHandlerLayer,
+	ShutdownSignalTag,
 	SignalHandlerLayer,
 } from "../../../src/lib/effect/daemon-layers.js";
-import { ShutdownSignalTag } from "../../../src/lib/effect/services.js";
 
 describe("SignalHandlerLayer", () => {
 	it.scoped("installs signal handlers on layer build", () =>

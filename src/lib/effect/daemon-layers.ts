@@ -4,7 +4,7 @@
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
 import { NodeFileSystem } from "@effect/platform-node";
-import { Data, Deferred, Effect, Layer, Ref } from "effect";
+import { Context, Data, Deferred, Effect, Layer, Ref } from "effect";
 import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
 import {
 	closeHttpServer,
@@ -34,9 +34,15 @@ import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive } from "./port-scanner-layer.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
-import { SessionOverridesTag, ShutdownSignalTag } from "./services.js";
+import { SessionOverridesTag } from "./services.js";
 import { StorageMonitorLive } from "./storage-monitor-layer.js";
 import { VersionCheckerLive } from "./version-checker-layer.js";
+
+/** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
+export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
+	ShutdownSignalTag,
+	Deferred.Deferred<void>
+>() {}
 
 export class DaemonLifecycleLayerError extends Data.TaggedError(
 	"DaemonLifecycleLayerError",
