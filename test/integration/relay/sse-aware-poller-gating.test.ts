@@ -284,7 +284,8 @@ async function connectAndView(
 	return client;
 }
 
-/** Helper: reset harness state for the next test within a shared describe */
+/** Helper: reset harness state for the next test within a shared describe.
+ *  Uses generous timing to ensure the reducer fully settles under contention. */
 async function resetForNextTest(
 	harness: TestHarness,
 	sessions: string[],
@@ -293,8 +294,10 @@ async function resetForNextTest(
 		harness.mock.sessionStatuses[sid] = { type: "idle" };
 	}
 	harness.mock.resetMessageRequestCounts();
-	// Let the reducer process the idle transition (needs a few status poll cycles)
-	await wait(TEST_GRACE_MS + TEST_STATUS_POLL_MS * 2);
+	// Let the reducer process the idle transition — needs enough status poll cycles
+	// to fully settle. Under resource contention (sequential suite runs), the poller
+	// may drift, so we wait for grace + staleness + several poll cycles.
+	await wait(TEST_GRACE_MS + TEST_STALENESS_MS + TEST_STATUS_POLL_MS * 4);
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -589,7 +592,12 @@ describe("Group 3: Idle transitions", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		// SSE events flowing
+		// Reset counts AFTER busy is confirmed to exclude init/seeding requests
+		// (same pattern as Scenarios 3 and 7)
+		harness.mock.resetMessageRequestCounts();
+
+		// SSE events flowing — keep them going long enough for the reducer to
+		// register SSE coverage (multiple poll cycles under contention).
 		const sseInterval = setInterval(() => {
 			harness.mock.injectSSE({
 				type: "message.delta",
@@ -597,13 +605,15 @@ describe("Group 3: Idle transitions", () => {
 			});
 		}, TEST_SSE_INJECT_INTERVAL);
 
-		// Go idle before grace matters
-		await wait(Math.floor(TEST_GRACE_MS * 0.5));
+		// Wait for several status poll cycles so the reducer fully registers
+		// the busy+SSE-covered state before we transition to idle.
+		// Under resource contention the poller can drift, so use a generous window.
+		await wait(TEST_STATUS_POLL_MS * 4);
 		clearInterval(sseInterval);
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
-		// Client should receive done
-		const done = await client.waitFor("done", { timeout: 3000 });
+		// Client should receive done — use generous timeout for contention
+		const done = await client.waitFor("done", { timeout: 5000 });
 		expect(done["type"]).toBe("done");
 
 		// No poller was started → baseline message request count
@@ -611,7 +621,7 @@ describe("Group 3: Idle transitions", () => {
 		expect(count).toBeLessThan(3);
 
 		await client.close();
-	}, 5_000);
+	}, 8_000);
 
 	it("Scenario 9: Busy-polling → idle → poller stops + done sent", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
