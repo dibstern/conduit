@@ -21,6 +21,7 @@ import {
 import type { Fiber } from "effect";
 import {
 	Context,
+	Deferred,
 	Duration,
 	Effect,
 	Layer,
@@ -34,11 +35,12 @@ import {
 import type { DaemonOptions } from "../daemon/daemon-types.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
-import { makeDaemonLive } from "./daemon-layers.js";
+import { makeDaemonLive, ShutdownSignalTag } from "./daemon-layers.js";
 import {
 	type CrashLimitExceeded,
 	runStartupSequence,
 } from "./daemon-startup.js";
+import { KeepAwakeTag } from "./keep-awake-layer.js";
 import {
 	type ConfigTag,
 	type CrashCounterTag,
@@ -438,7 +440,26 @@ export async function startDaemonProcess(
 		}
 		if (typeof config["keepAwake"] === "boolean") {
 			keepAwake = config["keepAwake"];
-			// TODO: Forward keepAwake toggle to KeepAwakeTag after Task 6
+			// AP-22: Forward keepAwake toggle to KeepAwakeTag
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ka = yield* KeepAwakeTag;
+						if (config["keepAwake"]) {
+							yield* ka.activate();
+						} else {
+							yield* ka.deactivate();
+						}
+					}).pipe(
+						Effect.catchAll((e) =>
+							Effect.logWarning(
+								"applyRestartConfig: failed to toggle KeepAwakeTag",
+								{ error: String(e) },
+							),
+						),
+					),
+				);
+			}
 		}
 		if (typeof config["keepAwakeCommand"] === "string") {
 			keepAwakeCommand = config["keepAwakeCommand"];
@@ -972,13 +993,23 @@ export async function startDaemonProcess(
 		getPinHash: () => pinHash,
 		setPinHash: (hash: string) => {
 			pinHash = hash;
-			// Update DaemonConfigRef so AuthManager sees the new pinHash reactively
+			// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash
+			// reactively. AuthManager reads pinHash from DaemonConfigRef.
 			if (daemonRuntime) {
 				daemonRuntime.runPromise(
 					Effect.gen(function* () {
 						const ref = yield* DaemonConfigRefTag;
 						yield* Ref.update(ref, (c) => ({ ...c, pinHash: hash }));
-					}),
+					}).pipe(
+						Effect.catchAll((e) =>
+							Effect.logWarning(
+								"setPinHash: failed to update DaemonConfigRef",
+								{
+									error: String(e),
+								},
+							),
+						),
+					),
 				);
 			}
 			persistConfig();
@@ -986,23 +1017,64 @@ export async function startDaemonProcess(
 		getKeepAwake: () => keepAwake,
 		setKeepAwake: (enabled: boolean) => {
 			keepAwake = enabled;
-			// TODO: Forward keepAwake toggle to KeepAwakeTag after Task 6
+			// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling.
+			let supported = false;
+			let active = false;
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ka = yield* KeepAwakeTag;
+						if (enabled) {
+							yield* ka.activate();
+						} else {
+							yield* ka.deactivate();
+						}
+						supported = yield* ka.isSupported();
+						active = yield* ka.isActive();
+					}).pipe(
+						Effect.catchAll((e) =>
+							Effect.logWarning("setKeepAwake: failed to toggle KeepAwakeTag", {
+								error: String(e),
+							}),
+						),
+					),
+				);
+			}
 			persistConfig();
-			return {
-				// TODO: Query KeepAwakeTag for supported/active after Task 6
-				supported: false,
-				active: false,
-			};
+			return { supported, active };
 		},
 		setKeepAwakeCommand: (command: string, args: string[]) => {
 			keepAwakeCommand = command;
 			keepAwakeArgs = args;
-			// TODO: Reconfigure KeepAwakeTag with new command/args after Task 6
+			// AP-23: KeepAwakeTag is scoped and its command is fixed at construction.
+			// To apply a new command, the Layer would need to be rebuilt (Task 11).
+			// For now, persist the new command so it takes effect on next restart.
+			// If keep-awake is currently active, deactivate and reactivate won't
+			// change the underlying process — that requires Layer reconstruction.
 			persistConfig();
 		},
 		persistConfig: () => persistConfig(),
 		scheduleShutdown: () => {
-			shutdownTimer = setTimeout(() => stop(), DAEMON_SHUTDOWN_DELAY_MS);
+			shutdownTimer = setTimeout(() => {
+				// AP-25: Complete the ShutdownSignal Deferred so the Effect runtime
+				// begins graceful teardown (Layer finalizers in reverse order).
+				if (daemonRuntime) {
+					daemonRuntime.runPromise(
+						Effect.gen(function* () {
+							const deferred = yield* ShutdownSignalTag;
+							yield* Deferred.succeed(deferred, undefined);
+						}).pipe(
+							Effect.catchAll((e) =>
+								Effect.logWarning(
+									"scheduleShutdown: failed to complete ShutdownSignal",
+									{ error: String(e) },
+								),
+							),
+						),
+					);
+				}
+				stop();
+			}, DAEMON_SHUTDOWN_DELAY_MS);
 		},
 		applyConfig: (config: Record<string, unknown>) => {
 			applyRestartConfig(config);

@@ -4,12 +4,15 @@
 import { FileSystem } from "@effect/platform";
 import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
+import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
+import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
 import type { DaemonState } from "../../../src/lib/effect/daemon-state.js";
 import { makeDaemonStateLive } from "../../../src/lib/effect/daemon-state.js";
 import { decodeAndDispatch } from "../../../src/lib/effect/ipc-dispatch.js";
+import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
@@ -61,6 +64,45 @@ const makeTestFileSystem = () => {
 
 const CONFIG_PATH = "/test-config/daemon.json";
 
+/** Mock KeepAwakeTag for dispatch tests. */
+const makeMockKeepAwake = () =>
+	Layer.effect(
+		KeepAwakeTag,
+		Effect.gen(function* () {
+			const activeRef = yield* Ref.make(false);
+			return {
+				activate: () => Ref.set(activeRef, true),
+				deactivate: () => Ref.set(activeRef, false),
+				isActive: () => Ref.get(activeRef),
+				isSupported: () => Effect.succeed(true),
+			};
+		}),
+	);
+
+/** Mock DaemonConfigRefTag for dispatch tests. */
+const makeMockConfigRef = () => {
+	const initial: import("../../../src/lib/effect/daemon-config-ref.js").DaemonRuntimeConfig =
+		{
+			port: 2633,
+			host: "127.0.0.1",
+			pinHash: null,
+			tlsEnabled: false,
+			keepAwake: false,
+			keepAwakeCommand: undefined,
+			keepAwakeArgs: undefined,
+			shuttingDown: false,
+			dismissedPaths: new Set<string>(),
+			startTime: Date.now(),
+			hostExplicit: false,
+			persistedSessionCounts: new Map<string, number>(),
+		};
+	return Layer.effect(DaemonConfigRefTag, Ref.make(initial));
+};
+
+/** Mock ShutdownSignalTag for dispatch tests. */
+const makeMockShutdownSignal = () =>
+	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
+
 const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 	const testFs = makeTestFileSystem();
 	return Layer.mergeAll(
@@ -107,6 +149,9 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 			persistConfig: () => {},
 		}),
 		Layer.succeed(SessionOverridesTag, new SessionOverrides()),
+		makeMockKeepAwake(),
+		makeMockConfigRef(),
+		makeMockShutdownSignal(),
 	);
 };
 
