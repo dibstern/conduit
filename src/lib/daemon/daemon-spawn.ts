@@ -4,6 +4,7 @@
 
 import { type ChildProcess, spawn as cpSpawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import net from "node:net";
 import { join } from "node:path";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT, RELAY_ENV_KEYS } from "../env.js";
 import type { DaemonOptions, SpawnConfig } from "./daemon-types.js";
@@ -70,6 +71,29 @@ export async function spawnDaemon(
 	const port = options?.port ?? DEFAULT_PORT;
 	const logPath = options?.logPath ?? join(configDir, "daemon.log");
 	const socketPath = options?.socketPath ?? join(configDir, "relay.sock");
+
+	// Pre-flight: check if port is already in use
+	const host = options?.host ?? "127.0.0.1";
+	const portInUse = await new Promise<boolean>((resolve, reject) => {
+		const tester = net
+			.createServer()
+			.once("error", (err: NodeJS.ErrnoException) => {
+				if (err.code === "EADDRINUSE") {
+					resolve(true);
+				} else {
+					reject(err);
+				}
+			})
+			.once("listening", () => {
+				tester.close(() => resolve(false));
+			})
+			.listen(port, host);
+	});
+	if (portInUse) {
+		throw new Error(
+			`EADDRINUSE: Port ${port} address already in use. Stop the existing daemon with: npx conduit --stop`,
+		);
+	}
 
 	// Ensure config directory exists
 	if (!existsSync(configDir)) {
