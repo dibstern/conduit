@@ -73,16 +73,21 @@ export async function spawnDaemon(
 
 	// Pre-flight: check if port is already in use
 	const net = await import("node:net");
-	const portInUse = await new Promise<boolean>((resolve) => {
+	const host = options?.host ?? "127.0.0.1";
+	const portInUse = await new Promise<boolean>((resolve, reject) => {
 		const tester = net
 			.createServer()
 			.once("error", (err: NodeJS.ErrnoException) => {
-				resolve(err.code === "EADDRINUSE");
+				if (err.code === "EADDRINUSE") {
+					resolve(true);
+				} else {
+					reject(err);
+				}
 			})
 			.once("listening", () => {
 				tester.close(() => resolve(false));
 			})
-			.listen(port);
+			.listen(port, host);
 	});
 	if (portInUse) {
 		throw new Error(
