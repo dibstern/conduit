@@ -25,12 +25,14 @@ import {
 	Effect,
 	Layer,
 	ManagedRuntime,
+	Ref,
 	RuntimeFlags,
 	RuntimeFlagsPatch,
 	Schedule,
 	Supervisor,
 } from "effect";
 import type { DaemonOptions } from "../daemon/daemon-types.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
 import { makeDaemonLive } from "./daemon-layers.js";
 import {
@@ -205,7 +207,6 @@ import {
 	saveDaemonConfig,
 	syncRecentProjects,
 } from "../daemon/config-persistence.js";
-import { CrashCounter } from "../daemon/crash-counter.js";
 import type { DaemonLifecycleContext } from "../daemon/daemon-lifecycle.js";
 import {
 	findFreePort,
@@ -322,17 +323,9 @@ export async function startDaemonProcess(
 		mkdirSync(configDir, { recursive: true });
 	}
 
-	// ── Crash counter ─────────────────────────────────────────────────────
-	const crashCounter = new CrashCounter();
-	crashCounter.record();
-	if (crashCounter.shouldGiveUp()) {
-		throw new Error(
-			"Daemon crashed too many times within crash window — giving up",
-		);
-	}
-
+	// Crash counter is now managed by CrashCounterLive (via makeDaemonLive).
+	// The crash check happens in runStartupSequence via recordCrashCounter.
 	// PID file is now managed by makePidFileLive (via makeDaemonLive).
-	log.debug(`[startup:${elapsed()}] Crash counter done`);
 
 	// ── Mutable state ─────────────────────────────────────────────────────
 	let port = options.port ?? DEFAULT_PORT;
@@ -356,8 +349,13 @@ export async function startDaemonProcess(
 	const dismissedPaths = new Set<string>();
 
 	// ── Core services ─────────────────────────────────────────────────────
-	const auth = new AuthManager();
-	if (pinHash) auth.setPinHash(pinHash);
+	// AuthManager with reactive pinHash: initially reads from local `pinHash`
+	// variable. After the daemon runtime is built, pinHash changes go through
+	// DaemonConfigRef (updated via IPC handlers), and AuthManager reads them
+	// reactively through the getPinHash getter closure.
+	const auth = new AuthManager({
+		getPinHash: () => pinHash,
+	});
 
 	const instanceManager = new InstanceManager();
 	const registry = new ProjectRegistry();
@@ -434,7 +432,15 @@ export async function startDaemonProcess(
 		if (typeof config["tls"] === "boolean") tlsEnabled = config["tls"];
 		if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
 			pinHash = config["pinHash"];
-			if (pinHash) auth.setPinHash(pinHash);
+			// Update DaemonConfigRef so AuthManager sees the new pinHash reactively
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ref = yield* DaemonConfigRefTag;
+						yield* Ref.update(ref, (c) => ({ ...c, pinHash }));
+					}),
+				);
+			}
 		}
 		if (typeof config["keepAwake"] === "boolean") {
 			keepAwake = config["keepAwake"];
@@ -972,7 +978,15 @@ export async function startDaemonProcess(
 		getPinHash: () => pinHash,
 		setPinHash: (hash: string) => {
 			pinHash = hash;
-			auth.setPinHash(hash);
+			// Update DaemonConfigRef so AuthManager sees the new pinHash reactively
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ref = yield* DaemonConfigRefTag;
+						yield* Ref.update(ref, (c) => ({ ...c, pinHash: hash }));
+					}),
+				);
+			}
 			persistConfig();
 		},
 		getKeepAwake: () => keepAwake,
@@ -1203,6 +1217,7 @@ export async function startDaemonProcess(
 		},
 		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
+		pinHash,
 		relayFactory: (slug: string) =>
 			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
 				Effect.map((p) => ({
@@ -1221,7 +1236,8 @@ export async function startDaemonProcess(
 	};
 
 	// Create and build the daemon Layer — starts servers, installs signal/error
-	// handlers, writes PID file, creates DaemonState, DaemonEventBus, PinoLogger.
+	// handlers, writes PID file, creates DaemonState, DaemonEventBus, PinoLogger,
+	// CrashCounter, AuthManager (reactive pinHash from DaemonConfigRef).
 	try {
 		daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
 		await daemonRuntime.runPromise(Effect.void);

@@ -85,6 +85,8 @@ export interface AuthManagerOptions {
 	cookieExpiryMs?: number;
 	/** Injectable clock for testing */
 	now?: () => number;
+	/** Optional reactive getter — when set, overrides internal pin storage */
+	getPinHash?: () => string | null;
 }
 
 /** Hash a PIN with a domain-specific prefix (one-way, deterministic). */
@@ -94,6 +96,7 @@ export function hashPin(pin: string): string {
 
 export class AuthManager {
 	private pin: string | null = null;
+	private readonly getPinHashFn: (() => string | null) | null;
 	private attempts: Map<string, AttemptRecord> = new Map();
 	private cookies: Map<string, number> = new Map(); // cookie → expiry timestamp
 	private readonly maxAttempts: number;
@@ -106,6 +109,12 @@ export class AuthManager {
 		this.lockoutMs = (options.lockoutMinutes ?? 15) * 60_000;
 		this.cookieExpiryMs = options.cookieExpiryMs ?? 24 * 60 * 60_000; // 24 hours
 		this.now = options.now ?? Date.now;
+		this.getPinHashFn = options.getPinHash ?? null;
+	}
+
+	/** Get current pin, reading from reactive getter if available. */
+	private get currentPin(): string | null {
+		return this.getPinHashFn ? this.getPinHashFn() : this.pin;
 	}
 
 	/** Set or update the PIN. Validates 4-8 digit format. Stores as SHA-256 hash. */
@@ -120,12 +129,12 @@ export class AuthManager {
 	 * @deprecated Use getPinHash() instead — this now returns a hash, not the raw PIN.
 	 */
 	getPin(): string | null {
-		return this.pin;
+		return this.currentPin;
 	}
 
 	/** Get the stored PIN hash (for saving to config). */
 	getPinHash(): string | null {
-		return this.pin;
+		return this.currentPin;
 	}
 
 	/** Set a pre-hashed PIN directly (e.g. loaded from config). No re-hashing. */
@@ -135,18 +144,18 @@ export class AuthManager {
 
 	/** Whether a PIN is set */
 	hasPin(): boolean {
-		return this.pin !== null;
+		return this.currentPin !== null;
 	}
 
 	/** Non-consuming PIN check for status probes. Does not mutate rate limits. */
 	checkPin(pin: string): boolean {
-		if (!this.pin) return true;
-		return hashPin(pin) === this.pin;
+		if (!this.currentPin) return true;
+		return hashPin(pin) === this.currentPin;
 	}
 
 	/** Authenticate a PIN attempt from an IP address */
 	authenticate(pin: string, ip: string): AuthResult {
-		if (!this.pin) {
+		if (!this.currentPin) {
 			// No PIN mode — always succeed
 			return { ok: true, cookie: this.createCookie() };
 		}
@@ -169,7 +178,7 @@ export class AuthManager {
 		}
 
 		// Check PIN — hash the incoming PIN before comparing
-		if (hashPin(pin) === this.pin) {
+		if (hashPin(pin) === this.currentPin) {
 			// Correct — reset attempts and issue cookie
 			this.attempts.delete(ip);
 			return { ok: true, cookie: this.createCookie() };

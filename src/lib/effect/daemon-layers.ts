@@ -23,12 +23,14 @@ import {
 	writePidFile,
 } from "../daemon/pid-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
+import { AuthManagerFromConfigLive } from "./auth-middleware.js";
 import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
 } from "./daemon-config-ref.js";
 import { DaemonEventBusLive } from "./daemon-pubsub.js";
+import { CrashCounterLive } from "./daemon-startup.js";
 import {
 	DaemonStateTag,
 	emptyDaemonState,
@@ -320,6 +322,10 @@ export interface DaemonLiveOptions {
 	configPath?: string;
 	/** Factory for creating relay instances per slug. */
 	relayFactory?: RelayFactory;
+
+	// AuthManager — initial pinHash for DaemonConfigRef (read reactively by AuthManager)
+	/** Pre-hashed PIN for authentication, or null if no PIN is set. */
+	pinHash?: string | null;
 }
 
 /**
@@ -382,6 +388,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		makeDaemonConfigFromOptions({
 			port: options.ctx.port,
 			host: options.ctx.host,
+			...(options.pinHash != null && { pinHash: options.pinHash }),
 		}),
 	);
 
@@ -390,10 +397,19 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
 	const infraLayer = Layer.mergeAll(signalLayer, errorLayer, pidLayer);
 
+	// AuthManagerFromConfigLive needs DaemonConfigRefTag — satisfy it with configRefLayer
+	const authManagerLayer = AuthManagerFromConfigLive.pipe(
+		Layer.provide(configRefLayer),
+	);
+
 	let composed = infraLayer.pipe(
 		Layer.provideMerge(serversLayer),
 		Layer.provideMerge(stateLayer),
 		Layer.provideMerge(configRefLayer),
+		// CrashCounterLive has no deps — independent of configRefLayer
+		Layer.provideMerge(CrashCounterLive),
+		// AuthManager — pre-satisfied dependency on DaemonConfigRefTag
+		Layer.provideMerge(authManagerLayer),
 		Layer.provideMerge(DaemonEventBusLive),
 		Layer.provideMerge(PinoLoggerLive),
 	);

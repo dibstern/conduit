@@ -3,8 +3,9 @@ import {
 	HttpServerRequest,
 	HttpServerResponse,
 } from "@effect/platform";
-import { Context, Effect, Layer } from "effect";
-import type { AuthManager } from "../auth.js";
+import { Context, Effect, Layer, Ref } from "effect";
+import { AuthManager } from "../auth.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 
 export class AuthManagerTag extends Context.Tag("AuthManager")<
 	AuthManagerTag,
@@ -14,6 +15,29 @@ export class AuthManagerTag extends Context.Tag("AuthManager")<
 export const makeAuthManagerLive = (
 	auth: AuthManager,
 ): Layer.Layer<AuthManagerTag> => Layer.succeed(AuthManagerTag, auth);
+
+/**
+ * AuthManager Layer that reads pinHash reactively from DaemonConfigRef.
+ * When the Ref is updated (e.g. via IPC handler), AuthManager automatically
+ * sees the new pinHash on every authenticate()/hasPin()/checkPin() call.
+ */
+export const AuthManagerFromConfigLive: Layer.Layer<
+	AuthManagerTag,
+	never,
+	DaemonConfigRefTag
+> = Layer.effect(
+	AuthManagerTag,
+	Effect.gen(function* () {
+		const configRef = yield* DaemonConfigRefTag;
+		return new AuthManager({
+			getPinHash: () => {
+				// Ref.get is sync-safe for synchronous Refs created via Ref.make
+				const config = Effect.runSync(Ref.get(configRef));
+				return config.pinHash;
+			},
+		});
+	}),
+);
 
 export const parseCookies = (
 	header: string | undefined,
