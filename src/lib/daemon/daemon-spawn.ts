@@ -71,6 +71,25 @@ export async function spawnDaemon(
 	const logPath = options?.logPath ?? join(configDir, "daemon.log");
 	const socketPath = options?.socketPath ?? join(configDir, "relay.sock");
 
+	// Pre-flight: check if port is already in use
+	const net = await import("node:net");
+	const portInUse = await new Promise<boolean>((resolve) => {
+		const tester = net
+			.createServer()
+			.once("error", (err: NodeJS.ErrnoException) => {
+				resolve(err.code === "EADDRINUSE");
+			})
+			.once("listening", () => {
+				tester.close(() => resolve(false));
+			})
+			.listen(port);
+	});
+	if (portInUse) {
+		throw new Error(
+			`Port ${port} is already in use. Stop the existing daemon with: npx conduit --stop`,
+		);
+	}
+
 	// Ensure config directory exists
 	if (!existsSync(configDir)) {
 		mkdirSync(configDir, { recursive: true });
