@@ -5,6 +5,7 @@ import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
+	makeDaemonConfigFromOptions,
 } from "../../../src/lib/effect/daemon-config-ref.js";
 
 describe("DaemonConfigRef", () => {
@@ -47,23 +48,29 @@ describe("DaemonConfigRef", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.effect("seeds from DaemonOptions with overrides", () =>
-		Effect.gen(function* () {
-			const ref = yield* DaemonConfigRefTag;
-			const config = yield* Ref.get(ref);
-			expect(config.keepAwake).toBe(true);
-			expect(config.pinHash).toBe("abc123");
-		}).pipe(
-			Effect.provide(
-				Layer.fresh(
-					DaemonConfigRefLive({
-						...defaults,
-						keepAwake: true,
-						pinHash: "abc123",
-					}),
+	it.effect(
+		"seeds from DaemonOptions with overrides via makeDaemonConfigFromOptions",
+		() =>
+			Effect.gen(function* () {
+				const ref = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(ref);
+				expect(config.keepAwake).toBe(true);
+				expect(config.pinHash).toBe("abc123");
+				expect(config.hostExplicit).toBe(true);
+				expect(config.host).toBe("0.0.0.0");
+			}).pipe(
+				Effect.provide(
+					Layer.fresh(
+						DaemonConfigRefLive(
+							makeDaemonConfigFromOptions({
+								keepAwake: true,
+								pinHash: "abc123",
+								host: "0.0.0.0",
+							}),
+						),
+					),
 				),
 			),
-		),
 	);
 
 	it.effect("dismissedPaths is an independent Set per instance", () =>
