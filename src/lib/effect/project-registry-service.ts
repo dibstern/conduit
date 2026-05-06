@@ -13,12 +13,14 @@
 import {
 	Context,
 	Data,
+	Duration,
 	Effect,
 	HashMap,
 	Layer,
 	Option,
 	PubSub,
 	Ref,
+	Stream,
 } from "effect";
 
 import type { StoredProject } from "../types.js";
@@ -480,6 +482,93 @@ export const removeAll = Effect.gen(function* () {
 
 	yield* Effect.logInfo(`Removed ${allSlugs.length} project(s)`);
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
+
+// ─── Additional operations (Task 6 gap-fill) ───────────────────────────────
+
+/**
+ * Broadcast a message to all connected clients via DaemonEventBus.
+ * Publishes a RelayBroadcast event that consumers (e.g., WS handlers)
+ * can subscribe to for cross-relay broadcasting.
+ */
+export const broadcastToAll = (message: unknown) =>
+	Effect.gen(function* () {
+		const bus = yield* DaemonEventBusTag;
+		yield* PubSub.publish(bus, DaemonEvent.RelayBroadcast({ message }));
+	}).pipe(Effect.withSpan("projectRegistry.broadcastToAll"));
+
+/**
+ * Wait until a project transitions to Ready state, or timeout.
+ * Subscribes to DaemonEventBus and filters for InstanceStatusChanged
+ * events matching the given slug.
+ */
+export const waitForRelay = (slug: string, timeoutMs: number) =>
+	Effect.gen(function* () {
+		// Check if already ready
+		const entry = yield* getEntry(slug);
+		if (Option.isNone(entry)) {
+			return yield* new ProjectNotFound({ slug });
+		}
+		if (entry.value._tag === "Ready") {
+			return; // Already ready
+		}
+
+		// Subscribe to events and wait for InstanceStatusChanged with this slug
+		const bus = yield* DaemonEventBusTag;
+		const sub = yield* PubSub.subscribe(bus);
+		yield* Stream.fromQueue(sub).pipe(
+			Stream.filter(
+				(e) => e._tag === "InstanceStatusChanged" && e.instanceId === slug,
+			),
+			Stream.take(1),
+			Stream.runDrain,
+		);
+
+		// Verify it's actually ready (could be error transition)
+		const final = yield* getEntry(slug);
+		if (Option.isNone(final) || final.value._tag !== "Ready") {
+			return yield* new ProjectNotFound({ slug });
+		}
+	}).pipe(
+		Effect.timeout(Duration.millis(timeoutMs)),
+		Effect.annotateLogs("slug", slug),
+		Effect.withSpan("projectRegistry.waitForRelay"),
+	);
+
+/**
+ * Evict oldest sessions across relays. Stub implementation until
+ * relay access is available in later phases.
+ */
+export const evictOldestSessions = (count: number) =>
+	Effect.gen(function* () {
+		// TODO: Implement session eviction after relay access is available
+		yield* Effect.logInfo(`Eviction requested for ${count} sessions (stub)`);
+		return [] as string[];
+	}).pipe(Effect.withSpan("projectRegistry.evictOldestSessions"));
+
+/**
+ * Replace the relay for a slug. Invalidates the old relay via RelayCacheTag,
+ * creates a new one, and transitions the project to Ready.
+ */
+export const replaceRelay = (slug: string) =>
+	Effect.gen(function* () {
+		const relayCache = yield* RelayCacheTag;
+		yield* relayCache.invalidate(slug);
+		yield* relayCache.get(slug);
+		yield* markReady(slug);
+	}).pipe(
+		Effect.annotateLogs("slug", slug),
+		Effect.withSpan("projectRegistry.replaceRelay"),
+	);
+
+/**
+ * Check if a project is currently in Registering state
+ * (i.e., a relay creation is in-flight).
+ */
+export const isStarting = (slug: string) =>
+	getEntry(slug).pipe(
+		Effect.map(Option.map((e) => e._tag === "Registering")),
+		Effect.map(Option.getOrElse(() => false)),
+	);
 
 // ─── Layer factory ───────────────────────────────────────────────────────────
 
