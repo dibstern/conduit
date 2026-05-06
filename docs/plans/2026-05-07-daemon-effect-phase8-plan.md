@@ -1179,11 +1179,414 @@ Smoke test: start daemon, verify HTTP + WS + IPC all work, shut down cleanly.
 
 ## Success Criteria
 
-1. `daemon-main.ts` is <50 lines (just `Layer.launch` + exports)
+1. `daemon-main.ts` is <50 lines (just `NodeRuntime.runMain` + exports)
 2. Zero `let` declarations in daemon startup path
 3. Zero imperative class instantiation (`new ClassName()`)
 4. Zero closure capture of mutable state
 5. All daemon services discoverable via `Context.Tag`
 6. All service errors typed in Layer error channels
-7. `Layer.launch` handles full lifecycle (startup → signal → teardown)
+7. `NodeRuntime.runMain` + `ShutdownSignalTag` handles full lifecycle (startup → signal → teardown)
 8. All existing tests pass (`pnpm test:all`)
+
+---
+
+## Audit Amendments (Round 1)
+
+> **For Agent:** These amendments override the corresponding sections above. Read both — the original text provides context, these amendments provide corrections.
+
+### User Decisions (from Ask User findings)
+
+- **PushNotificationManager** → Create `PushManagerLive` Layer (`PushManagerTag` already exists at `push-service.ts:25`)
+- **AuthManager pinHash** → **Reactive approach**: AuthManager reads pinHash from `DaemonConfigRef` on every `authenticate()` call, not dual-write
+- **Relay factory conversion** → **Full conversion**: `createProjectRelay` itself gets converted to accept Effect services via Context Tags (not imperative shims)
+
+### Task 1 Amendments
+
+**AP-1: Add missing fields to `DaemonRuntimeConfig`:**
+
+```typescript
+export interface DaemonRuntimeConfig {
+  // ... existing fields from plan ...
+  readonly startTime: number;                              // NEW: used by getStatus()
+  readonly hostExplicit: boolean;                          // NEW: tracks if user explicitly set --host
+  readonly persistedSessionCounts: ReadonlyMap<string, number>; // NEW: used by buildConfig()
+}
+```
+
+Update `makeDaemonConfigFromOptions` to accept and set these fields. `startTime` defaults to `Date.now()`. `hostExplicit` is `true` when `options.host` is provided. `persistedSessionCounts` defaults to `new Map()`.
+
+Update test defaults to include these three fields.
+
+**AP-2: Step 7 wiring** — `DaemonLifecycleContext` has `port` and `host` fields directly (verified at `daemon-lifecycle.ts:372-373`). The plan's `options.ctx.port` reference is correct.
+
+### Task 2 Amendments
+
+**AP-3: Fix test PubSub wiring.** Replace the test with:
+
+```typescript
+it.scoped("writes config to disk on ConfigChanged event", () =>
+  Effect.gen(function* () {
+    const bus = yield* DaemonEventBusTag;
+    yield* PubSub.publish(bus, DaemonEvent.ConfigChanged({}));
+    yield* TestClock.adjust(Duration.millis(600));
+    expect(writes.length).toBeGreaterThanOrEqual(1);
+  }).pipe(Effect.provide(Layer.fresh(fullComposedLayer))),
+);
+```
+
+Where `fullComposedLayer` = `ConfigPersistenceLive.pipe(Layer.provide(Layer.mergeAll(DaemonConfigRefLive(defaults), DaemonEventBusLive, writerLayer)))`. Do NOT create a second `DaemonEventBusLive` in the outer `Effect.provide`.
+
+**AP-4: Fix ConfigWriter mock type.** Change `write: (config: unknown)` to `write: (config: DaemonRuntimeConfig)`. Type `writes` as `DaemonRuntimeConfig[]`.
+
+**AP-5: Note partial implementation.** `ConfigPersistenceLive` initially reads only `DaemonConfigRef`. After Tasks 6-7, update it to also read `ProjectRegistryTag` and `InstanceManagerTag` for the full config (projects list, instances list). Document this as a follow-up step in Task 6.
+
+**AP-6: Add debounce coalescing test.** Add test: publish 5 `ConfigChanged` events in rapid succession, advance TestClock past debounce window, verify `writes.length === 1`.
+
+### Task 3 Amendments
+
+**AP-7: Fix ALL background service config shapes.** The plan's simple config objects are wrong. Replace with:
+
+**VersionCheckerLive** — requires `VersionCheckerConfig`:
+```typescript
+versionCheck: {
+  getCurrentVersion: () => Effect.succeed(getVersion()),
+  fetchLatestVersion: () => Effect.tryPromise(() => fetchLatest()),
+  broadcast: (latest: string) => Effect.gen(function* () {
+    const bus = yield* DaemonEventBusTag;
+    yield* PubSub.publish(bus, DaemonEvent.VersionUpdate({ current: getVersion(), latest }));
+  }),
+  checkInterval: Duration.hours(1),
+},
+```
+
+**StorageMonitorLive** — requires `StorageMonitorConfig`:
+```typescript
+storageMon: {
+  getStorageUsage: () => Effect.tryPromise(() => getUsageForPath(path)),
+  persistence: { evictOldEvents: () => /* Effect wrapping registry.evictOldestSessions */ },
+  checkInterval: Duration.minutes(5),
+  highWaterMark: 0.9,
+},
+```
+
+**PortScannerLive** — requires `PortScannerConfig`. **Defer PortScanner wiring to after Task 7** (needs InstanceManager for `onDiscovered`/`onLost` callbacks). Pass `undefined` for now; wire in Task 7 as a follow-up step.
+
+**AP-8: Preserve `instanceManager.drain()` and `registry.drain()`.** Only delete drain calls for `versionChecker`, `storageMonitor`, `scanner`. Keep `instanceManager.drain()` and `registry.drain()` until Tasks 6-7.
+
+### Task 4 Amendments
+
+**AP-9: Fix CrashCounter.** Change `new CrashCounterImpl()` to `new CrashCounter()` (from `src/lib/daemon/crash-counter.ts:13`). Change `counter.count` to `counter.getTimestamps().length`.
+
+**AP-10: Wire both Layers into `makeDaemonLive`.** Add explicit step: compose `CrashCounterLive` and `AuthManagerFromConfigLive` into `makeDaemonLive` in `daemon-layers.ts` using `Layer.provideMerge`. `AuthManagerFromConfigLive` needs `DaemonConfigRefTag` — compose after `DaemonConfigRefLive`.
+
+**AP-11: AuthManager reactive pinHash (user decision).** Instead of dual-write, modify `AuthManager` class to accept a `Ref<DaemonRuntimeConfig>` and read `pinHash` from it on every `authenticate()` call:
+
+```typescript
+export const AuthManagerFromConfigLive = Layer.effect(
+  AuthManagerTag,
+  Effect.gen(function* () {
+    const configRef = yield* DaemonConfigRefTag;
+    return new AuthManager({ configRef }); // AuthManager reads pinHash reactively
+  }),
+);
+```
+
+This requires modifying `src/lib/auth.ts` to accept a Ref and call `Ref.get` (synchronous via `Effect.runSync`) in `authenticate()`. The IPC `setPinHash` handler only updates `DaemonConfigRef` — no separate `auth.setPinHash()` call needed.
+
+### Task 5 Amendments
+
+**AP-12: Add `hostExplicit` guard.** Replace `c.host === "127.0.0.1" ? "0.0.0.0" : c.host` with:
+```typescript
+if (certs && !config.hostExplicit) {
+  yield* Ref.update(configRef, (c) => ({ ...c, host: "0.0.0.0" }));
+}
+```
+Requires `hostExplicit` field from Task 1 AP-1.
+
+**AP-13: Add `caCertPem` to `TlsCertService`.** Add `readonly caCertPem: Buffer | null` to the interface. HTTP server layer needs it for cert chain.
+
+**AP-14: Add import.** Add `import { ensureCerts, type TlsCerts } from "../cli/tls.js";` to code snippet.
+
+**AP-15: Handle `ensureCerts` returning `null`.** `ensureCerts` returns `null` (not throws) for most failures. Add after tryPromise:
+```typescript
+if (!certs) {
+  yield* Effect.logWarning("TLS unavailable — mkcert not found, falling back to HTTP");
+  yield* Ref.update(configRef, (c) => ({ ...c, tlsEnabled: false }));
+  return { certs: null, caRootPath: null, caCertDer: null, caCertPem: null };
+}
+```
+
+**AP-16: Specify Layer composition order.** Insert `TlsCertLive(configDir)` in `makeDaemonLive` after `DaemonConfigRefLive` and before `serversLayer`. Use `Layer.provideMerge`.
+
+**AP-17: Add 5 test cases.** (a) TLS disabled → null certs, no `ensureCerts` call; (b) enabled, returns null → `tlsEnabled: false` in Ref; (c) enabled, throws → catch, log, `tlsEnabled: false`; (d) enabled, succeeds, host not explicit → host updated to `0.0.0.0`; (e) enabled, succeeds, host explicit → host NOT changed. Use `EnsureCertsTag` service for DI (more Effect-idiomatic than `vi.mock`).
+
+### Task 6 Amendments — MAJOR REWRITE
+
+**AP-18: Task 6 is already implemented.** `src/lib/effect/project-registry-service.ts` (495 lines) has a complete Effect-native ProjectRegistry with `Ref<HashMap>`, all CRUD operations, DaemonEventBus integration.
+
+**Rewrite Task 6 as: "Wire ProjectRegistry Layer + Fill Gaps"**
+
+Steps:
+1. **Verify** existing `project-registry-service.ts` covers all `daemon-main.ts` consumers (read all `registry.*` calls)
+2. **Do NOT add** `ProjectAdded/ProjectRemoved/ProjectReady/ProjectError` events — existing `InstanceAdded/InstanceRemoved/InstanceStatusChanged` events are already used by the service
+3. **Add missing methods**: `broadcastToAll` (publish `RelayBroadcast` event), `waitForRelay` (using `Deferred` or polling), `evictOldestSessions`, `replaceRelay`
+4. **Wire** `makeProjectRegistryLive` into `makeDaemonLive` in `daemon-layers.ts`
+5. **Delete** imperative `new ProjectRegistry()` and all event listeners from `daemon-main.ts`
+6. **Update ConfigPersistenceLive** (Task 2 follow-up) to also read `ProjectRegistryTag` for project list
+
+### Task 7 Amendments — MAJOR REWRITE
+
+**AP-19: Task 7 is already implemented.** `src/lib/effect/instance-manager-service.ts` (416 lines) has `addInstance`, `removeInstance`, `getInstance`, `getInstances`, health polling, restart, FiberMap-based fiber management.
+
+**Rewrite Task 7 as: "Wire InstanceManager Layer + Fill Gaps + Bridge"**
+
+Steps:
+1. **Verify** existing `instance-manager-service.ts` covers all `daemon-main.ts` consumers
+2. **Do NOT re-implement** `addInstance`, `removeInstance`, etc. — they already exist
+3. **Create `InstanceMgmtLive`** Layer that adapts the existing Effect functions to the `InstanceMgmtTag` interface (from `services.ts:262`) — this Tag is used by 10+ consumers (ipc-handlers, daemon-startup, ipc-dispatch)
+4. **Wire** `makeInstanceManagerStateLive` + `InstanceMgmtLive` into `makeDaemonLive`
+5. **Wire PortScanner** (deferred from Task 3 AP-7): now that InstanceManager is a Layer, construct `PortScannerConfig.onDiscovered/onLost` callbacks that call InstanceManager via Tags
+6. **Decoupling**: Use `DaemonEventBus` for instance→registry wiring (subscribe to `InstanceStatusChanged`, reset error-state projects) — avoids circular Layer dependency
+7. **Delete** imperative `new InstanceManager()` and event listeners from `daemon-main.ts`
+8. **Add `PushManagerLive`** Layer (user decision: create Layer using existing `PushManagerTag` from `push-service.ts:25`)
+
+### Task 8 Amendments
+
+**AP-20: Add IPC dispatch bridge.** Create `IpcDispatchLive` Layer that builds `IPCHandlerMap` by wrapping each Effect handler in `runtime.runPromise`. Show how `makeIpcServerLive` signature changes:
+
+```typescript
+// New: IpcDispatchLive provides DaemonIPCContext by wrapping Effect handlers
+export const IpcDispatchLive = Layer.effect(
+  IpcContextTag, // new Tag
+  Effect.gen(function* () {
+    const runtime = yield* Effect.runtime</* all handler deps */>();
+    return {
+      addProject: (dir) => Runtime.runPromise(runtime)(handleAddProject(dir)),
+      // ... all 19 handlers wrapped
+    };
+  }),
+);
+```
+
+**AP-21: Enumerate all 19 IPC handlers.** Plan must list: `addProject`, `removeProject`, `getProjects`, `setProjectTitle`, `getPinHash`, `setPinHash`, `getKeepAwake`, `setKeepAwake`, `setKeepAwakeCommand`, `persistConfig`, `scheduleShutdown`, `restartWithConfig`, `getInstances`, `getInstance`, `instanceAdd`, `instanceRemove`, `instanceStart`, `instanceStop`, `instanceUpdate`. Flag `getStatus`, `setKeepAwakeCommand`, `instanceAdd`, `setPinHash`, `scheduleShutdown` as requiring explicit implementation notes.
+
+**AP-22: Fix `handleSetKeepAwake`.** Must call `KeepAwakeTag.activate()`/`deactivate()` directly, not just update Ref:
+```typescript
+const keepAwake = yield* KeepAwakeTag;
+if (enabled) yield* keepAwake.activate();
+else yield* keepAwake.deactivate();
+const supported = yield* keepAwake.isSupported();
+const active = yield* keepAwake.isActive();
+```
+
+**AP-23: Design `setKeepAwakeCommand` reconfiguration.** Options: (a) add `reconfigure(command, args)` to KeepAwake service; (b) use `ScopedRef` to swap service. Recommend (a) — extend `KeepAwakeService` interface in `keep-awake-layer.ts`.
+
+**AP-24: `handleSetPinHash` — reactive approach.** Per user decision, only update `DaemonConfigRef`. AuthManager reads pinHash reactively. Remove `auth.setPinHash(hash)` call.
+
+**AP-25: `scheduleShutdown` handler.** Must complete `ShutdownSignalTag` Deferred (after delay) to trigger fiber interruption and Layer teardown. See Task 12 AP-36.
+
+**AP-26: Add testing strategy.** Group handlers: (1) simple state updates → unit test with mock Refs; (2) complex logic (instanceAdd ID generation) → dedicated test cases; (3) service interaction (setKeepAwakeCommand) → mock KeepAwakeTag.
+
+### Task 9 Amendments
+
+**AP-27: Add missing dependencies.** `RelayFactoryLive` must also depend on: `PushManagerTag`, `VersionCheckerTag` (for `getCachedUpdate`), `HttpServerRefTag` (for `ctx.httpServer`).
+
+**AP-28: PersistenceLayer lifecycle.** Each relay creates a SQLite DB. Must be managed as a scoped resource — `Effect.acquireRelease(openDb, closeDb)` inside relay construction.
+
+**AP-29: AbortSignal → Effect Scope.** Replace `(signal: AbortSignal) => Promise<ProjectRelay>` with Effect that adds finalizers via `Effect.addFinalizer`. The factory returns a scoped Effect, not a Promise.
+
+**AP-30: Full `createProjectRelay` conversion (user decision).** Convert `createProjectRelay` to accept Effect services via Context Tags. This is a large sub-task — enumerate the 15+ callback params and map each to a Tag-based access.
+
+**AP-31: Introduce `HttpServerRefTag` here** (not Task 11). Task 9 and Task 10 both need it. Define:
+```typescript
+export class HttpServerRefTag extends Context.Tag("HttpServerRef")<
+  HttpServerRefTag,
+  Ref.Ref<http.Server | null>
+>() {}
+```
+Provided by `makeHttpServerLive` — after starting the server, set the Ref.
+
+### Task 10 Amendments
+
+**AP-32: WebSocket routing must preserve all behaviors:**
+- Call `ensureRelayStarted(slug)` for lazy relay startup before waiting
+- `waitForRelay` with 10s timeout (use `Effect.timeout` + `Deferred`-based wait on `ProjectReady` event)
+- Write `HTTP/1.1 503 Service Unavailable\r\n\r\n` on relay wait failure before destroying socket
+- Check `shuttingDown` from `DaemonConfigRefTag`
+- Read `dismissedPaths` from `DaemonConfigRefTag` in ProjectDiscoveryLive
+
+**AP-33: Add `SessionPrefetchLive`.** Implement with instance credential resolution from `InstanceManagerTag`, Basic auth header construction, `Effect.forkScoped` for fire-and-forget fetch loop.
+
+**AP-34: Add instance-status-to-registry wiring.** Scoped fiber subscribing to `DaemonEventBus` for `InstanceStatusChanged` events → reset error-state projects in ProjectRegistry. Can be a sub-fiber in `ProjectDiscoveryLive` or a separate `InstanceRegistryBridgeLive`.
+
+**AP-35: Add error-state project reset** to `ProjectDiscoveryLive`. After discovery, iterate all error-state projects and reset with `addWithoutRelay(..., { silent: true })`.
+
+**AP-36: Add auth failure path tests.** (1) upgrade succeeds when no PIN set; (2) upgrade succeeds with valid cookie; (3) upgrade rejected + socket destroyed on auth failure; (4) upgrade rejected when `shuttingDown` is true.
+
+### Task 11 Amendments
+
+**AP-37: Replace `Layer.mergeAll` with tiered `Layer.provide` composition:**
+
+```typescript
+export const makeDaemonLive = (options: DaemonOptions) => {
+  const configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
+  
+  // Tier 0: Foundation (no inter-dependencies)
+  const foundation = Layer.mergeAll(
+    DaemonEventBusLive,
+    PinoLoggerLive,
+    DaemonConfigRefLive(makeDaemonConfigFromOptions(options)),
+    SignalHandlerLayer,
+    ProcessErrorHandlerLayer,
+    makePidFileLive(configDir, pidPath, socketPath),
+  );
+
+  // Tier 1: Services needing foundation
+  const services = Layer.mergeAll(
+    AuthManagerFromConfigLive,
+    TlsCertLive(configDir),
+    CrashCounterLive,
+    ConfigPersistenceLive,
+  ).pipe(Layer.provide(foundation));
+
+  // Tier 2: Registries needing services
+  const registries = Layer.mergeAll(
+    ProjectRegistryLive,
+    InstanceManagerLive,
+    RelayFactoryLive,
+    PushManagerLive,
+  ).pipe(Layer.provide(services));
+
+  // Tier 3: Dispatch/routing needing registries
+  const dispatch = Layer.mergeAll(
+    IpcDispatchLive,
+    WebSocketRoutingLive,
+    ProjectDiscoveryLive,
+    SessionPrefetchLive,
+  ).pipe(Layer.provide(registries));
+
+  // Tier 4: Servers + background (needing dispatch)
+  const servers = Layer.mergeAll(
+    HttpServerLive,
+    IpcServerLive,
+    OnboardingServerLive,
+    VersionCheckerLive(versionConfig),
+    StorageMonitorLive(storageConfig),
+    KeepAwakeLive(keepAwakeConfig),
+    PortScannerLive(portScannerConfig),
+  ).pipe(Layer.provide(dispatch));
+
+  return servers;
+};
+```
+
+**AP-38: Convert server Layer factories.** `makeHttpServerLive`, `makeIpcServerLive`, `makeOnboardingServerLive` currently take `DaemonLifecycleContext` params. Convert to read deps from Context Tags (`DaemonConfigRefTag` for port/host, `TlsCertTag` for TLS, `HttpServerRefTag` for server ref, `IpcContextTag` for IPC handlers). This is a significant sub-task — add explicit steps for each server Layer conversion.
+
+### Task 12 Amendments
+
+**AP-39: CRITICAL — Use `NodeRuntime.runMain`, not `Effect.runFork`.** `Layer.launch` does NOT handle SIGINT/SIGTERM. Replace:
+
+```typescript
+// daemon-main.ts
+import { NodeRuntime } from "@effect/platform-node";
+
+export const startDaemonProcess = (options: DaemonOptions) =>
+  NodeRuntime.runMain(Layer.launch(makeDaemonLive(options)));
+```
+
+`NodeRuntime.runMain` installs SIGINT/SIGTERM handlers that interrupt the fiber. Additionally, wire `ShutdownSignalTag` Deferred into the daemon program so IPC `shutdown` command can also trigger teardown:
+
+```typescript
+// In makeDaemonLive, add a "shutdown awaiter" Layer:
+const ShutdownAwaiterLive = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    const shutdown = yield* ShutdownSignalTag;
+    yield* Effect.forkScoped(
+      Deferred.await(shutdown).pipe(
+        Effect.flatMap(() => Effect.interrupt),
+      ),
+    );
+  }),
+);
+```
+
+**AP-40: Fix `--daemon` path.** `startDaemonProcess` with `NodeRuntime.runMain` never returns (it calls `process.exit` on completion). The `--daemon` cli-core.ts path (line 122) uses `await startDaemonProcess(...)` then `return` — this works because `runMain` keeps the process alive. Change to:
+
+```typescript
+// cli-core.ts --daemon path:
+startDaemonProcess(options); // no await — runMain handles process lifecycle
+return; // unreachable but satisfies TypeScript
+```
+
+**AP-41: Define `DaemonHandleTag` for foreground mode.**
+
+```typescript
+export interface DaemonHandle {
+  readonly port: Effect.Effect<number>;
+  readonly addProject: (dir: string, slug?: string, instanceId?: string) => Effect.Effect<StoredProject>;
+  readonly removeProject: (slug: string) => Effect.Effect<void>;
+  readonly discoverProjects: () => Effect.Effect<void>;
+  readonly getStatus: () => Effect.Effect<DaemonStatus>;
+  readonly getProjects: () => Effect.Effect<ReadonlyArray<StoredProject>>;
+}
+
+export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+  DaemonHandleTag,
+  DaemonHandle
+>() {}
+
+export const DaemonHandleLive = Layer.effect(
+  DaemonHandleTag,
+  Effect.gen(function* () {
+    const configRef = yield* DaemonConfigRefTag;
+    const registry = yield* ProjectRegistryTag;
+    // ... compose handle from existing Tags
+  }),
+);
+```
+
+For `--foreground` mode:
+```typescript
+const runtime = ManagedRuntime.make(makeDaemonLive(options));
+await runtime.runPromise(Effect.void); // builds layers, starts servers
+const handle = await runtime.runPromise(DaemonHandleTag); // get handle
+```
+
+**AP-42: IPC shutdown triggers Deferred.** The IPC `scheduleShutdown` handler (Task 8) completes `ShutdownSignalTag` Deferred after delay:
+
+```typescript
+export const handleScheduleShutdown = Effect.gen(function* () {
+  const shutdown = yield* ShutdownSignalTag;
+  yield* Effect.sleep(Duration.millis(DAEMON_SHUTDOWN_DELAY_MS));
+  yield* Deferred.succeed(shutdown, void 0);
+});
+```
+
+**AP-43: Expand test stub.** Must verify: (a) Layer builds with mock deps; (b) shutdown signal triggers teardown; (c) all finalizers run (PID file removed, servers closed); (d) IPC shutdown command triggers teardown via Deferred.
+
+**AP-44: Update conventions doc.** `docs/plans/effect-ts-next-wave/conventions.md` line 78 incorrectly claims `Layer.launch` handles SIGINT/SIGTERM. Correct to: "Use `NodeRuntime.runMain(Layer.launch(...))` for the top-level daemon program — `runMain` handles SIGINT/SIGTERM."
+
+### Dependency Graph Update
+
+Task 3 PortScanner wiring deferred to after Task 7. `HttpServerRefTag` introduced in Task 9 (not Task 11).
+
+```
+Task 1 (DaemonConfigRef) ← keystone
+  │
+  ├─ Task 2 (ConfigPersistence)       ─┐
+  ├─ Task 3 (background svc, no PS)    │ parallel after Task 1
+  ├─ Task 4 (CrashCounter/Auth)        │
+  ├─ Task 5 (TLS)                     ─┘
+  │
+  Task 6 (ProjectRegistry wiring + gaps) ← needs Task 2
+  │
+  Task 7 (InstanceManager wiring + gaps + PortScanner) ← needs Task 6
+  │
+  ├─ Task 8 (IPC handlers + dispatch bridge)  ─┐
+  ├─ Task 9 (Relay factory + HttpServerRefTag) │ parallel after Task 7
+  ├─ Task 10 (WS/discovery/prefetch)          ─┘
+  │
+  Task 11 (tiered Layer composition, server Layer conversion) ← needs Tasks 3-10
+  │
+  Task 12 (NodeRuntime.runMain + DaemonHandleTag) ← needs Task 11
+```
