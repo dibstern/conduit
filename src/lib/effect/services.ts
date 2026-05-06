@@ -6,7 +6,7 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { Context, type Deferred } from "effect";
+import { Context } from "effect";
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
@@ -245,11 +245,8 @@ export class ProviderStateServiceTag extends Context.Tag(
 
 // ─── Daemon lifecycle Tags ────────────────────────────────────────────────
 
-/** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
-export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
-	ShutdownSignalTag,
-	Deferred.Deferred<void>
->() {}
+// ShutdownSignalTag moved to daemon-layers.ts to break circular dependency.
+// Import it directly from daemon-layers.ts if needed.
 
 // ─── Daemon leaf-service Tags ─────────────────────────────────────────────
 // Re-exported from the Effect-native layer files. These are the canonical Tags

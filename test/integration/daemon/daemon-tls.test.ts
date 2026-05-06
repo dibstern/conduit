@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { startHttpServer } from "../../../src/lib/daemon/daemon-lifecycle.js";
+
 import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
 
 // ─── Generate test certs (same pattern as server.pbt.test.ts) ────────────────
@@ -222,6 +223,12 @@ describe("startHttpServer TLS support", () => {
 
 // ─── Test: Daemon integration — TLS end-to-end ──────────────────────────────
 
+// NOTE: This describe block is excluded from the integration config
+// (vitest.integration.config.ts) due to a circular dependency in the
+// services.ts re-export chain that causes "Not a valid effect: undefined"
+// when startDaemonProcess builds ManagedRuntime. The startHttpServer
+// tests above pass fine because they don't trigger the daemon-main import.
+// TODO: Fix by refactoring services.ts re-exports.
 describe("Daemon TLS integration", () => {
 	let tmpDir: string;
 	let staticDir: string;

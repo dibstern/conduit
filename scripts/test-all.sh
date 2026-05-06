@@ -33,14 +33,17 @@ run() {
 run "Type check"       pnpm check
 run "Lint"             pnpm lint
 
+# Wait for child processes to exit and ports to settle between suites.
+wait_for_cleanup() {
+  sleep 1
+}
+
 # --- Vitest suites (no build needed) ---
-# Use vitest run test/unit instead of bare vitest run.
-# Bare vitest run includes both components (jsdom) and unit (threads) projects
-# in the same process, which causes @effect/vitest's dynamic test registration
-# to fail with "No test suite found" in ~58 files.
 run "Unit tests"               pnpm test:unit
-run "Integration tests"        vitest run --config vitest.integration.config.ts
-run "Contract tests"           vitest run --config vitest.contract.config.ts
+wait_for_cleanup
+run "Integration tests"        pnpm test:integration
+wait_for_cleanup
+run "Contract tests"           pnpm test:contract
 
 # --- Build (needed by E2E and storybook visual tests below) ---
 run "Build"            pnpm build

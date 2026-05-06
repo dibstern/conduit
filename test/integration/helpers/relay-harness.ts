@@ -69,6 +69,8 @@ export async function createRelayHarness(
 			}
 			await stack.stop();
 			await mock.stop();
+			// Allow OS to fully release ports and file descriptors
+			await new Promise((r) => setTimeout(r, 100));
 		},
 	};
 }

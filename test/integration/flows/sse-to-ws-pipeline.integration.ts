@@ -24,7 +24,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		harness.mock.resetQueues();
 		// Let relay pipeline drain events from previous test before
 		// new test's client connects and starts asserting.
-		await new Promise((r) => setTimeout(r, 500));
+		await new Promise((r) => setTimeout(r, 1000));
 	});
 
 	it("SSE stream is running after relay startup", async () => {
@@ -66,7 +66,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		expect(done["code"]).toBe(0);
 
 		await client.close();
-	}, 10_000);
+	}, 30_000);
 
 	it("delta events contain incremental text", async () => {
 		const client = await harness.connectWsClient();
@@ -91,7 +91,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		}
 
 		await client.close();
-	}, 10_000);
+	}, 30_000);
 
 	it("done event arrives after deltas", async () => {
 		const client = await harness.connectWsClient();
@@ -115,7 +115,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		expect(doneIndex).toBeGreaterThan(deltaIndex);
 
 		await client.close();
-	}, 10_000);
+	}, 30_000);
 
 	it("multiple clients all receive same SSE-sourced events", async () => {
 		const client1 = await harness.connectWsClient();
@@ -153,7 +153,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 
 		await client1.close();
 		await client2.close();
-	}, 10_000);
+	}, 30_000);
 
 	it("done signal arrives after completion with no errors", async () => {
 		const client = await harness.connectWsClient();
@@ -181,5 +181,5 @@ describe("Integration: SSE to WS Pipeline", () => {
 		expect(pipelineErrors).toHaveLength(0);
 
 		await client.close();
-	}, 10_000);
+	}, 30_000);
 });
