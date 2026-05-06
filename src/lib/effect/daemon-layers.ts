@@ -42,6 +42,7 @@ import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive } from "./port-scanner-layer.js";
 import { makeProjectRegistryLive } from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
+import { RelayFactoryLive } from "./relay-factory-layer.js";
 import { SessionOverridesTag } from "./services.js";
 import { StorageMonitorLive } from "./storage-monitor-layer.js";
 import { EnsureCertsLive, TlsCertLive } from "./tls-cert-layer.js";
@@ -445,6 +446,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			Layer.provideMerge(makeRelayCacheLayer(options.relayFactory)),
 		);
 	}
+
+	// RelayFactory + HttpServerRef — Effect-native relay creation.
+	// RelayFactoryLive provides both RelayFactoryTag and HttpServerRefTag.
+	// DaemonConfigRefTag is already in the composed layer.
+	composed = composed.pipe(
+		Layer.provideMerge(
+			RelayFactoryLive(options.configDir).pipe(Layer.provide(configRefLayer)),
+		),
+	);
 
 	return composed;
 };
