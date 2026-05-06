@@ -1590,3 +1590,318 @@ Task 1 (DaemonConfigRef) ← keystone
   │
   Task 12 (NodeRuntime.runMain + DaemonHandleTag) ← needs Task 11
 ```
+
+---
+
+## Audit Amendments (Round 2)
+
+> **For Agent:** These amendments override Round 1 amendments where they conflict. Read Round 1 first, then apply these corrections on top.
+
+### Task 1 Amendments (Round 2)
+
+**AP-R2-1: Update all test `defaults` objects with AP-1 fields.**
+
+Every test that constructs a `DaemonRuntimeConfig` defaults object must include the three AP-1 fields. Replace all test defaults (Task 1 lines 73-83, Task 2 lines 309-319, and any other test defaults in the plan) with:
+
+```typescript
+const defaults: DaemonRuntimeConfig = {
+  port: 2633,
+  host: "127.0.0.1",
+  pinHash: null,
+  tlsEnabled: false,
+  keepAwake: false,
+  keepAwakeCommand: undefined,
+  keepAwakeArgs: undefined,
+  shuttingDown: false,
+  dismissedPaths: new Set(),
+  startTime: Date.now(),
+  hostExplicit: false,
+  persistedSessionCounts: new Map(),
+};
+```
+
+**AP-R2-2: Update `makeDaemonConfigFromOptions` for AP-1 fields.**
+
+Replace the function at plan lines 177-196 with:
+
+```typescript
+export const makeDaemonConfigFromOptions = (options: {
+  port?: number;
+  host?: string;
+  pinHash?: string;
+  tlsEnabled?: boolean;
+  keepAwake?: boolean;
+  keepAwakeCommand?: string;
+  keepAwakeArgs?: string[];
+  dismissedPaths?: string[];
+  startTime?: number;
+  persistedSessionCounts?: ReadonlyMap<string, number>;
+}): DaemonRuntimeConfig => ({
+  port: options.port ?? 2633,
+  host: options.host ?? "127.0.0.1",
+  pinHash: options.pinHash ?? null,
+  tlsEnabled: options.tlsEnabled ?? false,
+  keepAwake: options.keepAwake ?? false,
+  keepAwakeCommand: options.keepAwakeCommand,
+  keepAwakeArgs: options.keepAwakeArgs,
+  shuttingDown: false,
+  dismissedPaths: new Set(options.dismissedPaths ?? []),
+  startTime: options.startTime ?? Date.now(),
+  hostExplicit: options.host !== undefined,
+  persistedSessionCounts: new Map(options.persistedSessionCounts ?? []),
+});
+```
+
+### Task 2 Amendments (Round 2)
+
+**AP-R2-3: Fix AP-3 test `writes` scoping.**
+
+Rewrite `makeTestLayer()` to return both the composed layer and the writes array, so AP-3's test body can destructure them:
+
+```typescript
+const makeTestLayer = () => {
+  const writes: DaemonRuntimeConfig[] = [];
+  const writerLayer = Layer.succeed(ConfigWriterTag, {
+    write: (config: DaemonRuntimeConfig) =>
+      Effect.sync(() => { writes.push(config); }),
+  });
+  const layer = ConfigPersistenceLive.pipe(
+    Layer.provide(Layer.mergeAll(
+      DaemonConfigRefLive(defaults),
+      DaemonEventBusLive,
+      writerLayer,
+    )),
+  );
+  return { layer, writes };
+};
+
+// Usage in test:
+it.scoped("writes config to disk on ConfigChanged event", () =>
+  Effect.gen(function* () {
+    const { layer, writes } = makeTestLayer();
+    yield* Layer.build(Layer.fresh(layer));
+    const bus = yield* DaemonEventBusTag;
+    yield* PubSub.publish(bus, DaemonEvent.ConfigChanged({}));
+    yield* TestClock.adjust(Duration.millis(600));
+    expect(writes.length).toBeGreaterThanOrEqual(1);
+  }).pipe(Effect.provide(/* NOTE: bus comes from layer above, not a second one */)),
+);
+```
+
+**AP-R2-4: Add `persistedSessionCounts` seeding cross-reference.**
+
+Add to Task 1 Step 7 (after the wiring code at plan lines 230-237):
+
+> **Note:** `persistedSessionCounts` is populated when disk config is loaded. This happens during Task 6 when `ProjectRegistryLive` rehydrates from disk state. Until then, defaults to empty Map.
+
+### Task 5 Amendments (Round 2)
+
+**AP-R2-5: Add `caCertPem` to success-path return.**
+
+Replace plan lines 659-663 return object with:
+
+```typescript
+return {
+  certs,
+  caRootPath: certs?.caRoot ?? null,
+  caCertDer: certs?.caCertDer ?? null,
+  caCertPem: certs?.caCertPem ?? null,
+};
+```
+
+**AP-R2-6: Add `EnsureCertsTag` to implementation and tests.**
+
+Add a Context Tag for `ensureCerts` DI so tests can mock it:
+
+```typescript
+export interface EnsureCertsService {
+  ensureCerts: (opts: { configDir: string }) => Effect.Effect<TlsCerts | null, TlsCertLoadError>;
+}
+
+export class EnsureCertsTag extends Context.Tag("EnsureCerts")<
+  EnsureCertsTag,
+  EnsureCertsService
+>() {}
+
+// Production layer:
+export const EnsureCertsLive = Layer.succeed(EnsureCertsTag, {
+  ensureCerts: (opts) => Effect.tryPromise({
+    try: () => ensureCerts(opts),
+    catch: (cause) => new TlsCertLoadError({ cause }),
+  }),
+});
+```
+
+Update `TlsCertLive` to resolve from context instead of importing directly:
+
+```typescript
+// Replace: yield* Effect.tryPromise({ try: () => ensureCerts({ configDir }), ... })
+// With:
+const certService = yield* EnsureCertsTag;
+const certs = yield* certService.ensureCerts({ configDir }).pipe(
+  Effect.catchTag("TlsCertLoadError", (e) =>
+    Effect.gen(function* () {
+      yield* Effect.logWarning("TLS unavailable — falling back to HTTP");
+      yield* Ref.update(configRef, (c) => ({ ...c, tlsEnabled: false }));
+      return null;
+    }),
+  ),
+);
+```
+
+`TlsCertLive` now depends on `EnsureCertsTag`. Compose with `EnsureCertsLive` in `makeDaemonLive`. Tests provide mock `EnsureCertsTag` directly.
+
+### Task 6 Amendments (Round 2)
+
+**AP-R2-7: Document ProjectRegistryLive co-layer requirements.**
+
+Add to AP-18 step 4 (wiring into makeDaemonLive):
+
+> **Required co-layers:** `ProjectRegistryLive` free functions require `DaemonEventBusTag` and `RelayCacheTag` at call sites. `DaemonEventBusLive` is already composed. `RelayCacheLayer` (from `makeRelayCacheLayer`) must also be composed — `relayFactory` option in `DaemonLiveOptions` must be mandatory when ProjectRegistry is wired. If no relay factory is available during testing, provide a stub `RelayCacheLayer` via `Layer.succeed(RelayCacheTag, ...)`.
+
+**AP-R2-8: Add `isStarting` to gap list.**
+
+Add to AP-18 step 3 missing methods:
+
+> - `isStarting(slug)` — used at `daemon-main.ts:632`. Replace with: check `getEntry(slug)` returns entry with `_tag === "Registering"`. Add helper: `export const isStarting = (slug: string) => getEntry(slug).pipe(Effect.map(Option.map(e => e._tag === "Registering")), Effect.map(Option.getOrElse(() => false)))`.
+
+### Task 7 Amendments (Round 2)
+
+**AP-R2-9: Add missing InstanceManagementDeps methods to gap list.**
+
+Add to AP-19 step 3 before building `InstanceMgmtLive` adapter:
+
+> **Fill gaps first.** The existing Effect service is missing 4 of 7 `InstanceManagementDeps` methods:
+> - `startInstance(id)` — spawn instance process, update status to "running"
+> - `stopInstance(id)` — interrupt instance fiber, update status to "stopped"
+> - `updateInstance(id, partial)` — `Ref.update` with partial field merge
+> - `persistConfig()` — delegate to `ConfigPersistenceLive` by publishing `ConfigChanged` event
+>
+> Implement these before building the adapter.
+
+**AP-R2-10: Fix `addInstance` return type.**
+
+> Modify Effect `addInstance` to return `OpenCodeInstance` instead of `void`. After `Ref.update`, read back the created instance via `HashMap.get` and return it. The `InstanceMgmtLive` adapter can then pass through directly.
+
+**AP-R2-11: Add `getExternalUrl`/`getInstanceUrl` to gap list.**
+
+> Add to AP-19 gap list:
+> - `getExternalUrl(id)` — used at `daemon-main.ts:397`. Pure helper: construct URL from `instance.port` + daemon host.
+> - `getInstanceUrl(id)` — used at `daemon-main.ts:544,550`. Pure helper: construct URL from `instance.port` + localhost.
+>
+> Implement as standalone Effect functions (not methods on the service interface).
+
+**AP-R2-12: Fix PortScanner callback construction.**
+
+Replace AP-19 step 5 PortScanner wiring guidance:
+
+> **PortScanner callbacks must close over concrete values, not Tags.** `PortScannerConfig.onDiscovered/onLost` are typed `(port: number) => Effect.Effect<void>` (zero requirements — `R = never`). You cannot use `yield* InstanceManagerStateTag` inside these callbacks.
+>
+> Instead, obtain concrete Ref/FiberMap values during Layer construction and close over them:
+>
+> ```typescript
+> // Inside a Layer.scoped that has access to both services:
+> const stateRef = yield* InstanceManagerStateTag;
+> const fibers = yield* PollerFibersTag;
+>
+> const portScannerConfig: PortScannerConfig = {
+>   // ...
+>   onDiscovered: (port) => Effect.gen(function* () {
+>     // Close over stateRef directly — no Tag access needed
+>     yield* Ref.update(stateRef, (s) => ({ ... }));
+>   }),
+>   onLost: (port) => Effect.gen(function* () {
+>     yield* Ref.update(stateRef, (s) => ({ ... }));
+>   }),
+> };
+> ```
+
+**AP-R2-13: Specify DaemonEventBus bridge home.**
+
+Add to AP-19 step 6:
+
+> Create dedicated `DaemonWiringLive` Layer that sits above both `ProjectRegistryLive` and `InstanceManagerLive` in the composition tier. This Layer:
+> 1. Subscribes to `DaemonEventBus` for `InstanceStatusChanged` events
+> 2. Resets error-state projects in ProjectRegistry when instances become healthy
+> 3. Manages the subscription fiber via `Effect.forkScoped`
+>
+> Place in Tier 3 (dispatch/routing) of the tiered composition from AP-37.
+
+**AP-R2-14: Document `drain()` replacement.**
+
+Add to AP-19 step 7:
+
+> **Note:** `instanceManager.drain()` and `registry.drain()` are replaced by scope-based finalization. `FiberMap.make` is scoped — all fibers are interrupted when the Layer scope closes. `Ref` state is garbage collected. No explicit `drain` method is needed on the Effect services.
+
+**AP-R2-15: Wire existing PushManagerLive.**
+
+Replace AP-19 step 8:
+
+> Wire existing `PushManagerLive` from `push-service.ts:37` into `makeDaemonLive`. Provide a concrete `sendPush` implementation (or stub if push notifications are not yet wired). Do NOT create a new Layer — the existing one is complete.
+
+### Task 11 Amendments (Round 2)
+
+**AP-R2-16: Use `Layer.provideMerge` instead of `Layer.provide` in tiered composition.**
+
+AP-37's tiered composition uses `Layer.provide` which strips transitive deps. `services.pipe(Layer.provide(foundation))` outputs only service tags — downstream tiers cannot access foundation tags like `DaemonEventBusTag` or `DaemonConfigRefTag`.
+
+Replace all `Layer.provide` with `Layer.provideMerge` in the tiered composition:
+
+```typescript
+export const makeDaemonLive = (options: DaemonOptions) => {
+  const configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
+
+  // Tier 0: Foundation (no inter-dependencies)
+  const foundation = Layer.mergeAll(
+    DaemonEventBusLive,
+    PinoLoggerLive,
+    DaemonConfigRefLive(makeDaemonConfigFromOptions(options)),
+    SignalHandlerLayer,
+    ProcessErrorHandlerLayer,
+    makePidFileLive(configDir, pidPath, socketPath),
+  );
+
+  // Tier 1: Services needing foundation
+  // provideMerge passes foundation output through
+  const services = Layer.mergeAll(
+    AuthManagerFromConfigLive,
+    TlsCertLive(configDir),
+    CrashCounterLive,
+    ConfigPersistenceLive,
+    EnsureCertsLive,
+  ).pipe(Layer.provideMerge(foundation));
+
+  // Tier 2: Registries needing foundation + services
+  const registries = Layer.mergeAll(
+    ProjectRegistryLive,
+    InstanceManagerLive,
+    RelayFactoryLive,
+    PushManagerLive,
+  ).pipe(Layer.provideMerge(services));
+
+  // Tier 3: Dispatch/routing/wiring needing all above
+  const dispatch = Layer.mergeAll(
+    IpcDispatchLive,
+    WebSocketRoutingLive,
+    ProjectDiscoveryLive,
+    SessionPrefetchLive,
+    DaemonWiringLive,
+  ).pipe(Layer.provideMerge(registries));
+
+  // Tier 4: Servers + background (needing dispatch)
+  const servers = Layer.mergeAll(
+    HttpServerLive,
+    IpcServerLive,
+    OnboardingServerLive,
+    VersionCheckerLive(versionConfig),
+    StorageMonitorLive(storageConfig),
+    KeepAwakeLive(keepAwakeConfig),
+    PortScannerLive(portScannerConfig),
+    ShutdownAwaiterLive,
+  ).pipe(Layer.provideMerge(dispatch));
+
+  return servers;
+};
+```
+
+Key difference: `Layer.provideMerge(a)(b)` outputs `a.Output | b.Output`, so downstream tiers can access all upstream tags.
