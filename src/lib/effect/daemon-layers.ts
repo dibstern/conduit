@@ -36,6 +36,7 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "./daemon-state.js";
+import { makeInstanceManagerStateLive } from "./instance-manager-service.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive } from "./port-scanner-layer.js";
@@ -428,6 +429,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		// No deps at construction time; DaemonEventBusTag and RelayCacheTag
 		// are required at call sites (mutation functions), not Layer build.
 		Layer.provideMerge(makeProjectRegistryLive()),
+		// InstanceManagerState + PollerFibers — scoped Layer for instance lifecycle.
+		// FiberMap fibers are auto-interrupted on scope close.
+		Layer.provideMerge(makeInstanceManagerStateLive()),
 	);
 
 	// Background services — only include if configs were provided
