@@ -25,6 +25,7 @@ export type DaemonEvent = Data.TaggedEnum<{
 	SessionCreated: { readonly sessionId: string };
 	SessionDeleted: { readonly sessionId: string };
 	RelayBroadcast: { readonly message: unknown };
+	ConfigChanged: {};
 }>;
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();
@@ -77,6 +78,8 @@ export const publishSessionDeleted = (sessionId: string) =>
 
 export const publishRelayBroadcast = (message: unknown) =>
 	publish(DaemonEvent.RelayBroadcast({ message }));
+
+export const publishConfigChanged = publish(DaemonEvent.ConfigChanged());
 
 // ─── Subscriber ─────────────────────────────────────────────────────────────
 
