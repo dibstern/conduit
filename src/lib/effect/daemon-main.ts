@@ -21,6 +21,7 @@ import {
 import type { Fiber } from "effect";
 import {
 	Context,
+	Duration,
 	Effect,
 	Layer,
 	ManagedRuntime,
@@ -180,6 +181,7 @@ export const makeDaemonProgramLayer = (
 // project-registry, instance-manager, config-persistence, etc.).
 
 import { existsSync, mkdirSync } from "node:fs";
+import { statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -211,11 +213,9 @@ import {
 	probeOpenCode,
 	probeOpenCodePort,
 } from "../daemon/daemon-utils.js";
-import { KeepAwake } from "../daemon/keep-awake.js";
 import { PortScanner, type ScanResult } from "../daemon/port-scanner.js";
 import { ProjectRegistry } from "../daemon/project-registry.js";
-import { StorageMonitor } from "../daemon/storage-monitor.js";
-import { VersionChecker } from "../daemon/version-check.js";
+import { fetchLatestVersion } from "../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { InstanceManager } from "../instance/instance-manager.js";
@@ -238,6 +238,7 @@ import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { OpenCodeInstance, StoredProject } from "../types.js";
 import { generateSlug } from "../utils.js";
+import { getVersion } from "../version.js";
 import { AuthManagerTag } from "./auth-middleware.js";
 import { StaticDirTag } from "./static-file-handler.js";
 
@@ -344,12 +345,8 @@ export async function startDaemonProcess(
 	let shuttingDown = false;
 	let startTime = Date.now();
 	let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
-	let _eventLoopTimer: ReturnType<typeof setInterval> | null = null;
 	let tlsCerts: TlsCerts | null = null;
 	let pushManager: PushNotificationManager | null = null;
-	let versionChecker: VersionChecker | null = null;
-	let keepAwakeManager: KeepAwake | null = null;
-	let storageMonitor: StorageMonitor | null = null;
 	let scanner: PortScanner | null = null;
 	// Layer-managed runtime — set after router setup, used by stop().
 	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic resolved at construction
@@ -441,7 +438,7 @@ export async function startDaemonProcess(
 		}
 		if (typeof config["keepAwake"] === "boolean") {
 			keepAwake = config["keepAwake"];
-			keepAwakeManager?.setEnabled(keepAwake);
+			// TODO: Forward keepAwake toggle to KeepAwakeTag after Task 6
 		}
 		if (typeof config["keepAwakeCommand"] === "string") {
 			keepAwakeCommand = config["keepAwakeCommand"];
@@ -613,12 +610,7 @@ export async function startDaemonProcess(
 					setProjectInstance(slug, instanceId),
 				...(pushManager != null && { pushManager }),
 				configDir,
-				...(versionChecker != null && {
-					getCachedUpdate: () =>
-						versionChecker?.isUpdateAvailable()
-							? versionChecker.getLatestVersion()
-							: null,
-				}),
+				// TODO: Wire getCachedUpdate to VersionCheckerTag after Task 6
 				persistence,
 			});
 		};
@@ -768,23 +760,17 @@ export async function startDaemonProcess(
 			clearTimeout(shutdownTimer);
 			shutdownTimer = null;
 		}
-		if (_eventLoopTimer) clearInterval(_eventLoopTimer);
-		_eventLoopTimer = null;
 		await flushConfigSave();
 		await saveDaemonConfig(buildConfig(), configDir);
-		// Drain imperative background services (not yet Layer-managed)
-		await versionChecker?.drain();
-		await storageMonitor?.drain();
+		// Drain imperative services not yet Layer-managed (Tasks 6-7)
 		await scanner?.drain();
 		await instanceManager.drain();
 		await registry.drain();
 		scanner = null;
-		versionChecker = null;
-		storageMonitor = null;
-		keepAwakeManager = null;
 		// Dispose the Layer-managed runtime — tears down in reverse order:
 		// servers (HTTP, IPC, onboarding), signal handlers, error handlers,
-		// PID/socket file cleanup, KeepAwake, DaemonState, DaemonEventBus.
+		// PID/socket file cleanup, KeepAwake, VersionChecker, StorageMonitor,
+		// DaemonState, DaemonEventBus.
 		if (daemonRuntime) await daemonRuntime.dispose();
 		shuttingDown = false;
 	}
@@ -992,26 +978,18 @@ export async function startDaemonProcess(
 		getKeepAwake: () => keepAwake,
 		setKeepAwake: (enabled: boolean) => {
 			keepAwake = enabled;
-			keepAwakeManager?.setEnabled(enabled);
+			// TODO: Forward keepAwake toggle to KeepAwakeTag after Task 6
 			persistConfig();
 			return {
-				supported: keepAwakeManager?.isSupported() ?? false,
-				active: keepAwakeManager?.isActive() ?? false,
+				// TODO: Query KeepAwakeTag for supported/active after Task 6
+				supported: false,
+				active: false,
 			};
 		},
 		setKeepAwakeCommand: (command: string, args: string[]) => {
 			keepAwakeCommand = command;
 			keepAwakeArgs = args;
-			keepAwakeManager?.deactivate();
-			keepAwakeManager = new KeepAwake({
-				enabled: keepAwake,
-				command,
-				args,
-			});
-			keepAwakeManager.onError = ({ error }) => {
-				log.warn("KeepAwake error:", formatErrorDetail(error));
-			};
-			if (keepAwake) keepAwakeManager.activate();
+			// TODO: Reconfigure KeepAwakeTag with new command/args after Task 6
 			persistConfig();
 		},
 		persistConfig: () => persistConfig(),
@@ -1170,6 +1148,7 @@ export async function startDaemonProcess(
 		staticDir,
 	};
 
+	const firstProject = registry.allProjects()[0];
 	const daemonLiveOptions: DaemonLiveOptions = {
 		configDir,
 		pidPath,
@@ -1178,14 +1157,51 @@ export async function startDaemonProcess(
 		ipcContext,
 		getStatus,
 		onboarding: onboardingDeps,
-		// KeepAwake config — Layer version will be created during construction.
-		// VersionChecker, StorageMonitor, PortScanner stay imperative for now.
+		// KeepAwake config — pure Effect Layer replaces imperative KeepAwake class.
+		// Always provide config (even empty) so the Layer is created; platform
+		// detection in KeepAwakeLive handles the default command.
 		keepAwake: keepAwakeCommand
 			? {
 					command: keepAwakeCommand,
 					...(keepAwakeArgs != null && { args: keepAwakeArgs }),
 				}
-			: undefined,
+			: {},
+		// VersionChecker config — pure Effect Layer replaces imperative VersionChecker class.
+		...(!process.argv.includes("--no-update") && {
+			versionCheck: {
+				getCurrentVersion: getVersion,
+				fetchLatestVersion: () =>
+					Effect.tryPromise(() =>
+						fetchLatestVersion("conduit-code", "https://registry.npmjs.org"),
+					).pipe(Effect.orElseSucceed(() => null)),
+				broadcast: (msg: { type: string; current: string; latest: string }) =>
+					Effect.sync(() =>
+						registry.broadcastToAll({
+							type: "update_available",
+							version: msg.latest,
+						}),
+					),
+				checkInterval: Duration.hours(1),
+			},
+		}),
+		// StorageMonitor config — pure Effect Layer replaces imperative StorageMonitor class.
+		storageMon: {
+			getStorageUsage: () =>
+				Effect.tryPromise(async () => {
+					const monitorPath = firstProject?.directory ?? process.cwd();
+					const stats = await statfs(monitorPath);
+					const total = stats.blocks * stats.bsize;
+					const available = stats.bavail * stats.bsize;
+					return total > 0 ? 1 - available / total : 0;
+				}).pipe(Effect.catchAll(() => Effect.succeed(0))),
+			persistence: {
+				// TODO: Wire to ProjectRegistryTag after Task 6
+				evictOldEvents: () => Effect.void,
+			},
+			checkInterval: Duration.minutes(5),
+			highWaterMark: 0.9,
+		},
+		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
 		relayFactory: (slug: string) =>
 			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
@@ -1404,60 +1420,12 @@ export async function startDaemonProcess(
 	clearCrashInfo(configDir);
 	await saveDaemonConfig(buildConfig(), configDir);
 
-	// ── Background services ───────────────────────────────────────────────
-	versionChecker = new VersionChecker({
-		enabled: !process.argv.includes("--no-update"),
-	});
-	versionChecker.onUpdateAvailable = ({ latest }) => {
-		registry.broadcastToAll({ type: "update_available", version: latest });
-	};
-	versionChecker.start();
-
-	keepAwakeManager = new KeepAwake({
-		enabled: keepAwake,
-		...(keepAwakeCommand != null && { command: keepAwakeCommand }),
-		...(keepAwakeArgs != null && { args: keepAwakeArgs }),
-	});
-	keepAwakeManager.onError = ({ error }) => {
-		log.warn("KeepAwake error:", formatErrorDetail(error));
-	};
-	keepAwakeManager.activate();
-
-	const firstProject = registry.allProjects()[0];
-	storageMonitor = new StorageMonitor({
-		path: firstProject?.directory ?? process.cwd(),
-	});
-	storageMonitor.onLowDiskSpace = ({ availableBytes, thresholdBytes }) => {
-		log.warn(
-			`Low disk space warning: ${availableBytes / 1024 / 1024}MB available (threshold: ${thresholdBytes / 1024 / 1024}MB)`,
-		);
-		const summaries = registry.evictOldestSessions(3);
-		if (summaries.length > 0) {
-			for (const summary of summaries) log.info(`Eviction: ${summary}`);
-		} else {
-			log.info("Eviction triggered but no events were eligible for removal");
-		}
-	};
-	storageMonitor.onDiskSpaceOk = ({ availableBytes }) => {
-		log.info(
-			`Disk space recovered: ${availableBytes / 1024 / 1024}MB available`,
-		);
-	};
-	storageMonitor.start();
+	// Background services (VersionChecker, KeepAwake, StorageMonitor) are now
+	// managed by their respective Effect Layers via makeDaemonLive.
 
 	log.info(`Daemon fully started in ${elapsed()}`);
 
-	// ── Event loop monitor ────────────────────────────────────────────────
-	let lastTick = Date.now();
-	_eventLoopTimer = setInterval(() => {
-		const now = Date.now();
-		const delta = now - lastTick;
-		if (delta > 100) {
-			log.debug(`[eventloop] blocked for ${delta}ms`);
-		}
-		lastTick = now;
-	}, 50);
-	_eventLoopTimer.unref();
+	// Event loop monitoring handled by Layer
 
 	// ── discoverProjects helper ───────────────────────────────────────────
 	async function discoverProjects(): Promise<void> {
