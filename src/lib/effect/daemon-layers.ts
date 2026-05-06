@@ -24,6 +24,10 @@ import {
 } from "../daemon/pid-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "./daemon-config-ref.js";
 import { DaemonEventBusLive } from "./daemon-pubsub.js";
 import {
 	DaemonStateTag,
@@ -373,6 +377,14 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		? makeDaemonStateFromDiskNode(options.configPath)
 		: makeDaemonStateLive();
 
+	// DaemonConfigRef — typed Ref for mutable daemon config (port, host, tls, etc.)
+	const configRefLayer = DaemonConfigRefLive(
+		makeDaemonConfigFromOptions({
+			port: options.ctx.port,
+			host: options.ctx.host,
+		}),
+	);
+
 	// Compose: PinoLoggerLive (bottom) → infrastructure → servers → background → state → relay cache
 	// PinoLoggerLive is the foundation: all Effect.log* calls route to Pino.
 	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
@@ -381,6 +393,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	let composed = infraLayer.pipe(
 		Layer.provideMerge(serversLayer),
 		Layer.provideMerge(stateLayer),
+		Layer.provideMerge(configRefLayer),
 		Layer.provideMerge(DaemonEventBusLive),
 		Layer.provideMerge(PinoLoggerLive),
 	);
