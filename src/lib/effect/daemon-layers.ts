@@ -42,6 +42,7 @@ import { PortScannerLive } from "./port-scanner-layer.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import { SessionOverridesTag } from "./services.js";
 import { StorageMonitorLive } from "./storage-monitor-layer.js";
+import { EnsureCertsLive, TlsCertLive } from "./tls-cert-layer.js";
 import { VersionCheckerLive } from "./version-checker-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
@@ -397,6 +398,14 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
 	const infraLayer = Layer.mergeAll(signalLayer, errorLayer, pidLayer);
 
+	// TLS cert layer — loads certs, updates configRef on success/failure.
+	// Depends on configRefLayer + EnsureCertsLive. Placed AFTER configRefLayer
+	// and BEFORE serversLayer (AP-16) so servers see the updated host/tls config.
+	const tlsCertLayer = TlsCertLive(options.configDir).pipe(
+		Layer.provide(configRefLayer),
+		Layer.provide(EnsureCertsLive),
+	);
+
 	// AuthManagerFromConfigLive needs DaemonConfigRefTag — satisfy it with configRefLayer
 	const authManagerLayer = AuthManagerFromConfigLive.pipe(
 		Layer.provide(configRefLayer),
@@ -406,6 +415,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(serversLayer),
 		Layer.provideMerge(stateLayer),
 		Layer.provideMerge(configRefLayer),
+		// TLS cert loading — after configRef, before servers consume the config
+		Layer.provideMerge(tlsCertLayer),
 		// CrashCounterLive has no deps — independent of configRefLayer
 		Layer.provideMerge(CrashCounterLive),
 		// AuthManager — pre-satisfied dependency on DaemonConfigRefTag

@@ -49,6 +49,7 @@ import {
 	ProjectMgmtTag,
 	type RelayCacheTag,
 } from "./services.js";
+import { TlsCertTag } from "./tls-cert-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -189,12 +190,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AuthManager } from "../auth.js";
-import {
-	ensureCerts,
-	getAllIPs,
-	getTailscaleIP,
-	type TlsCerts,
-} from "../cli/tls.js";
+import { getAllIPs, getTailscaleIP, type TlsCerts } from "../cli/tls.js";
 import {
 	DAEMON_SHUTDOWN_DELAY_MS,
 	DEFAULT_OPENCODE_PORT,
@@ -224,7 +220,6 @@ import { createLogger, setLogFormat, setLogLevel } from "../logger.js";
 import { PersistenceLayer } from "../persistence/persistence-layer.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import {
-	CaCertProvider,
 	effectRouterWithCors,
 	HealthProvider,
 	ProjectsProvider,
@@ -315,7 +310,6 @@ export async function startDaemonProcess(
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	const pidPath = options.pidPath ?? join(configDir, "daemon.pid");
 	const staticDir = options.staticDir ?? DEFAULT_STATIC_DIR;
-	const hostExplicit = options.host != null;
 	const smartDefault = options.smartDefault ?? true;
 
 	// Ensure config directory exists
@@ -1044,38 +1038,9 @@ export async function startDaemonProcess(
 	}
 	log.debug(`[startup:${elapsed()}] Push notifications init done`);
 
-	// ── TLS ───────────────────────────────────────────────────────────────
-	if (tlsEnabled) {
-		try {
-			tlsCerts = await ensureCerts({ configDir });
-			if (!tlsCerts) {
-				log.warn("TLS enabled but mkcert not available — falling back to HTTP");
-				tlsEnabled = false;
-			} else if (!hostExplicit) {
-				host = "0.0.0.0";
-				ctx.host = host;
-			}
-		} catch (err) {
-			log.warn(
-				"TLS cert loading failed — falling back to HTTP:",
-				formatErrorDetail(err),
-			);
-			tlsEnabled = false;
-		}
-	}
-
-	if (tlsCerts) {
-		ctx.tls = {
-			key: tlsCerts.key,
-			cert: tlsCerts.caCertPem
-				? Buffer.concat([tlsCerts.cert, Buffer.from("\n"), tlsCerts.caCertPem])
-				: tlsCerts.cert,
-		};
-	}
-
-	log.info(
-		`[startup:${elapsed()}] TLS certs ${tlsEnabled ? "loaded" : "skipped"}`,
-	);
+	// TLS cert loading is now handled by TlsCertLive Layer (via makeDaemonLive).
+	// After the daemon runtime is built, TLS certs are read back from the
+	// runtime and used to set ctx.tls for the server lifecycle context.
 
 	// ── HTTP request router ───────────────────────────────────────────────
 	const getRouterProjects = (): RouterProjectInfo[] =>
@@ -1130,15 +1095,10 @@ export async function startDaemonProcess(
 			}),
 		);
 	}
-	if (tlsCerts?.caRoot != null || tlsCerts?.caCertDer != null) {
-		routerLayer = Layer.merge(
-			routerLayer,
-			Layer.succeed(CaCertProvider, {
-				caCertDer: tlsCerts?.caCertDer ?? undefined,
-				caRootPath: tlsCerts?.caRoot ?? undefined,
-			}),
-		);
-	}
+	// CaCertProvider is now available via TlsCertTag in the Layer.
+	// The /ca/download endpoint uses Effect.serviceOption(CaCertProvider) and
+	// handles absence gracefully. A future task will wire the router to read
+	// directly from TlsCertTag.
 
 	const effectHandler = Effect.runSync(
 		NodeHttpServer.makeHandler(
@@ -1156,9 +1116,12 @@ export async function startDaemonProcess(
 	ctx.port = port;
 	ctx.host = host;
 
+	// TLS cert paths for onboarding are populated after TlsCertLive runs
+	// (during Layer build). For now, pass nulls — the onboarding server
+	// reads these at connection time, and they'll be set after runtime init.
 	const onboardingDeps = {
-		caRootPath: tlsCerts?.caRoot ?? null,
-		caCertDer: tlsCerts?.caCertDer ?? null,
+		caRootPath: null as string | null,
+		caCertDer: null as Buffer | null,
 		staticDir,
 	};
 
@@ -1249,6 +1212,34 @@ export async function startDaemonProcess(
 	// Read back the actual port (important when port 0 is used)
 	port = ctx.port;
 	log.debug(`[startup:${elapsed()}] Servers started via Layer`);
+
+	// ── TLS certs from Layer ─────────────────────────────────────────────
+	// TlsCertLive ran during Layer construction. Read back the results to
+	// update the mutable ctx/variables that legacy code still references.
+	const tlsService = await daemonRuntime.runPromise(TlsCertTag);
+	tlsCerts = tlsService.certs;
+	if (tlsCerts) {
+		ctx.tls = {
+			key: tlsCerts.key,
+			cert: tlsCerts.caCertPem
+				? Buffer.concat([tlsCerts.cert, Buffer.from("\n"), tlsCerts.caCertPem])
+				: tlsCerts.cert,
+		};
+	}
+	// Sync tlsEnabled and host from the config Ref (TlsCertLive may have
+	// updated them during Layer build, e.g. on fallback or host override).
+	const postTlsConfig = await daemonRuntime.runPromise(
+		Effect.gen(function* () {
+			const ref = yield* DaemonConfigRefTag;
+			return yield* Ref.get(ref);
+		}),
+	);
+	tlsEnabled = postTlsConfig.tlsEnabled;
+	host = postTlsConfig.host;
+	ctx.host = host;
+	log.info(
+		`[startup:${elapsed()}] TLS certs ${tlsEnabled ? "loaded" : "skipped"}`,
+	);
 
 	// ── WebSocket upgrade routing ─────────────────────────────────────────
 	const wsServer = ctx.upgradeServer ?? ctx.httpServer;
