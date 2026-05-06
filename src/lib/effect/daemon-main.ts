@@ -1206,8 +1206,13 @@ export async function startDaemonProcess(
 
 	// Create and build the daemon Layer — starts servers, installs signal/error
 	// handlers, writes PID file, creates DaemonState, DaemonEventBus, PinoLogger.
-	daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
-	await daemonRuntime.runPromise(Effect.void);
+	try {
+		daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
+		await daemonRuntime.runPromise(Effect.void);
+	} catch (err) {
+		log.error({ err: formatErrorDetail(err) }, "Daemon startup failed");
+		throw err;
+	}
 
 	// Read back the actual port (important when port 0 is used)
 	port = ctx.port;
