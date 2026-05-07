@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, Fiber, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
 import {
@@ -167,5 +167,131 @@ describe("CrashCounterLive", () => {
 			expect(result.count).toBe(3);
 			expect(result.shouldAbort).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(CrashCounterLive))),
+	);
+});
+
+// ─── AuthManager concurrent pinHash tests ──────────────────────────────────
+
+describe("AuthManager concurrent pinHash safety", () => {
+	const noPin: DaemonRuntimeConfig = {
+		port: 2633,
+		host: "127.0.0.1",
+		pinHash: null,
+		tlsEnabled: false,
+		keepAwake: false,
+		keepAwakeCommand: undefined,
+		keepAwakeArgs: undefined,
+		shuttingDown: false,
+		dismissedPaths: new Set(),
+		startTime: Date.now(),
+		hostExplicit: false,
+		persistedSessionCounts: new Map(),
+	};
+
+	it.effect(
+		"concurrent pinHash updates and reads produce consistent state",
+		() =>
+			Effect.gen(function* () {
+				const auth = yield* AuthManagerTag;
+				const configRef = yield* DaemonConfigRefTag;
+
+				const hashes = Array.from({ length: 10 }, (_, i) =>
+					hashPin(`pin-${i}`),
+				);
+
+				// Fork 10 writers concurrently updating pinHash
+				const writerFibers = yield* Effect.all(
+					hashes.map((hash) =>
+						Effect.fork(
+							Ref.update(configRef, (c) => ({
+								...c,
+								pinHash: hash,
+							})),
+						),
+					),
+				);
+
+				// Fork 10 readers concurrently calling getPinHash
+				const readResults: Array<string | null> = [];
+				const readerFibers = yield* Effect.all(
+					Array.from({ length: 10 }, () =>
+						Effect.fork(
+							Effect.sync(() => {
+								const pin = auth.getPinHash();
+								readResults.push(pin);
+								return pin;
+							}),
+						),
+					),
+				);
+
+				// Join all fibers
+				for (const f of writerFibers) {
+					yield* Fiber.join(f);
+				}
+				for (const f of readerFibers) {
+					yield* Fiber.join(f);
+				}
+
+				// Every read should be either null (initial) or one of the valid hashes
+				for (const pin of readResults) {
+					if (pin !== null) {
+						expect(hashes).toContain(pin);
+					}
+				}
+
+				// Final state should be one of the hashes
+				const finalPin = auth.getPinHash();
+				expect(finalPin).not.toBeNull();
+				expect(hashes).toContain(finalPin);
+			}).pipe(
+				Effect.provide(
+					Layer.fresh(
+						AuthManagerFromConfigLive.pipe(
+							Layer.provideMerge(DaemonConfigRefLive(noPin)),
+						),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"checkPin is consistent with reactive pinHash across 10 updates",
+		() =>
+			Effect.gen(function* () {
+				const auth = yield* AuthManagerTag;
+				const configRef = yield* DaemonConfigRefTag;
+
+				for (let i = 0; i < 10; i++) {
+					const pin = `pin-${i}`;
+					const hash = hashPin(pin);
+					yield* Ref.update(configRef, (c) => ({
+						...c,
+						pinHash: hash,
+					}));
+					// checkPin should immediately reflect the updated hash
+					expect(auth.hasPin()).toBe(true);
+					expect(auth.checkPin(pin)).toBe(true);
+					// Wrong pin should fail
+					expect(auth.checkPin("wrong")).toBe(false);
+				}
+
+				// Clear pin
+				yield* Ref.update(configRef, (c) => ({
+					...c,
+					pinHash: null,
+				}));
+				expect(auth.hasPin()).toBe(false);
+				// No pin → checkPin always returns true
+				expect(auth.checkPin("anything")).toBe(true);
+			}).pipe(
+				Effect.provide(
+					Layer.fresh(
+						AuthManagerFromConfigLive.pipe(
+							Layer.provideMerge(DaemonConfigRefLive(noPin)),
+						),
+					),
+				),
+			),
 	);
 });

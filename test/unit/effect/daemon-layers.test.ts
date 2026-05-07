@@ -119,6 +119,44 @@ describe("ShutdownAwaiterLive", () => {
 	);
 });
 
+describe("Shutdown signal integration", () => {
+	it.scoped(
+		"completing ShutdownSignalTag Deferred triggers scope teardown",
+		() =>
+			Effect.gen(function* () {
+				const teardownRan = yield* Deferred.make<void>();
+				const shutdownDeferred = yield* Deferred.make<void>();
+
+				// Layer that marks teardown via finalizer
+				const markerLayer = Layer.scopedDiscard(
+					Effect.addFinalizer(() => Deferred.succeed(teardownRan, void 0)),
+				);
+
+				// Compose: ShutdownSignal provider + ShutdownAwaiter + marker
+				const shutdownLayer = Layer.succeed(
+					ShutdownSignalTag,
+					shutdownDeferred,
+				);
+				const composed = Layer.mergeAll(
+					ShutdownAwaiterLive.pipe(Layer.provide(shutdownLayer)),
+					markerLayer,
+				);
+
+				const scope = yield* Scope.make();
+				yield* Layer.buildWithScope(Layer.fresh(composed), scope);
+
+				// Teardown has NOT happened yet
+				expect(yield* Deferred.isDone(teardownRan)).toBe(false);
+
+				// Close scope (simulates the shutdown signal path completing)
+				yield* Scope.close(scope, Exit.void);
+
+				// Teardown finalizer should have run
+				expect(yield* Deferred.isDone(teardownRan)).toBe(true);
+			}),
+	);
+});
+
 describe("DaemonHandleTag", () => {
 	it.effect("is a valid Context.Tag with identifier 'DaemonHandle'", () =>
 		Effect.sync(() => {

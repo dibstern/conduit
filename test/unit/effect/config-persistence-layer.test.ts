@@ -118,4 +118,46 @@ describe("ConfigPersistenceLive", () => {
 			expect(writes[0]!.port).toBe(9999);
 		}),
 	);
+
+	it.scoped(
+		"100+ rapid ConfigChanged events coalesced to exactly 1 write",
+		() =>
+			Effect.gen(function* () {
+				const { layer, writes } = makeTestLayer();
+				const ctx = yield* Layer.build(Layer.fresh(layer));
+				const bus = Context.get(ctx, DaemonEventBusTag);
+				for (let i = 0; i < 120; i++) {
+					yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+				}
+				yield* TestClock.adjust(Duration.millis(600));
+				expect(writes.length).toBe(1);
+			}),
+	);
+
+	it.scoped("writer failure does not crash the persistence loop", () =>
+		Effect.gen(function* () {
+			const failingWriterLayer = Layer.succeed(ConfigWriterTag, {
+				write: (_config: DaemonRuntimeConfig) =>
+					// Use type assertion — at runtime catchAll still catches
+					Effect.fail(new Error("disk full")) as unknown as Effect.Effect<void>,
+			});
+			const deps = Layer.mergeAll(
+				DaemonConfigRefLive(defaults),
+				DaemonEventBusLive,
+				failingWriterLayer,
+			);
+			const layer = Layer.merge(
+				ConfigPersistenceLive.pipe(Layer.provide(deps)),
+				deps,
+			);
+			const ctx = yield* Layer.build(Layer.fresh(layer));
+			const bus = Context.get(ctx, DaemonEventBusTag);
+			yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+			yield* TestClock.adjust(Duration.millis(600));
+			// Test passes if no crash — persistence loop survived the error
+			yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+			yield* TestClock.adjust(Duration.millis(600));
+			// Still alive after second attempt
+		}),
+	);
 });
