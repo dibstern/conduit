@@ -43,7 +43,7 @@ import { PortScannerLive } from "./port-scanner-layer.js";
 import { ProjectDiscoveryLive } from "./project-discovery-layer.js";
 import { makeProjectRegistryLive } from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
-import { HttpServerRefLive, RelayFactoryLive } from "./relay-factory-layer.js";
+import { RelayFactoryLive } from "./relay-factory-layer.js";
 import { SessionOverridesTag } from "./services.js";
 import { SessionPrefetchLive } from "./session-prefetch-layer.js";
 import { StorageMonitorLive } from "./storage-monitor-layer.js";
@@ -302,17 +302,15 @@ export const makePidFileLive = (
 
 /**
  * Options for composing the full DaemonLive layer.
- * Each field corresponds to the parameters needed by the individual layer
- * factories. All runtime-resolved values (lifecycle context, IPC context, etc.)
- * are passed in so the composition remains a pure Layer expression.
+ *
+ * Simplified from the original DaemonLiveOptions — fields that are now
+ * provided by Layers (keepAwake config, versionCheck config, storageMon
+ * config, configPath, relayFactory) have been moved to DaemonOptions or
+ * are derived internally. Only server lifecycle context (still imperative)
+ * and optional background service configs remain.
  */
 export interface DaemonLiveOptions {
-	// PID file management
-	configDir: string;
-	pidPath: string;
-	socketPath: string;
-
-	// Server lifecycle
+	// Server lifecycle (still imperative — AP-38 deferred)
 	ctx: DaemonLifecycleContext;
 	ipcContext: DaemonIPCContext;
 	getStatus: () => DaemonStatus;
@@ -323,6 +321,11 @@ export interface DaemonLiveOptions {
 	versionCheck?: Parameters<typeof VersionCheckerLive>[0];
 	storageMon?: Parameters<typeof StorageMonitorLive>[0];
 	portScanner?: Parameters<typeof PortScannerLive>[0];
+
+	// DaemonOptions-derived values (computed by caller from DaemonOptions)
+	configDir: string;
+	pidPath: string;
+	socketPath: string;
 
 	// DaemonState + RelayCache (Tasks 1-4 integration)
 	/** Path to daemon.json config file. When set, loads config from disk. */
@@ -336,37 +339,98 @@ export interface DaemonLiveOptions {
 }
 
 /**
- * Compose all daemon lifecycle Layers into a single Layer.
+ * Compose all daemon lifecycle Layers into a single Layer using tiered
+ * `Layer.provideMerge` composition.
  *
- * Layer ordering expresses startup dependencies:
- *   1. Signal handlers + error handlers + PID file (infrastructure)
- *   2. Servers: HTTP, IPC, onboarding (sequential: HTTP first)
- *   3. Background services: keep-awake, version checker, storage monitor, port scanner
+ * Tiers (AP-37 / AP-R2-16):
+ *   Tier 0 — Foundation: independent Layers with no inter-dependencies
+ *   Tier 1 — Services: Layers that depend on foundation Tags
+ *   Tier 2 — Registries: state containers and factories
+ *   Tier 3 — Servers: imperative server lifecycle (still takes DaemonLifecycleContext)
+ *   Tier 4 — Background: optional background service fibers
+ *   Tier 5 — Scoped fibers: discovery, prefetch, WS routing (need registries + config)
  *
- * Scope finalizers run in reverse order on shutdown, ensuring servers close
- * before PID file removal and signal handler cleanup.
+ * Each tier uses `Layer.provideMerge` so downstream tiers can access
+ * upstream Tags without re-providing them. Scope finalizers run in
+ * reverse order on shutdown.
  */
 export const makeDaemonLive = (options: DaemonLiveOptions) => {
-	// Infrastructure layers (no inter-dependencies)
-	const signalLayer = SignalHandlerLayer;
-	const errorLayer = ProcessErrorHandlerLayer;
-	const pidLayer = makePidFileLive(
-		options.configDir,
-		options.pidPath,
-		options.socketPath,
+	const { configDir, pidPath, socketPath } = options;
+
+	// ── Tier 0: Foundation (no inter-dependencies) ─────────────────────────
+	// These Layers have zero dependencies on other Tags. They form the base
+	// of the Layer stack that all subsequent tiers build on.
+	const foundation = Layer.mergeAll(
+		DaemonEventBusLive,
+		PinoLoggerLive,
+		DaemonConfigRefLive(
+			makeDaemonConfigFromOptions({
+				port: options.ctx.port,
+				host: options.ctx.host,
+				...(options.pinHash != null && { pinHash: options.pinHash }),
+			}),
+		),
+		SignalHandlerLayer,
+		ProcessErrorHandlerLayer,
+		makePidFileLive(configDir, pidPath, socketPath),
+		CrashCounterLive,
 	);
 
-	// Server layers (sequential: HTTP first, then IPC, then onboarding)
-	const serversLayer = makeHttpServerLive(options.ctx).pipe(
-		Layer.provideMerge(
-			makeIpcServerLive(options.ctx, options.ipcContext, options.getStatus),
-		),
-		Layer.provideMerge(
-			makeOnboardingServerLive(options.ctx, options.onboarding),
-		),
+	// ── Tier 1: Services needing foundation ────────────────────────────────
+	// These Layers depend on Tags from Tier 0 (primarily DaemonConfigRefTag).
+	// Layer.provideMerge makes Tier 0 Tags available AND passes them through.
+	//
+	// TlsCertLive depends on both DaemonConfigRefTag (Tier 0) and EnsureCertsTag.
+	// EnsureCertsLive is provided to TlsCertLive directly (intra-tier dependency).
+	const tlsCertWithDeps = TlsCertLive(configDir).pipe(
+		Layer.provide(EnsureCertsLive),
 	);
+	const services = Layer.mergeAll(
+		AuthManagerFromConfigLive,
+		tlsCertWithDeps,
+		EnsureCertsLive,
+	).pipe(Layer.provideMerge(foundation));
 
-	// Background services — all optional for phased migration.
+	// ── Tier 2: Registries + state containers ──────────────────────────────
+	// State containers and factories. ProjectRegistryLive and
+	// InstanceManagerStateLive have no construction deps but are logically
+	// grouped here. RelayFactoryLive needs DaemonConfigRefTag (from Tier 0,
+	// available via Tier 1's provideMerge passthrough).
+	//
+	// DaemonState from disk (with real FS) or empty defaults.
+	const stateLayer = options.configPath
+		? makeDaemonStateFromDiskNode(options.configPath)
+		: makeDaemonStateLive();
+
+	// Compose registry layers explicitly to preserve type information.
+	// RelayFactoryLive has R = DaemonConfigRefTag, which is satisfied by
+	// the services tier (via provideMerge passthrough from foundation).
+	let registries = Layer.mergeAll(
+		makeProjectRegistryLive(),
+		makeInstanceManagerStateLive(),
+		RelayFactoryLive(configDir),
+		stateLayer,
+	).pipe(Layer.provideMerge(services));
+
+	// RelayCache layer — only include if a factory is provided
+	if (options.relayFactory) {
+		registries = Layer.merge(
+			registries,
+			makeRelayCacheLayer(options.relayFactory),
+		);
+	}
+
+	// ── Tier 3: Servers (imperative lifecycle — AP-38 deferred) ────────────
+	// Server Layers still take DaemonLifecycleContext params. Converting them
+	// to read from Context Tags is deferred to AP-38.
+	const servers = Layer.mergeAll(
+		makeHttpServerLive(options.ctx),
+		makeIpcServerLive(options.ctx, options.ipcContext, options.getStatus),
+		makeOnboardingServerLive(options.ctx, options.onboarding),
+	).pipe(Layer.provideMerge(registries));
+
+	// ── Tier 4: Background services (optional) ────────────────────────────
+	// All optional for phased migration. Each is independent.
 	// biome-ignore lint/suspicious/noExplicitAny: Layer generics complex during conditional composition
 	const bgParts: Array<Layer.Layer<any, any, never>> = [];
 	if (options.keepAwake !== undefined) {
@@ -381,121 +445,21 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	if (options.portScanner) {
 		bgParts.push(makePortScannerLive(options.portScanner));
 	}
-	// biome-ignore lint/suspicious/noExplicitAny: mergeAll requires at least 1 element; skip if empty
-	const backgroundLayer: Layer.Layer<any, any, never> | null =
-		bgParts.length > 0 ? bgParts.reduce((acc, l) => Layer.merge(acc, l)) : null;
+	const withBackground =
+		bgParts.length > 0
+			? bgParts
+					.reduce((acc, l) => Layer.merge(acc, l))
+					.pipe(Layer.provideMerge(servers))
+			: servers;
 
-	// State layer — DaemonState from disk (with real FS) or empty defaults
-	const stateLayer = options.configPath
-		? makeDaemonStateFromDiskNode(options.configPath)
-		: makeDaemonStateLive();
+	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
+	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
+	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
+	const scopedFibers = Layer.mergeAll(
+		WebSocketRoutingLive,
+		ProjectDiscoveryLive,
+		SessionPrefetchLive,
+	).pipe(Layer.provideMerge(withBackground));
 
-	// DaemonConfigRef — typed Ref for mutable daemon config (port, host, tls, etc.)
-	const configRefLayer = DaemonConfigRefLive(
-		makeDaemonConfigFromOptions({
-			port: options.ctx.port,
-			host: options.ctx.host,
-			...(options.pinHash != null && { pinHash: options.pinHash }),
-		}),
-	);
-
-	// Compose: PinoLoggerLive (bottom) → infrastructure → servers → background → state → relay cache
-	// PinoLoggerLive is the foundation: all Effect.log* calls route to Pino.
-	// Use Layer.mergeAll for independent layers, Layer.provideMerge for sequential deps.
-	const infraLayer = Layer.mergeAll(signalLayer, errorLayer, pidLayer);
-
-	// TLS cert layer — loads certs, updates configRef on success/failure.
-	// Depends on configRefLayer + EnsureCertsLive. Placed AFTER configRefLayer
-	// and BEFORE serversLayer (AP-16) so servers see the updated host/tls config.
-	const tlsCertLayer = TlsCertLive(options.configDir).pipe(
-		Layer.provide(configRefLayer),
-		Layer.provide(EnsureCertsLive),
-	);
-
-	// AuthManagerFromConfigLive needs DaemonConfigRefTag — satisfy it with configRefLayer
-	const authManagerLayer = AuthManagerFromConfigLive.pipe(
-		Layer.provide(configRefLayer),
-	);
-
-	let composed = infraLayer.pipe(
-		Layer.provideMerge(serversLayer),
-		Layer.provideMerge(stateLayer),
-		Layer.provideMerge(configRefLayer),
-		// TLS cert loading — after configRef, before servers consume the config
-		Layer.provideMerge(tlsCertLayer),
-		// CrashCounterLive has no deps — independent of configRefLayer
-		Layer.provideMerge(CrashCounterLive),
-		// AuthManager — pre-satisfied dependency on DaemonConfigRefTag
-		Layer.provideMerge(authManagerLayer),
-		Layer.provideMerge(DaemonEventBusLive),
-		Layer.provideMerge(PinoLoggerLive),
-		// ProjectRegistryLive — Ref<HashMap> for project state.
-		// No deps at construction time; DaemonEventBusTag and RelayCacheTag
-		// are required at call sites (mutation functions), not Layer build.
-		Layer.provideMerge(makeProjectRegistryLive()),
-		// InstanceManagerState + PollerFibers — scoped Layer for instance lifecycle.
-		// FiberMap fibers are auto-interrupted on scope close.
-		Layer.provideMerge(makeInstanceManagerStateLive()),
-	);
-
-	// Background services — only include if configs were provided
-	if (backgroundLayer) {
-		composed = composed.pipe(Layer.provideMerge(backgroundLayer));
-	}
-
-	// RelayCache layer — only include if a factory is provided
-	if (options.relayFactory) {
-		composed = composed.pipe(
-			Layer.provideMerge(makeRelayCacheLayer(options.relayFactory)),
-		);
-	}
-
-	// RelayFactory + HttpServerRef — Effect-native relay creation.
-	// RelayFactoryLive provides both RelayFactoryTag and HttpServerRefTag.
-	// DaemonConfigRefTag is already in the composed layer.
-	composed = composed.pipe(
-		Layer.provideMerge(
-			RelayFactoryLive(options.configDir).pipe(Layer.provide(configRefLayer)),
-		),
-	);
-
-	// Scoped fiber layers — WebSocket routing, project discovery, session prefetch.
-	// These are side-effect-only layers (scopedDiscard) that fork background fibers.
-	// Their deps are pre-satisfied from individual layers (not `composed`) to avoid
-	// type inference issues with the `any`-typed background service layers.
-	// Note: configRefLayer, authManagerLayer, HttpServerRefLive, DaemonEventBusLive,
-	// makeProjectRegistryLive, makeInstanceManagerStateLive are all memoized by
-	// the Effect runtime — providing the same Layer to multiple consumers constructs
-	// the service only once (Layer memoization).
-
-	// WebSocket routing — attaches upgrade handler to HTTP server.
-	const wsRoutingLayer = WebSocketRoutingLive.pipe(
-		Layer.provide(configRefLayer),
-		Layer.provide(authManagerLayer),
-		Layer.provide(HttpServerRefLive),
-	);
-
-	// Project discovery — forks a one-shot fiber to discover projects from OpenCode.
-	const projectDiscoveryLayer = ProjectDiscoveryLive.pipe(
-		Layer.provide(configRefLayer),
-		Layer.provide(makeInstanceManagerStateLive()),
-		Layer.provide(makeProjectRegistryLive()),
-		Layer.provide(DaemonEventBusLive),
-	);
-
-	// Session prefetch — forks a one-shot fiber to prefetch session counts.
-	const sessionPrefetchLayer = SessionPrefetchLive.pipe(
-		Layer.provide(configRefLayer),
-		Layer.provide(makeInstanceManagerStateLive()),
-		Layer.provide(makeProjectRegistryLive()),
-		Layer.provide(DaemonEventBusLive),
-	);
-
-	composed = composed.pipe(
-		Layer.provideMerge(wsRoutingLayer),
-		Layer.provideMerge(projectDiscoveryLayer),
-		Layer.provideMerge(sessionPrefetchLayer),
-	);
-
-	return composed;
+	return scopedFibers;
 };
