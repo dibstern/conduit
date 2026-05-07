@@ -17,11 +17,14 @@ import {
 	HashMap,
 	Layer,
 	Option,
+	PubSub,
 	Ref,
 	Schedule,
 } from "effect";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import {
+	DaemonEvent,
+	DaemonEventBusTag,
 	publishInstanceError,
 	publishInstanceStatusChanged,
 } from "./daemon-pubsub.js";
@@ -162,6 +165,8 @@ export const addInstance = (input: AddInstanceInput) =>
 			pollerKey(input.id),
 			Effect.never.pipe(Effect.interruptible),
 		);
+
+		return instance;
 	}).pipe(
 		Effect.annotateLogs("instanceId", input.id),
 		Effect.withSpan("instance.add", { attributes: { instanceId: input.id } }),
@@ -413,3 +418,100 @@ export const cancelInstanceFibers = (instanceId: string) =>
 		yield* FiberMap.remove(fibers, pollerKey(instanceId));
 		yield* FiberMap.remove(fibers, restartKey(instanceId));
 	});
+
+// ─── Missing methods for InstanceManagementDeps ─────────────────────────
+
+/**
+ * Start an instance — update status to "starting" and begin health polling.
+ * The actual process spawn is handled externally; this manages Effect-side state.
+ */
+export const startInstance = (instanceId: string) =>
+	Effect.gen(function* () {
+		const stateRef = yield* InstanceManagerStateTag;
+		yield* Ref.update(stateRef, (s) => ({
+			...s,
+			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
+				...inst,
+				status: "starting" as const,
+			})),
+		}));
+		yield* publishInstanceStatusChanged(instanceId);
+		yield* startHealthPoller(instanceId);
+	}).pipe(
+		Effect.annotateLogs("instanceId", instanceId),
+		Effect.withSpan("instance.start"),
+	);
+
+/**
+ * Stop an instance — interrupt its fibers and mark it "stopped".
+ */
+export const stopInstance = (instanceId: string) =>
+	Effect.gen(function* () {
+		yield* cancelInstanceFibers(instanceId);
+		const stateRef = yield* InstanceManagerStateTag;
+		yield* Ref.update(stateRef, (s) => ({
+			...s,
+			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
+				...inst,
+				status: "stopped" as const,
+			})),
+		}));
+		yield* publishInstanceStatusChanged(instanceId);
+	}).pipe(
+		Effect.annotateLogs("instanceId", instanceId),
+		Effect.withSpan("instance.stop"),
+	);
+
+/**
+ * Update an instance with partial field merge.
+ */
+export const updateInstance = (
+	instanceId: string,
+	updates: Partial<
+		Pick<OpenCodeInstance, "name" | "port" | "env" | "managed" | "status">
+	>,
+) =>
+	Effect.gen(function* () {
+		const stateRef = yield* InstanceManagerStateTag;
+		yield* Ref.update(stateRef, (s) => ({
+			...s,
+			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
+				...inst,
+				...updates,
+			})),
+		}));
+		yield* publishInstanceStatusChanged(instanceId);
+	}).pipe(
+		Effect.annotateLogs("instanceId", instanceId),
+		Effect.withSpan("instance.update"),
+	);
+
+/**
+ * Publish a ConfigChanged event so listeners (e.g. persistence) can react.
+ */
+export const persistConfig = Effect.gen(function* () {
+	const bus = yield* DaemonEventBusTag;
+	yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+}).pipe(Effect.withSpan("instance.persistConfig"));
+
+// ─── URL helpers ────────────────────────────────────────────────────────
+
+/**
+ * Get the external URL for an instance (using the daemon's public host).
+ * Returns null if the instance is not found.
+ */
+export const getExternalUrl = (instanceId: string, daemonHost: string) =>
+	getInstance(instanceId).pipe(
+		Effect.map((inst) => `http://${daemonHost}:${inst.port}`),
+		Effect.catchTag("InstanceNotFound", () => Effect.succeed(null)),
+	);
+
+/**
+ * Get the localhost URL for an instance.
+ * Returns null if the instance is not found.
+ */
+export const getInstanceUrl = (instanceId: string) =>
+	getInstance(instanceId).pipe(
+		Effect.map((inst) => `http://localhost:${inst.port}`),
+		Effect.catchTag("InstanceNotFound", () => Effect.succeed(null)),
+	);

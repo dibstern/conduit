@@ -4,10 +4,13 @@
 
 import type { Socket } from "node:net";
 import type { FileSystem } from "@effect/platform";
-import { Effect, Schema, Stream } from "effect";
+import { Context, Effect, Schema, Stream } from "effect";
+import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
 import { IPCCommandSchema, serializeResponse } from "../daemon/ipc-protocol.js";
 import type { IPCResponse } from "../types.js";
 import type { PersistencePathTag } from "./daemon-config-persistence.js";
+import type { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import type { ShutdownSignalTag } from "./daemon-layers.js";
 import type { DaemonStateTag } from "./daemon-state.js";
 import {
 	handleAddProject,
@@ -30,6 +33,7 @@ import {
 	handleSetProjectTitle,
 	handleShutdown,
 } from "./ipc-handlers.js";
+import type { KeepAwakeTag } from "./keep-awake-layer.js";
 import type {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
@@ -41,11 +45,24 @@ import type {
 /** Union of all Tags needed by all IPC handlers. */
 export type IpcHandlerDeps =
 	| DaemonStateTag
+	| DaemonConfigRefTag
 	| FileSystem.FileSystem
 	| PersistencePathTag
 	| InstanceMgmtTag
 	| ProjectMgmtTag
-	| SessionOverridesTag;
+	| SessionOverridesTag
+	| KeepAwakeTag
+	| ShutdownSignalTag;
+
+// ─── IpcContextTag ──────────────────────────────────────────────────────────
+// Context.Tag for the imperative DaemonIPCContext interface.
+// Task 11 will provide this via IpcDispatchLive Layer; for now it is a
+// forward-looking Tag that daemon-main.ts can populate imperatively.
+
+export class IpcContextTag extends Context.Tag("IpcContext")<
+	IpcContextTag,
+	DaemonIPCContext
+>() {}
 
 // ─── Decode + Dispatch ───────────────────────────────────────────────────────
 

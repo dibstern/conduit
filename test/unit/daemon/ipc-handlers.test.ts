@@ -4,9 +4,11 @@
 import { FileSystem } from "@effect/platform";
 import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Deferred, Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
+import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
+import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
 import type { DaemonState } from "../../../src/lib/effect/daemon-state.js";
 import {
 	DaemonStateTag,
@@ -33,6 +35,7 @@ import {
 	handleSetProjectTitle,
 	handleShutdown,
 } from "../../../src/lib/effect/ipc-handlers.js";
+import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
@@ -132,6 +135,45 @@ const makeMockInstanceMgmt = (overrides?: Partial<InstanceManagementDeps>) =>
 const makeMockSessionOverrides = () =>
 	Layer.succeed(SessionOverridesTag, new SessionOverrides());
 
+/** Mock KeepAwakeTag — tracks activate/deactivate calls. */
+const makeMockKeepAwake = () =>
+	Layer.effect(
+		KeepAwakeTag,
+		Effect.gen(function* () {
+			const activeRef = yield* Ref.make(false);
+			return {
+				activate: () => Ref.set(activeRef, true),
+				deactivate: () => Ref.set(activeRef, false),
+				isActive: () => Ref.get(activeRef),
+				isSupported: () => Effect.succeed(true),
+			};
+		}),
+	);
+
+/** Mock DaemonConfigRefTag — Ref with sensible defaults. */
+const makeMockConfigRef = () => {
+	const initial: import("../../../src/lib/effect/daemon-config-ref.js").DaemonRuntimeConfig =
+		{
+			port: 2633,
+			host: "127.0.0.1",
+			pinHash: null,
+			tlsEnabled: false,
+			keepAwake: false,
+			keepAwakeCommand: undefined,
+			keepAwakeArgs: undefined,
+			shuttingDown: false,
+			dismissedPaths: new Set<string>(),
+			startTime: Date.now(),
+			hostExplicit: false,
+			persistedSessionCounts: new Map<string, number>(),
+		};
+	return Layer.effect(DaemonConfigRefTag, Ref.make(initial));
+};
+
+/** Mock ShutdownSignalTag — Deferred for testing. */
+const makeMockShutdownSignal = () =>
+	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
+
 const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 	const testFs = makeTestFileSystem();
 	return Layer.mergeAll(
@@ -141,6 +183,9 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 		makeMockProjectMgmt(),
 		makeMockInstanceMgmt(),
 		makeMockSessionOverrides(),
+		makeMockKeepAwake(),
+		makeMockConfigRef(),
+		makeMockShutdownSignal(),
 	);
 };
 
@@ -240,7 +285,7 @@ describe("IPC handlers", () => {
 	// ── handleSetPin ─────────────────────────────────────────────────────
 
 	describe("handleSetPin", () => {
-		it.effect("updates pinHash in state", () =>
+		it.effect("updates pinHash in state and DaemonConfigRef", () =>
 			Effect.gen(function* () {
 				const ref = yield* DaemonStateTag;
 
@@ -254,14 +299,19 @@ describe("IPC handlers", () => {
 				expect(state.pinHash).not.toBeNull();
 				expect(state.pinHash).not.toBe("1234"); // Should be hashed
 				expect(state.pinHash?.length).toBe(64); // SHA-256 hex length
-			}).pipe(Effect.provide(makeTestLayers())),
+
+				// AP-24: Verify DaemonConfigRef was also updated
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.pinHash).toBe(state.pinHash);
+			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
 		);
 	});
 
 	// ── handleSetKeepAwake ───────────────────────────────────────────────
 
 	describe("handleSetKeepAwake", () => {
-		it.effect("enables keep awake", () =>
+		it.effect("enables keep awake and activates KeepAwakeTag", () =>
 			Effect.gen(function* () {
 				const result = yield* handleSetKeepAwake({
 					cmd: "set_keep_awake",
@@ -269,31 +319,47 @@ describe("IPC handlers", () => {
 				});
 
 				expect(result.ok).toBe(true);
+				expect(result["supported"]).toBe(true);
+				expect(result["active"]).toBe(true);
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwake).toBe(true);
-			}).pipe(Effect.provide(makeTestLayers())),
+
+				// Verify KeepAwakeTag was activated
+				const ka = yield* KeepAwakeTag;
+				const isActive = yield* ka.isActive();
+				expect(isActive).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
 		);
 
-		it.effect("disables keep awake", () =>
+		it.effect("disables keep awake and deactivates KeepAwakeTag", () =>
 			Effect.gen(function* () {
+				// First activate
+				const ka = yield* KeepAwakeTag;
+				yield* ka.activate();
+
 				const result = yield* handleSetKeepAwake({
 					cmd: "set_keep_awake",
 					enabled: false,
 				});
 
 				expect(result.ok).toBe(true);
+				expect(result["active"]).toBe(false);
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwake).toBe(false);
-			}).pipe(Effect.provide(makeTestLayers({ keepAwake: true }))),
+
+				// Verify KeepAwakeTag was deactivated
+				const isActive = yield* ka.isActive();
+				expect(isActive).toBe(false);
+			}).pipe(Effect.provide(Layer.fresh(makeTestLayers({ keepAwake: true })))),
 		);
 	});
 
 	// ── handleShutdown ───────────────────────────────────────────────────
 
 	describe("handleShutdown", () => {
-		it.effect("sets shuttingDown to true", () =>
+		it.effect("sets shuttingDown and completes ShutdownSignal Deferred", () =>
 			Effect.gen(function* () {
 				const result = yield* handleShutdown({ cmd: "shutdown" });
 
@@ -301,7 +367,12 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.shuttingDown).toBe(true);
-			}).pipe(Effect.provide(makeTestLayers())),
+
+				// AP-25: Verify ShutdownSignal Deferred was completed
+				const deferred = yield* ShutdownSignalTag;
+				const isDone = yield* Deferred.isDone(deferred);
+				expect(isDone).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
 		);
 	});
 
@@ -433,7 +504,7 @@ describe("IPC handlers", () => {
 	// ── handleRestartWithConfig ──────────────────────────────────────────
 
 	describe("handleRestartWithConfig", () => {
-		it.effect("sets shuttingDown to true", () =>
+		it.effect("sets shuttingDown and completes ShutdownSignal", () =>
 			Effect.gen(function* () {
 				const result = yield* handleRestartWithConfig({
 					cmd: "restart_with_config",
@@ -443,7 +514,12 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.shuttingDown).toBe(true);
-			}).pipe(Effect.provide(makeTestLayers())),
+
+				// AP-25: Verify ShutdownSignal Deferred was completed
+				const deferred = yield* ShutdownSignalTag;
+				const isDone = yield* Deferred.isDone(deferred);
+				expect(isDone).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
 		);
 	});
 

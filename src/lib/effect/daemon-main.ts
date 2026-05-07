@@ -17,25 +17,35 @@ import {
 	NodeFileSystem,
 	NodeHttpServer,
 	NodePath,
+	NodeRuntime,
 } from "@effect/platform-node";
 import type { Fiber } from "effect";
 import {
 	Context,
+	Deferred,
+	Duration,
 	Effect,
 	Layer,
 	ManagedRuntime,
+	Ref,
 	RuntimeFlags,
 	RuntimeFlagsPatch,
 	Schedule,
 	Supervisor,
 } from "effect";
 import type { DaemonOptions } from "../daemon/daemon-types.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
-import { makeDaemonLive } from "./daemon-layers.js";
+import {
+	makeDaemonLive,
+	ShutdownAwaiterLive,
+	ShutdownSignalTag,
+} from "./daemon-layers.js";
 import {
 	type CrashLimitExceeded,
 	runStartupSequence,
 } from "./daemon-startup.js";
+import { KeepAwakeTag } from "./keep-awake-layer.js";
 import {
 	type ConfigTag,
 	type CrashCounterTag,
@@ -46,6 +56,7 @@ import {
 	ProjectMgmtTag,
 	type RelayCacheTag,
 } from "./services.js";
+import { TlsCertTag } from "./tls-cert-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -173,6 +184,62 @@ export const makeDaemonProgramLayer = (
 		}).pipe(Effect.annotateLogs("component", "daemon-main")),
 	).pipe(Layer.provide(Layer.merge(daemonLayer, makeSupervisorLive)));
 
+// ─── DaemonHandleTag ────────────────────────────────────────────────────
+// Effect-native handle for foreground mode. Provides the same capabilities
+// as the imperative DaemonHandle interface but via Effect-typed methods.
+// AP-41: This Tag is used by foreground mode to interact with the running
+// daemon without going through IPC.
+
+export interface EffectDaemonHandle {
+	readonly port: Effect.Effect<number>;
+	readonly addProject: (dir: string) => Effect.Effect<void>;
+	readonly removeProject: (slug: string) => Effect.Effect<void>;
+	readonly getStatus: () => Effect.Effect<
+		import("../daemon/daemon-types.js").DaemonStatus
+	>;
+	readonly getProjects: () => Effect.Effect<
+		ReadonlyArray<import("../types.js").StoredProject>
+	>;
+}
+
+export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+	DaemonHandleTag,
+	EffectDaemonHandle
+>() {}
+
+// ─── startDaemonEffect ──────────────────────────────────────────────────
+// Effect-native daemon entry point. Uses NodeRuntime.runMain which handles
+// SIGINT/SIGTERM (interrupts the fiber) and calls process.exit on
+// completion. Layer.launch constructs the Layer, runs until the fiber is
+// interrupted, then tears down all finalizers in reverse order.
+//
+// AP-39: NodeRuntime.runMain (not Effect.runFork) — installs signal
+//        handlers that interrupt the fiber.
+// AP-40: runMain never returns (calls process.exit on completion). The
+//        --daemon path in cli-core.ts uses `await startDaemonProcess(...)`
+//        then returns — this works because runMain keeps the process alive.
+// AP-44: Layer.launch alone does NOT handle SIGINT/SIGTERM. runMain does.
+//
+// ShutdownAwaiterLive bridges the Deferred-based shutdown signal (from
+// SignalHandlerLayer or IPC scheduleShutdown) into fiber interruption.
+//
+// NOTE: This coexists alongside the legacy startDaemonProcess. The
+// transition to using startDaemonEffect as the primary entry point
+// happens when all imperative code in startDaemonProcess is eliminated.
+
+export const startDaemonEffect = (daemonLiveOptions: DaemonLiveOptions) => {
+	const daemonLayer = makeDaemonLive(daemonLiveOptions);
+
+	// ShutdownAwaiterLive needs ShutdownSignalTag, which is provided by
+	// SignalHandlerLayer inside daemonLayer. Provide daemonLayer to the
+	// awaiter so it has access to the Deferred.
+	const fullLayer = ShutdownAwaiterLive.pipe(Layer.provideMerge(daemonLayer));
+
+	NodeRuntime.runMain(Layer.launch(fullLayer), {
+		disablePrettyLogger: true,
+	});
+};
+
 // ─── Imperative bridge: startDaemonProcess ───────────────────────────────
 // Standalone startup function that replaces `new Daemon(options).start()`.
 // Orchestrates the same initialization sequence the Daemon class performed,
@@ -180,17 +247,13 @@ export const makeDaemonProgramLayer = (
 // project-registry, instance-manager, config-persistence, etc.).
 
 import { existsSync, mkdirSync } from "node:fs";
+import { statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AuthManager } from "../auth.js";
-import {
-	ensureCerts,
-	getAllIPs,
-	getTailscaleIP,
-	type TlsCerts,
-} from "../cli/tls.js";
+import { getAllIPs, getTailscaleIP, type TlsCerts } from "../cli/tls.js";
 import {
 	DAEMON_SHUTDOWN_DELAY_MS,
 	DEFAULT_OPENCODE_PORT,
@@ -203,7 +266,6 @@ import {
 	saveDaemonConfig,
 	syncRecentProjects,
 } from "../daemon/config-persistence.js";
-import { CrashCounter } from "../daemon/crash-counter.js";
 import type { DaemonLifecycleContext } from "../daemon/daemon-lifecycle.js";
 import {
 	findFreePort,
@@ -211,11 +273,9 @@ import {
 	probeOpenCode,
 	probeOpenCodePort,
 } from "../daemon/daemon-utils.js";
-import { KeepAwake } from "../daemon/keep-awake.js";
 import { PortScanner, type ScanResult } from "../daemon/port-scanner.js";
 import { ProjectRegistry } from "../daemon/project-registry.js";
-import { StorageMonitor } from "../daemon/storage-monitor.js";
-import { VersionChecker } from "../daemon/version-check.js";
+import { fetchLatestVersion } from "../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { InstanceManager } from "../instance/instance-manager.js";
@@ -223,7 +283,6 @@ import { createLogger, setLogFormat, setLogLevel } from "../logger.js";
 import { PersistenceLayer } from "../persistence/persistence-layer.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import {
-	CaCertProvider,
 	effectRouterWithCors,
 	HealthProvider,
 	ProjectsProvider,
@@ -238,6 +297,7 @@ import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { OpenCodeInstance, StoredProject } from "../types.js";
 import { generateSlug } from "../utils.js";
+import { getVersion } from "../version.js";
 import { AuthManagerTag } from "./auth-middleware.js";
 import { StaticDirTag } from "./static-file-handler.js";
 
@@ -313,7 +373,6 @@ export async function startDaemonProcess(
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	const pidPath = options.pidPath ?? join(configDir, "daemon.pid");
 	const staticDir = options.staticDir ?? DEFAULT_STATIC_DIR;
-	const hostExplicit = options.host != null;
 	const smartDefault = options.smartDefault ?? true;
 
 	// Ensure config directory exists
@@ -321,17 +380,9 @@ export async function startDaemonProcess(
 		mkdirSync(configDir, { recursive: true });
 	}
 
-	// ── Crash counter ─────────────────────────────────────────────────────
-	const crashCounter = new CrashCounter();
-	crashCounter.record();
-	if (crashCounter.shouldGiveUp()) {
-		throw new Error(
-			"Daemon crashed too many times within crash window — giving up",
-		);
-	}
-
+	// Crash counter is now managed by CrashCounterLive (via makeDaemonLive).
+	// The crash check happens in runStartupSequence via recordCrashCounter.
 	// PID file is now managed by makePidFileLive (via makeDaemonLive).
-	log.debug(`[startup:${elapsed()}] Crash counter done`);
 
 	// ── Mutable state ─────────────────────────────────────────────────────
 	let port = options.port ?? DEFAULT_PORT;
@@ -344,12 +395,8 @@ export async function startDaemonProcess(
 	let shuttingDown = false;
 	let startTime = Date.now();
 	let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
-	let _eventLoopTimer: ReturnType<typeof setInterval> | null = null;
 	let tlsCerts: TlsCerts | null = null;
 	let pushManager: PushNotificationManager | null = null;
-	let versionChecker: VersionChecker | null = null;
-	let keepAwakeManager: KeepAwake | null = null;
-	let storageMonitor: StorageMonitor | null = null;
 	let scanner: PortScanner | null = null;
 	// Layer-managed runtime — set after router setup, used by stop().
 	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic resolved at construction
@@ -359,8 +406,13 @@ export async function startDaemonProcess(
 	const dismissedPaths = new Set<string>();
 
 	// ── Core services ─────────────────────────────────────────────────────
-	const auth = new AuthManager();
-	if (pinHash) auth.setPinHash(pinHash);
+	// AuthManager with reactive pinHash: initially reads from local `pinHash`
+	// variable. After the daemon runtime is built, pinHash changes go through
+	// DaemonConfigRef (updated via IPC handlers), and AuthManager reads them
+	// reactively through the getPinHash getter closure.
+	const auth = new AuthManager({
+		getPinHash: () => pinHash,
+	});
 
 	const instanceManager = new InstanceManager();
 	const registry = new ProjectRegistry();
@@ -437,11 +489,38 @@ export async function startDaemonProcess(
 		if (typeof config["tls"] === "boolean") tlsEnabled = config["tls"];
 		if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
 			pinHash = config["pinHash"];
-			if (pinHash) auth.setPinHash(pinHash);
+			// Update DaemonConfigRef so AuthManager sees the new pinHash reactively
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ref = yield* DaemonConfigRefTag;
+						yield* Ref.update(ref, (c) => ({ ...c, pinHash }));
+					}),
+				);
+			}
 		}
 		if (typeof config["keepAwake"] === "boolean") {
 			keepAwake = config["keepAwake"];
-			keepAwakeManager?.setEnabled(keepAwake);
+			// AP-22: Forward keepAwake toggle to KeepAwakeTag
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ka = yield* KeepAwakeTag;
+						if (config["keepAwake"]) {
+							yield* ka.activate();
+						} else {
+							yield* ka.deactivate();
+						}
+					}).pipe(
+						Effect.catchAll((e) =>
+							Effect.logWarning(
+								"applyRestartConfig: failed to toggle KeepAwakeTag",
+								{ error: String(e) },
+							),
+						),
+					),
+				);
+			}
 		}
 		if (typeof config["keepAwakeCommand"] === "string") {
 			keepAwakeCommand = config["keepAwakeCommand"];
@@ -613,12 +692,7 @@ export async function startDaemonProcess(
 					setProjectInstance(slug, instanceId),
 				...(pushManager != null && { pushManager }),
 				configDir,
-				...(versionChecker != null && {
-					getCachedUpdate: () =>
-						versionChecker?.isUpdateAvailable()
-							? versionChecker.getLatestVersion()
-							: null,
-				}),
+				// TODO: Wire getCachedUpdate to VersionCheckerTag after Task 6
 				persistence,
 			});
 		};
@@ -768,23 +842,17 @@ export async function startDaemonProcess(
 			clearTimeout(shutdownTimer);
 			shutdownTimer = null;
 		}
-		if (_eventLoopTimer) clearInterval(_eventLoopTimer);
-		_eventLoopTimer = null;
 		await flushConfigSave();
 		await saveDaemonConfig(buildConfig(), configDir);
-		// Drain imperative background services (not yet Layer-managed)
-		await versionChecker?.drain();
-		await storageMonitor?.drain();
+		// Drain imperative services not yet Layer-managed (Tasks 6-7)
 		await scanner?.drain();
 		await instanceManager.drain();
 		await registry.drain();
 		scanner = null;
-		versionChecker = null;
-		storageMonitor = null;
-		keepAwakeManager = null;
 		// Dispose the Layer-managed runtime — tears down in reverse order:
 		// servers (HTTP, IPC, onboarding), signal handlers, error handlers,
-		// PID/socket file cleanup, KeepAwake, DaemonState, DaemonEventBus.
+		// PID/socket file cleanup, KeepAwake, VersionChecker, StorageMonitor,
+		// DaemonState, DaemonEventBus.
 		if (daemonRuntime) await daemonRuntime.dispose();
 		shuttingDown = false;
 	}
@@ -986,37 +1054,88 @@ export async function startDaemonProcess(
 		getPinHash: () => pinHash,
 		setPinHash: (hash: string) => {
 			pinHash = hash;
-			auth.setPinHash(hash);
+			// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash
+			// reactively. AuthManager reads pinHash from DaemonConfigRef.
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ref = yield* DaemonConfigRefTag;
+						yield* Ref.update(ref, (c) => ({ ...c, pinHash: hash }));
+					}).pipe(
+						Effect.catchAll((e) =>
+							Effect.logWarning(
+								"setPinHash: failed to update DaemonConfigRef",
+								{
+									error: String(e),
+								},
+							),
+						),
+					),
+				);
+			}
 			persistConfig();
 		},
 		getKeepAwake: () => keepAwake,
 		setKeepAwake: (enabled: boolean) => {
 			keepAwake = enabled;
-			keepAwakeManager?.setEnabled(enabled);
+			// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling.
+			let supported = false;
+			let active = false;
+			if (daemonRuntime) {
+				daemonRuntime.runPromise(
+					Effect.gen(function* () {
+						const ka = yield* KeepAwakeTag;
+						if (enabled) {
+							yield* ka.activate();
+						} else {
+							yield* ka.deactivate();
+						}
+						supported = yield* ka.isSupported();
+						active = yield* ka.isActive();
+					}).pipe(
+						Effect.catchAll((e) =>
+							Effect.logWarning("setKeepAwake: failed to toggle KeepAwakeTag", {
+								error: String(e),
+							}),
+						),
+					),
+				);
+			}
 			persistConfig();
-			return {
-				supported: keepAwakeManager?.isSupported() ?? false,
-				active: keepAwakeManager?.isActive() ?? false,
-			};
+			return { supported, active };
 		},
 		setKeepAwakeCommand: (command: string, args: string[]) => {
 			keepAwakeCommand = command;
 			keepAwakeArgs = args;
-			keepAwakeManager?.deactivate();
-			keepAwakeManager = new KeepAwake({
-				enabled: keepAwake,
-				command,
-				args,
-			});
-			keepAwakeManager.onError = ({ error }) => {
-				log.warn("KeepAwake error:", formatErrorDetail(error));
-			};
-			if (keepAwake) keepAwakeManager.activate();
+			// AP-23: KeepAwakeTag is scoped and its command is fixed at construction.
+			// To apply a new command, the Layer would need to be rebuilt (Task 11).
+			// For now, persist the new command so it takes effect on next restart.
+			// If keep-awake is currently active, deactivate and reactivate won't
+			// change the underlying process — that requires Layer reconstruction.
 			persistConfig();
 		},
 		persistConfig: () => persistConfig(),
 		scheduleShutdown: () => {
-			shutdownTimer = setTimeout(() => stop(), DAEMON_SHUTDOWN_DELAY_MS);
+			shutdownTimer = setTimeout(() => {
+				// AP-25: Complete the ShutdownSignal Deferred so the Effect runtime
+				// begins graceful teardown (Layer finalizers in reverse order).
+				if (daemonRuntime) {
+					daemonRuntime.runPromise(
+						Effect.gen(function* () {
+							const deferred = yield* ShutdownSignalTag;
+							yield* Deferred.succeed(deferred, undefined);
+						}).pipe(
+							Effect.catchAll((e) =>
+								Effect.logWarning(
+									"scheduleShutdown: failed to complete ShutdownSignal",
+									{ error: String(e) },
+								),
+							),
+						),
+					);
+				}
+				stop();
+			}, DAEMON_SHUTDOWN_DELAY_MS);
 		},
 		applyConfig: (config: Record<string, unknown>) => {
 			applyRestartConfig(config);
@@ -1052,38 +1171,9 @@ export async function startDaemonProcess(
 	}
 	log.debug(`[startup:${elapsed()}] Push notifications init done`);
 
-	// ── TLS ───────────────────────────────────────────────────────────────
-	if (tlsEnabled) {
-		try {
-			tlsCerts = await ensureCerts({ configDir });
-			if (!tlsCerts) {
-				log.warn("TLS enabled but mkcert not available — falling back to HTTP");
-				tlsEnabled = false;
-			} else if (!hostExplicit) {
-				host = "0.0.0.0";
-				ctx.host = host;
-			}
-		} catch (err) {
-			log.warn(
-				"TLS cert loading failed — falling back to HTTP:",
-				formatErrorDetail(err),
-			);
-			tlsEnabled = false;
-		}
-	}
-
-	if (tlsCerts) {
-		ctx.tls = {
-			key: tlsCerts.key,
-			cert: tlsCerts.caCertPem
-				? Buffer.concat([tlsCerts.cert, Buffer.from("\n"), tlsCerts.caCertPem])
-				: tlsCerts.cert,
-		};
-	}
-
-	log.info(
-		`[startup:${elapsed()}] TLS certs ${tlsEnabled ? "loaded" : "skipped"}`,
-	);
+	// TLS cert loading is now handled by TlsCertLive Layer (via makeDaemonLive).
+	// After the daemon runtime is built, TLS certs are read back from the
+	// runtime and used to set ctx.tls for the server lifecycle context.
 
 	// ── HTTP request router ───────────────────────────────────────────────
 	const getRouterProjects = (): RouterProjectInfo[] =>
@@ -1138,15 +1228,10 @@ export async function startDaemonProcess(
 			}),
 		);
 	}
-	if (tlsCerts?.caRoot != null || tlsCerts?.caCertDer != null) {
-		routerLayer = Layer.merge(
-			routerLayer,
-			Layer.succeed(CaCertProvider, {
-				caCertDer: tlsCerts?.caCertDer ?? undefined,
-				caRootPath: tlsCerts?.caRoot ?? undefined,
-			}),
-		);
-	}
+	// CaCertProvider is now available via TlsCertTag in the Layer.
+	// The /ca/download endpoint uses Effect.serviceOption(CaCertProvider) and
+	// handles absence gracefully. A future task will wire the router to read
+	// directly from TlsCertTag.
 
 	const effectHandler = Effect.runSync(
 		NodeHttpServer.makeHandler(
@@ -1164,12 +1249,16 @@ export async function startDaemonProcess(
 	ctx.port = port;
 	ctx.host = host;
 
+	// TLS cert paths for onboarding are populated after TlsCertLive runs
+	// (during Layer build). For now, pass nulls — the onboarding server
+	// reads these at connection time, and they'll be set after runtime init.
 	const onboardingDeps = {
-		caRootPath: tlsCerts?.caRoot ?? null,
-		caCertDer: tlsCerts?.caCertDer ?? null,
+		caRootPath: null as string | null,
+		caCertDer: null as Buffer | null,
 		staticDir,
 	};
 
+	const firstProject = registry.allProjects()[0];
 	const daemonLiveOptions: DaemonLiveOptions = {
 		configDir,
 		pidPath,
@@ -1178,15 +1267,53 @@ export async function startDaemonProcess(
 		ipcContext,
 		getStatus,
 		onboarding: onboardingDeps,
-		// KeepAwake config — Layer version will be created during construction.
-		// VersionChecker, StorageMonitor, PortScanner stay imperative for now.
+		// KeepAwake config — pure Effect Layer replaces imperative KeepAwake class.
+		// Always provide config (even empty) so the Layer is created; platform
+		// detection in KeepAwakeLive handles the default command.
 		keepAwake: keepAwakeCommand
 			? {
 					command: keepAwakeCommand,
 					...(keepAwakeArgs != null && { args: keepAwakeArgs }),
 				}
-			: undefined,
+			: {},
+		// VersionChecker config — pure Effect Layer replaces imperative VersionChecker class.
+		...(!process.argv.includes("--no-update") && {
+			versionCheck: {
+				getCurrentVersion: getVersion,
+				fetchLatestVersion: () =>
+					Effect.tryPromise(() =>
+						fetchLatestVersion("conduit-code", "https://registry.npmjs.org"),
+					).pipe(Effect.orElseSucceed(() => null)),
+				broadcast: (msg: { type: string; current: string; latest: string }) =>
+					Effect.sync(() =>
+						registry.broadcastToAll({
+							type: "update_available",
+							version: msg.latest,
+						}),
+					),
+				checkInterval: Duration.hours(1),
+			},
+		}),
+		// StorageMonitor config — pure Effect Layer replaces imperative StorageMonitor class.
+		storageMon: {
+			getStorageUsage: () =>
+				Effect.tryPromise(async () => {
+					const monitorPath = firstProject?.directory ?? process.cwd();
+					const stats = await statfs(monitorPath);
+					const total = stats.blocks * stats.bsize;
+					const available = stats.bavail * stats.bsize;
+					return total > 0 ? 1 - available / total : 0;
+				}).pipe(Effect.catchAll(() => Effect.succeed(0))),
+			persistence: {
+				// TODO: Wire to ProjectRegistryTag after Task 6
+				evictOldEvents: () => Effect.void,
+			},
+			checkInterval: Duration.minutes(5),
+			highWaterMark: 0.9,
+		},
+		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
+		pinHash,
 		relayFactory: (slug: string) =>
 			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
 				Effect.map((p) => ({
@@ -1205,7 +1332,8 @@ export async function startDaemonProcess(
 	};
 
 	// Create and build the daemon Layer — starts servers, installs signal/error
-	// handlers, writes PID file, creates DaemonState, DaemonEventBus, PinoLogger.
+	// handlers, writes PID file, creates DaemonState, DaemonEventBus, PinoLogger,
+	// CrashCounter, AuthManager (reactive pinHash from DaemonConfigRef).
 	try {
 		daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
 		await daemonRuntime.runPromise(Effect.void);
@@ -1217,6 +1345,34 @@ export async function startDaemonProcess(
 	// Read back the actual port (important when port 0 is used)
 	port = ctx.port;
 	log.debug(`[startup:${elapsed()}] Servers started via Layer`);
+
+	// ── TLS certs from Layer ─────────────────────────────────────────────
+	// TlsCertLive ran during Layer construction. Read back the results to
+	// update the mutable ctx/variables that legacy code still references.
+	const tlsService = await daemonRuntime.runPromise(TlsCertTag);
+	tlsCerts = tlsService.certs;
+	if (tlsCerts) {
+		ctx.tls = {
+			key: tlsCerts.key,
+			cert: tlsCerts.caCertPem
+				? Buffer.concat([tlsCerts.cert, Buffer.from("\n"), tlsCerts.caCertPem])
+				: tlsCerts.cert,
+		};
+	}
+	// Sync tlsEnabled and host from the config Ref (TlsCertLive may have
+	// updated them during Layer build, e.g. on fallback or host override).
+	const postTlsConfig = await daemonRuntime.runPromise(
+		Effect.gen(function* () {
+			const ref = yield* DaemonConfigRefTag;
+			return yield* Ref.get(ref);
+		}),
+	);
+	tlsEnabled = postTlsConfig.tlsEnabled;
+	host = postTlsConfig.host;
+	ctx.host = host;
+	log.info(
+		`[startup:${elapsed()}] TLS certs ${tlsEnabled ? "loaded" : "skipped"}`,
+	);
 
 	// ── WebSocket upgrade routing ─────────────────────────────────────────
 	const wsServer = ctx.upgradeServer ?? ctx.httpServer;
@@ -1404,60 +1560,12 @@ export async function startDaemonProcess(
 	clearCrashInfo(configDir);
 	await saveDaemonConfig(buildConfig(), configDir);
 
-	// ── Background services ───────────────────────────────────────────────
-	versionChecker = new VersionChecker({
-		enabled: !process.argv.includes("--no-update"),
-	});
-	versionChecker.onUpdateAvailable = ({ latest }) => {
-		registry.broadcastToAll({ type: "update_available", version: latest });
-	};
-	versionChecker.start();
-
-	keepAwakeManager = new KeepAwake({
-		enabled: keepAwake,
-		...(keepAwakeCommand != null && { command: keepAwakeCommand }),
-		...(keepAwakeArgs != null && { args: keepAwakeArgs }),
-	});
-	keepAwakeManager.onError = ({ error }) => {
-		log.warn("KeepAwake error:", formatErrorDetail(error));
-	};
-	keepAwakeManager.activate();
-
-	const firstProject = registry.allProjects()[0];
-	storageMonitor = new StorageMonitor({
-		path: firstProject?.directory ?? process.cwd(),
-	});
-	storageMonitor.onLowDiskSpace = ({ availableBytes, thresholdBytes }) => {
-		log.warn(
-			`Low disk space warning: ${availableBytes / 1024 / 1024}MB available (threshold: ${thresholdBytes / 1024 / 1024}MB)`,
-		);
-		const summaries = registry.evictOldestSessions(3);
-		if (summaries.length > 0) {
-			for (const summary of summaries) log.info(`Eviction: ${summary}`);
-		} else {
-			log.info("Eviction triggered but no events were eligible for removal");
-		}
-	};
-	storageMonitor.onDiskSpaceOk = ({ availableBytes }) => {
-		log.info(
-			`Disk space recovered: ${availableBytes / 1024 / 1024}MB available`,
-		);
-	};
-	storageMonitor.start();
+	// Background services (VersionChecker, KeepAwake, StorageMonitor) are now
+	// managed by their respective Effect Layers via makeDaemonLive.
 
 	log.info(`Daemon fully started in ${elapsed()}`);
 
-	// ── Event loop monitor ────────────────────────────────────────────────
-	let lastTick = Date.now();
-	_eventLoopTimer = setInterval(() => {
-		const now = Date.now();
-		const delta = now - lastTick;
-		if (delta > 100) {
-			log.debug(`[eventloop] blocked for ${delta}ms`);
-		}
-		lastTick = now;
-	}, 50);
-	_eventLoopTimer.unref();
+	// Event loop monitoring handled by Layer
 
 	// ── discoverProjects helper ───────────────────────────────────────────
 	async function discoverProjects(): Promise<void> {

@@ -2,10 +2,13 @@ import { FileSystem } from "@effect/platform";
 import { SystemError } from "@effect/platform/Error";
 import { type Rpc, RpcClient, type RpcGroup, RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, Exit, Layer, Ref, Schema } from "effect";
+import { Deferred, Effect, Either, Exit, Layer, Ref, Schema } from "effect";
 import type { Scope } from "effect/Scope";
 import { expect } from "vitest";
 import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
+import type { DaemonRuntimeConfig } from "../../../src/lib/effect/daemon-config-ref.js";
+import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
+import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
@@ -22,6 +25,7 @@ import {
 	IpcHandlersLayer,
 	IpcRpcGroup,
 } from "../../../src/lib/effect/ipc-rpc-group.js";
+import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
@@ -104,6 +108,41 @@ const makeMockInstanceMgmt = (overrides?: Partial<InstanceManagementDeps>) =>
 		...overrides,
 	});
 
+const makeMockKeepAwake = () =>
+	Layer.effect(
+		KeepAwakeTag,
+		Effect.gen(function* () {
+			const activeRef = yield* Ref.make(false);
+			return {
+				activate: () => Ref.set(activeRef, true),
+				deactivate: () => Ref.set(activeRef, false),
+				isActive: () => Ref.get(activeRef),
+				isSupported: () => Effect.succeed(true),
+			};
+		}),
+	);
+
+const makeMockConfigRef = () => {
+	const initial: DaemonRuntimeConfig = {
+		port: 2633,
+		host: "127.0.0.1",
+		pinHash: null,
+		tlsEnabled: false,
+		keepAwake: false,
+		keepAwakeCommand: undefined,
+		keepAwakeArgs: undefined,
+		shuttingDown: false,
+		dismissedPaths: new Set<string>(),
+		startTime: Date.now(),
+		hostExplicit: false,
+		persistedSessionCounts: new Map<string, number>(),
+	};
+	return Layer.effect(DaemonConfigRefTag, Ref.make(initial));
+};
+
+const makeMockShutdownSignal = () =>
+	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
+
 const makeTestLayer = () =>
 	Layer.mergeAll(
 		makeTestFileSystem(),
@@ -115,6 +154,9 @@ const makeTestLayer = () =>
 		}),
 		makeMockInstanceMgmt(),
 		Layer.succeed(SessionOverridesTag, new SessionOverrides()),
+		makeMockKeepAwake(),
+		makeMockConfigRef(),
+		makeMockShutdownSignal(),
 	);
 
 type RpcTestEnv =

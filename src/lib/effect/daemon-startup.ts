@@ -9,7 +9,8 @@
 //   - Programming defects (untagged) propagate up
 //   - Effect.catchAll is NOT used
 
-import { Context, Data, Effect, Ref } from "effect";
+import { Context, Data, Effect, Layer, Ref } from "effect";
+import { CrashCounter as CrashCounterImpl } from "../daemon/crash-counter.js";
 import { type OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { InstanceConfig } from "../shared-types.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
@@ -35,6 +36,32 @@ export class CrashCounterTag extends Context.Tag("CrashCounter")<
 	CrashCounterTag,
 	CrashCounter
 >() {}
+
+/**
+ * CrashCounterLive — Layer that wraps the imperative CrashCounter class
+ * in the Effect CrashCounter service interface.
+ * Uses counter.getTimestamps().length for count (per AP-9).
+ */
+export const CrashCounterLive: Layer.Layer<CrashCounterTag> = Layer.effect(
+	CrashCounterTag,
+	Effect.sync(() => {
+		const counter = new CrashCounterImpl();
+		return {
+			record: () =>
+				Effect.sync(() => {
+					counter.record();
+					return {
+						count: counter.getTimestamps().length,
+						shouldAbort: counter.shouldGiveUp(),
+					};
+				}),
+			reset: () =>
+				Effect.sync(() => {
+					counter.reset();
+				}),
+		};
+	}),
+);
 
 // ─── recordCrashCounter ────────────────────────────────────────────────────
 

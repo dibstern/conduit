@@ -359,6 +359,7 @@ export { ProjectRegistryTag } from "./project-registry-service.js";
 export { PushManagerTag } from "./push-service.js";
 export { RateLimiterTag } from "./rate-limiter-layer.js";
 export { RelayCacheTag } from "./relay-cache.js";
+export { HttpServerRefTag, RelayFactoryTag } from "./relay-factory-layer.js";
 // ─── Phase 2 Effect-native Tag re-exports ─────────────────────────────────
 export { SessionManagerStateTag } from "./session-manager-state.js";
 export { OverridesStateTag } from "./session-overrides-state.js";

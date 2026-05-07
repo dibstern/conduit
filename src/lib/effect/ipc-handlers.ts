@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import type { FileSystem } from "@effect/platform";
-import { Effect, Ref, type Schema } from "effect";
+import { Deferred, Effect, Ref, type Schema } from "effect";
 import type { IPCCommandSchema } from "../daemon/ipc-protocol.js";
 import type { IPCResponse } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -15,7 +15,10 @@ import {
 	type PersistencePathTag,
 	persistConfig,
 } from "./daemon-config-persistence.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import { ShutdownSignalTag } from "./daemon-layers.js";
 import { DaemonStateTag } from "./daemon-state.js";
+import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { InstanceMgmtTag, SessionOverridesTag } from "./services.js";
 
 // ─── Type extraction ─────────────────────────────────────────────────────────
@@ -143,10 +146,19 @@ export const handleSetProjectTitle = (
 
 export const handleSetPin = (
 	cmd: CmdOf<"set_pin">,
-): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
+): Effect.Effect<
+	IPCResponse,
+	never,
+	DaemonStateTag | DaemonConfigRefTag | PersistDeps
+> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 		const hashed = hashPin(cmd.pin);
+
+		// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash reactively.
+		// AuthManager reads pinHash from DaemonConfigRef, not DaemonState.
+		const configRef = yield* DaemonConfigRefTag;
+		yield* Ref.update(configRef, (c) => ({ ...c, pinHash: hashed }));
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
@@ -159,9 +171,26 @@ export const handleSetPin = (
 
 export const handleSetKeepAwake = (
 	cmd: CmdOf<"set_keep_awake">,
-): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
+): Effect.Effect<
+	IPCResponse,
+	never,
+	DaemonStateTag | KeepAwakeTag | PersistDeps
+> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
+		const keepAwake = yield* KeepAwakeTag;
+
+		// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling,
+		// not just the Ref update. KeepAwakeTag.activate/deactivate manages the
+		// platform-specific process (caffeinate, systemd-inhibit, etc.).
+		if (cmd.enabled) {
+			yield* keepAwake.activate();
+		} else {
+			yield* keepAwake.deactivate();
+		}
+
+		const supported = yield* keepAwake.isSupported();
+		const active = yield* keepAwake.isActive();
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
@@ -169,7 +198,7 @@ export const handleSetKeepAwake = (
 		}));
 
 		yield* persistConfig;
-		return { ok: true, supported: true, active: cmd.enabled };
+		return { ok: true, supported, active };
 	});
 
 export const handleSetKeepAwakeCommand = (
@@ -190,7 +219,7 @@ export const handleSetKeepAwakeCommand = (
 
 export const handleShutdown = (
 	_cmd: CmdOf<"shutdown">,
-): Effect.Effect<IPCResponse, never, DaemonStateTag> =>
+): Effect.Effect<IPCResponse, never, DaemonStateTag | ShutdownSignalTag> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 
@@ -198,6 +227,11 @@ export const handleShutdown = (
 			...s,
 			shuttingDown: true,
 		}));
+
+		// AP-25: Complete the ShutdownSignal Deferred so the daemon-wide
+		// shutdown sequence begins (Layer teardown in reverse order).
+		const shutdownDeferred = yield* ShutdownSignalTag;
+		yield* Deferred.succeed(shutdownDeferred, undefined);
 
 		return { ok: true };
 	});
@@ -408,7 +442,11 @@ export const handleSetModel = (
 
 export const handleRestartWithConfig = (
 	cmd: CmdOf<"restart_with_config">,
-): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
+): Effect.Effect<
+	IPCResponse,
+	never,
+	DaemonStateTag | ShutdownSignalTag | PersistDeps
+> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 
@@ -418,5 +456,10 @@ export const handleRestartWithConfig = (
 		}));
 
 		yield* persistConfig;
+
+		// AP-25: Complete the ShutdownSignal Deferred to trigger graceful shutdown.
+		const shutdownDeferred = yield* ShutdownSignalTag;
+		yield* Deferred.succeed(shutdownDeferred, undefined);
+
 		return { ok: true };
 	});

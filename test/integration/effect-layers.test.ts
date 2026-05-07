@@ -5,9 +5,12 @@
 import { FileSystem } from "@effect/platform";
 import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue } from "effect";
+import { Deferred, Effect, Layer, Queue, Ref } from "effect";
 import { expect } from "vitest";
 import { PersistencePathTag } from "../../src/lib/effect/daemon-config-persistence.js";
+import type { DaemonRuntimeConfig } from "../../src/lib/effect/daemon-config-ref.js";
+import { DaemonConfigRefTag } from "../../src/lib/effect/daemon-config-ref.js";
+import { ShutdownSignalTag } from "../../src/lib/effect/daemon-layers.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
@@ -23,6 +26,7 @@ import {
 	makeInstanceManagerStateLive,
 } from "../../src/lib/effect/instance-manager-service.js";
 import { decodeAndDispatch } from "../../src/lib/effect/ipc-dispatch.js";
+import { KeepAwakeTag } from "../../src/lib/effect/keep-awake-layer.js";
 import {
 	makePollerManagerStateLive,
 	PollerManagerStateTag,
@@ -118,6 +122,41 @@ const composedLayer = Layer.mergeAll(
 	makeOverridesStateLive(),
 );
 
+const makeMockKeepAwake = () =>
+	Layer.effect(
+		KeepAwakeTag,
+		Effect.gen(function* () {
+			const activeRef = yield* Ref.make(false);
+			return {
+				activate: () => Ref.set(activeRef, true),
+				deactivate: () => Ref.set(activeRef, false),
+				isActive: () => Ref.get(activeRef),
+				isSupported: () => Effect.succeed(true),
+			};
+		}),
+	);
+
+const makeMockConfigRef = () => {
+	const initial: DaemonRuntimeConfig = {
+		port: 2633,
+		host: "127.0.0.1",
+		pinHash: null,
+		tlsEnabled: false,
+		keepAwake: false,
+		keepAwakeCommand: undefined,
+		keepAwakeArgs: undefined,
+		shuttingDown: false,
+		dismissedPaths: new Set<string>(),
+		startTime: Date.now(),
+		hostExplicit: false,
+		persistedSessionCounts: new Map<string, number>(),
+	};
+	return Layer.effect(DaemonConfigRefTag, Ref.make(initial));
+};
+
+const makeMockShutdownSignal = () =>
+	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
+
 /** Layers needed by IPC dispatch (imperative service mocks + FS + persistence path). */
 const ipcDepsLayer = Layer.mergeAll(
 	makeTestFileSystem(),
@@ -150,6 +189,9 @@ const ipcDepsLayer = Layer.mergeAll(
 		persistConfig: () => {},
 	}),
 	Layer.succeed(SessionOverridesTag, new SessionOverrides()),
+	makeMockKeepAwake(),
+	makeMockConfigRef(),
+	makeMockShutdownSignal(),
 );
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

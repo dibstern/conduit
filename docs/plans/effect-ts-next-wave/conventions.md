@@ -75,7 +75,7 @@
 
 ## Daemon Entry Point
 
-- Use `Layer.launch` for the top-level daemon program. It constructs the Layer, runs until interrupted (SIGINT/SIGTERM), then tears down all finalizers in reverse order.
+- Use `NodeRuntime.runMain(Layer.launch(...))` for the top-level daemon program — `runMain` handles SIGINT/SIGTERM. `Layer.launch` alone does NOT install signal handlers; `runMain` is what interrupts the fiber on signals and calls `process.exit` on completion.
 
 ## Persistence
 
