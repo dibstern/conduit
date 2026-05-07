@@ -37,18 +37,24 @@ import {
 	makeDaemonStateLive,
 } from "./daemon-state.js";
 import { makeInstanceManagerStateLive } from "./instance-manager-service.js";
-import { KeepAwakeLive } from "./keep-awake-layer.js";
+import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
-import { PortScannerLive } from "./port-scanner-layer.js";
+import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectDiscoveryLive } from "./project-discovery-layer.js";
 import { makeProjectRegistryLive } from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import { RelayFactoryLive } from "./relay-factory-layer.js";
 import { SessionOverridesTag } from "./services.js";
 import { SessionPrefetchLive } from "./session-prefetch-layer.js";
-import { StorageMonitorLive } from "./storage-monitor-layer.js";
+import {
+	StorageMonitorLive,
+	StorageMonitorTag,
+} from "./storage-monitor-layer.js";
 import { EnsureCertsLive, TlsCertLive } from "./tls-cert-layer.js";
-import { VersionCheckerLive } from "./version-checker-layer.js";
+import {
+	VersionCheckerLive,
+	VersionCheckerTag,
+} from "./version-checker-layer.js";
 import { WebSocketRoutingLive } from "./ws-routing-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
@@ -430,27 +436,41 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(Layer.provideMerge(registries));
 
 	// ── Tier 4: Background services (optional) ────────────────────────────
-	// All optional for phased migration. Each is independent.
-	// biome-ignore lint/suspicious/noExplicitAny: Layer generics complex during conditional composition
-	const bgParts: Array<Layer.Layer<any, any, never>> = [];
-	if (options.keepAwake !== undefined) {
-		bgParts.push(makeKeepAwakeLive(options.keepAwake));
-	}
-	if (options.versionCheck) {
-		bgParts.push(makeVersionCheckerLive(options.versionCheck));
-	}
-	if (options.storageMon) {
-		bgParts.push(makeStorageMonitorLive(options.storageMon));
-	}
-	if (options.portScanner) {
-		bgParts.push(makePortScannerLive(options.portScanner));
-	}
-	const withBackground =
-		bgParts.length > 0
-			? bgParts
-					.reduce((acc, l) => Layer.merge(acc, l))
-					.pipe(Layer.provideMerge(servers))
-			: servers;
+	// When a config is not provided, a no-op stub Layer provides the Tag
+	// so the service is always resolvable. This avoids type erasure and
+	// ensures wiring tests can verify all Tags without any casts.
+	const keepAwakeLayer =
+		options.keepAwake !== undefined
+			? makeKeepAwakeLive(options.keepAwake)
+			: Layer.succeed(KeepAwakeTag, {
+					activate: () => Effect.void,
+					deactivate: () => Effect.void,
+					isActive: () => Effect.succeed(false),
+					isSupported: () => Effect.succeed(false),
+				});
+	const versionCheckLayer = options.versionCheck
+		? makeVersionCheckerLive(options.versionCheck)
+		: Layer.succeed(VersionCheckerTag, {
+				getLatestKnown: () => Effect.succeed(null),
+				getCurrentVersion: () => Effect.succeed("unknown"),
+			});
+	const storageMonLayer = options.storageMon
+		? makeStorageMonitorLive(options.storageMon)
+		: Layer.succeed(StorageMonitorTag, {
+				getUsage: () => Effect.succeed(0),
+				getLastCheck: () => Effect.succeed(0),
+			});
+	const portScannerLayer = options.portScanner
+		? makePortScannerLive(options.portScanner)
+		: Layer.succeed(PortScannerTag, {
+				getKnownPorts: () => Effect.succeed(new Set<number>()),
+			});
+	const withBackground = Layer.mergeAll(
+		keepAwakeLayer,
+		versionCheckLayer,
+		storageMonLayer,
+		portScannerLayer,
+	).pipe(Layer.provideMerge(servers));
 
 	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.

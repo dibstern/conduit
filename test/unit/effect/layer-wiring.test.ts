@@ -149,11 +149,7 @@ describe("makeDaemonLive wiring", () => {
 
 	// Build the composed layer ONCE for all wiring tests.
 	// Layer.fresh ensures each test gets its own state.
-	// Cast to Layer<any> because makeDaemonLive uses `any` generics for
-	// optional background layers — the Tags are provided at runtime but
-	// TypeScript can't verify it statically.
-	// biome-ignore lint/suspicious/noExplicitAny: background layer generics erased by optional composition
-	const daemonLayer: Layer.Layer<any, any, never> = makeDaemonLive(options);
+	const daemonLayer = makeDaemonLive(options);
 
 	// ── Tier 0: Foundation Tags ───────────────────────────────────────────
 
