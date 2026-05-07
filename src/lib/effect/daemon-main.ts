@@ -17,6 +17,7 @@ import {
 	NodeFileSystem,
 	NodeHttpServer,
 	NodePath,
+	NodeRuntime,
 } from "@effect/platform-node";
 import type { Fiber } from "effect";
 import {
@@ -35,7 +36,11 @@ import {
 import type { DaemonOptions } from "../daemon/daemon-types.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
-import { makeDaemonLive, ShutdownSignalTag } from "./daemon-layers.js";
+import {
+	makeDaemonLive,
+	ShutdownAwaiterLive,
+	ShutdownSignalTag,
+} from "./daemon-layers.js";
 import {
 	type CrashLimitExceeded,
 	runStartupSequence,
@@ -178,6 +183,62 @@ export const makeDaemonProgramLayer = (
 			yield* Effect.never; // Keep alive until interrupted
 		}).pipe(Effect.annotateLogs("component", "daemon-main")),
 	).pipe(Layer.provide(Layer.merge(daemonLayer, makeSupervisorLive)));
+
+// ─── DaemonHandleTag ────────────────────────────────────────────────────
+// Effect-native handle for foreground mode. Provides the same capabilities
+// as the imperative DaemonHandle interface but via Effect-typed methods.
+// AP-41: This Tag is used by foreground mode to interact with the running
+// daemon without going through IPC.
+
+export interface EffectDaemonHandle {
+	readonly port: Effect.Effect<number>;
+	readonly addProject: (dir: string) => Effect.Effect<void>;
+	readonly removeProject: (slug: string) => Effect.Effect<void>;
+	readonly getStatus: () => Effect.Effect<
+		import("../daemon/daemon-types.js").DaemonStatus
+	>;
+	readonly getProjects: () => Effect.Effect<
+		ReadonlyArray<import("../types.js").StoredProject>
+	>;
+}
+
+export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+	DaemonHandleTag,
+	EffectDaemonHandle
+>() {}
+
+// ─── startDaemonEffect ──────────────────────────────────────────────────
+// Effect-native daemon entry point. Uses NodeRuntime.runMain which handles
+// SIGINT/SIGTERM (interrupts the fiber) and calls process.exit on
+// completion. Layer.launch constructs the Layer, runs until the fiber is
+// interrupted, then tears down all finalizers in reverse order.
+//
+// AP-39: NodeRuntime.runMain (not Effect.runFork) — installs signal
+//        handlers that interrupt the fiber.
+// AP-40: runMain never returns (calls process.exit on completion). The
+//        --daemon path in cli-core.ts uses `await startDaemonProcess(...)`
+//        then returns — this works because runMain keeps the process alive.
+// AP-44: Layer.launch alone does NOT handle SIGINT/SIGTERM. runMain does.
+//
+// ShutdownAwaiterLive bridges the Deferred-based shutdown signal (from
+// SignalHandlerLayer or IPC scheduleShutdown) into fiber interruption.
+//
+// NOTE: This coexists alongside the legacy startDaemonProcess. The
+// transition to using startDaemonEffect as the primary entry point
+// happens when all imperative code in startDaemonProcess is eliminated.
+
+export const startDaemonEffect = (daemonLiveOptions: DaemonLiveOptions) => {
+	const daemonLayer = makeDaemonLive(daemonLiveOptions);
+
+	// ShutdownAwaiterLive needs ShutdownSignalTag, which is provided by
+	// SignalHandlerLayer inside daemonLayer. Provide daemonLayer to the
+	// awaiter so it has access to the Deferred.
+	const fullLayer = ShutdownAwaiterLive.pipe(Layer.provideMerge(daemonLayer));
+
+	NodeRuntime.runMain(Layer.launch(fullLayer), {
+		disablePrettyLogger: true,
+	});
+};
 
 // ─── Imperative bridge: startDaemonProcess ───────────────────────────────
 // Standalone startup function that replaces `new Daemon(options).start()`.

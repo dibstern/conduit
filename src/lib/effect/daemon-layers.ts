@@ -463,3 +463,40 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	return scopedFibers;
 };
+
+// ─── ShutdownAwaiterLive ──────────────────────────────────────────────────
+// Side-effect-only Layer that awaits the ShutdownSignalTag Deferred. When the
+// Deferred completes (from SIGINT/SIGTERM via SignalHandlerLayer, or from IPC
+// shutdown), it sends SIGTERM to the current process, which triggers
+// NodeRuntime.runMain's signal handler to interrupt the main fiber and tear
+// down the Layer tree.
+//
+// Why process.kill instead of Effect.interrupt?
+// Layer.launch blocks on Effect.never in the main fiber. A forkScoped child
+// calling Effect.interrupt only interrupts itself — it cannot reach the parent
+// fiber running Effect.never. The correct way to stop the process is via
+// the same signal mechanism that runMain already handles (SIGTERM/SIGINT).
+// For the signal-originated shutdown path (user presses Ctrl+C), runMain
+// handles it directly and this Layer is a no-op (the Deferred was already
+// completed by SignalHandlerLayer, and the process is already shutting down).
+//
+// Used by startDaemonEffect (in daemon-main.ts) to bridge IPC-based shutdown
+// into process termination that NodeRuntime.runMain understands.
+
+export const ShutdownAwaiterLive: Layer.Layer<never, never, ShutdownSignalTag> =
+	Layer.scopedDiscard(
+		Effect.gen(function* () {
+			const shutdown = yield* ShutdownSignalTag;
+			yield* Effect.forkScoped(
+				Deferred.await(shutdown).pipe(
+					Effect.flatMap(() =>
+						Effect.sync(() => {
+							// Send SIGTERM to self — NodeRuntime.runMain intercepts this
+							// and interrupts the main fiber, triggering graceful teardown.
+							process.kill(process.pid, "SIGTERM");
+						}),
+					),
+				),
+			);
+		}),
+	);
