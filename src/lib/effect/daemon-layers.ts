@@ -40,13 +40,16 @@ import { makeInstanceManagerStateLive } from "./instance-manager-service.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive } from "./port-scanner-layer.js";
+import { ProjectDiscoveryLive } from "./project-discovery-layer.js";
 import { makeProjectRegistryLive } from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
-import { RelayFactoryLive } from "./relay-factory-layer.js";
+import { HttpServerRefLive, RelayFactoryLive } from "./relay-factory-layer.js";
 import { SessionOverridesTag } from "./services.js";
+import { SessionPrefetchLive } from "./session-prefetch-layer.js";
 import { StorageMonitorLive } from "./storage-monitor-layer.js";
 import { EnsureCertsLive, TlsCertLive } from "./tls-cert-layer.js";
 import { VersionCheckerLive } from "./version-checker-layer.js";
+import { WebSocketRoutingLive } from "./ws-routing-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
 export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
@@ -454,6 +457,44 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(
 			RelayFactoryLive(options.configDir).pipe(Layer.provide(configRefLayer)),
 		),
+	);
+
+	// Scoped fiber layers — WebSocket routing, project discovery, session prefetch.
+	// These are side-effect-only layers (scopedDiscard) that fork background fibers.
+	// Their deps are pre-satisfied from individual layers (not `composed`) to avoid
+	// type inference issues with the `any`-typed background service layers.
+	// Note: configRefLayer, authManagerLayer, HttpServerRefLive, DaemonEventBusLive,
+	// makeProjectRegistryLive, makeInstanceManagerStateLive are all memoized by
+	// the Effect runtime — providing the same Layer to multiple consumers constructs
+	// the service only once (Layer memoization).
+
+	// WebSocket routing — attaches upgrade handler to HTTP server.
+	const wsRoutingLayer = WebSocketRoutingLive.pipe(
+		Layer.provide(configRefLayer),
+		Layer.provide(authManagerLayer),
+		Layer.provide(HttpServerRefLive),
+	);
+
+	// Project discovery — forks a one-shot fiber to discover projects from OpenCode.
+	const projectDiscoveryLayer = ProjectDiscoveryLive.pipe(
+		Layer.provide(configRefLayer),
+		Layer.provide(makeInstanceManagerStateLive()),
+		Layer.provide(makeProjectRegistryLive()),
+		Layer.provide(DaemonEventBusLive),
+	);
+
+	// Session prefetch — forks a one-shot fiber to prefetch session counts.
+	const sessionPrefetchLayer = SessionPrefetchLive.pipe(
+		Layer.provide(configRefLayer),
+		Layer.provide(makeInstanceManagerStateLive()),
+		Layer.provide(makeProjectRegistryLive()),
+		Layer.provide(DaemonEventBusLive),
+	);
+
+	composed = composed.pipe(
+		Layer.provideMerge(wsRoutingLayer),
+		Layer.provideMerge(projectDiscoveryLayer),
+		Layer.provideMerge(sessionPrefetchLayer),
 	);
 
 	return composed;
