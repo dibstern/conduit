@@ -9,6 +9,7 @@ describe("probeClaudeCapabilities", () => {
 				displayName: string;
 				supportedEffortLevels?: string[];
 			}>;
+			account?: { subscriptionType?: string };
 		};
 		throwOnInit?: Error;
 	}) {
@@ -81,6 +82,106 @@ describe("probeClaudeCapabilities", () => {
 		});
 		const result = await probeClaudeCapabilities({ queryFactory });
 		expect(result.models[0]?.variants).toBeUndefined();
+	});
+
+	it("captures subscriptionType from init.account", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				account: { subscriptionType: "Max" },
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.subscriptionType).toBe("Max");
+	});
+
+	it("leaves subscriptionType undefined when account is absent", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.subscriptionType).toBeUndefined();
+	});
+
+	it("adds contextWindowOptions for Sonnet family", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" },
+					{ value: "claude-opus-4-7", displayName: "Opus 4.7" },
+					{ value: "claude-haiku-4-7", displayName: "Haiku 4.7" },
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		const sonnet = result.models.find((m) => m.id === "claude-sonnet-4-7");
+		const opus = result.models.find((m) => m.id === "claude-opus-4-7");
+		const haiku = result.models.find((m) => m.id === "claude-haiku-4-7");
+		expect(sonnet?.contextWindowOptions).toEqual([
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		]);
+		expect(opus?.contextWindowOptions).toBeUndefined();
+		expect(haiku?.contextWindowOptions).toBeUndefined();
+	});
+
+	it("flips 1m default for premium subscriptions", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				account: { subscriptionType: "max" },
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.models[0]?.contextWindowOptions).toEqual([
+			{ value: "200k", label: "200K" },
+			{ value: "1m", label: "1M (beta)", isDefault: true },
+		]);
+	});
+
+	it("keeps 200k default for non-premium subscriptions", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				account: { subscriptionType: "Pro" },
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.models[0]?.contextWindowOptions?.[0]).toMatchObject({
+			value: "200k",
+			isDefault: true,
+		});
+		expect(result.models[0]?.contextWindowOptions?.[1]).toMatchObject({
+			value: "1m",
+		});
+		expect(
+			result.models[0]?.contextWindowOptions?.[1]?.isDefault,
+		).toBeUndefined();
+	});
+
+	it.each([
+		"max",
+		"maxplan",
+		"max5",
+		"max20",
+		"enterprise",
+		"team",
+		"MAX",
+		"Max Plan",
+	])("recognises %s as premium", async (sub) => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				account: { subscriptionType: sub },
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		const onem = result.models[0]?.contextWindowOptions?.find(
+			(o) => o.value === "1m",
+		);
+		expect(onem?.isDefault).toBe(true);
 	});
 
 	it("calls query() with persistSession:false, maxTurns:0, settingSources:[]", async () => {

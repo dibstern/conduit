@@ -98,12 +98,26 @@ export interface ModelSelection {
 	readonly modelId: string;
 }
 
+/** A user-selectable context-window option, e.g. 200k vs 1m. */
+export interface ContextWindowOption {
+	readonly value: string;
+	readonly label: string;
+	readonly isDefault?: boolean;
+}
+
 export interface ModelInfo {
 	readonly id: string;
 	readonly name: string;
 	readonly providerId: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
+	/**
+	 * Optional per-model context-window selector entries. When present and
+	 * non-empty, the UI renders a dropdown alongside the effort picker. The
+	 * entry marked `isDefault: true` is selected when the user has no
+	 * persisted override.
+	 */
+	readonly contextWindowOptions?: readonly ContextWindowOption[];
 }
 
 // ─── History ────────────────────────────────────────────────────────────────
