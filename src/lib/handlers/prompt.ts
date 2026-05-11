@@ -107,6 +107,7 @@ export const handleMessage = (
 			prompt.model = sessionModel;
 		const variant = overrides.getVariant(activeId);
 		if (variant) prompt.variant = variant;
+		const contextWindow = overrides.getContextWindow(activeId);
 
 		wsHandler.sendToSession(activeId, {
 			type: "status",
@@ -246,6 +247,7 @@ export const handleMessage = (
 				...(images && images.length > 0 ? { images } : {}),
 				...(sessionAgent ? { agent: sessionAgent } : {}),
 				...(variant ? { variant } : {}),
+				...(contextWindow ? { contextWindow } : {}),
 			};
 
 			// Fire-and-forget: the engine manages the turn lifecycle.

@@ -147,6 +147,7 @@ export interface SendTurnInput {
 	readonly eventSink: EventSink;
 	readonly abortSignal: AbortSignal;
 	readonly variant?: string;
+	readonly contextWindow?: string;
 	readonly images?: readonly string[];
 	readonly agent?: string;
 }

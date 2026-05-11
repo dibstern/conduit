@@ -1898,6 +1898,67 @@ describe("handleMessage", () => {
 		);
 	});
 
+	it.effect("passes contextWindow override into engine send_turn input", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+			getClientsForSession: vi.fn(() => ["client-1"]),
+		});
+		const log = mockLogger();
+		const overrides = mockOverrides({
+			getAgent: vi.fn(() => undefined),
+			getModel: vi.fn(() => ({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-5",
+			})),
+			getVariant: vi.fn(() => ""),
+			getContextWindow: vi.fn(() => "1m"),
+			isModelUserSelected: vi.fn(() => true),
+			startProcessingTimeout: vi.fn(),
+		});
+		const sessionMgr = mockSessionManager();
+		const config = mockConfig();
+		const permissionBridge = mockPermissionBridge();
+		const questionBridge = mockQuestionBridge();
+		const client = {} as unknown as OpenCodeAPI;
+		const engine = {
+			getProviderForSession: vi.fn(() => "claude"),
+			dispatch: vi.fn(async () => ({
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			})),
+		} as unknown as OrchestrationEngine;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(QuestionBridgeTag, questionBridge),
+			Layer.succeed(OrchestrationEngineTag, engine),
+		);
+
+		return handleMessage("client-1", { text: "hello world" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(engine.dispatch).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "claude",
+						input: expect.objectContaining({
+							contextWindow: "1m",
+						}),
+					}),
+				);
+			}),
+		);
+	});
+
 	it.effect("sends message via legacy path when no engine", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),

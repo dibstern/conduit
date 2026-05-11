@@ -274,6 +274,202 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		).toBeUndefined();
 	});
 
+	it("uses the [1m] SDK model suffix for Sonnet when contextWindow is 1m", async () => {
+		const resultMsg = makeSuccessResult();
+		const mockQuery = createMockQuery([resultMsg]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-sonnet-1m",
+				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+				contextWindow: "1m",
+			}),
+		);
+
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
+			"claude-sonnet-4-5[1m]",
+		);
+	});
+
+	it("uses the base SDK model id when contextWindow is 200k or absent", async () => {
+		for (const [sessionId, contextWindow] of [
+			["session-sonnet-200k", "200k"],
+			["session-sonnet-default", undefined],
+		] as const) {
+			const resultMsg = makeSuccessResult();
+			const mockQuery = createMockQuery([resultMsg]);
+			queryFactorySpy = vi.fn(() => mockQuery);
+
+			const adapter = new ClaudeAdapter({
+				workspaceRoot: workspace,
+				queryFactory: queryFactorySpy,
+			});
+
+			await adapter.sendTurn(
+				makeBaseSendTurnInput({
+					sessionId,
+					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					...(contextWindow ? { contextWindow } : {}),
+				}),
+			);
+
+			const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
+				string,
+				unknown
+			>;
+			expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
+				"claude-sonnet-4-5",
+			);
+		}
+	});
+
+	it("does not apply the [1m] suffix to non-Sonnet models", async () => {
+		for (const modelId of ["claude-opus-4-5", "claude-haiku-4-5"]) {
+			const resultMsg = makeSuccessResult();
+			const mockQuery = createMockQuery([resultMsg]);
+			queryFactorySpy = vi.fn(() => mockQuery);
+
+			const adapter = new ClaudeAdapter({
+				workspaceRoot: workspace,
+				queryFactory: queryFactorySpy,
+			});
+
+			await adapter.sendTurn(
+				makeBaseSendTurnInput({
+					sessionId: `session-${modelId}`,
+					model: { providerId: "claude", modelId },
+					contextWindow: "1m",
+				}),
+			);
+
+			const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
+				string,
+				unknown
+			>;
+			expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
+				modelId,
+			);
+		}
+	});
+
+	it("calls query.setModel when contextWindow changes mid-session", async () => {
+		const result1 = makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+			string,
+			unknown
+		>);
+		const result2 = makeSuccessResult({
+			session_id: "sdk-session-1",
+			total_cost_usd: 0.1,
+		} as Record<string, unknown>);
+		const result3 = makeSuccessResult({
+			session_id: "sdk-session-1",
+			total_cost_usd: 0.2,
+		} as Record<string, unknown>);
+
+		let resolveSecond: (() => void) | undefined;
+		let resolveThird: (() => void) | undefined;
+		const secondReady = new Promise<void>((r) => {
+			resolveSecond = r;
+		});
+		const thirdReady = new Promise<void>((r) => {
+			resolveThird = r;
+		});
+		const gen = (async function* () {
+			yield result1 as unknown as SDKMessage;
+			await secondReady;
+			yield result2 as unknown as SDKMessage;
+			await thirdReady;
+			yield result3 as unknown as SDKMessage;
+		})();
+
+		const setModel = vi.fn(async () => {});
+		const mockQuery = Object.assign(gen, {
+			interrupt: vi.fn(async () => {}),
+			close: vi.fn(),
+			setModel,
+			setPermissionMode: vi.fn(async () => {}),
+			streamInput: vi.fn(async () => {}),
+			setMaxThinkingTokens: vi.fn(async () => {}),
+			applyFlagSettings: vi.fn(async () => {}),
+			initializationResult: vi.fn(async () => ({})),
+			supportedCommands: vi.fn(async () => []),
+			supportedModels: vi.fn(async () => []),
+			supportedAgents: vi.fn(async () => []),
+			mcpServerStatus: vi.fn(async () => []),
+			getContextUsage: vi.fn(async () => ({})),
+			reloadPlugins: vi.fn(async () => ({})),
+			accountInfo: vi.fn(async () => ({})),
+			rewindFiles: vi.fn(async () => ({ canRewind: false })),
+			seedReadState: vi.fn(async () => {}),
+			reconnectMcpServer: vi.fn(async () => {}),
+			toggleMcpServer: vi.fn(async () => {}),
+			setMcpServers: vi.fn(async () => ({})),
+			stopTask: vi.fn(async () => {}),
+			next: gen.next.bind(gen),
+			return: gen.return.bind(gen),
+			throw: gen.throw.bind(gen),
+			[Symbol.asyncIterator]: () => gen,
+		}) as unknown as Query;
+
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		const sink = createMockEventSink();
+
+		const turn1 = await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-context-switch",
+				turnId: "turn-1",
+				eventSink: sink,
+				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+				contextWindow: "200k",
+			}),
+		);
+		expect(turn1.status).toBe("completed");
+		expect(setModel).not.toHaveBeenCalled();
+
+		const turn2Promise = adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-context-switch",
+				turnId: "turn-2",
+				eventSink: sink,
+				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+				contextWindow: "1m",
+			}),
+		);
+		resolveSecond?.();
+		const turn2 = await turn2Promise;
+		expect(turn2.status).toBe("completed");
+
+		const turn3Promise = adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-context-switch",
+				turnId: "turn-3",
+				eventSink: sink,
+				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+				contextWindow: "200k",
+			}),
+		);
+		resolveThird?.();
+		const turn3 = await turn3Promise;
+		expect(turn3.status).toBe("completed");
+
+		expect(setModel).toHaveBeenNthCalledWith(1, "claude-sonnet-4-5[1m]");
+		expect(setModel).toHaveBeenNthCalledWith(2, "claude-sonnet-4-5");
+	});
+
 	// ── Test 5: Stream consumer translates all messages ───────────────────
 
 	it("stream consumer translates all messages through event sink", async () => {
