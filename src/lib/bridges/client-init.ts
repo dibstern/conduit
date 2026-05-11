@@ -332,6 +332,8 @@ export async function handleClientConnected(
 			}))
 			.filter((p) => p.configured);
 
+		wsHandler.sendTo(clientId, { type: "model_list", providers });
+
 		// Merge Claude in-process models when the orchestration engine is available.
 		// Mirrors handleGetModels so the initial client_connected payload doesn't
 		// overwrite the merged list the client later receives from get_models.
@@ -363,13 +365,12 @@ export async function handleClientConnected(
 								: {}),
 						})),
 					});
+					wsHandler.sendTo(clientId, { type: "model_list", providers });
 				}
 			} catch {
 				// Claude adapter may not be available — skip silently
 			}
 		}
-
-		wsHandler.sendTo(clientId, { type: "model_list", providers });
 
 		// Send variant info — current thinking level and available variants
 		// for the active model (per-session when available, global fallback)

@@ -67,39 +67,45 @@ export const handleGetModels = (
 			}))
 			.filter((p) => p.configured);
 
-		// Merge Claude in-process models when the orchestration engine is available.
-		const engineResult = yield* Effect.either(
-			Effect.gen(function* () {
-				const engine = yield* OrchestrationEngineTag;
-				const claudeCaps = yield* Effect.tryPromise(() =>
-					engine.dispatch({ type: "discover", providerId: "claude" }),
-				);
-				return claudeCaps;
-			}),
-		);
-		if (engineResult._tag === "Right" && engineResult.right.models.length > 0) {
-			for (const p of providers) {
-				if (p.id === "anthropic") {
-					p.name = "Anthropic - opencode";
-				}
-			}
-			providers.push({
-				id: "claude",
-				name: "Anthropic - claude",
-				configured: true,
-				models: engineResult.right.models.map((m) => ({
-					id: m.id,
-					name: m.name,
-					provider: "claude",
-					...(m.limit ? { limit: m.limit } : {}),
-					...(m.variants && Object.keys(m.variants).length > 0
-						? { variants: Object.keys(m.variants) }
-						: {}),
-				})),
-			});
-		}
-
 		wsHandler.sendTo(clientId, { type: "model_list", providers });
+
+		// Merge Claude in-process models when the orchestration engine is available.
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		if (engineOption._tag === "Some") {
+			const engineResult = yield* Effect.either(
+				Effect.tryPromise(() =>
+					engineOption.value.dispatch({
+						type: "discover",
+						providerId: "claude",
+					}),
+				),
+			);
+			if (
+				engineResult._tag === "Right" &&
+				engineResult.right.models.length > 0
+			) {
+				for (const p of providers) {
+					if (p.id === "anthropic") {
+						p.name = "Anthropic - opencode";
+					}
+				}
+				providers.push({
+					id: "claude",
+					name: "Anthropic - claude",
+					configured: true,
+					models: engineResult.right.models.map((m) => ({
+						id: m.id,
+						name: m.name,
+						provider: "claude",
+						...(m.limit ? { limit: m.limit } : {}),
+						...(m.variants && Object.keys(m.variants).length > 0
+							? { variants: Object.keys(m.variants) }
+							: {}),
+					})),
+				});
+				wsHandler.sendTo(clientId, { type: "model_list", providers });
+			}
+		}
 
 		// Send model_info: prefer session's model, fall back to relay-side selection
 		let sentModelInfo = false;

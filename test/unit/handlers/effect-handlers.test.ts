@@ -592,6 +592,67 @@ describe("handleGetModels", () => {
 		);
 	});
 
+	it("sends OpenCode model_list before slow Claude discovery finishes", async () => {
+		const ws = mockWsHandler();
+		let resolveDiscovery: (value: { models: [] }) => void = () => {};
+		const engine = {
+			dispatch: vi.fn(
+				() =>
+					new Promise((resolve) => {
+						resolveDiscovery = resolve as (value: { models: [] }) => void;
+					}),
+			),
+		} as unknown as OrchestrationEngine;
+		const client = {
+			provider: {
+				list: vi.fn(async () => ({
+					connected: ["openai"],
+					providers: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							models: [{ id: "gpt-4", name: "GPT-4" }],
+						},
+					],
+				})),
+			},
+			session: { get: vi.fn() },
+		} as unknown as OpenCodeAPI;
+		const overrides = mockOverrides();
+		const log = mockLogger();
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(OrchestrationEngineTag, engine),
+		);
+
+		const runPromise = Effect.runPromise(
+			handleGetModels("client-1", {}).pipe(Effect.provide(layer)),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(ws.sendTo).toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "model_list",
+				providers: [
+					{
+						id: "openai",
+						name: "OpenAI",
+						configured: true,
+						models: [{ id: "gpt-4", name: "GPT-4", provider: "openai" }],
+					},
+				],
+			}),
+		);
+
+		resolveDiscovery({ models: [] });
+		await runPromise;
+	});
+
 	it.effect(
 		"includes variants in claude provider entries in model_list",
 		() => {
