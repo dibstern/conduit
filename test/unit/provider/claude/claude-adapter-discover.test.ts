@@ -2,13 +2,28 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
+import {
+	__setProbeOverrideForTesting,
+	resetCapabilityCacheForTesting,
+} from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 
 describe("ClaudeAdapter.discover()", () => {
 	let workspace: string;
 
 	beforeEach(() => {
+		resetCapabilityCacheForTesting();
+		__setProbeOverrideForTesting(async () => ({
+			models: [
+				{
+					id: "claude-sonnet-4-7",
+					name: "Claude Sonnet 4.7",
+					providerId: "claude",
+					limit: { context: 200_000, output: 64_000 },
+				},
+			],
+		}));
 		workspace = join(tmpdir(), `conduit-claude-test-${Date.now()}`);
 		mkdirSync(join(workspace, ".claude", "commands"), { recursive: true });
 		mkdirSync(join(workspace, ".claude", "skills", "my-skill"), {
@@ -25,6 +40,8 @@ describe("ClaudeAdapter.discover()", () => {
 	});
 
 	afterEach(() => {
+		__setProbeOverrideForTesting(undefined);
+		resetCapabilityCacheForTesting();
 		rmSync(workspace, { recursive: true, force: true });
 	});
 
@@ -103,5 +120,55 @@ describe("ClaudeAdapter.discover()", () => {
 		} finally {
 			rmSync(emptyWorkspace, { recursive: true, force: true });
 		}
+	});
+
+	describe("with capability probe", () => {
+		it("returns models from the probe when available", async () => {
+			__setProbeOverrideForTesting(async () => ({
+				models: [
+					{
+						id: "claude-opus-4-7",
+						name: "Claude Opus 4.7",
+						providerId: "claude",
+						limit: { context: 200_000, output: 32_000 },
+					},
+				],
+			}));
+
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const caps = await adapter.discover();
+			expect(caps.models).toHaveLength(1);
+			expect(caps.models[0]?.id).toBe("claude-opus-4-7");
+		});
+
+		it("falls back to a minimal model list when the probe fails", async () => {
+			__setProbeOverrideForTesting(async () => {
+				throw new Error("claude binary not found");
+			});
+
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const caps = await adapter.discover();
+			expect(caps.models.length).toBeGreaterThan(0);
+			expect(caps.models.every((m) => m.providerId === "claude")).toBe(true);
+		});
+
+		it("returns the same probe result across two adapter instances", async () => {
+			const probe = vi.fn().mockResolvedValue({
+				models: [
+					{
+						id: "claude-sonnet-4-7",
+						name: "Sonnet 4.7",
+						providerId: "claude" as const,
+					},
+				],
+			});
+			__setProbeOverrideForTesting(probe);
+
+			const a1 = new ClaudeAdapter({ workspaceRoot: workspace });
+			const a2 = new ClaudeAdapter({ workspaceRoot: workspace });
+			await a1.discover();
+			await a2.discover();
+			expect(probe).toHaveBeenCalledTimes(1);
+		});
 	});
 });

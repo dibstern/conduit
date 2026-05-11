@@ -223,6 +223,57 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		).toBeInstanceOf(AbortController);
 	});
 
+	it("forwards SendTurnInput.variant as SDK options.effort", async () => {
+		const resultMsg = makeSuccessResult();
+		const mockQuery = createMockQuery([resultMsg]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const input = makeBaseSendTurnInput({
+			sessionId: "session-effort",
+			variant: "high",
+		});
+
+		await adapter.sendTurn(input);
+
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect((callArgs["options"] as Record<string, unknown>)["effort"]).toBe(
+			"high",
+		);
+	});
+
+	it("omits SDK options.effort when no variant is supplied", async () => {
+		const resultMsg = makeSuccessResult();
+		const mockQuery = createMockQuery([resultMsg]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const input = makeBaseSendTurnInput({
+			sessionId: "session-default-effort",
+		});
+
+		await adapter.sendTurn(input);
+
+		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect(
+			(callArgs["options"] as Record<string, unknown>)["effort"],
+		).toBeUndefined();
+	});
+
 	// ── Test 5: Stream consumer translates all messages ───────────────────
 
 	it("stream consumer translates all messages through event sink", async () => {

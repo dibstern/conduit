@@ -8,9 +8,11 @@
  * - First sendTurn() creates an EffectPromptQueue (backed by Effect Queue)
  *   + calls query() + starts a background stream consumer. Subsequent
  *   turns enqueue into the existing queue.
- * - Discovery is filesystem + hardcoded: the SDK does not expose a models
- *   or commands API, so we enumerate ~/.claude/ and <workspace>/.claude/
- *   directories for user/project commands and skills.
+ * - Discovery reads the live model list from a 5-minute TTL cache shared
+ *   across adapter instances (see claude-capabilities-probe.ts). The probe
+ *   spawns a throwaway SDK query, reads initializationResult(), and aborts
+ *   before any API call. Nothing persists to disk. Commands and skills are
+ *   enumerated from ~/.claude/ and <workspace>/.claude/.
  * - Shutdown is graceful: close every session's prompt queue, call the
  *   runtime's close(), then clear the session map.
  */
@@ -31,6 +33,7 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import { getCachedClaudeCapabilities } from "./claude-capabilities-probe.js";
 import {
 	ClaudeEventTranslator,
 	isInterruptedResult,
@@ -59,31 +62,10 @@ const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
 	{ name: "help", description: "Show help" },
 ];
 
-// ─── Model catalog ─────────────────────────────────────────────────────────
+// ─── Fallback model catalog ────────────────────────────────────────────────
 
-// Model IDs must match Claude Code backend-recognized identifiers. Outdated
-// IDs (e.g. claude-haiku-3-5, claude-opus-4, claude-sonnet-4) return a 502
-// "unknown provider for model" error from the backend. Short aliases
-// (opus/sonnet/haiku) always resolve to the current generation.
-const CLAUDE_MODELS: ReadonlyArray<ModelInfo> = [
-	{
-		id: "claude-opus-4-6",
-		name: "Claude Opus 4.6",
-		providerId: "claude",
-		limit: { context: 200_000, output: 32_000 },
-	},
-	{
-		id: "claude-sonnet-4-6",
-		name: "Claude Sonnet 4.6",
-		providerId: "claude",
-		limit: { context: 200_000, output: 64_000 },
-	},
-	{
-		id: "claude-haiku-4-5",
-		name: "Claude Haiku 4.5",
-		providerId: "claude",
-		limit: { context: 200_000, output: 8_192 },
-	},
+// Used only when the SDK capability probe fails or returns no models.
+const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 	{
 		id: "opus",
 		name: "Claude Opus (latest)",
@@ -249,8 +231,19 @@ export class ClaudeAdapter implements ProviderAdapter {
 			...enumerateSkills(projectBase, "project-skill"),
 		];
 
+		let models: ReadonlyArray<ModelInfo>;
+		try {
+			const probe = await getCachedClaudeCapabilities();
+			models = probe.models.length > 0 ? probe.models : FALLBACK_MODELS;
+		} catch (err) {
+			log.warn(
+				`Capability probe failed; using fallback model list: ${err instanceof Error ? err.message : err}`,
+			);
+			models = FALLBACK_MODELS;
+		}
+
 		return {
-			models: CLAUDE_MODELS,
+			models,
 			supportsTools: true,
 			supportsThinking: true,
 			supportsPermissions: true,
@@ -364,6 +357,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 				...(input.model ? { model: input.model.modelId } : {}),
 				...(resumeSessionId ? { resume: resumeSessionId } : {}),
 				...(input.agent ? { agent: input.agent } : {}),
+				...(input.variant
+					? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
+					: {}),
 			};
 
 			// 6. Call query factory and assign to context
