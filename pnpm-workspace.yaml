@@ -1,2 +1,8 @@
 allowBuilds:
+  '@evilmartians/lefthook': false
+  '@parcel/watcher': false
   better-sqlite3: true
+  esbuild: false
+  msgpackr-extract: false
+  protobufjs: false
+  sharp: false

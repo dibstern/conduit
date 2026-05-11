@@ -50,6 +50,22 @@ import type {
 
 const log = createLogger("claude-adapter");
 
+function supportsMillionTokenContext(modelId: string): boolean {
+	const normalized = modelId.toLowerCase();
+	return normalized === "sonnet" || /^claude-.*sonnet(?:-|$)/.test(normalized);
+}
+
+function claudeApiModelId(
+	modelId: string | undefined,
+	contextWindow: string | undefined,
+): string | undefined {
+	if (!modelId) return undefined;
+	if (contextWindow === "1m" && supportsMillionTokenContext(modelId)) {
+		return `${modelId}[1m]`;
+	}
+	return modelId;
+}
+
 // ─── Built-in command catalog ──────────────────────────────────────────────
 
 const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
@@ -325,6 +341,10 @@ export class ClaudeAdapter implements ProviderAdapter {
 				typeof input.providerState["resumeSessionId"] === "string"
 					? input.providerState["resumeSessionId"]
 					: undefined;
+			const apiModelId = claudeApiModelId(
+				input.model?.modelId,
+				input.contextWindow,
+			);
 
 			// 4. Create session context (query assigned after creation below)
 			const ctx: ClaudeSessionContext = {
@@ -341,6 +361,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 				streamConsumer: undefined,
 				currentTurnId: input.turnId,
 				currentModel: input.model?.modelId,
+				...(apiModelId ? { currentApiModelId: apiModelId } : {}),
 				resumeSessionId,
 				lastAssistantUuid: undefined,
 				turnCount: 0,
@@ -354,7 +375,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 				includePartialMessages: true,
 				settingSources: ["user", "project", "local"],
 				canUseTool: bridge.createCanUseTool(ctx),
-				...(input.model ? { model: input.model.modelId } : {}),
+				...(apiModelId ? { model: apiModelId } : {}),
 				...(resumeSessionId ? { resume: resumeSessionId } : {}),
 				...(input.agent ? { agent: input.agent } : {}),
 				...(input.variant
@@ -391,10 +412,20 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
-	private enqueueTurn(
+	private async enqueueTurn(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
 	): Promise<TurnResult> {
+		const baseModelId = input.model?.modelId ?? ctx.currentModel;
+		const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
+		if (apiModelId && apiModelId !== ctx.currentApiModelId) {
+			await ctx.query.setModel(apiModelId);
+			ctx.currentApiModelId = apiModelId;
+		}
+		if (input.model?.modelId) {
+			ctx.currentModel = input.model.modelId;
+		}
+
 		const deferred = createDeferred<TurnResult>();
 		this.pushTurnDeferred(ctx.sessionId, deferred);
 

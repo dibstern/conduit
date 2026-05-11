@@ -9,6 +9,7 @@ export type { PayloadMap } from "./payloads.js";
 // ─── Handler modules ─────────────────────────────────────────────────────────
 
 export { filterAgents, handleGetAgents, handleSwitchAgent } from "./agent.js";
+export { handleSwitchContextWindow } from "./context-window.js";
 export {
 	handleGetFileContent,
 	handleGetFileList,
@@ -83,6 +84,7 @@ import {
 	handleGetAgents as handleGetAgentsImpl,
 	handleSwitchAgent as handleSwitchAgentImpl,
 } from "./agent.js";
+import { handleSwitchContextWindow as handleSwitchContextWindowImpl } from "./context-window.js";
 import {
 	handleGetFileContent as handleGetFileContentImpl,
 	handleGetFileList as handleGetFileListImpl,
@@ -191,6 +193,7 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	switch_model: handleSwitchModelImpl,
 	set_default_model: handleSetDefaultModelImpl,
 	switch_variant: handleSwitchVariantImpl,
+	switch_context_window: handleSwitchContextWindowImpl,
 	// Settings
 	get_commands: handleGetCommandsImpl,
 	get_projects: handleGetProjectsImpl,

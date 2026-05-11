@@ -3,7 +3,7 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { ModelInfo } from "../types.js";
+import type { ContextWindowOption, ModelInfo } from "../types.js";
 import { TTLCache } from "./ttl-cache.js";
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
@@ -21,6 +21,9 @@ interface SDKModelInfoSubset {
 
 interface InitializationResultSubset {
 	readonly models?: readonly SDKModelInfoSubset[];
+	readonly account?: {
+		readonly subscriptionType?: string;
+	};
 }
 
 interface CapabilityQuery {
@@ -29,6 +32,7 @@ interface CapabilityQuery {
 
 export interface ProbeResult {
 	readonly models: ReadonlyArray<ModelInfo>;
+	readonly subscriptionType?: string;
 }
 
 export interface ProbeDeps {
@@ -54,15 +58,76 @@ function effortLevelsToVariants(
 	return Object.fromEntries(levels.map((level) => [level, {}]));
 }
 
-function sdkModelToConduit(model: SDKModelInfoSubset): ModelInfo {
+const CONTEXT_WINDOW_OPTIONS_BY_FAMILY: Record<
+	string,
+	ReadonlyArray<ContextWindowOption>
+> = {
+	sonnet: [
+		{ value: "200k", label: "200K", isDefault: true },
+		{ value: "1m", label: "1M (beta)" },
+	],
+};
+
+function familyFor(modelId: string): "opus" | "sonnet" | "haiku" | undefined {
+	if (/^(?:claude-)?opus/i.test(modelId)) return "opus";
+	if (/^(?:claude-)?sonnet/i.test(modelId)) return "sonnet";
+	if (/^(?:claude-)?haiku/i.test(modelId)) return "haiku";
+	return undefined;
+}
+
+function contextWindowOptionsFor(
+	modelId: string,
+): ReadonlyArray<ContextWindowOption> | undefined {
+	const family = familyFor(modelId);
+	if (!family) return undefined;
+	return CONTEXT_WINDOW_OPTIONS_BY_FAMILY[family];
+}
+
+const PREMIUM_SUBSCRIPTION_TYPES = new Set([
+	"max",
+	"maxplan",
+	"max5",
+	"max20",
+	"enterprise",
+	"team",
+]);
+
+function isPremium(subscriptionType: string | undefined): boolean {
+	if (!subscriptionType) return false;
+	const normalized = subscriptionType.toLowerCase().replace(/[\s_-]+/g, "");
+	return PREMIUM_SUBSCRIPTION_TYPES.has(normalized);
+}
+
+function adjustForSubscription(
+	options: ReadonlyArray<ContextWindowOption> | undefined,
+	subscriptionType: string | undefined,
+): ReadonlyArray<ContextWindowOption> | undefined {
+	if (!options) return undefined;
+	if (!isPremium(subscriptionType)) return options;
+	return options.map((option) =>
+		option.value === "1m"
+			? { value: option.value, label: option.label, isDefault: true }
+			: { value: option.value, label: option.label },
+	);
+}
+
+function sdkModelToConduit(
+	model: SDKModelInfoSubset,
+	subscriptionType: string | undefined,
+): ModelInfo {
 	const limit = inferLimits(model.value);
 	const variants = effortLevelsToVariants(model.supportedEffortLevels);
+	const contextWindowOptions = adjustForSubscription(
+		contextWindowOptionsFor(model.value),
+		subscriptionType,
+	);
 	return {
 		id: model.value,
 		name: model.displayName,
 		providerId: "claude",
 		...(limit ? { limit } : {}),
 		...(variants ? { variants } : {}),
+		...(contextWindowOptions ? { contextWindowOptions } : {}),
 	};
 }
 
@@ -96,8 +161,12 @@ export async function probeClaudeCapabilities(
 			},
 		});
 		const init = await query.initializationResult();
+		const subscriptionType = init.account?.subscriptionType;
 		return {
-			models: (init.models ?? []).map(sdkModelToConduit),
+			models: (init.models ?? []).map((model) =>
+				sdkModelToConduit(model, subscriptionType),
+			),
+			...(subscriptionType ? { subscriptionType } : {}),
 		};
 	} finally {
 		if (!abortController.signal.aborted) {

@@ -14,7 +14,10 @@ import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
 import { expect } from "vitest";
 import type { OnboardingServerDeps } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
-import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
+import {
+	DaemonConfigRefTag,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/effect/daemon-config-ref.js";
 import {
 	type DaemonLiveOptions,
 	makeDaemonLive,
@@ -55,8 +58,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		ctx: {
 			// Use an ephemeral port so wiring tests can run while the local
 			// development daemon owns the default conduit port.
-			port: 0,
-			host: "127.0.0.1",
 			httpServer,
 			upgradeServer: null,
 			onboardingServer: null,
@@ -105,6 +106,12 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			instances: [],
 		}),
 		onboarding: {} as OnboardingServerDeps,
+		initialConfig: makeDaemonConfigFromOptions({
+			port: 0,
+			host: "127.0.0.1",
+			tlsEnabled: false,
+			hostExplicit: false,
+		}),
 		// Background services with minimal configs
 		keepAwake: {},
 		versionCheck: {
@@ -141,15 +148,47 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
+	it.scoped("provides DaemonConfigRefTag with the actual ephemeral port", () =>
+		Effect.gen(function* () {
+			const ref = yield* DaemonConfigRefTag;
+			const config = yield* Ref.get(ref);
+			expect(config.port).toBeGreaterThan(0);
+			expect(config.host).toBe("127.0.0.1");
+		}).pipe(Effect.provide(makeDaemonLayer())),
+	);
+
 	it.scoped(
-		"provides DaemonConfigRefTag with ephemeral initial port (Tier 0)",
-		() =>
-			Effect.gen(function* () {
+		"makeDaemonLive seeds DaemonConfigRef from the full initial config",
+		() => {
+			const options = {
+				...makeMockOptions(),
+				initialConfig: makeDaemonConfigFromOptions({
+					port: 53123,
+					host: "0.0.0.0",
+					tlsEnabled: false,
+					hostExplicit: false,
+					keepAwake: true,
+					keepAwakeCommand: "printf",
+					keepAwakeArgs: ["awake"],
+					dismissedPaths: ["/tmp/dismissed"],
+					persistedSessionCounts: new Map([["persisted", 3]]),
+				}),
+			} satisfies DaemonLiveOptions;
+
+			return Effect.gen(function* () {
 				const ref = yield* DaemonConfigRefTag;
 				const config = yield* Ref.get(ref);
-				expect(config.port).toBe(0);
-				expect(config.host).toBe("127.0.0.1");
-			}).pipe(Effect.provide(makeDaemonLayer())),
+				expect(config.port).toBe(53123);
+				expect(config.host).toBe("0.0.0.0");
+				expect(config.tlsEnabled).toBe(false);
+				expect(config.hostExplicit).toBe(false);
+				expect(config.keepAwake).toBe(true);
+				expect(config.keepAwakeCommand).toBe("printf");
+				expect(config.keepAwakeArgs).toEqual(["awake"]);
+				expect(config.dismissedPaths.has("/tmp/dismissed")).toBe(true);
+				expect(config.persistedSessionCounts.get("persisted")).toBe(3);
+			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+		},
 	);
 
 	it.scoped("provides ShutdownSignalTag as a Deferred (Tier 0)", () =>

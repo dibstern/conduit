@@ -136,10 +136,14 @@
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": [
-			"@evilmartians/lefthook",
 			"better-sqlite3"
 		],
 		"ignoredBuiltDependencies": [
+			"@evilmartians/lefthook",
+			"@parcel/watcher",
+			"esbuild",
+			"msgpackr-extract",
+			"protobufjs",
 			"sharp"
 		]
 	}

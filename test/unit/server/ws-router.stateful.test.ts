@@ -411,6 +411,7 @@ const validMessageTypes: IncomingMessageType[] = [
 	"input_sync",
 	"switch_agent",
 	"switch_model",
+	"switch_context_window",
 	"get_todo",
 	"get_agents",
 	"get_models",

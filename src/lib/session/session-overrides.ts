@@ -1,5 +1,6 @@
 // ─── Session Overrides ──────────────────────────────────────────────────────
-// Per-session state selected by the user via the UI: agent, model, and
+// Per-session state selected by the user via the UI: agent, model, variant,
+// context window, and
 // processing timeout. Each session has independent overrides. A global
 // defaultModel provides the fallback when no per-session model is set.
 
@@ -14,6 +15,7 @@ interface SessionState {
 	model?: ModelOverride;
 	agent?: string;
 	variant?: string;
+	contextWindow?: string;
 	modelUserSelected: boolean;
 	processingTimer: ReturnType<typeof setTimeout> | null;
 	processingTimeoutCallback: (() => void) | null;
@@ -25,6 +27,9 @@ export class SessionOverrides {
 
 	/** Global default variant (thinking level) — e.g. "low", "medium", "high", "max". */
 	defaultVariant: string = "";
+
+	/** Global default context window — e.g. "200k" or "1m". */
+	defaultContextWindow: string = "";
 
 	private readonly sessions: Map<string, SessionState> = new Map();
 
@@ -100,9 +105,23 @@ export class SessionOverrides {
 		return this.sessions.get(sessionId)?.variant ?? this.defaultVariant;
 	}
 
+	// ─── Per-Session Context Window ─────────────────────────────────────────
+
+	/** Set the context window for a session. Empty string clears. */
+	setContextWindow(sessionId: string, contextWindow: string): void {
+		this.getOrCreate(sessionId).contextWindow = contextWindow;
+	}
+
+	/** Get the context window for a session (per-session override ?? global default). */
+	getContextWindow(sessionId: string): string {
+		return (
+			this.sessions.get(sessionId)?.contextWindow ?? this.defaultContextWindow
+		);
+	}
+
 	// ─── Per-Session Clear ──────────────────────────────────────────────────
 
-	/** Clear all overrides for a specific session (model, agent, timer). */
+	/** Clear all overrides for a specific session (model, agent, variant, context window, timer). */
 	clearSession(sessionId: string): void {
 		const state = this.sessions.get(sessionId);
 		if (state?.processingTimer) {

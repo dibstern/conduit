@@ -34,7 +34,11 @@ import {
 	Supervisor,
 } from "effect";
 import type { DaemonOptions } from "../daemon/daemon-types.js";
-import { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import {
+	DaemonConfigRefTag,
+	type DaemonRuntimeConfig,
+	makeDaemonConfigFromOptions,
+} from "./daemon-config-ref.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
 import {
 	makeDaemonLive,
@@ -56,7 +60,6 @@ import {
 	ProjectMgmtTag,
 	type RelayCacheTag,
 } from "./services.js";
-import { TlsCertTag } from "./tls-cert-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -253,7 +256,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AuthManager } from "../auth.js";
-import { getAllIPs, getTailscaleIP, type TlsCerts } from "../cli/tls.js";
+import { getAllIPs, getTailscaleIP } from "../cli/tls.js";
 import {
 	DAEMON_SHUTDOWN_DELAY_MS,
 	DEFAULT_OPENCODE_PORT,
@@ -350,6 +353,19 @@ export interface DaemonHandle {
 	readonly registry: import("../daemon/project-registry.js").ProjectRegistry;
 }
 
+export function resolveRuntimeConfigUpdateSync(
+	current: DaemonRuntimeConfig,
+	update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+	runRuntimeUpdate:
+		| ((
+				update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+		  ) => DaemonRuntimeConfig)
+		| null,
+): DaemonRuntimeConfig {
+	if (!runRuntimeUpdate) return update(current);
+	return runRuntimeUpdate(update);
+}
+
 /**
  * Start the daemon process. Directly orchestrates the startup sequence
  * that was previously encapsulated in the Daemon class.
@@ -395,7 +411,6 @@ export async function startDaemonProcess(
 	let shuttingDown = false;
 	let startTime = Date.now();
 	let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
-	let tlsCerts: TlsCerts | null = null;
 	let pushManager: PushNotificationManager | null = null;
 	let scanner: PortScanner | null = null;
 	// Layer-managed runtime — set after router setup, used by stop().
@@ -404,6 +419,82 @@ export async function startDaemonProcess(
 
 	const persistedSessionCounts = new Map<string, number>();
 	const dismissedPaths = new Set<string>();
+	let runtimeConfigSnapshot = makeDaemonConfigFromOptions({
+		port,
+		host,
+		hostExplicit: options.host !== undefined,
+		...(pinHash != null && { pinHash }),
+		tlsEnabled,
+		keepAwake,
+		...(keepAwakeCommand != null && { keepAwakeCommand }),
+		...(keepAwakeArgs != null && { keepAwakeArgs }),
+		dismissedPaths: Array.from(dismissedPaths),
+		startTime,
+		persistedSessionCounts,
+	});
+
+	function syncLegacyConfigLocals(config: DaemonRuntimeConfig): void {
+		port = config.port;
+		host = config.host;
+		pinHash = config.pinHash;
+		tlsEnabled = config.tlsEnabled;
+		keepAwake = config.keepAwake;
+		keepAwakeCommand = config.keepAwakeCommand;
+		keepAwakeArgs =
+			config.keepAwakeArgs != null ? [...config.keepAwakeArgs] : undefined;
+		startTime = config.startTime;
+		dismissedPaths.clear();
+		for (const path of config.dismissedPaths) dismissedPaths.add(path);
+		persistedSessionCounts.clear();
+		for (const [slug, count] of config.persistedSessionCounts) {
+			persistedSessionCounts.set(slug, count);
+		}
+	}
+
+	function readRuntimeConfigSnapshot(): DaemonRuntimeConfig {
+		if (!daemonRuntime || shuttingDown) return runtimeConfigSnapshot;
+		try {
+			runtimeConfigSnapshot = daemonRuntime.runSync(
+				Effect.gen(function* () {
+					const ref = yield* DaemonConfigRefTag;
+					return yield* Ref.get(ref);
+				}),
+			);
+			syncLegacyConfigLocals(runtimeConfigSnapshot);
+		} catch {
+			// During startup/shutdown, keep the last known snapshot.
+		}
+		return runtimeConfigSnapshot;
+	}
+
+	function updateRuntimeConfigSync(
+		update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+	): void {
+		const runtime = shuttingDown ? null : daemonRuntime;
+		try {
+			runtimeConfigSnapshot = resolveRuntimeConfigUpdateSync(
+				runtimeConfigSnapshot,
+				update,
+				runtime
+					? (runtimeUpdate) =>
+							runtime.runSync(
+								Effect.gen(function* () {
+									const ref = yield* DaemonConfigRefTag;
+									yield* Ref.update(ref, runtimeUpdate);
+									return yield* Ref.get(ref);
+								}),
+							)
+					: null,
+			);
+			syncLegacyConfigLocals(runtimeConfigSnapshot);
+		} catch (err) {
+			log.error(
+				{ err: formatErrorDetail(err) },
+				"Runtime config update failed",
+			);
+			throw err;
+		}
+	}
 
 	// ── Core services ─────────────────────────────────────────────────────
 	// AuthManager with reactive pinHash: initially reads from local `pinHash`
@@ -411,7 +502,7 @@ export async function startDaemonProcess(
 	// DaemonConfigRef (updated via IPC handlers), and AuthManager reads them
 	// reactively through the getPinHash getter closure.
 	const auth = new AuthManager({
-		getPinHash: () => pinHash,
+		getPinHash: () => readRuntimeConfigSnapshot().pinHash,
 	});
 
 	const instanceManager = new InstanceManager();
@@ -422,20 +513,27 @@ export async function startDaemonProcess(
 	let _needsResave = false;
 
 	function buildConfig(): DaemonConfig {
+		const cfg = readRuntimeConfigSnapshot();
 		return {
 			pid: process.pid,
-			port,
-			pinHash,
-			tls: tlsEnabled,
+			port: cfg.port,
+			pinHash: cfg.pinHash,
+			tls: cfg.tlsEnabled,
 			debug: false,
-			keepAwake,
-			...(keepAwakeCommand != null && { keepAwakeCommand }),
-			...(keepAwakeArgs != null && { keepAwakeArgs }),
+			keepAwake: cfg.keepAwake,
+			...(cfg.keepAwakeCommand != null && {
+				keepAwakeCommand: cfg.keepAwakeCommand,
+			}),
+			...(cfg.keepAwakeArgs != null && { keepAwakeArgs: cfg.keepAwakeArgs }),
 			dangerouslySkipPermissions: false,
 			projects: registry.allProjects().map((p) => {
 				const e = registry.get(p.slug);
 				const relay = e?.status === "ready" ? e.relay : undefined;
-				const sessionCount = relay?.sessionMgr.getLastKnownSessionCount() || 0;
+				const sessionCount =
+					relay?.sessionMgr.getLastKnownSessionCount() ||
+					cfg.persistedSessionCounts.get(p.slug) ||
+					persistedSessionCounts.get(p.slug) ||
+					0;
 				return {
 					path: p.directory,
 					slug: p.slug,
@@ -456,8 +554,8 @@ export async function startDaemonProcess(
 					...(extUrl != null && { url: extUrl }),
 				};
 			}),
-			...(dismissedPaths.size > 0 && {
-				dismissedPaths: Array.from(dismissedPaths),
+			...(cfg.dismissedPaths.size > 0 && {
+				dismissedPaths: Array.from(cfg.dismissedPaths),
 			}),
 		};
 	}
@@ -485,22 +583,35 @@ export async function startDaemonProcess(
 	}
 
 	function applyRestartConfig(config: Record<string, unknown>): void {
-		if (typeof config["port"] === "number") port = config["port"];
-		if (typeof config["tls"] === "boolean") tlsEnabled = config["tls"];
+		updateRuntimeConfigSync((current) => {
+			let next = current;
+			if (typeof config["port"] === "number") {
+				next = { ...next, port: config["port"] };
+			}
+			if (typeof config["tls"] === "boolean") {
+				next = { ...next, tlsEnabled: config["tls"] };
+			}
+			if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
+				next = { ...next, pinHash: config["pinHash"] };
+			}
+			if (typeof config["keepAwake"] === "boolean") {
+				next = { ...next, keepAwake: config["keepAwake"] };
+			}
+			if (typeof config["keepAwakeCommand"] === "string") {
+				next = { ...next, keepAwakeCommand: config["keepAwakeCommand"] };
+			}
+			if (
+				Array.isArray(config["keepAwakeArgs"]) &&
+				config["keepAwakeArgs"].every((arg) => typeof arg === "string")
+			) {
+				next = { ...next, keepAwakeArgs: [...config["keepAwakeArgs"]] };
+			}
+			return next;
+		});
 		if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
 			pinHash = config["pinHash"];
-			// Update DaemonConfigRef so AuthManager sees the new pinHash reactively
-			if (daemonRuntime) {
-				daemonRuntime.runPromise(
-					Effect.gen(function* () {
-						const ref = yield* DaemonConfigRefTag;
-						yield* Ref.update(ref, (c) => ({ ...c, pinHash }));
-					}),
-				);
-			}
 		}
 		if (typeof config["keepAwake"] === "boolean") {
-			keepAwake = config["keepAwake"];
 			// AP-22: Forward keepAwake toggle to KeepAwakeTag
 			if (daemonRuntime) {
 				daemonRuntime.runPromise(
@@ -521,15 +632,6 @@ export async function startDaemonProcess(
 					),
 				);
 			}
-		}
-		if (typeof config["keepAwakeCommand"] === "string") {
-			keepAwakeCommand = config["keepAwakeCommand"];
-		}
-		if (
-			Array.isArray(config["keepAwakeArgs"]) &&
-			config["keepAwakeArgs"].every((arg) => typeof arg === "string")
-		) {
-			keepAwakeArgs = config["keepAwakeArgs"];
 		}
 	}
 
@@ -739,6 +841,10 @@ export async function startDaemonProcess(
 		}
 		dir = resolve(dir);
 		dismissedPaths.delete(dir);
+		updateRuntimeConfigSync((c) => ({
+			...c,
+			dismissedPaths: new Set(dismissedPaths),
+		}));
 		const existing = registry.findByDirectory(dir);
 		if (existing) return existing.project;
 
@@ -778,6 +884,10 @@ export async function startDaemonProcess(
 		const entry = registry.get(slug);
 		if (!entry) throw new Error(`Project "${slug}" not found`);
 		dismissedPaths.add(entry.project.directory);
+		updateRuntimeConfigSync((c) => ({
+			...c,
+			dismissedPaths: new Set(dismissedPaths),
+		}));
 		await registry.remove(slug);
 		syncRecentProjects(
 			registry.allProjects().map((p) => ({
@@ -792,6 +902,7 @@ export async function startDaemonProcess(
 
 	// ── Helper: getStatus ─────────────────────────────────────────────────
 	function getStatus(): import("../daemon/daemon-types.js").DaemonStatus {
+		const cfg = readRuntimeConfigSnapshot();
 		const tsIP = getTailscaleIP();
 		const allIPs = getAllIPs();
 		const lanIP = allIPs.find((ip) => !ip.startsWith("100.")) ?? null;
@@ -802,22 +913,23 @@ export async function startDaemonProcess(
 			const relay = e.status === "ready" ? e.relay : undefined;
 			sessionCount +=
 				relay?.sessionMgr.getLastKnownSessionCount() ||
+				cfg.persistedSessionCounts.get(slug) ||
 				persistedSessionCounts.get(slug) ||
 				0;
 		}
 		return {
 			ok: true,
-			uptime: (Date.now() - startTime) / 1000,
-			port,
-			host,
+			uptime: (Date.now() - cfg.startTime) / 1000,
+			port: cfg.port,
+			host: cfg.host,
 			...(tsIP != null && { tailscaleIP: tsIP }),
 			...(lanIP != null && { lanIP }),
 			projectCount: registry.size,
 			sessionCount,
 			clientCount: ctx.clientCount,
-			pinEnabled: pinHash !== null,
-			tlsEnabled,
-			keepAwake,
+			pinEnabled: cfg.pinHash !== null,
+			tlsEnabled: cfg.tlsEnabled,
+			keepAwake: cfg.keepAwake,
 			projects: Array.from(registry.slugs()).map((slug) => {
 				// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.slugs() so the entry is guaranteed to exist
 				const entry = registry.get(slug)!;
@@ -837,6 +949,7 @@ export async function startDaemonProcess(
 	// ── Helper: stop ──────────────────────────────────────────────────────
 	async function stop(): Promise<void> {
 		if (shuttingDown) return;
+		readRuntimeConfigSnapshot();
 		shuttingDown = true;
 		if (shutdownTimer) {
 			clearTimeout(shutdownTimer);
@@ -853,14 +966,14 @@ export async function startDaemonProcess(
 		// servers (HTTP, IPC, onboarding), signal handlers, error handlers,
 		// PID/socket file cleanup, KeepAwake, VersionChecker, StorageMonitor,
 		// DaemonState, DaemonEventBus.
-		if (daemonRuntime) await daemonRuntime.dispose();
+		const runtime = daemonRuntime;
+		daemonRuntime = null;
+		if (runtime) await runtime.dispose();
 		shuttingDown = false;
 	}
 
 	// ── Lifecycle context ─────────────────────────────────────────────────
 	const ctx: DaemonLifecycleContext = {
-		port,
-		host,
 		httpServer: null,
 		upgradeServer: null,
 		onboardingServer: null,
@@ -945,6 +1058,13 @@ export async function startDaemonProcess(
 	if (savedConfig?.keepAwakeArgs) {
 		keepAwakeArgs = savedConfig.keepAwakeArgs;
 	}
+	updateRuntimeConfigSync((c) => ({
+		...c,
+		keepAwakeCommand,
+		keepAwakeArgs,
+		dismissedPaths: new Set(dismissedPaths),
+		persistedSessionCounts: new Map(persistedSessionCounts),
+	}));
 	log.debug(`[startup:${elapsed()}] Rehydration complete`);
 
 	// ── Probe-and-convert default instance ────────────────────────────────
@@ -1033,8 +1153,9 @@ export async function startDaemonProcess(
 	const ipcContext = {
 		addProject: (dir: string) => addProject(dir),
 		removeProject: (slug: string) => removeProject(slug),
-		getProjects: () =>
-			registry.allProjects().map((project) => {
+		getProjects: () => {
+			const cfg = readRuntimeConfigSnapshot();
+			return registry.allProjects().map((project) => {
 				// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
 				const entry = registry.get(project.slug)!;
 				const relay = entry.status === "ready" ? entry.relay : undefined;
@@ -1042,42 +1163,25 @@ export async function startDaemonProcess(
 					...project,
 					sessions:
 						relay?.sessionMgr.getLastKnownSessionCount() ||
+						cfg.persistedSessionCounts.get(project.slug) ||
 						persistedSessionCounts.get(project.slug) ||
 						0,
 					clients: relay?.wsHandler.getClientCount() ?? 0,
 					isProcessing: relay?.isAnySessionProcessing() ?? false,
 				};
-			}),
+			});
+		},
 		setProjectTitle: (slug: string, title: string) => {
 			registry.updateProject(slug, { title });
 		},
-		getPinHash: () => pinHash,
+		getPinHash: () => readRuntimeConfigSnapshot().pinHash,
 		setPinHash: (hash: string) => {
-			pinHash = hash;
-			// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash
-			// reactively. AuthManager reads pinHash from DaemonConfigRef.
-			if (daemonRuntime) {
-				daemonRuntime.runPromise(
-					Effect.gen(function* () {
-						const ref = yield* DaemonConfigRefTag;
-						yield* Ref.update(ref, (c) => ({ ...c, pinHash: hash }));
-					}).pipe(
-						Effect.catchAll((e) =>
-							Effect.logWarning(
-								"setPinHash: failed to update DaemonConfigRef",
-								{
-									error: String(e),
-								},
-							),
-						),
-					),
-				);
-			}
+			updateRuntimeConfigSync((c) => ({ ...c, pinHash: hash }));
 			persistConfig();
 		},
-		getKeepAwake: () => keepAwake,
+		getKeepAwake: () => readRuntimeConfigSnapshot().keepAwake,
 		setKeepAwake: (enabled: boolean) => {
-			keepAwake = enabled;
+			updateRuntimeConfigSync((c) => ({ ...c, keepAwake: enabled }));
 			// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling.
 			let supported = false;
 			let active = false;
@@ -1105,8 +1209,11 @@ export async function startDaemonProcess(
 			return { supported, active };
 		},
 		setKeepAwakeCommand: (command: string, args: string[]) => {
-			keepAwakeCommand = command;
-			keepAwakeArgs = args;
+			updateRuntimeConfigSync((c) => ({
+				...c,
+				keepAwakeCommand: command,
+				keepAwakeArgs: args,
+			}));
 			// AP-23: KeepAwakeTag is scoped and its command is fixed at construction.
 			// To apply a new command, the Layer would need to be rebuilt (Task 11).
 			// For now, persist the new command so it takes effect on next restart.
@@ -1171,13 +1278,10 @@ export async function startDaemonProcess(
 	}
 	log.debug(`[startup:${elapsed()}] Push notifications init done`);
 
-	// TLS cert loading is now handled by TlsCertLive Layer (via makeDaemonLive).
-	// After the daemon runtime is built, TLS certs are read back from the
-	// runtime and used to set ctx.tls for the server lifecycle context.
-
 	// ── HTTP request router ───────────────────────────────────────────────
-	const getRouterProjects = (): RouterProjectInfo[] =>
-		registry.allProjects().map((project) => {
+	const getRouterProjects = (): RouterProjectInfo[] => {
+		const cfg = readRuntimeConfigSnapshot();
+		return registry.allProjects().map((project) => {
 			// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
 			const entry = registry.get(project.slug)!;
 			const relay = entry.status === "ready" ? entry.relay : undefined;
@@ -1190,11 +1294,13 @@ export async function startDaemonProcess(
 				clients: relay?.wsHandler.getClientCount() ?? 0,
 				sessions:
 					relay?.sessionMgr.getLastKnownSessionCount() ||
+					cfg.persistedSessionCounts.get(project.slug) ||
 					persistedSessionCounts.get(project.slug) ||
 					0,
 				isProcessing: relay?.isAnySessionProcessing() ?? false,
 			} satisfies RouterProjectInfo;
 		});
+	};
 
 	// biome-ignore lint/suspicious/noExplicitAny: optional daemon providers are merged conditionally.
 	let routerLayer: Layer.Layer<any, never, never> = Layer.mergeAll(
@@ -1205,7 +1311,10 @@ export async function startDaemonProcess(
 			removeProject: (slug: string) =>
 				Effect.tryPromise(() => removeProject(slug)),
 		}),
-		Layer.succeed(SetupInfoProvider, { port, isTls: tlsEnabled }),
+		Layer.succeed(SetupInfoProvider, {
+			getPort: () => readRuntimeConfigSnapshot().port,
+			getIsTls: () => readRuntimeConfigSnapshot().tlsEnabled,
+		}),
 		Layer.succeed(HealthProvider, { getHealthResponse: () => getStatus() }),
 		Layer.succeed(ThemeProvider, { loadThemes: loadThemeFiles }),
 		NodeFileSystem.layer,
@@ -1245,19 +1354,13 @@ export async function startDaemonProcess(
 	};
 
 	// ── Layer-managed daemon lifecycle ────────────────────────────────────
-	// Sync port/host into ctx before Layer construction starts servers.
-	ctx.port = port;
-	ctx.host = host;
-
-	// TLS cert paths for onboarding are populated after TlsCertLive runs
-	// (during Layer build). For now, pass nulls — the onboarding server
-	// reads these at connection time, and they'll be set after runtime init.
 	const onboardingDeps = {
 		caRootPath: null as string | null,
 		caCertDer: null as Buffer | null,
 		staticDir,
 	};
 
+	const initialRuntimeConfig = readRuntimeConfigSnapshot();
 	const firstProject = registry.allProjects()[0];
 	const daemonLiveOptions: DaemonLiveOptions = {
 		configDir,
@@ -1267,13 +1370,16 @@ export async function startDaemonProcess(
 		ipcContext,
 		getStatus,
 		onboarding: onboardingDeps,
+		initialConfig: initialRuntimeConfig,
 		// KeepAwake config — pure Effect Layer replaces imperative KeepAwake class.
 		// Always provide config (even empty) so the Layer is created; platform
 		// detection in KeepAwakeLive handles the default command.
-		keepAwake: keepAwakeCommand
+		keepAwake: initialRuntimeConfig.keepAwakeCommand
 			? {
-					command: keepAwakeCommand,
-					...(keepAwakeArgs != null && { args: keepAwakeArgs }),
+					command: initialRuntimeConfig.keepAwakeCommand,
+					...(initialRuntimeConfig.keepAwakeArgs != null && {
+						args: [...initialRuntimeConfig.keepAwakeArgs],
+					}),
 				}
 			: {},
 		// VersionChecker config — pure Effect Layer replaces imperative VersionChecker class.
@@ -1313,7 +1419,6 @@ export async function startDaemonProcess(
 		},
 		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
-		pinHash,
 		relayFactory: (slug: string) =>
 			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
 				Effect.map((p) => ({
@@ -1342,36 +1447,10 @@ export async function startDaemonProcess(
 		throw err;
 	}
 
-	// Read back the actual port (important when port 0 is used)
-	port = ctx.port;
+	const postStartupConfig = readRuntimeConfigSnapshot();
 	log.debug(`[startup:${elapsed()}] Servers started via Layer`);
-
-	// ── TLS certs from Layer ─────────────────────────────────────────────
-	// TlsCertLive ran during Layer construction. Read back the results to
-	// update the mutable ctx/variables that legacy code still references.
-	const tlsService = await daemonRuntime.runPromise(TlsCertTag);
-	tlsCerts = tlsService.certs;
-	if (tlsCerts) {
-		ctx.tls = {
-			key: tlsCerts.key,
-			cert: tlsCerts.caCertPem
-				? Buffer.concat([tlsCerts.cert, Buffer.from("\n"), tlsCerts.caCertPem])
-				: tlsCerts.cert,
-		};
-	}
-	// Sync tlsEnabled and host from the config Ref (TlsCertLive may have
-	// updated them during Layer build, e.g. on fallback or host override).
-	const postTlsConfig = await daemonRuntime.runPromise(
-		Effect.gen(function* () {
-			const ref = yield* DaemonConfigRefTag;
-			return yield* Ref.get(ref);
-		}),
-	);
-	tlsEnabled = postTlsConfig.tlsEnabled;
-	host = postTlsConfig.host;
-	ctx.host = host;
 	log.info(
-		`[startup:${elapsed()}] TLS certs ${tlsEnabled ? "loaded" : "skipped"}`,
+		`[startup:${elapsed()}] TLS certs ${postStartupConfig.tlsEnabled ? "loaded" : "skipped"}`,
 	);
 
 	// ── WebSocket upgrade routing ─────────────────────────────────────────
@@ -1523,6 +1602,10 @@ export async function startDaemonProcess(
 			.then((data: unknown) => {
 				if (Array.isArray(data)) {
 					persistedSessionCounts.set(slug, data.length);
+					updateRuntimeConfigSync((c) => ({
+						...c,
+						persistedSessionCounts: new Map(persistedSessionCounts),
+					}));
 				}
 			})
 			.catch(() => {
@@ -1545,7 +1628,7 @@ export async function startDaemonProcess(
 	// Signal handlers and error handlers are now managed by
 	// SignalHandlerLayer and ProcessErrorHandlerLayer (via makeDaemonLive).
 
-	startTime = Date.now();
+	updateRuntimeConfigSync((c) => ({ ...c, startTime: Date.now() }));
 
 	// ── Discover projects (non-blocking) ──────────────────────────────────
 	if (smartDefault) {
@@ -1627,7 +1710,7 @@ export async function startDaemonProcess(
 	// ── Return DaemonHandle ───────────────────────────────────────────────
 	return {
 		get port() {
-			return port;
+			return readRuntimeConfigSnapshot().port;
 		},
 		get onboardingPort() {
 			const server = ctx.onboardingServer;

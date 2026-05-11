@@ -24,6 +24,7 @@ export type {
 	AgentInfo,
 	AskUserQuestion,
 	CommandInfo,
+	ContextWindowOption,
 	FileEntry,
 	FileVersion,
 	HistoryMessage,

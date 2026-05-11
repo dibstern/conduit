@@ -182,6 +182,8 @@
 				return Array.isArray(p.ptys) ? `${p.ptys.length} ptys` : "";
 			case "variant_info":
 				return p.variant ? String(p.variant) : "";
+			case "context_window_info":
+				return p.contextWindow ? String(p.contextWindow) : "";
 			case "model_info":
 				return p.provider && p.model ? `${p.provider}:${p.model}` : "";
 			case "default_model_info":

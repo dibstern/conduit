@@ -148,6 +148,11 @@ const SwitchVariantMsg = Schema.Struct({
 	variant: Schema.String,
 });
 
+const SwitchContextWindowMsg = Schema.Struct({
+	type: Schema.Literal("switch_context_window"),
+	contextWindow: Schema.String,
+});
+
 // ── Settings / Projects ──────────────────────────────────────────────────────
 
 const GetCommandsMsg = Schema.Struct({
@@ -307,7 +312,7 @@ const ReloadProviderSessionMsg = Schema.Struct({
 });
 
 // ─── Combined union schema ──────────────────────────────────────────────────
-// Covers all 49 IncomingMessageType values from ws-router.ts.
+// Covers all 50 IncomingMessageType values from ws-router.ts.
 
 export const IncomingWsMessage = Schema.Union(
 	// Prompt / Messages
@@ -337,6 +342,7 @@ export const IncomingWsMessage = Schema.Union(
 	SwitchModelMsg,
 	SetDefaultModelMsg,
 	SwitchVariantMsg,
+	SwitchContextWindowMsg,
 	// Settings / Projects
 	GetCommandsMsg,
 	GetProjectsMsg,

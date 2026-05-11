@@ -133,6 +133,7 @@ export interface ClaudeSessionContext {
 	streamConsumer: Promise<void> | undefined;
 	currentTurnId: string | undefined;
 	currentModel: string | undefined;
+	currentApiModelId?: string;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;
 	turnCount: number;

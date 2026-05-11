@@ -23,6 +23,7 @@ export interface SessionState {
 	model?: ModelOverride;
 	agent?: string;
 	variant?: string;
+	contextWindow?: string;
 	modelUserSelected: boolean;
 	processingTimeoutFiber?: Fiber.RuntimeFiber<void>;
 	processingTimeoutCallback?: () => Effect.Effect<void>;
@@ -32,6 +33,7 @@ export interface OverridesState {
 	sessions: Map<string, SessionState>;
 	defaultModel: ModelOverride | undefined;
 	defaultVariant: string;
+	defaultContextWindow: string;
 }
 
 // ─── Context Tag ────────────────────────────────────────────────────────────
@@ -50,6 +52,7 @@ export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
 			sessions: new Map(),
 			defaultModel: undefined,
 			defaultVariant: "",
+			defaultContextWindow: "",
 		}),
 	);
 
@@ -82,6 +85,16 @@ export const setDefaultVariant = (variant: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		yield* Ref.update(ref, (s) => ({ ...s, defaultVariant: variant }));
+	});
+
+/** Set the global default context window. */
+export const setDefaultContextWindow = (contextWindow: string) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		yield* Ref.update(ref, (s) => ({
+			...s,
+			defaultContextWindow: contextWindow,
+		}));
 	});
 
 // ─── Per-Session Model ──────────────────────────────────────────────────────
@@ -170,10 +183,35 @@ export const getVariant = (sessionId: string) =>
 		return state.sessions.get(sessionId)?.variant ?? state.defaultVariant;
 	});
 
+// ─── Per-Session Context Window ─────────────────────────────────────────────
+
+/** Set the context window for a session. Empty string clears. */
+export const setContextWindow = (sessionId: string, contextWindow: string) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		yield* Ref.update(ref, (state) => {
+			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
+			const next = new Map(sessions);
+			next.set(sessionId, { ...entry, contextWindow });
+			return { ...state, sessions: next };
+		});
+	});
+
+/** Get the context window for a session (per-session ?? defaultContextWindow). */
+export const getContextWindow = (sessionId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return (
+			state.sessions.get(sessionId)?.contextWindow ?? state.defaultContextWindow
+		);
+	});
+
 // ─── Clear Session ──────────────────────────────────────────────────────────
 
 /**
- * Clear all overrides for a specific session (model, agent, timer).
+ * Clear all overrides for a specific session (model, agent, variant,
+ * context window, timer).
  * Interrupts any active processing timeout fiber.
  */
 export const clearSession = (sessionId: string) =>

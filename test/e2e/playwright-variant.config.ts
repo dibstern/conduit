@@ -6,7 +6,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: "variant-selector.spec.ts",
+	testMatch: ["variant-selector.spec.ts", "context-window-selector.spec.ts"],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,

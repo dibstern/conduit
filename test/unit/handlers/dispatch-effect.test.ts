@@ -65,11 +65,14 @@ function mockOverrides(
 		setAgent: vi.fn(),
 		setModel: vi.fn(),
 		setVariant: vi.fn(),
+		setContextWindow: vi.fn(),
 		getModel: vi.fn(),
 		getVariant: vi.fn(),
+		getContextWindow: vi.fn(),
 		setDefaultModel: vi.fn(),
 		defaultModel: undefined,
 		defaultVariant: "",
+		defaultContextWindow: "",
 		...overrides,
 	} as unknown as SessionOverrides;
 }
