@@ -246,6 +246,18 @@ src/lib/persistence/command-receipts.ts:59:			throw new PersistenceError({
 src/lib/effect/session-manager-service.ts:173:export const SessionManagerServiceLive = Layer.succeed(
 ```
 
+Pattern counts from the same baseline:
+
+| Pattern | Baseline hits |
+|---|---:|
+| `startDaemonProcess` | 8 |
+| `Layer.succeed(` | 52 |
+| `PersistenceLayer.open` | 2 |
+| `Effect.promise` | 3 |
+| `concurrency: "unbounded"` | 3 |
+| `Effect.runPromise` / `Effect.runSync` | 22 |
+| `throw new .*Error` | 86 |
+
 ## Narrow Baseline
 
 ```text
@@ -303,22 +315,39 @@ Baseline status: not green. No baseline repair was mixed into Phase 0.
 
 ## Behavior Smoke Checklist
 
-Live behavior smoke was not run in this baseline pass. Reason: the narrow baseline is already not green, and
-the failures show the expected local OpenCode endpoint at `localhost:4096` is not reachable from this session.
-Running provider-backed live smoke now would mix environmental diagnosis into the migration baseline.
+Provider-backed behavior smoke is blocked because the expected local OpenCode endpoint is not reachable:
 
-Daemon CLI invocation used: Not run.
+```text
+$ curl -sS -u "opencode:$OPENCODE_SERVER_PASSWORD" http://localhost:4096/health
+curl: (7) Failed to connect to localhost port 4096 after 0 ms: Couldn't connect to server
+```
 
-- [ ] Cold daemon start, IPC `ping` round-trip, clean shutdown with no orphan processes.
-  - Baseline observation: Not run; blocked by the failed narrow baseline and unavailable `localhost:4096` provider endpoint.
+Daemon-only smoke was run with an isolated temp config directory and ephemeral port, so it did not touch the
+user's normal daemon config or the default `2633` port.
+
+Daemon CLI invocation used:
+
+```bash
+tmp_dir=$(mktemp -d /tmp/conduit-smoke.XXXXXX)
+CONDUIT_CONFIG_DIR="$tmp_dir" CONDUIT_PORT=0 CONDUIT_HOST=127.0.0.1 CONDUIT_TLS=0 CONDUIT_OC_URL=http://localhost:4096 pnpm exec tsx src/bin/cli.ts --daemon
+CONDUIT_CONFIG_DIR="$tmp_dir" pnpm exec tsx src/bin/cli.ts --status
+curl -sS "http://127.0.0.1:65272/health"
+CONDUIT_CONFIG_DIR="$tmp_dir" pnpm exec tsx src/bin/cli.ts --stop
+curl -sS "http://127.0.0.1:65272/health"
+```
+
+- [x] Cold daemon start, IPC `ping` round-trip, clean shutdown with no orphan processes.
+  - Baseline observation: Pass for daemon-only path. Internal `--daemon` started with PID `42670`, `/health`
+    returned `{"ok":true,...,"port":65272,"tlsEnabled":false}`, `--status` returned uptime/port/projects,
+    `--stop` printed `Daemon stopped.`, the daemon process exited, and post-stop `/health` refused connection.
 - [ ] Single-project chat round-trip with one provider, OpenCode or Claude.
   - Baseline observation: Not run; provider-backed smoke cannot be trusted while `localhost:4096` refuses connections.
 - [ ] Daemon restart preserves an in-flight session; event store rehydrates correctly.
-  - Baseline observation: Not run; live daemon/session smoke deferred until the baseline environment is green.
+  - Baseline observation: Not run; requires a provider-backed in-flight session, blocked by unavailable OpenCode.
 - [ ] Project relay disconnect and reconnect from a browser client.
-  - Baseline observation: Not run; live browser/daemon smoke deferred until the baseline environment is green.
+  - Baseline observation: Not run; requires provider-backed browser session, blocked by unavailable OpenCode.
 - [ ] Multi-instance: two projects active concurrently, no cross-talk.
-  - Baseline observation: Not run; live multi-instance smoke deferred until the baseline environment is green.
+  - Baseline observation: Not run; requires at least one reachable provider/instance, blocked by unavailable OpenCode.
 
 Before each later phase opens a PR, rerun this checklist and record the exact daemon CLI invocation, provider,
 project paths, and pass/fail observations.
