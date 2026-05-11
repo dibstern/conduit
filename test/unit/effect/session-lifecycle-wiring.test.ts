@@ -7,6 +7,7 @@ import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/effect/daemon-pubsub.js";
+import { makePinoLoggerLive } from "../../../src/lib/effect/pino-logger-layer.js";
 import {
 	LoggerTag,
 	OpenCodeAPITag,
@@ -97,6 +98,23 @@ function makeTestLayer(
 	return Layer.provideMerge(wiringLayer, bridgeLayers);
 }
 
+function makePinoSpies() {
+	return {
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		child: vi.fn(),
+	};
+}
+
+function mockPino() {
+	const root = makePinoSpies();
+	const child = makePinoSpies();
+	root.child.mockReturnValue(child);
+	return { root, child };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
 // AUDIT FIX (AP-1): Use `it.live` (not `it.scoped`) because subscriber fibers
@@ -180,6 +198,61 @@ describe("SessionLifecycleWiringLive", () => {
 			Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
 		);
 	});
+
+	it.live(
+		"keeps lifecycle subscriber alive after history rebuild failure",
+		() => {
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const pino = mockPino();
+			services.client.session.messages.mockRejectedValue(
+				new Error("history unavailable"),
+			);
+			deps.monitoringState.current = {
+				sessions: new Map([["s-after-failure", { phase: "idle" as const }]]),
+			};
+
+			return Effect.gen(function* () {
+				const bus = yield* DaemonEventBusTag;
+				yield* Effect.sleep("10 millis");
+				yield* PubSub.publish(
+					bus,
+					DaemonEvent.SessionCreated({ sessionId: "s-fails" }),
+				);
+				yield* Effect.sleep("50 millis");
+				yield* PubSub.publish(
+					bus,
+					DaemonEvent.SessionDeleted({ sessionId: "s-after-failure" }),
+				);
+				yield* Effect.sleep("50 millis");
+
+				expect(services.client.session.messages).toHaveBeenCalledWith(
+					"s-fails",
+				);
+				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith(
+					"s-after-failure",
+				);
+				expect(services.statusPoller.clearMessageActivity).toHaveBeenCalledWith(
+					"s-after-failure",
+				);
+				expect(deps.sseTracker.remove).toHaveBeenCalledWith("s-after-failure");
+				expect(
+					deps.monitoringState.current.sessions.has("s-after-failure"),
+				).toBe(false);
+				expect(pino.root.child).toHaveBeenCalledWith(
+					expect.objectContaining({
+						sessionId: "s-fails",
+						operation: "rebuildTranslatorFromHistory",
+					}),
+				);
+				expect(pino.child.error).toHaveBeenCalled();
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
+				Effect.provide(makePinoLoggerLive(pino.root as any)),
+			);
+		},
+	);
 
 	it.live(
 		"stops poller and cleans up monitoring state on SessionDeleted",

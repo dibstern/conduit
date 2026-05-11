@@ -213,7 +213,21 @@ export const makeSessionLifecycleWiringLive = (
 								client,
 								pollerManager,
 								sessionLog,
-							});
+							}).pipe(
+								Effect.catchTag(
+									"SessionLifecycleHistoryRebuildError",
+									(error) =>
+										Effect.logError(
+											"Session history rebuild failed; continuing lifecycle subscriber",
+											error,
+										).pipe(
+											Effect.annotateLogs({
+												sessionId: error.sessionId,
+												operation: error.operation,
+											}),
+										),
+								),
+							);
 						}
 						if (event._tag === "SessionDeleted") {
 							return handleSessionDeleted(event.sessionId, {
