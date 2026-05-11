@@ -358,6 +358,9 @@ export async function handleClientConnected(
 							name: m.name,
 							provider: "claude",
 							...(m.limit ? { limit: m.limit } : {}),
+							...(m.variants && Object.keys(m.variants).length > 0
+								? { variants: Object.keys(m.variants) }
+								: {}),
 						})),
 					});
 				}

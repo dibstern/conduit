@@ -48,6 +48,7 @@ import {
 import {
 	handleGetModels,
 	handleSwitchModel,
+	handleSwitchVariant,
 } from "../../../src/lib/handlers/model.js";
 import {
 	handlePermissionResponse,
@@ -590,6 +591,71 @@ describe("handleGetModels", () => {
 			}),
 		);
 	});
+
+	it.effect(
+		"includes variants in claude provider entries in model_list",
+		() => {
+			const ws = mockWsHandler();
+			const engine = {
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-opus-4-7",
+							name: "Claude Opus 4.7",
+							providerId: "claude",
+							variants: { low: {}, medium: {}, high: {}, max: {} },
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+			const client = {
+				provider: {
+					list: vi.fn(async () => ({
+						connected: [],
+						providers: [],
+					})),
+				},
+				session: { get: vi.fn() },
+			} as unknown as OpenCodeAPI;
+			const overrides = mockOverrides();
+			const log = mockLogger();
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return handleGetModels("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({
+							type: "model_list",
+							providers: [
+								{
+									id: "claude",
+									name: "Anthropic - claude",
+									configured: true,
+									models: [
+										{
+											id: "claude-opus-4-7",
+											name: "Claude Opus 4.7",
+											provider: "claude",
+											variants: ["low", "medium", "high", "max"],
+										},
+									],
+								},
+							],
+						}),
+					);
+				}),
+			);
+		},
+	);
 });
 
 describe("handleSwitchModel", () => {
@@ -635,6 +701,120 @@ describe("handleSwitchModel", () => {
 			}),
 		);
 	});
+});
+
+describe("handleSwitchVariant", () => {
+	it.effect("returns Claude variants when active model is Claude", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-42"),
+		});
+		const overrides = mockOverrides({
+			getModel: vi.fn(() => ({
+				providerID: "claude",
+				modelID: "claude-opus-4-7",
+			})),
+		});
+		const engine = {
+			dispatch: vi.fn(async () => ({
+				models: [
+					{
+						id: "claude-opus-4-7",
+						name: "Claude Opus 4.7",
+						providerId: "claude",
+						variants: { low: {}, medium: {}, high: {}, max: {} },
+					},
+				],
+			})),
+		} as unknown as OrchestrationEngine;
+		const client = {
+			provider: {
+				list: vi.fn(async () => ({
+					connected: [],
+					providers: [],
+				})),
+			},
+		} as unknown as OpenCodeAPI;
+		const log = mockLogger();
+		const config = mockConfig({
+			configDir: `/tmp/conduit-switch-variant-claude-${Date.now()}`,
+		});
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(OrchestrationEngineTag, engine),
+		);
+
+		return handleSwitchVariant("client-1", { variant: "high" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(engine.dispatch).toHaveBeenCalledWith({
+					type: "discover",
+					providerId: "claude",
+				});
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+					type: "variant_info",
+					variant: "high",
+					variants: ["low", "medium", "high", "max"],
+				});
+			}),
+		);
+	});
+
+	it.effect(
+		"falls back to OpenCode lookup when active model is not Claude",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-42"),
+			});
+			const overrides = mockOverrides({
+				getModel: vi.fn(() => ({
+					providerID: "openai",
+					modelID: "gpt-4",
+				})),
+			});
+			const client = {
+				provider: {
+					list: vi.fn(async () => ({
+						connected: ["openai"],
+						providers: [
+							{
+								id: "openai",
+								name: "OpenAI",
+								models: [{ id: "gpt-4", variants: { v2: {}, v3: {} } }],
+							},
+						],
+					})),
+				},
+			} as unknown as OpenCodeAPI;
+			const log = mockLogger();
+			const config = mockConfig({
+				configDir: `/tmp/conduit-switch-variant-opencode-${Date.now()}`,
+			});
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, config),
+			);
+
+			return handleSwitchVariant("client-1", { variant: "v2" }).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+						type: "variant_info",
+						variant: "v2",
+						variants: ["v2", "v3"],
+					});
+				}),
+			);
+		},
+	);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

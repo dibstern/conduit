@@ -92,6 +92,9 @@ export const handleGetModels = (
 					name: m.name,
 					provider: "claude",
 					...(m.limit ? { limit: m.limit } : {}),
+					...(m.variants && Object.keys(m.variants).length > 0
+						? { variants: Object.keys(m.variants) }
+						: {}),
 				})),
 			});
 		}
@@ -352,23 +355,51 @@ export const handleSwitchVariant = (
 		// Send variant_info
 		let availableVariants: string[] = [];
 		if (activeModel) {
-			const provListResult = yield* Effect.either(
-				Effect.tryPromise(() => client.provider.list()),
-			);
-			if (provListResult._tag === "Right") {
-				for (const p of provListResult.right.providers) {
-					const m = (p.models ?? []).find(
-						(mod) => mod.id === activeModel.modelID,
+			if (isClaudeProvider(activeModel.providerID)) {
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				if (engineOption._tag === "Some") {
+					const capsResult = yield* Effect.either(
+						Effect.tryPromise(() =>
+							engineOption.value.dispatch({
+								type: "discover",
+								providerId: "claude",
+							}),
+						),
 					);
-					if (m?.variants) {
-						availableVariants = Object.keys(m.variants);
-						break;
+					if (capsResult._tag === "Right") {
+						const model = capsResult.right.models.find(
+							(m) => m.id === activeModel.modelID,
+						);
+						if (model?.variants) {
+							availableVariants = Object.keys(model.variants);
+						}
+					} else {
+						log.warn(
+							`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
+						);
 					}
 				}
 			} else {
-				log.warn(
-					`Failed to fetch variant list: ${provListResult.left instanceof Error ? provListResult.left.message : provListResult.left}`,
+				const provListResult = yield* Effect.either(
+					Effect.tryPromise(() => client.provider.list()),
 				);
+				if (provListResult._tag === "Right") {
+					for (const p of provListResult.right.providers) {
+						const m = (p.models ?? []).find(
+							(mod) => mod.id === activeModel.modelID,
+						);
+						if (m?.variants) {
+							availableVariants = Object.keys(m.variants);
+							break;
+						}
+					}
+				} else {
+					log.warn(
+						`Failed to fetch variant list: ${provListResult.left instanceof Error ? provListResult.left.message : provListResult.left}`,
+					);
+				}
 			}
 		}
 		if (sessionId) {
