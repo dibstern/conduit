@@ -832,6 +832,65 @@ describe("handleSwitchModel", () => {
 			}),
 		);
 	});
+
+	it.effect("returns Claude variants when switching to a Claude model", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-42"),
+		});
+		const overrides = mockOverrides();
+		const log = mockLogger();
+		const config = mockConfig({
+			configDir: `/tmp/conduit-switch-model-claude-${Date.now()}`,
+		});
+		const engine = {
+			dispatch: vi.fn(async () => ({
+				models: [
+					{
+						id: "opus",
+						name: "Default (recommended)",
+						providerId: "claude",
+						variants: { low: {}, medium: {}, high: {}, max: {} },
+					},
+				],
+			})),
+			bindSession: vi.fn(),
+		} as unknown as OrchestrationEngine;
+		const client = {
+			provider: {
+				list: vi.fn(async () => ({
+					connected: [],
+					providers: [],
+				})),
+			},
+		} as unknown as OpenCodeAPI;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(OrchestrationEngineTag, engine),
+		);
+
+		return handleSwitchModel("client-1", {
+			modelId: "opus",
+			providerId: "claude",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(engine.dispatch).toHaveBeenCalledWith({
+					type: "discover",
+					providerId: "claude",
+				});
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+					type: "variant_info",
+					variant: "",
+					variants: ["low", "medium", "high", "max"],
+				});
+			}),
+		);
+	});
 });
 
 describe("handleSwitchVariant", () => {

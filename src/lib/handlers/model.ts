@@ -262,15 +262,41 @@ export const handleSwitchModel = (
 			// Restore persisted variant for the new model and send variant_info
 			const modelKey = `${providerId}/${modelId}`;
 			let availableVariants: string[] = [];
-			const provListResult = yield* Effect.either(
-				Effect.tryPromise(() => client.provider.list()),
-			);
-			if (provListResult._tag === "Right") {
-				for (const p of provListResult.right.providers) {
-					const m = (p.models ?? []).find((mod) => mod.id === modelId);
-					if (m?.variants) {
-						availableVariants = Object.keys(m.variants);
-						break;
+			if (isClaudeProvider(providerId)) {
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				if (engineOption._tag === "Some") {
+					const capsResult = yield* Effect.either(
+						Effect.tryPromise(() =>
+							engineOption.value.dispatch({
+								type: "discover",
+								providerId: "claude",
+							}),
+						),
+					);
+					if (capsResult._tag === "Right") {
+						const model = capsResult.right.models.find((m) => m.id === modelId);
+						if (model?.variants) {
+							availableVariants = Object.keys(model.variants);
+						}
+					} else {
+						log.warn(
+							`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
+						);
+					}
+				}
+			} else {
+				const provListResult = yield* Effect.either(
+					Effect.tryPromise(() => client.provider.list()),
+				);
+				if (provListResult._tag === "Right") {
+					for (const p of provListResult.right.providers) {
+						const m = (p.models ?? []).find((mod) => mod.id === modelId);
+						if (m?.variants) {
+							availableVariants = Object.keys(m.variants);
+							break;
+						}
 					}
 				}
 			}
@@ -334,32 +360,58 @@ export const handleSetDefaultModel = (
 		log.info(`client=${clientId} Set default: ${model} (${provider})`);
 
 		// Send variant_info for the new default model
-		const provListResult = yield* Effect.either(
-			Effect.tryPromise(() => client.provider.list()),
-		);
-		if (provListResult._tag === "Right") {
-			let availableVariants: string[] = [];
-			for (const p of provListResult.right.providers) {
-				const m = (p.models ?? []).find((mod) => mod.id === model);
-				if (m?.variants) {
-					availableVariants = Object.keys(m.variants);
-					break;
+		let availableVariants: string[] = [];
+		if (isClaudeProvider(provider)) {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "Some") {
+				const capsResult = yield* Effect.either(
+					Effect.tryPromise(() =>
+						engineOption.value.dispatch({
+							type: "discover",
+							providerId: "claude",
+						}),
+					),
+				);
+				if (capsResult._tag === "Right") {
+					const selectedModel = capsResult.right.models.find(
+						(m) => m.id === model,
+					);
+					if (selectedModel?.variants) {
+						availableVariants = Object.keys(selectedModel.variants);
+					}
+				} else {
+					log.warn(
+						`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
+					);
 				}
 			}
-			const settings = loadRelaySettings(config.configDir);
-			const modelKey = `${provider}/${model}`;
-			const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
-			const validVariant =
-				persistedVariant && availableVariants.includes(persistedVariant)
-					? persistedVariant
-					: "";
-			overrides.defaultVariant = validVariant;
-			wsHandler.broadcast({
-				type: "variant_info",
-				variant: validVariant,
-				variants: availableVariants,
-			});
+		} else {
+			const provListResult = yield* Effect.either(
+				Effect.tryPromise(() => client.provider.list()),
+			);
+			if (provListResult._tag === "Right") {
+				for (const p of provListResult.right.providers) {
+					const m = (p.models ?? []).find((mod) => mod.id === model);
+					if (m?.variants) {
+						availableVariants = Object.keys(m.variants);
+						break;
+					}
+				}
+			}
 		}
+		const settings = loadRelaySettings(config.configDir);
+		const modelKey = `${provider}/${model}`;
+		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
+		const validVariant =
+			persistedVariant && availableVariants.includes(persistedVariant)
+				? persistedVariant
+				: "";
+		overrides.defaultVariant = validVariant;
+		wsHandler.broadcast({
+			type: "variant_info",
+			variant: validVariant,
+			variants: availableVariants,
+		});
 	});
 
 export const handleSwitchVariant = (
