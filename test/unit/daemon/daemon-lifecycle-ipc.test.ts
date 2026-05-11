@@ -45,8 +45,6 @@ import type {
 } from "../../../src/lib/types.js";
 
 const makeContext = (socketPath: string): DaemonLifecycleContext => ({
-	port: 0,
-	host: "127.0.0.1",
 	httpServer: null,
 	onboardingServer: null,
 	upgradeServer: null,

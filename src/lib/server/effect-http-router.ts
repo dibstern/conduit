@@ -102,8 +102,8 @@ export class ThemeProvider extends Context.Tag("ThemeProvider")<
 export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 	SetupInfoProvider,
 	{
-		readonly port: number;
-		readonly isTls: boolean;
+		readonly getPort: () => number;
+		readonly getIsTls: () => boolean;
 	}
 >() {}
 
@@ -340,11 +340,13 @@ const setupInfoHandler = Effect.gen(function* () {
 	}
 
 	const setup = maybeSetup.value;
+	const port = setup.getPort();
+	const isTls = setup.getIsTls();
 	const request = yield* HttpServerRequest.HttpServerRequest;
-	const hostHeader = request.headers["host"] ?? `localhost:${setup.port}`;
+	const hostHeader = request.headers["host"] ?? `localhost:${port}`;
 	const hostBase = hostHeader.replace(/:\d+$/, "");
-	const httpsUrl = `https://${hostBase}:${setup.port}`;
-	const httpUrl = `http://${hostBase}:${setup.port}`;
+	const httpsUrl = `https://${hostBase}:${port}`;
+	const httpUrl = `http://${hostBase}:${port}`;
 
 	// Check for ?mode=lan query parameter
 	const url = new URL(request.url, `http://${hostHeader}`);
@@ -353,7 +355,7 @@ const setupInfoHandler = Effect.gen(function* () {
 	return yield* HttpServerResponse.json({
 		httpsUrl,
 		httpUrl,
-		hasCert: setup.isTls,
+		hasCert: isTls,
 		lanMode,
 	} satisfies SetupInfoResponse);
 });

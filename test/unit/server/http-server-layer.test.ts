@@ -98,9 +98,12 @@ const TestThemeLayer = Layer.succeed(ThemeProvider, {
 	}),
 });
 
+let setupInfoPort = 9999;
+let setupInfoIsTls = false;
+
 const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
-	port: 9999,
-	isTls: false,
+	getPort: () => setupInfoPort,
+	getIsTls: () => setupInfoIsTls,
 });
 
 let staticDir = "";
@@ -225,6 +228,8 @@ describe("Effect HTTP Router - Extended Routes", () => {
 
 	describe("GET /api/setup-info", () => {
 		it("returns setup info when SetupInfoProvider present", async () => {
+			setupInfoPort = 9999;
+			setupInfoIsTls = false;
 			const handler = tracked(
 				Layer.merge(TestProjectsLayer, TestSetupInfoLayer),
 			);
@@ -245,7 +250,39 @@ describe("Effect HTTP Router - Extended Routes", () => {
 			expect(body.httpUrl).toContain("http://");
 		});
 
+		it("reflects live SetupInfoProvider values", async () => {
+			setupInfoPort = 8181;
+			setupInfoIsTls = true;
+			const handler = tracked(
+				Layer.merge(TestProjectsLayer, TestSetupInfoLayer),
+			);
+
+			const first = await handler(
+				new Request("http://localhost:9999/api/setup-info"),
+			);
+			const firstBody = (await first.json()) as {
+				httpsUrl: string;
+				hasCert: boolean;
+			};
+			expect(firstBody.httpsUrl).toContain(":8181");
+			expect(firstBody.hasCert).toBe(true);
+
+			setupInfoPort = 8282;
+			setupInfoIsTls = false;
+			const second = await handler(
+				new Request("http://localhost:9999/api/setup-info"),
+			);
+			const secondBody = (await second.json()) as {
+				httpsUrl: string;
+				hasCert: boolean;
+			};
+			expect(secondBody.httpsUrl).toContain(":8282");
+			expect(secondBody.hasCert).toBe(false);
+		});
+
 		it("respects ?mode=lan query parameter", async () => {
+			setupInfoPort = 9999;
+			setupInfoIsTls = false;
 			const handler = tracked(
 				Layer.merge(TestProjectsLayer, TestSetupInfoLayer),
 			);
