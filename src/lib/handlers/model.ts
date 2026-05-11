@@ -101,6 +101,9 @@ export const handleGetModels = (
 						...(m.variants && Object.keys(m.variants).length > 0
 							? { variants: Object.keys(m.variants) }
 							: {}),
+						...(m.contextWindowOptions && m.contextWindowOptions.length > 0
+							? { contextWindowOptions: m.contextWindowOptions }
+							: {}),
 					})),
 				});
 				wsHandler.sendTo(clientId, { type: "model_list", providers });

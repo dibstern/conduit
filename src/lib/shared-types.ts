@@ -104,6 +104,12 @@ export interface ProviderInfo {
 	models: ModelInfo[];
 }
 
+export interface ContextWindowOption {
+	value: string;
+	label: string;
+	isDefault?: boolean;
+}
+
 export interface ModelInfo {
 	id: string;
 	name: string;
@@ -111,6 +117,7 @@ export interface ModelInfo {
 	cost?: { input?: number; output?: number };
 	limit?: { context?: number; output?: number };
 	variants?: string[];
+	contextWindowOptions?: ContextWindowOption[];
 }
 
 export interface CommandInfo {
@@ -393,6 +400,15 @@ const ProviderInfoSchema = Schema.Struct({
 				}),
 			),
 			variants: Schema.optional(Schema.Array(Schema.String)),
+			contextWindowOptions: Schema.optional(
+				Schema.Array(
+					Schema.Struct({
+						value: Schema.String,
+						label: Schema.String,
+						isDefault: Schema.optional(Schema.Boolean),
+					}),
+				),
+			),
 		}),
 	),
 });

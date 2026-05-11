@@ -654,7 +654,7 @@ describe("handleGetModels", () => {
 	});
 
 	it.effect(
-		"includes variants in claude provider entries in model_list",
+		"includes variants and contextWindowOptions in claude provider entries in model_list",
 		() => {
 			const ws = mockWsHandler();
 			const engine = {
@@ -665,6 +665,10 @@ describe("handleGetModels", () => {
 							name: "Claude Opus 4.7",
 							providerId: "claude",
 							variants: { low: {}, medium: {}, high: {}, max: {} },
+							contextWindowOptions: [
+								{ value: "200k", label: "200K", isDefault: true },
+								{ value: "1m", label: "1M (beta)" },
+							],
 						},
 					],
 				})),
@@ -707,6 +711,10 @@ describe("handleGetModels", () => {
 											name: "Claude Opus 4.7",
 											provider: "claude",
 											variants: ["low", "medium", "high", "max"],
+											contextWindowOptions: [
+												{ value: "200k", label: "200K", isDefault: true },
+												{ value: "1m", label: "1M (beta)" },
+											],
 										},
 									],
 								},
