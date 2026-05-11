@@ -7,35 +7,14 @@
 // Each test builds the composed Layer with mock server deps and verifies
 // that the service is accessible and functional.
 
-import { createServer, type Server as HttpServer } from "node:http";
-import {
-	createServer as createNetServer,
-	type Server as NetServer,
-	type Socket,
-} from "node:net";
+import { createServer } from "node:http";
+import { createServer as createNetServer, type Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
-import {
-	Context,
-	Deferred,
-	Duration,
-	Effect,
-	Layer,
-	PubSub,
-	Ref,
-	TestClock,
-} from "effect";
+import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
 import { expect } from "vitest";
-import { AuthManager } from "../../../src/lib/auth.js";
 import type { OnboardingServerDeps } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
-import {
-	type ConfigWriter,
-	ConfigWriterTag,
-} from "../../../src/lib/effect/config-persistence-layer.js";
-import {
-	DaemonConfigRefTag,
-	type DaemonRuntimeConfig,
-} from "../../../src/lib/effect/daemon-config-ref.js";
+import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
 import {
 	type DaemonLiveOptions,
 	makeDaemonLive,
@@ -74,7 +53,9 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		pidPath: "/tmp/test-daemon-wiring/daemon.pid",
 		socketPath: "/tmp/test-daemon-wiring/relay.sock",
 		ctx: {
-			port: 2633,
+			// Use an ephemeral port so wiring tests can run while the local
+			// development daemon owns the default conduit port.
+			port: 0,
 			host: "127.0.0.1",
 			httpServer,
 			upgradeServer: null,
@@ -109,7 +90,7 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		getStatus: () => ({
 			ok: true as const,
 			pid: process.pid,
-			port: 2633,
+			port: 0,
 			host: "127.0.0.1",
 			version: "0.0.0-test",
 			uptime: 0,
@@ -123,7 +104,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			projects: [],
 			instances: [],
 		}),
-		// biome-ignore lint/suspicious/noExplicitAny: mock stub — OnboardingServerDeps has complex shape
 		onboarding: {} as OnboardingServerDeps,
 		// Background services with minimal configs
 		keepAwake: {},
@@ -145,11 +125,7 @@ const makeMockOptions = (): DaemonLiveOptions => {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("makeDaemonLive wiring", () => {
-	const options = makeMockOptions();
-
-	// Build the composed layer ONCE for all wiring tests.
-	// Layer.fresh ensures each test gets its own state.
-	const daemonLayer = makeDaemonLive(options);
+	const makeDaemonLayer = () => Layer.fresh(makeDaemonLive(makeMockOptions()));
 
 	// ── Tier 0: Foundation Tags ───────────────────────────────────────────
 
@@ -162,18 +138,18 @@ describe("makeDaemonLive wiring", () => {
 				DaemonEvent.StatusChanged({ statuses: {} }),
 			);
 			expect(published).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped(
-		"provides DaemonConfigRefTag with correct initial port (Tier 0)",
+		"provides DaemonConfigRefTag with ephemeral initial port (Tier 0)",
 		() =>
 			Effect.gen(function* () {
 				const ref = yield* DaemonConfigRefTag;
 				const config = yield* Ref.get(ref);
-				expect(config.port).toBe(2633);
+				expect(config.port).toBe(0);
 				expect(config.host).toBe("127.0.0.1");
-			}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides ShutdownSignalTag as a Deferred (Tier 0)", () =>
@@ -182,7 +158,7 @@ describe("makeDaemonLive wiring", () => {
 			// It should be a Deferred — verify by checking it's not already done
 			const isDone = yield* Deferred.isDone(shutdown);
 			expect(isDone).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides CrashCounterTag (Tier 0)", () =>
@@ -191,7 +167,7 @@ describe("makeDaemonLive wiring", () => {
 			const result = yield* counter.record();
 			expect(result.count).toBeGreaterThanOrEqual(1);
 			expect(typeof result.shouldAbort).toBe("boolean");
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Tier 1: Service Tags ─────────────────────────────────────────────
@@ -208,7 +184,7 @@ describe("makeDaemonLive wiring", () => {
 				const configRef = yield* DaemonConfigRefTag;
 				yield* Ref.update(configRef, (c) => ({ ...c, pinHash: "test-hash" }));
 				expect(auth.hasPin()).toBe(true);
-			}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides TlsCertTag (Tier 1)", () =>
@@ -217,7 +193,7 @@ describe("makeDaemonLive wiring", () => {
 			// TLS disabled by default — certs should be null
 			expect(tls.certs).toBeNull();
 			expect(tls.caRootPath).toBeNull();
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Tier 2: Registry Tags ────────────────────────────────────────────
@@ -228,7 +204,7 @@ describe("makeDaemonLive wiring", () => {
 			const state = yield* Ref.get(ref);
 			// Empty registry on startup
 			expect(state).toBeDefined();
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped(
@@ -242,7 +218,7 @@ describe("makeDaemonLive wiring", () => {
 				// PollerFibersTag should also be available
 				const fibers = yield* PollerFibersTag;
 				expect(fibers).toBeDefined();
-			}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides RelayFactoryTag and HttpServerRefTag (Tier 2)", () =>
@@ -254,7 +230,7 @@ describe("makeDaemonLive wiring", () => {
 			const server = yield* Ref.get(serverRef);
 			// Initially null (server not set yet)
 			expect(server).toBeNull();
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides DaemonStateTag (Tier 2)", () =>
@@ -262,7 +238,7 @@ describe("makeDaemonLive wiring", () => {
 			const stateRef = yield* DaemonStateTag;
 			const state = yield* Ref.get(stateRef);
 			expect(state.port).toBeDefined();
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Tier 4: Background Service Tags ──────────────────────────────────
@@ -276,7 +252,7 @@ describe("makeDaemonLive wiring", () => {
 
 			const active = yield* keepAwake.isActive();
 			expect(active).toBe(false); // not activated by default
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides VersionCheckerTag (Tier 4)", () =>
@@ -284,7 +260,7 @@ describe("makeDaemonLive wiring", () => {
 			const checker = yield* VersionCheckerTag;
 			const current = yield* checker.getCurrentVersion();
 			expect(current).toBe("0.0.0"); // from mock config
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	it.scoped("provides StorageMonitorTag (Tier 4)", () =>
@@ -293,7 +269,7 @@ describe("makeDaemonLive wiring", () => {
 			const usage = yield* monitor.getUsage();
 			// Mock returns 0.1 — if wiring is broken, this would throw
 			expect(typeof usage).toBe("number");
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Cross-tier wiring: DaemonEventBus is shared ──────────────────────
@@ -314,7 +290,7 @@ describe("makeDaemonLive wiring", () => {
 				// Should receive it — proves single bus instance
 				const msg = yield* sub.take;
 				expect(msg._tag).toBe("ConfigChanged");
-			}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Cross-tier wiring: AuthManager reads DaemonConfigRef reactively ──
@@ -339,7 +315,7 @@ describe("makeDaemonLive wiring", () => {
 				// Clear pin
 				yield* Ref.update(configRef, (c) => ({ ...c, pinHash: null }));
 				expect(auth.hasPin()).toBe(false);
-			}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Cross-tier wiring: KeepAwake activate/deactivate lifecycle ────────
@@ -361,7 +337,7 @@ describe("makeDaemonLive wiring", () => {
 				yield* keepAwake.deactivate();
 				const activeAfterDeactivate = yield* keepAwake.isActive();
 				expect(activeAfterDeactivate).toBe(false);
-			}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
 	// ── Cross-tier wiring: CrashCounter records and resets ───────────────
@@ -379,6 +355,6 @@ describe("makeDaemonLive wiring", () => {
 			yield* counter.reset();
 			const afterReset = yield* counter.record();
 			expect(afterReset.count).toBe(1);
-		}).pipe(Effect.provide(Layer.fresh(daemonLayer))),
+		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 });

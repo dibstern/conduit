@@ -115,7 +115,7 @@ describe("ConfigPersistenceLive", () => {
 			yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
 			yield* TestClock.adjust(Duration.millis(600));
 			expect(writes.length).toBe(1);
-			expect(writes[0]!.port).toBe(9999);
+			expect(writes[0]?.port).toBe(9999);
 		}),
 	);
 
