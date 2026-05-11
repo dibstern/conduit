@@ -11,6 +11,10 @@ const meta = {
 		discoveryState.providers = [];
 		discoveryState.currentModelId = "";
 		discoveryState.currentProviderId = "";
+		discoveryState.currentVariant = "";
+		discoveryState.availableVariants = [];
+		discoveryState.currentContextWindow = "";
+		discoveryState.availableContextWindowOptions = [];
 	},
 } satisfies Meta<typeof ModelSelector>;
 

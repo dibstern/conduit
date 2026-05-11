@@ -52,6 +52,7 @@ export type IncomingMessageType =
 	| "set_project_instance"
 	| "set_default_model"
 	| "switch_variant"
+	| "switch_context_window"
 	| "view_session"
 	| "proxy_detect"
 	| "scan_now"
@@ -103,6 +104,7 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"set_project_instance",
 	"set_default_model",
 	"switch_variant",
+	"switch_context_window",
 	"view_session",
 	"proxy_detect",
 	"scan_now",

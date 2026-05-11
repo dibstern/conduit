@@ -14,6 +14,8 @@ import {
 	loadRelaySettings,
 	saveRelaySettings,
 } from "../relay/relay-settings.js";
+import type { ModelOverride } from "../session/session-overrides.js";
+import type { ContextWindowOption } from "../shared-types.js";
 import { fixupConfigFile } from "./fixup-config-file.js";
 import type { PayloadMap } from "./payloads.js";
 
@@ -34,6 +36,23 @@ const resolveSessionFromContext = (clientId: string) =>
 		const wsHandler = yield* WebSocketHandlerTag;
 		return wsHandler.getClientSession(clientId);
 	});
+
+function findContextWindowOptions(
+	providers: ReadonlyArray<{
+		models: ReadonlyArray<{
+			id: string;
+			contextWindowOptions?: readonly ContextWindowOption[];
+		}>;
+	}>,
+	modelId: string | undefined,
+): readonly ContextWindowOption[] {
+	if (!modelId) return [];
+	for (const provider of providers) {
+		const model = provider.models.find((m) => m.id === modelId);
+		if (model?.contextWindowOptions) return model.contextWindowOptions;
+	}
+	return [];
+}
 
 export const handleGetModels = (
 	clientId: string,
@@ -101,6 +120,9 @@ export const handleGetModels = (
 						...(m.variants && Object.keys(m.variants).length > 0
 							? { variants: Object.keys(m.variants) }
 							: {}),
+						...(m.contextWindowOptions && m.contextWindowOptions.length > 0
+							? { contextWindowOptions: m.contextWindowOptions }
+							: {}),
 					})),
 				});
 				wsHandler.sendTo(clientId, { type: "model_list", providers });
@@ -110,11 +132,16 @@ export const handleGetModels = (
 		// Send model_info: prefer session's model, fall back to relay-side selection
 		let sentModelInfo = false;
 		const activeId = yield* resolveSessionFromContext(clientId);
+		let sessionModel: ModelOverride | undefined;
 		if (activeId) {
 			const sessionResult = yield* Effect.either(
 				Effect.tryPromise(() => client.session.get(activeId)),
 			);
 			if (sessionResult._tag === "Right" && sessionResult.right.modelID) {
+				sessionModel = {
+					modelID: sessionResult.right.modelID,
+					providerID: sessionResult.right.providerID ?? "",
+				};
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
 					model: sessionResult.right.modelID,
@@ -153,7 +180,7 @@ export const handleGetModels = (
 			? overrides.getVariant(activeId)
 			: overrides.defaultVariant;
 		const activeModelForVariant = activeId
-			? overrides.getModel(activeId)
+			? (overrides.getModel(activeId) ?? sessionModel)
 			: overrides.defaultModel;
 		let variantList: string[] = [];
 		if (activeModelForVariant) {
@@ -171,6 +198,16 @@ export const handleGetModels = (
 			type: "variant_info",
 			variant: currentVariant,
 			variants: variantList,
+		});
+		wsHandler.sendTo(clientId, {
+			type: "context_window_info",
+			contextWindow: activeId
+				? overrides.getContextWindow(activeId)
+				: overrides.defaultContextWindow,
+			options: findContextWindowOptions(
+				providers,
+				activeModelForVariant?.modelID,
+			),
 		});
 	});
 

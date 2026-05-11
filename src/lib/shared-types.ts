@@ -104,6 +104,12 @@ export interface ProviderInfo {
 	models: ModelInfo[];
 }
 
+export interface ContextWindowOption {
+	value: string;
+	label: string;
+	isDefault?: boolean;
+}
+
 export interface ModelInfo {
 	id: string;
 	name: string;
@@ -111,6 +117,7 @@ export interface ModelInfo {
 	cost?: { input?: number; output?: number };
 	limit?: { context?: number; output?: number };
 	variants?: string[];
+	contextWindowOptions?: ContextWindowOption[];
 }
 
 export interface CommandInfo {
@@ -371,6 +378,12 @@ const SessionInfoSchema = Schema.Struct({
 	pendingQuestionCount: Schema.optional(Schema.Number),
 });
 
+const ContextWindowOptionSchema = Schema.Struct({
+	value: Schema.String,
+	label: Schema.String,
+	isDefault: Schema.optional(Schema.Boolean),
+});
+
 const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
@@ -393,6 +406,9 @@ const ProviderInfoSchema = Schema.Struct({
 				}),
 			),
 			variants: Schema.optional(Schema.Array(Schema.String)),
+			contextWindowOptions: Schema.optional(
+				Schema.Array(ContextWindowOptionSchema),
+			),
 		}),
 	),
 });
@@ -904,6 +920,12 @@ const VariantInfoSchema = Schema.Struct({
 	variants: Schema.optional(Schema.Array(Schema.String)),
 });
 
+const ContextWindowInfoSchema = Schema.Struct({
+	type: Schema.Literal("context_window_info"),
+	contextWindow: Schema.String,
+	options: Schema.Array(ContextWindowOptionSchema),
+});
+
 const ProxyDetectedSchema = Schema.Struct({
 	type: Schema.Literal("proxy_detected"),
 	found: Schema.Boolean,
@@ -1008,6 +1030,7 @@ export const RelayMessageSchema = Schema.Union(
 	ProviderSessionReloadedSchema,
 	// Variant / thinking level
 	VariantInfoSchema,
+	ContextWindowInfoSchema,
 	ProxyDetectedSchema,
 	ScanResultSchema,
 	// Cross-session notifications
@@ -1245,6 +1268,11 @@ export type RelayMessage =
 	| { type: "provider_session_reloaded"; sessionId: string }
 	// ── Variant / thinking level ────────────────────────────────────────
 	| { type: "variant_info"; variant?: string; variants?: string[] }
+	| {
+			type: "context_window_info";
+			contextWindow: string;
+			options: readonly ContextWindowOption[];
+	  }
 	| { type: "proxy_detected"; found: boolean; port: number }
 	| {
 			type: "scan_result";

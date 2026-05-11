@@ -54,6 +54,7 @@ const validMessageTypes: IncomingMessageType[] = [
 	"switch_model",
 	"set_default_model",
 	"switch_variant",
+	"switch_context_window",
 	"get_todo",
 	"get_agents",
 	"get_models",
@@ -429,8 +430,8 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			const invalidResult = routeMessage({ type: "__definitely_not_valid__" });
 			expect(isRouteError(invalidResult)).toBe(true);
 
-			// Verify our test list has exactly the right number (40 types in production)
-			expect(validMessageTypes).toHaveLength(48);
+			// Verify our test list has exactly the right number (49 routed types).
+			expect(validMessageTypes).toHaveLength(49);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

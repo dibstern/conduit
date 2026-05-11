@@ -325,6 +325,88 @@ describe("handleClientConnected — model list", () => {
 		await initPromise;
 	});
 
+	it("includes contextWindowOptions on Claude entries in model_list", async () => {
+		const contextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		];
+		const deps = applyTestDefaults(
+			createMockClientInitDeps({
+				orchestrationEngine: {
+					dispatch: vi.fn(async () => ({
+						models: [
+							{
+								id: "claude-sonnet-4-7",
+								name: "Claude Sonnet 4.7",
+								providerId: "claude",
+								contextWindowOptions,
+							},
+						],
+					})),
+				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+			}),
+		);
+
+		await handleClientConnected(deps, "client-1");
+
+		const modelLists = vi
+			.mocked(deps.wsHandler.sendTo)
+			.mock.calls.map((call) => call[1])
+			.filter((msg) => (msg as { type?: string }).type === "model_list");
+		expect(modelLists).toContainEqual(
+			expect.objectContaining({
+				type: "model_list",
+				providers: expect.arrayContaining([
+					expect.objectContaining({
+						id: "claude",
+						models: [
+							expect.objectContaining({
+								id: "claude-sonnet-4-7",
+								contextWindowOptions,
+							}),
+						],
+					}),
+				]),
+			}),
+		);
+	});
+
+	it("sends context_window_info for active Claude model on connect", async () => {
+		const contextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		];
+		const deps = applyTestDefaults(
+			createMockClientInitDeps({
+				orchestrationEngine: {
+					dispatch: vi.fn(async () => ({
+						models: [
+							{
+								id: "claude-sonnet-4-7",
+								name: "Claude Sonnet 4.7",
+								providerId: "claude",
+								contextWindowOptions,
+							},
+						],
+					})),
+				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+			}),
+		);
+		vi.mocked(deps.overrides.getModel).mockReturnValue({
+			providerID: "claude",
+			modelID: "claude-sonnet-4-7",
+		});
+		vi.mocked(deps.overrides.getContextWindow).mockReturnValue("1m");
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "context_window_info",
+			contextWindow: "1m",
+			options: contextWindowOptions,
+		});
+	});
+
 	it("auto-selects default model when defaultModel is not set", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
 
@@ -386,8 +468,10 @@ describe("handleClientConnected — defaultModel priority", () => {
 					setDefaultModel: vi.fn(),
 					setModelDefault: vi.fn(),
 					getVariant: vi.fn().mockReturnValue(""),
+					getContextWindow: vi.fn().mockReturnValue(""),
 					getModel: vi.fn().mockReturnValue(undefined),
 					defaultVariant: "",
+					defaultContextWindow: "",
 					hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 				} as unknown as ClientInitDeps["overrides"],
 			}),
@@ -416,8 +500,10 @@ describe("handleClientConnected — defaultModel priority", () => {
 					setDefaultModel: vi.fn(),
 					setModelDefault: vi.fn(),
 					getVariant: vi.fn().mockReturnValue(""),
+					getContextWindow: vi.fn().mockReturnValue(""),
 					getModel: vi.fn().mockReturnValue(undefined),
 					defaultVariant: "",
+					defaultContextWindow: "",
 					hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 				} as unknown as ClientInitDeps["overrides"],
 			}),

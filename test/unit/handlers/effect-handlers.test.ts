@@ -34,6 +34,7 @@ import {
 	handleGetAgents,
 	handleSwitchAgent,
 } from "../../../src/lib/handlers/agent.js";
+import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
 import {
 	handleGetFileContent,
 	handleGetFileList,
@@ -146,11 +147,14 @@ function mockOverrides(
 		setAgent: vi.fn(),
 		setModel: vi.fn(),
 		setVariant: vi.fn(),
+		setContextWindow: vi.fn(),
 		getModel: vi.fn(),
 		getVariant: vi.fn(),
+		getContextWindow: vi.fn(),
 		setDefaultModel: vi.fn(),
 		defaultModel: undefined,
 		defaultVariant: "",
+		defaultContextWindow: "",
 		...overrides,
 	} as unknown as SessionOverrides;
 }
@@ -654,7 +658,7 @@ describe("handleGetModels", () => {
 	});
 
 	it.effect(
-		"includes variants in claude provider entries in model_list",
+		"includes variants and contextWindowOptions in claude provider entries in model_list",
 		() => {
 			const ws = mockWsHandler();
 			const engine = {
@@ -665,6 +669,10 @@ describe("handleGetModels", () => {
 							name: "Claude Opus 4.7",
 							providerId: "claude",
 							variants: { low: {}, medium: {}, high: {}, max: {} },
+							contextWindowOptions: [
+								{ value: "200k", label: "200K", isDefault: true },
+								{ value: "1m", label: "1M (beta)" },
+							],
 						},
 					],
 				})),
@@ -707,12 +715,74 @@ describe("handleGetModels", () => {
 											name: "Claude Opus 4.7",
 											provider: "claude",
 											variants: ["low", "medium", "high", "max"],
+											contextWindowOptions: [
+												{ value: "200k", label: "200K", isDefault: true },
+												{ value: "1m", label: "1M (beta)" },
+											],
 										},
 									],
 								},
 							],
 						}),
 					);
+				}),
+			);
+		},
+	);
+	it.effect(
+		"sends context_window_info for active Claude model after get_models",
+		() => {
+			const contextWindowOptions = [
+				{ value: "200k", label: "200K", isDefault: true },
+				{ value: "1m", label: "1M (beta)" },
+			];
+			const ws = mockWsHandler();
+			const engine = {
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-opus-4-7",
+							name: "Claude Opus 4.7",
+							providerId: "claude",
+							contextWindowOptions,
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+			const client = {
+				provider: {
+					list: vi.fn(async () => ({
+						connected: [],
+						providers: [],
+					})),
+				},
+				session: { get: vi.fn() },
+			} as unknown as OpenCodeAPI;
+			const overrides = mockOverrides({
+				defaultModel: {
+					providerID: "claude",
+					modelID: "claude-opus-4-7",
+				},
+				defaultContextWindow: "1m",
+			});
+			const log = mockLogger();
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return handleGetModels("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "context_window_info",
+						contextWindow: "1m",
+						options: contextWindowOptions,
+					});
 				}),
 			);
 		},
@@ -871,6 +941,122 @@ describe("handleSwitchVariant", () => {
 						type: "variant_info",
 						variant: "v2",
 						variants: ["v2", "v3"],
+					});
+				}),
+			);
+		},
+	);
+});
+
+describe("handleSwitchContextWindow", () => {
+	it.effect(
+		"persists supported Claude context window and echoes available options",
+		() => {
+			const contextWindowOptions = [
+				{ value: "200k", label: "200k", isDefault: true },
+				{ value: "1m", label: "1M" },
+			];
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-42"),
+			});
+			const overrides = mockOverrides({
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				})),
+				getContextWindow: vi.fn(() => ""),
+			});
+			const engine = {
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							providerId: "claude",
+							contextWindowOptions,
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+			const client = { provider: { list: vi.fn() } } as unknown as OpenCodeAPI;
+			const log = mockLogger();
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return handleSwitchContextWindow("client-1", {
+				contextWindow: "1m",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(overrides.setContextWindow).toHaveBeenCalledWith(
+						"session-42",
+						"1m",
+					);
+					expect(engine.dispatch).toHaveBeenCalledWith({
+						type: "discover",
+						providerId: "claude",
+					});
+					expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+						type: "context_window_info",
+						contextWindow: "1m",
+						options: contextWindowOptions,
+					});
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"ignores unsupported context window and resends current state",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-42"),
+			});
+			const overrides = mockOverrides({
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-haiku-4-7",
+				})),
+				getContextWindow: vi.fn(() => ""),
+			});
+			const engine = {
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-haiku-4-7",
+							name: "Claude Haiku 4.7",
+							providerId: "claude",
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+			const client = { provider: { list: vi.fn() } } as unknown as OpenCodeAPI;
+			const log = mockLogger();
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return handleSwitchContextWindow("client-1", {
+				contextWindow: "1m",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(overrides.setContextWindow).not.toHaveBeenCalled();
+					expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+						type: "context_window_info",
+						contextWindow: "",
+						options: [],
 					});
 				}),
 			);
@@ -1766,6 +1952,67 @@ describe("handleMessage", () => {
 			Effect.tap(() => {
 				expect(ws.sendTo).not.toHaveBeenCalled();
 				expect(ws.sendToSession).not.toHaveBeenCalled();
+			}),
+		);
+	});
+
+	it.effect("passes contextWindow override into engine send_turn input", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+			getClientsForSession: vi.fn(() => ["client-1"]),
+		});
+		const log = mockLogger();
+		const overrides = mockOverrides({
+			getAgent: vi.fn(() => undefined),
+			getModel: vi.fn(() => ({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-5",
+			})),
+			getVariant: vi.fn(() => ""),
+			getContextWindow: vi.fn(() => "1m"),
+			isModelUserSelected: vi.fn(() => true),
+			startProcessingTimeout: vi.fn(),
+		});
+		const sessionMgr = mockSessionManager();
+		const config = mockConfig();
+		const permissionBridge = mockPermissionBridge();
+		const questionBridge = mockQuestionBridge();
+		const client = {} as unknown as OpenCodeAPI;
+		const engine = {
+			getProviderForSession: vi.fn(() => "claude"),
+			dispatch: vi.fn(async () => ({
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			})),
+		} as unknown as OrchestrationEngine;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(QuestionBridgeTag, questionBridge),
+			Layer.succeed(OrchestrationEngineTag, engine),
+		);
+
+		return handleMessage("client-1", { text: "hello world" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(engine.dispatch).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "claude",
+						input: expect.objectContaining({
+							contextWindow: "1m",
+						}),
+					}),
+				);
 			}),
 		);
 	});
