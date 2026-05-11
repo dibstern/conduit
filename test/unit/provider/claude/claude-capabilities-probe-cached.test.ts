@@ -22,6 +22,8 @@ describe("getCachedClaudeCapabilities", () => {
 			models: [
 				{ id: "claude-opus-4-7", name: "Opus 4.7", providerId: "claude" },
 			],
+			commands: [],
+			agents: [],
 		});
 		__setProbeOverrideForTesting(probe);
 
@@ -43,7 +45,7 @@ describe("getCachedClaudeCapabilities", () => {
 		const probe = vi
 			.fn()
 			.mockRejectedValueOnce(new Error("binary missing"))
-			.mockResolvedValueOnce({ models: [] });
+			.mockResolvedValueOnce({ models: [], commands: [], agents: [] });
 		__setProbeOverrideForTesting(probe);
 
 		await expect(getCachedClaudeCapabilities()).rejects.toThrow(
@@ -55,10 +57,11 @@ describe("getCachedClaudeCapabilities", () => {
 	});
 
 	it("concurrent calls share one probe invocation", async () => {
-		let resolve: (value: { models: [] }) => void = () => {};
+		let resolve: (value: { models: []; commands: []; agents: [] }) => void =
+			() => {};
 		const probe = vi.fn().mockImplementation(
 			() =>
-				new Promise<{ models: [] }>((r) => {
+				new Promise<{ models: []; commands: []; agents: [] }>((r) => {
 					resolve = r;
 				}),
 		);
@@ -69,7 +72,7 @@ describe("getCachedClaudeCapabilities", () => {
 			getCachedClaudeCapabilities(),
 			getCachedClaudeCapabilities(),
 		];
-		resolve({ models: [] });
+		resolve({ models: [], commands: [], agents: [] });
 		const results = await Promise.all(calls);
 		expect(results).toHaveLength(3);
 		expect(probe).toHaveBeenCalledTimes(1);

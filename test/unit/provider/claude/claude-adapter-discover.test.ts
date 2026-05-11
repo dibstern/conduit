@@ -23,6 +23,8 @@ describe("ClaudeAdapter.discover()", () => {
 					limit: { context: 200_000, output: 64_000 },
 				},
 			],
+			commands: [],
+			agents: [],
 		}));
 		workspace = join(tmpdir(), `conduit-claude-test-${Date.now()}`);
 		mkdirSync(join(workspace, ".claude", "commands"), { recursive: true });
@@ -133,6 +135,8 @@ describe("ClaudeAdapter.discover()", () => {
 						limit: { context: 200_000, output: 32_000 },
 					},
 				],
+				commands: [],
+				agents: [],
 			}));
 
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
@@ -161,6 +165,8 @@ describe("ClaudeAdapter.discover()", () => {
 						providerId: "claude" as const,
 					},
 				],
+				commands: [],
+				agents: [],
 			});
 			__setProbeOverrideForTesting(probe);
 
@@ -169,6 +175,46 @@ describe("ClaudeAdapter.discover()", () => {
 			await a1.discover();
 			await a2.discover();
 			expect(probe).toHaveBeenCalledTimes(1);
+		});
+
+		it("returns SDK agents from Claude discover", async () => {
+			__setProbeOverrideForTesting(async () => ({
+				models: [],
+				commands: [],
+				agents: [
+					{ id: "Explore", name: "Explore", description: "Codebase explorer" },
+				],
+			}));
+
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const caps = await adapter.discover();
+			expect(caps.agents).toEqual([
+				{ id: "Explore", name: "Explore", description: "Codebase explorer" },
+			]);
+		});
+
+		it("unions SDK-sourced commands with filesystem commands, deduping by name", async () => {
+			__setProbeOverrideForTesting(async () => ({
+				models: [],
+				agents: [],
+				commands: [
+					{ name: "init", description: "SDK init", source: "claude-sdk" },
+					{
+						name: "new-command",
+						description: "from SDK",
+						source: "claude-sdk",
+					},
+				],
+			}));
+
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const caps = await adapter.discover();
+			const names = caps.commands.map((c) => c.name);
+			expect(names).toContain("new-command");
+			expect(names.filter((name) => name === "init")).toHaveLength(1);
+			expect(caps.commands.find((c) => c.name === "init")?.source).toBe(
+				"builtin",
+			);
 		});
 	});
 });
