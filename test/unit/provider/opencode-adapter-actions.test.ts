@@ -186,6 +186,8 @@ describe("OpenCodeAdapter action methods", () => {
 					push: vi.fn(),
 					requestPermission: vi.fn(),
 					requestQuestion: vi.fn(),
+					resolvePermission: vi.fn(),
+					resolveQuestion: vi.fn(),
 				},
 				abortSignal: new AbortController().signal,
 			});

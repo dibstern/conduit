@@ -88,12 +88,7 @@ export interface RelayEventSinkDeps {
 	};
 }
 
-export interface RelayEventSink extends EventSink {
-	/** Resolve a pending permission request (from UI). */
-	resolvePermission(requestId: string, response: PermissionResponse): void;
-	/** Resolve a pending question request (from UI). */
-	resolveQuestion(requestId: string, answers: Record<string, unknown>): void;
-}
+export type RelayEventSink = EventSink;
 
 // ─── Factory ────────────────────────────────────────────────────────────────
 
@@ -282,6 +277,16 @@ function translateCanonicalEvent(event: CanonicalEvent): TranslationResult {
 		}
 
 		case "tool.running":
+			if (event.data.metadata) {
+				return emit({
+					type: "tool_executing",
+					id: event.data.partId,
+					name: "Task",
+					input: undefined,
+					metadata: event.data.metadata,
+					messageId: event.data.messageId,
+				});
+			}
 			return silent(
 				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
 			);

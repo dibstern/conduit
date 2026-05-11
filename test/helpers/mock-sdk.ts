@@ -57,6 +57,8 @@ export function createMockEventSink(): EventSink {
 		push: vi.fn(async () => {}),
 		requestPermission: vi.fn(async () => ({ decision: "once" as const })),
 		requestQuestion: vi.fn(async () => ({})),
+		resolvePermission: vi.fn(),
+		resolveQuestion: vi.fn(),
 	};
 }
 

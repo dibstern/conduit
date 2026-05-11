@@ -8,6 +8,7 @@ import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapte
 import type {
 	Query,
 	SDKMessage,
+	SDKUserMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import {
 	createMockEventSink,
@@ -16,6 +17,18 @@ import {
 	makeErrorResult,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
+
+async function readFirstPromptText(callArgs: unknown): Promise<string> {
+	const prompt = (callArgs as { prompt: AsyncIterable<SDKUserMessage> }).prompt;
+	const result = await prompt[Symbol.asyncIterator]().next();
+	const message = result.value as {
+		message?: { content?: Array<{ type?: string; text?: string }> };
+	};
+	const textPart = message.message?.content?.find(
+		(part) => part.type === "text",
+	);
+	return textPart?.text ?? "";
+}
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +80,67 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(result.tokens.input).toBe(100);
 		expect(result.tokens.output).toBe(50);
 		expect(result.durationMs).toBe(1500);
+	});
+
+	it("uses the current session event sink for Claude permission callbacks", async () => {
+		const firstQuery = createMockQuery([
+			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+				string,
+				unknown
+			>),
+		]);
+		const secondQuery = createMockQuery([
+			makeSuccessResult({ session_id: "sdk-session-2" } as Record<
+				string,
+				unknown
+			>),
+		]);
+		queryFactorySpy = vi
+			.fn()
+			.mockReturnValueOnce(firstQuery)
+			.mockReturnValueOnce(secondQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sink1 = createMockEventSink();
+		const sink2 = createMockEventSink();
+		await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-one",
+				turnId: "turn-1",
+				eventSink: sink1,
+			}),
+		);
+		await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-two",
+				turnId: "turn-2",
+				eventSink: sink2,
+			}),
+		);
+
+		const secondCall = queryFactorySpy.mock.calls[1]?.[0] as {
+			options: { canUseTool?: NonNullable<unknown> };
+		};
+		const canUseTool = secondCall.options.canUseTool as (
+			toolName: string,
+			toolInput: Record<string, unknown>,
+			options: { signal: AbortSignal; toolUseID: string },
+		) => Promise<unknown>;
+		await canUseTool(
+			"Bash",
+			{ command: "pwd" },
+			{
+				signal: new AbortController().signal,
+				toolUseID: "tool-session-two",
+			},
+		);
+
+		expect(sink1.requestPermission).not.toHaveBeenCalled();
+		expect(sink2.requestPermission).toHaveBeenCalledTimes(1);
 	});
 
 	// ── Test 2: Subsequent turn enqueues into existing session ────────────
@@ -161,6 +235,340 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 		expect(turn2Result.status).toBe("completed");
 		expect(turn2Result.cost).toBe(0.1);
+	});
+
+	it("restarts the SDK query when the Claude agent changes between turns", async () => {
+		const result1 = makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+			string,
+			unknown
+		>);
+		const resultFromOldQuery = makeSuccessResult({
+			session_id: "sdk-session-1",
+			total_cost_usd: 9.99,
+		} as Record<string, unknown>);
+		const resultFromNewQuery = makeSuccessResult({
+			session_id: "sdk-session-2",
+			total_cost_usd: 0.22,
+		} as Record<string, unknown>);
+
+		let releaseOldQuery: (() => void) | undefined;
+		const oldQueryReleased = new Promise<void>((resolve) => {
+			releaseOldQuery = resolve;
+		});
+		const oldGen = (async function* () {
+			yield result1 as unknown as SDKMessage;
+			await oldQueryReleased;
+			yield resultFromOldQuery as unknown as SDKMessage;
+		})();
+		const oldQuery = Object.assign(oldGen, {
+			interrupt: vi.fn(async () => {}),
+			close: vi.fn(() => releaseOldQuery?.()),
+			setModel: vi.fn(async () => {}),
+			setPermissionMode: vi.fn(async () => {}),
+			streamInput: vi.fn(async () => {}),
+			setMaxThinkingTokens: vi.fn(async () => {}),
+			applyFlagSettings: vi.fn(async () => {}),
+			initializationResult: vi.fn(async () => ({})),
+			supportedCommands: vi.fn(async () => []),
+			supportedModels: vi.fn(async () => []),
+			supportedAgents: vi.fn(async () => []),
+			mcpServerStatus: vi.fn(async () => []),
+			getContextUsage: vi.fn(async () => ({})),
+			reloadPlugins: vi.fn(async () => ({})),
+			accountInfo: vi.fn(async () => ({})),
+			rewindFiles: vi.fn(async () => ({ canRewind: false })),
+			seedReadState: vi.fn(async () => {}),
+			reconnectMcpServer: vi.fn(async () => {}),
+			toggleMcpServer: vi.fn(async () => {}),
+			setMcpServers: vi.fn(async () => ({})),
+			stopTask: vi.fn(async () => {}),
+			next: oldGen.next.bind(oldGen),
+			return: oldGen.return.bind(oldGen),
+			throw: oldGen.throw.bind(oldGen),
+			[Symbol.asyncIterator]: () => oldGen,
+		}) as unknown as Query;
+		const newQuery = createMockQuery([
+			resultFromNewQuery as unknown as SDKMessage,
+		]);
+		queryFactorySpy = vi
+			.fn()
+			.mockReturnValueOnce(oldQuery)
+			.mockReturnValueOnce(newQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		const sink = createMockEventSink();
+
+		const firstResult = await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-agent",
+				turnId: "turn-1",
+				agent: "Explore",
+				eventSink: sink,
+			}),
+		);
+		expect(firstResult.status).toBe("completed");
+
+		const secondPromise = adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-agent",
+				turnId: "turn-2",
+				agent: "Plan",
+				eventSink: sink,
+			}),
+		);
+
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(queryFactorySpy).toHaveBeenCalledTimes(2);
+			expect(oldQuery.close).toHaveBeenCalledTimes(1);
+			expect(
+				(queryFactorySpy.mock.calls[0]?.[0] as { options: { agent?: string } })
+					.options.agent,
+			).toBe("Explore");
+			expect(
+				(queryFactorySpy.mock.calls[1]?.[0] as { options: { agent?: string } })
+					.options.agent,
+			).toBe("Plan");
+
+			const secondResult = await secondPromise;
+			expect(secondResult.cost).toBe(0.22);
+		} finally {
+			releaseOldQuery?.();
+			await Promise.race([
+				secondPromise.catch(() => undefined),
+				new Promise((resolve) => setTimeout(resolve, 25)),
+			]);
+			await adapter.shutdown();
+		}
+	});
+
+	it("injects prior conversation transcript into the restarted agent query", async () => {
+		const oldQuery = createMockQuery([
+			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+				string,
+				unknown
+			>) as unknown as SDKMessage,
+		]);
+		const newQuery = createMockQuery([
+			makeSuccessResult({
+				session_id: "sdk-session-2",
+				total_cost_usd: 0.22,
+			} as Record<string, unknown>) as unknown as SDKMessage,
+		]);
+		queryFactorySpy = vi
+			.fn()
+			.mockReturnValueOnce(oldQuery)
+			.mockReturnValueOnce(newQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		const sink = createMockEventSink();
+
+		await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-agent-history",
+				turnId: "turn-1",
+				agent: "Explore",
+				eventSink: sink,
+			}),
+		);
+
+		const secondResult = await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-agent-history",
+				turnId: "turn-2",
+				prompt: "Apply the same fix to the other file.",
+				agent: "Plan",
+				eventSink: sink,
+				history: [
+					{
+						role: "user",
+						content: "Find the config bug.",
+						parts: [{ type: "text", text: "Find the config bug." }],
+					},
+					{
+						role: "assistant",
+						content: "I will inspect the file.",
+						parts: [
+							{ type: "text", text: "I will inspect the file." },
+							{
+								type: "tool_use",
+								id: "toolu_1",
+								name: "Read",
+								input: { file_path: "/tmp/config.ts" },
+							},
+							{
+								type: "tool_result",
+								tool_use_id: "toolu_1",
+								content: "export const broken = true;",
+							},
+						],
+					},
+				],
+			}),
+		);
+
+		expect(secondResult.status).toBe("completed");
+		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
+		const promptText = await readFirstPromptText(
+			queryFactorySpy.mock.calls[1]?.[0],
+		);
+
+		expect(promptText.startsWith("<prior-conversation-transcript>")).toBe(true);
+		expect(promptText).toContain(
+			"The following is the conversation history before you took over this session.",
+		);
+		expect(promptText).toContain("[user]\nFind the config bug.");
+		expect(promptText).toContain("[assistant]\nI will inspect the file.");
+		expect(promptText).toContain("[tool-call:Read id=toolu_1]");
+		expect(promptText).toContain('{"file_path":"/tmp/config.ts"}');
+		expect(promptText).toContain(
+			"[tool-result id=toolu_1]\nexport const broken = true;",
+		);
+		expect(promptText.indexOf("[user]")).toBeLessThan(
+			promptText.indexOf("[assistant]"),
+		);
+		expect(promptText.indexOf("[tool-call:Read id=toolu_1]")).toBeLessThan(
+			promptText.indexOf("[tool-result id=toolu_1]"),
+		);
+		expect(
+			promptText.endsWith("\n\nApply the same fix to the other file."),
+		).toBe(true);
+
+		await adapter.shutdown();
+	});
+
+	it("does not rewrite the restarted agent query when history is empty", async () => {
+		const oldQuery = createMockQuery([
+			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+				string,
+				unknown
+			>) as unknown as SDKMessage,
+		]);
+		const newQuery = createMockQuery([
+			makeSuccessResult({ session_id: "sdk-session-2" } as Record<
+				string,
+				unknown
+			>) as unknown as SDKMessage,
+		]);
+		queryFactorySpy = vi
+			.fn()
+			.mockReturnValueOnce(oldQuery)
+			.mockReturnValueOnce(newQuery);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		const sink = createMockEventSink();
+
+		await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-agent-no-history",
+				turnId: "turn-1",
+				agent: "Explore",
+				eventSink: sink,
+			}),
+		);
+		await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-agent-no-history",
+				turnId: "turn-2",
+				prompt: "Fresh agent prompt.",
+				agent: "Plan",
+				eventSink: sink,
+				history: [],
+			}),
+		);
+
+		const promptText = await readFirstPromptText(
+			queryFactorySpy.mock.calls[1]?.[0],
+		);
+		expect(promptText).toBe("Fresh agent prompt.");
+
+		await adapter.shutdown();
+	});
+
+	it("rejects a Claude agent change while the current turn is active", async () => {
+		const result = makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+			string,
+			unknown
+		>);
+		let releaseResult: (() => void) | undefined;
+		const resultReady = new Promise<void>((resolve) => {
+			releaseResult = resolve;
+		});
+		const gen = (async function* () {
+			await resultReady;
+			yield result as unknown as SDKMessage;
+		})();
+		const query = Object.assign(gen, {
+			interrupt: vi.fn(async () => {}),
+			close: vi.fn(),
+			setModel: vi.fn(async () => {}),
+			setPermissionMode: vi.fn(async () => {}),
+			streamInput: vi.fn(async () => {}),
+			setMaxThinkingTokens: vi.fn(async () => {}),
+			applyFlagSettings: vi.fn(async () => {}),
+			initializationResult: vi.fn(async () => ({})),
+			supportedCommands: vi.fn(async () => []),
+			supportedModels: vi.fn(async () => []),
+			supportedAgents: vi.fn(async () => []),
+			mcpServerStatus: vi.fn(async () => []),
+			getContextUsage: vi.fn(async () => ({})),
+			reloadPlugins: vi.fn(async () => ({})),
+			accountInfo: vi.fn(async () => ({})),
+			rewindFiles: vi.fn(async () => ({ canRewind: false })),
+			seedReadState: vi.fn(async () => {}),
+			reconnectMcpServer: vi.fn(async () => {}),
+			toggleMcpServer: vi.fn(async () => {}),
+			setMcpServers: vi.fn(async () => ({})),
+			stopTask: vi.fn(async () => {}),
+			next: gen.next.bind(gen),
+			return: gen.return.bind(gen),
+			throw: gen.throw.bind(gen),
+			[Symbol.asyncIterator]: () => gen,
+		}) as unknown as Query;
+		queryFactorySpy = vi.fn(() => query);
+
+		const adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		const sink = createMockEventSink();
+		const firstPromise = adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-active-agent",
+				turnId: "turn-1",
+				agent: "Explore",
+				eventSink: sink,
+			}),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		const secondResult = await adapter.sendTurn(
+			makeBaseSendTurnInput({
+				sessionId: "session-active-agent",
+				turnId: "turn-2",
+				agent: "Plan",
+				eventSink: sink,
+			}),
+		);
+
+		expect(secondResult.status).toBe("error");
+		expect(secondResult.error?.message).toMatch(
+			/Cannot switch Claude agent while a turn is active/,
+		);
+		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
+
+		releaseResult?.();
+		await firstPromise;
+		await adapter.shutdown();
 	});
 
 	// ── Test 3: Resume uses SDK resume option ─────────────────────────────

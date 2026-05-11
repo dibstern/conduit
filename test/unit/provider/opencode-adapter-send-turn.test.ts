@@ -52,6 +52,8 @@ function makeStubEventSink(): EventSink & {
 			decision: "once" as const,
 		})),
 		requestQuestion: vi.fn(async () => ({})),
+		resolvePermission: vi.fn(),
+		resolveQuestion: vi.fn(),
 	};
 }
 

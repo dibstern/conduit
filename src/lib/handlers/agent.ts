@@ -59,32 +59,24 @@ export function filterAgents(
 		}));
 }
 
-export function claudeAgentMatchesModel(
-	agent: ProviderAgentInfo,
-	modelId: string | undefined,
-): boolean {
-	if (!agent.model) return true;
-	if (!modelId) return true;
-	const normalizedAgentModel = agent.model.toLowerCase();
-	const normalizedModelId = modelId.toLowerCase();
-	return (
-		normalizedModelId === normalizedAgentModel ||
-		normalizedModelId.includes(normalizedAgentModel)
-	);
-}
-
 export function toWireAgents(
 	agents: readonly ProviderAgentInfo[],
-): Array<{ id: string; name: string; description?: string }> {
+): Array<{ id: string; name: string; description?: string; model?: string }> {
 	return agents.map((agent) => ({
 		id: agent.id,
 		name: agent.name,
 		...(agent.description ? { description: agent.description } : {}),
+		...(agent.model ? { model: agent.model } : {}),
 	}));
 }
 
 export function makeAgentListMessage(
-	agents: Array<{ id: string; name: string; description?: string }>,
+	agents: Array<{
+		id: string;
+		name: string;
+		description?: string;
+		model?: string;
+	}>,
 	sessionId: string | undefined,
 	overrides: SessionOverrides | undefined,
 ): Extract<RelayMessage, { type: "agent_list" }> {
@@ -141,15 +133,7 @@ export const handleGetAgents = (
 				);
 				return;
 			}
-			const activeModelId =
-				activeSessionId && overrides
-					? overrides.getModel(activeSessionId)?.modelID
-					: undefined;
-			const agents = toWireAgents(
-				(result.right.agents ?? []).filter((agent) =>
-					claudeAgentMatchesModel(agent, activeModelId),
-				),
-			);
+			const agents = toWireAgents(result.right.agents ?? []);
 			wsHandler.sendTo(
 				clientId,
 				makeAgentListMessage(agents, activeSessionId, overrides),

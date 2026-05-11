@@ -60,7 +60,8 @@ export function getProviderGroups(): ProviderGroup[] {
 
 /** Format agent label for display. */
 export function formatAgentLabel(agent: AgentInfo): string {
-	return agent.name || agent.id;
+	const label = agent.name || agent.id;
+	return agent.model ? `${label} (${agent.model})` : label;
 }
 
 /** Build tooltip text for an agent. */

@@ -24,6 +24,8 @@ function makeStubSink(): EventSink & { events: CanonicalEvent[] } {
 		}),
 		requestPermission: vi.fn(),
 		requestQuestion: vi.fn(),
+		resolvePermission: vi.fn(),
+		resolveQuestion: vi.fn(),
 	};
 }
 
@@ -140,11 +142,12 @@ describe("ClaudeEventTranslator", () => {
 
 	// ─── 3. system (subtype task_progress) ───────────────────────────────
 
-	it("translates system/task_progress to turn.completed with usage", async () => {
+	it("does not translate system/task_progress to main turn completion", async () => {
 		await translator.translate(ctx, {
 			type: "system",
 			subtype: "task_progress",
 			task_id: "task-1",
+			tool_use_id: "tool-task-1",
 			description: "Working...",
 			usage: {
 				total_tokens: 500,
@@ -159,12 +162,46 @@ describe("ClaudeEventTranslator", () => {
 		} as unknown as SDKMessage);
 
 		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
-		expect(turnCompleted).toBeDefined();
-		const data = dataOf(turnCompleted);
-		const tokens = data["tokens"] as Record<string, unknown>;
-		expect(tokens["input"]).toBe(300);
-		expect(tokens["output"]).toBe(200);
-		expect(tokens["cacheRead"]).toBe(50);
+		expect(turnCompleted).toBeUndefined();
+
+		const running = sink.events.find((e) => e.type === "tool.running");
+		expect(running).toBeDefined();
+		const data = dataOf(running);
+		expect(data["partId"]).toBe("tool-task-1");
+		expect(data["metadata"]).toMatchObject({
+			providerTaskId: "task-1",
+			status: "running",
+			description: "Working...",
+			totalTokens: 500,
+			toolUses: 3,
+			durationMs: 2000,
+		});
+	});
+
+	it("maps system/task_started to child task metadata", async () => {
+		await translator.translate(ctx, {
+			type: "system",
+			subtype: "task_started",
+			task_id: "task-2",
+			tool_use_id: "tool-task-2",
+			description: "Explore code",
+			task_type: "Explore",
+			prompt: "Find the route",
+			uuid: "00000000-0000-0000-0000-000000000026",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const running = sink.events.find((e) => e.type === "tool.running");
+		expect(running).toBeDefined();
+		const data = dataOf(running);
+		expect(data["partId"]).toBe("tool-task-2");
+		expect(data["metadata"]).toMatchObject({
+			providerTaskId: "task-2",
+			status: "running",
+			description: "Explore code",
+			subagentType: "Explore",
+			prompt: "Find the route",
+		});
 	});
 
 	// ─── 3b. system (subtype api_retry) ──────────────────────────────────
@@ -936,18 +973,29 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	it("silently ignores tool_progress messages", async () => {
+	it("maps tool_progress messages to child task metadata", async () => {
 		await translator.translate(ctx, {
 			type: "tool_progress",
 			tool_use_id: "tool-1",
 			tool_name: "Bash",
-			parent_tool_use_id: null,
+			parent_tool_use_id: "tool-task-1",
 			elapsed_time_seconds: 5,
+			task_id: "task-1",
 			uuid: "00000000-0000-0000-0000-000000000023",
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
-		expect(sink.events).toHaveLength(0);
+		const running = sink.events.find((e) => e.type === "tool.running");
+		expect(running).toBeDefined();
+		const data = dataOf(running);
+		expect(data["partId"]).toBe("tool-task-1");
+		expect(data["metadata"]).toMatchObject({
+			providerTaskId: "task-1",
+			parentToolUseId: "tool-task-1",
+			activeToolUseId: "tool-1",
+			activeToolName: "Bash",
+			elapsedTimeSeconds: 5,
+		});
 	});
 
 	it("silently ignores system/task_notification messages", async () => {
@@ -966,7 +1014,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	it("silently ignores system/task_started messages", async () => {
+	it("ignores system/task_started messages without a tool_use_id", async () => {
 		await translator.translate(ctx, {
 			type: "system",
 			subtype: "task_started",

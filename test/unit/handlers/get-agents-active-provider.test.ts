@@ -76,7 +76,12 @@ describe("handleGetAgents active provider", () => {
 				commands: [],
 				agents: [
 					{ id: "Explore", name: "Explore", description: "Explorer" },
-					{ id: "Review", name: "Review", description: "Reviewer" },
+					{
+						id: "Review",
+						name: "Review",
+						description: "Reviewer",
+						model: "opus",
+					},
 				],
 			})),
 		} as unknown as OrchestrationEngine;
@@ -96,7 +101,12 @@ describe("handleGetAgents active provider", () => {
 					type: "agent_list",
 					agents: [
 						{ id: "Explore", name: "Explore", description: "Explorer" },
-						{ id: "Review", name: "Review", description: "Reviewer" },
+						{
+							id: "Review",
+							name: "Review",
+							description: "Reviewer",
+							model: "opus",
+						},
 					],
 					activeAgentId: "Explore",
 				});
@@ -104,59 +114,65 @@ describe("handleGetAgents active provider", () => {
 		);
 	});
 
-	it.effect("filters Claude agents by active Claude model family", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const client = {
-			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
-		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides({
-			getModel: vi.fn(() => ({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-7",
-			})),
-		});
-		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
-			dispatch: vi.fn(async () => ({
-				models: [],
-				supportsTools: true,
-				supportsThinking: true,
-				supportsPermissions: true,
-				supportsQuestions: true,
-				supportsAttachments: true,
-				supportsFork: false,
-				supportsRevert: false,
-				commands: [],
-				agents: [
-					{ id: "Any", name: "Any" },
-					{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-					{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
-				],
-			})),
-		} as unknown as OrchestrationEngine;
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(SessionOverridesTag, overrides),
-		);
-
-		return handleGetAgents("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "agent_list",
+	it.effect(
+		"returns all Claude agents regardless of active Claude model",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const client = {
+				app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
+			} as unknown as OpenCodeAPI;
+			const overrides = mockOverrides({
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				})),
+			});
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => ({
+					models: [],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: false,
+					supportsRevert: false,
+					commands: [],
 					agents: [
 						{ id: "Any", name: "Any" },
-						{ id: "SonnetOnly", name: "SonnetOnly" },
+						{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+						{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
+						{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
 					],
-				});
-			}),
-		);
-	});
+				})),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(SessionOverridesTag, overrides),
+			);
+
+			return handleGetAgents("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "agent_list",
+						agents: [
+							{ id: "Any", name: "Any" },
+							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+							{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
+							{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
+						],
+					});
+				}),
+			);
+		},
+	);
 
 	it.effect(
 		"returns OpenCode agents for an OpenCode-bound active session",

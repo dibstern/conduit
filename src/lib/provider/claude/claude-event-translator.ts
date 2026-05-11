@@ -15,7 +15,7 @@
  *   tool.completed (block stop, tool result)
  *   turn.error (SDK errors)
  *   session.status (system init, status updates)
- *   turn.completed (result, task_progress)
+ *   turn.completed (result)
  *
  * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
  */
@@ -173,9 +173,11 @@ export class ClaudeEventTranslator {
 				return this.translateUserToolResults(ctx, message);
 			case "result":
 				return this.translateResult(ctx, message);
+			case "tool_progress":
+				return this.translateToolProgress(ctx, message);
 			default:
 				// Explicitly ignore known SDK message types we don't process
-				// (auth_status, tool_progress, rate_limit_event, prompt_suggestion, etc.)
+				// (auth_status, rate_limit_event, prompt_suggestion, etc.)
 				return;
 		}
 	}
@@ -259,29 +261,17 @@ export class ClaudeEventTranslator {
 			// include input_tokens/output_tokens/cache_read_input_tokens.
 			// Cast to Record for those extended fields not in the SDK type.
 			case "task_progress": {
-				const usage = message.usage as Record<string, unknown>;
-				const inputTokens =
-					typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : 0;
-				const outputTokens =
-					typeof usage["output_tokens"] === "number"
-						? usage["output_tokens"]
-						: 0;
-				const cacheRead =
-					typeof usage["cache_read_input_tokens"] === "number"
-						? usage["cache_read_input_tokens"]
-						: undefined;
-				await this.push(
-					makeCanonicalEvent("turn.completed", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId || "",
-						tokens: {
-							input: inputTokens,
-							output: outputTokens,
-							...(cacheRead !== undefined ? { cacheRead } : {}),
-						},
-						cost: 0,
-						duration: 0,
-					}),
-				);
+				await this.translateTaskProgress(ctx, message);
+				return;
+			}
+
+			case "task_started": {
+				await this.translateTaskStarted(ctx, message);
+				return;
+			}
+
+			case "task_notification": {
+				await this.translateTaskNotification(ctx, message);
 				return;
 			}
 
@@ -298,10 +288,101 @@ export class ClaudeEventTranslator {
 			}
 
 			default:
-				// Ignore other system subtypes (task_notification, task_started,
-				// compact_boundary, hook_*, etc.)
+				// Ignore other system subtypes (compact_boundary, hook_*, etc.)
 				return;
 		}
+	}
+
+	private async translateTaskStarted(
+		ctx: ClaudeSessionContext,
+		message: SDKSystemLike & { subtype: "task_started" },
+	): Promise<void> {
+		if (!message.tool_use_id) return;
+		await this.pushTaskMetadata(ctx, message.tool_use_id, {
+			providerTaskId: message.task_id,
+			status: "running",
+			description: message.description,
+			...(message.task_type ? { subagentType: message.task_type } : {}),
+			...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
+			...(message.prompt ? { prompt: message.prompt } : {}),
+			...(message.skip_transcript !== undefined
+				? { skipTranscript: message.skip_transcript }
+				: {}),
+		});
+	}
+
+	private async translateTaskProgress(
+		ctx: ClaudeSessionContext,
+		message: SDKSystemLike & { subtype: "task_progress" },
+	): Promise<void> {
+		if (!message.tool_use_id) return;
+		const usage = message.usage as Record<string, unknown>;
+		await this.pushTaskMetadata(ctx, message.tool_use_id, {
+			providerTaskId: message.task_id,
+			status: "running",
+			description: message.description,
+			totalTokens: usage["total_tokens"] ?? 0,
+			toolUses: usage["tool_uses"] ?? 0,
+			durationMs: usage["duration_ms"] ?? 0,
+			...(message.last_tool_name
+				? { lastToolName: message.last_tool_name }
+				: {}),
+			...(message.summary ? { summary: message.summary } : {}),
+		});
+	}
+
+	private async translateTaskNotification(
+		ctx: ClaudeSessionContext,
+		message: SDKSystemLike & { subtype: "task_notification" },
+	): Promise<void> {
+		if (!message.tool_use_id) return;
+		const usage = message.usage as Record<string, unknown> | undefined;
+		await this.pushTaskMetadata(ctx, message.tool_use_id, {
+			providerTaskId: message.task_id,
+			status: message.status,
+			outputFile: message.output_file,
+			summary: message.summary,
+			...(usage
+				? {
+						totalTokens: usage["total_tokens"] ?? 0,
+						toolUses: usage["tool_uses"] ?? 0,
+						durationMs: usage["duration_ms"] ?? 0,
+					}
+				: {}),
+			...(message.skip_transcript !== undefined
+				? { skipTranscript: message.skip_transcript }
+				: {}),
+		});
+	}
+
+	private async translateToolProgress(
+		ctx: ClaudeSessionContext,
+		message: SDKMessage & { type: "tool_progress" },
+	): Promise<void> {
+		const parentToolUseId = message.parent_tool_use_id;
+		if (!parentToolUseId) return;
+		await this.pushTaskMetadata(ctx, parentToolUseId, {
+			...(message.task_id ? { providerTaskId: message.task_id } : {}),
+			parentToolUseId,
+			activeToolUseId: message.tool_use_id,
+			activeToolName: message.tool_name,
+			elapsedTimeSeconds: message.elapsed_time_seconds,
+		});
+	}
+
+	private async pushTaskMetadata(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+		metadata: Record<string, unknown>,
+	): Promise<void> {
+		await this.push(
+			makeCanonicalEvent("tool.running", ctx.sessionId, {
+				messageId:
+					this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+				partId: parentToolUseId,
+				metadata,
+			}),
+		);
 	}
 
 	// ─── Stream Events ───────────────────────────────────────────────────

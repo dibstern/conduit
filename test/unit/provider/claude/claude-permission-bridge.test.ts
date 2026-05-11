@@ -2,13 +2,39 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudePermissionBridge } from "../../../../src/lib/provider/claude/claude-permission-bridge.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
-import type { EventSink } from "../../../../src/lib/provider/types.js";
+import type {
+	EventSink,
+	PermissionResponse,
+} from "../../../../src/lib/provider/types.js";
 
 function makeSink(): EventSink {
 	return {
 		push: vi.fn(async () => {}),
 		requestPermission: vi.fn(async () => ({ decision: "once" as const })),
 		requestQuestion: vi.fn(),
+		resolvePermission: vi.fn(),
+		resolveQuestion: vi.fn(),
+	};
+}
+
+function makeInteractiveSink(): EventSink & {
+	resolvePermission(requestId: string, response: PermissionResponse): void;
+} {
+	const pending = new Map<string, (response: PermissionResponse) => void>();
+	return {
+		push: vi.fn(async () => {}),
+		requestPermission: vi.fn(
+			async (request) =>
+				new Promise<PermissionResponse>((resolve) => {
+					pending.set(request.requestId, resolve);
+				}),
+		),
+		requestQuestion: vi.fn(),
+		resolvePermission: vi.fn((requestId, response) => {
+			pending.get(requestId)?.(response);
+			pending.delete(requestId);
+		}),
+		resolveQuestion: vi.fn(),
 	};
 }
 
@@ -171,14 +197,9 @@ describe("ClaudePermissionBridge", () => {
 	});
 
 	it("resolvePermission resolves the pending approval's deferred", async () => {
-		// Use a sink that blocks forever (the bridge will resolve via resolvePermission)
-		let resolveSink: (v: unknown) => void = () => {};
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(
-			() =>
-				new Promise((r) => {
-					resolveSink = r;
-				}),
-		);
+		sink = makeInteractiveSink();
+		ctx.eventSink = sink;
+		bridge = new ClaudePermissionBridge({ sink });
 
 		const ac = new AbortController();
 		const callbackPromise = bridge.canUseTool(
@@ -197,11 +218,17 @@ describe("ClaudePermissionBridge", () => {
 
 		// Resolve via the bridge's resolvePermission (which resolves the deferred)
 		await bridge.resolvePermission(ctx, pending?.requestId ?? "", "once");
-		// Also resolve the sink promise so the bridge can complete
-		resolveSink({ decision: "once" });
 
-		const result = await callbackPromise;
-		expect(result.behavior).toBe("allow");
+		const result = await Promise.race([
+			callbackPromise,
+			new Promise<"still-pending">((resolve) =>
+				setTimeout(() => resolve("still-pending"), 25),
+			),
+		]);
+		ac.abort();
+		await callbackPromise.catch(() => {});
+		expect(result).not.toBe("still-pending");
+		expect(result).toMatchObject({ behavior: "allow" });
 	});
 
 	it("resolvePermission is a no-op for unknown requestId", async () => {

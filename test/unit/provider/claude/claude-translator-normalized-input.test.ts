@@ -47,6 +47,8 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 				},
 				requestPermission: vi.fn(),
 				requestQuestion: vi.fn(),
+				resolvePermission: vi.fn(),
+				resolveQuestion: vi.fn(),
 			},
 		});
 

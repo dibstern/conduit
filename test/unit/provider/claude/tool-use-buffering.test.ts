@@ -46,6 +46,8 @@ function makeTranslator() {
 			},
 			requestPermission: vi.fn(),
 			requestQuestion: vi.fn(),
+			resolvePermission: vi.fn(),
+			resolveQuestion: vi.fn(),
 		},
 	});
 	return { translator, events };

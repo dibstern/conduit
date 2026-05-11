@@ -9,11 +9,7 @@
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
-import {
-	claudeAgentMatchesModel,
-	makeAgentListMessage,
-	toWireAgents,
-} from "../handlers/agent.js";
+import { makeAgentListMessage, toWireAgents } from "../handlers/agent.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
@@ -343,14 +339,7 @@ export async function handleClientConnected(
 				type: "discover",
 				providerId: "claude",
 			});
-			const activeModelId = activeId
-				? overrides.getModel(activeId)?.modelID
-				: undefined;
-			const agents = toWireAgents(
-				(claudeCaps.agents ?? []).filter((agent) =>
-					claudeAgentMatchesModel(agent, activeModelId),
-				),
-			);
+			const agents = toWireAgents(claudeCaps.agents ?? []);
 			wsHandler.sendTo(
 				clientId,
 				makeAgentListMessage(agents, activeId, overrides),

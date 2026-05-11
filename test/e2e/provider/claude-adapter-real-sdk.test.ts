@@ -41,6 +41,8 @@ function createCollectingEventSink(): EventSink & {
 		): Promise<Record<string, unknown>> {
 			return {};
 		},
+		resolvePermission() {},
+		resolveQuestion() {},
 	};
 }
 

@@ -134,6 +134,7 @@ export interface ClaudeSessionContext {
 	currentTurnId: string | undefined;
 	currentModel: string | undefined;
 	currentApiModelId?: string;
+	currentAgent?: string;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;
 	turnCount: number;

@@ -63,6 +63,11 @@ describe("formatAgentLabel", () => {
 		const agent: AgentInfo = { id: "a1", name: "" };
 		expect(formatAgentLabel(agent)).toBe("a1");
 	});
+
+	it("includes model when an agent declares one", () => {
+		const agent: AgentInfo = { id: "Explore", name: "Explore", model: "haiku" };
+		expect(formatAgentLabel(agent)).toBe("Explore (haiku)");
+	});
 });
 
 // ─── Pure helper: formatModelName ───────────────────────────────────────────

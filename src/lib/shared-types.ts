@@ -95,6 +95,7 @@ export interface AgentInfo {
 	id: string;
 	name: string;
 	description?: string;
+	model?: string;
 }
 
 export interface ProviderInfo {
@@ -417,6 +418,7 @@ const AgentInfoSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
+	model: Schema.optional(Schema.String),
 });
 
 const CommandInfoSchema = Schema.Struct({

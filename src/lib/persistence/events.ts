@@ -103,6 +103,7 @@ export interface ToolStartedPayload {
 export interface ToolRunningPayload {
 	readonly messageId: string;
 	readonly partId: string;
+	readonly metadata?: Record<string, unknown>;
 }
 
 export interface ToolCompletedPayload {
@@ -383,6 +384,9 @@ const ToolStartedPayloadSchema = Schema.Struct({
 const ToolRunningPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	partId: Schema.String,
+	metadata: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
 });
 
 const ToolCompletedPayloadSchema = Schema.Struct({

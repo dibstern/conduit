@@ -26,7 +26,6 @@ import { createDeferred, type Deferred } from "../deferred.js";
 import type {
 	AdapterCapabilities,
 	CommandInfo,
-	EventSink,
 	ModelInfo,
 	PermissionDecision,
 	ProviderAdapter,
@@ -41,6 +40,7 @@ import {
 } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { EffectPromptQueue } from "./effect-prompt-queue.js";
+import { serializePriorConversation } from "./history-transcript.js";
 import type {
 	ClaudeSessionContext,
 	Query,
@@ -218,8 +218,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 		Deferred<TurnResult>[]
 	>();
 
-	/** Permission bridge instance (shared across sessions). */
-	private permissionBridge: ClaudePermissionBridge | undefined;
+	/** Permission bridge is stateless; the live sink comes from the session context. */
+	private permissionBridge: ClaudePermissionBridge =
+		new ClaudePermissionBridge();
 
 	/** Injectable query factory (defaults to real SDK). */
 	private readonly queryFactory: NonNullable<ClaudeAdapterDeps["queryFactory"]>;
@@ -252,7 +253,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		let sdkCommands: ReadonlyArray<CommandInfo> = [];
 		let agents: ReadonlyArray<ProviderAgentInfo> = [];
 		try {
-			const probe = await getCachedClaudeCapabilities();
+			const probe = await getCachedClaudeCapabilities(this.deps.workspaceRoot);
 			models = probe.models.length > 0 ? probe.models : FALLBACK_MODELS;
 			sdkCommands = probe.commands;
 			agents = probe.agents;
@@ -290,6 +291,10 @@ export class ClaudeAdapter implements ProviderAdapter {
 		// Per-session mutex: prevent duplicate session creation
 		const pending = this.sessionLocks.get(sessionId);
 		if (pending) {
+			const existingCtx = this.sessions.get(sessionId);
+			if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
+				return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
+			}
 			await pending;
 			return this.sendTurn(input);
 		}
@@ -345,8 +350,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 				}
 			}
 
-			// Initialize the permission bridge for this sink.
-			const bridge = this.getOrCreatePermissionBridge(input.eventSink);
+			const bridge = this.getPermissionBridge();
 
 			const resumeSessionId =
 				typeof input.providerState["resumeSessionId"] === "string"
@@ -373,6 +377,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 				currentTurnId: input.turnId,
 				currentModel: input.model?.modelId,
 				...(apiModelId ? { currentApiModelId: apiModelId } : {}),
+				...(input.agent ? { currentAgent: input.agent } : {}),
 				resumeSessionId,
 				lastAssistantUuid: undefined,
 				turnCount: 0,
@@ -427,6 +432,13 @@ export class ClaudeAdapter implements ProviderAdapter {
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
 	): Promise<TurnResult> {
+		if (this.hasAgentChanged(ctx, input)) {
+			if (this.hasPendingTurn(ctx.sessionId)) {
+				return this.agentSwitchDuringActiveTurnResult(ctx, input);
+			}
+			return this.restartSessionForAgentChange(ctx, input);
+		}
+
 		const baseModelId = input.model?.modelId ?? ctx.currentModel;
 		const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
 		if (apiModelId && apiModelId !== ctx.currentApiModelId) {
@@ -449,6 +461,56 @@ export class ClaudeAdapter implements ProviderAdapter {
 		ctx.promptQueue.enqueue(userMessage);
 
 		return deferred.promise;
+	}
+
+	private hasPendingTurn(sessionId: string): boolean {
+		return (this.turnDeferredQueues.get(sessionId)?.length ?? 0) > 0;
+	}
+
+	private hasAgentChanged(
+		ctx: ClaudeSessionContext,
+		input: SendTurnInput,
+	): boolean {
+		return input.agent !== ctx.currentAgent;
+	}
+
+	private agentSwitchDuringActiveTurnResult(
+		ctx: ClaudeSessionContext,
+		input: SendTurnInput,
+	): TurnResult {
+		return {
+			status: "error",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			error: {
+				code: "provider_error",
+				message: `Cannot switch Claude agent while a turn is active (current=${ctx.currentAgent ?? "default"}, requested=${input.agent ?? "default"}).`,
+			},
+			providerStateUpdates: [],
+		};
+	}
+
+	private async restartSessionForAgentChange(
+		ctx: ClaudeSessionContext,
+		input: SendTurnInput,
+	): Promise<TurnResult> {
+		const oldStreamConsumer = ctx.streamConsumer;
+		await this.disposeSession(ctx, "Claude agent changed");
+		if (oldStreamConsumer) {
+			await oldStreamConsumer.catch(() => undefined);
+		}
+
+		const providerState = { ...input.providerState };
+		delete providerState["resumeSessionId"];
+		const transcript = serializePriorConversation(input.history);
+		const prompt =
+			transcript.length > 0 ? `${transcript}\n\n${input.prompt}` : input.prompt;
+		return this.createSessionAndSendTurn({
+			...input,
+			providerState,
+			prompt,
+		});
 	}
 
 	// ─── runStreamConsumer ────────────────────────────────────────────────
@@ -747,15 +809,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		const ctx = this.sessions.get(sessionId);
 		if (!ctx) return;
 
-		if (this.permissionBridge) {
-			await this.permissionBridge.resolvePermission(ctx, requestId, decision);
-		} else {
-			// Direct resolution via the PendingApproval deferred
-			const pending = ctx.pendingApprovals.get(requestId);
-			if (pending) {
-				pending.resolve(decision);
-			}
-		}
+		await this.permissionBridge.resolvePermission(ctx, requestId, decision);
 	}
 
 	// ─── resolveQuestion ──────────────────────────────────────────────────
@@ -842,12 +896,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 	/**
 	 * Get the permission bridge, creating one if needed.
 	 */
-	protected getOrCreatePermissionBridge(
-		sink: EventSink,
-	): ClaudePermissionBridge {
-		if (!this.permissionBridge) {
-			this.permissionBridge = new ClaudePermissionBridge({ sink });
-		}
+	protected getPermissionBridge(): ClaudePermissionBridge {
 		return this.permissionBridge;
 	}
 }

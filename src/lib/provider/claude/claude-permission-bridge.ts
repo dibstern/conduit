@@ -28,7 +28,7 @@ import type {
 } from "./types.js";
 
 export interface ClaudePermissionBridgeDeps {
-	readonly sink: EventSink;
+	readonly sink?: EventSink;
 }
 
 // AbortSignal-aware promise wrapper. When the abort signal fires,
@@ -52,7 +52,7 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 export class ClaudePermissionBridge {
-	constructor(private readonly deps: ClaudePermissionBridgeDeps) {}
+	constructor(private readonly deps: ClaudePermissionBridgeDeps = {}) {}
 
 	/**
 	 * Factory method that returns the exact SDK CanUseTool signature.
@@ -81,23 +81,34 @@ export class ClaudePermissionBridge {
 	): Promise<PermissionResult> {
 		const requestId = randomUUID();
 		const createdAt = new Date().toISOString();
+		const sink = ctx.eventSink ?? this.deps.sink;
+		if (!sink) {
+			return {
+				behavior: "deny",
+				message: "Permission sink unavailable.",
+			};
+		}
 
 		// Track the pending approval on the session context for interrupt
-		// cleanup. Resolution flows through EventSink.requestPermission(),
-		// not through PendingApproval.resolve/reject — those are no-ops here.
+		// cleanup. The resolver completes the same EventSink.requestPermission()
+		// deferred that the SDK callback is awaiting.
 		const pending: PendingApproval = {
 			requestId,
 			toolName,
 			toolInput: toolInput ?? {},
 			createdAt,
-			resolve: () => {},
-			reject: () => {},
+			resolve: (decision) => {
+				sink.resolvePermission(requestId, { decision });
+			},
+			reject: () => {
+				sink.resolvePermission(requestId, { decision: "reject" });
+			},
 		};
 		ctx.pendingApprovals.set(requestId, pending);
 
 		try {
 			// Fire the permission.asked event and await the sink promise.
-			const sinkPromise = this.deps.sink.requestPermission({
+			const sinkPromise = sink.requestPermission({
 				requestId,
 				sessionId: ctx.sessionId,
 				turnId: ctx.currentTurnId ?? "",

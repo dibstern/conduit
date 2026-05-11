@@ -10,12 +10,15 @@ import {
 	PermissionBridgeTag,
 	ProviderStateServiceTag,
 	QuestionBridgeTag,
+	ReadQueryTag,
 	SessionManagerTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { canonicalEvent } from "../persistence/events.js";
+import type { ReadQueryService } from "../persistence/read-query-service.js";
+import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import { createRelayEventSink } from "../provider/relay-event-sink.js";
 import type { SendTurnInput } from "../provider/types.js";
 import { isClaudeProvider } from "./model.js";
@@ -29,7 +32,31 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	push: () => Promise.resolve(),
 	requestPermission: () => Promise.resolve({ decision: "once" as const }),
 	requestQuestion: () => Promise.resolve({}),
+	resolvePermission: () => {},
+	resolveQuestion: () => {},
 };
+
+type PromptHistorySessionManager = {
+	loadPreRenderedHistory(
+		sessionId: string,
+		offset?: number,
+	): Promise<{ messages: SendTurnInput["history"]; hasMore: boolean }>;
+};
+
+async function loadPriorHistoryForTurn(
+	sessionId: string,
+	sessionMgr: PromptHistorySessionManager,
+	readQuery?: ReadQueryService,
+): Promise<SendTurnInput["history"]> {
+	if (readQuery) {
+		const rows = readQuery.getSessionMessagesWithParts(sessionId);
+		return messageRowsToHistory(rows, {
+			pageSize: Number.MAX_SAFE_INTEGER,
+		}).messages;
+	}
+	const history = await sessionMgr.loadPreRenderedHistory(sessionId);
+	return history.messages;
+}
 
 // ─── Per-session input draft store ──────────────────────────────────────────
 // Stores the last input_sync text per session so that newly connecting clients
@@ -140,6 +167,7 @@ export const handleMessage = (
 		const providerStateOption = yield* Effect.serviceOption(
 			ProviderStateServiceTag,
 		);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
 
 		if (engineOption._tag === "Some") {
 			const orchestrationEngine = engineOption.value;
@@ -149,6 +177,29 @@ export const handleMessage = (
 				providerId =
 					model && isClaudeProvider(model.providerID) ? "claude" : "opencode";
 			}
+			const priorHistory =
+				providerId === "claude"
+					? yield* Effect.gen(function* () {
+							const result = yield* Effect.either(
+								Effect.tryPromise({
+									try: () =>
+										loadPriorHistoryForTurn(
+											activeId,
+											sessionMgr,
+											readQueryOption._tag === "Some"
+												? readQueryOption.value
+												: undefined,
+										),
+									catch: (err) => err,
+								}),
+							);
+							if (result._tag === "Right") return result.right;
+							log.warn(
+								`Failed to load prior Claude history for ${activeId}: ${result.left instanceof Error ? result.left.message : result.left}`,
+							);
+							return [];
+						})
+					: [];
 
 			// Persist user message for Claude sessions (non-fatal)
 			if (providerId === "claude" && claudeEventPersistOption._tag === "Some") {
@@ -228,7 +279,7 @@ export const handleMessage = (
 				sessionId: activeId,
 				turnId: crypto.randomUUID(),
 				prompt: text,
-				history: [],
+				history: priorHistory,
 				providerState:
 					providerStateOption._tag === "Some"
 						? (providerStateOption.value.getState(activeId) ?? {})

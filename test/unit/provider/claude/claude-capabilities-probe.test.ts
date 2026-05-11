@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 
 describe("probeClaudeCapabilities", () => {
+	const workspaceRoot = "/tmp/claude-workspace";
+
 	function makeFakeQuery(opts: {
 		initResult?: {
 			models?: Array<{
@@ -40,7 +42,10 @@ describe("probeClaudeCapabilities", () => {
 				],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models).toHaveLength(2);
 		expect(result.models[0]).toMatchObject({
 			id: "claude-opus-4-7",
@@ -74,7 +79,10 @@ describe("probeClaudeCapabilities", () => {
 				],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models[0]?.variants).toEqual({
 			low: {},
 			medium: {},
@@ -90,7 +98,10 @@ describe("probeClaudeCapabilities", () => {
 				models: [{ value: "claude-opus-4-7", displayName: "Opus 4.7" }],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models[0]?.variants).toBeUndefined();
 	});
 
@@ -101,7 +112,10 @@ describe("probeClaudeCapabilities", () => {
 				account: { subscriptionType: "Max" },
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.subscriptionType).toBe("Max");
 	});
 
@@ -118,7 +132,10 @@ describe("probeClaudeCapabilities", () => {
 				],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.commands).toEqual([
 			{
 				name: "init",
@@ -139,7 +156,10 @@ describe("probeClaudeCapabilities", () => {
 				],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.agents).toEqual([
 			{
 				id: "code-reviewer",
@@ -153,7 +173,10 @@ describe("probeClaudeCapabilities", () => {
 
 	it("returns empty commands and agents when init omits them", async () => {
 		const queryFactory = makeFakeQuery({ initResult: { models: [] } });
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.commands).toEqual([]);
 		expect(result.agents).toEqual([]);
 	});
@@ -164,7 +187,10 @@ describe("probeClaudeCapabilities", () => {
 				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.subscriptionType).toBeUndefined();
 	});
 
@@ -178,7 +204,10 @@ describe("probeClaudeCapabilities", () => {
 				],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		const sonnet = result.models.find((m) => m.id === "claude-sonnet-4-7");
 		const opus = result.models.find((m) => m.id === "claude-opus-4-7");
 		const haiku = result.models.find((m) => m.id === "claude-haiku-4-7");
@@ -197,7 +226,10 @@ describe("probeClaudeCapabilities", () => {
 				account: { subscriptionType: "max" },
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models[0]?.contextWindowOptions).toEqual([
 			{ value: "200k", label: "200K" },
 			{ value: "1m", label: "1M (beta)", isDefault: true },
@@ -211,7 +243,10 @@ describe("probeClaudeCapabilities", () => {
 				account: { subscriptionType: "Pro" },
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models[0]?.contextWindowOptions?.[0]).toMatchObject({
 			value: "200k",
 			isDefault: true,
@@ -240,23 +275,31 @@ describe("probeClaudeCapabilities", () => {
 				account: { subscriptionType: sub },
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		const onem = result.models[0]?.contextWindowOptions?.find(
 			(o) => o.value === "1m",
 		);
 		expect(onem?.isDefault).toBe(true);
 	});
 
-	it("calls query() with persistSession:false, maxTurns:0, settingSources:[]", async () => {
+	it("calls query() with runtime-equivalent workspace discovery options", async () => {
 		const queryFactory = makeFakeQuery({ initResult: { models: [] } });
-		await probeClaudeCapabilities({ queryFactory });
+		await probeClaudeCapabilities({ queryFactory, workspaceRoot });
 		expect(queryFactory).toHaveBeenCalledTimes(1);
 		const callArg = queryFactory.mock.calls[0]?.[0] as {
 			options: Record<string, unknown>;
 		};
 		expect(callArg.options["persistSession"]).toBe(false);
 		expect(callArg.options["maxTurns"]).toBe(0);
-		expect(callArg.options["settingSources"]).toEqual([]);
+		expect(callArg.options["cwd"]).toBe(workspaceRoot);
+		expect(callArg.options["settingSources"]).toEqual([
+			"user",
+			"project",
+			"local",
+		]);
 		expect(callArg.options["abortController"]).toBeInstanceOf(AbortController);
 	});
 
@@ -272,7 +315,7 @@ describe("probeClaudeCapabilities", () => {
 					};
 				},
 			);
-		await probeClaudeCapabilities({ queryFactory });
+		await probeClaudeCapabilities({ queryFactory, workspaceRoot });
 		expect(capturedController?.signal.aborted).toBe(true);
 	});
 
@@ -290,15 +333,18 @@ describe("probeClaudeCapabilities", () => {
 					};
 				},
 			);
-		await expect(probeClaudeCapabilities({ queryFactory })).rejects.toThrow(
-			"boom",
-		);
+		await expect(
+			probeClaudeCapabilities({ queryFactory, workspaceRoot }),
+		).rejects.toThrow("boom");
 		expect(capturedController?.signal.aborted).toBe(true);
 	});
 
 	it("returns empty models when init returns no models field", async () => {
 		const queryFactory = makeFakeQuery({ initResult: {} });
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models).toEqual([]);
 	});
 
@@ -308,7 +354,10 @@ describe("probeClaudeCapabilities", () => {
 				models: [{ value: "claude-haiku-4-7", displayName: "Haiku 4.7" }],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models[0]?.limit).toEqual({
 			context: 200_000,
 			output: 8_192,
@@ -321,7 +370,10 @@ describe("probeClaudeCapabilities", () => {
 				models: [{ value: "mystery-model", displayName: "Mystery" }],
 			},
 		});
-		const result = await probeClaudeCapabilities({ queryFactory });
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
 		expect(result.models[0]?.limit).toBeUndefined();
 	});
 });

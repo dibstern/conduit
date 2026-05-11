@@ -273,6 +273,7 @@ describe("handleClientConnected — agent list", () => {
 						agents: [
 							{ id: "Explore", name: "Explore", description: "Explorer" },
 							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+							{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
 						],
 					})),
 				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
@@ -289,7 +290,11 @@ describe("handleClientConnected — agent list", () => {
 		expect(deps.client.app.agents).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "agent_list",
-			agents: [{ id: "Explore", name: "Explore", description: "Explorer" }],
+			agents: [
+				{ id: "Explore", name: "Explore", description: "Explorer" },
+				{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+				{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
+			],
 			activeAgentId: "Explore",
 		});
 	});

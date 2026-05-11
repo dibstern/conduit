@@ -57,6 +57,7 @@ export interface ProbeResult {
 }
 
 export interface ProbeDeps {
+	readonly workspaceRoot: string;
 	readonly queryFactory?: (params: {
 		prompt: string | AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
@@ -164,7 +165,7 @@ async function* singleMessage(): AsyncIterable<SDKUserMessage> {
 }
 
 export async function probeClaudeCapabilities(
-	deps: ProbeDeps = {},
+	deps: ProbeDeps,
 ): Promise<ProbeResult> {
 	const queryFactory = deps.queryFactory ?? sdkQuery;
 	const abortController = new AbortController();
@@ -175,7 +176,8 @@ export async function probeClaudeCapabilities(
 			options: {
 				persistSession: false,
 				maxTurns: 0,
-				settingSources: [],
+				cwd: deps.workspaceRoot,
+				settingSources: ["user", "project", "local"],
 				abortController,
 				allowedTools: [],
 				stderr: () => {},
@@ -212,27 +214,37 @@ export async function probeClaudeCapabilities(
 
 const CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
 
-let probeOverride: (() => Promise<ProbeResult>) | undefined;
-let cache: TTLCache<ProbeResult> | undefined;
+let probeOverride:
+	| ((workspaceRoot: string) => Promise<ProbeResult>)
+	| undefined;
+let caches = new Map<string, TTLCache<ProbeResult>>();
 
-function makeCache(): TTLCache<ProbeResult> {
+function makeCache(workspaceRoot: string): TTLCache<ProbeResult> {
 	return new TTLCache<ProbeResult>(CAPABILITY_CACHE_TTL_MS, () =>
-		probeOverride ? probeOverride() : probeClaudeCapabilities(),
+		probeOverride
+			? probeOverride(workspaceRoot)
+			: probeClaudeCapabilities({ workspaceRoot }),
 	);
 }
 
-export async function getCachedClaudeCapabilities(): Promise<ProbeResult> {
-	if (!cache) cache = makeCache();
+export async function getCachedClaudeCapabilities(
+	workspaceRoot: string,
+): Promise<ProbeResult> {
+	let cache = caches.get(workspaceRoot);
+	if (!cache) {
+		cache = makeCache(workspaceRoot);
+		caches.set(workspaceRoot, cache);
+	}
 	return cache.get();
 }
 
 export function resetCapabilityCacheForTesting(): void {
-	cache = undefined;
+	caches = new Map<string, TTLCache<ProbeResult>>();
 }
 
 export function __setProbeOverrideForTesting(
-	fn: (() => Promise<ProbeResult>) | undefined,
+	fn: ((workspaceRoot: string) => Promise<ProbeResult>) | undefined,
 ): void {
 	probeOverride = fn;
-	cache = undefined;
+	caches = new Map<string, TTLCache<ProbeResult>>();
 }

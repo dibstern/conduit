@@ -45,11 +45,15 @@ export interface QuestionRequest {
  *   permission.resolved arrives, return the decision.
  * - `requestQuestion(request)`: emit question.asked, block until
  *   question.resolved arrives, return the answers.
+ * - `resolvePermission(...)` / `resolveQuestion(...)`: complete the matching
+ *   pending request when the UI returns an answer.
  */
 export interface EventSink {
 	push(event: CanonicalEvent): Promise<void>;
 	requestPermission(request: PermissionRequest): Promise<PermissionResponse>;
 	requestQuestion(request: QuestionRequest): Promise<Record<string, unknown>>;
+	resolvePermission(requestId: string, response: PermissionResponse): void;
+	resolveQuestion(requestId: string, answers: Record<string, unknown>): void;
 }
 
 // ─── Turn Types ─────────────────────────────────────────────────────────────
@@ -123,11 +127,14 @@ export interface ModelInfo {
 // ─── History ────────────────────────────────────────────────────────────────
 
 export interface HistoryMessage {
+	readonly id?: string;
 	readonly role: "user" | "assistant";
-	readonly content: string;
+	readonly content?: string;
+	readonly text?: string;
 	readonly parts?: readonly Record<string, unknown>[];
-	readonly tokens?: TurnTokens;
+	readonly tokens?: unknown;
 	readonly cost?: number;
+	readonly time?: unknown;
 }
 
 // ─── Send Turn Input ────────────────────────────────────────────────────────

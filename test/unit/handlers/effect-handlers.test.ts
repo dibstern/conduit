@@ -85,6 +85,7 @@ import type {
 } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
+import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
@@ -2075,6 +2076,120 @@ describe("handleMessage", () => {
 			}),
 		);
 	});
+
+	it.effect(
+		"passes prior SQLite history into Claude engine send_turn input",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const overrides = mockOverrides({
+				getAgent: vi.fn(() => "Plan"),
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-5",
+				})),
+				getVariant: vi.fn(() => ""),
+				getContextWindow: vi.fn(() => ""),
+				isModelUserSelected: vi.fn(() => true),
+				startProcessingTimeout: vi.fn(),
+			});
+			const sessionMgr = mockSessionManager();
+			const config = mockConfig();
+			const permissionBridge = mockPermissionBridge();
+			const questionBridge = mockQuestionBridge();
+			const client = {} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => ({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				})),
+			} as unknown as OrchestrationEngine;
+			const readQuery = {
+				getSessionMessagesWithParts: vi.fn(() => [
+					{
+						id: "msg-user-1",
+						session_id: "session-1",
+						turn_id: "turn-1",
+						role: "user",
+						text: "Earlier question",
+						cost: null,
+						tokens_in: null,
+						tokens_out: null,
+						tokens_cache_read: null,
+						tokens_cache_write: null,
+						is_streaming: 0,
+						created_at: 1,
+						updated_at: 1,
+						parts: [
+							{
+								id: "part-user-1",
+								message_id: "msg-user-1",
+								type: "text",
+								text: "Earlier question",
+								tool_name: null,
+								call_id: null,
+								input: null,
+								result: null,
+								duration: null,
+								status: null,
+								sort_order: 0,
+								created_at: 1,
+								updated_at: 1,
+							},
+						],
+					},
+				]),
+			} as unknown as ReadQueryService;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(ConfigTag, config),
+				Layer.succeed(PermissionBridgeTag, permissionBridge),
+				Layer.succeed(QuestionBridgeTag, questionBridge),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(ReadQueryTag, readQuery),
+			);
+
+			return handleMessage("client-1", { text: "new prompt" }).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+						"session-1",
+					);
+					expect(engine.dispatch).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "send_turn",
+							providerId: "claude",
+							input: expect.objectContaining({
+								history: [
+									expect.objectContaining({
+										role: "user",
+										parts: [
+											expect.objectContaining({
+												type: "text",
+												text: "Earlier question",
+											}),
+										],
+									}),
+								],
+							}),
+						}),
+					);
+				}),
+			);
+		},
+	);
 
 	it.effect("sends message via legacy path when no engine", () => {
 		const ws = mockWsHandler({

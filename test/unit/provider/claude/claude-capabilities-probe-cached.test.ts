@@ -6,6 +6,9 @@ import {
 } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 
 describe("getCachedClaudeCapabilities", () => {
+	const workspaceA = "/tmp/claude-workspace-a";
+	const workspaceB = "/tmp/claude-workspace-b";
+
 	beforeEach(() => {
 		vi.useFakeTimers();
 		resetCapabilityCacheForTesting();
@@ -27,18 +30,37 @@ describe("getCachedClaudeCapabilities", () => {
 		});
 		__setProbeOverrideForTesting(probe);
 
-		const r1 = await getCachedClaudeCapabilities();
+		const r1 = await getCachedClaudeCapabilities(workspaceA);
 		expect(r1.models).toHaveLength(1);
 		expect(probe).toHaveBeenCalledTimes(1);
 
 		vi.advanceTimersByTime(4 * 60 * 1000);
-		const r2 = await getCachedClaudeCapabilities();
+		const r2 = await getCachedClaudeCapabilities(workspaceA);
 		expect(r2.models).toHaveLength(1);
 		expect(probe).toHaveBeenCalledTimes(1);
 
 		vi.advanceTimersByTime(2 * 60 * 1000);
-		await getCachedClaudeCapabilities();
+		await getCachedClaudeCapabilities(workspaceA);
 		expect(probe).toHaveBeenCalledTimes(2);
+	});
+
+	it("caches separately per workspace root", async () => {
+		const probe = vi.fn(async (workspaceRoot: string) => ({
+			models: [
+				{ id: workspaceRoot, name: workspaceRoot, providerId: "claude" },
+			],
+			commands: [],
+			agents: [],
+		}));
+		__setProbeOverrideForTesting(probe);
+
+		await getCachedClaudeCapabilities(workspaceA);
+		await getCachedClaudeCapabilities(workspaceB);
+		await getCachedClaudeCapabilities(workspaceA);
+
+		expect(probe).toHaveBeenCalledTimes(2);
+		expect(probe).toHaveBeenNthCalledWith(1, workspaceA);
+		expect(probe).toHaveBeenNthCalledWith(2, workspaceB);
 	});
 
 	it("does not cache probe failures", async () => {
@@ -48,10 +70,10 @@ describe("getCachedClaudeCapabilities", () => {
 			.mockResolvedValueOnce({ models: [], commands: [], agents: [] });
 		__setProbeOverrideForTesting(probe);
 
-		await expect(getCachedClaudeCapabilities()).rejects.toThrow(
+		await expect(getCachedClaudeCapabilities(workspaceA)).rejects.toThrow(
 			"binary missing",
 		);
-		const r2 = await getCachedClaudeCapabilities();
+		const r2 = await getCachedClaudeCapabilities(workspaceA);
 		expect(r2.models).toEqual([]);
 		expect(probe).toHaveBeenCalledTimes(2);
 	});
@@ -68,9 +90,9 @@ describe("getCachedClaudeCapabilities", () => {
 		__setProbeOverrideForTesting(probe);
 
 		const calls = [
-			getCachedClaudeCapabilities(),
-			getCachedClaudeCapabilities(),
-			getCachedClaudeCapabilities(),
+			getCachedClaudeCapabilities(workspaceA),
+			getCachedClaudeCapabilities(workspaceA),
+			getCachedClaudeCapabilities(workspaceA),
 		];
 		resolve({ models: [], commands: [], agents: [] });
 		const results = await Promise.all(calls);
