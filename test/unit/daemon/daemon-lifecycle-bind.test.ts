@@ -1,18 +1,15 @@
-import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import {
 	closeHttpServer,
 	startHttpServer,
 } from "../../../src/lib/daemon/daemon-lifecycle.js";
+import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
-const fixtureDir = join(process.cwd(), "test", "fixtures");
-const testCert = readFileSync(join(fixtureDir, "test-cert.pem"));
-const testKey = readFileSync(join(fixtureDir, "test-key.pem"));
+const fixtureCerts = makeTestTlsCerts();
 
 function makeContext(): DaemonLifecycleContext {
 	return {
@@ -136,8 +133,8 @@ describe("startHttpServer bind config", () => {
 				port: 0,
 				host: "127.0.0.1",
 				tls: {
-					key: testKey,
-					cert: testCert,
+					key: fixtureCerts.key,
+					cert: fixtureCerts.cert,
 				},
 			});
 
@@ -166,8 +163,8 @@ describe("startHttpServer bind config", () => {
 			port: 0,
 			host: "127.0.0.1",
 			tls: {
-				key: testKey,
-				cert: testCert,
+				key: fixtureCerts.key,
+				cert: fixtureCerts.cert,
 			},
 		});
 

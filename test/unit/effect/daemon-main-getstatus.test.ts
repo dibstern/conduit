@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,6 +11,7 @@ import {
 import { makeDaemonConfigFromOptions } from "../../../src/lib/effect/daemon-config-ref.js";
 import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
 import { resolveRuntimeConfigUpdateSync } from "../../../src/lib/effect/daemon-main.js";
+import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
 const ensureCertsMock = vi.hoisted(() => vi.fn());
 
@@ -26,17 +26,27 @@ vi.mock("../../../src/lib/cli/tls.js", async (importOriginal) => {
 	};
 });
 
-const fixtureDir = join(process.cwd(), "test", "fixtures");
-const testCert = readFileSync(join(fixtureDir, "test-cert.pem"));
-const testKey = readFileSync(join(fixtureDir, "test-key.pem"));
+const fixtureCerts: TlsCerts = makeTestTlsCerts();
 
-const fixtureCerts: TlsCerts = {
-	key: testKey,
-	cert: testCert,
-	caRoot: null,
-	caCertPem: null,
-	caCertDer: null,
-};
+async function waitForPersistedConfig(
+	configDir: string,
+	predicate: (
+		config: NonNullable<ReturnType<typeof loadDaemonConfig>>,
+	) => boolean,
+): Promise<NonNullable<ReturnType<typeof loadDaemonConfig>>> {
+	const deadline = Date.now() + 1_000;
+	let lastConfig: ReturnType<typeof loadDaemonConfig> = null;
+
+	while (Date.now() < deadline) {
+		lastConfig = loadDaemonConfig(configDir);
+		if (lastConfig && predicate(lastConfig)) return lastConfig;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+
+	throw new Error(
+		`Timed out waiting for persisted config: ${JSON.stringify(lastConfig)}`,
+	);
+}
 
 async function sendRestartConfig(
 	socketPath: string,
@@ -152,8 +162,11 @@ describe("daemon main runtime config status", () => {
 		expect(response).toEqual({ ok: true });
 		expect(daemon.getStatus().tlsEnabled).toBe(true);
 		expect(daemon.getStatus().keepAwake).toBe(true);
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		expect(loadDaemonConfig(tmpDir)?.tls).toBe(true);
+		const persisted = await waitForPersistedConfig(
+			tmpDir,
+			(config) => config.tls === true,
+		);
+		expect(persisted.tls).toBe(true);
 	});
 
 	it("keeps keep-awake startup config in the runtime-backed ref and persisted config", async () => {

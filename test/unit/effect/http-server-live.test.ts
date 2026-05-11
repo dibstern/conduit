@@ -1,12 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, Layer, Ref, type Scope } from "effect";
 import { expect } from "vitest";
-import type { TlsCerts } from "../../../src/lib/cli/tls.js";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import {
 	DaemonConfigRefLive,
@@ -22,10 +21,9 @@ import {
 	TlsCertLive,
 	TlsCertTag,
 } from "../../../src/lib/effect/tls-cert-layer.js";
+import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
-const fixtureDir = join(process.cwd(), "test", "fixtures");
-const testCert = readFileSync(join(fixtureDir, "test-cert.pem"));
-const testKey = readFileSync(join(fixtureDir, "test-key.pem"));
+const fixtureCerts = makeTestTlsCerts();
 
 const baseConfig: DaemonRuntimeConfig = {
 	port: 0,
@@ -48,14 +46,6 @@ const NullTlsLayer = Layer.succeed(TlsCertTag, {
 	caCertDer: null,
 	caCertPem: null,
 });
-
-const fixtureCerts: TlsCerts = {
-	key: testKey,
-	cert: testCert,
-	caRoot: null,
-	caCertPem: null,
-	caCertDer: null,
-};
 
 function makeContext(): DaemonLifecycleContext {
 	return {
@@ -128,6 +118,14 @@ function httpGet(
 
 function makeStaticDir(): string {
 	return mkdtempSync(join(tmpdir(), "conduit-http-server-live-"));
+}
+
+function withStaticDir<A, E, R>(
+	use: (staticDir: string) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | Scope.Scope> {
+	return Effect.acquireRelease(Effect.sync(makeStaticDir), (staticDir) =>
+		Effect.sync(() => rmSync(staticDir, { recursive: true, force: true })),
+	).pipe(Effect.flatMap(use));
 }
 
 function activeTlsLayer(caCertDer: Buffer | null = null) {
@@ -245,28 +243,56 @@ describe("makeHttpServerLive", () => {
 
 describe("makeOnboardingServerLive", () => {
 	it.scoped("skips when TlsCertTag has no certs", () => {
-		const ctx = makeContext();
-		const staticDir = makeStaticDir();
-		const configLayer = DaemonConfigRefLive(baseConfig);
-		const testLayer = makeOnboardingServerLive(ctx, {
-			staticDir,
-			caRootPath: null,
-			caCertDer: null,
-		}).pipe(Layer.provideMerge(configLayer), Layer.provide(NullTlsLayer));
+		return withStaticDir((staticDir) => {
+			const ctx = makeContext();
+			const configLayer = DaemonConfigRefLive(baseConfig);
+			const testLayer = makeOnboardingServerLive(ctx, {
+				staticDir,
+				caRootPath: null,
+				caCertDer: null,
+			}).pipe(Layer.provideMerge(configLayer), Layer.provide(NullTlsLayer));
 
-		return Effect.gen(function* () {
-			expect(ctx.onboardingServer).toBeNull();
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => rmSync(staticDir, { recursive: true, force: true })),
-			);
-		}).pipe(Effect.provide(Layer.fresh(testLayer)));
+			return Effect.sync(() => {
+				expect(ctx.onboardingServer).toBeNull();
+			}).pipe(Effect.provide(Layer.fresh(testLayer)));
+		});
 	});
 
 	it.scoped(
 		"binds to the host from DaemonConfigRefTag when TLS is active",
 		() => {
+			return withStaticDir((staticDir) => {
+				const ctx = makeContext();
+				const configLayer = DaemonConfigRefLive({
+					...baseConfig,
+					host: "127.0.0.1",
+					port: 0,
+				});
+				const testLayer = makeOnboardingServerLive(ctx, {
+					staticDir,
+					caRootPath: null,
+					caCertDer: null,
+				}).pipe(
+					Layer.provideMerge(configLayer),
+					Layer.provide(activeTlsLayer()),
+				);
+
+				return Effect.sync(() => {
+					const addr = ctx.onboardingServer?.address();
+					if (!addr || typeof addr === "string") {
+						throw new Error("Onboarding server did not bind");
+					}
+					expect(addr.address).toBe("127.0.0.1");
+					expect(addr.port).toBeGreaterThan(0);
+				}).pipe(Effect.provide(Layer.fresh(testLayer)));
+			});
+		},
+	);
+
+	it.scoped("serves CA DER material from TlsCertTag", () => {
+		return withStaticDir((staticDir) => {
 			const ctx = makeContext();
-			const staticDir = makeStaticDir();
+			const caPayload = Buffer.from("test-ca-der");
 			const configLayer = DaemonConfigRefLive({
 				...baseConfig,
 				host: "127.0.0.1",
@@ -276,96 +302,59 @@ describe("makeOnboardingServerLive", () => {
 				staticDir,
 				caRootPath: null,
 				caCertDer: null,
-			}).pipe(Layer.provideMerge(configLayer), Layer.provide(activeTlsLayer()));
+			}).pipe(
+				Layer.provideMerge(configLayer),
+				Layer.provide(activeTlsLayer(caPayload)),
+			);
 
 			return Effect.gen(function* () {
-				const addr = ctx.onboardingServer?.address();
-				if (!addr || typeof addr === "string") {
-					throw new Error("Onboarding server did not bind");
-				}
-				expect(addr.address).toBe("127.0.0.1");
-				expect(addr.port).toBeGreaterThan(0);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() =>
-						rmSync(staticDir, { recursive: true, force: true }),
-					),
+				const response = yield* Effect.promise(() =>
+					httpGet(onboardingPort(ctx), "/ca/download"),
+				);
+				expect(response.status).toBe(200);
+				expect(response.body).toEqual(caPayload);
+				expect(response.headers["content-type"]).toBe(
+					"application/x-x509-ca-cert",
 				);
 			}).pipe(Effect.provide(Layer.fresh(testLayer)));
-		},
-	);
-
-	it.scoped("serves CA DER material from TlsCertTag", () => {
-		const ctx = makeContext();
-		const staticDir = makeStaticDir();
-		const caPayload = Buffer.from("test-ca-der");
-		const configLayer = DaemonConfigRefLive({
-			...baseConfig,
-			host: "127.0.0.1",
-			port: 0,
 		});
-		const testLayer = makeOnboardingServerLive(ctx, {
-			staticDir,
-			caRootPath: null,
-			caCertDer: null,
-		}).pipe(
-			Layer.provideMerge(configLayer),
-			Layer.provide(activeTlsLayer(caPayload)),
-		);
-
-		return Effect.gen(function* () {
-			const response = yield* Effect.promise(() =>
-				httpGet(onboardingPort(ctx), "/ca/download"),
-			);
-			expect(response.status).toBe(200);
-			expect(response.body).toEqual(caPayload);
-			expect(response.headers["content-type"]).toBe(
-				"application/x-x509-ca-cert",
-			);
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => rmSync(staticDir, { recursive: true, force: true })),
-			);
-		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});
 
 	it.scoped(
 		"uses the actual main-server port in composed setup-info when HTTP started with port 0",
 		() => {
-			const ctx = makeContext();
-			const staticDir = makeStaticDir();
-			const configLayer = DaemonConfigRefLive({
-				...baseConfig,
-				host: "127.0.0.1",
-				port: 0,
-				tlsEnabled: true,
+			return withStaticDir((staticDir) => {
+				const ctx = makeContext();
+				const configLayer = DaemonConfigRefLive({
+					...baseConfig,
+					host: "127.0.0.1",
+					port: 0,
+					tlsEnabled: true,
+				});
+				const upstream = Layer.merge(configLayer, activeTlsLayer());
+				const httpLayer = makeHttpServerLive(ctx).pipe(
+					Layer.provideMerge(upstream),
+				);
+				const testLayer = makeOnboardingServerLive(ctx, {
+					staticDir,
+					caRootPath: null,
+					caCertDer: null,
+				}).pipe(Layer.provideMerge(httpLayer));
+
+				return Effect.gen(function* () {
+					const mainPort = boundAddress(ctx).port;
+					const response = yield* Effect.promise(() =>
+						httpGet(onboardingPort(ctx), "/api/setup-info"),
+					);
+					const body = JSON.parse(response.body.toString("utf8")) as {
+						httpsUrl: string;
+					};
+
+					expect(response.status).toBe(200);
+					expect(body.httpsUrl).toContain(`:${mainPort}`);
+					expect(body.httpsUrl).not.toContain(":0");
+				}).pipe(Effect.provide(Layer.fresh(testLayer)));
 			});
-			const upstream = Layer.merge(configLayer, activeTlsLayer());
-			const httpLayer = makeHttpServerLive(ctx).pipe(
-				Layer.provideMerge(upstream),
-			);
-			const testLayer = makeOnboardingServerLive(ctx, {
-				staticDir,
-				caRootPath: null,
-				caCertDer: null,
-			}).pipe(Layer.provideMerge(httpLayer));
-
-			return Effect.gen(function* () {
-				const mainPort = boundAddress(ctx).port;
-				const response = yield* Effect.promise(() =>
-					httpGet(onboardingPort(ctx), "/api/setup-info"),
-				);
-				const body = JSON.parse(response.body.toString("utf8")) as {
-					httpsUrl: string;
-				};
-
-				expect(response.status).toBe(200);
-				expect(body.httpsUrl).toContain(`:${mainPort}`);
-				expect(body.httpsUrl).not.toContain(":0");
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() =>
-						rmSync(staticDir, { recursive: true, force: true }),
-					),
-				);
-			}).pipe(Effect.provide(Layer.fresh(testLayer)));
 		},
 	);
 });
