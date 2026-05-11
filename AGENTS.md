@@ -1,7 +1,7 @@
 # AGENTS.md
 
 The opencode instance at localhost:4096 is running and accessible.
-NEVER stash changes, you are interrupting other sessions and work. 
+NEVER stash changes, you are interrupting other sessions and work.
 
 ## Purpose
 
