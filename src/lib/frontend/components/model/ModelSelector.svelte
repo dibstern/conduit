@@ -1,10 +1,12 @@
 <!-- ─── Model Selector ──────────────────────────────────────────────────────── -->
 <!-- Clickable model name with dropdown picker grouped by provider. -->
 <!-- Dropdown shows cost per 1K tokens, checkmark on active model. -->
-<!-- Variant badge is rendered by the sibling ModelVariant component. -->
+<!-- Variant and context-window badges are rendered by sibling components. -->
 
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
+	// biome-ignore lint/style/useImportType: ContextWindowSelector is used as a value for bind:this
+	import ContextWindowSelector from "./ContextWindowSelector.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
@@ -23,6 +25,7 @@
 
 	let dropdownOpen = $state(false);
 	let variantRef: ModelVariant | undefined = $state();
+	let contextWindowRef: ContextWindowSelector | undefined = $state();
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -100,6 +103,7 @@
 	function toggleDropdown(e: MouseEvent) {
 		e.stopPropagation();
 		variantRef?.close();
+		contextWindowRef?.close();
 		dropdownOpen = !dropdownOpen;
 	}
 
@@ -163,7 +167,22 @@
 	</button>
 
 	<!-- Variant badge (extracted component) -->
-	<ModelVariant bind:this={variantRef} onOpen={() => { dropdownOpen = false }} />
+	<ModelVariant
+		bind:this={variantRef}
+		onOpen={() => {
+			dropdownOpen = false;
+			contextWindowRef?.close();
+		}}
+	/>
+
+	<!-- Context window badge -->
+	<ContextWindowSelector
+		bind:this={contextWindowRef}
+		onOpen={() => {
+			dropdownOpen = false;
+			variantRef?.close();
+		}}
+	/>
 
 	<!-- Model dropdown -->
 	{#if dropdownOpen}

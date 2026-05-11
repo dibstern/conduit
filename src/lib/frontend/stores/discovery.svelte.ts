@@ -4,6 +4,7 @@
 import type {
 	AgentInfo,
 	CommandInfo,
+	ContextWindowOption,
 	ModelInfo,
 	ProviderGroup,
 	ProviderInfo,
@@ -24,6 +25,8 @@ export const discoveryState = $state({
 	defaultProviderId: "" as string,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
+	currentContextWindow: "" as string,
+	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -172,6 +175,11 @@ export function getActiveModelVariants(): string[] {
 	return discoveryState.availableVariants;
 }
 
+/** Get the available context-window options for the currently active model. */
+export function getActiveContextWindowOptions(): ReadonlyArray<ContextWindowOption> {
+	return discoveryState.availableContextWindowOptions;
+}
+
 // ─── Variant handler ────────────────────────────────────────────────────────
 
 export function handleVariantInfo(
@@ -179,6 +187,15 @@ export function handleVariantInfo(
 ): void {
 	discoveryState.currentVariant = msg.variant ?? "";
 	discoveryState.availableVariants = msg.variants ?? [];
+}
+
+// ─── Context-window handler ─────────────────────────────────────────────────
+
+export function handleContextWindowInfo(
+	msg: Extract<RelayMessage, { type: "context_window_info" }>,
+): void {
+	discoveryState.currentContextWindow = msg.contextWindow ?? "";
+	discoveryState.availableContextWindowOptions = msg.options ?? [];
 }
 
 /** Clear all discovery state (for project switch). */
@@ -194,4 +211,6 @@ export function clearDiscoveryState(): void {
 	discoveryState.defaultProviderId = "";
 	discoveryState.currentVariant = "";
 	discoveryState.availableVariants = [];
+	discoveryState.currentContextWindow = "";
+	discoveryState.availableContextWindowOptions = [];
 }

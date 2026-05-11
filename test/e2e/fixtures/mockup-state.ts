@@ -616,3 +616,128 @@ export const noVariantInitMessages: MockMessage[] = [
 	},
 	variantProjectList,
 ];
+
+// ─── Context-window selector test fixtures ──────────────────────────────────
+
+/** Model list with Claude context-window options on one Sonnet model. */
+export const contextWindowModelList: MockMessage = {
+	type: "model_list",
+	providers: [
+		{
+			id: "anthropic",
+			name: "Anthropic",
+			configured: true,
+			models: [
+				{
+					id: "claude-sonnet-4",
+					name: "claude-sonnet-4",
+					provider: "anthropic",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+						{ value: "1m", label: "1M (beta)" },
+					],
+				},
+				{
+					id: "claude-haiku-3.5",
+					name: "claude-haiku-3.5",
+					provider: "anthropic",
+				},
+			],
+		},
+	],
+};
+
+/** Init messages for context-window testing — Sonnet model with options. */
+export const contextWindowInitMessages: MockMessage[] = [
+	{
+		type: "session_switched",
+		id: "sess-context-001",
+	},
+	{
+		type: "status",
+		status: "idle",
+	},
+	{
+		type: "model_info",
+		model: "claude-sonnet-4",
+		provider: "anthropic",
+	},
+	{
+		type: "client_count",
+		count: 1,
+	},
+	{
+		type: "session_list",
+		roots: true,
+		sessions: [
+			{
+				id: "sess-context-001",
+				title: "Test session",
+				updatedAt: Date.now(),
+				messageCount: 0,
+			},
+		],
+	},
+	contextWindowModelList,
+	{
+		type: "agent_list",
+		agents: [
+			{ id: "code", name: "Code", description: "General coding assistant" },
+		],
+	},
+	{
+		type: "context_window_info",
+		contextWindow: "",
+		options: [
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		],
+	},
+	variantProjectList,
+];
+
+/** Init messages for context-window testing — model with no selector options. */
+export const noContextWindowInitMessages: MockMessage[] = [
+	{
+		type: "session_switched",
+		id: "sess-context-none-001",
+	},
+	{
+		type: "status",
+		status: "idle",
+	},
+	{
+		type: "model_info",
+		model: "claude-haiku-3.5",
+		provider: "anthropic",
+	},
+	{
+		type: "client_count",
+		count: 1,
+	},
+	{
+		type: "session_list",
+		roots: true,
+		sessions: [
+			{
+				id: "sess-context-none-001",
+				title: "Test session",
+				updatedAt: Date.now(),
+				messageCount: 0,
+			},
+		],
+	},
+	contextWindowModelList,
+	{
+		type: "agent_list",
+		agents: [
+			{ id: "code", name: "Code", description: "General coding assistant" },
+		],
+	},
+	{
+		type: "context_window_info",
+		contextWindow: "",
+		options: [],
+	},
+	variantProjectList,
+];

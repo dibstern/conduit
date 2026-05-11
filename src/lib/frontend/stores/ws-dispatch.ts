@@ -63,6 +63,7 @@ import {
 import {
 	handleAgentList,
 	handleCommandList,
+	handleContextWindowInfo,
 	handleDefaultModelInfo,
 	handleModelInfo,
 	handleModelList,
@@ -805,6 +806,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "variant_info":
 			handleVariantInfo(msg);
+			break;
+		case "context_window_info":
+			handleContextWindowInfo(msg);
 			break;
 		case "command_list":
 			handleCommandList(msg);

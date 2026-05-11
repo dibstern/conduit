@@ -6,8 +6,10 @@ import {
 	filterCommands,
 	formatAgentLabel,
 	formatModelName,
+	getActiveContextWindowOptions,
 	handleAgentList,
 	handleCommandList,
+	handleContextWindowInfo,
 	handleDefaultModelInfo,
 	handleModelInfo,
 	handleModelList,
@@ -43,6 +45,10 @@ beforeEach(() => {
 	discoveryState.commandsFetched = false;
 	discoveryState.defaultModelId = "";
 	discoveryState.defaultProviderId = "";
+	discoveryState.currentVariant = "";
+	discoveryState.availableVariants = [];
+	discoveryState.currentContextWindow = "";
+	discoveryState.availableContextWindowOptions = [];
 });
 
 // ─── Pure helper: formatAgentLabel ──────────────────────────────────────────
@@ -281,5 +287,58 @@ describe("handleDefaultModelInfo", () => {
 		});
 		expect(discoveryState.defaultModelId).toBe("model-b");
 		expect(discoveryState.defaultProviderId).toBe("provider-b");
+	});
+});
+
+// ─── Context window state ───────────────────────────────────────────────────
+
+describe("handleContextWindowInfo", () => {
+	it("sets the current context window and options from the server", () => {
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "1m",
+			options: [
+				{ value: "200k", label: "200K" },
+				{ value: "1m", label: "1M (beta)", isDefault: true },
+			],
+		});
+
+		expect(discoveryState.currentContextWindow).toBe("1m");
+		expect(discoveryState.availableContextWindowOptions).toEqual([
+			{ value: "200k", label: "200K" },
+			{ value: "1m", label: "1M (beta)", isDefault: true },
+		]);
+	});
+
+	it("falls back to empty state when the server sends no options", () => {
+		discoveryState.currentContextWindow = "1m";
+		discoveryState.availableContextWindowOptions = [
+			{ value: "200k", label: "200K" },
+		];
+
+		handleContextWindowInfo(
+			msg({
+				type: "context_window_info",
+				contextWindow: "",
+				options: undefined,
+			}),
+		);
+
+		expect(discoveryState.currentContextWindow).toBe("");
+		expect(discoveryState.availableContextWindowOptions).toEqual([]);
+	});
+});
+
+describe("getActiveContextWindowOptions", () => {
+	it("returns the server-provided context window options", () => {
+		discoveryState.availableContextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		];
+
+		expect(getActiveContextWindowOptions()).toEqual([
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		]);
 	});
 });
