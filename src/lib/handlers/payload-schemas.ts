@@ -115,6 +115,10 @@ export const PayloadSchemas: {
 		variant: Schema.String,
 	}),
 
+	switch_context_window: Schema.Struct({
+		contextWindow: Schema.String,
+	}),
+
 	get_commands: Schema.Struct({}),
 
 	get_projects: Schema.Struct({}),

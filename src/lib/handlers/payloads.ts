@@ -38,6 +38,7 @@ export interface PayloadMap {
 	switch_model: { modelId: string; providerId: string };
 	set_default_model: { provider: string; model: string };
 	switch_variant: { variant: string };
+	switch_context_window: { contextWindow: string };
 	get_commands: Record<string, never>;
 	get_projects: Record<string, never>;
 	add_project: { directory: string; instanceId?: string };

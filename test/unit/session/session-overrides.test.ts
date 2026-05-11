@@ -413,6 +413,48 @@ describe("SessionOverrides — variant", () => {
 	});
 });
 
+// ─── Context Window ────────────────────────────────────────────────────────
+
+describe("SessionOverrides — context window", () => {
+	it("defaults to empty string", () => {
+		const overrides = new SessionOverrides();
+		expect(overrides.defaultContextWindow).toBe("");
+	});
+
+	it("setContextWindow(sessionId, contextWindow) sets per-session context window", () => {
+		const overrides = new SessionOverrides();
+		overrides.setContextWindow("sess-1", "1m");
+		expect(overrides.getContextWindow("sess-1")).toBe("1m");
+	});
+
+	it("getContextWindow falls back to defaultContextWindow when session has no override", () => {
+		const overrides = new SessionOverrides();
+		overrides.defaultContextWindow = "200k";
+		expect(overrides.getContextWindow("sess-new")).toBe("200k");
+	});
+
+	it("per-session context window takes precedence over defaultContextWindow", () => {
+		const overrides = new SessionOverrides();
+		overrides.defaultContextWindow = "200k";
+		overrides.setContextWindow("sess-1", "1m");
+		expect(overrides.getContextWindow("sess-1")).toBe("1m");
+	});
+
+	it("clearSession removes per-session context window", () => {
+		const overrides = new SessionOverrides();
+		overrides.setContextWindow("sess-1", "1m");
+		overrides.clearSession("sess-1");
+		expect(overrides.getContextWindow("sess-1")).toBe("");
+	});
+
+	it("setting empty string clears context window", () => {
+		const overrides = new SessionOverrides();
+		overrides.setContextWindow("sess-1", "1m");
+		overrides.setContextWindow("sess-1", "");
+		expect(overrides.getContextWindow("sess-1")).toBe("");
+	});
+});
+
 // ─── drain ──────────────────────────────────────────────────────────────────
 
 describe("SessionOverrides — drain", () => {

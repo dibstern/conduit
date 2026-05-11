@@ -9,6 +9,7 @@ import {
 	clearProcessingTimeout,
 	clearSession,
 	getAgent,
+	getContextWindow,
 	getModel,
 	getVariant,
 	hasActiveProcessingTimeout,
@@ -17,6 +18,8 @@ import {
 	OverridesStateTag,
 	resetProcessingTimeout,
 	setAgent,
+	setContextWindow,
+	setDefaultContextWindow,
 	setDefaultModel,
 	setDefaultVariant,
 	setModel,
@@ -170,6 +173,40 @@ describe("SessionOverrides Effect", () => {
 			yield* setVariant("sess-1", "high");
 			yield* setVariant("sess-1", "");
 			expect(yield* getVariant("sess-1")).toBe("");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	// ─── Per-Session Context Window ─────────────────────────────────────────
+
+	it.effect(
+		"setContextWindow/getContextWindow with fallback to defaultContextWindow",
+		() =>
+			Effect.gen(function* () {
+				yield* setDefaultContextWindow("200k");
+
+				// Falls back to defaultContextWindow
+				expect(yield* getContextWindow("sess-1")).toBe("200k");
+
+				// Per-session takes precedence
+				yield* setContextWindow("sess-1", "1m");
+				expect(yield* getContextWindow("sess-1")).toBe("1m");
+
+				// Other sessions still get default
+				expect(yield* getContextWindow("sess-2")).toBe("200k");
+			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("getContextWindow returns empty string by default", () =>
+		Effect.gen(function* () {
+			expect(yield* getContextWindow("sess-1")).toBe("");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("setting empty string clears context window", () =>
+		Effect.gen(function* () {
+			yield* setContextWindow("sess-1", "1m");
+			yield* setContextWindow("sess-1", "");
+			expect(yield* getContextWindow("sess-1")).toBe("");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 

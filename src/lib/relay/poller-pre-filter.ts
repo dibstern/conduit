@@ -29,6 +29,7 @@ const METADATA_TYPES: ReadonlySet<string> = new Set([
 	"pty_list",
 	"scan_result",
 	"variant_info",
+	"context_window_info",
 	"proxy_detected",
 ]);
 

@@ -247,7 +247,7 @@ describe("IncomingWsMessage schema rejections", () => {
 // ─── Exhaustiveness: every IncomingMessageType has a schema ──────────────────
 
 describe("IncomingWsMessage coverage", () => {
-	// All 49 incoming message types from ws-router.ts (the source of truth).
+	// All 50 incoming message types from ws-router.ts (the source of truth).
 	// This test ensures IncomingWsMessage covers every one.
 	const ALL_INCOMING_TYPES = [
 		"message",
@@ -294,6 +294,7 @@ describe("IncomingWsMessage coverage", () => {
 		"set_project_instance",
 		"set_default_model",
 		"switch_variant",
+		"switch_context_window",
 		"view_session",
 		"proxy_detect",
 		"scan_now",
@@ -348,6 +349,7 @@ describe("IncomingWsMessage coverage", () => {
 		set_project_instance: { slug: "s", instanceId: "i1" },
 		set_default_model: { provider: "p", model: "m" },
 		switch_variant: { variant: "v" },
+		switch_context_window: { contextWindow: "1m" },
 		view_session: { sessionId: "s1" },
 		proxy_detect: {},
 		scan_now: {},
