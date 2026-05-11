@@ -4,6 +4,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { ModelInfo } from "../types.js";
+import { TTLCache } from "./ttl-cache.js";
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
 	[
@@ -103,4 +104,31 @@ export async function probeClaudeCapabilities(
 			abortController.abort();
 		}
 	}
+}
+
+const CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let probeOverride: (() => Promise<ProbeResult>) | undefined;
+let cache: TTLCache<ProbeResult> | undefined;
+
+function makeCache(): TTLCache<ProbeResult> {
+	return new TTLCache<ProbeResult>(CAPABILITY_CACHE_TTL_MS, () =>
+		probeOverride ? probeOverride() : probeClaudeCapabilities(),
+	);
+}
+
+export async function getCachedClaudeCapabilities(): Promise<ProbeResult> {
+	if (!cache) cache = makeCache();
+	return cache.get();
+}
+
+export function resetCapabilityCacheForTesting(): void {
+	cache = undefined;
+}
+
+export function __setProbeOverrideForTesting(
+	fn: (() => Promise<ProbeResult>) | undefined,
+): void {
+	probeOverride = fn;
+	cache = undefined;
 }
