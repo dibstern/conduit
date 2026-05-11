@@ -25,6 +25,7 @@
 			options[0],
 	);
 	const currentLabel = $derived(selectedOption?.label ?? "default");
+	const currentOverride = $derived(discoveryState.currentContextWindow);
 
 	function getDefaultValue(
 		contextOptions: ReadonlyArray<ContextWindowOption>,
@@ -87,13 +88,26 @@
 				data-testid="context-window-dropdown"
 				class="absolute bottom-[calc(100%+4px)] right-0 w-44 bg-bg-alt border border-border rounded-lg shadow-[0_-4px_16px_rgba(var(--shadow-rgb),0.3)] z-[210] py-1 font-brand"
 			>
+				<button
+					data-testid="context-window-option-default"
+					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentOverride === '' ? 'text-accent' : ''}"
+					onclick={(e) => selectContextWindow({ value: "", label: "default" }, e)}
+				>
+					{#if currentOverride === ""}
+						<span class="text-accent font-bold text-xs">&#10003;</span>
+					{:else}
+						<span class="w-[10px]"></span>
+					{/if}
+					default
+				</button>
+
 				{#each options as option (option.value)}
 					<button
 						data-testid="context-window-option-{option.value}"
-						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {selectedValue === option.value ? 'text-accent' : ''}"
+						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentOverride === option.value ? 'text-accent' : ''}"
 						onclick={(e) => selectContextWindow(option, e)}
 					>
-						{#if selectedValue === option.value}
+						{#if currentOverride === option.value}
 							<span class="text-accent font-bold text-xs">&#10003;</span>
 						{:else}
 							<span class="w-[10px]"></span>

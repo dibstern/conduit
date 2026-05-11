@@ -15,12 +15,15 @@ import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionOverrides } from "../session/session-overrides.js";
+import type {
+	ModelOverride,
+	SessionOverrides,
+} from "../session/session-overrides.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
 } from "../session/session-switch.js";
-import type { PtyInfo } from "../shared-types.js";
+import type { ContextWindowOption, PtyInfo } from "../shared-types.js";
 import type { OpenCodeInstance, RelayMessage } from "../types.js";
 import type { PermissionBridge } from "./permission-bridge.js";
 
@@ -48,6 +51,23 @@ interface SessionManagerLike {
 	}>;
 	seedPaginationCursor(sessionId: string, messageId: string): void;
 	getLastMessageAtMap?(): ReadonlyMap<string, number>;
+}
+
+function findContextWindowOptions(
+	providers: ReadonlyArray<{
+		models: ReadonlyArray<{
+			id: string;
+			contextWindowOptions?: readonly ContextWindowOption[];
+		}>;
+	}>,
+	modelId: string | undefined,
+): readonly ContextWindowOption[] {
+	if (!modelId) return [];
+	for (const provider of providers) {
+		const model = provider.models.find((m) => m.id === modelId);
+		if (model?.contextWindowOptions) return model.contextWindowOptions;
+	}
+	return [];
 }
 
 export interface ClientInitDeps {
@@ -127,6 +147,7 @@ export async function handleClientConnected(
 	// otherwise compute the default (most recent or newly created).
 	const activeId =
 		requestedSessionId || (await sessionMgr.getDefaultSessionId());
+	let activeSessionModel: ModelOverride | undefined;
 	if (activeId) {
 		// pollerManager intentionally omitted — not available in ClientInitDeps.
 		// skipPollerSeed: true ensures switchClientToSession never accesses it.
@@ -151,6 +172,10 @@ export async function handleClientConnected(
 		try {
 			const session = await client.session.get(activeId);
 			if (session.modelID) {
+				activeSessionModel = {
+					modelID: session.modelID,
+					providerID: session.providerID ?? "",
+				};
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
 					model: session.modelID,
@@ -380,9 +405,10 @@ export async function handleClientConnected(
 		const currentVariant = activeId
 			? overrides.getVariant(activeId)
 			: overrides.defaultVariant;
-		const activeModelId = activeId
-			? overrides.getModel(activeId)?.modelID
-			: overrides.defaultModel?.modelID;
+		const activeModel = activeId
+			? (overrides.getModel(activeId) ?? activeSessionModel)
+			: overrides.defaultModel;
+		const activeModelId = activeModel?.modelID;
 		let availableVariants: string[] = [];
 		if (activeModelId) {
 			for (const p of providers) {
@@ -399,6 +425,13 @@ export async function handleClientConnected(
 			type: "variant_info",
 			variant: currentVariant,
 			variants: availableVariants,
+		});
+		wsHandler.sendTo(clientId, {
+			type: "context_window_info",
+			contextWindow: activeId
+				? overrides.getContextWindow(activeId)
+				: overrides.defaultContextWindow,
+			options: findContextWindowOptions(providers, activeModelId),
 		});
 
 		// Send default model info to new client

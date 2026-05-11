@@ -378,6 +378,12 @@ const SessionInfoSchema = Schema.Struct({
 	pendingQuestionCount: Schema.optional(Schema.Number),
 });
 
+const ContextWindowOptionSchema = Schema.Struct({
+	value: Schema.String,
+	label: Schema.String,
+	isDefault: Schema.optional(Schema.Boolean),
+});
+
 const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
@@ -401,22 +407,10 @@ const ProviderInfoSchema = Schema.Struct({
 			),
 			variants: Schema.optional(Schema.Array(Schema.String)),
 			contextWindowOptions: Schema.optional(
-				Schema.Array(
-					Schema.Struct({
-						value: Schema.String,
-						label: Schema.String,
-						isDefault: Schema.optional(Schema.Boolean),
-					}),
-				),
+				Schema.Array(ContextWindowOptionSchema),
 			),
 		}),
 	),
-});
-
-const ContextWindowOptionSchema = Schema.Struct({
-	value: Schema.String,
-	label: Schema.String,
-	isDefault: Schema.optional(Schema.Boolean),
 });
 
 const AgentInfoSchema = Schema.Struct({

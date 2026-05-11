@@ -85,6 +85,9 @@ test.describe("Context window dropdown", () => {
 			page.locator("[data-testid='context-window-dropdown']"),
 		).toBeVisible();
 		await expect(
+			page.locator("[data-testid='context-window-option-default']"),
+		).toContainText("default");
+		await expect(
 			page.locator("[data-testid='context-window-option-200k']"),
 		).toContainText("200K");
 		await expect(
@@ -112,6 +115,44 @@ test.describe("Context window dropdown", () => {
 		expect(msg).toMatchObject({
 			type: "switch_context_window",
 			contextWindow: "1m",
+		});
+	});
+
+	test("selecting default clears the override", async ({ page, baseURL }) => {
+		const control = await setupWithContextOptions(page, baseURL);
+
+		const badge = page.locator("[data-testid='context-window-badge']");
+		await badge.click();
+		await page.locator("[data-testid='context-window-option-1m']").click();
+		await expect(badge).toContainText("1M (beta)");
+
+		await badge.click();
+		await page.locator("[data-testid='context-window-option-default']").click();
+
+		await expect(badge).toContainText("200K");
+		await expect
+			.poll(() =>
+				control
+					.getClientMessages()
+					.filter(
+						(m: unknown) =>
+							typeof m === "object" &&
+							m !== null &&
+							(m as { type?: string }).type === "switch_context_window",
+					),
+			)
+			.toHaveLength(2);
+		const messages = control
+			.getClientMessages()
+			.filter(
+				(m: unknown) =>
+					typeof m === "object" &&
+					m !== null &&
+					(m as { type?: string }).type === "switch_context_window",
+			);
+		expect(messages[1]).toMatchObject({
+			type: "switch_context_window",
+			contextWindow: "",
 		});
 	});
 
