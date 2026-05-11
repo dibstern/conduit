@@ -5,8 +5,7 @@ description: Use when working with Effect-TS patterns, services, layers, schemas
 
 # Effect-TS Expert
 
-Expert guidance for functional programming with the Effect library — typed errors, dependency injection, composability,
-concurrency, and testing patterns. Tailored for the conduit codebase (Svelte 5 + Node.js daemon, mid-migration to Effect).
+Expert guidance for functional programming with the Effect library — typed errors, dependency injection, composability, concurrency, and testing patterns. Tailored for the conduit codebase (Svelte 5 + Node.js daemon, mid-migration to Effect).
 
 ## Prerequisites Check
 
