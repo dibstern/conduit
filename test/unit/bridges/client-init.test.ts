@@ -255,6 +255,80 @@ describe("handleClientConnected — agent list", () => {
 		});
 	});
 
+	it("sends Claude agents for a Claude-bound active session", async () => {
+		const deps = applyTestDefaults(
+			createMockClientInitDeps({
+				orchestrationEngine: {
+					getProviderForSession: vi.fn(() => "claude"),
+					dispatch: vi.fn(async () => ({
+						models: [],
+						supportsTools: true,
+						supportsThinking: true,
+						supportsPermissions: true,
+						supportsQuestions: true,
+						supportsAttachments: true,
+						supportsFork: false,
+						supportsRevert: false,
+						commands: [],
+						agents: [
+							{ id: "Explore", name: "Explore", description: "Explorer" },
+							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+						],
+					})),
+				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+			}),
+		);
+		vi.mocked(deps.overrides.getModel).mockReturnValue({
+			providerID: "claude",
+			modelID: "claude-sonnet-4-7",
+		});
+		vi.mocked(deps.overrides.getAgent).mockReturnValue("Explore");
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.client.app.agents).not.toHaveBeenCalled();
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "agent_list",
+			agents: [{ id: "Explore", name: "Explore", description: "Explorer" }],
+			activeAgentId: "Explore",
+		});
+	});
+
+	it("clears stale agent during Claude-bound client init", async () => {
+		const deps = applyTestDefaults(
+			createMockClientInitDeps({
+				orchestrationEngine: {
+					getProviderForSession: vi.fn(() => "claude"),
+					dispatch: vi.fn(async () => ({
+						models: [],
+						supportsTools: true,
+						supportsThinking: true,
+						supportsPermissions: true,
+						supportsQuestions: true,
+						supportsAttachments: true,
+						supportsFork: false,
+						supportsRevert: false,
+						commands: [],
+						agents: [{ id: "Explore", name: "Explore" }],
+					})),
+				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+			}),
+		);
+		vi.mocked(deps.overrides.getModel).mockReturnValue({
+			providerID: "claude",
+			modelID: "claude-opus-4-7",
+		});
+		vi.mocked(deps.overrides.getAgent).mockReturnValue("Missing");
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.overrides.clearAgent).toHaveBeenCalledWith("session-1");
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "agent_list",
+			agents: [{ id: "Explore", name: "Explore" }],
+		});
+	});
+
 	it("sends INIT_FAILED when listAgents throws", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.client.app.agents).mockRejectedValue(

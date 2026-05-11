@@ -114,6 +114,7 @@
 			modelId: model.id,
 			providerId: model.provider,
 		});
+		wsSend({ type: "get_agents" });
 		discoveryState.currentModelId = model.id;
 		discoveryState.currentProviderId = model.provider;
 		dropdownOpen = false;

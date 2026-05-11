@@ -10,6 +10,16 @@ describe("probeClaudeCapabilities", () => {
 				supportedEffortLevels?: string[];
 			}>;
 			account?: { subscriptionType?: string };
+			commands?: Array<{
+				name: string;
+				description?: string;
+				argumentHint?: string;
+			}>;
+			agents?: Array<{
+				name: string;
+				description?: string;
+				model?: string;
+			}>;
 		};
 		throwOnInit?: Error;
 	}) {
@@ -93,6 +103,59 @@ describe("probeClaudeCapabilities", () => {
 		});
 		const result = await probeClaudeCapabilities({ queryFactory });
 		expect(result.subscriptionType).toBe("Max");
+	});
+
+	it("captures slash commands from init", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [],
+				commands: [
+					{
+						name: "init",
+						description: "Init Claude",
+						argumentHint: "[path]",
+					},
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.commands).toEqual([
+			{
+				name: "init",
+				description: "Init Claude",
+				args: "[path]",
+				source: "claude-sdk",
+			},
+		]);
+	});
+
+	it("captures agents from init", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [],
+				agents: [
+					{ name: "code-reviewer", description: "Reviews code", model: "opus" },
+					{ name: "test-runner", description: "Runs tests" },
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.agents).toEqual([
+			{
+				id: "code-reviewer",
+				name: "code-reviewer",
+				description: "Reviews code",
+				model: "opus",
+			},
+			{ id: "test-runner", name: "test-runner", description: "Runs tests" },
+		]);
+	});
+
+	it("returns empty commands and agents when init omits them", async () => {
+		const queryFactory = makeFakeQuery({ initResult: { models: [] } });
+		const result = await probeClaudeCapabilities({ queryFactory });
+		expect(result.commands).toEqual([]);
+		expect(result.agents).toEqual([]);
 	});
 
 	it("leaves subscriptionType undefined when account is absent", async () => {

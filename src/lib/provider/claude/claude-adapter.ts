@@ -30,6 +30,7 @@ import type {
 	ModelInfo,
 	PermissionDecision,
 	ProviderAdapter,
+	ProviderAgentInfo,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -235,7 +236,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		const userBase = join(homedir(), ".claude");
 		const projectBase = join(this.deps.workspaceRoot, ".claude");
 
-		const commands: CommandInfo[] = [
+		const fsCommands: CommandInfo[] = [
 			...BUILTIN_COMMANDS.map((c) => ({
 				name: c.name,
 				description: c.description,
@@ -248,15 +249,24 @@ export class ClaudeAdapter implements ProviderAdapter {
 		];
 
 		let models: ReadonlyArray<ModelInfo>;
+		let sdkCommands: ReadonlyArray<CommandInfo> = [];
+		let agents: ReadonlyArray<ProviderAgentInfo> = [];
 		try {
 			const probe = await getCachedClaudeCapabilities();
 			models = probe.models.length > 0 ? probe.models : FALLBACK_MODELS;
+			sdkCommands = probe.commands;
+			agents = probe.agents;
 		} catch (err) {
 			log.warn(
 				`Capability probe failed; using fallback model list: ${err instanceof Error ? err.message : err}`,
 			);
 			models = FALLBACK_MODELS;
 		}
+		const seen = new Set(fsCommands.map((command) => command.name));
+		const commands = [
+			...fsCommands,
+			...sdkCommands.filter((command) => !seen.has(command.name)),
+		];
 
 		return {
 			models,
@@ -268,6 +278,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 			supportsFork: false,
 			supportsRevert: false,
 			commands,
+			agents,
 		};
 	}
 

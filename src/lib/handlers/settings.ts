@@ -6,7 +6,9 @@ import { basename, dirname } from "node:path";
 import { Effect } from "effect";
 import {
 	ConfigTag,
+	LoggerTag,
 	OpenCodeAPITag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { RelayError } from "../errors.js";
@@ -22,6 +24,42 @@ export const handleGetCommands = (
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
+		const activeSessionId = wsHandler.getClientSession(clientId);
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const activeProviderId =
+			activeSessionId &&
+			engineOption._tag === "Some" &&
+			typeof engineOption.value.getProviderForSession === "function"
+				? engineOption.value.getProviderForSession(activeSessionId)
+				: undefined;
+
+		if (activeProviderId === "claude" && engineOption._tag === "Some") {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() =>
+					engineOption.value.dispatch({
+						type: "discover",
+						providerId: "claude",
+					}),
+				),
+			);
+			if (result._tag === "Left") {
+				const logOption = yield* Effect.serviceOption(LoggerTag);
+				if (logOption._tag === "Some") {
+					logOption.value.warn(
+						`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+					);
+				}
+				wsHandler.sendTo(clientId, { type: "command_list", commands: [] });
+				return;
+			}
+			const commands = result.right.commands.map((command) => ({
+				name: command.name,
+				...(command.description ? { description: command.description } : {}),
+				...(command.args ? { args: command.args } : {}),
+			}));
+			wsHandler.sendTo(clientId, { type: "command_list", commands });
+			return;
+		}
 
 		const commands = yield* Effect.tryPromise(() => client.app.commands());
 		wsHandler.sendTo(clientId, { type: "command_list", commands });

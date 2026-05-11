@@ -3,7 +3,12 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { ContextWindowOption, ModelInfo } from "../types.js";
+import type {
+	CommandInfo,
+	ContextWindowOption,
+	ModelInfo,
+	ProviderAgentInfo,
+} from "../types.js";
 import { TTLCache } from "./ttl-cache.js";
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
@@ -19,11 +24,25 @@ interface SDKModelInfoSubset {
 	readonly supportedEffortLevels?: readonly string[];
 }
 
+interface SDKSlashCommandSubset {
+	readonly name: string;
+	readonly description?: string;
+	readonly argumentHint?: string;
+}
+
+interface SDKAgentInfoSubset {
+	readonly name: string;
+	readonly description?: string;
+	readonly model?: string;
+}
+
 interface InitializationResultSubset {
 	readonly models?: readonly SDKModelInfoSubset[];
 	readonly account?: {
 		readonly subscriptionType?: string;
 	};
+	readonly commands?: readonly SDKSlashCommandSubset[];
+	readonly agents?: readonly SDKAgentInfoSubset[];
 }
 
 interface CapabilityQuery {
@@ -33,6 +52,8 @@ interface CapabilityQuery {
 export interface ProbeResult {
 	readonly models: ReadonlyArray<ModelInfo>;
 	readonly subscriptionType?: string;
+	readonly commands: ReadonlyArray<CommandInfo>;
+	readonly agents: ReadonlyArray<ProviderAgentInfo>;
 }
 
 export interface ProbeDeps {
@@ -162,11 +183,25 @@ export async function probeClaudeCapabilities(
 		});
 		const init = await query.initializationResult();
 		const subscriptionType = init.account?.subscriptionType;
+		const commands: CommandInfo[] = (init.commands ?? []).map((command) => ({
+			name: command.name,
+			...(command.description ? { description: command.description } : {}),
+			...(command.argumentHint ? { args: command.argumentHint } : {}),
+			source: "claude-sdk",
+		}));
+		const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
+			id: agent.name,
+			name: agent.name,
+			...(agent.description ? { description: agent.description } : {}),
+			...(agent.model ? { model: agent.model } : {}),
+		}));
 		return {
 			models: (init.models ?? []).map((model) =>
 				sdkModelToConduit(model, subscriptionType),
 			),
 			...(subscriptionType ? { subscriptionType } : {}),
+			commands,
+			agents,
 		};
 	} finally {
 		if (!abortController.signal.aborted) {

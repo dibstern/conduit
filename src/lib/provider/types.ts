@@ -159,12 +159,21 @@ export type CommandSource =
 	| "user-command"
 	| "project-command"
 	| "user-skill"
-	| "project-skill";
+	| "project-skill"
+	| "claude-sdk";
 
 export interface CommandInfo {
 	readonly name: string;
 	readonly description?: string;
+	readonly args?: string;
 	readonly source: CommandSource;
+}
+
+export interface ProviderAgentInfo {
+	readonly id: string;
+	readonly name: string;
+	readonly description?: string;
+	readonly model?: string;
 }
 
 // ─── Adapter Capabilities ───────────────────────────────────────────────────
@@ -179,6 +188,7 @@ export interface AdapterCapabilities {
 	readonly supportsFork: boolean;
 	readonly supportsRevert: boolean;
 	readonly commands: readonly CommandInfo[];
+	readonly agents?: readonly ProviderAgentInfo[];
 }
 
 // ─── Provider Adapter Interface ─────────────────────────────────────────────

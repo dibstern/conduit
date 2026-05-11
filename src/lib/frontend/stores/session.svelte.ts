@@ -380,6 +380,8 @@ export function switchToSession(
 	const slug = getCurrentSlug();
 	if (slug) navigate(`/p/${slug}/s/${sessionId}`);
 	sendWs({ type: "view_session", sessionId });
+	sendWs({ type: "get_agents" });
+	sendWs({ type: "get_commands" });
 }
 
 /** Clear all session state (for project switch). */

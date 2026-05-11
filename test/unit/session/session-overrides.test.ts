@@ -106,6 +106,20 @@ describe("SessionOverrides — per-session agent", () => {
 		overrides.setAgent("sess-1", "plan");
 		expect(overrides.getAgent("sess-1")).toBe("plan");
 	});
+
+	it("clears agent for a specific session without clearing other overrides", () => {
+		const overrides = new SessionOverrides();
+		overrides.setAgent("sess-1", "code");
+		overrides.setModel("sess-1", { providerID: "claude", modelID: "sonnet" });
+		overrides.setAgent("sess-2", "plan");
+		overrides.clearAgent("sess-1");
+		expect(overrides.getAgent("sess-1")).toBeUndefined();
+		expect(overrides.getModel("sess-1")).toEqual({
+			providerID: "claude",
+			modelID: "sonnet",
+		});
+		expect(overrides.getAgent("sess-2")).toBe("plan");
+	});
 });
 
 // ─── Per-Session Model ──────────────────────────────────────────────────────

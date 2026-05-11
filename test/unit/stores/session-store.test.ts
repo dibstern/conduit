@@ -18,6 +18,7 @@ import {
 	sessionState,
 	setCurrentSession,
 	setSearchQuery,
+	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type {
@@ -76,6 +77,27 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	sessionState.hasMore = false;
+});
+
+describe("switchToSession", () => {
+	it("requests active-provider commands and agents after changing session", () => {
+		const sendWs = vi.fn();
+		sessionState.currentId = "old-session";
+
+		switchToSession("new-session", sendWs);
+
+		expect(sendWs).toHaveBeenCalledWith({
+			type: "view_session",
+			sessionId: "new-session",
+		});
+		expect(sendWs).toHaveBeenCalledWith({ type: "get_agents" });
+		expect(sendWs).toHaveBeenCalledWith({ type: "get_commands" });
+		expect(sendWs.mock.calls.map((call) => call[0])).toEqual([
+			{ type: "view_session", sessionId: "new-session" },
+			{ type: "get_agents" },
+			{ type: "get_commands" },
+		]);
+	});
 });
 
 // ─── groupSessionsByDate (pure function) ────────────────────────────────────
