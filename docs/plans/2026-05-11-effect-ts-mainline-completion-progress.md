@@ -325,7 +325,8 @@ curl: (7) Failed to connect to localhost port 4096 after 0 ms: Couldn't connect 
 Daemon-only smoke was run with an isolated temp config directory and ephemeral port, so it did not touch the
 user's normal daemon config or the default `2633` port.
 
-Daemon CLI invocation used:
+Daemon CLI invocation used. The `--daemon` command is long-running; it ran in terminal/session A while the
+status, health, and stop probes ran from terminal/session B.
 
 ```bash
 tmp_dir=$(mktemp -d /tmp/conduit-smoke.XXXXXX)
@@ -336,7 +337,7 @@ CONDUIT_CONFIG_DIR="$tmp_dir" pnpm exec tsx src/bin/cli.ts --stop
 curl -sS "http://127.0.0.1:65272/health"
 ```
 
-- [x] Cold daemon start, IPC `ping` round-trip, clean shutdown with no orphan processes.
+- [x] Cold daemon start, IPC status/shutdown round-trip, clean shutdown with no orphan processes.
   - Baseline observation: Pass for daemon-only path. Internal `--daemon` started with PID `42670`, `/health`
     returned `{"ok":true,...,"port":65272,"tlsEnabled":false}`, `--status` returned uptime/port/projects,
     `--stop` printed `Daemon stopped.`, the daemon process exited, and post-stop `/health` refused connection.
