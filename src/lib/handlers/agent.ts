@@ -4,10 +4,14 @@ import { Effect } from "effect";
 import {
 	LoggerTag,
 	OpenCodeAPITag,
+	OrchestrationEngineTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import type { Agent } from "../instance/sdk-types.js";
+import type { ProviderAgentInfo } from "../provider/types.js";
+import type { SessionOverrides } from "../session/session-overrides.js";
+import type { RelayMessage } from "../types.js";
 import type { PayloadMap } from "./payloads.js";
 
 /**
@@ -55,6 +59,47 @@ export function filterAgents(
 		}));
 }
 
+export function claudeAgentMatchesModel(
+	agent: ProviderAgentInfo,
+	modelId: string | undefined,
+): boolean {
+	if (!agent.model) return true;
+	if (!modelId) return true;
+	const normalizedAgentModel = agent.model.toLowerCase();
+	const normalizedModelId = modelId.toLowerCase();
+	return (
+		normalizedModelId === normalizedAgentModel ||
+		normalizedModelId.includes(normalizedAgentModel)
+	);
+}
+
+export function toWireAgents(
+	agents: readonly ProviderAgentInfo[],
+): Array<{ id: string; name: string; description?: string }> {
+	return agents.map((agent) => ({
+		id: agent.id,
+		name: agent.name,
+		...(agent.description ? { description: agent.description } : {}),
+	}));
+}
+
+export function makeAgentListMessage(
+	agents: Array<{ id: string; name: string; description?: string }>,
+	sessionId: string | undefined,
+	overrides: SessionOverrides | undefined,
+): Extract<RelayMessage, { type: "agent_list" }> {
+	const activeAgentId =
+		sessionId && overrides ? overrides.getAgent(sessionId) : undefined;
+	if (!activeAgentId) return { type: "agent_list", agents };
+	if (agents.some((agent) => agent.id === activeAgentId)) {
+		return { type: "agent_list", agents, activeAgentId };
+	}
+	if (sessionId && typeof overrides?.clearAgent === "function") {
+		overrides.clearAgent(sessionId);
+	}
+	return { type: "agent_list", agents };
+}
+
 export const handleGetAgents = (
 	clientId: string,
 	_payload: PayloadMap["get_agents"],
@@ -62,10 +107,62 @@ export const handleGetAgents = (
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
+		const activeSessionId = wsHandler.getClientSession(clientId);
+		const overridesOption = yield* Effect.serviceOption(SessionOverridesTag);
+		const overrides =
+			overridesOption._tag === "Some" ? overridesOption.value : undefined;
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const activeProviderId =
+			activeSessionId &&
+			engineOption._tag === "Some" &&
+			typeof engineOption.value.getProviderForSession === "function"
+				? engineOption.value.getProviderForSession(activeSessionId)
+				: undefined;
+
+		if (activeProviderId === "claude" && engineOption._tag === "Some") {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() =>
+					engineOption.value.dispatch({
+						type: "discover",
+						providerId: "claude",
+					}),
+				),
+			);
+			if (result._tag === "Left") {
+				const logOption = yield* Effect.serviceOption(LoggerTag);
+				if (logOption._tag === "Some") {
+					logOption.value.warn(
+						`Failed to discover Claude agents: ${result.left instanceof Error ? result.left.message : result.left}`,
+					);
+				}
+				wsHandler.sendTo(
+					clientId,
+					makeAgentListMessage([], activeSessionId, overrides),
+				);
+				return;
+			}
+			const activeModelId =
+				activeSessionId && overrides
+					? overrides.getModel(activeSessionId)?.modelID
+					: undefined;
+			const agents = toWireAgents(
+				(result.right.agents ?? []).filter((agent) =>
+					claudeAgentMatchesModel(agent, activeModelId),
+				),
+			);
+			wsHandler.sendTo(
+				clientId,
+				makeAgentListMessage(agents, activeSessionId, overrides),
+			);
+			return;
+		}
 
 		const rawAgents = yield* Effect.tryPromise(() => client.app.agents());
 		const agents = filterAgents(rawAgents);
-		wsHandler.sendTo(clientId, { type: "agent_list", agents });
+		wsHandler.sendTo(
+			clientId,
+			makeAgentListMessage(agents, activeSessionId, overrides),
+		);
 	});
 
 export const handleSwitchAgent = (

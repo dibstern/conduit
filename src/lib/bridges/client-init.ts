@@ -9,6 +9,11 @@
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
+import {
+	claudeAgentMatchesModel,
+	makeAgentListMessage,
+	toWireAgents,
+} from "../handlers/agent.js";
 import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
@@ -328,9 +333,36 @@ export async function handleClientConnected(
 
 	// ── Agent list (filter out internal agents) ──────────────────────────
 	try {
-		const rawAgents = await client.app.agents();
-		const agents = filterAgents(rawAgents);
-		wsHandler.sendTo(clientId, { type: "agent_list", agents });
+		const activeProviderId =
+			activeId &&
+			typeof deps.orchestrationEngine?.getProviderForSession === "function"
+				? deps.orchestrationEngine.getProviderForSession(activeId)
+				: undefined;
+		if (activeProviderId === "claude" && deps.orchestrationEngine) {
+			const claudeCaps = await deps.orchestrationEngine.dispatch({
+				type: "discover",
+				providerId: "claude",
+			});
+			const activeModelId = activeId
+				? overrides.getModel(activeId)?.modelID
+				: undefined;
+			const agents = toWireAgents(
+				(claudeCaps.agents ?? []).filter((agent) =>
+					claudeAgentMatchesModel(agent, activeModelId),
+				),
+			);
+			wsHandler.sendTo(
+				clientId,
+				makeAgentListMessage(agents, activeId, overrides),
+			);
+		} else {
+			const rawAgents = await client.app.agents();
+			const agents = filterAgents(rawAgents);
+			wsHandler.sendTo(
+				clientId,
+				makeAgentListMessage(agents, activeId, overrides),
+			);
+		}
 	} catch (err) {
 		sendInitError(err, "Failed to list agents");
 	}

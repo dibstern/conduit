@@ -261,6 +261,7 @@ function createMockOverrides(): HandlerDeps["overrides"] {
 		setContextWindow: vi.fn(),
 		getModel: vi.fn().mockReturnValue(undefined),
 		getAgent: vi.fn().mockReturnValue(undefined),
+		clearAgent: vi.fn(),
 		getVariant: vi.fn().mockReturnValue(""),
 		getContextWindow: vi.fn().mockReturnValue(""),
 		isModelUserSelected: vi.fn().mockReturnValue(false),

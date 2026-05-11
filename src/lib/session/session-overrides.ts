@@ -93,6 +93,12 @@ export class SessionOverrides {
 		return this.sessions.get(sessionId)?.agent;
 	}
 
+	/** Clear the agent override for a session without touching other overrides. */
+	clearAgent(sessionId: string): void {
+		const state = this.sessions.get(sessionId);
+		if (state) delete state.agent;
+	}
+
 	// ─── Per-Session Variant (Thinking Level) ───────────────────────────────
 
 	/** Set the variant (thinking level) for a session. Empty string clears. */
