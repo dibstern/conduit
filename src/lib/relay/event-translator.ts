@@ -807,10 +807,37 @@ export function createTranslator(): Translator {
 }
 
 /**
- * Rebuild translator state from REST API messages.
+ * Rebuild translator state from REST API messages, surfacing fetch/rebuild
+ * failures to the caller.
  * Fetches messages for the given session and populates the translator's
  * seenParts map so it knows which parts already exist (prevents duplicate
  * tool_start/thinking_start on session switch or SSE reconnection).
+ */
+export async function rebuildTranslatorFromHistoryOrThrow<
+	M extends {
+		parts?: Array<{ id: string; type: string; [key: string]: unknown }>;
+	},
+>(
+	translator: Translator,
+	getMessages: (sessionId: string) => Promise<M[] | undefined>,
+	sessionId: string,
+): Promise<M[] | undefined> {
+	const messages = await getMessages(sessionId);
+	if (messages === undefined) return undefined;
+
+	const parts = messages.map((m) => {
+		const rawParts = (m as { parts?: unknown[] }).parts as
+			| Array<{ id: string; type: PartType; state?: { status?: ToolStatus } }>
+			| undefined;
+		return rawParts != null ? { parts: rawParts } : {};
+	});
+	translator.rebuildStateFromHistory(sessionId, parts);
+	return messages;
+}
+
+/**
+ * Legacy imperative wrapper: rebuild failures are logged and represented as
+ * undefined so existing callback-based callers keep their historical behavior.
  */
 export async function rebuildTranslatorFromHistory<
 	M extends {
@@ -818,20 +845,16 @@ export async function rebuildTranslatorFromHistory<
 	},
 >(
 	translator: Translator,
-	getMessages: (sessionId: string) => Promise<M[]>,
+	getMessages: (sessionId: string) => Promise<M[] | undefined>,
 	sessionId: string,
 	log: { warn(...args: unknown[]): void },
 ): Promise<M[] | undefined> {
 	try {
-		const messages = await getMessages(sessionId);
-		const parts = messages.map((m) => {
-			const rawParts = (m as { parts?: unknown[] }).parts as
-				| Array<{ id: string; type: PartType; state?: { status?: ToolStatus } }>
-				| undefined;
-			return rawParts != null ? { parts: rawParts } : {};
-		});
-		translator.rebuildStateFromHistory(sessionId, parts);
-		return messages;
+		return await rebuildTranslatorFromHistoryOrThrow(
+			translator,
+			getMessages,
+			sessionId,
+		);
 	} catch (err) {
 		log.warn(
 			`rebuildStateFromHistory failed for ${sessionId}: ${err instanceof Error ? err.message : err}`,

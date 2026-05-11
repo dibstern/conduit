@@ -17,7 +17,11 @@ import {
 } from "../../../src/lib/effect/services.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
-import { makeSessionLifecycleWiringLive } from "../../../src/lib/relay/session-lifecycle-wiring.js";
+import {
+	handleSessionCreated,
+	makeSessionLifecycleWiringLive,
+	SessionLifecycleHistoryRebuildError,
+} from "../../../src/lib/relay/session-lifecycle-wiring.js";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -101,6 +105,36 @@ function makeTestLayer(
 // subscription scope.
 
 describe("SessionLifecycleWiringLive", () => {
+	it.effect("maps history rebuild rejection into a typed lifecycle error", () =>
+		Effect.gen(function* () {
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const cause = new Error("history unavailable");
+			services.client.session.messages.mockRejectedValue(cause);
+
+			const result = yield* Effect.either(
+				handleSessionCreated("s-reject", {
+					translator: deps.translator as any,
+					client: services.client,
+					pollerManager: services.pollerManager,
+					sessionLog: services.log,
+				}),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(SessionLifecycleHistoryRebuildError);
+				expect(result.left._tag).toBe("SessionLifecycleHistoryRebuildError");
+				expect(result.left.sessionId).toBe("s-reject");
+				expect(result.left.operation).toBe("rebuildTranslatorFromHistory");
+				expect(result.left.cause).toBe(cause);
+			}
+			expect(deps.translator.reset).toHaveBeenCalledWith("s-reject");
+			expect(deps.translator.rebuildStateFromHistory).not.toHaveBeenCalled();
+			expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
+		}),
+	);
+
 	it.live("broadcasts RelayBroadcast to WebSocket handler", () => {
 		const services = makeMockServices();
 		const deps = makeMockDeps();

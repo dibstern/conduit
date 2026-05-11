@@ -85,10 +85,18 @@ const startLifecycleServer = (operation: string, start: () => Promise<void>) =>
 		catch: (cause) => new DaemonLifecycleLayerError({ operation, cause }),
 	});
 
-// close* lifecycle helpers resolve on no-op, normal close, or shutdown timeout;
-// they do not reject, so defects here indicate a bug in the close helper itself.
-const closeLifecycleServer = (close: () => Promise<void>) =>
-	Effect.promise(close);
+const loggedFinalizerPromise = (operation: string, run: () => Promise<void>) =>
+	Effect.tryPromise({
+		try: run,
+		catch: (cause) => new DaemonLifecycleLayerError({ operation, cause }),
+	}).pipe(
+		Effect.catchAll((error) =>
+			Effect.logError(`${operation} failed during shutdown`, error),
+		),
+	);
+
+const closeLifecycleServer = (operation: string, close: () => Promise<void>) =>
+	loggedFinalizerPromise(operation, close);
 
 /**
  * Installs SIGTERM/SIGINT handlers. Completes a Deferred on signal.
@@ -193,7 +201,11 @@ export const makeSessionOverridesLive = () =>
 		SessionOverridesTag,
 		Effect.gen(function* () {
 			const instance = new SessionOverrides();
-			yield* Effect.addFinalizer(() => Effect.promise(() => instance.drain()));
+			yield* Effect.addFinalizer(() =>
+				loggedFinalizerPromise("SessionOverrides.drain", () =>
+					instance.drain(),
+				),
+			);
 			return instance;
 		}),
 	);
@@ -268,7 +280,7 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 			});
 			yield* Ref.update(configRef, (c) => ({ ...c, port: actualPort }));
 			yield* Effect.addFinalizer(() =>
-				closeLifecycleServer(() => closeHttpServer(ctx)),
+				closeLifecycleServer("closeHttpServer", () => closeHttpServer(ctx)),
 			);
 		}),
 	);
@@ -288,7 +300,7 @@ export const makeIpcServerLive = (
 				startIPCServer(ctx, ipcContext, getStatus),
 			);
 			yield* Effect.addFinalizer(() =>
-				closeLifecycleServer(() => closeIPCServer(ctx)),
+				closeLifecycleServer("closeIPCServer", () => closeIPCServer(ctx)),
 			);
 		}),
 	);
@@ -329,7 +341,9 @@ export const makeOnboardingServerLive = (
 					}),
 			});
 			yield* Effect.addFinalizer(() =>
-				closeLifecycleServer(() => closeOnboardingServer(ctx)),
+				closeLifecycleServer("closeOnboardingServer", () =>
+					closeOnboardingServer(ctx),
+				),
 			);
 		}),
 	);

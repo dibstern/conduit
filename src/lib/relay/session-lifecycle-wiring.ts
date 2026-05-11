@@ -3,7 +3,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import { Effect, Layer, Stream } from "effect";
+import { Data, Effect, Layer, Stream } from "effect";
 import { DaemonEventBusTag } from "../effect/daemon-pubsub.js";
 import {
 	LoggerTag,
@@ -22,6 +22,7 @@ import type { RelayMessage } from "../types.js";
 import {
 	type createTranslator,
 	rebuildTranslatorFromHistory,
+	rebuildTranslatorFromHistoryOrThrow,
 } from "./event-translator.js";
 import type { MonitoringState } from "./monitoring-types.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
@@ -58,6 +59,20 @@ export interface SessionLifecycleWiringDeps {
 	getMonitoringState: () => MonitoringState;
 	setMonitoringState: (state: MonitoringState) => void;
 	sessionLog: Logger;
+}
+
+export class SessionLifecycleHistoryRebuildError extends Data.TaggedError(
+	"SessionLifecycleHistoryRebuildError",
+)<{
+	sessionId: string;
+	operation: "rebuildTranslatorFromHistory";
+	cause: unknown;
+}> {
+	get message(): string {
+		const inner =
+			this.cause instanceof Error ? this.cause.message : String(this.cause);
+		return `${this.operation} failed for ${this.sessionId}: ${inner}`;
+	}
 }
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
@@ -219,7 +234,7 @@ export const makeSessionLifecycleWiringLive = (
 
 // ─── Event Handlers ─────────────────────────────────────────────────────────
 
-const handleSessionCreated = (
+export const handleSessionCreated = (
 	sessionId: string,
 	deps: {
 		translator: ReturnType<typeof createTranslator>;
@@ -231,14 +246,20 @@ const handleSessionCreated = (
 	Effect.gen(function* () {
 		deps.translator.reset(sessionId);
 
-		const existingMessages = yield* Effect.promise(() =>
-			rebuildTranslatorFromHistory(
-				deps.translator,
-				(id) => deps.client.session.messages(id),
-				sessionId,
-				deps.sessionLog,
-			),
-		);
+		const existingMessages = yield* Effect.tryPromise({
+			try: () =>
+				rebuildTranslatorFromHistoryOrThrow(
+					deps.translator,
+					(id) => deps.client.session.messages(id),
+					sessionId,
+				),
+			catch: (cause) =>
+				new SessionLifecycleHistoryRebuildError({
+					sessionId,
+					operation: "rebuildTranslatorFromHistory",
+					cause,
+				}),
+		});
 
 		if (existingMessages) {
 			deps.pollerManager.startPolling(sessionId, existingMessages);
