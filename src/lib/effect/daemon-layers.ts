@@ -322,6 +322,18 @@ export interface DaemonLiveOptions {
 	getStatus: () => DaemonStatus;
 	onboarding: OnboardingServerDeps;
 
+	/** Initial bind port. DaemonLifecycleContext no longer carries config. */
+	port: number;
+
+	/** Initial bind host before TlsCertLive may override it to 0.0.0.0. */
+	host: string;
+
+	/** Whether TLS is requested. Drives TlsCertLive cert loading and HTTPS server creation. */
+	tlsEnabled?: boolean;
+
+	/** True only when caller explicitly set host. */
+	hostExplicit?: boolean;
+
 	// Background services — Effect-native config types (all optional for phased migration)
 	keepAwake?: Parameters<typeof KeepAwakeLive>[0];
 	versionCheck?: Parameters<typeof VersionCheckerLive>[0];
@@ -371,8 +383,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		PinoLoggerLive,
 		DaemonConfigRefLive(
 			makeDaemonConfigFromOptions({
-				port: options.ctx.port,
-				host: options.ctx.host,
+				port: options.port,
+				host: options.host,
+				hostExplicit: options.hostExplicit ?? false,
+				tlsEnabled: options.tlsEnabled ?? false,
 				...(options.pinHash != null && { pinHash: options.pinHash }),
 			}),
 		),

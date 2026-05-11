@@ -105,6 +105,10 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			instances: [],
 		}),
 		onboarding: {} as OnboardingServerDeps,
+		port: 0,
+		host: "127.0.0.1",
+		tlsEnabled: false,
+		hostExplicit: false,
 		// Background services with minimal configs
 		keepAwake: {},
 		versionCheck: {
@@ -150,6 +154,28 @@ describe("makeDaemonLive wiring", () => {
 				expect(config.port).toBe(0);
 				expect(config.host).toBe("127.0.0.1");
 			}).pipe(Effect.provide(makeDaemonLayer())),
+	);
+
+	it.scoped(
+		"makeDaemonLive seeds DaemonConfigRef from explicit options",
+		() => {
+			const options = {
+				...makeMockOptions(),
+				port: 53123,
+				host: "0.0.0.0",
+				tlsEnabled: false,
+				hostExplicit: false,
+			} satisfies DaemonLiveOptions;
+
+			return Effect.gen(function* () {
+				const ref = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(ref);
+				expect(config.port).toBe(53123);
+				expect(config.host).toBe("0.0.0.0");
+				expect(config.tlsEnabled).toBe(false);
+				expect(config.hostExplicit).toBe(false);
+			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+		},
 	);
 
 	it.scoped("provides ShutdownSignalTag as a Deferred (Tier 0)", () =>

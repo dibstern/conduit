@@ -66,12 +66,30 @@ describe("DaemonConfigRef", () => {
 								keepAwake: true,
 								pinHash: "abc123",
 								host: "0.0.0.0",
+								hostExplicit: true,
 							}),
 						),
 					),
 				),
 			),
 	);
+
+	it("makeDaemonConfigFromOptions carries tlsEnabled and explicit hostExplicit", () => {
+		const c1 = makeDaemonConfigFromOptions({ tlsEnabled: true });
+		expect(c1.tlsEnabled).toBe(true);
+		expect(c1.hostExplicit).toBe(false);
+
+		const c2 = makeDaemonConfigFromOptions({
+			tlsEnabled: false,
+			hostExplicit: true,
+			host: "127.0.0.1",
+		});
+		expect(c2.tlsEnabled).toBe(false);
+		expect(c2.hostExplicit).toBe(true);
+
+		const c3 = makeDaemonConfigFromOptions({ host: "0.0.0.0" });
+		expect(c3.hostExplicit).toBe(false);
+	});
 
 	it.effect("dismissedPaths is an independent Set per instance", () =>
 		Effect.gen(function* () {

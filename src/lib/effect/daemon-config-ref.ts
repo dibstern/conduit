@@ -44,6 +44,7 @@ export const DaemonConfigRefLive = (initial: DaemonRuntimeConfig) =>
 export const makeDaemonConfigFromOptions = (options: {
 	port?: number;
 	host?: string;
+	hostExplicit?: boolean;
 	pinHash?: string;
 	tlsEnabled?: boolean;
 	keepAwake?: boolean;
@@ -63,6 +64,6 @@ export const makeDaemonConfigFromOptions = (options: {
 	shuttingDown: false,
 	dismissedPaths: new Set(options.dismissedPaths ?? []),
 	startTime: options.startTime ?? Date.now(),
-	hostExplicit: options.host !== undefined,
+	hostExplicit: options.hostExplicit ?? false,
 	persistedSessionCounts: new Map(options.persistedSessionCounts ?? []),
 });

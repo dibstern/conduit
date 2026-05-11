@@ -1267,6 +1267,10 @@ export async function startDaemonProcess(
 		ipcContext,
 		getStatus,
 		onboarding: onboardingDeps,
+		port,
+		host,
+		tlsEnabled,
+		hostExplicit: options.host !== undefined,
 		// KeepAwake config — pure Effect Layer replaces imperative KeepAwake class.
 		// Always provide config (even empty) so the Layer is created; platform
 		// detection in KeepAwakeLive handles the default command.
