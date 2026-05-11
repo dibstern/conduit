@@ -11,7 +11,9 @@ import {
 	closeIPCServer,
 	closeOnboardingServer,
 	type DaemonLifecycleContext,
+	type HttpServerStartConfig,
 	type OnboardingServerDeps,
+	type OnboardingServerStartConfig,
 	startHttpServer,
 	startIPCServer,
 	startOnboardingServer,
@@ -27,7 +29,8 @@ import { AuthManagerFromConfigLive } from "./auth-middleware.js";
 import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
 import {
 	DaemonConfigRefLive,
-	makeDaemonConfigFromOptions,
+	DaemonConfigRefTag,
+	type DaemonRuntimeConfig,
 } from "./daemon-config-ref.js";
 import { DaemonEventBusLive } from "./daemon-pubsub.js";
 import { CrashCounterLive } from "./daemon-startup.js";
@@ -50,7 +53,7 @@ import {
 	StorageMonitorLive,
 	StorageMonitorTag,
 } from "./storage-monitor-layer.js";
-import { EnsureCertsLive, TlsCertLive } from "./tls-cert-layer.js";
+import { EnsureCertsLive, TlsCertLive, TlsCertTag } from "./tls-cert-layer.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
@@ -234,9 +237,36 @@ export const makeRelayCacheLayer = (factory: RelayFactory) =>
 export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			yield* startLifecycleServer("startHttpServer", () =>
-				startHttpServer(ctx),
-			);
+			const configRef = yield* DaemonConfigRefTag;
+			const tls = yield* TlsCertTag;
+			const config = yield* Ref.get(configRef);
+
+			const startConfig: HttpServerStartConfig = {
+				port: config.port,
+				host: config.host,
+			};
+			if (tls.certs) {
+				startConfig.tls = {
+					key: tls.certs.key,
+					cert: tls.certs.caCertPem
+						? Buffer.concat([
+								tls.certs.cert,
+								Buffer.from("\n"),
+								tls.certs.caCertPem,
+							])
+						: tls.certs.cert,
+				};
+			}
+
+			const actualPort = yield* Effect.tryPromise({
+				try: () => startHttpServer(ctx, startConfig),
+				catch: (cause) =>
+					new DaemonLifecycleLayerError({
+						operation: "startHttpServer",
+						cause,
+					}),
+			});
+			yield* Ref.update(configRef, (c) => ({ ...c, port: actualPort }));
 			yield* Effect.addFinalizer(() =>
 				closeLifecycleServer(() => closeHttpServer(ctx)),
 			);
@@ -264,9 +294,8 @@ export const makeIpcServerLive = (
 	);
 
 /**
- * Onboarding server layer — starts an HTTP-only onboarding server on port+1
- * when TLS is active (ctx.tls is present). No-ops gracefully when TLS is not
- * configured because startOnboardingServer already returns Promise.resolve().
+ * Onboarding server layer — starts an HTTP-only onboarding server when TLS is
+ * active and tears it down gracefully on scope close.
  */
 export const makeOnboardingServerLive = (
 	ctx: DaemonLifecycleContext,
@@ -274,9 +303,31 @@ export const makeOnboardingServerLive = (
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			yield* startLifecycleServer("startOnboardingServer", () =>
-				startOnboardingServer(ctx, deps),
-			);
+			const configRef = yield* DaemonConfigRefTag;
+			const tls = yield* TlsCertTag;
+			const config = yield* Ref.get(configRef);
+
+			if (!tls.certs) return;
+
+			const startConfig: OnboardingServerStartConfig = {
+				httpsPort: config.port,
+				listenPort: config.port === 0 ? 0 : config.port + 1,
+				host: config.host,
+			};
+			const effectiveDeps: OnboardingServerDeps = {
+				staticDir: deps.staticDir,
+				caRootPath: tls.caRootPath,
+				caCertDer: tls.caCertDer,
+			};
+
+			yield* Effect.tryPromise({
+				try: () => startOnboardingServer(ctx, effectiveDeps, startConfig),
+				catch: (cause) =>
+					new DaemonLifecycleLayerError({
+						operation: "startOnboardingServer",
+						cause,
+					}),
+			});
 			yield* Effect.addFinalizer(() =>
 				closeLifecycleServer(() => closeOnboardingServer(ctx)),
 			);
@@ -322,17 +373,8 @@ export interface DaemonLiveOptions {
 	getStatus: () => DaemonStatus;
 	onboarding: OnboardingServerDeps;
 
-	/** Initial bind port. DaemonLifecycleContext no longer carries config. */
-	port: number;
-
-	/** Initial bind host before TlsCertLive may override it to 0.0.0.0. */
-	host: string;
-
-	/** Whether TLS is requested. Drives TlsCertLive cert loading and HTTPS server creation. */
-	tlsEnabled?: boolean;
-
-	/** True only when caller explicitly set host. */
-	hostExplicit?: boolean;
+	/** Full runtime config snapshot used to seed DaemonConfigRef. */
+	initialConfig: DaemonRuntimeConfig;
 
 	// Background services — Effect-native config types (all optional for phased migration)
 	keepAwake?: Parameters<typeof KeepAwakeLive>[0];
@@ -350,10 +392,6 @@ export interface DaemonLiveOptions {
 	configPath?: string;
 	/** Factory for creating relay instances per slug. */
 	relayFactory?: RelayFactory;
-
-	// AuthManager — initial pinHash for DaemonConfigRef (read reactively by AuthManager)
-	/** Pre-hashed PIN for authentication, or null if no PIN is set. */
-	pinHash?: string | null;
 }
 
 /**
@@ -381,15 +419,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const foundation = Layer.mergeAll(
 		DaemonEventBusLive,
 		PinoLoggerLive,
-		DaemonConfigRefLive(
-			makeDaemonConfigFromOptions({
-				port: options.port,
-				host: options.host,
-				hostExplicit: options.hostExplicit ?? false,
-				tlsEnabled: options.tlsEnabled ?? false,
-				...(options.pinHash != null && { pinHash: options.pinHash }),
-			}),
-		),
+		DaemonConfigRefLive(options.initialConfig),
 		SignalHandlerLayer,
 		ProcessErrorHandlerLayer,
 		makePidFileLive(configDir, pidPath, socketPath),
@@ -440,14 +470,16 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		);
 	}
 
-	// ── Tier 3: Servers (imperative lifecycle — AP-38 deferred) ────────────
-	// Server Layers still take DaemonLifecycleContext params. Converting them
-	// to read from Context Tags is deferred to AP-38.
-	const servers = Layer.mergeAll(
+	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
+	const httpAndIpc = Layer.mergeAll(
 		makeHttpServerLive(options.ctx),
 		makeIpcServerLive(options.ctx, options.ipcContext, options.getStatus),
-		makeOnboardingServerLive(options.ctx, options.onboarding),
-	).pipe(Layer.provideMerge(registries));
+	);
+
+	const servers = makeOnboardingServerLive(
+		options.ctx,
+		options.onboarding,
+	).pipe(Layer.provideMerge(httpAndIpc), Layer.provideMerge(registries));
 
 	// ── Tier 4: Background services (optional) ────────────────────────────
 	// When a config is not provided, a no-op stub Layer provides the Tag

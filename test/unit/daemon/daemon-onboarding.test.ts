@@ -7,7 +7,6 @@
 // 4. GET /api/setup-info returns JSON with correct ports
 // 5. Static assets (.js, .css) are served for the SPA
 // 6. Unknown routes 302-redirect to HTTPS setup URL
-// 7. Onboarding server is not started when TLS is not active
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -15,7 +14,10 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
+import type {
+	DaemonLifecycleContext,
+	OnboardingServerStartConfig,
+} from "../../../src/lib/daemon/daemon-lifecycle.js";
 import {
 	closeOnboardingServer,
 	startOnboardingServer,
@@ -122,12 +124,8 @@ describe("startOnboardingServer", () => {
 		cleanTmpDir(tmpDir);
 	});
 
-	function makeCtx(
-		overrides?: Partial<DaemonLifecycleContext>,
-	): DaemonLifecycleContext {
+	function makeCtx(): DaemonLifecycleContext {
 		return {
-			port: 0,
-			host: "127.0.0.1",
 			httpServer: null,
 			upgradeServer: null,
 			onboardingServer: null,
@@ -136,18 +134,31 @@ describe("startOnboardingServer", () => {
 			clientCount: 0,
 			socketPath: join(tmpDir, "unused.sock"),
 			router: null,
-			tls: { key: Buffer.from("unused"), cert: Buffer.from("unused") },
+		};
+	}
+
+	function startConfig(
+		overrides: Partial<OnboardingServerStartConfig> = {},
+	): OnboardingServerStartConfig {
+		return {
+			httpsPort: 9200,
+			listenPort: 0,
+			host: "127.0.0.1",
 			...overrides,
 		};
 	}
 
 	it("GET /ca/download returns CA PEM with correct headers", async () => {
 		const ctx = makeCtx();
-		await startOnboardingServer(ctx, {
-			caRootPath: caPath,
-			caCertDer: null,
-			staticDir,
-		});
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: caPath,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		const port = getOnboardingPort(ctx);
 
 		const { status, body, headers } = await httpGet(port, "/ca/download");
@@ -161,11 +172,15 @@ describe("startOnboardingServer", () => {
 
 	it("GET /ca/download returns 404 when caRootPath is null", async () => {
 		const ctx = makeCtx();
-		await startOnboardingServer(ctx, {
-			caRootPath: null,
-			caCertDer: null,
-			staticDir,
-		});
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: null,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		const port = getOnboardingPort(ctx);
 
 		const { status } = await httpGet(port, "/ca/download");
@@ -176,11 +191,15 @@ describe("startOnboardingServer", () => {
 
 	it("GET /setup returns index.html", async () => {
 		const ctx = makeCtx();
-		await startOnboardingServer(ctx, {
-			caRootPath: caPath,
-			caCertDer: null,
-			staticDir,
-		});
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: caPath,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		const port = getOnboardingPort(ctx);
 
 		const { status, body, headers } = await httpGet(port, "/setup");
@@ -193,15 +212,18 @@ describe("startOnboardingServer", () => {
 
 	it("GET /api/setup-info returns JSON with correct port values", async () => {
 		// Use a known main port so we can verify the URLs use different ports
-		const ctx = makeCtx({ port: 9200 });
-		await startOnboardingServer(ctx, {
-			caRootPath: caPath,
-			caCertDer: null,
-			staticDir,
-		});
+		const ctx = makeCtx();
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: caPath,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		expect(ctx.onboardingServer).not.toBeNull();
-		// The onboarding server listens on port 9201 (ctx.port + 1)
-		const port = 9201;
+		const port = getOnboardingPort(ctx);
 
 		const { status, body } = await httpGet(port, "/api/setup-info");
 		expect(status).toBe(200);
@@ -209,8 +231,8 @@ describe("startOnboardingServer", () => {
 		// httpsUrl should use the main port (9200), not onboarding port (9201)
 		expect(parsed.httpsUrl).toContain(":9200");
 		expect(parsed.httpsUrl).toMatch(/^https:/);
-		// httpUrl should use the onboarding port (9201)
-		expect(parsed.httpUrl).toContain(":9201");
+		// httpUrl should use the onboarding port
+		expect(parsed.httpUrl).toContain(`:${port}`);
 		expect(parsed.httpUrl).toMatch(/^http:/);
 		expect(parsed.hasCert).toBe(true);
 
@@ -219,11 +241,15 @@ describe("startOnboardingServer", () => {
 
 	it("GET /api/setup-info returns lanMode true when ?mode=lan", async () => {
 		const ctx = makeCtx();
-		await startOnboardingServer(ctx, {
-			caRootPath: caPath,
-			caCertDer: null,
-			staticDir,
-		});
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: caPath,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		const port = getOnboardingPort(ctx);
 
 		const { status, body } = await httpGet(port, "/api/setup-info?mode=lan");
@@ -236,11 +262,15 @@ describe("startOnboardingServer", () => {
 
 	it("serves static assets needed by the SPA", async () => {
 		const ctx = makeCtx();
-		await startOnboardingServer(ctx, {
-			caRootPath: caPath,
-			caCertDer: null,
-			staticDir,
-		});
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: caPath,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		const port = getOnboardingPort(ctx);
 
 		const js = await httpGet(port, "/app.abc12345.js");
@@ -257,15 +287,18 @@ describe("startOnboardingServer", () => {
 	});
 
 	it("unknown routes 302-redirect to HTTPS setup URL", async () => {
-		const ctx = makeCtx({ port: 9200 });
-		await startOnboardingServer(ctx, {
-			caRootPath: caPath,
-			caCertDer: null,
-			staticDir,
-		});
+		const ctx = makeCtx();
+		await startOnboardingServer(
+			ctx,
+			{
+				caRootPath: caPath,
+				caCertDer: null,
+				staticDir,
+			},
+			startConfig(),
+		);
 		expect(ctx.onboardingServer).not.toBeNull();
-		// Onboarding listens on 9201
-		const port = 9201;
+		const port = getOnboardingPort(ctx);
 
 		// Use raw http.request to avoid following redirects
 		const { status, headers } = await httpGet(port, "/anything-else");
@@ -274,18 +307,5 @@ describe("startOnboardingServer", () => {
 		expect(headers["location"]).toMatch(/^https:.*:9200\/setup/);
 
 		await closeOnboardingServer(ctx);
-	});
-
-	it("is NOT started when TLS is not active (no tls in context)", async () => {
-		const ctx = makeCtx();
-		// Remove tls to simulate non-TLS mode
-		delete ctx.tls;
-		await startOnboardingServer(ctx, {
-			caRootPath: null,
-			caCertDer: null,
-			staticDir,
-		});
-		// onboardingServer should remain null
-		expect(ctx.onboardingServer).toBeNull();
 	});
 });

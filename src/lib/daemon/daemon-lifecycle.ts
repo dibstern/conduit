@@ -368,8 +368,6 @@ async function dispatchTaggedRequest(
 // Mutable context so lifecycle functions can store server references back.
 
 export interface DaemonLifecycleContext {
-	port: number;
-	host: string;
 	httpServer: HttpServer | null;
 	/** HTTP-only onboarding server on port+1 (only when TLS is active). */
 	onboardingServer: HttpServer | null;
@@ -386,15 +384,23 @@ export interface DaemonLifecycleContext {
 	router: {
 		handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void>;
 	} | null;
-	/** When provided, the HTTP server is created as HTTPS with these certs. */
+}
+
+export interface HttpServerStartConfig {
+	port: number;
+	host: string;
 	tls?: { key: Buffer; cert: Buffer };
 }
 
 // ─── HTTP Server ────────────────────────────────────────────────────────────
 
 /** Create and start the HTTP(S) server, storing it in ctx.httpServer. */
-export function startHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
+export function startHttpServer(
+	ctx: DaemonLifecycleContext,
+	config: HttpServerStartConfig,
+): Promise<number> {
 	return new Promise((resolve, reject) => {
+		let actualPort = config.port;
 		const handler = (req: IncomingMessage, res: ServerResponse) => {
 			// biome-ignore lint/style/noNonNullAssertion: safe — router set before startHttpServer
 			ctx.router!.handleRequest(req, res).catch((err) => {
@@ -406,23 +412,23 @@ export function startHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
 			});
 		};
 
-		if (ctx.tls) {
+		if (config.tls) {
 			// ─── TLS mode: protocol detection ─────────────────────────────
 			// A net.Server listens on the port. Each connection's first byte
 			// is peeked: 0x16 (TLS ClientHello) → HTTPS server, otherwise →
 			// plain HTTP redirect to https://.
 			const httpsServer = createHttpsServer(
-				{ key: ctx.tls.key, cert: ctx.tls.cert },
+				{ key: config.tls.key, cert: config.tls.cert },
 				handler,
 			);
 			ctx.upgradeServer = httpsServer;
 
 			// Lightweight HTTP redirect handler for plain-HTTP connections
 			const httpRedirect = createServer((req, res) => {
-				const host = req.headers.host ?? `localhost:${ctx.port}`;
+				const host = req.headers.host ?? `localhost:${actualPort}`;
 				const hostBase = host.replace(/:\d+$/, "");
 				res.writeHead(301, {
-					Location: `https://${hostBase}:${ctx.port}${req.url ?? "/"}`,
+					Location: `https://${hostBase}:${actualPort}${req.url ?? "/"}`,
 				});
 				res.end();
 			});
@@ -456,22 +462,28 @@ export function startHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
 			reject(err);
 		});
 
-		ctx.httpServer.listen(ctx.port, ctx.host, () => {
+		ctx.httpServer.listen(config.port, config.host, () => {
 			// Resolve actual port (important when port 0 is used for OS-assigned ephemeral port)
 			// biome-ignore lint/style/noNonNullAssertion: safe — inside listen callback
 			const addr = ctx.httpServer!.address();
 			if (addr && typeof addr !== "string") {
-				ctx.port = addr.port;
+				actualPort = addr.port;
 			}
-			resolve();
+			resolve(actualPort);
 		});
 	});
 }
 
-/** Gracefully close the HTTP server. */
-export function closeHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
+function closeServerHandle(server: HttpServer): Promise<void> {
 	return new Promise((resolve) => {
-		if (!ctx.httpServer) {
+		try {
+			server.closeIdleConnections?.();
+			server.closeAllConnections?.();
+		} catch {
+			// Best-effort drain before close.
+		}
+
+		if (!server.listening) {
 			resolve();
 			return;
 		}
@@ -480,9 +492,37 @@ export function closeHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
 			resolve();
 		}, SHUTDOWN_TIMEOUT_MS);
 
-		ctx.httpServer.close(() => {
+		try {
+			server.close(() => {
+				clearTimeout(timeout);
+				resolve();
+			});
+		} catch {
 			clearTimeout(timeout);
+			resolve();
+		}
+	});
+}
+
+/** Gracefully close the HTTP server. */
+export function closeHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
+	return new Promise((resolve) => {
+		const httpServer = ctx.httpServer;
+		const upgradeServer = ctx.upgradeServer;
+		if (!httpServer && !upgradeServer) {
+			resolve();
+			return;
+		}
+
+		const closes = [
+			httpServer ? closeServerHandle(httpServer) : Promise.resolve(),
+			upgradeServer && upgradeServer !== httpServer
+				? closeServerHandle(upgradeServer)
+				: Promise.resolve(),
+		];
+		Promise.all(closes).then(() => {
 			ctx.httpServer = null;
+			ctx.upgradeServer = null;
 			resolve();
 		});
 	});
@@ -497,9 +537,16 @@ export interface OnboardingServerDeps {
 	staticDir: string;
 }
 
+export interface OnboardingServerStartConfig {
+	/** Main HTTPS port used in redirect/setup URLs. */
+	httpsPort: number;
+	/** Onboarding listen port, usually httpsPort + 1, or 0 for OS assignment. */
+	listenPort: number;
+	host: string;
+}
+
 /**
- * Start an HTTP-only onboarding server on ctx.port + 1.
- * Only call when ctx.tls is present (TLS active).
+ * Start an HTTP-only onboarding server.
  *
  * Serves: /ca/download, /setup (index.html), /api/setup-info, SPA static assets.
  * Everything else 302-redirects to the HTTPS main server.
@@ -507,18 +554,10 @@ export interface OnboardingServerDeps {
 export function startOnboardingServer(
 	ctx: DaemonLifecycleContext,
 	deps: OnboardingServerDeps,
+	config: OnboardingServerStartConfig,
 ): Promise<void> {
-	// Only start when TLS is active
-	if (!ctx.tls) {
-		return Promise.resolve();
-	}
-
-	// When ctx.port is 0 (OS-assigned), also use 0 for the onboarding server
-	// so it gets its own ephemeral port. Otherwise use port+1.
-	const listenPort = ctx.port === 0 ? 0 : ctx.port + 1;
-
 	// Resolved after listen — may differ from listenPort when 0 is used.
-	let actualPort = listenPort;
+	let actualPort = config.listenPort;
 
 	// Pre-read CA cert (if available) so we don't hit disk per request.
 	// DER format preferred (passed in from ensureCerts), PEM as fallback.
@@ -595,7 +634,7 @@ export function startOnboardingServer(
 							const host = req.headers.host ?? `localhost:${actualPort}`;
 							const hostBase = host.replace(/:\d+$/, "");
 							// httpsUrl uses the MAIN port, httpUrl uses the ONBOARDING port
-							const httpsUrl = `https://${hostBase}:${ctx.port}`;
+							const httpsUrl = `https://${hostBase}:${config.httpsPort}`;
 							const httpUrl = `http://${hostBase}:${actualPort}`;
 							res.writeHead(200, {
 								"Content-Type": "application/json",
@@ -626,7 +665,7 @@ export function startOnboardingServer(
 						const redirectHost = req.headers.host ?? `localhost:${actualPort}`;
 						const redirectHostBase = redirectHost.replace(/:\d+$/, "");
 						res.writeHead(302, {
-							Location: `https://${redirectHostBase}:${ctx.port}/setup`,
+							Location: `https://${redirectHostBase}:${config.httpsPort}/setup`,
 						});
 						res.end();
 					} catch (err) {
@@ -643,7 +682,7 @@ export function startOnboardingServer(
 				server.on("error", (err: NodeJS.ErrnoException) => {
 					if (err.code === "EADDRINUSE") {
 						log.warn(
-							`Onboarding server: port ${listenPort} already in use — skipping`,
+							`Onboarding server: port ${config.listenPort} already in use — skipping`,
 						);
 						server.close();
 						resolve();
@@ -652,7 +691,7 @@ export function startOnboardingServer(
 					reject(err);
 				});
 
-				server.listen(listenPort, ctx.host, () => {
+				server.listen(config.listenPort, config.host, () => {
 					// Resolve actual port (important when listenPort is 0)
 					const addr = server.address();
 					if (addr && typeof addr !== "string") {
@@ -660,7 +699,7 @@ export function startOnboardingServer(
 					}
 					ctx.onboardingServer = server;
 					log.info(
-						`Onboarding HTTP server listening on ${ctx.host}:${actualPort}`,
+						`Onboarding HTTP server listening on ${config.host}:${actualPort}`,
 					);
 					resolve();
 				});

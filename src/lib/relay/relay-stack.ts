@@ -273,8 +273,8 @@ export class EffectRelayServer {
 					Effect.fail(new Error("Project API route not found")),
 			}),
 			Layer.succeed(SetupInfoProvider, {
-				port: this.actualPort,
-				isTls: this.protocol === "https",
+				getPort: () => this.actualPort,
+				getIsTls: () => this.protocol === "https",
 			}),
 			Layer.succeed(ThemeProvider, { loadThemes: loadThemeFiles }),
 			NodeFileSystem.layer,
