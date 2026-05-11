@@ -2,11 +2,11 @@
 
 > **For Agent:** REQUIRED SUB-SKILL: Use executing-plans to implement this plan task-by-task.
 
-**Goal:** Detect the user's Claude subscription tier (Max / Pro / Free / Enterprise / Team) from the SDK probe, and add a per-session 1M-context-window option for Sonnet 4 / 4.5 models. Premium-plan users (Max / Enterprise / Team) get 1M as the default; everyone else can still opt into 1M manually. When the user picks 1M, the `claude-adapter` passes the `context-1m-2025-08-07` beta header to the SDK.
+**Goal:** Detect the user's Claude subscription tier (Max / Pro / Free / Enterprise / Team) from the SDK probe, and add a per-session 1M-context-window option for Sonnet 4 / 4.5 models. Premium-plan users (Max / Enterprise / Team) get 1M as the default; everyone else can still opt into 1M manually. When the user picks 1M, the `claude-adapter` uses the t3code-compatible effective model id suffix (`"<model>[1m]"`) and switches live SDK sessions with `query.setModel(...)`.
 
-**Architecture:** Extends the probe + TTL cache shipped in PR 1 (`2026-05-11-claude-capabilities-probe.md`). The probe now reads `init.account?.subscriptionType` alongside the model list. A hardcoded per-family `CONTEXT_WINDOW_OPTIONS_BY_FAMILY` map declares which models offer a 1M context option (Sonnet 4/4.5 today). A new `adjustModelsForSubscription()` flips the option's `isDefault` flag for premium tiers. Each `ModelInfo` gains a `contextWindowOptions?: ContextWindowOption[]` field. A new `ContextWindowSelector.svelte` Svelte component renders the dropdown next to `ModelVariant.svelte`. A new `switch_context_window` WebSocket message + `handleSwitchContextWindow` handler updates the per-session override (in `session-overrides`). On each `sendTurn`, `claude-adapter.ts` reads the per-session context-window override and, if `"1m"`, adds `betas: ["context-1m-2025-08-07"]` to the SDK options.
+**Architecture:** Extends the probe + TTL cache shipped in PR 1 (`2026-05-11-claude-capabilities-probe.md`). The probe now reads `init.account?.subscriptionType` alongside the model list. A hardcoded per-family `CONTEXT_WINDOW_OPTIONS_BY_FAMILY` map declares which models offer a 1M context option (Sonnet 4/4.5 today). A new `adjustModelsForSubscription()` flips the option's `isDefault` flag for premium tiers. Each `ModelInfo` gains a `contextWindowOptions?: ContextWindowOption[]` field. A new `ContextWindowSelector.svelte` Svelte component renders the dropdown next to `ModelVariant.svelte`. A new `switch_context_window` WebSocket message + `handleSwitchContextWindow` handler updates the per-session override (in `session-overrides`). On each `sendTurn`, `claude-adapter.ts` reads the per-session context-window override, computes the effective SDK model id (`claude-sonnet-...` vs `claude-sonnet-...[1m]`), passes that id on query creation, and calls `query.setModel(...)` when the effective id changes for an already-active SDK query.
 
-**Tech Stack:** TypeScript, `@anthropic-ai/claude-agent-sdk` (`betas` option at `sdk.d.ts:1285`, `AccountInfo.subscriptionType` at `sdk.d.ts:23`), Svelte 5, Vitest.
+**Tech Stack:** TypeScript, `@anthropic-ai/claude-agent-sdk` (`Query.setModel(...)`, `AccountInfo.subscriptionType` at `sdk.d.ts:23`), Svelte 5, Vitest.
 
 **Depends on:** `2026-05-11-claude-capabilities-probe.md` (PR 1). All probe / cache / effort plumbing is assumed in place. This PR adds NEW fields to existing types; it does not refactor PR 1's work.
 
@@ -45,7 +45,7 @@ const PREMIUM_SUBSCRIPTION_TYPES = new Set([
 
 ## Context window options by model family
 
-Hardcoded. Source: Anthropic docs (`docs.anthropic.com/en/docs/about-claude/models/overview`) and the SDK's beta-feature note at `sdk.d.ts:1281`.
+Hardcoded. Source: Anthropic docs (`docs.anthropic.com/en/docs/about-claude/models/overview`) and t3code's Claude provider implementation, which represents 1M context by suffixing the effective SDK model id with `[1m]`.
 
 ```typescript
 const CONTEXT_WINDOW_OPTIONS_BY_FAMILY: Record<string, ContextWindowOption[]> = {
@@ -58,6 +58,18 @@ const CONTEXT_WINDOW_OPTIONS_BY_FAMILY: Record<string, ContextWindowOption[]> = 
 ```
 
 If a model id doesn't match any family entry, `contextWindowOptions` is omitted → the frontend hides the dropdown for that model. Same convention as the effort dropdown.
+
+## SDK application model
+
+t3code does **not** pass a `betas` header for 1M context in its adapter path. It computes the SDK model id like this:
+
+```typescript
+function claudeApiModelId(modelId: string, contextWindow: string | undefined): string {
+	return contextWindow === "1m" ? `${modelId}[1m]` : modelId;
+}
+```
+
+Then, on later turns, it calls `query.setModel(apiModelId)` when the effective id changes. Conduit should follow that shape because the Claude SDK exposes `Query.setModel(...)` for live sessions, but `betas` is only an option passed to `query(...)` at creation time.
 
 ---
 
@@ -524,12 +536,13 @@ git commit -m "feat(handlers): add switch_context_window + context_window_info m
 
 ---
 
-### Task 4: Pass selected context window to SDK via `betas` header
+### Task 4: Apply selected context window through the effective SDK model id
 
 **Files:**
 - Modify: `src/lib/provider/types.ts` (extend `SendTurnInput` with `contextWindow?: string`)
 - Modify: `src/lib/handlers/prompt.ts` (populate `contextWindow` from session override, around line 248)
-- Modify: `src/lib/provider/claude/claude-adapter.ts:395-404` (build SDK options with `betas`)
+- Modify: `src/lib/provider/claude/types.ts` (track the active query's effective SDK model id)
+- Modify: `src/lib/provider/claude/claude-adapter.ts:305-456` (build SDK model id and call `query.setModel(...)` on live changes)
 - Test: `test/unit/provider/claude/claude-adapter-send-turn.test.ts` (add coverage)
 
 **Step 1: Add `contextWindow` to `SendTurnInput`**
@@ -550,10 +563,24 @@ const contextWindow = overrides.getContextWindow(activeId);
 		...(contextWindow ? { contextWindow } : {}),
 ```
 
-**Step 3: Write the failing test in `claude-adapter-send-turn.test.ts`**
+**Step 3: Add the effective model-id helper**
 
 ```typescript
-it("passes betas: ['context-1m-2025-08-07'] when contextWindow is '1m'", async () => {
+function claudeApiModelId(
+	modelId: string | undefined,
+	contextWindow: string | undefined,
+): string | undefined {
+	if (!modelId) return undefined;
+	return contextWindow === "1m" ? `${modelId}[1m]` : modelId;
+}
+```
+
+Keep the helper in `claude-adapter.ts` unless another module needs it. This mirrors t3code's `resolveClaudeApiModelId(...)`.
+
+**Step 4: Write the failing tests in `claude-adapter-send-turn.test.ts`**
+
+```typescript
+it("uses the [1m] model suffix when contextWindow is '1m' on query creation", async () => {
 	const capturedOptions: unknown[] = [];
 	const fakeQuery = makeFakeQueryFactory({
 		onCall: (params) => capturedOptions.push(params.options),
@@ -565,14 +592,15 @@ it("passes betas: ['context-1m-2025-08-07'] when contextWindow is '1m'", async (
 
 	await adapter.sendTurn({
 		// ...minimum SendTurnInput with...
+		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 		contextWindow: "1m",
 	});
 
-	const opts = capturedOptions[0] as { betas?: string[] };
-	expect(opts.betas).toContain("context-1m-2025-08-07");
+	const opts = capturedOptions[0] as { model?: string };
+	expect(opts.model).toBe("claude-sonnet-4-5[1m]");
 });
 
-it("omits betas when contextWindow is '200k' or absent", async () => {
+it("uses the base model id when contextWindow is '200k' or absent", async () => {
 	const capturedOptions: unknown[] = [];
 	const fakeQuery = makeFakeQueryFactory({
 		onCall: (params) => capturedOptions.push(params.options),
@@ -582,12 +610,42 @@ it("omits betas when contextWindow is '200k' or absent", async () => {
 		queryFactory: fakeQuery,
 	});
 
-	await adapter.sendTurn({ /* no contextWindow */ });
-	await adapter.sendTurn({ contextWindow: "200k" });
+	await adapter.sendTurn({
+		// ...minimum SendTurnInput with...
+		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+	});
 
-	for (const opts of capturedOptions as Array<{ betas?: string[] }>) {
-		expect(opts.betas ?? []).not.toContain("context-1m-2025-08-07");
-	}
+	const opts = capturedOptions[0] as { model?: string };
+	expect(opts.model).toBe("claude-sonnet-4-5");
+});
+
+it("calls query.setModel when contextWindow changes mid-session", async () => {
+	const fakeQuery = makeFakeQueryFactory();
+	const adapter = new ClaudeAdapter({
+		workspaceRoot: tmpWorkspace,
+		queryFactory: fakeQuery,
+	});
+
+	await adapter.sendTurn({
+		// ...minimum SendTurnInput with...
+		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+		contextWindow: "200k",
+	});
+	await adapter.sendTurn({
+		// ...same conduit session, next user turn...
+		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+		contextWindow: "1m",
+	});
+	await adapter.sendTurn({
+		// ...same conduit session, next user turn...
+		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+		contextWindow: "200k",
+	});
+
+	expect(fakeQuery.lastQuery.setModelCalls).toEqual([
+		"claude-sonnet-4-5[1m]",
+		"claude-sonnet-4-5",
+	]);
 });
 ```
 
@@ -599,9 +657,21 @@ pnpm test:unit -- test/unit/provider/claude/claude-adapter-send-turn.test.ts
 
 Expected: FAIL on the new tests.
 
-**Step 4: Modify the SDK options builder in `claude-adapter.ts`**
+**Step 5: Track current effective SDK model id**
 
-Inside `createSessionAndSendTurn`, replace the existing SDK options block (now also includes the `effort` spread from PR 1):
+In `ClaudeSessionContext`, add:
+
+```typescript
+	currentApiModelId: string | undefined;
+```
+
+On query creation, compute:
+
+```typescript
+const apiModelId = claudeApiModelId(input.model?.modelId, input.contextWindow);
+```
+
+Then use `apiModelId` in the SDK options block (which also includes PR 1's `effort` spread):
 
 ```typescript
 			const options: SDKOptions = {
@@ -610,25 +680,40 @@ Inside `createSessionAndSendTurn`, replace the existing SDK options block (now a
 				includePartialMessages: true,
 				settingSources: ["user", "project", "local"],
 				canUseTool: bridge.createCanUseTool(ctx),
-				...(input.model ? { model: input.model.modelId } : {}),
+				...(apiModelId ? { model: apiModelId } : {}),
 				...(resumeSessionId ? { resume: resumeSessionId } : {}),
 				...(input.agent ? { agent: input.agent } : {}),
 				...(input.variant
 					? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
 					: {}),
-				...(input.contextWindow === "1m"
-					? {
-							betas: ["context-1m-2025-08-07"] as NonNullable<
-								SDKOptions["betas"]
-							>,
-						}
-					: {}),
 			};
 ```
 
-The literal `"context-1m-2025-08-07"` is what the SDK documents at `sdk.d.ts:1281`. If Anthropic ever rolls out a new beta header, that constant moves into a `const` near the top of the file with a comment pointing at the SDK doc location.
+Set `ctx.currentApiModelId = apiModelId` when creating the context.
 
-**Step 5: Run tests to verify pass**
+**Step 6: Switch live SDK sessions with `query.setModel(...)`**
+
+In `enqueueTurn`, before building/enqueueing the user message:
+
+```typescript
+const nextApiModelId = claudeApiModelId(
+	input.model?.modelId ?? ctx.currentModel,
+	input.contextWindow,
+);
+if (nextApiModelId && nextApiModelId !== ctx.currentApiModelId) {
+	await ctx.query.setModel(nextApiModelId);
+	ctx.currentApiModelId = nextApiModelId;
+	ctx.currentModel = input.model?.modelId ?? ctx.currentModel;
+}
+```
+
+Use `query.setModel(...)` only when the effective SDK model id changes. This handles all three cases without recreating the query:
+
+- base model → 1M suffix
+- 1M suffix → base model
+- selected Claude model changes while the same provider session remains active
+
+**Step 7: Run tests to verify pass**
 
 ```bash
 pnpm test:unit -- test/unit/provider/claude/claude-adapter-send-turn.test.ts
@@ -636,11 +721,11 @@ pnpm test:unit -- test/unit/provider/claude/claude-adapter-send-turn.test.ts
 
 Expected: PASS.
 
-**Step 6: Commit**
+**Step 8: Commit**
 
 ```bash
-git add src/lib/provider/types.ts src/lib/handlers/prompt.ts src/lib/provider/claude/claude-adapter.ts test/unit/provider/claude/claude-adapter-send-turn.test.ts
-git commit -m "feat(claude): wire 1M context window via betas header"
+git add src/lib/provider/types.ts src/lib/handlers/prompt.ts src/lib/provider/claude/types.ts src/lib/provider/claude/claude-adapter.ts test/unit/provider/claude/claude-adapter-send-turn.test.ts
+git commit -m "feat(claude): wire 1M context window via model suffix"
 ```
 
 ---
@@ -708,7 +793,7 @@ Create `src/lib/frontend/components/model/ContextWindowSelector.stories.ts`, mir
 
 **Step 6: Manual smoke check**
 
-Run the dev server, open conduit at `http://localhost:2633/`, select a Sonnet 4/4.5 model in a Claude project, confirm the context-window dropdown appears with "200K" default and "1M (beta)" as the second option. Pick 1M, send a prompt, confirm the daemon log shows `betas: [context-1m-2025-08-07]` (add a temporary log line in `claude-adapter.ts` if needed and remove before commit).
+Run the dev server, open conduit at `http://localhost:2633/`, select a Sonnet 4/4.5 model in a Claude project, confirm the context-window dropdown appears with "200K" default and "1M (beta)" as the second option. Pick 1M, send a prompt, and confirm the adapter uses the effective SDK model id with the `[1m]` suffix (add a temporary debug log around `claudeApiModelId(...)` if needed and remove it before commit).
 
 **Step 7: Commit**
 
@@ -746,7 +831,8 @@ Expected: PASS.
 **Step 3: Final commit (if anything trailed)**
 
 ```bash
-git add -A
+git status --short
+git add src/lib/provider/types.ts src/lib/handlers src/lib/shared-types.ts src/lib/session src/lib/effect src/lib/provider/claude src/lib/frontend test/unit
 git commit -m "chore: lint/format cleanup after context-window work"
 ```
 
@@ -754,12 +840,12 @@ git commit -m "chore: lint/format cleanup after context-window work"
 
 ## Out of scope (do NOT include in this PR)
 
-- **PR 3: SDK-sourced commands + agents with provider tagging** — `docs/plans/2026-05-11-claude-commands-agents-merge.md`.
+- **PR 3: SDK-sourced commands + active-provider/model agents** — `docs/plans/2026-05-11-claude-commands-agents-merge.md`.
 - **Auto-PR workflow** to refresh hardcoded context-window options from LiteLLM.
-- **Other beta headers** beyond `context-1m-2025-08-07`. The SDK's `betas` field is generic, but only the 1M context flag is in scope here.
+- **Other Claude SDK beta flags.** This PR intentionally avoids the SDK `betas` option and uses the t3code-compatible model-id suffix for 1M.
 - **Subscription tier indicator in UI** (e.g. a "Max Plan" badge somewhere). The `subscriptionType` is captured by the probe but not yet surfaced visually. Trivial follow-up if/when desired.
 - **Adjusting model output limits based on subscription** — not exposed by SDK; no useful tier-dependent variation today.
-- **Streaming the `betas` header for Opus / Haiku models** when the user has 1M selected but switches model — the per-model `contextWindowOptions` only offers 1M for Sonnet, so the UI prevents this case at the dropdown level. The adapter additionally ignores `contextWindow: "1m"` for non-Sonnet models (validate at SDK options builder if defensive coding feels warranted; default behaviour is to pass the header and let the SDK return an error if applied to an incompatible model).
+- **Applying the `[1m]` model suffix for Opus / Haiku models** when the user has 1M selected but switches model — the per-model `contextWindowOptions` only offers 1M for Sonnet, so the UI prevents this case at the dropdown level. The adapter should defensively suffix only when `contextWindow === "1m"` and the active model still has a 1M option; otherwise use the base model id.
 
 ## Risk register
 
@@ -769,6 +855,6 @@ git commit -m "chore: lint/format cleanup after context-window work"
 | User upgrades plan but TTL cache hasn't expired | 5-min cache window. Worst-case wait. Documented elsewhere in PR 1's risk register. |
 | User on a premium plan but on a model that doesn't offer 1M (e.g. Opus, Haiku) | `contextWindowOptions` is undefined for those families → UI hides the dropdown entirely. No "default 1M but model doesn't support it" failure mode. |
 | User switches between Claude and OpenCode mid-session | `contextWindow` override is Claude-only — OpenCode adapter ignores `SendTurnInput.contextWindow`. The frontend `ContextWindowSelector.svelte` hides itself unless the active model exposes `contextWindowOptions`, which OpenCode models do not. |
-| Anthropic ships a new context-window option (e.g. 500K) | Hardcoded `CONTEXT_WINDOW_OPTIONS_BY_FAMILY` needs a code change. The PR that lands the new option also needs to either add a new SDK beta header constant or rename the existing one. Same maintenance footprint as the model-list family map. |
-| `betas` header rejected by some Anthropic API backends (e.g. Bedrock, Vertex) | SDK doc says `betas` is supported on Anthropic first-party only. If the user is authenticated via Bedrock/Vertex (`init.account?.apiProvider !== "firstParty"`), the 1M option should be hidden. **Follow-up:** factor `apiProvider` into `contextWindowOptionsFor` similarly to `subscriptionType`. Out of scope for the first cut; document the limitation. |
+| Anthropic ships a new context-window option (e.g. 500K) | Hardcoded `CONTEXT_WINDOW_OPTIONS_BY_FAMILY` needs a code change. The PR that lands the new option also needs to define the effective SDK model-id encoding for that option. Same maintenance footprint as the model-list family map. |
+| Claude SDK stops accepting the `[1m]` model suffix | The unit tests pin the intended SDK option shape. If live smoke exposes rejection, fall back to a documented query-recreate path using SDK `betas`, but do not silently mix both approaches in this PR. |
 | Concurrent `switch_context_window` requests race the `discover()` lookup | Same dispatch-cached pattern as PR 1's `switch_variant` handler — `discover()` reads from the TTL cache, no race risk. |

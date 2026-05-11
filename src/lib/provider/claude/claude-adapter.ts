@@ -8,9 +8,10 @@
  * - First sendTurn() creates an EffectPromptQueue (backed by Effect Queue)
  *   + calls query() + starts a background stream consumer. Subsequent
  *   turns enqueue into the existing queue.
- * - Discovery is filesystem + hardcoded: the SDK does not expose a models
- *   or commands API, so we enumerate ~/.claude/ and <workspace>/.claude/
- *   directories for user/project commands and skills.
+ * - Discovery: on first session, the adapter calls query.supportedModels()
+ *   to cache the live model list from the local Claude Code binary.
+ *   Before the first session, a minimal fallback list is used. Commands
+ *   and skills are enumerated from ~/.claude/ and <workspace>/.claude/.
  * - Shutdown is graceful: close every session's prompt queue, call the
  *   runtime's close(), then clear the session map.
  */
@@ -61,29 +62,10 @@ const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
 
 // ─── Model catalog ─────────────────────────────────────────────────────────
 
-// Model IDs must match Claude Code backend-recognized identifiers. Outdated
-// IDs (e.g. claude-haiku-3-5, claude-opus-4, claude-sonnet-4) return a 502
-// "unknown provider for model" error from the backend. Short aliases
-// (opus/sonnet/haiku) always resolve to the current generation.
-const CLAUDE_MODELS: ReadonlyArray<ModelInfo> = [
-	{
-		id: "claude-opus-4-6",
-		name: "Claude Opus 4.6",
-		providerId: "claude",
-		limit: { context: 200_000, output: 32_000 },
-	},
-	{
-		id: "claude-sonnet-4-6",
-		name: "Claude Sonnet 4.6",
-		providerId: "claude",
-		limit: { context: 200_000, output: 64_000 },
-	},
-	{
-		id: "claude-haiku-4-5",
-		name: "Claude Haiku 4.5",
-		providerId: "claude",
-		limit: { context: 200_000, output: 8_192 },
-	},
+// Fallback model list used before the first session provides live data via
+// query.supportedModels(). Once a session is active the adapter caches the
+// SDK's model list and discover() returns that instead.
+const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 	{
 		id: "opus",
 		name: "Claude Opus (latest)",
@@ -103,6 +85,39 @@ const CLAUDE_MODELS: ReadonlyArray<ModelInfo> = [
 		limit: { context: 200_000, output: 8_192 },
 	},
 ];
+
+// Best-effort output-token limits keyed by model-id prefix. The SDK's
+// ModelInfo does not include context/output limits so we infer from known
+// families. Falls back to a conservative default.
+const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
+	[
+		[/^(?:claude-)?opus/i, 32_000],
+		[/^(?:claude-)?sonnet/i, 64_000],
+		[/^(?:claude-)?haiku/i, 8_192],
+	];
+
+function inferLimits(
+	modelId: string,
+): { context: number; output: number } | undefined {
+	for (const [re, output] of OUTPUT_LIMIT_BY_FAMILY) {
+		if (re.test(modelId)) return { context: 200_000, output };
+	}
+	return undefined;
+}
+
+/** Map SDK ModelInfo → conduit ModelInfo. */
+function sdkModelToConduit(sdk: {
+	value: string;
+	displayName: string;
+}): ModelInfo {
+	const limit = inferLimits(sdk.value);
+	return {
+		id: sdk.value,
+		name: sdk.displayName,
+		providerId: "claude",
+		...(limit ? { limit } : {}),
+	};
+}
 
 // ─── Frontmatter parser (minimal) ──────────────────────────────────────────
 
@@ -222,6 +237,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 	/** Permission bridge instance (shared across sessions). */
 	private permissionBridge: ClaudePermissionBridge | undefined;
 
+	/** Cached model list from SDK's query.supportedModels(). */
+	private dynamicModels: ReadonlyArray<ModelInfo> | undefined;
+
 	/** Injectable query factory (defaults to real SDK). */
 	private readonly queryFactory: NonNullable<ClaudeAdapterDeps["queryFactory"]>;
 
@@ -250,7 +268,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		];
 
 		return {
-			models: CLAUDE_MODELS,
+			models: this.dynamicModels ?? FALLBACK_MODELS,
 			supportsTools: true,
 			supportsThinking: true,
 			supportsPermissions: true,
@@ -260,6 +278,26 @@ export class ClaudeAdapter implements ProviderAdapter {
 			supportsRevert: false,
 			commands,
 		};
+	}
+
+	// ─── refreshModels ────────────────────────────────────────────────────
+
+	private refreshModels(query: Query): void {
+		query
+			.supportedModels()
+			.then((sdkModels) => {
+				if (sdkModels.length > 0) {
+					this.dynamicModels = sdkModels.map(sdkModelToConduit);
+					log.info(
+						`Cached ${sdkModels.length} models from SDK: ${sdkModels.map((m) => m.value).join(", ")}`,
+					);
+				}
+			})
+			.catch((err) => {
+				log.warn(
+					`Failed to fetch supportedModels from SDK: ${err instanceof Error ? err.message : err}`,
+				);
+			});
 	}
 
 	// ─── sendTurn ─────────────────────────────────────────────────────────
@@ -373,10 +411,15 @@ export class ClaudeAdapter implements ProviderAdapter {
 			});
 			(ctx as { query: ClaudeSessionContext["query"] }).query = query;
 
-			// 6. Store session
+			// 6b. Fetch live model list on first session (fire-and-forget)
+			if (!this.dynamicModels) {
+				this.refreshModels(query);
+			}
+
+			// 7. Store session
 			this.sessions.set(sessionId, ctx);
 
-			// 7. Start background stream consumer
+			// 8. Start background stream consumer
 			const translator = new ClaudeEventTranslator({
 				sink: input.eventSink,
 			});

@@ -32,9 +32,9 @@ Conduit already has an effort picker (`src/lib/frontend/components/model/ModelVa
 |---|---|---|
 | Probe doesn't populate `variants` for Claude models | `claude-capabilities-probe.ts` (new) | Map `sdk.supportedEffortLevels` → `variants: Object.fromEntries(...)` |
 | `switch_variant` handler is OpenCode-only | `src/lib/handlers/model.ts:354-367` | Branch on `providerId === "claude"` → look up variants from cached probe via `orchestrationEngine.dispatch({type:"discover", providerId:"claude"})` |
-| `ClaudeAdapter.sendTurn` doesn't pass `effort` to SDK | `src/lib/provider/claude/claude-adapter.ts:395-404` | Read `input.variant` (already in `SendTurnInput` since prompt.ts:248 sets it) and pass as `options.effort` |
+| `ClaudeAdapter.sendTurn` doesn't apply `effort` to Claude SDK sessions | `src/lib/provider/claude/claude-adapter.ts:305-405` | Read `input.variant`, pass it as `options.effort` when a query is created, and restart/resume the SDK query before the next turn when the effort changes for an already-active conduit session |
 
-Result: an end-to-end effort picker for Claude that uses the dropdown the user already sees today for OpenCode.
+Result: an end-to-end effort picker for Claude that uses the dropdown the user already sees today for OpenCode. Important lifecycle detail: the Claude SDK `Query` control surface has `setModel(...)`, `setPermissionMode(...)`, and `setMaxThinkingTokens(...)`, but **no `setEffort(...)`**. So effort is a query-creation option. A mid-session effort change must close the current SDK query and create a new one with the stored `resumeSessionId`, not enqueue into the old query.
 
 The four other SDK capability booleans (`supportsEffort`, `supportsAdaptiveThinking`, `supportsFastMode`, `supportsAutoMode`) are NOT plumbed in this PR — no existing UI consumes them, and adding new dropdowns/toggles is a separate design conversation. They remain available on the SDK ModelInfo for future work.
 
@@ -1353,15 +1353,21 @@ git commit -m "feat(handlers): support Claude variants in switch_variant handler
 
 ---
 
-### Task 8: Pass session variant through to SDK `options.effort`
+### Task 8: Apply session variant through SDK `options.effort`, including mid-session changes
 
 **Files:**
-- Modify: `src/lib/provider/claude/claude-adapter.ts:395-404` (build SDK options inside `createSessionAndSendTurn`)
-- Test: `test/unit/provider/claude/claude-adapter-send-turn.test.ts` (add variant→effort coverage)
+- Modify: `src/lib/provider/claude/types.ts` (track the active query's effective effort)
+- Modify: `src/lib/provider/claude/claude-adapter.ts:305-456` (`sendTurn`, `createSessionAndSendTurn`, `enqueueTurn`)
+- Test: `test/unit/provider/claude/claude-adapter-send-turn.test.ts` (add creation + restart/resume coverage)
 
-`SendTurnInput.variant?: string` already exists (`src/lib/provider/types.ts:135`) and `prompt.ts:248` already populates it from `overrides.getVariant(activeId)`. Today's adapter ignores it. Fix: when present, pass it as `options.effort` (SDK accepts the same string set — `'low' | 'medium' | 'high' | 'xhigh' | 'max'`).
+`SendTurnInput.variant?: string` already exists (`src/lib/provider/types.ts:135`) and `prompt.ts:248` already populates it from `overrides.getVariant(activeId)`. Today's adapter ignores it. Fix two paths:
 
-The SDK option is documented at `sdk.d.ts:1406` (`effort?: EffortLevel`).
+- On SDK query creation, pass the selected variant as `options.effort`.
+- On a later turn for an already-active conduit session, if the selected variant changed, close the current SDK query and create a replacement query with the latest `resumeSessionId`, then send the turn through the new query.
+
+Do **not** call a nonexistent SDK mutator. The SDK `Query` type exposes `setModel(...)`, `setPermissionMode(...)`, and `setMaxThinkingTokens(...)`, but no `setEffort(...)`. t3code also only sets normal `options.effort` at query creation; its only per-turn effort-like mode is `ultrathink`, which is prompt text, not SDK `options.effort`. Conduit should support real dropdown changes by restart/resume.
+
+The SDK option is documented at `sdk.d.ts` (`effort?: EffortLevel`).
 
 **Step 1: Write the failing test**
 
@@ -1404,6 +1410,80 @@ it("omits SDK options.effort when no variant is supplied", async () => {
 	expect(capturedOptions).toHaveLength(1);
 	expect((capturedOptions[0] as { effort?: string }).effort).toBeUndefined();
 });
+
+it("restarts and resumes the Claude query when effort changes mid-session", async () => {
+	const capturedOptions: unknown[] = [];
+	const fakeQuery = makeFakeQueryFactory({
+		onCall: (params) => capturedOptions.push(params.options),
+	});
+	const adapter = new ClaudeAdapter({
+		workspaceRoot: tmpWorkspace,
+		queryFactory: fakeQuery,
+	});
+
+	await adapter.sendTurn({
+		// ...minimum SendTurnInput with...
+		variant: "low",
+	});
+	// Complete the first fake query with a result that carries session_id
+	// "sdk-session-1", matching the existing fake-query result helper.
+
+	await adapter.sendTurn({
+		// ...same conduit session, next user turn...
+		variant: "high",
+	});
+
+	expect(capturedOptions).toHaveLength(2);
+	expect((capturedOptions[0] as { effort?: string }).effort).toBe("low");
+	expect((capturedOptions[1] as { effort?: string; resume?: string }).effort).toBe(
+		"high",
+	);
+	expect((capturedOptions[1] as { resume?: string }).resume).toBe("sdk-session-1");
+});
+
+it("does not restart the Claude query when effort is unchanged", async () => {
+	const capturedOptions: unknown[] = [];
+	const fakeQuery = makeFakeQueryFactory({
+		onCall: (params) => capturedOptions.push(params.options),
+	});
+	const adapter = new ClaudeAdapter({
+		workspaceRoot: tmpWorkspace,
+		queryFactory: fakeQuery,
+	});
+
+	await adapter.sendTurn({
+		// ...minimum SendTurnInput with...
+		variant: "high",
+	});
+	await adapter.sendTurn({
+		// ...same conduit session, next user turn...
+		variant: "high",
+	});
+
+	expect(capturedOptions).toHaveLength(1);
+});
+
+it("restarts and clears SDK effort when the user returns to default effort", async () => {
+	const capturedOptions: unknown[] = [];
+	const fakeQuery = makeFakeQueryFactory({
+		onCall: (params) => capturedOptions.push(params.options),
+	});
+	const adapter = new ClaudeAdapter({
+		workspaceRoot: tmpWorkspace,
+		queryFactory: fakeQuery,
+	});
+
+	await adapter.sendTurn({
+		// ...minimum SendTurnInput with...
+		variant: "high",
+	});
+	await adapter.sendTurn({
+		// ...same conduit session, next user turn, no variant...
+	});
+
+	expect(capturedOptions).toHaveLength(2);
+	expect((capturedOptions[1] as { effort?: string }).effort).toBeUndefined();
+});
 ```
 
 Re-use whatever `makeFakeQueryFactory` / fixture helper the file already has. If none exists, look at one of the other `claude-adapter-*.test.ts` files for the existing pattern.
@@ -1416,7 +1496,34 @@ pnpm test:unit -- test/unit/provider/claude/claude-adapter-send-turn.test.ts
 
 Expected: FAIL on the new variant test (existing tests still pass).
 
-**Step 3: Modify `claude-adapter.ts`**
+**Step 3: Modify `claude/types.ts`**
+
+In `ClaudeSessionContext`, add the active query's normalized effort:
+
+```typescript
+	currentEffort: NonNullable<SDKOptions["effort"]> | undefined;
+```
+
+If importing `SDKOptions` into the type file creates an awkward dependency, use a local string union matching SDK-derived effort values:
+
+```typescript
+export type ClaudeEffort = "low" | "medium" | "high" | "xhigh" | "max";
+```
+
+**Step 4: Add a small normalizer in `claude-adapter.ts`**
+
+```typescript
+function effortFromVariant(
+	variant: string | undefined,
+): NonNullable<SDKOptions["effort"]> | undefined {
+	if (!variant) return undefined;
+	return variant as NonNullable<SDKOptions["effort"]>;
+}
+```
+
+The cast is needed because `input.variant` is `string` while `SDKOptions["effort"]` is `EffortLevel | number`. The dropdown only surfaces SDK-derived effort levels (Task 2 maps `supportedEffortLevels` into the variants record), so the runtime value is always one of the valid SDK strings. This is a documented narrowing, not a guess.
+
+**Step 5: Modify query creation in `claude-adapter.ts`**
 
 Find the SDK options builder inside `createSessionAndSendTurn` (around line 395-404):
 
@@ -1433,7 +1540,13 @@ Find the SDK options builder inside `createSessionAndSendTurn` (around line 395-
 			};
 ```
 
-Replace with (add the `effort` spread, treating empty string the same as undefined since the variant cycle uses `""` to mean "default"):
+Before building the options, compute:
+
+```typescript
+const effort = effortFromVariant(input.variant);
+```
+
+Then replace the options block with:
 
 ```typescript
 			const options: SDKOptions = {
@@ -1445,23 +1558,65 @@ Replace with (add the `effort` spread, treating empty string the same as undefin
 				...(input.model ? { model: input.model.modelId } : {}),
 				...(resumeSessionId ? { resume: resumeSessionId } : {}),
 				...(input.agent ? { agent: input.agent } : {}),
-				...(input.variant
-					? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
-					: {}),
+				...(effort ? { effort } : {}),
 			};
 ```
 
-The cast is needed because `input.variant` is `string` while `SDKOptions["effort"]` is `EffortLevel | number`. The dropdown only surfaces SDK-derived effort levels (Task 2 maps `supportedEffortLevels` into the variants record), so the runtime value is always one of the valid SDK strings — the cast is a documented narrowing, not a guess.
+When creating `ClaudeSessionContext`, set `currentEffort: effort`.
 
-**Step 4: Run test to verify it passes**
+**Step 6: Restart/resume when the effort changes**
+
+In `sendTurn`, before `return this.enqueueTurn(existingCtx, input)`, compare the active query's effort with the requested effort:
+
+```typescript
+const requestedEffort = effortFromVariant(input.variant);
+if (existingCtx.currentEffort !== requestedEffort) {
+	return this.restartSessionForEffortChange(existingCtx, input, requestedEffort);
+}
+return this.enqueueTurn(existingCtx, input);
+```
+
+Add a helper that preserves the resume cursor, closes the old query, removes it from the session map, and creates a replacement query:
+
+```typescript
+private async restartSessionForEffortChange(
+	ctx: ClaudeSessionContext,
+	input: SendTurnInput,
+	_effort: NonNullable<SDKOptions["effort"]> | undefined,
+): Promise<TurnResult> {
+	const resumeSessionId = ctx.resumeSessionId;
+
+	try {
+		ctx.promptQueue.close();
+	} catch {}
+	try {
+		ctx.query.close();
+	} catch {}
+
+	(ctx as { stopped: boolean }).stopped = true;
+	this.sessions.delete(ctx.sessionId);
+
+	return this.createSessionAndSendTurn({
+		...input,
+		providerState: {
+			...input.providerState,
+			...(resumeSessionId ? { resumeSessionId } : {}),
+		},
+	});
+}
+```
+
+This helper runs only between turns. Do not use `cleanupSession(...)` here: it emits interruption/failed-tool behavior intended for abort/end-session paths, not a normal configuration change between completed turns.
+
+**Step 7: Run test to verify it passes**
 
 ```bash
 pnpm test:unit -- test/unit/provider/claude/claude-adapter-send-turn.test.ts
 ```
 
-Expected: PASS (existing + 2 new tests).
+Expected: PASS (existing + new tests).
 
-**Step 5: Typecheck**
+**Step 8: Typecheck**
 
 ```bash
 pnpm check
@@ -1469,10 +1624,10 @@ pnpm check
 
 Expected: clean.
 
-**Step 6: Commit**
+**Step 9: Commit**
 
 ```bash
-git add src/lib/provider/claude/claude-adapter.ts test/unit/provider/claude/claude-adapter-send-turn.test.ts
+git add src/lib/provider/claude/types.ts src/lib/provider/claude/claude-adapter.ts test/unit/provider/claude/claude-adapter-send-turn.test.ts
 git commit -m "feat(claude): pass session variant through to SDK options.effort"
 ```
 
@@ -1525,7 +1680,8 @@ Expected: only PASS / OK / DONE lines, no FAIL.
 If lint or check auto-formatted anything:
 
 ```bash
-git add -A
+git status --short
+git add src/lib/provider/claude src/lib/provider src/lib/handlers src/lib/bridges src/lib/frontend test/unit
 git commit -m "chore: lint/format cleanup after probe refactor"
 ```
 
@@ -1535,8 +1691,8 @@ git commit -m "chore: lint/format cleanup after probe refactor"
 
 This plan is **PR 1 of 3**. Subsequent PRs build on the probe/cache/effort foundation laid here:
 
-- **PR 2: Subscription detection + 1M context window** — see `docs/plans/2026-05-11-claude-subscription-1m-context.md`. Reads `init.account?.subscriptionType` from the probe, adds a separate context-window dropdown in the UI, plumbs the `betas: ["context-1m-2025-08-07"]` header when 1M is selected on a Sonnet model.
-- **PR 3: SDK-sourced commands + agents with provider tagging** — see `docs/plans/2026-05-11-claude-commands-agents-merge.md`. Merges Claude SDK commands and agents with OpenCode equivalents in the UI, with provider icons on each entry. Uses the existing probe result populated in this PR (`init.commands`, `init.agents`).
+- **PR 2: Subscription detection + 1M context window** — see `docs/plans/2026-05-11-claude-subscription-1m-context.md`. Reads `init.account?.subscriptionType` from the probe, adds a separate context-window dropdown in the UI, and applies 1M by switching the effective Claude SDK model id to the t3code-style `"<model>[1m]"` suffix.
+- **PR 3: SDK-sourced commands + agents for the active provider/model** — see `docs/plans/2026-05-11-claude-commands-agents-merge.md`. Surfaces Claude SDK commands and agents when Claude is the active provider, while keeping OpenCode commands/agents scoped to OpenCode sessions. Uses the existing probe result populated in this PR (`init.commands`, `init.agents`).
 
 Other items kept out:
 
@@ -1561,6 +1717,7 @@ The probe (Task 2 of this plan) returns a `ProbeResult` with `models` only today
 | Probe leaks subprocess on abort failure | `finally` block aborts the controller; SDK kills its child process on abort. If the SDK ever fails to honor abort, we'd see lingering processes — would require an SDK bug report. |
 | Module-level cache survives daemon restart on a test rerun | `resetCapabilityCacheForTesting()` is exported and used in `beforeEach`/`afterEach`. Forgetting it would leak state across tests. |
 | SDK adds new effort level not in conduit's variant cycle | `ModelVariant.svelte` reads variants from the data, not from a hardcoded list — new levels appear automatically in the dropdown. The Ctrl+T cycle comment ("low → medium → high → max") in `ModelVariant.svelte` is mildly stale and can be cleaned up in a follow-up if it bothers anyone. |
-| User had Claude-incompatible variant (e.g. OpenCode `"thinking"`) persisted in `relaySettings.defaultVariants` and switches to a Claude model | `claude-adapter.ts` casts `input.variant` to `EffortLevel`. SDK will likely 400 or ignore unknown values. Mitigation: Task 8 gates the cast — only pass `options.effort` when variant is present; document that mismatched variants are surfaced via the SDK error path (which conduit already turns into a `turn.error` event). Follow-up: validate variant against the model's variants record before passing. |
+| User had Claude-incompatible variant (e.g. OpenCode `"thinking"`) persisted in `relaySettings.defaultVariants` and switches to a Claude model | `claude-adapter.ts` casts `input.variant` to `EffortLevel`. Mitigation: Task 7 validates the selected variant against the active Claude model's variants before storing it; Task 8 only applies non-empty variants from that path and restarts/resumes when the effective effort changes. If a stale value still leaks through, the SDK error path becomes a normal `turn.error` event. |
+| Effort changes while a Claude turn is actively running | The UI already blocks duplicate sends through the processing timeout/turn state. The adapter restart helper in Task 8 is designed for the next user turn after the previous result has resolved. Do not use it as an interrupt mechanism. |
 | `prompt.ts` populates `SendTurnInput.variant` for the Claude session but the user's selected variant was made when no model was active (default) | `overrides.defaultVariant` is used in that case (line 374-376 of `bridges/client-init.ts`). Existing behaviour; not changed by this PR. |
 | Switch-variant handler's Claude branch dispatches `discover` synchronously inside a hot path | `discover` reads the TTL cache — no probe spawn unless cache miss (max once per 5 min). Worst case 100-500ms wait once per cache window; acceptable for a UI click. |

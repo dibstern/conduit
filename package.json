@@ -69,7 +69,7 @@
 		"prepare": "lefthook install || true"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.2.97",
+		"@anthropic-ai/claude-agent-sdk": "^0.2.132",
 		"@effect/experimental": "0.60.0",
 		"@effect/opentelemetry": "^0.63.0",
 		"@effect/platform": "^0.96.1",
