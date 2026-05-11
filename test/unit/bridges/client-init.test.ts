@@ -291,6 +291,40 @@ describe("handleClientConnected — model list", () => {
 		});
 	});
 
+	it("sends OpenCode model_list before slow Claude discovery finishes", async () => {
+		let resolveDiscovery: (value: { models: [] }) => void = () => {};
+		const deps = applyTestDefaults(
+			createMockClientInitDeps({
+				orchestrationEngine: {
+					dispatch: vi.fn(
+						() =>
+							new Promise((resolve) => {
+								resolveDiscovery = resolve as (value: { models: [] }) => void;
+							}),
+					),
+				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+			}),
+		);
+
+		const initPromise = handleClientConnected(deps, "client-1");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "model_list",
+			providers: [
+				{
+					id: "openai",
+					name: "OpenAI",
+					configured: true,
+					models: [{ id: "gpt-4", name: "GPT-4", provider: "openai" }],
+				},
+			],
+		});
+
+		resolveDiscovery({ models: [] });
+		await initPromise;
+	});
+
 	it("auto-selects default model when defaultModel is not set", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
 

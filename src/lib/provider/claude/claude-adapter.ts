@@ -8,10 +8,11 @@
  * - First sendTurn() creates an EffectPromptQueue (backed by Effect Queue)
  *   + calls query() + starts a background stream consumer. Subsequent
  *   turns enqueue into the existing queue.
- * - Discovery: on first session, the adapter calls query.supportedModels()
- *   to cache the live model list from the local Claude Code binary.
- *   Before the first session, a minimal fallback list is used. Commands
- *   and skills are enumerated from ~/.claude/ and <workspace>/.claude/.
+ * - Discovery reads the live model list from a 5-minute TTL cache shared
+ *   across adapter instances (see claude-capabilities-probe.ts). The probe
+ *   spawns a throwaway SDK query, reads initializationResult(), and aborts
+ *   before any API call. Nothing persists to disk. Commands and skills are
+ *   enumerated from ~/.claude/ and <workspace>/.claude/.
  * - Shutdown is graceful: close every session's prompt queue, call the
  *   runtime's close(), then clear the session map.
  */
@@ -32,6 +33,7 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import { getCachedClaudeCapabilities } from "./claude-capabilities-probe.js";
 import {
 	ClaudeEventTranslator,
 	isInterruptedResult,
@@ -60,11 +62,9 @@ const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
 	{ name: "help", description: "Show help" },
 ];
 
-// ─── Model catalog ─────────────────────────────────────────────────────────
+// ─── Fallback model catalog ────────────────────────────────────────────────
 
-// Fallback model list used before the first session provides live data via
-// query.supportedModels(). Once a session is active the adapter caches the
-// SDK's model list and discover() returns that instead.
+// Used only when the SDK capability probe fails or returns no models.
 const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 	{
 		id: "opus",
@@ -85,39 +85,6 @@ const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 		limit: { context: 200_000, output: 8_192 },
 	},
 ];
-
-// Best-effort output-token limits keyed by model-id prefix. The SDK's
-// ModelInfo does not include context/output limits so we infer from known
-// families. Falls back to a conservative default.
-const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
-	[
-		[/^(?:claude-)?opus/i, 32_000],
-		[/^(?:claude-)?sonnet/i, 64_000],
-		[/^(?:claude-)?haiku/i, 8_192],
-	];
-
-function inferLimits(
-	modelId: string,
-): { context: number; output: number } | undefined {
-	for (const [re, output] of OUTPUT_LIMIT_BY_FAMILY) {
-		if (re.test(modelId)) return { context: 200_000, output };
-	}
-	return undefined;
-}
-
-/** Map SDK ModelInfo → conduit ModelInfo. */
-function sdkModelToConduit(sdk: {
-	value: string;
-	displayName: string;
-}): ModelInfo {
-	const limit = inferLimits(sdk.value);
-	return {
-		id: sdk.value,
-		name: sdk.displayName,
-		providerId: "claude",
-		...(limit ? { limit } : {}),
-	};
-}
 
 // ─── Frontmatter parser (minimal) ──────────────────────────────────────────
 
@@ -237,9 +204,6 @@ export class ClaudeAdapter implements ProviderAdapter {
 	/** Permission bridge instance (shared across sessions). */
 	private permissionBridge: ClaudePermissionBridge | undefined;
 
-	/** Cached model list from SDK's query.supportedModels(). */
-	private dynamicModels: ReadonlyArray<ModelInfo> | undefined;
-
 	/** Injectable query factory (defaults to real SDK). */
 	private readonly queryFactory: NonNullable<ClaudeAdapterDeps["queryFactory"]>;
 
@@ -267,8 +231,19 @@ export class ClaudeAdapter implements ProviderAdapter {
 			...enumerateSkills(projectBase, "project-skill"),
 		];
 
+		let models: ReadonlyArray<ModelInfo>;
+		try {
+			const probe = await getCachedClaudeCapabilities();
+			models = probe.models.length > 0 ? probe.models : FALLBACK_MODELS;
+		} catch (err) {
+			log.warn(
+				`Capability probe failed; using fallback model list: ${err instanceof Error ? err.message : err}`,
+			);
+			models = FALLBACK_MODELS;
+		}
+
 		return {
-			models: this.dynamicModels ?? FALLBACK_MODELS,
+			models,
 			supportsTools: true,
 			supportsThinking: true,
 			supportsPermissions: true,
@@ -278,26 +253,6 @@ export class ClaudeAdapter implements ProviderAdapter {
 			supportsRevert: false,
 			commands,
 		};
-	}
-
-	// ─── refreshModels ────────────────────────────────────────────────────
-
-	private refreshModels(query: Query): void {
-		query
-			.supportedModels()
-			.then((sdkModels) => {
-				if (sdkModels.length > 0) {
-					this.dynamicModels = sdkModels.map(sdkModelToConduit);
-					log.info(
-						`Cached ${sdkModels.length} models from SDK: ${sdkModels.map((m) => m.value).join(", ")}`,
-					);
-				}
-			})
-			.catch((err) => {
-				log.warn(
-					`Failed to fetch supportedModels from SDK: ${err instanceof Error ? err.message : err}`,
-				);
-			});
 	}
 
 	// ─── sendTurn ─────────────────────────────────────────────────────────
@@ -402,6 +357,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 				...(input.model ? { model: input.model.modelId } : {}),
 				...(resumeSessionId ? { resume: resumeSessionId } : {}),
 				...(input.agent ? { agent: input.agent } : {}),
+				...(input.variant
+					? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
+					: {}),
 			};
 
 			// 6. Call query factory and assign to context
@@ -410,11 +368,6 @@ export class ClaudeAdapter implements ProviderAdapter {
 				options,
 			});
 			(ctx as { query: ClaudeSessionContext["query"] }).query = query;
-
-			// 6b. Fetch live model list on first session (fire-and-forget)
-			if (!this.dynamicModels) {
-				this.refreshModels(query);
-			}
 
 			// 7. Store session
 			this.sessions.set(sessionId, ctx);
