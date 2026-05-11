@@ -210,6 +210,11 @@ src/lib/effect/daemon-layers.ts:499:		: Layer.succeed(VersionCheckerTag, {
 src/lib/effect/daemon-layers.ts:505:		: Layer.succeed(StorageMonitorTag, {
 src/lib/effect/daemon-layers.ts:511:		: Layer.succeed(PortScannerTag, {
 src/lib/persistence/effect/projection-runner-effect.ts:374:		throw new ProjectionRunnerError({
+src/lib/persistence/projection-runner.ts:216:			throw new PersistenceError({
+src/lib/persistence/projection-runner.ts:269:			throw new PersistenceError({
+src/lib/persistence/projection-runner.ts:710:			throw new PersistenceError({
+src/lib/persistence/projection-runner.ts:727:			throw new PersistenceError({
+src/lib/persistence/projection-runner.ts:743:			throw new PersistenceError({
 src/lib/effect/auth-middleware.ts:17:): Layer.Layer<AuthManagerTag> => Layer.succeed(AuthManagerTag, auth);
 src/lib/effect/auth-middleware.ts:35:				const config = Effect.runSync(Ref.get(configRef));
 src/lib/effect/daemon-main.ts:222://        --daemon path in cli-core.ts uses `await startDaemonProcess(...)`
