@@ -306,6 +306,7 @@ export const handleDeleteSession = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const { sessionId: id } = payload;
@@ -339,8 +340,8 @@ export const handleDeleteSession = (
 		// Broadcast session_deleted so all clients know this session is gone
 		wsHandler.broadcast({ type: "session_deleted", sessionId: id });
 
-		yield* Effect.tryPromise(() =>
-			sessionMgr.sendDualSessionLists((msg) => wsHandler.broadcast(msg)),
+		yield* sessionManagerService.sendDualSessionLists((msg) =>
+			wsHandler.broadcast(msg),
 		);
 		log.info(`client=${clientId} Deleted: ${id}`);
 	});

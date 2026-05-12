@@ -2225,6 +2225,60 @@ Exit: 0
 Checked 975 files. No fixes applied.
 ```
 
+## Phase 7.14: Delete Session List Broadcast Service Contract
+
+Plan issues found:
+
+- `handleDeleteSession` still used `Effect.tryPromise(() => sessionMgr.sendDualSessionLists(...))`
+  for the final session-list broadcast, keeping one lifecycle path on the legacy list sender.
+- The delete handler can switch viewers and send metadata after deletion, so its typed dependency
+  surface includes OpenCode model/API and permission/question bridge services even when a narrow
+  test has no viewers. The test layer now provides that full possible boundary rather than hiding
+  the handler's environment.
+- Unlike `new_session`, the existing delete-session list broadcast was not fail-open. This slice
+  preserves that behavior instead of introducing new warning-only semantics.
+
+Changes:
+
+- Converted `handleDeleteSession`'s final session-list broadcast to call
+  `SessionManagerServiceTag.sendDualSessionLists`.
+- Added a handler regression proving delete still uses `deleteSession(..., { silent: true })`,
+  emits `session_deleted`, broadcasts the service-produced list envelope, and does not call the
+  legacy list sender.
+- Generalized the session lifecycle handler test Layer so new-session/delete tests provide the
+  services required by the full lifecycle and metadata paths.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts
+Exit: 1
+Expected failure:
+  handleDeleteSession still called the legacy sendDualSessionLists Promise path.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  67 passed (67)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 975 files. No fixes applied.
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

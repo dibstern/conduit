@@ -73,6 +73,7 @@ import {
 } from "../../../src/lib/handlers/prompt.js";
 import { handleReloadProviderSession } from "../../../src/lib/handlers/reload.js";
 import {
+	handleDeleteSession,
 	handleForkSession,
 	handleListSessions,
 	handleLoadMoreHistory,
@@ -1280,7 +1281,8 @@ function makeForkSessionLayer(options?: {
 	);
 }
 
-function makeNewSessionLayer(options?: {
+function makeSessionLifecycleLayer(options?: {
+	client?: OpenCodeAPI;
 	ws?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
@@ -1291,6 +1293,15 @@ function makeNewSessionLayer(options?: {
 	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
 		options?.sessionManagerService ?? makeMockSessionManagerService();
+	const client =
+		options?.client ??
+		({
+			session: {
+				get: vi.fn(async () => ({})),
+			},
+			permission: { list: vi.fn(async () => []) },
+			question: { list: vi.fn(async () => []) },
+		} as unknown as OpenCodeAPI);
 	const overrides =
 		options?.overrides ??
 		mockOverrides({
@@ -1299,11 +1310,14 @@ function makeNewSessionLayer(options?: {
 	const log = options?.log ?? mockLogger();
 
 	return Layer.mergeAll(
+		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
+		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
+		Layer.succeed(QuestionBridgeTag, mockQuestionBridge()),
 		Layer.succeed(StatusPollerTag, {
 			isProcessing: vi.fn(() => false),
 			clearMessageActivity: vi.fn(),
@@ -2054,7 +2068,7 @@ describe("handleNewSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				sendDualSessionLists,
 			});
-			const layer = makeNewSessionLayer({
+			const layer = makeSessionLifecycleLayer({
 				ws,
 				sessionMgr,
 				sessionManagerService,
@@ -2135,7 +2149,7 @@ describe("handleNewSession", () => {
 		const sessionManagerService = makeMockSessionManagerService({
 			sendDualSessionLists,
 		});
-		const layer = makeNewSessionLayer({
+		const layer = makeSessionLifecycleLayer({
 			ws,
 			sessionMgr,
 			sessionManagerService,
@@ -2162,6 +2176,74 @@ describe("handleNewSession", () => {
 			}),
 		);
 	});
+});
+
+describe("handleDeleteSession", () => {
+	it.effect(
+		"deletes and broadcasts lists through SessionManagerService",
+		() => {
+			const ws = mockWsHandler({
+				getClientsForSession: vi.fn(() => []),
+			});
+			const log = mockLogger();
+			const legacySendDualSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendDualSessionLists should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				deleteSession: vi.fn(async () => {}),
+				listSessions: vi.fn(async () => []),
+				sendDualSessionLists: legacySendDualSessionLists,
+			});
+			const sendDualSessionLists = vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [],
+						roots: true,
+					});
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				sendDualSessionLists,
+			});
+			const layer = makeSessionLifecycleLayer({
+				ws,
+				sessionMgr,
+				sessionManagerService,
+				log,
+			});
+
+			return handleDeleteSession("client-1", {
+				sessionId: "deleted-session",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.getClientsForSession).toHaveBeenCalledWith(
+						"deleted-session",
+					);
+					expect(sessionMgr.deleteSession).toHaveBeenCalledWith(
+						"deleted-session",
+						{ silent: true },
+					);
+					expect(sessionMgr.listSessions).toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_deleted",
+						sessionId: "deleted-session",
+					});
+					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_list",
+						sessions: [],
+						roots: true,
+					});
+					expect(log.info).toHaveBeenCalledWith(
+						"client=client-1 Deleted: deleted-session",
+					);
+				}),
+			);
+		},
+	);
 });
 
 describe("handleRenameSession", () => {
