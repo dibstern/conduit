@@ -15,11 +15,11 @@ import {
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	QuestionBridgeTag,
-	SessionManagerTag,
 	SessionOverridesTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -31,9 +31,9 @@ import type {
 	OrchestrationEngine,
 	SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
-import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 function mockWsHandler(
 	sessionId = "session-provider-state",
@@ -75,7 +75,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					messagesPage: vi.fn(async () => []),
 				},
 			} as unknown as OpenCodeAPI;
-			const sessionMgr = new SessionManager({ client, log });
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
 				dispatch: vi.fn(async () => ({
@@ -93,7 +92,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
@@ -169,7 +171,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 				messagesPage: vi.fn(async () => []),
 			},
 		} as unknown as OpenCodeAPI;
-		const sessionMgr = new SessionManager({ client, log });
 		const engine = {
 			getProviderForSession: vi.fn(() => "claude"),
 			dispatch: vi.fn(async () => ({
@@ -184,7 +185,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 			Layer.succeed(ConfigTag, {
 				httpServer: createServer(),
 				opencodeUrl: "http://127.0.0.1:1",
@@ -272,7 +273,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 				messagesPage: vi.fn(async () => []),
 			},
 		} as unknown as OpenCodeAPI;
-		const sessionMgr = new SessionManager({ client, log });
 		const engine = {
 			getProviderForSession: vi.fn(() => "claude"),
 			dispatch: vi.fn(async () => ({
@@ -287,7 +287,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 			Layer.succeed(ConfigTag, {
 				httpServer: createServer(),
 				opencodeUrl: "http://127.0.0.1:1",
@@ -350,7 +350,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					messagesPage: vi.fn(async () => []),
 				},
 			} as unknown as OpenCodeAPI;
-			const sessionMgr = new SessionManager({ client, log });
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
 				dispatch: vi.fn(async (command: SendTurnCommand) => {
@@ -391,7 +390,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",

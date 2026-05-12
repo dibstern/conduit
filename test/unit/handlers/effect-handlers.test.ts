@@ -134,6 +134,9 @@ function mockWsHandler(
 	};
 }
 
+const flushDispatchContinuation = () =>
+	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
+
 function mockLogger(): Logger {
 	return {
 		info: vi.fn(),
@@ -2944,7 +2947,7 @@ describe("handleMessage", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const overrides = mockOverrides();
-		const sessionMgr = mockSessionManager();
+		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
 		const permissionBridge = mockPermissionBridge();
 		const questionBridge = mockQuestionBridge();
@@ -2955,7 +2958,7 @@ describe("handleMessage", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(PermissionBridgeTag, permissionBridge),
 			Layer.succeed(QuestionBridgeTag, questionBridge),
@@ -2981,7 +2984,7 @@ describe("handleMessage", () => {
 		});
 		const log = mockLogger();
 		const overrides = mockOverrides();
-		const sessionMgr = mockSessionManager();
+		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
 		const permissionBridge = mockPermissionBridge();
 		const questionBridge = mockQuestionBridge();
@@ -2992,7 +2995,7 @@ describe("handleMessage", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(PermissionBridgeTag, permissionBridge),
 			Layer.succeed(QuestionBridgeTag, questionBridge),
@@ -3024,7 +3027,7 @@ describe("handleMessage", () => {
 			isModelUserSelected: vi.fn(() => true),
 			startProcessingTimeout: vi.fn(),
 		});
-		const sessionMgr = mockSessionManager();
+		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
 		const permissionBridge = mockPermissionBridge();
 		const questionBridge = mockQuestionBridge();
@@ -3045,7 +3048,7 @@ describe("handleMessage", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(PermissionBridgeTag, permissionBridge),
 			Layer.succeed(QuestionBridgeTag, questionBridge),
@@ -3087,7 +3090,7 @@ describe("handleMessage", () => {
 				isModelUserSelected: vi.fn(() => true),
 				startProcessingTimeout: vi.fn(),
 			});
-			const sessionMgr = mockSessionManager();
+			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
 			const permissionBridge = mockPermissionBridge();
 			const questionBridge = mockQuestionBridge();
@@ -3144,7 +3147,7 @@ describe("handleMessage", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				Layer.succeed(PermissionBridgeTag, permissionBridge),
 				Layer.succeed(QuestionBridgeTag, questionBridge),
@@ -3182,6 +3185,367 @@ describe("handleMessage", () => {
 		},
 	);
 
+	it.effect(
+		"loads prior Claude history through SessionManagerService when SQLite is unavailable",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const overrides = mockOverrides({
+				getAgent: vi.fn(() => undefined),
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-5",
+				})),
+				getVariant: vi.fn(() => ""),
+				getContextWindow: vi.fn(() => ""),
+				isModelUserSelected: vi.fn(() => true),
+				startProcessingTimeout: vi.fn(),
+			});
+			const legacyLoadPreRenderedHistory = vi.fn(async () => {
+				throw new Error("legacy prompt history load should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				loadPreRenderedHistory: legacyLoadPreRenderedHistory,
+			});
+			const loadPreRenderedHistory = vi.fn(() =>
+				Effect.succeed({
+					messages: [
+						{
+							id: "history-msg-1",
+							role: "user" as const,
+							parts: [
+								{
+									id: "history-part-1",
+									type: "text" as const,
+									text: "Earlier fallback question",
+								},
+							],
+						},
+					],
+					hasMore: false,
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory,
+			});
+			const config = mockConfig();
+			const permissionBridge = mockPermissionBridge();
+			const questionBridge = mockQuestionBridge();
+			const client = {} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => ({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				})),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				Layer.succeed(PermissionBridgeTag, permissionBridge),
+				Layer.succeed(QuestionBridgeTag, questionBridge),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return handleMessage("client-1", { text: "new prompt" }).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
+					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
+					expect(engine.dispatch).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "send_turn",
+							providerId: "claude",
+							input: expect.objectContaining({
+								history: [
+									expect.objectContaining({
+										role: "user",
+										parts: [
+											expect.objectContaining({
+												type: "text",
+												text: "Earlier fallback question",
+											}),
+										],
+									}),
+								],
+							}),
+						}),
+					);
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"auto-renames first Claude turn through SessionManagerService",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const overrides = mockOverrides({
+				getAgent: vi.fn(() => undefined),
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-5",
+				})),
+				getVariant: vi.fn(() => ""),
+				getContextWindow: vi.fn(() => ""),
+				isModelUserSelected: vi.fn(() => true),
+				startProcessingTimeout: vi.fn(),
+			});
+			const legacyListSessions = vi.fn(async () => {
+				throw new Error("legacy auto-rename listSessions should not be used");
+			});
+			const legacyRenameSession = vi.fn(async () => {
+				throw new Error("legacy auto-rename renameSession should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				listSessions: legacyListSessions,
+				renameSession: legacyRenameSession,
+			});
+			const listSessions = vi.fn(() =>
+				Effect.succeed([
+					{
+						id: "session-1",
+						title: "Claude Session",
+						updatedAt: 100,
+						messageCount: 0,
+					},
+				]),
+			);
+			const renameSession = vi.fn(() => Effect.void);
+			const sendDualSessionLists = vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "session-1",
+								title: "First prompt",
+								updatedAt: 200,
+								messageCount: 1,
+							},
+						],
+						roots: true,
+					});
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				listSessions,
+				renameSession,
+				sendDualSessionLists,
+			});
+			const config = mockConfig();
+			const permissionBridge = mockPermissionBridge();
+			const questionBridge = mockQuestionBridge();
+			const client = {} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => ({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [{ key: "turnCount", value: 1 }],
+				})),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				Layer.succeed(PermissionBridgeTag, permissionBridge),
+				Layer.succeed(QuestionBridgeTag, questionBridge),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return Effect.gen(function* () {
+				yield* handleMessage("client-1", { text: "First prompt" });
+				yield* flushDispatchContinuation();
+
+				expect(listSessions).toHaveBeenCalledWith();
+				expect(renameSession).toHaveBeenCalledWith("session-1", "First prompt");
+				expect(sendDualSessionLists).toHaveBeenCalled();
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "session_list",
+					sessions: [
+						{
+							id: "session-1",
+							title: "First prompt",
+							updatedAt: 200,
+							messageCount: 1,
+						},
+					],
+					roots: true,
+				});
+				expect(legacyListSessions).not.toHaveBeenCalled();
+				expect(legacyRenameSession).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect("does not auto-rename Claude sessions with custom titles", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+			getClientsForSession: vi.fn(() => ["client-1"]),
+		});
+		const log = mockLogger();
+		const overrides = mockOverrides({
+			getAgent: vi.fn(() => undefined),
+			getModel: vi.fn(() => ({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-5",
+			})),
+			getVariant: vi.fn(() => ""),
+			getContextWindow: vi.fn(() => ""),
+			isModelUserSelected: vi.fn(() => true),
+			startProcessingTimeout: vi.fn(),
+		});
+		const sessionMgr = mockSessionManager();
+		const listSessions = vi.fn(() =>
+			Effect.succeed([
+				{
+					id: "session-1",
+					title: "User named this",
+					updatedAt: 100,
+					messageCount: 0,
+				},
+			]),
+		);
+		const renameSession = vi.fn(() => Effect.void);
+		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			listSessions,
+			renameSession,
+			sendDualSessionLists,
+		});
+		const config = mockConfig();
+		const permissionBridge = mockPermissionBridge();
+		const questionBridge = mockQuestionBridge();
+		const client = {} as unknown as OpenCodeAPI;
+		const engine = {
+			getProviderForSession: vi.fn(() => "claude"),
+			dispatch: vi.fn(async () => ({
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [{ key: "turnCount", value: 1 }],
+			})),
+		} as unknown as OrchestrationEngine;
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(PermissionBridgeTag, permissionBridge),
+			Layer.succeed(QuestionBridgeTag, questionBridge),
+			Layer.succeed(OrchestrationEngineTag, engine),
+		);
+
+		return Effect.gen(function* () {
+			yield* handleMessage("client-1", { text: "First prompt" });
+			yield* flushDispatchContinuation();
+
+			expect(listSessions).toHaveBeenCalledWith();
+			expect(renameSession).not.toHaveBeenCalled();
+			expect(sendDualSessionLists).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"keeps dispatch rejection recovery after launching continuation",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const overrides = mockOverrides({
+				getAgent: vi.fn(() => undefined),
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-5",
+				})),
+				getVariant: vi.fn(() => ""),
+				getContextWindow: vi.fn(() => ""),
+				isModelUserSelected: vi.fn(() => true),
+				startProcessingTimeout: vi.fn(),
+				clearProcessingTimeout: vi.fn(),
+			});
+			const sessionMgr = mockSessionManager();
+			const sessionManagerService = makeMockSessionManagerService();
+			const config = mockConfig();
+			const permissionBridge = mockPermissionBridge();
+			const questionBridge = mockQuestionBridge();
+			const client = {} as unknown as OpenCodeAPI;
+			const dispatchError = new Error("dispatch failed");
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => {
+					throw dispatchError;
+				}),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				Layer.succeed(PermissionBridgeTag, permissionBridge),
+				Layer.succeed(QuestionBridgeTag, questionBridge),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return Effect.gen(function* () {
+				yield* handleMessage("client-1", { text: "First prompt" });
+				yield* flushDispatchContinuation();
+
+				expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+					"session-1",
+				);
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+				expect(ws.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "error",
+						sessionId: "session-1",
+						code: "SEND_FAILED",
+					}),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.effect("sends message via legacy path when no engine", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -3195,7 +3559,16 @@ describe("handleMessage", () => {
 			isModelUserSelected: vi.fn(() => false),
 			startProcessingTimeout: vi.fn(),
 		});
-		const sessionMgr = mockSessionManager();
+		const legacyRecordMessageActivity = vi.fn(() => {
+			throw new Error("legacy recordMessageActivity should not be used");
+		});
+		const sessionMgr = mockSessionManager({
+			recordMessageActivity: legacyRecordMessageActivity,
+		});
+		const recordMessageActivity = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			recordMessageActivity,
+		});
 		const config = mockConfig();
 		const permissionBridge = mockPermissionBridge();
 		const questionBridge = mockQuestionBridge();
@@ -3209,6 +3582,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(PermissionBridgeTag, permissionBridge),
 			Layer.succeed(QuestionBridgeTag, questionBridge),
@@ -3220,9 +3594,8 @@ describe("handleMessage", () => {
 				expect(client.session.prompt).toHaveBeenCalledWith("session-1", {
 					text: "hello world",
 				});
-				expect(sessionMgr.recordMessageActivity).toHaveBeenCalledWith(
-					"session-1",
-				);
+				expect(recordMessageActivity).toHaveBeenCalledWith("session-1");
+				expect(legacyRecordMessageActivity).not.toHaveBeenCalled();
 			}),
 		);
 	});

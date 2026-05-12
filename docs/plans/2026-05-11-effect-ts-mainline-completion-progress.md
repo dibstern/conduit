@@ -2839,6 +2839,105 @@ $ git diff --check
 Exit: 0
 ```
 
+## Phase 7.22: Prompt Send-Turn Session Service Contract
+
+Plan issues found:
+
+- `src/lib/handlers/prompt.ts` could not be converted by only swapping the two pre-dispatch
+  calls. `recordMessageActivity` and prior-history fallback run inside `Effect.gen`, but Claude
+  auto-rename ran in a raw `Promise.then(...)` continuation after fire-and-forget dispatch.
+- Calling `SessionManagerService` from that raw promise callback would either add new
+  `Effect.runPromise` scatter or fake an async adapter. The long-term fix is to launch one
+  fire-and-forget Effect continuation with `Effect.forkDaemon`, preserving immediate dispatch
+  behavior while keeping service methods as Effects.
+- Legacy `SessionManager.renameSession` included an implicit session-list broadcast. The service
+  rename path does not, so prompt auto-rename now explicitly calls `sendDualSessionLists` after a
+  successful service rename to preserve the visible session-list refresh.
+
+Changes:
+
+- Removed `SessionManagerTag` from `src/lib/handlers/prompt.ts`.
+- `handleMessage` now records message activity through
+  `SessionManagerServiceTag.recordMessageActivity`.
+- Claude prior-history fallback now uses `SessionManagerServiceTag.loadPreRenderedHistory`; Effect
+  and sync SQLite readers still take precedence.
+- Replaced the raw dispatch `.then/.catch` continuation with an Effect program launched by
+  `Effect.forkDaemon`. Dispatch is still started immediately; result handling, provider-state
+  update persistence, auto-rename, and dispatch failure recovery now run in Effect.
+- Claude first-turn auto-rename now uses `SessionManagerServiceTag.listSessions`,
+  `renameSession`, and explicit `sendDualSessionLists` broadcast. Custom titles still prevent
+  auto-rename.
+- Updated persistence-backed prompt tests to stop providing `SessionManagerTag`.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "sends message via legacy path when no engine"
+Exit: 1
+Expected failure:
+  legacy recordMessageActivity should not be used
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "loads prior Claude history through SessionManagerService"
+Exit: 1
+Expected failure:
+  SessionManagerService.loadPreRenderedHistory was not called by the Claude fallback path.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "auto-renames first Claude turn|does not auto-rename Claude sessions with custom titles"
+Exit: 1
+Expected failure:
+  SessionManagerService.listSessions was not called by the auto-rename continuation.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleMessage"
+Exit: 0
+Test Files  1 passed (1)
+Tests  9 passed | 60 skipped (69)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed (4)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 0
+Test Files  2 passed (2)
+Tests  73 passed (73)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  363 passed (363)
+Tests  5191 passed | 2 skipped | 12 todo (5205)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

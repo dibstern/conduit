@@ -11,11 +11,13 @@ import {
 	ProviderStateServiceTag,
 	QuestionBridgeTag,
 	ReadQueryTag,
-	SessionManagerTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
-import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+import {
+	type SessionManagerService,
+	SessionManagerServiceTag,
+} from "../effect/session-manager-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
@@ -30,7 +32,7 @@ import {
 	createRelayEventSink,
 	type RelayEventSinkPersist,
 } from "../provider/relay-event-sink.js";
-import type { SendTurnInput } from "../provider/types.js";
+import type { SendTurnInput, TurnResult } from "../provider/types.js";
 import { isClaudeProvider } from "./model.js";
 import type { PayloadMap } from "./payloads.js";
 import type { PromptOptions } from "./types.js";
@@ -46,13 +48,6 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	resolveQuestion: () => {},
 };
 
-type PromptHistorySessionManager = {
-	loadPreRenderedHistory(
-		sessionId: string,
-		offset?: number,
-	): Promise<{ messages: SendTurnInput["history"]; hasMore: boolean }>;
-};
-
 type PriorHistoryReaders = {
 	readQueryEffect?: ReadQueryEffect;
 	readQuery?: ReadQueryService;
@@ -60,7 +55,7 @@ type PriorHistoryReaders = {
 
 function loadPriorHistoryForTurn(
 	sessionId: string,
-	sessionMgr: PromptHistorySessionManager,
+	sessionManagerService: SessionManagerService,
 	readers: PriorHistoryReaders,
 ): Effect.Effect<SendTurnInput["history"], unknown> {
 	if (readers.readQueryEffect) {
@@ -85,10 +80,9 @@ function loadPriorHistoryForTurn(
 			catch: (err) => err,
 		});
 	}
-	return Effect.tryPromise({
-		try: () => sessionMgr.loadPreRenderedHistory(sessionId),
-		catch: (err) => err,
-	}).pipe(Effect.map((history) => history.messages));
+	return sessionManagerService
+		.loadPreRenderedHistory(sessionId)
+		.pipe(Effect.map((history) => history.messages));
 }
 
 // ─── Per-session input draft store ──────────────────────────────────────────
@@ -116,7 +110,7 @@ export const handleMessage = (
 		const wsHandler = yield* WebSocketHandlerTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const config = yield* ConfigTag;
 		const permissionBridge = yield* PermissionBridgeTag;
 		const questionBridge = yield* QuestionBridgeTag;
@@ -154,7 +148,7 @@ export const handleMessage = (
 		}
 
 		// Track message activity
-		sessionMgr.recordMessageActivity(activeId);
+		yield* sessionManagerService.recordMessageActivity(activeId);
 
 		const prompt: PromptOptions = {
 			text,
@@ -230,7 +224,11 @@ export const handleMessage = (
 									: {}),
 							};
 							const result = yield* Effect.either(
-								loadPriorHistoryForTurn(activeId, sessionMgr, historyReaders),
+								loadPriorHistoryForTurn(
+									activeId,
+									sessionManagerService,
+									historyReaders,
+								),
 							);
 							if (result._tag === "Right") return result.right;
 							log.warn(
@@ -375,90 +373,8 @@ export const handleMessage = (
 				...(contextWindow ? { contextWindow } : {}),
 			};
 
-			// Fire-and-forget: the engine manages the turn lifecycle.
-			// Use Effect.catchAll for send failure recovery (sends error to client).
-			void orchestrationEngine
-				.dispatch({
-					type: "send_turn",
-					providerId,
-					input: sendTurnInput,
-				})
-				.then((result) => {
-					if (result.status === "error") {
-						const msg = result.error?.message ?? "Send failed";
-						log.warn(
-							`client=${clientId} session=${activeId} engine dispatch error: ${msg}`,
-						);
-						overrides.clearProcessingTimeout(activeId);
-						wsHandler.sendToSession(activeId, {
-							type: "done",
-							sessionId: activeId,
-							code: 1,
-						});
-						wsHandler.sendTo(
-							clientId,
-							new RelayError(msg, {
-								code: "SEND_FAILED",
-							}).toMessage(activeId),
-						);
-					}
-					// Persist provider state updates
-					if (
-						result.status !== "error" &&
-						result.providerStateUpdates?.length
-					) {
-						const updates = result.providerStateUpdates.map((u) => ({
-							key: u.key,
-							value: String(u.value),
-						}));
-						if (providerStateEffectOption._tag === "Some") {
-							void Effect.runPromise(
-								providerStateEffectOption.value.saveUpdates(activeId, updates),
-							).catch((err) => {
-								log.warn(
-									`Non-fatal provider state persistence error for ${activeId}: ${formatErrorDetail(err)}`,
-								);
-							});
-						} else {
-							try {
-								if (providerStateOption._tag === "Some") {
-									providerStateOption.value.saveUpdates(activeId, updates);
-								}
-							} catch {
-								// Non-fatal
-							}
-						}
-					}
-					// Auto-rename Claude sessions after first successful turn
-					if (result.status !== "error" && providerId === "claude") {
-						const turnCount = result.providerStateUpdates?.find(
-							(u) => u.key === "turnCount",
-						)?.value;
-						if (Number(turnCount) === 1) {
-							const title = text.length > 60 ? `${text.slice(0, 57)}...` : text;
-							sessionMgr
-								.listSessions()
-								.then(async (sessions) => {
-									const session = sessions.find((s) => s.id === activeId);
-									const currentTitle = session?.title ?? "";
-									const isDefault =
-										!currentTitle ||
-										currentTitle === "Claude Session" ||
-										currentTitle.startsWith("New session");
-									if (isDefault) {
-										await sessionMgr.renameSession(activeId, title);
-									}
-								})
-								.catch((err) => {
-									log.warn(
-										`Auto-rename failed for ${activeId}: ${err instanceof Error ? err.message : err}`,
-									);
-								});
-						}
-					}
-				})
-				.catch((sendErr) => {
-					// Send failure — send error to client and broadcast done (intentional recovery)
+			const handleDispatchFailure = (sendErr: unknown) =>
+				Effect.sync(() => {
 					log.warn(
 						`client=${clientId} session=${activeId} Failed to send message:`,
 						formatErrorDetail(sendErr),
@@ -478,6 +394,113 @@ export const handleMessage = (
 						).toMessage(activeId),
 					);
 				});
+
+			const handleDispatchResult = (result: TurnResult) =>
+				Effect.gen(function* () {
+					if (result.status === "error") {
+						const msg = result.error?.message ?? "Send failed";
+						log.warn(
+							`client=${clientId} session=${activeId} engine dispatch error: ${msg}`,
+						);
+						overrides.clearProcessingTimeout(activeId);
+						wsHandler.sendToSession(activeId, {
+							type: "done",
+							sessionId: activeId,
+							code: 1,
+						});
+						wsHandler.sendTo(
+							clientId,
+							new RelayError(msg, {
+								code: "SEND_FAILED",
+							}).toMessage(activeId),
+						);
+					}
+
+					// Persist provider state updates
+					if (
+						result.status !== "error" &&
+						result.providerStateUpdates?.length
+					) {
+						const updates = result.providerStateUpdates.map((u) => ({
+							key: u.key,
+							value: String(u.value),
+						}));
+						if (providerStateEffectOption._tag === "Some") {
+							const saveResult = yield* Effect.either(
+								providerStateEffectOption.value.saveUpdates(activeId, updates),
+							);
+							if (saveResult._tag === "Left") {
+								log.warn(
+									`Non-fatal provider state persistence error for ${activeId}: ${formatErrorDetail(saveResult.left)}`,
+								);
+							}
+						} else {
+							if (providerStateOption._tag === "Some") {
+								yield* Effect.try({
+									try: () =>
+										providerStateOption.value.saveUpdates(activeId, updates),
+									catch: (err) => err,
+								}).pipe(Effect.catchAll(() => Effect.void));
+							}
+						}
+					}
+
+					// Auto-rename Claude sessions after first successful turn
+					if (result.status !== "error" && providerId === "claude") {
+						const turnCount = result.providerStateUpdates?.find(
+							(u) => u.key === "turnCount",
+						)?.value;
+						if (Number(turnCount) === 1) {
+							const title = text.length > 60 ? `${text.slice(0, 57)}...` : text;
+							const renameResult = yield* Effect.either(
+								Effect.gen(function* () {
+									const sessions = yield* sessionManagerService.listSessions();
+									const session = sessions.find((s) => s.id === activeId);
+									const currentTitle = session?.title ?? "";
+									const isDefault =
+										!currentTitle ||
+										currentTitle === "Claude Session" ||
+										currentTitle.startsWith("New session");
+									if (!isDefault) return;
+
+									yield* sessionManagerService.renameSession(activeId, title);
+									yield* sessionManagerService.sendDualSessionLists((msg) =>
+										wsHandler.broadcast(msg),
+									);
+								}),
+							);
+							if (renameResult._tag === "Left") {
+								log.warn(
+									`Auto-rename failed for ${activeId}: ${formatErrorDetail(renameResult.left)}`,
+								);
+							}
+						}
+					}
+				});
+
+			const dispatchPromise = yield* Effect.try({
+				try: () =>
+					orchestrationEngine.dispatch({
+						type: "send_turn",
+						providerId,
+						input: sendTurnInput,
+					}),
+				catch: (err) => err,
+			}).pipe(Effect.either);
+
+			if (dispatchPromise._tag === "Left") {
+				yield* handleDispatchFailure(dispatchPromise.left);
+			} else {
+				yield* Effect.forkDaemon(
+					Effect.tryPromise({
+						try: () => dispatchPromise.right,
+						catch: (err) => err,
+					}).pipe(
+						Effect.flatMap(handleDispatchResult),
+						Effect.catchAll(handleDispatchFailure),
+					),
+				);
+			}
 		} else {
 			// Legacy path: direct REST call
 			const sendResult = yield* Effect.either(
