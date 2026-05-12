@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { expect, vi } from "vitest";
 import {
 	handleListSessions,
+	handleRenameSession,
 	handleViewSession,
 } from "../../../src/lib/handlers/session.js";
 import {
@@ -110,5 +111,54 @@ describe("session handler wire snapshots", () => {
 		);
 
 		expect(calls).toEqual(readSnapshots()["list_sessions_success"]);
+	});
+
+	it("keeps the rename_session broadcast envelopes stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const sessionManagerService = makeMockSessionManagerService({
+			renameSession: vi.fn(() => Effect.void),
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "root-1",
+								title: "Renamed Root",
+								updatedAt: 100,
+								messageCount: 2,
+							},
+						],
+						roots: true,
+					});
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "child-1",
+								title: "Child Session",
+								updatedAt: 200,
+								messageCount: 4,
+								parentID: "root-1",
+							},
+						],
+						roots: false,
+					});
+				}),
+			),
+		});
+
+		await Effect.runPromise(
+			handleRenameSession("client-1", {
+				sessionId: "root-1",
+				title: "Renamed Root",
+			}).pipe(
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["rename_session_success"]);
 	});
 });

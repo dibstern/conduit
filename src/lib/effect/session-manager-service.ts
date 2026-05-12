@@ -247,6 +247,25 @@ export const deleteSession = (sessionId: string) =>
 	);
 
 /**
+ * Rename a session via the API.
+ */
+export const renameSession = (sessionId: string, title: string) =>
+	Effect.gen(function* () {
+		const api = yield* OpenCodeAPITag;
+		yield* Effect.tryPromise(() =>
+			api.session.update(sessionId, { title }),
+		).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({ operation: "renameSession", cause }),
+			),
+		);
+	}).pipe(
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
+	);
+
+/**
  * Record message activity for a session (updates lastMessageAt timestamp).
  */
 export const recordMessageActivity = (sessionId: string, timestamp?: number) =>
@@ -337,6 +356,10 @@ export interface SessionManagerService {
 		title?: string,
 	): Effect.Effect<SessionDetail, SessionManagerError>;
 	deleteSession(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	renameSession(
+		sessionId: string,
+		title: string,
+	): Effect.Effect<void, SessionManagerError>;
 	recordMessageActivity(
 		sessionId: string,
 		timestamp?: number,
@@ -428,6 +451,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 				deleteSession(sessionId).pipe(
 					Effect.provideService(OpenCodeAPITag, api),
 					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			renameSession: (sessionId, title) =>
+				renameSession(sessionId, title).pipe(
+					Effect.provideService(OpenCodeAPITag, api),
 				),
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(

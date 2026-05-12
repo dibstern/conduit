@@ -18,6 +18,7 @@ import {
 } from "../../../src/lib/effect/services.js";
 import {
 	listSessions,
+	renameSession,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 	sendDualSessionLists,
@@ -68,6 +69,20 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 }
 
 describe("SessionManagerService", () => {
+	it.effect("renames a session through the provider API", () => {
+		const api = makeMockOpenCodeAPI();
+		const update = vi.spyOn(api.session, "update").mockResolvedValue(undefined);
+		const layer = Layer.succeed(OpenCodeAPITag, api);
+
+		return Effect.gen(function* () {
+			yield* renameSession("session-1", "New Title");
+
+			expect(update).toHaveBeenCalledWith("session-1", {
+				title: "New Title",
+			});
+		}).pipe(Effect.provide(layer));
+	});
+
 	it.effect("projects provider sessions into frontend session info", () => {
 		const api = makeMockOpenCodeAPI();
 		vi.spyOn(api.session, "list").mockResolvedValue([

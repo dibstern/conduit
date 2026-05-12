@@ -2077,6 +2077,7 @@ describe("handleListSessions", () => {
 					}),
 				),
 				deleteSession: vi.fn(() => Effect.void),
+				renameSession: vi.fn(() => Effect.void),
 				recordMessageActivity: vi.fn(() => Effect.void),
 				setForkEntry: vi.fn(() => Effect.void),
 				sendDualSessionLists,
@@ -2472,40 +2473,95 @@ describe("handleDeleteSession", () => {
 });
 
 describe("handleRenameSession", () => {
-	it.effect("renames session and logs", () => {
-		const log = mockLogger();
-		const sessionMgr = mockSessionManager();
-		const ws = mockWsHandler();
+	it.effect(
+		"renames through SessionManagerService and broadcasts lists",
+		() => {
+			const log = mockLogger();
+			const legacyRenameSession = vi.fn(async () => {
+				throw new Error("legacy renameSession should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				renameSession: legacyRenameSession,
+			});
+			const ws = mockWsHandler();
+			const calls: string[] = [];
+			const renameSession = vi.fn(() =>
+				Effect.sync(() => {
+					calls.push("rename");
+				}),
+			);
+			const sendDualSessionLists = vi.fn((send) =>
+				Effect.sync(() => {
+					calls.push("broadcast");
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "session-1",
+								title: "New Title",
+								updatedAt: 100,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				renameSession,
+				sendDualSessionLists,
+			});
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
+			const layer = Layer.mergeAll(
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(WebSocketHandlerTag, ws),
+			);
 
-		return handleRenameSession("client-1", {
-			sessionId: "session-1",
-			title: "New Title",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(sessionMgr.renameSession).toHaveBeenCalledWith(
-					"session-1",
-					"New Title",
-				);
-				expect(log.info).toHaveBeenCalled();
-			}),
-		);
-	});
+			return handleRenameSession("client-1", {
+				sessionId: "session-1",
+				title: "New Title",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
+					expect(legacyRenameSession).not.toHaveBeenCalled();
+					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(calls).toEqual(["rename", "broadcast"]);
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_list",
+						sessions: [
+							{
+								id: "session-1",
+								title: "New Title",
+								updatedAt: 100,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+					expect(log.info).toHaveBeenCalled();
+				}),
+			);
+		},
+	);
 
 	it.effect("does nothing when id or title is empty", () => {
 		const log = mockLogger();
 		const sessionMgr = mockSessionManager();
 		const ws = mockWsHandler();
+		const renameSession = vi.fn(() => Effect.void);
+		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			renameSession,
+			sendDualSessionLists,
+		});
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -2515,7 +2571,8 @@ describe("handleRenameSession", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(sessionMgr.renameSession).not.toHaveBeenCalled();
+				expect(renameSession).not.toHaveBeenCalled();
+				expect(sendDualSessionLists).not.toHaveBeenCalled();
 			}),
 		);
 	});

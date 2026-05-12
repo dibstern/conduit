@@ -352,12 +352,16 @@ export const handleRenameSession = (
 	payload: PayloadMap["rename_session"],
 ) =>
 	Effect.gen(function* () {
-		const sessionMgr = yield* SessionManagerTag;
+		const wsHandler = yield* WebSocketHandlerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const { sessionId: id, title } = payload;
 		if (id && title) {
-			yield* Effect.tryPromise(() => sessionMgr.renameSession(id, title));
+			yield* sessionManagerService.renameSession(id, title);
+			yield* sessionManagerService.sendDualSessionLists((msg) =>
+				wsHandler.broadcast(msg),
+			);
 			log.info(`client=${clientId} Renamed: ${id} → ${title}`);
 		}
 	});

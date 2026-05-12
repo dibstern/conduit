@@ -2512,6 +2512,94 @@ $ pnpm lint
 Exit: 0
 ```
 
+## Phase 7.19: Rename Session Service Contract
+
+Plan issue found:
+
+- `handleRenameSession` could not be converted by only swapping the provider mutation. Legacy
+  `SessionManager.renameSession` also refreshed the session list via its internal broadcast path,
+  so the handler must explicitly broadcast through `SessionManagerServiceTag` after the service
+  mutation.
+- This is a browser `rename_session` slice, not global rename retirement. Claude auto-title in
+  `src/lib/handlers/prompt.ts` still calls legacy `sessionMgr.renameSession` and should be
+  handled with the prompt/session-send ownership work.
+
+Changes:
+
+- Added `SessionManagerService.renameSession`, backed by `OpenCodeAPITag.session.update`.
+- Converted `handleRenameSession` to call `SessionManagerServiceTag.renameSession` and then
+  `sendDualSessionLists` with `wsHandler.broadcast`.
+- Tightened handler tests so legacy `sessionMgr.renameSession` throws if rename regresses to the
+  legacy path, mutation happens before list refresh, and the refreshed session-list broadcast
+  remains observable.
+- Added a `rename_session` wire snapshot for the roots-first/background-all broadcast envelope.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "renames"
+Exit: 1
+Expected failure:
+  renameSession was not exported by SessionManagerService.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleRenameSession"
+Exit: 1
+Expected failure:
+  legacy renameSession should not be used
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts -t "rename_session"
+Exit: 1
+Expected failure:
+  rename_session_success snapshot did not exist yet.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "renames"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 9 skipped (10)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleRenameSession"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 62 skipped (64)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts -t "rename_session"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 2 skipped (3)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  80 passed (80)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:
