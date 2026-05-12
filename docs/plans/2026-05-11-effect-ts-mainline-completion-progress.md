@@ -1409,3 +1409,86 @@ Checksum after backfill: b4379c0b4631c149b4ffa201e92341150395475e3d1c386e227a77e
 Row counts unchanged for sessions, events, messages, message_parts, activities, turns, pending_approvals,
 session_providers, provider_state, tool_content, command_receipts, and projector_cursors.
 ```
+
+## Phase 5.1: Effect Event Store Version Assignment Slice
+
+Plan issues found:
+
+- The Effect event store still had an in-memory `Map<sessionId, nextVersion>` cache after the schema migration
+  foundation landed. That directly violated Phase 5's "delete the mutable version cache" rule and left a stale
+  version window whenever another writer advanced the same session stream.
+- Deleting the cache alone was not enough. The high-risk transaction rule says version assignment and append must
+  be one transaction, but the single-event `append` path previously ran `SELECT MAX(stream_version) + 1` and
+  `INSERT` as separate SQL operations under `@effect/sql`'s default deferred `BEGIN`. The fix makes version
+  allocation part of the `INSERT ... SELECT COALESCE(MAX(stream_version) + 1, 0) ... RETURNING` write statement,
+  and keeps single-event append and batch append inside explicit `SqlClient.withTransaction(...)` scopes.
+- A reviewer correctly called out that the first same-service concurrency test did not prove the independent
+  SQLite-client case. The slice now has both same-service and independent-store shared-file concurrency checks.
+
+Changes:
+
+- `src/lib/persistence/effect/event-store-effect.ts`: removed the mutable version cache and the
+  `resetVersionCache` API from the Effect event-store service.
+- `src/lib/persistence/effect/event-store-effect.ts`: wrapped the single-event append path in
+  `SqlClient.withTransaction(...)`; `appendBatch` now reuses the same internal append body inside one outer
+  transaction instead of nesting through the public `append` method.
+- `src/lib/persistence/effect/event-store-effect.ts`: moved stream-version allocation into the `INSERT` statement
+  so the version read and row write are not two separately interleavable SQL statements.
+- `test/unit/persistence/projectors-effect.test.ts`: added a behavior test proving an append observes a stream
+  version advanced outside the service instance.
+- `test/unit/persistence/projectors-effect.test.ts`: added the Phase 5 concurrent append behavior check; ten
+  concurrent appends to the same session must return unique contiguous stream versions.
+- `test/unit/persistence/projectors-effect.test.ts`: added a shared-file independent-store concurrency check so
+  the regression suite is not limited to one Effect SQL service instance.
+- `test/unit/persistence/projectors-effect.test.ts`: renamed the old cache-rollback assertions to the behavior
+  they actually protect: batch rollback for schema-invalid input and serialization defects.
+- `test/unit/persistence/projectors-effect.test.ts`: removed the `resetVersionCache` test because the reset
+  method was cache-management surface, not production behavior.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts -t \
+  "append observes stream versions advanced outside the service instance"
+Exit: 1
+Expected failure:
+  EventStoreError from append after the existing cache reused streamVersion=1 and hit
+  idx_events_session_version.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts -t \
+  "append observes stream versions advanced outside the service instance"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 36 skipped (37)
+```
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts -t \
+  "concurrent appends to one session receive unique contiguous stream versions"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 37 skipped (38)
+```
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts -t \
+  "append observes stream versions advanced outside the service instance|\
+concurrent appends from independent store instances receive unique contiguous stream versions|\
+concurrent appends to one session receive unique contiguous stream versions"
+Exit: 0
+Test Files  1 passed (1)
+Tests  3 passed | 36 skipped (39)
+```
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts \
+  test/unit/persistence/persistence-effect.test.ts \
+  test/unit/persistence/migrations.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  60 passed (60)
+```

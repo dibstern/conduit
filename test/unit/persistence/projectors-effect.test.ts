@@ -210,6 +210,19 @@ function makeTestSqliteLayer() {
 	);
 }
 
+function makeFileSqliteLayer(filename: string) {
+	return SqliteNode.layer({ filename }).pipe(Layer.provide(Reactivity.layer));
+}
+
+function makeEventStoreLayerForFile(filename: string) {
+	const sqliteLayer = makeFileSqliteLayer(filename);
+	const eventStoreLayer = Layer.effect(
+		EventStoreEffectTag,
+		makeEventStoreEffect,
+	).pipe(Layer.provide(sqliteLayer));
+	return Layer.merge(sqliteLayer, eventStoreLayer);
+}
+
 // Combine: SQLite client + schema + service layers
 const makeTestLayer = (
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
@@ -271,6 +284,25 @@ function runTestWithProjectors<A, E>(
 ): Promise<A> {
 	const layer = makeTestLayer(projectors);
 	return Effect.runPromise(Effect.provide(effect, layer));
+}
+
+function runWithSqliteFile<A, E>(
+	filename: string,
+	effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+): Promise<A> {
+	return Effect.runPromise(
+		Effect.provide(effect, makeFileSqliteLayer(filename)),
+	);
+}
+
+function appendWithIndependentStore(filename: string, event: CanonicalEvent) {
+	return Effect.provide(
+		Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			return yield* store.append(event);
+		}),
+		makeEventStoreLayerForFile(filename),
+	);
 }
 
 // Helper to seed a session row directly
@@ -577,14 +609,95 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
-	it("appendBatch restores version cache after a rolled-back batch", () =>
+	it("append observes stream versions advanced outside the service instance", () =>
 		runTest(
 			Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
-				yield* seedSession("s-cache-rollback");
-				const valid = makeSessionCreated("s-cache-rollback");
+				yield* seedSession("s-external-writer");
+				yield* store.append(makeSessionCreated("s-external-writer"));
+				yield* insertRawEventRow({
+					sessionId: "s-external-writer",
+					type: "message.created",
+					data: JSON.stringify({
+						messageId: "external-message",
+						role: "assistant",
+						sessionId: "s-external-writer",
+					}),
+					streamVersion: 1,
+				});
+
+				const stored = yield* store.append(
+					makeTextDelta("s-external-writer", "external-message", "hello"),
+				);
+
+				expect(stored.streamVersion).toBe(2);
+			}),
+		));
+
+	it("concurrent appends to one session receive unique contiguous stream versions", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-concurrent-appends");
+				const events = Array.from({ length: 10 }, (_, index) =>
+					makeTextDelta("s-concurrent-appends", `m${index}`, `text ${index}`),
+				);
+
+				const stored = yield* Effect.forEach(
+					events,
+					(event) => store.append(event),
+					{ concurrency: "unbounded" },
+				);
+
+				expect(
+					stored.map((event) => event.streamVersion).sort((a, b) => a - b),
+				).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+			}),
+		));
+
+	it("concurrent appends from independent store instances receive unique contiguous stream versions", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-projectors-shared-"));
+		try {
+			const filename = join(dir, "events.db");
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					yield* runMigrationsEffect(schemaMigrations);
+					yield* seedSession("s-independent-concurrent-appends");
+				}),
+			);
+			const events = Array.from({ length: 10 }, (_, index) =>
+				makeTextDelta(
+					"s-independent-concurrent-appends",
+					`m${index}`,
+					`text ${index}`,
+				),
+			);
+
+			const stored = await Effect.runPromise(
+				Effect.forEach(
+					events,
+					(event) => appendWithIndependentStore(filename, event),
+					{ concurrency: "unbounded" },
+				),
+			);
+
+			expect(
+				stored.map((event) => event.streamVersion).sort((a, b) => a - b),
+			).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("appendBatch rolls back a schema-invalid batch", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-batch-validation-rollback");
+				const valid = makeSessionCreated("s-batch-validation-rollback");
 				const invalid = {
-					...makeTextDelta("s-cache-rollback", "m1", "hello"),
+					...makeTextDelta("s-batch-validation-rollback", "m1", "hello"),
 					data: {
 						messageId: "m1",
 						partId: "p1",
@@ -597,20 +710,20 @@ describe("EventStoreEffect", () => {
 				expect(batchResult._tag).toBe("Left");
 
 				const stored = yield* store.append(
-					makeSessionCreated("s-cache-rollback"),
+					makeSessionCreated("s-batch-validation-rollback"),
 				);
 				expect(stored.streamVersion).toBe(0);
 			}),
 		));
 
-	it("appendBatch restores version cache after a defect rolls back the batch", () =>
+	it("appendBatch rolls back a serialization defect", () =>
 		runTest(
 			Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
-				yield* seedSession("s-cache-defect");
-				const valid = makeSessionCreated("s-cache-defect");
+				yield* seedSession("s-batch-defect-rollback");
+				const valid = makeSessionCreated("s-batch-defect-rollback");
 				const defect = {
-					...canonicalEvent("tool.completed", "s-cache-defect", {
+					...canonicalEvent("tool.completed", "s-batch-defect-rollback", {
 						messageId: "m1",
 						partId: "p1",
 						result: BigInt(1),
@@ -624,7 +737,7 @@ describe("EventStoreEffect", () => {
 				expect(batchExit._tag).toBe("Failure");
 
 				const stored = yield* store.append(
-					makeSessionCreated("s-cache-defect"),
+					makeSessionCreated("s-batch-defect-rollback"),
 				);
 				expect(stored.streamVersion).toBe(0);
 			}),
@@ -637,19 +750,6 @@ describe("EventStoreEffect", () => {
 				yield* seedSession("s1");
 				const version = yield* store.getNextStreamVersion("s1");
 				expect(version).toBe(0);
-			}),
-		));
-
-	it("resetVersionCache clears the internal cache", () =>
-		runTest(
-			Effect.gen(function* () {
-				const store = yield* EventStoreEffectTag;
-				yield* seedSession("s1");
-				yield* store.append(makeSessionCreated("s1"));
-				yield* store.resetVersionCache();
-				// After reset, should re-read from DB
-				const version = yield* store.getNextStreamVersion("s1");
-				expect(version).toBe(1);
 			}),
 		));
 });

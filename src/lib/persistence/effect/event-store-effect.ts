@@ -4,7 +4,7 @@
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Exit, Schema } from "effect";
+import { Context, Data, Effect, Schema } from "effect";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";
 import {
@@ -53,8 +53,6 @@ export interface EventStoreEffect {
 	readonly getNextStreamVersion: (
 		sessionId: string,
 	) => Effect.Effect<number, EventStoreError | SqlError>;
-
-	readonly resetVersionCache: () => Effect.Effect<void>;
 }
 
 // ─── Service Tag ─────────���──────────────────────��────────────────────────────
@@ -90,7 +88,6 @@ const validateCanonicalEvent = (
 
 export const makeEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	const versionCache = new Map<string, number>();
 
 	const getNextStreamVersion = (
 		sessionId: string,
@@ -111,27 +108,30 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			),
 		);
 
-	const append = (
+	const appendInCurrentTransaction = (
 		event: CanonicalEvent,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
 		Effect.gen(function* () {
 			yield* validateCanonicalEvent(event);
 
-			let nextVersion = versionCache.get(event.sessionId);
-			if (nextVersion === undefined) {
-				nextVersion = yield* getNextStreamVersion(event.sessionId);
-			}
-
 			const dataJson = JSON.stringify(event.data);
 			const metadataJson = JSON.stringify(event.metadata);
 
 			const rows = yield* sql<StoredEventRow>`
-					INSERT INTO events (
-						event_id, session_id, stream_version, type, data, metadata, provider, created_at
-					) VALUES (
-					${event.eventId}, ${event.sessionId}, ${nextVersion}, ${event.type},
-					${dataJson}, ${metadataJson}, ${event.provider}, ${event.createdAt}
+				INSERT INTO events (
+					event_id, session_id, stream_version, type, data, metadata, provider, created_at
 				)
+				SELECT
+					${event.eventId},
+					${event.sessionId},
+					COALESCE(MAX(stream_version) + 1, 0),
+					${event.type},
+					${dataJson},
+					${metadataJson},
+					${event.provider},
+					${event.createdAt}
+				FROM events
+				WHERE session_id = ${event.sessionId}
 				RETURNING
 					sequence, event_id, session_id, stream_version,
 					type, data, metadata, provider, created_at`;
@@ -145,7 +145,6 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			}
 
 			const stored = yield* decodeEventStoreRow(row);
-			versionCache.set(event.sessionId, nextVersion + 1);
 			return stored;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -155,30 +154,24 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			),
 		);
 
+	const append = (
+		event: CanonicalEvent,
+	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
+		sql.withTransaction(appendInCurrentTransaction(event));
+
 	const appendBatch = (
 		events: readonly CanonicalEvent[],
 	): Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError> => {
 		if (events.length === 0) return Effect.succeed([]);
 
-		const cacheSnapshot = new Map(versionCache);
-		const restoreCache = Effect.sync(() => {
-			versionCache.clear();
-			for (const [sessionId, version] of cacheSnapshot) {
-				versionCache.set(sessionId, version);
-			}
-		});
-
-		return Effect.onExit(
-			sql.withTransaction(
-				Effect.gen(function* () {
-					const results: StoredEvent[] = [];
-					for (const event of events) {
-						results.push(yield* append(event));
-					}
-					return results;
-				}),
-			),
-			(exit) => (Exit.isFailure(exit) ? restoreCache : Effect.void),
+		return sql.withTransaction(
+			Effect.gen(function* () {
+				const results: StoredEvent[] = [];
+				for (const event of events) {
+					results.push(yield* appendInCurrentTransaction(event));
+				}
+				return results;
+			}),
 		);
 	};
 
@@ -242,11 +235,6 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 	): Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError> =>
 		readBySession(sessionId, fromSequence, undefined);
 
-	const resetVersionCache = (): Effect.Effect<void> =>
-		Effect.sync(() => {
-			versionCache.clear();
-		});
-
 	return {
 		append,
 		appendBatch,
@@ -254,6 +242,5 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		readBySession,
 		readAllBySession,
 		getNextStreamVersion,
-		resetVersionCache,
 	} satisfies EventStoreEffect;
 });
