@@ -655,6 +655,13 @@ $ pnpm lint
 Exit: 0
 ```
 
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  346 passed (346)
+Tests  5084 passed | 2 skipped | 12 todo (5098)
+```
+
 ## Phase 4: Relay Cache Async Stop Slice
 
 Plan issue found:
@@ -800,4 +807,64 @@ $ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
 Exit: 0
 Test Files  346 passed (346)
 Tests  5081 passed | 2 skipped | 12 todo (5095)
+```
+
+## Phase 4: Session Event Bridge Scoped Stream Slice
+
+Plan issue found:
+
+- `src/lib/relay/session-event-bridge.ts` still used `Effect.runSync(PubSub.publish(...))` inside EventEmitter
+  callbacks. The call was operationally safe with `PubSub.sliding`, but it violated the Phase 4 rule against
+  app-internal `Effect.runPromise` / `Effect.runSync` bridge escapes.
+- Converting the bridge to a forked stream exposed an ordering requirement: the layer must not finish building
+  before the EventEmitter listeners are registered, or synchronous session events emitted immediately after
+  construction can be lost.
+
+Changes:
+
+- `src/lib/relay/session-event-bridge.ts`: replaced callback-local `Effect.runSync` publishing with a scoped
+  `Stream.asyncPush` callback bridge and a scoped stream consumer that publishes to `DaemonEventBus`.
+- `src/lib/relay/session-event-bridge.ts`: layer construction now awaits listener registration before returning,
+  preserving the old synchronous-listener readiness contract.
+- `test/unit/effect/session-event-bridge.test.ts`: added a static bridge-exit gate for `Effect.runSync`, scoped
+  listener cleanup coverage, and synchronous burst-order coverage.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/session-event-bridge.test.ts
+Exit: 1
+Expected failure:
+  expected session-event-bridge.ts not to contain 'Effect.runSync'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-event-bridge.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  6 passed (6)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-event-bridge.test.ts \
+  test/unit/effect/session-lifecycle-wiring.test.ts
+Exit: 0
+Test Files  2 passed (2)
+Tests  13 passed (13)
+```
+
+```text
+$ rg -n "Effect\\.run(Promise|Sync)" src/lib/relay/session-event-bridge.ts
+Exit: 1
+No output.
+```
+
+```text
+$ pnpm check
+Exit: 0
+
+$ pnpm lint
+Exit: 0
 ```
