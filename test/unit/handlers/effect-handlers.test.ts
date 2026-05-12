@@ -9,6 +9,10 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import type { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../../../src/lib/effect/pending-interaction-service.js";
 import type {
 	SessionManagerShape,
 	WebSocketHandlerShape,
@@ -104,10 +108,7 @@ import type { OrchestrationEngine } from "../../../src/lib/provider/orchestratio
 import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
-import type {
-	OpenCodeDecision,
-	ProjectRelayConfig,
-} from "../../../src/lib/types.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
@@ -1288,6 +1289,7 @@ function makeForkSessionLayer(options?: {
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		PendingInteractionServiceLive,
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
@@ -1337,6 +1339,7 @@ function makeSessionLifecycleLayer(options?: {
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		PendingInteractionServiceLive,
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
@@ -1917,17 +1920,66 @@ describe("handleScanNow", () => {
 // ─── Permissions handler tests ────────────────────────────────────────────
 
 describe("handlePermissionResponse", () => {
+	it.effect(
+		"processes permission response through PendingInteractionService without PermissionBridgeTag",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const log = mockLogger();
+			const client = {
+				permission: { reply: vi.fn(async () => {}) },
+				config: { get: vi.fn(async () => ({})) },
+			} as unknown as OpenCodeAPI;
+			const config = mockConfig();
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+			);
+
+			return Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				yield* pendingInteractions.recordPermissionRequest({
+					requestId: "perm-1" as PermissionId,
+					sessionId: "session-1",
+					toolName: "Bash",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+				});
+
+				yield* handlePermissionResponse("client-1", {
+					requestId: "perm-1" as PermissionId,
+					decision: "allow",
+				});
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.permission.reply).toHaveBeenCalledWith(
+						"session-1",
+						"perm-1",
+						"once",
+					);
+					expect(ws.broadcast).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "permission_resolved",
+							requestId: "perm-1",
+							decision: "once",
+						}),
+					);
+				}),
+			);
+		},
+	);
+
 	it.effect("processes permission response and broadcasts resolution", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const permissionBridge = mockPermissionBridge({
-			onPermissionResponse: vi.fn(() => ({
-				toolName: "Bash",
-				mapped: "once" as OpenCodeDecision,
-			})),
-		});
 		const client = {
 			permission: { reply: vi.fn(async () => {}) },
 			config: { get: vi.fn(async () => ({})) },
@@ -1938,20 +1990,26 @@ describe("handlePermissionResponse", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
 			Layer.succeed(ConfigTag, config),
+			PendingInteractionServiceLive,
 		);
 
-		return handlePermissionResponse("client-1", {
-			requestId: "perm-1" as PermissionId,
-			decision: "allow",
+		return Effect.gen(function* () {
+			const pendingInteractions = yield* PendingInteractionServiceTag;
+			yield* pendingInteractions.recordPermissionRequest({
+				requestId: "perm-1" as PermissionId,
+				sessionId: "session-1",
+				toolName: "Bash",
+				toolInput: { patterns: [], metadata: {} },
+				always: [],
+			});
+			yield* handlePermissionResponse("client-1", {
+				requestId: "perm-1" as PermissionId,
+				decision: "allow",
+			});
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(permissionBridge.onPermissionResponse).toHaveBeenCalledWith(
-					"perm-1",
-					"allow",
-				);
 				expect(ws.broadcast).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "permission_resolved",
@@ -1967,9 +2025,6 @@ describe("handlePermissionResponse", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const permissionBridge = mockPermissionBridge({
-			onPermissionResponse: vi.fn(() => null),
-		});
 		const client = {
 			permission: { reply: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -1979,8 +2034,8 @@ describe("handlePermissionResponse", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
 			Layer.succeed(ConfigTag, config),
+			PendingInteractionServiceLive,
 		);
 
 		return handlePermissionResponse("client-1", {

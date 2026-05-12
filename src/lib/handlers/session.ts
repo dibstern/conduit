@@ -2,11 +2,11 @@
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
 import {
 	LoggerTag,
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
-	PermissionBridgeTag,
 	PollerManagerTag,
 	QuestionBridgeTag,
 	ReadQueryTag,
@@ -39,7 +39,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const modelService = yield* OpenCodeModelServiceTag;
-		const permissionBridge = yield* PermissionBridgeTag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const questionBridge = yield* QuestionBridgeTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
@@ -66,12 +66,12 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					),
 				),
 
-				// Pending permissions (bridge + API)
+				// Pending permissions (service + API)
 				Effect.gen(function* () {
-					const bridgePending = permissionBridge.getPending();
+					const bridgePending =
+						yield* pendingInteractions.listPendingPermissions(id);
 					const sentPermissionIds = new Set<string>();
 					for (const perm of bridgePending) {
-						if (perm.sessionId && perm.sessionId !== id) continue;
 						wsHandler.sendTo(clientId, {
 							type: "permission_request",
 							sessionId: perm.sessionId,

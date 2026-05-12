@@ -5,13 +5,13 @@
 // answer. The handler calls the OpenCode REST API directly — no in-memory
 // bridge state is needed, so questions survive relay restarts.
 
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
@@ -137,11 +137,16 @@ export const handlePermissionResponse = (
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const permissionBridge = yield* PermissionBridgeTag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
 
 		const { requestId, decision, persistScope, persistPattern } = payload;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "?";
-		const result = permissionBridge.onPermissionResponse(requestId, decision);
+		const resultOption =
+			yield* pendingInteractions.resolvePermissionFromBrowser(
+				requestId,
+				decision,
+			);
+		const result = Option.getOrUndefined(resultOption);
 
 		if (result) {
 			log.info(

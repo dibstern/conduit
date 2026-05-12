@@ -3136,6 +3136,91 @@ $ pnpm check
 Exit: 0
 ```
 
+## Phase 7.25: Pending Permission Interaction Service
+
+Plan issues found:
+
+- The Phase 7 plan says to convert permission/question bridge methods, but treating
+  `PermissionBridgeTag` as a thin Effect wrapper would preserve the real state split. Pending permissions are read by
+  SSE wiring, browser response handlers, session metadata replay, and timeout wiring, so this slice moves those
+  permission paths to one Effect-owned state service.
+- Moving only `handlePermissionResponse` would be incomplete: `permission.asked` would still store in the legacy
+  bridge, or the handler would resolve a different state owner than the SSE producer. This slice migrates the selected
+  producer/read/timeout paths together.
+- The Claude/EventSink deferred permission path still has its own state and remains a separate follow-up. This slice
+  intentionally does not migrate `QuestionBridgeTag` or Claude deferred waiters because those need a broader
+  `relay-event-sink` migration.
+
+Changes:
+
+- Added `src/lib/effect/pending-interaction-service.ts` with `PendingInteractionServiceTag`, backed by `Ref` state and
+  `Clock` timestamps.
+- Added service methods for recording pending permissions, listing them by session, resolving browser decisions,
+  marking OpenCode replies, recovering pending permissions from REST, and taking timed-out permissions.
+- Migrated `handlePermissionResponse` from `PermissionBridgeTag.onPermissionResponse(...)` to
+  `PendingInteractionServiceTag.resolvePermissionFromBrowser(...)`.
+- Migrated `sendSessionMetadata` permission replay from `PermissionBridgeTag.getPending()` to
+  `PendingInteractionServiceTag.listPendingPermissions(...)`, keeping API replay/dedup behavior.
+- Migrated `sse-wiring.ts` permission asked/replied and reconnect recovery to a `pendingPermissions` composition port
+  backed by `PendingInteractionServiceTag` in `relay-stack.ts`.
+- Migrated `PermissionTimeoutLive` from `PermissionBridgeTag.checkTimeouts()` to
+  `PendingInteractionServiceTag.takeTimedOutPermissions()`.
+- Updated shared SSE test mocks for the new pending-permissions port.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/pending-interaction-service.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/effect/pending-interaction-service.js'
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "PendingInteractionService without PermissionBridgeTag"
+Exit: 1
+Expected failure:
+  Service not found: PermissionBridge
+```
+
+```text
+$ pnpm check
+Exit: 2
+Expected failure:
+  Session metadata and helper layers still needed the new PendingInteractionServiceTag after the state owner moved.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/pending-interaction-service.test.ts \
+  test/unit/relay/sse-wiring.test.ts \
+  test/unit/relay/race-sse-rehydration.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/mock-factories.test.ts \
+  test/unit/relay/permission-rehydration-wiring.test.ts
+Exit: 0
+Test Files  7 passed (7)
+Tests  149 passed (149)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 977 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

@@ -28,6 +28,7 @@ import {
 	makeInstanceManagerStateLive,
 } from "../../src/lib/effect/instance-manager-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/effect/message-poller.js";
+import { PendingInteractionServiceLive } from "../../src/lib/effect/pending-interaction-service.js";
 import { RateLimiterLive } from "../../src/lib/effect/rate-limiter-layer.js";
 import {
 	ConfigTag,
@@ -71,6 +72,7 @@ import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
 import type { SessionOverrides } from "../../src/lib/session/session-overrides.js";
+import type { PermissionId } from "../../src/lib/shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
@@ -356,8 +358,35 @@ export function createMockSSEWiringDeps(
 			increment: vi.fn(),
 			set: vi.fn(),
 		},
-		permissionBridge:
-			createMockPermissionBridge() as unknown as SSEWiringDeps["permissionBridge"],
+		pendingPermissions: {
+			record: vi.fn((input) => ({
+				requestId: input.requestId,
+				sessionId: input.sessionId,
+				toolName: input.toolName,
+				toolInput: input.toolInput,
+				always: [...(input.always ?? [])],
+				timestamp: Date.now(),
+			})),
+			markReplied: vi.fn(() => true),
+			recover: vi.fn(
+				(
+					permissions: Parameters<
+						SSEWiringDeps["pendingPermissions"]["recover"]
+					>[0],
+				) =>
+					permissions.map((permission) => ({
+						requestId: permission.id as PermissionId,
+						sessionId: permission.sessionId ?? "",
+						toolName: permission.permission,
+						toolInput: {
+							patterns: [...(permission.patterns ?? [])],
+							metadata: permission.metadata ?? {},
+						},
+						always: [...(permission.always ?? [])],
+						timestamp: Date.now(),
+					})),
+			),
+		},
 		overrides: createMockOverrides() as unknown as SSEWiringDeps["overrides"],
 		wsHandler: {
 			broadcast: vi.fn(),
@@ -968,6 +997,7 @@ export function makeTestHandlerLayer(
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		PendingInteractionServiceLive,
 		sessionManagerServiceLayer,
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerTag, sessionMgr),

@@ -13,7 +13,9 @@ import {
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PendingInteractionServiceTag } from "../../../src/lib/effect/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,
@@ -192,9 +194,13 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		if (mock) await mock.close();
 	}, 10_000);
 
-	it("rehydrates pending permissions from OpenCode API into the bridge on SSE connect", () => {
-		// The permission bridge should have the rehydrated permission
-		const pending = relay.permissionBridge.getPending();
+	it("rehydrates pending permissions from OpenCode API into the Effect service on SSE connect", async () => {
+		const pending = await relay.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				return yield* pendingInteractions.listPendingPermissions();
+			}),
+		);
 		expect(pending).toHaveLength(1);
 		expect(pending[0]).toMatchObject({
 			requestId: "perm-rehydrate-1",
@@ -209,7 +215,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		await client.waitForOpen();
 		await client.waitForInitialState();
 
-		// The client-init path replays pending permissions from the bridge.
+		// The client-init path replays pending permissions from the shared service.
 		// If rehydration worked, the client should receive a permission_request.
 		const permMsg = await client.waitFor("permission_request", {
 			timeout: 3000,

@@ -3,8 +3,11 @@
 // OpenCode, translates them, filters by session, records to cache, broadcasts
 // to browser clients, and sends push notifications.
 
-import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type {
+	PendingPermissionRecoveryInput,
+	PendingPermissionRequestInput,
+} from "../effect/pending-interaction-service.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
@@ -12,7 +15,7 @@ import type { PushNotificationManager } from "../server/push.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
-import type { RelayMessage } from "../types.js";
+import type { PendingPermission, RelayMessage } from "../types.js";
 import { applyPipelineResult, processEvent } from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
 import { resolveNotifications } from "./notification-policy.js";
@@ -73,11 +76,19 @@ interface PendingQuestionCountsLike {
 	set(counts: ReadonlyMap<string, number>): void;
 }
 
+interface PendingPermissionsLike {
+	record(input: PendingPermissionRequestInput): PendingPermission;
+	markReplied(requestId: string): boolean;
+	recover(
+		permissions: readonly PendingPermissionRecoveryInput[],
+	): PendingPermission[];
+}
+
 export interface SSEWiringDeps {
 	translator: Translator;
 	sessionMgr: SessionManagerLike;
 	pendingQuestionCounts: PendingQuestionCountsLike;
-	permissionBridge: PermissionBridge;
+	pendingPermissions: PendingPermissionsLike;
 	overrides: SessionOverrides;
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
@@ -192,7 +203,6 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	const {
 		translator,
 		sessionMgr,
-		permissionBridge,
 		overrides,
 		wsHandler,
 		pushManager,
@@ -217,14 +227,31 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	// ── Permission / question bridge routing ──────────────────────────────
 
 	if (event.type === "permission.asked") {
-		const pending = permissionBridge.onPermissionRequest(event);
-		// Broadcast directly from bridge data — bypasses the translator so
+		const props = event.properties as {
+			id?: string;
+			sessionID?: string;
+			permission?: string;
+			patterns?: string[];
+			metadata?: Record<string, unknown>;
+			always?: string[];
+		};
+		const pending =
+			props.id && props.permission
+				? deps.pendingPermissions.record({
+						requestId: props.id as PermissionId,
+						sessionId: props.sessionID || eventSessionId || "",
+						toolName: props.permission,
+						toolInput: {
+							patterns: props.patterns ?? [],
+							metadata: props.metadata ?? {},
+						},
+						always: props.always ?? [],
+					})
+				: null;
+		// Broadcast directly from recorded state — bypasses the translator so
 		// permissions are delivered even when the SSE event lacks sessionID.
 		if (pending) {
-			// Prefer bridge's sessionId; fall back to the event-level
-			// sessionId so the notification is never empty-string (which
-			// getRemotePermissions filters out).
-			const permSessionId = pending.sessionId || eventSessionId || "";
+			const permSessionId = pending.sessionId;
 			const permMsg: RelayMessage = {
 				type: "permission_request",
 				sessionId: permSessionId,
@@ -288,7 +315,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		}
 	}
 	if (isPermissionRepliedEvent(event)) {
-		permissionBridge.onPermissionReplied(event.properties.id);
+		deps.pendingPermissions.markReplied(event.properties.id);
 	}
 
 	// ── Session updated (title change, etc.) → refresh session list ──────
@@ -499,7 +526,7 @@ export function wireSSEConsumer(
 					log.info(
 						`Rehydrating ${pendingPermissions.length} pending permission(s) from API`,
 					);
-					const recovered = deps.permissionBridge.recoverPending(
+					const recovered = deps.pendingPermissions.recover(
 						pendingPermissions.map((p) => {
 							const sessionId =
 								typeof p["sessionID"] === "string" ? p["sessionID"] : "";

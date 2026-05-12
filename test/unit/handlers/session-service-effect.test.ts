@@ -1,6 +1,10 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../../../src/lib/effect/pending-interaction-service.js";
 import type {
 	OpenCodeModelService,
 	PollerManagerShape,
@@ -11,7 +15,6 @@ import {
 	LoggerTag,
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
-	PermissionBridgeTag,
 	PollerManagerTag,
 	QuestionBridgeTag,
 	SessionManagerTag,
@@ -25,9 +28,9 @@ import {
 } from "../../../src/lib/effect/session-manager-service.js";
 import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockLogger,
-	makeMockPermissionBridge,
 	makeMockQuestionBridge,
 	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
@@ -102,7 +105,7 @@ function makeSessionMetadataLayer(options: {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(SessionOverridesTag, makeMockSessionOverrides()),
 			Layer.succeed(LoggerTag, logger),
-			Layer.succeed(PermissionBridgeTag, makeMockPermissionBridge()),
+			PendingInteractionServiceLive,
 			Layer.succeed(QuestionBridgeTag, makeMockQuestionBridge()),
 			Layer.succeed(StatusPollerTag, statusPoller),
 			Layer.succeed(PollerManagerTag, pollerManager),
@@ -186,6 +189,43 @@ describe("session handlers with Effect-native model service", () => {
 			}),
 		);
 	});
+
+	it.effect(
+		"replays pending permissions from PendingInteractionService without PermissionBridgeTag",
+		() => {
+			const { wsHandler, layer } = makeSessionMetadataLayer({});
+
+			return Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				yield* pendingInteractions.recordPermissionRequest({
+					requestId: "perm-1" as PermissionId,
+					sessionId: "session-1",
+					toolName: "Bash",
+					toolInput: {
+						patterns: ["git *"],
+						metadata: { command: "git status" },
+					},
+					always: [],
+				});
+
+				yield* handleViewSession("client-1", { sessionId: "session-1" });
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "permission_request",
+						sessionId: "session-1",
+						requestId: "perm-1",
+						toolName: "Bash",
+						toolInput: {
+							patterns: ["git *"],
+							metadata: { command: "git status" },
+						},
+					});
+				}),
+			);
+		},
+	);
 
 	it.effect(
 		"logs model metadata lookup failures and still sends session lists",

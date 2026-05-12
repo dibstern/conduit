@@ -33,6 +33,10 @@ import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
 import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../effect/pending-interaction-service.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
 import {
 	ClaudeEventPersistTag,
@@ -858,12 +862,14 @@ export async function createProjectRelay(
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 
 	const coreBridgeLayers = Layer.mergeAll(
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		pendingInteractionServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(PermissionBridgeTag, permissionBridge),
@@ -1022,7 +1028,29 @@ export async function createProjectRelay(
 					);
 				},
 			},
-			permissionBridge,
+			pendingPermissions: {
+				record: (input) =>
+					relayManagedRuntime.runSync(
+						Effect.gen(function* () {
+							const service = yield* PendingInteractionServiceTag;
+							return yield* service.recordPermissionRequest(input);
+						}),
+					),
+				markReplied: (requestId) =>
+					relayManagedRuntime.runSync(
+						Effect.gen(function* () {
+							const service = yield* PendingInteractionServiceTag;
+							return yield* service.markPermissionReplied(requestId);
+						}),
+					),
+				recover: (permissions) =>
+					relayManagedRuntime.runSync(
+						Effect.gen(function* () {
+							const service = yield* PendingInteractionServiceTag;
+							return yield* service.recoverPendingPermissions(permissions);
+						}),
+					),
+			},
 			overrides,
 			wsHandler,
 			...(config.pushManager != null && { pushManager: config.pushManager }),
