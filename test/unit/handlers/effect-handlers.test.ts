@@ -2244,6 +2244,143 @@ describe("handleDeleteSession", () => {
 			);
 		},
 	);
+
+	it.effect(
+		"switches every viewer and replays metadata before the service list broadcast",
+		() => {
+			const ws = mockWsHandler({
+				getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
+			});
+			const log = mockLogger();
+			const legacySendDualSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendDualSessionLists should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				deleteSession: vi.fn(async () => {}),
+				listSessions: vi.fn(async () => [
+					{
+						id: "remaining-session",
+						projectID: "project-1",
+						directory: "/tmp/project",
+						title: "Remaining Session",
+						version: "1.0.0",
+						time: { created: 100, updated: 200 },
+					},
+				]),
+				loadPreRenderedHistory: vi.fn(async () => ({
+					messages: [],
+					hasMore: false,
+				})),
+				sendDualSessionLists: legacySendDualSessionLists,
+			});
+			const sendDualSessionLists = vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "remaining-session",
+								title: "Remaining Session",
+								updatedAt: 200,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				sendDualSessionLists,
+			});
+			const client = {
+				session: {
+					get: vi.fn(async () => ({
+						id: "remaining-session",
+						modelID: "claude-sonnet-4-5",
+						providerID: "anthropic",
+					})),
+				},
+				permission: { list: vi.fn(async () => []) },
+				question: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const layer = makeSessionLifecycleLayer({
+				client,
+				ws,
+				sessionMgr,
+				sessionManagerService,
+				log,
+			});
+
+			return handleDeleteSession("client-1", {
+				sessionId: "deleted-session",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.getClientsForSession).toHaveBeenCalledWith(
+						"deleted-session",
+					);
+					expect(sessionMgr.deleteSession).toHaveBeenCalledWith(
+						"deleted-session",
+						{ silent: true },
+					);
+					expect(ws.setClientSession).toHaveBeenCalledWith(
+						"client-1",
+						"remaining-session",
+					);
+					expect(ws.setClientSession).toHaveBeenCalledWith(
+						"client-2",
+						"remaining-session",
+					);
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session_switched",
+						id: "remaining-session",
+						sessionId: "remaining-session",
+						history: {
+							messages: [],
+							hasMore: false,
+						},
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
+						type: "session_switched",
+						id: "remaining-session",
+						sessionId: "remaining-session",
+						history: {
+							messages: [],
+							hasMore: false,
+						},
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "model_info",
+						model: "claude-sonnet-4-5",
+						provider: "anthropic",
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
+						type: "model_info",
+						model: "claude-sonnet-4-5",
+						provider: "anthropic",
+					});
+					expect(sendDualSessionLists).toHaveBeenCalledTimes(3);
+					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_deleted",
+						sessionId: "deleted-session",
+					});
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_list",
+						sessions: [
+							{
+								id: "remaining-session",
+								title: "Remaining Session",
+								updatedAt: 200,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+				}),
+			);
+		},
+	);
 });
 
 describe("handleRenameSession", () => {

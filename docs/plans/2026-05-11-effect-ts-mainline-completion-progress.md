@@ -2279,6 +2279,51 @@ Exit: 0
 Checked 975 files. No fixes applied.
 ```
 
+## Phase 7.15: Delete Session Multi-Viewer Coverage
+
+Plan issue found:
+
+- The first delete-session service-boundary regression covered the zero-viewer path only. The
+  handler also has a multi-viewer path that switches every viewer to the next session and replays
+  metadata before sending the final broadcast list. That path exercises the full typed dependency
+  surface and is the higher-risk delete behavior.
+
+Changes:
+
+- Added a multi-viewer `handleDeleteSession` regression that proves both viewers are switched to
+  the remaining session, both receive metadata replay, `session_deleted` is broadcast, the final
+  session list comes from `SessionManagerServiceTag`, and the legacy list sender is not called.
+- No production code changed; the Phase 7.14 implementation already satisfied this behavior.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleDeleteSession"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 61 skipped (63)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  68 passed (68)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 975 files. No fixes applied.
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:
