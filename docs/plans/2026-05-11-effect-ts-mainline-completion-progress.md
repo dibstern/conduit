@@ -2060,6 +2060,79 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.27: Terminal Handler Service Contract
+
+Plan issues found:
+
+- Phase 7 lists PTY methods after permission/question, but a direct handler swap to `PtyManagerStateTag` would be a
+  false migration. `src/lib/effect/pty-manager-service.ts` is only a state Ref and does not own upstream WebSocket
+  lifecycle, provider PTY create/list/delete/resize calls, scrollback, explicit-close suppression of `pty_exited`, or
+  reconnect behavior.
+- The safe boundary is a terminal service that owns the current production PTY trio together: OpenCode PTY API,
+  relay-local `PtyManager`, and `connectPtyUpstream`. Otherwise handlers would still coordinate transport wiring and
+  the migration would only rename bridge tags.
+- `pty_created` must still broadcast before upstream connection begins. On connect failure, the service must preserve
+  the optimistic-tab cleanup sequence: `pty_created`, then `pty_deleted`, then `PTY_CONNECT_FAILED`.
+- Client-init PTY replay still uses the imperative `PtyManager` and should move in a later slice with the same service
+  owner. Moving only handler state replay now would split PTY source-of-truth.
+
+Changes:
+
+- Added `src/lib/effect/terminal-service.ts` with `OpenCodeTerminalServiceTag` and `OpenCodeTerminalServiceLive`.
+- The live service owns create/connect, list/reconnect, input, resize, and close/delete behavior while preserving the
+  existing browser envelopes and non-fatal resize/reconnect warning semantics.
+- Converted `src/lib/handlers/terminal.ts` to consume only `OpenCodeTerminalServiceTag`; it no longer imports
+  `OpenCodeAPITag`, `PtyManagerTag`, `ConnectPtyUpstreamTag`, `ConfigTag`, `RelayError`, or PTY DTO shaping.
+- Wired `OpenCodeTerminalServiceLive` into relay `ManagedRuntime` composition and shared handler test Layer wiring.
+- Added live-service tests using a real in-memory `PtyManager` plus fake provider/upstream ports, and handler boundary
+  tests proving terminal handlers run without the legacy OpenCode/PtyManager tags.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/terminal-service-effect.test.ts
+Exit: 1
+Expected failures:
+  Service not found: PtyManager
+  Service not found: OpenCodeAPI
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/terminal-service-effect.test.ts \
+  test/unit/effect/terminal-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  83 passed (83)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 975 files. No fixes applied.
+```
+
+```text
+$ pnpm exec vitest run --config vitest.integration.config.ts test/integration/flows/terminal.integration.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  9 passed (9)
+```
+
+```text
+$ rg -n "OpenCodeAPITag|PtyManagerTag|ConnectPtyUpstreamTag|ConfigTag|RelayError|formatErrorDetail|PtyInfo|PtyStatus" \
+  src/lib/handlers/terminal.ts
+Exit: 1
+No remaining terminal-handler imports for legacy OpenCode API, PTY manager, upstream connector, or terminal DTO shaping.
+```
+
 ## Phase 7.26: Pending Interaction Waiter Ownership And Bridge Removal
 
 Plan issues found:

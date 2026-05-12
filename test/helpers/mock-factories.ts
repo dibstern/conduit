@@ -59,6 +59,7 @@ import {
 } from "../../src/lib/effect/session-manager-state.js";
 import { makeSessionRegistryStateLive } from "../../src/lib/effect/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/effect/session-status-poller.js";
+import { OpenCodeTerminalServiceLive } from "../../src/lib/effect/terminal-service.js";
 import type { HandlerDeps } from "../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
@@ -908,6 +909,12 @@ export function makeTestHandlerLayer(
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
 	const configLayer = Layer.succeed(ConfigTag, config);
 	const loggerLayer = Layer.succeed(LoggerTag, log);
+	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
+	const connectPtyUpstreamLayer = Layer.succeed(
+		ConnectPtyUpstreamTag,
+		connectPtyUpstream,
+	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
@@ -916,6 +923,18 @@ export function makeTestHandlerLayer(
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
+	);
+	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				wsHandlerLayer,
+				loggerLayer,
+				configLayer,
+				ptyManagerLayer,
+				connectPtyUpstreamLayer,
+			),
+		),
 	);
 	const sessionManagerServiceLayer = opts?.sessionManagerService
 		? Layer.succeed(SessionManagerServiceTag, opts.sessionManagerService)
@@ -936,17 +955,18 @@ export function makeTestHandlerLayer(
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		openCodeTerminalServiceLayer,
 		PendingInteractionServiceLive,
 		sessionManagerServiceLayer,
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
+		wsHandlerLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, sessionOverrides),
-		Layer.succeed(PtyManagerTag, ptyManager),
+		ptyManagerLayer,
 		configLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
-		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
+		connectPtyUpstreamLayer,
 	);
 }
 

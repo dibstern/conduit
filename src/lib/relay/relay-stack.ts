@@ -70,6 +70,7 @@ import {
 	type SessionStatusPollerService,
 } from "../effect/session-status-poller.js";
 import { StaticDirTag } from "../effect/static-file-handler.js";
+import { OpenCodeTerminalServiceLive } from "../effect/terminal-service.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
@@ -873,6 +874,24 @@ export async function createProjectRelay(
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
+	const webSocketHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const connectPtyUpstreamLayer = Layer.succeed(
+		ConnectPtyUpstreamTag,
+		connectPtyUpstream,
+	);
+	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				webSocketHandlerLayer,
+				loggerLayer,
+				configLayer,
+				ptyManagerLayer,
+				connectPtyUpstreamLayer,
+			),
+		),
+	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 
 	const coreBridgeLayers = Layer.mergeAll(
@@ -880,17 +899,18 @@ export async function createProjectRelay(
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
+		webSocketHandlerLayer,
 		Layer.succeed(SessionOverridesTag, overrides),
-		Layer.succeed(PtyManagerTag, ptyManager),
+		ptyManagerLayer,
 		configLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(SessionRegistryTag, registry),
 		Layer.succeed(PollerManagerTag, pollerManager),
-		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
+		connectPtyUpstreamLayer,
 		Layer.succeed(OrchestrationEngineTag, orchestration.engine),
 		orchestration.registryLayer,
 	);

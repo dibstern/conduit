@@ -26,7 +26,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	PtyManagerTag,
 	ReadQueryTag,
 	ScanDepsTag,
 	SessionManagerTag,
@@ -39,6 +38,10 @@ import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/effect/session-manager-service.js";
+import {
+	type OpenCodeTerminalService,
+	OpenCodeTerminalServiceTag,
+} from "../../../src/lib/effect/terminal-service.js";
 import {
 	filterAgents,
 	handleGetAgents,
@@ -101,7 +104,6 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
@@ -1217,13 +1219,17 @@ function mockSessionManager(
 	} as unknown as SessionManagerShape;
 }
 
-function mockPtyManager(overrides?: Partial<PtyManager>): PtyManager {
+function mockTerminalService(
+	overrides?: Partial<OpenCodeTerminalService>,
+): OpenCodeTerminalService {
 	return {
-		closeSession: vi.fn(),
-		sendInput: vi.fn(),
-		hasSession: vi.fn(() => false),
+		create: vi.fn(() => Effect.void),
+		list: vi.fn(() => Effect.void),
+		sendInput: vi.fn(() => Effect.void),
+		close: vi.fn(() => Effect.void),
+		resize: vi.fn(() => Effect.void),
 		...overrides,
-	} as unknown as PtyManager;
+	};
 }
 
 function makeForkSessionLayer(options?: {
@@ -1590,10 +1596,10 @@ describe("handleForkSession", () => {
 // ─── Terminal handler tests ───────────────────────────────────────────────
 
 describe("handlePtyInput", () => {
-	it.effect("sends input to pty manager", () => {
-		const ptyManager = mockPtyManager();
+	it.effect("sends input through terminal service", () => {
+		const terminal = mockTerminalService();
 
-		const layer = Layer.succeed(PtyManagerTag, ptyManager);
+		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
 
 		return handlePtyInput("client-1", {
 			ptyId: "pty-1",
@@ -1601,68 +1607,45 @@ describe("handlePtyInput", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
+				expect(terminal.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
 			}),
 		);
 	});
 
 	it.effect("does nothing when ptyId is empty", () => {
-		const ptyManager = mockPtyManager();
+		const terminal = mockTerminalService();
 
-		const layer = Layer.succeed(PtyManagerTag, ptyManager);
+		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
 
 		return handlePtyInput("client-1", { ptyId: "", data: "ls\n" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ptyManager.sendInput).not.toHaveBeenCalled();
+				expect(terminal.sendInput).not.toHaveBeenCalled();
 			}),
 		);
 	});
 });
 
 describe("handlePtyClose", () => {
-	it.effect("closes PTY session and broadcasts deletion", () => {
-		const ws = mockWsHandler();
-		const ptyManager = mockPtyManager();
-		const client = {
-			pty: { delete: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
+	it.effect("closes PTY through terminal service", () => {
+		const terminal = mockTerminalService();
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(PtyManagerTag, ptyManager),
-		);
+		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
 
 		return handlePtyClose("client-1", { ptyId: "pty-1" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ptyManager.closeSession).toHaveBeenCalledWith("pty-1");
-				expect(client.pty.delete).toHaveBeenCalledWith("pty-1");
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "pty_deleted",
-					ptyId: "pty-1",
-				});
+				expect(terminal.close).toHaveBeenCalledWith("pty-1");
 			}),
 		);
 	});
 });
 
 describe("handlePtyResize", () => {
-	it.effect("resizes PTY without errors", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const log = mockLogger();
-		const client = {
-			pty: { resize: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
+	it.effect("resizes PTY through terminal service", () => {
+		const terminal = mockTerminalService();
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-		);
+		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
 
 		return handlePtyResize("client-1", {
 			ptyId: "pty-1",
@@ -1671,41 +1654,38 @@ describe("handlePtyResize", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(client.pty.resize).toHaveBeenCalledWith("pty-1", 40, 120);
+				expect(terminal.resize).toHaveBeenCalledWith(
+					"client-1",
+					"pty-1",
+					40,
+					120,
+				);
 			}),
 		);
 	});
 
-	it.effect("logs warning on resize failure (non-fatal)", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const log = mockLogger();
-		const client = {
-			pty: {
-				resize: vi.fn(async () => {
-					throw new Error("resize failed");
+	it.effect(
+		"defaults resize dimensions before calling terminal service",
+		() => {
+			const terminal = mockTerminalService();
+
+			const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
+
+			return handlePtyResize("client-1", {
+				ptyId: "pty-1",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(terminal.resize).toHaveBeenCalledWith(
+						"client-1",
+						"pty-1",
+						24,
+						80,
+					);
 				}),
-			},
-		} as unknown as OpenCodeAPI;
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-		);
-
-		return handlePtyResize("client-1", {
-			ptyId: "pty-1",
-			cols: 120,
-			rows: 40,
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(log.warn).toHaveBeenCalled();
-			}),
-		);
-	});
+			);
+		},
+	);
 });
 
 // ─── Instance handler tests ───────────────────────────────────────────────
