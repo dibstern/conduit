@@ -73,7 +73,15 @@ import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
 import { createSdkClientEffect } from "../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../logger.js";
-import { DualWriteHook } from "../persistence/dual-write-hook.js";
+import {
+	DualWriteHook,
+	type DualWriteHookPort,
+} from "../persistence/dual-write-hook.js";
+import { EffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
+import {
+	makePersistenceEffectLayer,
+	type PersistenceEffectRuntime,
+} from "../persistence/effect/live.js";
 import {
 	canonicalEvent,
 	type SessionStatusValue,
@@ -886,8 +894,23 @@ export async function createProjectRelay(
 	}
 
 	// ── Dual-write hook (SSE → SQLite event store) ──────────────────────
-	let dualWriteHook: DualWriteHook | undefined;
-	if (config.persistence) {
+	let effectPersistenceRuntime: PersistenceEffectRuntime | undefined;
+	let dualWriteHook: DualWriteHookPort | undefined;
+	if (config.persistenceDbPath != null) {
+		const persistenceRuntime = ManagedRuntime.make(
+			makePersistenceEffectLayer(config.persistenceDbPath),
+		);
+		try {
+			dualWriteHook = new EffectDualWriteHook({
+				runtime: persistenceRuntime,
+				log: log.child("dual-write"),
+			});
+			effectPersistenceRuntime = persistenceRuntime;
+		} catch (err) {
+			await persistenceRuntime.dispose();
+			throw err;
+		}
+	} else if (config.persistence) {
 		dualWriteHook = new DualWriteHook({
 			persistence: config.persistence,
 			log: log.child("dual-write"),
@@ -1004,7 +1027,12 @@ export async function createProjectRelay(
 	});
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	await sseStream.connect();
+	try {
+		await sseStream.connect();
+	} catch (err) {
+		await effectPersistenceRuntime?.dispose();
+		throw err;
+	}
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
 	// PermissionTimeoutLive is composed into RelayStateLive — no imperative wiring.
@@ -1042,6 +1070,7 @@ export async function createProjectRelay(
 			await orchestration.engine.shutdown();
 			// 4. Dispose Effect ManagedRuntimes
 			await effectRuntime.dispose();
+			await effectPersistenceRuntime?.dispose();
 			// 5. Clean up remaining resources
 			// Permission timeout timer is managed by PermissionTimeoutLive (auto-interrupted on dispose).
 			await overrides.drain();

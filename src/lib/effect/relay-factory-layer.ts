@@ -187,6 +187,7 @@ export const RelayFactoryLive = (
 									signal: ac.signal,
 									configDir,
 									persistence,
+									persistenceDbPath: dbPath,
 								});
 							},
 							catch: (cause) =>

@@ -756,6 +756,7 @@ export async function startDaemonProcess(
 				slug: project.slug,
 				noServer: true,
 				signal,
+				persistenceDbPath: dbPath,
 				log: createLogger("relay"),
 				getProjects: () => registry.allProjects(),
 				addProject: async (dir: string) => {

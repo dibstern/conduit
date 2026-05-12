@@ -7,7 +7,7 @@ import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
-import type { DualWriteHook } from "../persistence/dual-write-hook.js";
+import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { SessionOverrides } from "../session/session-overrides.js";
 import type { PermissionId } from "../shared-types.js";
@@ -113,7 +113,7 @@ export interface SSEWiringDeps {
 	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
 	/** Optional: dual-write hook for SQLite event store persistence */
-	dualWriteHook?: DualWriteHook;
+	dualWriteHook?: DualWriteHookPort;
 }
 
 // ─── Push notification helper ────────────────────────────────────────────────

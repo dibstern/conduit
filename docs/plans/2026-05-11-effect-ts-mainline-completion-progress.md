@@ -1492,3 +1492,78 @@ Exit: 0
 Test Files  3 passed (3)
 Tests  60 passed (60)
 ```
+
+## Phase 5.2: OpenCode Dual-Write Effect Persistence Slice
+
+Plan issues found:
+
+- The production OpenCode SSE dual-write path was still backed by `DualWriteHook -> PersistenceLayer ->
+  EventStore/ProjectionRunner`, even after the Effect event-store and projection-runner services existed.
+- `relay-stack.ts` could not build an Effect persistence runtime because production relay config carried only a
+  legacy `PersistenceLayer`, not the SQLite file path needed for `@effect/sql-sqlite-node`.
+- This slice intentionally does not remove `PersistenceLayer.open(...)`: read-side services, Claude persistence,
+  and provider-state storage still depend on the legacy `SqliteClient` boundary. Removing the open call now would
+  force a half-bridge instead of completing a real consumer migration.
+
+Changes:
+
+- `src/lib/persistence/effect/live.ts`: added one reusable per-project persistence layer that provides the
+  SQLite client, migration-running `PersistenceServiceTag`, `EventStoreEffectTag`, cursor repo, and
+  `ProjectionRunnerEffectTag`.
+- `src/lib/persistence/effect/session-seeder-effect.ts`: added an Effect-native session seeder for write paths
+  that need to guarantee the projected `sessions` row before appending events.
+- `src/lib/persistence/effect/dual-write-hook-effect.ts`: added the OpenCode SSE dual-write hook backed by
+  Effect event-store and projection services. It preserves the legacy hook's observable behavior: no-session and
+  not-translatable events are skipped, persistence failures are converted to `DualWriteResult`, projection
+  failures are non-fatal, stats are tracked, and reconnect resets translator/seeder state.
+- `src/lib/persistence/dual-write-hook.ts`: introduced `DualWriteHookPort` so SSE wiring can depend on behavior
+  instead of the concrete legacy hook class.
+- `src/lib/relay/sse-wiring.ts`: accepts `DualWriteHookPort`.
+- `src/lib/types.ts`: added `persistenceDbPath` to `ProjectRelayConfig`.
+- `src/lib/effect/daemon-main.ts` and `src/lib/effect/relay-factory-layer.ts`: pass the per-project
+  `.conduit/events.db` path into `createProjectRelay`.
+- `src/lib/relay/relay-stack.ts`: uses `EffectDualWriteHook` when `persistenceDbPath` is available; the old
+  `DualWriteHook` remains only as fallback for callers/tests that pass a legacy `PersistenceLayer` without a
+  path. The Effect persistence runtime is disposed during relay shutdown and if relay startup fails while
+  connecting the SSE stream.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/persistence/effect-dual-write-hook.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/persistence/effect/dual-write-hook-effect.js'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/persistence/effect-dual-write-hook.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
+```text
+$ pnpm vitest run test/unit/persistence/effect-dual-write-hook.test.ts \
+  test/unit/persistence/projectors-effect.test.ts \
+  test/unit/persistence/persistence-effect.test.ts \
+  test/unit/persistence/migrations.test.ts \
+  test/unit/relay/relay-stack-dual-write-wiring.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  64 passed (64)
+Note: relay-stack-dual-write-wiring emitted existing MaxListenersExceededWarning warnings from the test harness.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 950 files. No fixes applied.
+```

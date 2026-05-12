@@ -45,9 +45,17 @@ export interface DualWriteHookOptions {
 	log: DualWriteLog;
 }
 
+export interface DualWriteHookPort {
+	onSSEEvent(event: SSEEvent, sessionId: string | undefined): DualWriteResult;
+	onReconnect(): void;
+	getStats(): Readonly<DualWriteStats>;
+	startStatsLogging(intervalMs?: number): void;
+	stopStatsLogging(): void;
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
-export class DualWriteHook {
+export class DualWriteHook implements DualWriteHookPort {
 	private readonly persistence: PersistenceLayer;
 	private readonly log: DualWriteLog;
 	private readonly translator: CanonicalEventTranslator;
