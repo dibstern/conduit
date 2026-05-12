@@ -1,40 +1,118 @@
 // ─── WebSocket Routing Layer ────────────────────────────────────────────────
-// Scoped Layer that handles WebSocket upgrade routing.
-//
-// Attaches an HTTP server "upgrade" listener that:
-//   1. Validates the URL matches /p/{slug}/ws
-//   2. Authenticates WS upgrade requests (cookies, PIN headers)
-//   3. Calls ensureRelayStarted(slug) for lazy relay startup
-//   4. Waits up to 10s for the relay to become ready
-//   5. Writes HTTP/1.1 503\r\n\r\n on relay wait failure
-//   6. Checks shuttingDown from DaemonConfigRefTag
-//
-// Dependencies:
-//   - DaemonConfigRefTag — runtime config (shuttingDown, etc.)
-//   - HttpServerRefTag — Ref<http.Server | null> from relay-factory-layer
-//   - AuthManagerTag — WS auth validation
-//   - ProjectRegistryTag — ensureRelayStarted, waitForRelay, touchLastUsed
-//
-// The upgrade listener is registered as a scoped resource: when the Layer's
-// scope closes, the listener is removed from the HTTP server.
-//
-// (AP-32)
+// Scoped Layer that owns daemon WebSocket upgrade routing.
 
-// NOTE: The following imports are commented out until Task 11/12 wires
-// the full upgrade handler. They document the dependencies the handler
-// will need:
-//
-// import type http from "node:http";
-// import type net from "node:net";
-// import { parseCookies } from "../server/http-utils.js";
-// import {
-// 	isStarting, startRelay, touchLastUsed, waitForRelay,
-// } from "./project-registry-service.js";
-
-import { Effect, Layer } from "effect";
+import type http from "node:http";
+import type net from "node:net";
+import { Context, Data, Effect, Layer, Ref, Runtime } from "effect";
+import type { AuthManager } from "../auth.js";
+import { getClientIp, parseCookies } from "../server/http-utils.js";
 import { AuthManagerTag } from "./auth-middleware.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { HttpServerRefTag } from "./relay-factory-layer.js";
+
+const PROJECT_WS_PATTERN = /^\/p\/([^/]+)\/ws(?:\?|$)/;
+const RELAY_WAIT_TIMEOUT_MS = 10_000;
+const SERVICE_UNAVAILABLE_RESPONSE = "HTTP/1.1 503 Service Unavailable\r\n\r\n";
+
+export interface WebSocketRelay {
+	readonly wsHandler: {
+		readonly handleUpgrade: (
+			req: http.IncomingMessage,
+			socket: net.Socket,
+			head: Buffer,
+		) => void;
+	};
+}
+
+export class WebSocketUpgradeError extends Data.TaggedError(
+	"WebSocketUpgradeError",
+)<{
+	readonly reason:
+		| "invalid_path"
+		| "auth_failed"
+		| "relay_unavailable"
+		| "daemon_shutting_down"
+		| "server_unavailable";
+	readonly slug?: string;
+	readonly url?: string;
+	readonly cause?: unknown;
+}> {
+	get message(): string {
+		const slug = this.slug ? ` for "${this.slug}"` : "";
+		const detail = this.cause instanceof Error ? `: ${this.cause.message}` : "";
+		return `WebSocket upgrade ${this.reason}${slug}${detail}`;
+	}
+}
+
+export interface WebSocketRelayRouter {
+	readonly ensureRelayStarted: (
+		slug: string,
+	) => Effect.Effect<void, WebSocketUpgradeError>;
+	readonly waitForRelay: (
+		slug: string,
+		timeoutMs: number,
+	) => Effect.Effect<WebSocketRelay, WebSocketUpgradeError>;
+	readonly touchLastUsed: (
+		slug: string,
+	) => Effect.Effect<void, WebSocketUpgradeError>;
+}
+
+export class WebSocketRelayRouterTag extends Context.Tag(
+	"WebSocketRelayRouter",
+)<WebSocketRelayRouterTag, WebSocketRelayRouter>() {}
+
+const destroySocket = (socket: net.Socket) =>
+	Effect.sync(() => {
+		if (!socket.destroyed) socket.destroy();
+	});
+
+const writeServiceUnavailable = (socket: net.Socket) =>
+	Effect.sync(() => {
+		if (socket.destroyed) return;
+		if (socket.writable) socket.write(SERVICE_UNAVAILABLE_RESPONSE);
+		socket.destroy();
+	});
+
+const formatCause = (cause: unknown): string =>
+	cause instanceof Error ? cause.message : String(cause);
+
+const authenticateUpgrade = (
+	auth: AuthManager,
+	req: http.IncomingMessage,
+): boolean => {
+	const cookies = parseCookies(req.headers.cookie ?? "");
+	const sessionCookie = cookies["relay_session"] ?? "";
+	const pinHeader = req.headers["x-relay-pin"];
+	return (
+		!auth.hasPin() ||
+		auth.validateCookie(sessionCookie) ||
+		(typeof pinHeader === "string" &&
+			auth.authenticate(pinHeader, getClientIp(req)).ok)
+	);
+};
+
+const handleFailure = (error: WebSocketUpgradeError, socket: net.Socket) =>
+	Effect.gen(function* () {
+		if (error.reason === "relay_unavailable") {
+			yield* Effect.logWarning("WS upgrade rejected: relay unavailable", {
+				slug: error.slug,
+				error: error.cause == null ? error.message : formatCause(error.cause),
+			});
+			yield* writeServiceUnavailable(socket);
+			return;
+		}
+
+		const log =
+			error.reason === "invalid_path" || error.reason === "daemon_shutting_down"
+				? Effect.logDebug
+				: Effect.logWarning;
+		yield* log("WS upgrade rejected", {
+			reason: error.reason,
+			slug: error.slug,
+			url: error.url,
+		});
+		yield* destroySocket(socket);
+	});
 
 // ─── WebSocketRoutingLive ──────────────────────────────────────────────────
 
@@ -49,40 +127,112 @@ import { HttpServerRefTag } from "./relay-factory-layer.js";
 export const WebSocketRoutingLive: Layer.Layer<
 	never,
 	never,
-	DaemonConfigRefTag | HttpServerRefTag | AuthManagerTag
+	| DaemonConfigRefTag
+	| HttpServerRefTag
+	| AuthManagerTag
+	| WebSocketRelayRouterTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
-		const _configRef = yield* DaemonConfigRefTag;
-		const _httpServerRef = yield* HttpServerRefTag;
-		const _auth = yield* AuthManagerTag;
+		const configRef = yield* DaemonConfigRefTag;
+		const httpServerRef = yield* HttpServerRefTag;
+		const auth = yield* AuthManagerTag;
+		const relayRouter = yield* WebSocketRelayRouterTag;
+		const runtime = yield* Effect.runtime<never>();
+		const server = yield* Ref.get(httpServerRef);
 
-		// The HTTP server may not be ready yet at Layer build time —
-		// the upgrade handler reads it lazily from the Ref.
-		// This is a structural stub: the actual upgrade handler will be
-		// wired to the relay infrastructure in Task 11/12.
+		if (server === null) {
+			return yield* Effect.die(
+				new WebSocketUpgradeError({ reason: "server_unavailable" }),
+			);
+		}
 
+		const routeUpgrade = (
+			req: http.IncomingMessage,
+			socket: net.Socket,
+			head: Buffer,
+		) =>
+			Effect.gen(function* () {
+				const match = req.url?.match(PROJECT_WS_PATTERN);
+				if (!match) {
+					return yield* new WebSocketUpgradeError({
+						reason: "invalid_path",
+						url: req.url ?? "",
+					});
+				}
+
+				const slug = match[1];
+				if (slug === undefined || slug.length === 0) {
+					return yield* new WebSocketUpgradeError({
+						reason: "invalid_path",
+						url: req.url ?? "",
+					});
+				}
+
+				if (!authenticateUpgrade(auth, req)) {
+					return yield* new WebSocketUpgradeError({
+						reason: "auth_failed",
+						slug,
+						url: req.url ?? "",
+					});
+				}
+
+				const config = yield* Ref.get(configRef);
+				if (socket.destroyed || config.shuttingDown) {
+					return yield* new WebSocketUpgradeError({
+						reason: "daemon_shutting_down",
+						slug,
+						url: req.url ?? "",
+					});
+				}
+
+				yield* relayRouter.ensureRelayStarted(slug);
+				const relay = yield* relayRouter.waitForRelay(
+					slug,
+					RELAY_WAIT_TIMEOUT_MS,
+				);
+				if (socket.destroyed) {
+					return yield* new WebSocketUpgradeError({
+						reason: "daemon_shutting_down",
+						slug,
+						url: req.url ?? "",
+					});
+				}
+
+				yield* Effect.logDebug("WS upgrade accepted", { slug });
+				yield* relayRouter.touchLastUsed(slug);
+				yield* Effect.try({
+					try: () => relay.wsHandler.handleUpgrade(req, socket, head),
+					catch: (cause) =>
+						new WebSocketUpgradeError({
+							reason: "relay_unavailable",
+							slug,
+							url: req.url ?? "",
+							cause,
+						}),
+				});
+			}).pipe(
+				Effect.catchAll((error) => handleFailure(error, socket)),
+				Effect.annotateLogs("component", "ws-routing"),
+			);
+
+		const runUpgrade = Runtime.runPromise(runtime);
+		const onUpgrade = (
+			req: http.IncomingMessage,
+			socket: net.Socket,
+			head: Buffer,
+		) => {
+			void runUpgrade(routeUpgrade(req, socket, head)).catch(() => {
+				if (!socket.destroyed) socket.destroy();
+			});
+		};
+
+		server.on("upgrade", onUpgrade);
 		yield* Effect.logInfo("WebSocket routing layer initialized");
 
-		// NOTE: The full upgrade handler (attaching to httpServer.on("upgrade"))
-		// requires deep integration with the imperative relay registry
-		// (ensureRelayStarted, waitForRelay returning ProjectRelay with wsHandler).
-		// That wiring is deferred to Task 11/12.
-		//
-		// When ready, the handler will:
-		// 1. Read server from HttpServerRefTag
-		// 2. Attach "upgrade" listener
-		// 3. Inside listener:
-		//    a. Parse /p/{slug}/ws from URL
-		//    b. Check auth via AuthManagerTag (cookies + PIN header)
-		//    c. Check shuttingDown from DaemonConfigRefTag
-		//    d. ensureRelayStarted(slug)
-		//    e. waitForRelay(slug, 10_000)
-		//    f. touchLastUsed(slug)
-		//    g. relay.wsHandler.handleUpgrade(req, socket, head)
-		//    h. On failure: socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n")
-
 		yield* Effect.addFinalizer(() =>
-			Effect.logInfo("WebSocket routing layer torn down"),
+			Effect.sync(() => server.off("upgrade", onUpgrade)).pipe(
+				Effect.zipRight(Effect.logInfo("WebSocket routing layer torn down")),
+			),
 		);
 	}).pipe(
 		Effect.annotateLogs("component", "ws-routing"),

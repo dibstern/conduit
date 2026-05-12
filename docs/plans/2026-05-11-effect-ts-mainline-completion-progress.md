@@ -530,3 +530,96 @@ Exit: 0
 Test Files  345 passed (345)
 Tests  5068 passed | 2 skipped | 12 todo (5082)
 ```
+
+## Phase 3: WS Upgrade Routing Slice
+
+Plan issues found:
+
+- `WebSocketRoutingLive` could not attach behavior as written because `HttpServerRefTag` was never populated
+  by the lifecycle server. The HTTP lifecycle layer now writes `ctx.upgradeServer ?? ctx.httpServer` into the
+  shared ref after startup and clears it on shutdown.
+- The existing `relayFactory` in `daemon-main.ts` is still a temporary dummy for the Effect relay cache, so
+  routing WS upgrades through `RelayCacheTag` would have looked Effect-native while dropping the real project
+  relay behavior. The slice instead introduces a typed `WebSocketRelayRouterTag` and requires `makeDaemonLive`
+  callers to provide it explicitly. The legacy daemon provides the router from its live `ProjectRegistry`
+  until Phase 4 migrates relay ownership.
+- `makeDaemonLive` intentionally has no hidden fallback WS router. Tests provide explicit failing test routers;
+  production `startDaemonProcess` provides the real registry-backed router.
+
+Changes:
+
+- `src/lib/effect/ws-routing-layer.ts`: replaced the placeholder layer with a scoped `upgrade` listener. The
+  Node callback immediately hands off to a program run on the captured Effect runtime, validates `/p/<slug>/ws`,
+  applies cookie/PIN auth, checks `DaemonConfigRef.shuttingDown`, waits for the real project relay, and writes
+  `503 Service Unavailable` for relay readiness failures. The layer now fails fast if composed before the HTTP
+  server ref is populated; it does not install a silent no-op listener.
+- `src/lib/effect/daemon-layers.ts`: `makeHttpServerLive` now populates `HttpServerRefTag`, and
+  `DaemonLiveOptions` now requires a typed `wsRelayRouter`.
+- `src/lib/effect/daemon-main.ts`: removed the imperative WS upgrade listener. The legacy hybrid daemon now
+  passes a typed registry-backed router into `makeDaemonLive`; `stop()` marks `DaemonConfigRef.shuttingDown`
+  before draining.
+- Tests cover successful relay delegation, invalid path rejection, auth rejection before relay startup, relay
+  failure `503`, scoped listener cleanup, shutdown rejection, server-ref population, and composed layer wiring.
+- Review correction: shutdown was initially checked after `ensureRelayStarted`/`waitForRelay`, which could
+  lazy-start or wait on a relay during daemon shutdown. The handler now checks `DaemonConfigRef.shuttingDown`
+  before relay startup, and the shutdown test asserts the router methods are not called.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/ws-routing-layer.test.ts
+Exit: 1
+Expected failures:
+  expected ensureRelayStarted to have been called with "test-project"
+  expected socket.destroy to have been called for invalid/auth/shutdown paths
+  expected socket.write to have been called with "HTTP/1.1 503 Service Unavailable\r\n\r\n"
+  expected upgrade listener count to be before + 1
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/ws-routing-layer.test.ts test/unit/effect/scoped-fiber-layers.test.ts test/unit/effect/layer-wiring.test.ts test/unit/effect/http-server-live.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  54 passed (54)
+```
+
+```text
+$ pnpm vitest run --config vitest.integration.config.ts test/integration/daemon/daemon-server.test.ts
+Exit: 1
+Relevant WS tests passed. The file failed only because the local OpenCode health test tried
+http://localhost:4096/health and got ECONNREFUSED.
+```
+
+```text
+$ pnpm vitest run --config vitest.integration.config.ts test/integration/daemon/daemon-server.test.ts -t "Daemon WS upgrade"
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed | 3 skipped (7)
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:integration
+Exit: 0
+Test Files  24 passed (24)
+Tests  127 passed | 1 skipped (128)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 943 files in 208ms. No fixes applied.
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  346 passed (346)
+Tests  5074 passed | 2 skipped | 12 todo (5088)
+```

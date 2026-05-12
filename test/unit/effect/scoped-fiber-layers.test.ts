@@ -4,6 +4,7 @@
 // duplicate detection, error-state reset, mock fetch session prefetch,
 // scoped fiber lifecycle, and finalizer verification.
 
+import { createServer, type Server } from "node:http";
 import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
@@ -40,12 +41,16 @@ import {
 	ProjectRegistryTag,
 	type ProjectState,
 } from "../../../src/lib/effect/project-registry-service.js";
-import { HttpServerRefLive } from "../../../src/lib/effect/relay-factory-layer.js";
+import { HttpServerRefTag } from "../../../src/lib/effect/relay-factory-layer.js";
 import {
 	prefetchSessionCounts,
 	SessionPrefetchLive,
 } from "../../../src/lib/effect/session-prefetch-layer.js";
-import { WebSocketRoutingLive } from "../../../src/lib/effect/ws-routing-layer.js";
+import {
+	WebSocketRelayRouterTag,
+	WebSocketRoutingLive,
+	WebSocketUpgradeError,
+} from "../../../src/lib/effect/ws-routing-layer.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
 // ─── Shared test layers ────────────────────────────────────────────────────
@@ -57,6 +62,25 @@ const configRefLayer = DaemonConfigRefLive(
 const authLayer = Layer.succeed(
 	AuthManagerTag,
 	new AuthManager({ getPinHash: () => null }),
+);
+const wsRelayRouterLayer = Layer.succeed(WebSocketRelayRouterTag, {
+	ensureRelayStarted: () => Effect.void,
+	waitForRelay: (slug: string) =>
+		Effect.fail(
+			new WebSocketUpgradeError({
+				reason: "relay_unavailable",
+				slug,
+				cause: new Error("No relay configured in this test"),
+			}),
+		),
+	touchLastUsed: () => Effect.void,
+});
+const httpServerRefWithServerLayer = Layer.effect(
+	HttpServerRefTag,
+	Effect.flatMap(
+		Effect.sync(() => createServer()),
+		(server) => Ref.make<Server | null>(server),
+	),
 );
 
 const registryLayer = makeProjectRegistryLive();
@@ -110,8 +134,9 @@ const makeSeededRegistryLayer = (entries: Array<[string, ProjectState]>) =>
 describe("WebSocketRoutingLive", () => {
 	const wsLayer = WebSocketRoutingLive.pipe(
 		Layer.provide(configRefLayer),
-		Layer.provide(HttpServerRefLive),
+		Layer.provide(httpServerRefWithServerLayer),
 		Layer.provide(authLayer),
+		Layer.provide(wsRelayRouterLayer),
 	);
 
 	it.scoped("builds without error", () =>
@@ -581,8 +606,9 @@ describe("Scoped fiber lifecycle", () => {
 			const layer = Layer.fresh(
 				WebSocketRoutingLive.pipe(
 					Layer.provide(configRefLayer),
-					Layer.provide(HttpServerRefLive),
+					Layer.provide(httpServerRefWithServerLayer),
 					Layer.provide(authLayer),
+					Layer.provide(wsRelayRouterLayer),
 				),
 			);
 			const scope = yield* Scope.make();

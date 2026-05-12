@@ -16,6 +16,7 @@ import {
 	makeHttpServerLive,
 	makeOnboardingServerLive,
 } from "../../../src/lib/effect/daemon-layers.js";
+import { HttpServerRefLive } from "../../../src/lib/effect/relay-factory-layer.js";
 import {
 	EnsureCertsTag,
 	TlsCertLive,
@@ -148,6 +149,7 @@ describe("makeHttpServerLive", () => {
 		const testLayer = makeHttpServerLive(ctx).pipe(
 			Layer.provideMerge(configLayer),
 			Layer.provide(NullTlsLayer),
+			Layer.provide(HttpServerRefLive),
 		);
 
 		return Effect.sync(() => {
@@ -166,6 +168,7 @@ describe("makeHttpServerLive", () => {
 		const testLayer = makeHttpServerLive(ctx).pipe(
 			Layer.provideMerge(configLayer),
 			Layer.provide(NullTlsLayer),
+			Layer.provide(HttpServerRefLive),
 		);
 
 		return Effect.gen(function* () {
@@ -197,6 +200,7 @@ describe("makeHttpServerLive", () => {
 			const testLayer = makeHttpServerLive(ctx).pipe(
 				Layer.provideMerge(configLayer),
 				Layer.provide(tlsLayer),
+				Layer.provide(HttpServerRefLive),
 			);
 
 			return Effect.sync(() => {
@@ -226,6 +230,7 @@ describe("makeHttpServerLive", () => {
 			);
 			const testLayer = makeHttpServerLive(ctx).pipe(
 				Layer.provideMerge(tlsLayer),
+				Layer.provide(HttpServerRefLive),
 			);
 
 			return Effect.gen(function* () {
@@ -334,6 +339,7 @@ describe("makeOnboardingServerLive", () => {
 				const upstream = Layer.merge(configLayer, activeTlsLayer());
 				const httpLayer = makeHttpServerLive(ctx).pipe(
 					Layer.provideMerge(upstream),
+					Layer.provide(HttpServerRefLive),
 				);
 				const testLayer = makeOnboardingServerLive(ctx, {
 					staticDir,

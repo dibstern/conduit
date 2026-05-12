@@ -295,7 +295,6 @@ import {
 	SetupInfoProvider,
 	ThemeProvider,
 } from "../server/effect-http-router.js";
-import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { OpenCodeInstance, StoredProject } from "../types.js";
@@ -303,6 +302,7 @@ import { generateSlug } from "../utils.js";
 import { getVersion } from "../version.js";
 import { AuthManagerTag } from "./auth-middleware.js";
 import { StaticDirTag } from "./static-file-handler.js";
+import { WebSocketUpgradeError } from "./ws-routing-layer.js";
 
 /**
  * Default frontend directory resolved relative to this file.
@@ -950,6 +950,7 @@ export async function startDaemonProcess(
 	async function stop(): Promise<void> {
 		if (shuttingDown) return;
 		readRuntimeConfigSnapshot();
+		updateRuntimeConfigSync((config) => ({ ...config, shuttingDown: true }));
 		shuttingDown = true;
 		if (shutdownTimer) {
 			clearTimeout(shutdownTimer);
@@ -1420,6 +1421,38 @@ export async function startDaemonProcess(
 		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
 		configSnapshot: buildConfig,
+		wsRelayRouter: {
+			ensureRelayStarted: (slug: string) =>
+				Effect.try({
+					try: () => ensureRelayStarted(slug),
+					catch: (cause) =>
+						new WebSocketUpgradeError({
+							reason: "relay_unavailable",
+							slug,
+							cause,
+						}),
+				}),
+			waitForRelay: (slug: string, timeoutMs: number) =>
+				Effect.tryPromise({
+					try: () => registry.waitForRelay(slug, timeoutMs),
+					catch: (cause) =>
+						new WebSocketUpgradeError({
+							reason: "relay_unavailable",
+							slug,
+							cause,
+						}),
+				}),
+			touchLastUsed: (slug: string) =>
+				Effect.try({
+					try: () => registry.touchLastUsed(slug),
+					catch: (cause) =>
+						new WebSocketUpgradeError({
+							reason: "relay_unavailable",
+							slug,
+							cause,
+						}),
+				}),
+		},
 		relayFactory: (slug: string) =>
 			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
 				Effect.map((p) => ({
@@ -1453,58 +1486,6 @@ export async function startDaemonProcess(
 	log.info(
 		`[startup:${elapsed()}] TLS certs ${postStartupConfig.tlsEnabled ? "loaded" : "skipped"}`,
 	);
-
-	// ── WebSocket upgrade routing ─────────────────────────────────────────
-	const wsServer = ctx.upgradeServer ?? ctx.httpServer;
-	wsServer?.on("upgrade", async (req, socket, head) => {
-		const match = req.url?.match(/^\/p\/([^/]+)\/ws(?:\?|$)/);
-		if (!match) {
-			log.debug(
-				{ url: req.url },
-				"WS upgrade rejected: URL does not match /p/{slug}/ws",
-			);
-			socket.destroy();
-			return;
-		}
-		// biome-ignore lint/style/noNonNullAssertion: regex matched successfully so capture group 1 is always present
-		const slug = match[1]!;
-		const cookies = parseCookies(req.headers.cookie ?? "");
-		const sessionCookie = cookies["relay_session"] ?? "";
-		const pinHeader = req.headers["x-relay-pin"];
-		const authenticated =
-			!auth.hasPin() ||
-			auth.validateCookie(sessionCookie) ||
-			(typeof pinHeader === "string" &&
-				auth.authenticate(pinHeader, getClientIp(req)).ok);
-		if (!authenticated) {
-			log.warn({ slug }, "WS upgrade rejected: auth failed");
-			socket.destroy();
-			return;
-		}
-		try {
-			ensureRelayStarted(slug);
-			const relay = await registry.waitForRelay(slug, 10_000);
-			if (socket.destroyed || shuttingDown) {
-				if (!socket.destroyed) socket.destroy();
-				return;
-			}
-			log.debug({ slug }, "WS upgrade accepted");
-			registry.touchLastUsed(slug);
-			relay.wsHandler.handleUpgrade(req, socket, head);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			log.warn(
-				{ slug, error: formatErrorDetail(err) },
-				`WS upgrade rejected: ${errMsg}`,
-			);
-			if (!socket.destroyed) {
-				if (socket.writable) {
-					socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
-				}
-				socket.destroy();
-			}
-		}
-	});
 
 	// ── Port scanner ──────────────────────────────────────────────────────
 	if (smartDefault) {

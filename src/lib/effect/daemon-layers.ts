@@ -69,7 +69,7 @@ import {
 	makeProjectRegistryLive,
 } from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
-import { RelayFactoryLive } from "./relay-factory-layer.js";
+import { HttpServerRefTag, RelayFactoryLive } from "./relay-factory-layer.js";
 import { SessionOverridesTag } from "./services.js";
 import { SessionPrefetchLive } from "./session-prefetch-layer.js";
 import {
@@ -81,7 +81,11 @@ import {
 	VersionCheckerLive,
 	VersionCheckerTag,
 } from "./version-checker-layer.js";
-import { WebSocketRoutingLive } from "./ws-routing-layer.js";
+import {
+	type WebSocketRelayRouter,
+	WebSocketRelayRouterTag,
+	WebSocketRoutingLive,
+} from "./ws-routing-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
 export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
@@ -299,6 +303,7 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
+			const httpServerRef = yield* HttpServerRefTag;
 			const tls = yield* TlsCertTag;
 			const config = yield* Ref.get(configRef);
 
@@ -327,9 +332,12 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 						cause,
 					}),
 			});
+			yield* Ref.set(httpServerRef, ctx.upgradeServer ?? ctx.httpServer);
 			yield* Ref.update(configRef, (c) => ({ ...c, port: actualPort }));
 			yield* Effect.addFinalizer(() =>
-				closeLifecycleServer("closeHttpServer", () => closeHttpServer(ctx)),
+				closeLifecycleServer("closeHttpServer", () =>
+					closeHttpServer(ctx),
+				).pipe(Effect.zipRight(Ref.set(httpServerRef, null))),
 			);
 		}),
 	);
@@ -460,6 +468,11 @@ export interface DaemonLiveOptions {
 	configSnapshot?: () => DaemonConfig;
 	/** Factory for creating relay instances per slug. */
 	relayFactory?: RelayFactory;
+	/**
+	 * Project WebSocket router. The legacy daemon supplies this from its live
+	 * ProjectRegistry until Phase 4 moves relay ownership fully into Effect.
+	 */
+	wsRelayRouter: WebSocketRelayRouter;
 }
 
 /**
@@ -612,6 +625,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		portScannerLayer,
 	).pipe(Layer.provideMerge(withDaemonWiring));
 
+	const withWsRelayRouter = Layer.succeed(
+		WebSocketRelayRouterTag,
+		options.wsRelayRouter,
+	).pipe(Layer.provideMerge(withBackground));
+
 	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
@@ -619,7 +637,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		WebSocketRoutingLive,
 		ProjectDiscoveryLive,
 		SessionPrefetchLive,
-	).pipe(Layer.provideMerge(withBackground));
+	).pipe(Layer.provideMerge(withWsRelayRouter));
 
 	return scopedFibers;
 };
