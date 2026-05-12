@@ -2457,6 +2457,61 @@ Test Files  363 passed (363)
 Tests  5173 passed | 2 skipped | 12 todo (5187)
 ```
 
+## Phase 7.18: Search Sessions Service Contract
+
+Plan issue found:
+
+- `handleSearchSessions` still delegated to legacy `SessionManager.searchSessions`, even though
+  session list reads now belong to `SessionManagerServiceTag`. That kept search on the provider
+  API path and bypassed the Effect service's SQLite read preference, fork metadata overlay, and
+  pending-question projection.
+
+Changes:
+
+- Converted `handleSearchSessions` to read sessions through `SessionManagerServiceTag.listSessions`
+  and apply the existing case-insensitive title/id filter in the handler.
+- Preserved the existing `roots` behavior by passing `{ roots: true }` to the service before
+  filtering when the search payload requests roots.
+- Tightened handler tests so legacy `sessionMgr.searchSessions` throws if search regresses to the
+  legacy path.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleSearchSessions"
+Exit: 1
+Expected failure:
+  legacy searchSessions should not be used
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleSearchSessions"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 62 skipped (64)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  69 passed (69)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

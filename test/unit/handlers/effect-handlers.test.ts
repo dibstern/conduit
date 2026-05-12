@@ -2522,29 +2522,109 @@ describe("handleRenameSession", () => {
 });
 
 describe("handleSearchSessions", () => {
-	it.effect("searches sessions and sends results", () => {
+	it.effect("searches service sessions and sends results", () => {
 		const ws = mockWsHandler();
-		const results = [{ id: "s1", title: "Match", updatedAt: 0 }];
+		const legacySearchSessions = vi.fn(async () => {
+			throw new Error("legacy searchSessions should not be used");
+		});
 		const sessionMgr = mockSessionManager({
-			searchSessions: vi.fn(async () => results),
+			searchSessions: legacySearchSessions,
+		});
+		const listSessions = vi.fn(() =>
+			Effect.succeed([
+				{
+					id: "s1",
+					title: "Match",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+				{
+					id: "s2",
+					title: "Other",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+			]),
+		);
+		const sessionManagerService = makeMockSessionManagerService({
+			listSessions,
 		});
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		);
 
-		return handleSearchSessions("client-1", { query: "test" }).pipe(
+		return handleSearchSessions("client-1", { query: "mat" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(sessionMgr.searchSessions).toHaveBeenCalledWith(
-					"test",
-					undefined,
-				);
+				expect(listSessions).toHaveBeenCalledWith(undefined);
+				expect(legacySearchSessions).not.toHaveBeenCalled();
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "session_list",
-					sessions: results,
+					sessions: [
+						{
+							id: "s1",
+							title: "Match",
+							updatedAt: 0,
+							messageCount: 0,
+						},
+					],
 					roots: false,
+					search: true,
+				});
+			}),
+		);
+	});
+
+	it.effect("passes roots filtering to the service before searching", () => {
+		const ws = mockWsHandler();
+		const legacySearchSessions = vi.fn(async () => {
+			throw new Error("legacy searchSessions should not be used");
+		});
+		const sessionMgr = mockSessionManager({
+			searchSessions: legacySearchSessions,
+		});
+		const listSessions = vi.fn(() =>
+			Effect.succeed([
+				{
+					id: "root-1",
+					title: "Root Match",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+			]),
+		);
+		const sessionManagerService = makeMockSessionManagerService({
+			listSessions,
+		});
+
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		);
+
+		return handleSearchSessions("client-1", {
+			query: "root",
+			roots: true,
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(listSessions).toHaveBeenCalledWith({ roots: true });
+				expect(legacySearchSessions).not.toHaveBeenCalled();
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "session_list",
+					sessions: [
+						{
+							id: "root-1",
+							title: "Root Match",
+							updatedAt: 0,
+							messageCount: 0,
+						},
+					],
+					roots: true,
 					search: true,
 				});
 			}),

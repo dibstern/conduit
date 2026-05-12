@@ -381,14 +381,17 @@ export const handleSearchSessions = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const { query, roots } = payload;
-		const results = yield* Effect.tryPromise(() =>
-			sessionMgr.searchSessions(
-				query,
-				roots !== undefined ? { roots } : undefined,
-			),
+		const sessions = yield* sessionManagerService.listSessions(
+			roots !== undefined ? { roots } : undefined,
+		);
+		const q = query.toLowerCase();
+		const results = sessions.filter(
+			(s) =>
+				(s.title ?? "").toLowerCase().includes(q) ||
+				s.id.toLowerCase().includes(q),
 		);
 		wsHandler.sendTo(clientId, {
 			type: "session_list",
