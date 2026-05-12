@@ -13,8 +13,11 @@
 // T10: crash recovery — auto-restart, backoff, max restarts, exit codes
 
 import type { ChildProcess } from "node:child_process";
+import { createServer, type Server } from "node:http";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
+import { createSdkClientEffect } from "../../../src/lib/instance/sdk-factory.js";
 import type {
 	InstanceConfig,
 	OpenCodeInstance,
@@ -64,6 +67,59 @@ function createMockSpawner(mockProcess?: ChildProcess) {
 
 function createMockHealthChecker(healthy = true) {
 	return vi.fn().mockResolvedValue(healthy);
+}
+
+interface AuthHealthServer {
+	port: number;
+	url: string;
+	close: () => Promise<void>;
+	auth: { username: string; password: string };
+	authHeader: string;
+}
+
+async function createAuthHealthServer(): Promise<AuthHealthServer> {
+	const username = "opencode";
+	const password = "test-password";
+	const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+
+	const server = createServer((req, res) => {
+		if (req.url !== "/health") {
+			res.writeHead(404).end();
+			return;
+		}
+
+		if (req.headers.authorization === authHeader) {
+			res.writeHead(200).end("ok");
+			return;
+		}
+
+		res
+			.writeHead(401, { "WWW-Authenticate": 'Basic realm="OpenCode"' })
+			.end("unauthorized");
+	});
+
+	await new Promise<void>((resolve) => {
+		server.listen(0, "127.0.0.1", resolve);
+	});
+
+	const address = server.address();
+	if (address == null || typeof address === "string") {
+		throw new Error("Failed to bind auth health test server");
+	}
+
+	return {
+		port: address.port,
+		url: `http://127.0.0.1:${address.port}`,
+		auth: { username, password },
+		authHeader,
+		close: () => closeServer(server),
+	};
+}
+
+function closeServer(server: Server): Promise<void> {
+	return new Promise((resolve, reject) => {
+		server.close((err) => (err ? reject(err) : resolve()));
+	});
 }
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
@@ -1944,93 +2000,95 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── Health checker with auth against real OpenCode ──────────────────────
+	// ─── Health checker with auth-required OpenCode-compatible server ────────
 
-	describe("health checker with real OpenCode server", () => {
-		it("default health checker fails when OpenCode requires auth", async () => {
-			// Skip if no real OpenCode server running
-			const password = process.env["OPENCODE_SERVER_PASSWORD"];
-			if (!password) return;
-
-			const noAuthRes = await fetch("http://localhost:4096/health");
-			if (noAuthRes.ok) return; // server doesn't require auth
-			expect(noAuthRes.status).toBe(401);
-
-			// Use real defaultHealthChecker (no injection) — should get 401 → unhealthy
+	describe("health checker with auth-required server", () => {
+		it("default health checker fails when server requires auth", async () => {
+			const server = await createAuthHealthServer();
 			const mgr = new InstanceManager({
-				healthPollIntervalMs: 1000,
+				healthPollIntervalMs: 10,
 			});
 
-			mgr.addInstance("no-auth", {
-				name: "No Auth",
-				port: 4096,
-				managed: false,
-				url: "http://localhost:4096",
-			});
+			try {
+				const noAuthRes = await fetch(`${server.url}/health`);
+				expect(noAuthRes.status).toBe(401);
 
-			// Wait for a health poll cycle
-			await vi.waitFor(
-				() => {
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior addInstance
-					expect(mgr.getInstance("no-auth")!.status).toBe("unhealthy");
-				},
-				{ timeout: 5000 },
-			);
+				// Use defaultHealthChecker (no injection) — should get 401 → unhealthy
+				mgr.addInstance("no-auth", {
+					name: "No Auth",
+					port: server.port,
+					managed: false,
+					url: server.url,
+				});
 
-			mgr.stopAll();
-		}, 10_000);
+				// Wait for a health poll cycle
+				await vi.waitFor(
+					() => {
+						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior addInstance
+						expect(mgr.getInstance("no-auth")!.status).toBe("unhealthy");
+					},
+					{ timeout: 1000 },
+				);
+			} finally {
+				mgr.stopAll();
+				await server.close();
+			}
+		});
 
-		it("injected auth health checker succeeds against real OpenCode", async () => {
-			// Skip if no real OpenCode server running
-			const password = process.env["OPENCODE_SERVER_PASSWORD"];
-			if (!password) return;
-
-			const noAuthRes = await fetch("http://localhost:4096/health");
-			if (noAuthRes.ok) return; // server doesn't require auth
-			expect(noAuthRes.status).toBe(401);
-
+		it("SDK-backed auth health checker succeeds against auth-required server", async () => {
+			const server = await createAuthHealthServer();
 			const mgr = new InstanceManager({
-				healthPollIntervalMs: 1000,
+				healthPollIntervalMs: 10,
 			});
 
-			// Inject health checker with real credentials (same as daemon would)
-			const username = process.env["OPENCODE_SERVER_USERNAME"] ?? "opencode";
-			const encoded = Buffer.from(`${username}:${password}`).toString("base64");
-			const authHeader = `Basic ${encoded}`;
-			mgr.setHealthChecker(async (port: number) => {
-				try {
-					const res = await fetch(`http://localhost:${port}/health`, {
-						headers: { Authorization: authHeader },
-					});
-					return res.ok;
-				} catch {
-					return false;
-				}
-			});
+			try {
+				const noAuthRes = await fetch(`${server.url}/health`);
+				expect(noAuthRes.status).toBe(401);
 
-			const statusChanges: string[] = [];
-			mgr.on("status_changed", (inst) => statusChanges.push(inst.status));
+				const sdkClient = Effect.runSync(
+					createSdkClientEffect({
+						baseUrl: server.url,
+						auth: server.auth,
+					}),
+				);
 
-			mgr.addInstance("with-auth", {
-				name: "With Auth",
-				port: 4096,
-				managed: false,
-				url: "http://localhost:4096",
-			});
+				// Inject SDK-backed authenticated transport (same auth wrapper used by relay code).
+				mgr.setHealthChecker(async (port: number) => {
+					try {
+						const res = await sdkClient.fetch(
+							`http://localhost:${port}/health`,
+						);
+						return res.ok;
+					} catch {
+						return false;
+					}
+				});
 
-			// Wait for a health poll cycle
-			await vi.waitFor(
-				() => {
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior addInstance
-					expect(mgr.getInstance("with-auth")!.status).toBe("healthy");
-				},
-				{ timeout: 5000 },
-			);
+				const statusChanges: string[] = [];
+				mgr.on("status_changed", (inst) => statusChanges.push(inst.status));
 
-			expect(statusChanges).toContain("healthy");
+				mgr.addInstance("with-auth", {
+					name: "With Auth",
+					port: server.port,
+					managed: false,
+					url: server.url,
+				});
 
-			mgr.stopAll();
-		}, 10_000);
+				// Wait for a health poll cycle
+				await vi.waitFor(
+					() => {
+						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior addInstance
+						expect(mgr.getInstance("with-auth")!.status).toBe("healthy");
+					},
+					{ timeout: 1000 },
+				);
+
+				expect(statusChanges).toContain("healthy");
+			} finally {
+				mgr.stopAll();
+				await server.close();
+			}
+		});
 	});
 
 	// ─── Bug C-2: Unmanaged instance never gets health-polled ────────────────
