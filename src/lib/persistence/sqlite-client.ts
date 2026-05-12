@@ -126,6 +126,11 @@ export class SqliteClient {
 		return rows[0];
 	}
 
+	exec(sql: string): void {
+		this.db.exec(sql);
+		this.stmtCache.clear();
+	}
+
 	runInTransaction<T>(fn: () => T): T {
 		if (this.transactionDepth === 0) {
 			this.transactionDepth++;

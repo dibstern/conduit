@@ -66,6 +66,30 @@ function createMockHealthChecker(healthy = true) {
 	return vi.fn().mockResolvedValue(healthy);
 }
 
+const LIVE_OPENCODE_URL =
+	process.env["OPENCODE_URL"] ?? process.env["OPENCODE_BASE_URL"];
+
+async function getLiveAuthRequiredOpenCode(): Promise<
+	| { readonly url: URL; readonly port: number; readonly password: string }
+	| undefined
+> {
+	const password = process.env["OPENCODE_SERVER_PASSWORD"];
+	if (!password || !LIVE_OPENCODE_URL) return undefined;
+
+	const url = new URL(LIVE_OPENCODE_URL);
+	const port = Number(url.port);
+	if (!Number.isInteger(port) || port <= 0) return undefined;
+	let noAuthRes: Response;
+	try {
+		noAuthRes = await fetch(new URL("/health", url));
+	} catch {
+		return undefined;
+	}
+	if (noAuthRes.ok) return undefined;
+	expect(noAuthRes.status).toBe(401);
+	return { url, port, password };
+}
+
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
 describe("InstanceManager", () => {
@@ -1948,13 +1972,8 @@ describe("InstanceManager", () => {
 
 	describe("health checker with real OpenCode server", () => {
 		it("default health checker fails when OpenCode requires auth", async () => {
-			// Skip if no real OpenCode server running
-			const password = process.env["OPENCODE_SERVER_PASSWORD"];
-			if (!password) return;
-
-			const noAuthRes = await fetch("http://localhost:4096/health");
-			if (noAuthRes.ok) return; // server doesn't require auth
-			expect(noAuthRes.status).toBe(401);
+			const liveOpenCode = await getLiveAuthRequiredOpenCode();
+			if (!liveOpenCode) return;
 
 			// Use real defaultHealthChecker (no injection) — should get 401 → unhealthy
 			const mgr = new InstanceManager({
@@ -1963,9 +1982,9 @@ describe("InstanceManager", () => {
 
 			mgr.addInstance("no-auth", {
 				name: "No Auth",
-				port: 4096,
+				port: liveOpenCode.port,
 				managed: false,
-				url: "http://localhost:4096",
+				url: liveOpenCode.url.toString(),
 			});
 
 			// Wait for a health poll cycle
@@ -1981,13 +2000,8 @@ describe("InstanceManager", () => {
 		}, 10_000);
 
 		it("injected auth health checker succeeds against real OpenCode", async () => {
-			// Skip if no real OpenCode server running
-			const password = process.env["OPENCODE_SERVER_PASSWORD"];
-			if (!password) return;
-
-			const noAuthRes = await fetch("http://localhost:4096/health");
-			if (noAuthRes.ok) return; // server doesn't require auth
-			expect(noAuthRes.status).toBe(401);
+			const liveOpenCode = await getLiveAuthRequiredOpenCode();
+			if (!liveOpenCode) return;
 
 			const mgr = new InstanceManager({
 				healthPollIntervalMs: 1000,
@@ -1995,11 +2009,15 @@ describe("InstanceManager", () => {
 
 			// Inject health checker with real credentials (same as daemon would)
 			const username = process.env["OPENCODE_SERVER_USERNAME"] ?? "opencode";
-			const encoded = Buffer.from(`${username}:${password}`).toString("base64");
+			const encoded = Buffer.from(
+				`${username}:${liveOpenCode.password}`,
+			).toString("base64");
 			const authHeader = `Basic ${encoded}`;
 			mgr.setHealthChecker(async (port: number) => {
 				try {
-					const res = await fetch(`http://localhost:${port}/health`, {
+					const healthUrl = new URL("/health", liveOpenCode.url);
+					healthUrl.port = String(port);
+					const res = await fetch(healthUrl, {
 						headers: { Authorization: authHeader },
 					});
 					return res.ok;
@@ -2013,9 +2031,9 @@ describe("InstanceManager", () => {
 
 			mgr.addInstance("with-auth", {
 				name: "With Auth",
-				port: 4096,
+				port: liveOpenCode.port,
 				managed: false,
-				url: "http://localhost:4096",
+				url: liveOpenCode.url.toString(),
 			});
 
 			// Wait for a health poll cycle

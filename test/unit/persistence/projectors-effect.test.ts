@@ -1,7 +1,10 @@
 // ─── Effect Projectors + Event Store Tests ──────────────────────────────────
 // Tests the @effect/sql migration of projectors, event-store, cursor repo,
-// and projection runner using in-memory SQLite via @effect/sql-sqlite-node.
+// and projection runner using file-backed SQLite via @effect/sql-sqlite-node.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
@@ -33,6 +36,8 @@ import {
 	type EventId,
 	type EventMetadata,
 } from "../../../src/lib/persistence/events.js";
+import { runMigrationsEffect } from "../../../src/lib/persistence/migrations.js";
+import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -188,157 +193,32 @@ function makePermissionResolved(
 	);
 }
 
-// ─── Schema setup SQL (mirrors schema.ts) ───────────────────────────────────
+// ─── Test layer: SQLite with fresh schema ───────────────────────────────────
 
-const SETUP_SQL = `
-CREATE TABLE sessions (
-	id TEXT PRIMARY KEY,
-	provider TEXT NOT NULL,
-	provider_sid TEXT,
-	title TEXT NOT NULL DEFAULT 'Untitled',
-	status TEXT NOT NULL DEFAULT 'idle' CHECK(status IN ('idle', 'busy', 'retry', 'error')),
-	parent_id TEXT,
-	fork_point_event TEXT,
-	last_message_at INTEGER,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-CREATE INDEX idx_sessions_updated ON sessions (updated_at DESC);
-
-CREATE TABLE events (
-	sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-	event_id TEXT NOT NULL UNIQUE,
-	session_id TEXT NOT NULL,
-	stream_version INTEGER NOT NULL,
-	type TEXT NOT NULL,
-	data TEXT NOT NULL,
-	metadata TEXT NOT NULL DEFAULT '{}',
-	provider TEXT NOT NULL,
-	created_at INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE UNIQUE INDEX idx_events_session_version ON events (session_id, stream_version);
-CREATE INDEX idx_events_session_seq ON events (session_id, sequence);
-CREATE INDEX idx_events_type ON events (type);
-
-CREATE TABLE turns (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'running', 'completed', 'interrupted', 'error')),
-	user_message_id TEXT,
-	assistant_message_id TEXT,
-	cost REAL,
-	tokens_in INTEGER,
-	tokens_out INTEGER,
-	requested_at INTEGER NOT NULL,
-	started_at INTEGER,
-	completed_at INTEGER,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE messages (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	turn_id TEXT,
-	role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-	text TEXT NOT NULL DEFAULT '',
-	cost REAL,
-	tokens_in INTEGER,
-	tokens_out INTEGER,
-	tokens_cache_read INTEGER,
-	tokens_cache_write INTEGER,
-	is_streaming INTEGER NOT NULL DEFAULT 0,
-	is_inherited INTEGER NOT NULL DEFAULT 0,
-	last_applied_seq INTEGER,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE message_parts (
-	id TEXT PRIMARY KEY,
-	message_id TEXT NOT NULL,
-	type TEXT NOT NULL CHECK(type IN ('text', 'thinking', 'tool')),
-	text TEXT NOT NULL DEFAULT '',
-	tool_name TEXT,
-	call_id TEXT,
-	input TEXT,
-	result TEXT,
-	duration REAL,
-	status TEXT,
-	sort_order INTEGER NOT NULL,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	FOREIGN KEY (message_id) REFERENCES messages(id)
-);
-
-CREATE TABLE session_providers (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	provider TEXT NOT NULL,
-	provider_sid TEXT,
-	status TEXT NOT NULL DEFAULT 'active',
-	activated_at INTEGER NOT NULL,
-	deactivated_at INTEGER,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE pending_approvals (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	turn_id TEXT,
-	type TEXT NOT NULL CHECK(type IN ('permission', 'question')),
-	status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'resolved')),
-	tool_name TEXT,
-	input TEXT,
-	decision TEXT,
-	always TEXT,
-	created_at INTEGER NOT NULL,
-	resolved_at INTEGER,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE activities (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	turn_id TEXT,
-	tone TEXT NOT NULL,
-	kind TEXT NOT NULL,
-	summary TEXT NOT NULL,
-	payload TEXT NOT NULL DEFAULT '{}',
-	sequence INTEGER,
-	created_at INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE projector_cursors (
-	projector_name TEXT PRIMARY KEY,
-	last_applied_seq INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-`;
-
-// ─── Test layer: in-memory SQLite with fresh schema ─────────────────────────
-
-const TestSqliteLayer = SqliteNode.layer({
-	filename: ":memory:",
-}).pipe(Layer.provide(Reactivity.layer));
-
-const SchemaLayer = Layer.effectDiscard(
-	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		// Run schema setup statements
-		for (const stmt of SETUP_SQL.split(";").filter((s) => s.trim())) {
-			yield* sql.unsafe(`${stmt.trim()}`);
-		}
-	}),
-).pipe(Layer.provide(TestSqliteLayer));
+function makeTestSqliteLayer() {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-projectors-effect-"));
+	const filename = join(dir, "events.db");
+	return SqliteNode.layer({ filename }).pipe(
+		Layer.provide(Reactivity.layer),
+		Layer.merge(
+			Layer.scopedDiscard(
+				Effect.addFinalizer(() =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			),
+		),
+	);
+}
 
 // Combine: SQLite client + schema + service layers
 const makeTestLayer = (
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
 ) => {
-	const baseLayer = Layer.merge(TestSqliteLayer, SchemaLayer);
+	const testSqliteLayer = makeTestSqliteLayer();
+	const schemaLayer = Layer.effectDiscard(
+		runMigrationsEffect(schemaMigrations),
+	).pipe(Layer.provide(testSqliteLayer));
+	const baseLayer = Layer.merge(testSqliteLayer, schemaLayer);
 
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,

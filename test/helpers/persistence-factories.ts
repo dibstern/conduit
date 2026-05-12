@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { makePersistenceServiceLive } from "../../src/lib/effect/persistence-service.js";
 import { EventStore } from "../../src/lib/persistence/event-store.js";
 import {
@@ -298,11 +301,23 @@ export function createTestHarness(): TestHarness {
 // The imperative `createTestHarness()` above is preserved for existing tests.
 
 /**
- * In-memory SQLite layer for Effect tests.
- * Provides @effect/sql's SqlClient.SqlClient backed by an in-memory database.
- * Use with `Layer.provideMerge(makePersistenceServiceLive, TestSqlLayer)`.
+ * File-backed SQLite layer for Effect tests.
+ * Provides @effect/sql's SqlClient.SqlClient and the sqlite-node client.
+ * Use with `Layer.provideMerge(makePersistenceServiceLive, makeTestSqlLayer())`.
  */
-export const TestSqlLayer = EffectSqliteClient.layer({ filename: ":memory:" });
+export function makeTestSqlLayer() {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-effect-persistence-"));
+	const filename = join(dir, "events.db");
+	return EffectSqliteClient.layer({ filename }).pipe(
+		Layer.merge(
+			Layer.scopedDiscard(
+				Effect.addFinalizer(() =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			),
+		),
+	);
+}
 
 /**
  * Composed Layer providing both SqlClient and PersistenceService for Effect tests.
@@ -311,12 +326,9 @@ export const TestSqlLayer = EffectSqliteClient.layer({ filename: ":memory:" });
  *   it.effect("my persistence test", () =>
  *     Effect.gen(function* () {
  *       const persistence = yield* PersistenceServiceTag;
- *       yield* persistence.migrate;
  *       // ... test logic ...
- *     }).pipe(Effect.provide(TestPersistenceLayer)),
+ *     }).pipe(Effect.provide(makeTestPersistenceLayer())),
  *   );
  */
-export const TestPersistenceLayer = Layer.provideMerge(
-	makePersistenceServiceLive,
-	TestSqlLayer,
-);
+export const makeTestPersistenceLayer = () =>
+	Layer.provideMerge(makePersistenceServiceLive, makeTestSqlLayer());

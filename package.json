@@ -25,7 +25,7 @@
 		"build": "tsgo && pnpm copy:assets && vite build",
 		"build:server": "tsgo && pnpm copy:assets",
 		"build:frontend": "vite build",
-		"copy:assets": "rm -rf dist/src/lib/themes && cp -r src/lib/themes dist/src/lib/themes",
+		"copy:assets": "rm -rf dist/src/lib/themes dist/src/lib/persistence/migrations && cp -r src/lib/themes dist/src/lib/themes && mkdir -p dist/src/lib/persistence && cp -r src/lib/persistence/migrations dist/src/lib/persistence/migrations",
 		"preview:frontend": "vite preview",
 		"preview:server": "pnpm build && node dist/src/bin/cli.js",
 		"check": "tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json",

@@ -407,14 +407,7 @@ Exit: 0
 ```text
 $ pnpm lint
 Exit: 0
-Checked 941 files in 270ms. No fixes applied.
-```
-
-```text
-$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
-Exit: 0
-Test Files  345 passed (345)
-Tests  5057 passed | 2 skipped | 12 todo (5071)
+Checked 946 files in 195ms. No fixes applied.
 ```
 
 Review notes:
@@ -1178,4 +1171,241 @@ $ pnpm test:e2e -- test/e2e/specs/fork-session.spec.ts
 Exit: 0
 Build: passed
 Playwright: 5 passed
+```
+
+## Phase 5.0: Persistence Schema Migration Foundation Slice
+
+Plan issues found:
+
+- The plan's "add a migration runner" step was partly stale: a runner already existed, but it tracked only
+  `_migrations(id, name, applied_at)`, stored migrations as TypeScript functions, and had no checksum mismatch
+  protection.
+- The existing Effect persistence service was not production-compatible. It created a toy
+  `events(id, type, session_id, payload, created_at)` table while `EventStoreEffect` writes the real event-store
+  shape: `event_id`, `session_id`, `stream_version`, `data`, `metadata`, `provider`, and `created_at`.
+- The projectors Effect tests had their own hand-written schema copy, which omitted production tables and indexes.
+  That let Effect persistence tests drift away from the real SQLite schema.
+- The `PersistenceLayer.open(...)` guardrail remains intentionally open in this slice. Per the plan, production
+  consumers must not switch until the migration story has shipped and been observed.
+
+Changes:
+
+- `src/lib/persistence/migrations/0001_current_event_store.sql`: added the forward-only SQL migration file and
+  made it the schema authority.
+- `src/lib/persistence/schema.ts`: now reads the SQL migration file instead of duplicating DDL in TypeScript.
+- `src/lib/persistence/migrations.ts`: migration rows now record SHA-256 checksums, refuse missing/renamed/edited
+  applied migrations, enforce contiguous migration ids, run pending migrations transactionally, and backfill
+  checksums for legacy `_migrations` rows in the same transaction that validates that the current database still
+  contains the schema objects created by the baseline SQL migration.
+- `src/lib/effect/persistence-service.ts`: `makePersistenceServiceLive` now runs the real production migrations at
+  layer startup and exposes an idempotent `migrate` method backed by the same runner.
+- `test/unit/persistence/projectors-effect.test.ts`: removed the local schema string and uses the same migration
+  runner as production against a file-backed SQLite database.
+- `test/unit/persistence/persistence-effect.test.ts`: added startup-failure coverage for edited checksums,
+  unsafe legacy checksum backfills, accidental `:memory:` Effect SQLite layers, and readonly Effect SQLite
+  layers.
+- `package.json`: `copy:assets` now copies `src/lib/persistence/migrations` into `dist/src/lib/persistence`, so
+  compiled production code can still read the SQL file beside `schema.js`.
+- `AGENTS.md`: removed the stale fixed `localhost:4096` development assumption and documented provider-SDK
+  debugging for OpenCode and Claude.
+- `test/unit/instance/instance-manager.test.ts`: live OpenCode auth checks now require an explicit reachable
+  `OPENCODE_URL` / `OPENCODE_BASE_URL` instead of assuming `OPENCODE_SERVER_PASSWORD` implies
+  `localhost:4096` is listening.
+
+Existing SQLite schema inventory from a copied production DB
+(`/Users/dstern/src/personal/conduit/.conduit/events.db`, copied with `VACUUM INTO`):
+
+| table | columns |
+|---|---|
+| `_migrations` | `id:INTEGER pk`, `name:TEXT notnull`, `applied_at:INTEGER notnull` |
+| `activities` | `id:TEXT pk`, `session_id:TEXT notnull`, `turn_id:TEXT`, `tone:TEXT notnull`, `kind:TEXT notnull`, `summary:TEXT notnull`, `payload:TEXT notnull default='{}'`, `sequence:INTEGER`, `created_at:INTEGER notnull` |
+| `command_receipts` | `command_id:TEXT pk`, `session_id:TEXT notnull`, `status:TEXT notnull`, `result_sequence:INTEGER`, `error:TEXT`, `created_at:INTEGER notnull` |
+| `events` | `sequence:INTEGER pk`, `event_id:TEXT notnull`, `session_id:TEXT notnull`, `stream_version:INTEGER notnull`, `type:TEXT notnull`, `data:TEXT notnull`, `metadata:TEXT notnull default='{}'`, `provider:TEXT notnull`, `created_at:INTEGER notnull` |
+| `message_parts` | `id:TEXT pk`, `message_id:TEXT notnull`, `type:TEXT notnull`, `text:TEXT notnull default=''`, `tool_name:TEXT`, `call_id:TEXT`, `input:TEXT`, `result:TEXT`, `duration:REAL`, `status:TEXT`, `sort_order:INTEGER notnull`, `created_at:INTEGER notnull`, `updated_at:INTEGER notnull` |
+| `messages` | `id:TEXT pk`, `session_id:TEXT notnull`, `turn_id:TEXT`, `role:TEXT notnull`, `text:TEXT notnull default=''`, `cost:REAL`, `tokens_in:INTEGER`, `tokens_out:INTEGER`, `tokens_cache_read:INTEGER`, `tokens_cache_write:INTEGER`, `is_streaming:INTEGER notnull default=0`, `is_inherited:INTEGER notnull default=0`, `last_applied_seq:INTEGER`, `created_at:INTEGER notnull`, `updated_at:INTEGER notnull` |
+| `pending_approvals` | `id:TEXT pk`, `session_id:TEXT notnull`, `turn_id:TEXT`, `type:TEXT notnull`, `status:TEXT notnull default='pending'`, `tool_name:TEXT`, `input:TEXT`, `decision:TEXT`, `always:TEXT`, `created_at:INTEGER notnull`, `resolved_at:INTEGER` |
+| `projector_cursors` | `projector_name:TEXT pk`, `last_applied_seq:INTEGER notnull`, `updated_at:INTEGER notnull` |
+| `provider_state` | `session_id:TEXT notnull pk`, `key:TEXT notnull pk`, `value:TEXT notnull` |
+| `session_providers` | `id:TEXT pk`, `session_id:TEXT notnull`, `provider:TEXT notnull`, `provider_sid:TEXT`, `status:TEXT notnull default='active'`, `activated_at:INTEGER notnull`, `deactivated_at:INTEGER` |
+| `sessions` | `id:TEXT pk`, `provider:TEXT notnull`, `provider_sid:TEXT`, `title:TEXT notnull default='Untitled'`, `status:TEXT notnull default='idle'`, `parent_id:TEXT`, `fork_point_event:TEXT`, `last_message_at:INTEGER`, `created_at:INTEGER notnull`, `updated_at:INTEGER notnull` |
+| `tool_content` | `tool_id:TEXT pk`, `session_id:TEXT notnull`, `content:TEXT notnull`, `created_at:INTEGER notnull` |
+| `turns` | `id:TEXT pk`, `session_id:TEXT notnull`, `state:TEXT notnull default='pending'`, `user_message_id:TEXT`, `assistant_message_id:TEXT`, `cost:REAL`, `tokens_in:INTEGER`, `tokens_out:INTEGER`, `requested_at:INTEGER notnull`, `started_at:INTEGER`, `completed_at:INTEGER` |
+
+Schema comparison:
+
+- The current SQL migration matches the copied production table and index inventory.
+- The only migration metadata diff is intentional: `_migrations` gains a `checksum TEXT NOT NULL DEFAULT ''`
+  column. Existing row `1/create_event_store_tables` is treated as the already-applied baseline and gets the
+  checksum backfilled.
+- The Effect persistence service no longer has a separate schema expectation; it uses the same SQL file.
+- The Effect migration runner delegates to the sync SQLite migration engine on the same database file. This keeps
+  `db.exec(...)` script semantics for multi-statement migrations instead of splitting SQL manually.
+- `:memory:` Effect SQLite layers now fail fast because the sync migration connection would otherwise open a
+  separate in-memory database.
+- Readonly Effect SQLite layers now fail fast because the migration runner must be allowed to create tables,
+  record migration rows, and backfill legacy checksums.
+
+Index inventory covered by `test/unit/persistence/schema.test.ts`:
+
+| table | indexes |
+|---|---|
+| `activities` | `idx_activities_session_created`, `idx_activities_session_kind`, `idx_activities_tone`, `idx_activities_turn` |
+| `command_receipts` | `idx_command_receipts_session` |
+| `events` | `idx_events_session_seq`, `idx_events_session_version` unique, `idx_events_type` |
+| `message_parts` | `idx_message_parts_message` |
+| `messages` | `idx_messages_session_created`, `idx_messages_turn` |
+| `pending_approvals` | `idx_pending_approvals_pending`, `idx_pending_approvals_session_status` |
+| `session_providers` | `idx_session_providers_active`, `idx_session_providers_session` |
+| `sessions` | `idx_sessions_parent`, `idx_sessions_provider`, `idx_sessions_updated` |
+| `tool_content` | `idx_tool_content_session` |
+| `turns` | `idx_turns_assistant_message`, `idx_turns_session_requested` |
+
+Constraint inventory covered by the SQL baseline and schema tests:
+
+- Primary keys, foreign keys, and the unique `events.event_id` / `(session_id, stream_version)` constraints match
+  the production schema.
+- CHECK constraints are preserved for `sessions.status`, `turns.state`, `messages.role`, `message_parts.type`,
+  `pending_approvals.type`, and `pending_approvals.status`.
+
+Dry-run on copied production DB:
+
+```text
+Source: /Users/dstern/src/personal/conduit/.conduit/events.db
+Copy method: SQLite VACUUM INTO a temp-file copy
+Applied migrations: []
+Before migration rows: [{ id: 1, name: "create_event_store_tables" }]
+After migration rows:
+  [{ id: 1, name: "create_event_store_tables",
+     checksum: "b4379c0b4631c149b4ffa201e92341150395475e3d1c386e227a77e616a24613" }]
+```
+
+Before/after row counts were unchanged:
+
+```text
+activities=619
+command_receipts=0
+events=1685
+message_parts=261
+messages=220
+pending_approvals=0
+projector_cursors=6
+provider_state=9
+session_providers=10
+sessions=10
+tool_content=0
+turns=15
+```
+
+Rollback procedure:
+
+- Migrations are forward-only. Rollback means stop the daemon, restore the pre-upgrade `.conduit/events.db`
+  backup (and its `-wal` / `-shm` siblings if present), then restart.
+- If an already-applied migration file is edited, renamed, deleted, or checksum-mismatched, startup must fail
+  instead of silently continuing. The new runner enforces this before applying pending migrations.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/persistence/migrations.test.ts
+Exit: 1
+Expected failures:
+  migration.up is not a function
+  no such column: checksum
+```
+
+```text
+$ pnpm vitest run test/unit/persistence/persistence-effect.test.ts
+Exit: 1
+Expected failures:
+  startup migration creates the production event-store schema: expected [] to deeply equal [tables...]
+  evictBefore deletes old events: no such table: sessions
+```
+
+```text
+$ pnpm vitest run test/unit/persistence/migrations.test.ts --testNamePattern "legacy checksum"
+Exit: 1
+Expected failure:
+  expected [Function] to throw an error
+```
+
+```text
+$ git commit ...
+Exit: 1
+Expected/stale environment failure:
+  test/unit/instance/instance-manager.test.ts > health checker with real OpenCode server
+  fetch("http://localhost:4096/health") -> ECONNREFUSED
+Resolution:
+  require an explicit live OpenCode URL before running those live-server unit checks.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/persistence/migrations.test.ts \
+  test/unit/persistence/schema.test.ts \
+  test/unit/persistence/persistence-effect.test.ts \
+  test/unit/persistence/projectors-effect.test.ts \
+  test/unit/persistence/persistence-layer.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  74 passed (74)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 946 files in 287ms. No fixes applied.
+```
+
+```text
+$ pnpm vitest run test/unit/persistence
+Exit: 0
+Test Files  30 passed (30)
+Tests  386 passed (386)
+```
+
+```text
+$ env -u OPENCODE_URL -u OPENCODE_BASE_URL pnpm test:unit
+Exit: 0
+Test Files  348 passed (348)
+Tests  5106 passed | 2 skipped | 12 todo (5120)
+```
+
+```text
+$ pnpm build:server
+Exit: 0
+tsgo passed
+copy:assets copied src/lib/persistence/migrations into dist/src/lib/persistence/migrations
+```
+
+```text
+$ env OPENCODE_SERVER_PASSWORD=dummy env -u OPENCODE_URL -u OPENCODE_BASE_URL \
+  pnpm vitest run test/unit/instance/instance-manager.test.ts \
+  --testNamePattern "health checker with real OpenCode server"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 80 skipped (82)
+```
+
+```text
+$ pnpm test:contract
+Exit: 0
+Test Files  8 passed (8)
+Tests  81 passed (81)
+Note: this used an ephemeral OpenCode instance printed by the contract harness. `localhost:4096` was not listening
+in this development environment.
+```
+
+```text
+$ node --input-type=module <dry-run script against a VACUUM INTO copy>
+Exit: 0
+Applied migrations: []
+Checksum after backfill: b4379c0b4631c149b4ffa201e92341150395475e3d1c386e227a77e616a24613
+Row counts unchanged for sessions, events, messages, message_parts, activities, turns, pending_approvals,
+session_providers, provider_state, tool_content, command_receipts, and projector_cursors.
 ```

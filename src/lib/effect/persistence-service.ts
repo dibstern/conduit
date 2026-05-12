@@ -3,7 +3,10 @@
 // health checking, eviction, and transaction helpers for the relay event store.
 
 import { SqlClient } from "@effect/sql";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Context, Data, Effect, Layer } from "effect";
+import { runMigrationsEffect } from "../persistence/migrations.js";
+import { schemaMigrations } from "../persistence/schema.js";
 
 export class PersistenceError extends Data.TaggedError("PersistenceError")<{
 	operation: string;
@@ -26,29 +29,24 @@ export class PersistenceServiceTag extends Context.Tag("PersistenceService")<
 
 export const makePersistenceServiceLive: Layer.Layer<
 	PersistenceServiceTag,
-	never,
-	SqlClient.SqlClient
+	PersistenceError,
+	SqlClient.SqlClient | SqliteNode.SqliteClient
 > = Layer.effect(
 	PersistenceServiceTag,
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const sqlite = yield* SqliteNode.SqliteClient;
 
-		const migrate = Effect.gen(function* () {
-			yield* sql`CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL,
-        session_id TEXT,
-        payload TEXT NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch('now','subsec') * 1000)
-      )`;
-			yield* sql`CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)`;
-			yield* sql`CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)`;
-		}).pipe(
+		const migrate = runMigrationsEffect(schemaMigrations).pipe(
+			Effect.asVoid,
+			Effect.provideService(SqliteNode.SqliteClient, sqlite),
 			Effect.mapError(
 				(e) => new PersistenceError({ operation: "migrate", cause: e }),
 			),
 			Effect.withSpan("persistence.migrate"),
 		);
+
+		yield* migrate;
 
 		const healthCheck = sql`SELECT 1 AS ok`.pipe(
 			Effect.map((rows) => rows.length > 0),
