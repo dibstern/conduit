@@ -4,13 +4,14 @@
 // engine) from an OpenCodeClient. Used by relay-stack.ts to instantiate the
 // provider layer alongside the existing relay pipeline.
 
+import { Layer } from "effect";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { ClaudeAdapter } from "./claude/index.js";
 import { OpenCodeAdapter } from "./opencode-adapter.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
-import { ProviderRegistry } from "./provider-registry.js";
+import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import type { TurnResult } from "./types.js";
 
 const log = createLogger("orchestration-wiring");
@@ -23,6 +24,7 @@ export interface OrchestrationLayerOptions {
 export interface OrchestrationLayer {
 	readonly engine: OrchestrationEngine;
 	readonly registry: ProviderRegistry;
+	readonly registryLayer: Layer.Layer<ProviderRegistryTag>;
 	readonly adapter: OpenCodeAdapter;
 	/**
 	 * Wire SSE session.status idle events to notifyTurnCompleted().
@@ -69,6 +71,7 @@ export function createOrchestrationLayer(
 	});
 	registry.registerAdapter(claudeAdapter);
 
+	const registryLayer = Layer.succeed(ProviderRegistryTag, registry);
 	const engine = new OrchestrationEngine({ registry });
 
 	function wireSSEToAdapter(
@@ -96,5 +99,5 @@ export function createOrchestrationLayer(
 		});
 	}
 
-	return { engine, registry, adapter, wireSSEToAdapter };
+	return { engine, registry, registryLayer, adapter, wireSSEToAdapter };
 }

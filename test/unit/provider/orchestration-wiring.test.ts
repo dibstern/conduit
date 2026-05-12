@@ -1,10 +1,14 @@
 // test/unit/provider/orchestration-wiring.test.ts
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { createOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
-import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -57,6 +61,21 @@ describe("Orchestration wiring", () => {
 		const layer = createOrchestrationLayer({ client });
 
 		expect(layer.registry.hasAdapter("opencode")).toBe(true);
+	});
+
+	it("exposes the provider registry through an Effect service layer", async () => {
+		const client = makeStubClient();
+		const layer = createOrchestrationLayer({ client });
+
+		const service = await Effect.runPromise(
+			Effect.gen(function* () {
+				return yield* ProviderRegistryTag;
+			}).pipe(Effect.provide(layer.registryLayer)),
+		);
+
+		expect(service).toBe(layer.registry);
+		expect(service.hasAdapter("opencode")).toBe(true);
+		expect(service.hasAdapter("claude")).toBe(true);
 	});
 
 	it("engine can discover opencode capabilities", async () => {

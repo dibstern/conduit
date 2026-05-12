@@ -857,6 +857,7 @@ export async function createProjectRelay(
 		Layer.succeed(PollerManagerTag, pollerManager),
 		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
 		Layer.succeed(OrchestrationEngineTag, orchestration.engine),
+		orchestration.registryLayer,
 	);
 
 	// Optional bridge layers (only included when deps are present)

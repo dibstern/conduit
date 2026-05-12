@@ -3,15 +3,34 @@
 // Maps provider IDs to adapter instances. The OrchestrationEngine uses this
 // to route commands to the correct adapter.
 
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { createLogger } from "../logger.js";
 import { ProviderNotRegistered } from "./errors.js";
 import type { ProviderAdapter } from "./types.js";
 
 const log = createLogger("provider-registry");
 
+export class ProviderRegistryTag extends Context.Tag("ProviderRegistry")<
+	ProviderRegistryTag,
+	ProviderRegistry
+>() {}
+
+export const ProviderRegistryLive = (
+	adapters: Iterable<ProviderAdapter> = [],
+): Layer.Layer<ProviderRegistryTag> =>
+	Layer.effect(
+		ProviderRegistryTag,
+		Effect.sync(() => new ProviderRegistry(adapters)),
+	);
+
 export class ProviderRegistry {
 	private readonly adapters = new Map<string, ProviderAdapter>();
+
+	constructor(adapters: Iterable<ProviderAdapter> = []) {
+		for (const adapter of adapters) {
+			this.registerAdapter(adapter);
+		}
+	}
 
 	/** Register an adapter. Overwrites any existing adapter with the same providerId. */
 	registerAdapter(adapter: ProviderAdapter): void {

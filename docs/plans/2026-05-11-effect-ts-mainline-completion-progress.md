@@ -2060,6 +2060,58 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 6.8: Provider Registry Effect Service Layer
+
+Plan issues found:
+
+- The registry already had typed `getAdapterEffect` lookup, but it was still only constructor-injected imperative state.
+  That satisfied orchestration call sites but did not satisfy the plan's Layer-backed service requirement.
+- A tag/live-layer export alone would be token compliance if production wiring did not provide it. The relay runtime now
+  includes the same registry instance in its Effect Layer tree, so later provider/handler consumers can resolve it from
+  context instead of receiving another constructor parameter.
+
+Changes:
+
+- `src/lib/provider/provider-registry.ts`: added `ProviderRegistryTag`, `ProviderRegistryLive(...)`, and constructor
+  seeding for registered adapters.
+- `src/lib/provider/orchestration-wiring.ts`: exposes the concrete provider registry as `registryLayer` alongside the
+  existing engine/adapter wiring.
+- `src/lib/relay/relay-stack.ts`: provides the registry layer in the relay `ManagedRuntime` bridge layer tree.
+- `test/unit/provider/provider-registry.test.ts`: added Layer-backed lookup tests, typed missing-adapter failure, and
+  fresh Layer acquisition behavior.
+- `test/unit/provider/orchestration-wiring.test.ts`: verifies production orchestration wiring exposes the registry
+  through `ProviderRegistryTag`.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/provider-registry.test.ts
+Exit: 1
+Expected failure:
+  ProviderRegistryLive was not exported yet, so the Layer-backed service tests failed before implementation.
+```
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-wiring.test.ts
+Exit: 1
+Expected failure:
+  createOrchestrationLayer did not expose registryLayer, so resolving ProviderRegistryTag from production wiring failed.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/provider-registry.test.ts test/unit/provider/orchestration-wiring.test.ts
+Exit: 0
+Test Files  2 passed (2)
+Tests  27 passed (27)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
 ## Phase 6.5: Provider Send-Turn Effect Boundary
 
 Plan issues found:

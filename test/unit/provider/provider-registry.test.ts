@@ -1,9 +1,13 @@
 // test/unit/provider/provider-registry.test.ts
 
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
-import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryLive,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
 
 function makeStubAdapter(providerId: string): ProviderAdapter {
@@ -156,5 +160,56 @@ describe("ProviderRegistry", () => {
 
 		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
 		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
+	});
+
+	it("provides registered adapters through the Effect service layer", async () => {
+		const adapter = makeStubAdapter("claude");
+
+		const resolved = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ProviderRegistryTag;
+				return yield* service.getAdapterEffect("claude");
+			}).pipe(Effect.provide(ProviderRegistryLive([adapter]))),
+		);
+
+		expect(resolved).toBe(adapter);
+	});
+
+	it("fails typed Effect lookup when the layer-backed service lacks the adapter", async () => {
+		const exit = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ProviderRegistryTag;
+				return yield* Effect.exit(service.getAdapterEffect("missing"));
+			}).pipe(Effect.provide(ProviderRegistryLive([]))),
+		);
+
+		expect(exit._tag).toBe("Failure");
+		if (exit._tag === "Failure") {
+			expect(exit.cause.toString()).toContain("ProviderNotRegistered");
+			expect(exit.cause.toString()).toContain("missing");
+		}
+	});
+
+	it("creates fresh registry state for fresh Layer acquisitions", async () => {
+		const adapter = makeStubAdapter("claude");
+		const layer = ProviderRegistryLive([]);
+
+		const first = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ProviderRegistryTag;
+				service.registerAdapter(adapter);
+				return service.hasAdapter("claude");
+			}).pipe(Effect.provide(Layer.fresh(layer))),
+		);
+
+		const second = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ProviderRegistryTag;
+				return service.hasAdapter("claude");
+			}).pipe(Effect.provide(Layer.fresh(layer))),
+		);
+
+		expect(first).toBe(true);
+		expect(second).toBe(false);
 	});
 });
