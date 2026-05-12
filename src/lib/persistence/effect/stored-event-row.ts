@@ -28,7 +28,7 @@ export const decodeStoredEventRow = <E>(
 			catch: (cause) => mapCause({ field: "metadata", cause }),
 		});
 
-		return yield* Schema.decodeUnknown(StoredEventSchema)({
+		const event = {
 			sequence: row.sequence,
 			eventId: row.event_id,
 			sessionId: row.session_id,
@@ -38,5 +38,11 @@ export const decodeStoredEventRow = <E>(
 			metadata,
 			provider: row.provider,
 			createdAt: row.created_at,
-		}).pipe(Effect.mapError(mapCause));
+		};
+
+		yield* Schema.decodeUnknown(StoredEventSchema)(event).pipe(
+			Effect.mapError(mapCause),
+		);
+
+		return event as StoredEvent;
 	});

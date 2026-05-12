@@ -8,7 +8,6 @@ import {
 	ClientIdTag,
 	ConfigTag,
 	ConnectPtyUpstreamTag,
-	ForkMetaTag,
 	// Daemon-only Tags
 	InstanceMgmtTag,
 	LoggerTag,
@@ -47,7 +46,6 @@ const ALL_TAGS = [
 	SessionRegistryTag,
 	PollerManagerTag,
 	ConnectPtyUpstreamTag,
-	ForkMetaTag,
 	OrchestrationEngineTag,
 	ReadQueryTag,
 	ClaudeEventPersistTag,
@@ -73,8 +71,8 @@ describe("Service Tags", () => {
 	});
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
-		// HandlerDeps has 21 fields (15 required + 6 optional) + 1 per-request (ClientId)
-		expect(ALL_TAGS.length).toBe(22);
+		// HandlerDeps has 20 fields (13 required + 7 optional) + 1 per-request (ClientId)
+		expect(ALL_TAGS.length).toBe(21);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -129,10 +127,6 @@ describe("Service Tags", () => {
 
 	it("ConnectPtyUpstream tag has correct key", () => {
 		expect(ConnectPtyUpstreamTag.key).toBe("ConnectPtyUpstream");
-	});
-
-	it("ForkMeta tag has correct key", () => {
-		expect(ForkMetaTag.key).toBe("ForkMeta");
 	});
 
 	it("OrchestrationEngine tag has correct key", () => {

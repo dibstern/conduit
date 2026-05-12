@@ -21,7 +21,11 @@ import {
 	makeProjectorCursorEffect,
 	ProjectorCursorEffectTag,
 } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
-import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+	type ProjectionContext,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -331,7 +335,9 @@ const SchemaLayer = Layer.effectDiscard(
 ).pipe(Layer.provide(TestSqliteLayer));
 
 // Combine: SQLite client + schema + service layers
-const makeTestLayer = () => {
+const makeTestLayer = (
+	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
+) => {
 	const baseLayer = Layer.merge(TestSqliteLayer, SchemaLayer);
 
 	const eventStoreLayer = Layer.effect(
@@ -346,7 +352,7 @@ const makeTestLayer = () => {
 
 	const projectionRunnerLayer = Layer.effect(
 		ProjectionRunnerEffectTag,
-		makeProjectionRunnerEffect(createAllEffectProjectors()),
+		makeProjectionRunnerEffect(projectors),
 	).pipe(Layer.provide(Layer.merge(cursorLayer, baseLayer)));
 
 	return Layer.mergeAll(
@@ -369,6 +375,21 @@ function runTest<A, E>(
 	>,
 ): Promise<A> {
 	const layer = makeTestLayer();
+	return Effect.runPromise(Effect.provide(effect, layer));
+}
+
+function runTestWithProjectors<A, E>(
+	projectors: readonly EffectProjector[],
+	effect: Effect.Effect<
+		A,
+		E,
+		| SqlClient.SqlClient
+		| EventStoreEffectTag
+		| ProjectorCursorEffectTag
+		| ProjectionRunnerEffectTag
+	>,
+): Promise<A> {
+	const layer = makeTestLayer(projectors);
 	return Effect.runPromise(Effect.provide(effect, layer));
 }
 
@@ -424,6 +445,74 @@ describe("EventStoreEffect", () => {
 				expect(stored.eventId).toBe(event.eventId);
 				expect(stored.type).toBe("session.created");
 				expect(stored.sessionId).toBe("s1");
+			}),
+		));
+
+	it("append returns typed EventStoreError for schema-invalid payloads", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-append");
+				const event = {
+					...makeSessionCreated("s-invalid-append"),
+					data: {
+						sessionId: "s-invalid-append",
+						provider: "opencode",
+					},
+				} as unknown as CanonicalEvent;
+
+				const result = yield* Effect.either(store.append(event));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("validateCanonicalEvent");
+					}
+				}
+			}),
+		));
+
+	it("append preserves extra payload and metadata fields while validating required shape", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("s-preserve-extra");
+				const event = {
+					...makeSessionCreated("s-preserve-extra", {
+						metadata: { source: "test" },
+					}),
+					data: {
+						sessionId: "s-preserve-extra",
+						title: "Test Session",
+						provider: "opencode",
+						extraPayloadField: "kept",
+					},
+					metadata: {
+						source: "test",
+						extraMetadataField: "kept",
+					},
+				} as unknown as CanonicalEvent;
+
+				const stored = yield* store.append(event);
+				const rows = yield* sql<{ data: string; metadata: string }>`
+					SELECT data, metadata FROM events WHERE session_id = 's-preserve-extra'
+				`;
+
+				expect(stored.data).toMatchObject({
+					extraPayloadField: "kept",
+				});
+				expect(stored.metadata).toMatchObject({
+					extraMetadataField: "kept",
+				});
+				expect(JSON.parse(rows[0]?.data ?? "{}")).toMatchObject({
+					extraPayloadField: "kept",
+				});
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toMatchObject({
+					extraMetadataField: "kept",
+				});
 			}),
 		));
 
@@ -522,6 +611,35 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
+	it("returns typed EventStoreError for invalid metadata JSON in a stored row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-metadata-json");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-metadata-json",
+					data: JSON.stringify({
+						sessionId: "s-invalid-metadata-json",
+						title: "Raw Session",
+						provider: "opencode",
+					}),
+					metadata: "{not json",
+				});
+
+				const result = yield* Effect.either(store.readFromSequence(0));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+						expect(error.cause).toMatchObject({ field: "metadata" });
+					}
+				}
+			}),
+		));
+
 	it("returns typed EventStoreError for schema-invalid stored payload", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -576,6 +694,59 @@ describe("EventStoreEffect", () => {
 				expect(results.length).toBe(2);
 				expect(results[0]?.sequence).toBe(1);
 				expect(results[1]?.sequence).toBe(2);
+			}),
+		));
+
+	it("appendBatch restores version cache after a rolled-back batch", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-cache-rollback");
+				const valid = makeSessionCreated("s-cache-rollback");
+				const invalid = {
+					...makeTextDelta("s-cache-rollback", "m1", "hello"),
+					data: {
+						messageId: "m1",
+						partId: "p1",
+					},
+				} as unknown as CanonicalEvent;
+
+				const batchResult = yield* Effect.either(
+					store.appendBatch([valid, invalid]),
+				);
+				expect(batchResult._tag).toBe("Left");
+
+				const stored = yield* store.append(
+					makeSessionCreated("s-cache-rollback"),
+				);
+				expect(stored.streamVersion).toBe(0);
+			}),
+		));
+
+	it("appendBatch restores version cache after a defect rolls back the batch", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-cache-defect");
+				const valid = makeSessionCreated("s-cache-defect");
+				const defect = {
+					...canonicalEvent("tool.completed", "s-cache-defect", {
+						messageId: "m1",
+						partId: "p1",
+						result: BigInt(1),
+						duration: 1,
+					}),
+				} as unknown as CanonicalEvent;
+
+				const batchExit = yield* Effect.exit(
+					store.appendBatch([valid, defect]),
+				);
+				expect(batchExit._tag).toBe("Failure");
+
+				const stored = yield* store.append(
+					makeSessionCreated("s-cache-defect"),
+				);
+				expect(stored.streamVersion).toBe(0);
 			}),
 		));
 
@@ -900,6 +1071,69 @@ describe("ProjectionRunnerEffect", () => {
 				}
 			}),
 		));
+
+	it("recover returns typed ProjectionRunnerError for schema-invalid replay row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-invalid-shape-replay");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-shape-replay",
+					data: JSON.stringify({
+						sessionId: "s-invalid-shape-replay",
+					}),
+				});
+
+				const result = yield* Effect.either(runner.recover());
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(ProjectionRunnerError);
+					if (error instanceof ProjectionRunnerError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
+			}),
+		));
+
+	it("resets replaying state after typed replay decode failure", () => {
+		let observedContext: ProjectionContext | undefined;
+		const projector: EffectProjector = {
+			name: "replaying-state-test",
+			handles: ["session.created"],
+			project: (_event, ctx) =>
+				Effect.sync(() => {
+					observedContext = ctx;
+				}),
+		};
+
+		return runTestWithProjectors(
+			[projector],
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-replaying-reset");
+				yield* insertRawEventRow({
+					sessionId: "s-replaying-reset",
+					data: JSON.stringify({
+						sessionId: "s-replaying-reset",
+					}),
+				});
+
+				const result = yield* Effect.either(runner.recover());
+				expect(result._tag).toBe("Left");
+
+				yield* runner.markRecovered();
+				yield* runner.projectEvent({
+					...makeSessionCreated("s-replaying-reset"),
+					sequence: 2,
+					streamVersion: 1,
+				});
+
+				expect(observedContext?.replaying).toBe(false);
+			}),
+		);
+	});
 
 	it("recover is idempotent (no-op when caught up)", () =>
 		runTest(

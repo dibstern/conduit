@@ -21,12 +21,14 @@ import {
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
+	PollerManagerTag,
 	PtyManagerTag,
 	QuestionBridgeTag,
 	ReadQueryTag,
 	ScanDepsTag,
 	SessionManagerTag,
 	SessionOverridesTag,
+	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
 import {
@@ -63,6 +65,7 @@ import {
 } from "../../../src/lib/handlers/prompt.js";
 import { handleReloadProviderSession } from "../../../src/lib/handlers/reload.js";
 import {
+	handleForkSession,
 	handleListSessions,
 	handleLoadMoreHistory,
 	handleRenameSession,
@@ -1179,6 +1182,58 @@ function mockPtyManager(overrides?: Partial<PtyManager>): PtyManager {
 	} as unknown as PtyManager;
 }
 
+function makeForkSessionLayer(options?: {
+	client?: OpenCodeAPI;
+	ws?: WebSocketHandlerShape;
+	sessionMgr?: SessionManagerShape;
+	overrides?: SessionOverrides;
+	log?: Logger;
+}) {
+	const client =
+		options?.client ??
+		({
+			session: {
+				fork: vi.fn(async () => ({
+					id: "ses-child",
+					title: "Forked Session",
+					time: { created: 200, updated: 201 },
+				})),
+				message: vi.fn(async () => ({ time: { created: 123 } })),
+				messagesPage: vi.fn(async () => [{ id: "msg-last" }]),
+				get: vi.fn(async () => ({})),
+			},
+			permission: { list: vi.fn(async () => []) },
+		} as unknown as OpenCodeAPI);
+	const ws = options?.ws ?? mockWsHandler();
+	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
+	const overrides =
+		options?.overrides ??
+		mockOverrides({
+			clearSession: vi.fn(),
+			hasActiveProcessingTimeout: vi.fn(() => false),
+		});
+	const log = options?.log ?? mockLogger();
+
+	return Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(WebSocketHandlerTag, ws),
+		Layer.succeed(SessionManagerTag, sessionMgr),
+		Layer.succeed(SessionOverridesTag, overrides),
+		Layer.succeed(LoggerTag, log),
+		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
+		Layer.succeed(QuestionBridgeTag, mockQuestionBridge()),
+		Layer.succeed(StatusPollerTag, {
+			isProcessing: vi.fn(() => false),
+			clearMessageActivity: vi.fn(),
+		}),
+		Layer.succeed(PollerManagerTag, {
+			isPolling: vi.fn(() => true),
+			startPolling: vi.fn(),
+			stopPolling: vi.fn(),
+		}),
+	);
+}
+
 // ─── Tool Content handler tests ───────────────────────────────────────────
 
 describe("handleGetToolContent", () => {
@@ -1232,6 +1287,138 @@ describe("handleGetToolContent", () => {
 			}),
 		);
 	});
+});
+
+describe("handleForkSession", () => {
+	it.effect("stores explicit fork metadata through SessionManagerTag", () => {
+		const setForkEntry = vi.fn();
+		const ws = mockWsHandler();
+		const sessionMgr = mockSessionManager({
+			setForkEntry,
+			listSessions: vi.fn(async () => [
+				{
+					id: "ses-parent",
+					title: "Parent Session",
+					updatedAt: 100,
+					messageCount: 1,
+				},
+			]),
+			loadPreRenderedHistory: vi.fn(async () => ({
+				messages: [],
+				hasMore: false,
+			})),
+		});
+		const layer = makeForkSessionLayer({ sessionMgr, ws });
+
+		return handleForkSession("client-1", {
+			sessionId: "ses-parent",
+			messageId: "msg-1",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(setForkEntry).toHaveBeenCalledWith("ses-child", {
+					forkMessageId: "msg-1",
+					parentID: "ses-parent",
+					forkPointTimestamp: 123,
+				});
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "session_forked",
+					sessionId: "ses-child",
+					session: {
+						id: "ses-child",
+						title: "Forked Session",
+						updatedAt: 201,
+						parentID: "ses-parent",
+						forkMessageId: "msg-1",
+						forkPointTimestamp: 123,
+					},
+					parentId: "ses-parent",
+					parentTitle: "Parent Session",
+				});
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "session_switched",
+					id: "ses-child",
+					sessionId: "ses-child",
+					history: {
+						messages: [],
+						hasMore: false,
+					},
+				});
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "status",
+					sessionId: "ses-child",
+					status: "idle",
+				});
+			}),
+		);
+	});
+
+	it.effect("uses the whole-session fork fallback message as metadata", () => {
+		const setForkEntry = vi.fn();
+		const messagesPage = vi.fn(async () => [{ id: "msg-last" }]);
+		const client = {
+			session: {
+				fork: vi.fn(async () => ({
+					id: "ses-child",
+					title: "Forked Session",
+					time: { created: 200, updated: 201 },
+				})),
+				messagesPage,
+				get: vi.fn(async () => ({})),
+			},
+			permission: { list: vi.fn(async () => []) },
+		} as unknown as OpenCodeAPI;
+		const sessionMgr = mockSessionManager({
+			setForkEntry,
+			listSessions: vi.fn(async () => []),
+			loadPreRenderedHistory: vi.fn(async () => ({
+				messages: [],
+				hasMore: false,
+			})),
+		});
+		const layer = makeForkSessionLayer({ client, sessionMgr });
+
+		return handleForkSession("client-1", {
+			sessionId: "ses-parent",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(messagesPage).toHaveBeenCalledWith("ses-child", { limit: 1 });
+				expect(setForkEntry).toHaveBeenCalledWith("ses-child", {
+					forkMessageId: "msg-last",
+					parentID: "ses-parent",
+					forkPointTimestamp: 200,
+				});
+			}),
+		);
+	});
+
+	it.effect(
+		"returns without forking when no active session can be resolved",
+		() => {
+			const setForkEntry = vi.fn();
+			const fork = vi.fn();
+			const client = {
+				session: {
+					fork,
+				},
+				permission: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => undefined),
+			});
+			const sessionMgr = mockSessionManager({ setForkEntry });
+			const layer = makeForkSessionLayer({ client, ws, sessionMgr });
+
+			return handleForkSession("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(fork).not.toHaveBeenCalled();
+					expect(setForkEntry).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
 });
 
 // ─── Terminal handler tests ───────────────────────────────────────────────

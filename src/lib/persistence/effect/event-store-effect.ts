@@ -4,9 +4,9 @@
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect } from "effect";
+import { Context, Data, Effect, Exit, Schema } from "effect";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
-import { validateEventPayload } from "../events.js";
+import { CanonicalEventSchema } from "../events.js";
 import {
 	decodeStoredEventRow,
 	type StoredEventRow,
@@ -75,6 +75,17 @@ const decodeEventStoreRow = (
 			new EventStoreError({ operation: "decodeStoredEventRow", cause }),
 	);
 
+const validateCanonicalEvent = (
+	event: CanonicalEvent,
+): Effect.Effect<void, EventStoreError> =>
+	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(
+		Effect.asVoid,
+		Effect.mapError(
+			(cause) =>
+				new EventStoreError({ operation: "validateCanonicalEvent", cause }),
+		),
+	);
+
 // ─── Service implementation ───��─────────────────────────���────────────────────
 
 export const makeEventStoreEffect = Effect.gen(function* () {
@@ -104,7 +115,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		event: CanonicalEvent,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
 		Effect.gen(function* () {
-			validateEventPayload(event);
+			yield* validateCanonicalEvent(event);
 
 			let nextVersion = versionCache.get(event.sessionId);
 			if (nextVersion === undefined) {
@@ -149,14 +160,25 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 	): Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError> => {
 		if (events.length === 0) return Effect.succeed([]);
 
-		return sql.withTransaction(
-			Effect.gen(function* () {
-				const results: StoredEvent[] = [];
-				for (const event of events) {
-					results.push(yield* append(event));
-				}
-				return results;
-			}),
+		const cacheSnapshot = new Map(versionCache);
+		const restoreCache = Effect.sync(() => {
+			versionCache.clear();
+			for (const [sessionId, version] of cacheSnapshot) {
+				versionCache.set(sessionId, version);
+			}
+		});
+
+		return Effect.onExit(
+			sql.withTransaction(
+				Effect.gen(function* () {
+					const results: StoredEvent[] = [];
+					for (const event of events) {
+						results.push(yield* append(event));
+					}
+					return results;
+				}),
+			),
+			(exit) => (Exit.isFailure(exit) ? restoreCache : Effect.void),
 		);
 	};
 

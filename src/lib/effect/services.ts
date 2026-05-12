@@ -63,12 +63,6 @@ export type ConnectPtyUpstreamShape = (
 	cursor?: number,
 ) => Promise<void>;
 
-/** Shape for the forkMeta field — fork-point metadata store. */
-export interface ForkMetaShape {
-	setForkEntry(sessionId: string, entry: ForkEntry): void;
-	getForkEntry(sessionId: string): ForkEntry | undefined;
-}
-
 /**
  * Shape for the sessionMgr field — all SessionManager capabilities used
  * by handlers, session-switch, and wiring modules.
@@ -212,11 +206,6 @@ export class ConnectPtyUpstreamTag extends Context.Tag("ConnectPtyUpstream")<
 	ConnectPtyUpstreamShape
 >() {}
 
-export class ForkMetaTag extends Context.Tag("ForkMeta")<
-	ForkMetaTag,
-	ForkMetaShape
->() {}
-
 export class OrchestrationEngineTag extends Context.Tag("OrchestrationEngine")<
 	OrchestrationEngineTag,
 	OrchestrationEngine
@@ -313,23 +302,21 @@ type _AssertCoverage = {
 													? PollerManagerShape
 													: K extends "connectPtyUpstream"
 														? ConnectPtyUpstreamShape
-														: K extends "forkMeta"
-															? ForkMetaShape
-															: K extends "instanceMgmt"
-																? InstanceManagementDeps
-																: K extends "projectMgmt"
-																	? ProjectManagementDeps
-																	: K extends "scanDeps"
-																		? ScanDeps
-																		: K extends "readQuery"
-																			? ReadQueryService
-																			: K extends "orchestrationEngine"
-																				? OrchestrationEngine
-																				: K extends "claudeEventPersist"
-																					? RelayEventSinkPersist
-																					: K extends "providerStateService"
-																						? ProviderStateService
-																						: never;
+														: K extends "instanceMgmt"
+															? InstanceManagementDeps
+															: K extends "projectMgmt"
+																? ProjectManagementDeps
+																: K extends "scanDeps"
+																	? ScanDeps
+																	: K extends "readQuery"
+																		? ReadQueryService
+																		: K extends "orchestrationEngine"
+																			? OrchestrationEngine
+																			: K extends "claudeEventPersist"
+																				? RelayEventSinkPersist
+																				: K extends "providerStateService"
+																					? ProviderStateService
+																					: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.

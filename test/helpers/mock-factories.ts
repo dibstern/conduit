@@ -33,8 +33,6 @@ import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
-	type ForkMetaShape,
-	ForkMetaTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	PermissionBridgeTag,
@@ -334,10 +332,6 @@ export function createMockHandlerDeps(
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
-		},
-		forkMeta: {
-			setForkEntry: vi.fn(),
-			getForkEntry: vi.fn().mockReturnValue(undefined),
 		},
 		...overrides,
 	};
@@ -786,7 +780,6 @@ export interface TestHandlerLayerOptions {
 	statusPoller?: StatusPollerShape;
 	pollerManager?: PollerManagerShape;
 	connectPtyUpstream?: ConnectPtyUpstreamShape;
-	forkMeta?: ForkMetaShape;
 }
 
 /**
@@ -823,10 +816,6 @@ export function makeTestHandlerLayer(
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
-	const forkMeta: ForkMetaShape = opts?.forkMeta ?? {
-		setForkEntry: vi.fn(),
-		getForkEntry: vi.fn(() => undefined),
-	};
 
 	return Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, api),
@@ -841,7 +830,6 @@ export function makeTestHandlerLayer(
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
-		Layer.succeed(ForkMetaTag, forkMeta),
 	);
 }
 

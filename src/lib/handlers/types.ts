@@ -3,7 +3,6 @@
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
-import type { ForkEntry } from "../daemon/fork-metadata.js";
 import type {
 	PollerManagerShape,
 	SessionManagerShape,
@@ -84,11 +83,6 @@ export interface HandlerDeps {
 	/** Message poller manager — used to start REST polling when viewing sessions */
 	pollerManager: PollerManagerShape;
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;
-	/** Fork-point metadata store — used to persist forkMessageId and parentID */
-	forkMeta: {
-		setForkEntry: (sessionId: string, entry: ForkEntry) => void;
-		getForkEntry: (sessionId: string) => ForkEntry | undefined;
-	};
 	/** Instance management capability group (optional — only available in daemon mode) */
 	instanceMgmt?: InstanceManagementDeps;
 	/** Project management capability group (optional — only available in daemon mode) */

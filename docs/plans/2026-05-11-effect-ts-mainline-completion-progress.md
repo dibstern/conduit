@@ -10,7 +10,7 @@ Every item below must be removed or explicitly reclassified before the migration
 - [ ] `startDaemonProcess` imported by CLI.
 - [ ] `Layer.succeed(..., alreadyConstructedInstance)` inside relay composition.
 - [ ] `PersistenceLayer.open(...)` in daemon or relay production paths.
-- [ ] `Effect.promise(` on rejectable operations.
+- [x] `Effect.promise(` on rejectable operations.
 - [x] `concurrency: "unbounded"` on dynamic collections.
 - [ ] Throwing helpers called from Effect programs.
 - [ ] App-internal `Effect.runPromise` / `Effect.runSync`.
@@ -1039,4 +1039,143 @@ Blocked by external local dependency:
   test/integration/daemon/daemon-server.test.ts > health checker authenticates with real OpenCode server
   TypeError: fetch failed
   connect ECONNREFUSED ::1:4096 / 127.0.0.1:4096
+```
+
+## Phase 1.2: Effect Persistence Typed Validation Slice
+
+Plan issue found:
+
+- Phase 1.2 was partly stale in this worktree. The shared Effect row decoder already existed in
+  `src/lib/persistence/effect/stored-event-row.ts` and already lifted both `data` and `metadata` JSON parsing
+  plus `StoredEventSchema` validation into typed Effect failures.
+- The real remaining Effect-store defect was `EventStoreEffect.append(...)` calling the throwing
+  `validateEventPayload(event)` helper before writing. That throw escaped the typed error channel as a fiber
+  defect.
+- No new `StoredEventSchema` was added; the implementation reuses the existing canonical event schema.
+
+Changes:
+
+- `src/lib/persistence/effect/event-store-effect.ts`: replaced the throwing append validation path with
+  `Schema.decodeUnknown(CanonicalEventSchema)` mapped to `EventStoreError` with operation
+  `validateCanonicalEvent`.
+- `test/unit/persistence/projectors-effect.test.ts`: added append invalid-payload coverage, invalid
+  `metadata` JSON coverage, and projection-runner replay invalid-shape coverage.
+- Review fixes:
+  - Validation now returns typed success/failure only and persists the original event data/metadata so Effect
+    Schema decoding cannot silently strip extra provider fields.
+  - `decodeStoredEventRow(...)` now validates with `StoredEventSchema` but returns the parsed original event
+    object, so callers receive the same provider-specific extra fields that were stored.
+  - `appendBatch` snapshots and restores `versionCache` on any failed exit, including typed errors and defects,
+    so a rolled-back batch cannot advance the next stream version in memory.
+  - `ProjectionRunnerEffect.recover()` now uses `Effect.ensuring(...)` instead of JS `finally`, so `replaying`
+    is reset after typed Effect failures.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts
+Exit: 1
+Expected failure:
+  append invalid payload escaped as (FiberFailure) PersistenceError:
+  Event session.created missing required fields: title
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/persistence/projectors-effect.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  37 passed (37)
+```
+
+## Phase 4: Fork Metadata Bridge Removal Slice
+
+Plan issue found:
+
+- `ForkMetaTag` was not a real independent dependency. `relay-stack.ts` built it by delegating directly to
+  `SessionManager`, and `SessionManager` is the owner that persists fork metadata to disk. A derived bridge
+  layer would only move the redundancy; the long-term fix is deleting the tag and using `SessionManagerTag`
+  directly.
+- The Phase 4 plan text that says `src/lib/effect/relay-layer.ts` should be deleted is stale. Live source still
+  uses it as the real `RelayStateLive` composition module.
+
+Changes:
+
+- `src/lib/handlers/session.ts`: `handleForkSession` now persists fork metadata through
+  `SessionManagerTag.setForkEntry(...)`.
+- `src/lib/effect/services.ts`, `src/lib/handlers/types.ts`, `src/lib/relay/relay-stack.ts`, and
+  `test/helpers/mock-factories.ts`: removed `ForkMetaShape`, `ForkMetaTag`, `HandlerDeps.forkMeta`, the relay
+  `forkMeta` adapter, and test-layer provisioning for the deleted bridge.
+- `test/unit/handlers/effect-handlers.test.ts`: added direct Effect handler coverage for explicit-message
+  forks, whole-session fork fallback metadata, the no-active-session no-op path, and the outgoing
+  `session_forked`, `session_switched`, and `status` envelopes.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts --testNamePattern handleForkSession
+Exit: 1
+Expected failure:
+  Service not found: ForkMeta
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/effect/relay-stack-layers.test.ts \
+  test/unit/mock-factories.test.ts \
+  test/unit/persistence/projectors-effect.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  131 passed (131)
+```
+
+```text
+$ rg -n "Layer\.succeed\(ForkMetaTag|ForkMetaTag|ForkMetaShape|forkMeta:" \
+  src/lib test/helpers test/unit --glob '!test/e2e/fixtures/**'
+Exit: 0
+Output:
+src/lib/session/session-manager.ts:87:	private forkMeta: Map<string, ForkEntry>;
+test/unit/session/session-manager-effect.test.ts:94:				forkMeta: HashMap.make([
+src/lib/effect/session-manager-state.ts:22: * - forkMeta: per-session fork-point metadata
+src/lib/effect/session-manager-state.ts:29:	forkMeta: HashMap.HashMap<string, ForkEntry>;
+src/lib/effect/session-manager-state.ts:40:	forkMeta: HashMap.empty(),
+```
+
+The remaining `forkMeta` hits are the actual `SessionManager` storage/state, not the deleted relay bridge.
+
+```text
+$ rg -n "Effect\.promise\(" src
+Exit: 1
+No output.
+
+$ rg -n "concurrency: \"unbounded\"" src
+Exit: 1
+No output.
+```
+
+```text
+$ pnpm check
+Exit: 0
+
+$ pnpm lint
+Exit: 0
+Checked 946 files in 207ms. No fixes applied.
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  348 passed (348)
+Tests  5095 passed | 2 skipped | 12 todo (5109)
+```
+
+```text
+$ pnpm test:e2e -- test/e2e/specs/fork-session.spec.ts
+Exit: 0
+Build: passed
+Playwright: 5 passed
 ```

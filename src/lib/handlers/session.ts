@@ -3,7 +3,6 @@
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import {
-	ForkMetaTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	PermissionBridgeTag,
@@ -431,7 +430,6 @@ export const handleForkSession = (
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionMgr = yield* SessionManagerTag;
 		const overrides = yield* SessionOverridesTag;
-		const forkMeta = yield* ForkMetaTag;
 		const log = yield* LoggerTag;
 
 		const sessionId =
@@ -482,7 +480,7 @@ export const handleForkSession = (
 
 		// Persist fork-point metadata
 		if (forkMessageId || forkPointTimestamp) {
-			forkMeta.setForkEntry(forked.id, {
+			sessionMgr.setForkEntry(forked.id, {
 				forkMessageId: forkMessageId ?? "",
 				parentID: sessionId,
 				...(forkPointTimestamp != null && { forkPointTimestamp }),

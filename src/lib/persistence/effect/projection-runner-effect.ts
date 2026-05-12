@@ -250,7 +250,7 @@ export const makeProjectionRunnerEffect = (
 				replaying = true;
 				let totalReplayed = 0;
 
-				try {
+				yield* Effect.gen(function* () {
 					for (const projector of projectors) {
 						const cursor =
 							(yield* cursorRepo.get(projector.name))?.lastAppliedSeq ?? 0;
@@ -314,10 +314,14 @@ export const makeProjectionRunnerEffect = (
 						// Advance cursor to global max for non-matching events
 						yield* cursorRepo.upsert(projector.name, latestSeq);
 					}
-				} finally {
-					replaying = false;
-					recovered = true;
-				}
+				}).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							replaying = false;
+							recovered = true;
+						}),
+					),
+				);
 
 				return {
 					startCursor: 0,

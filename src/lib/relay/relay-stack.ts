@@ -38,7 +38,6 @@ import {
 	ClaudeEventPersistTag,
 	ConfigTag,
 	ConnectPtyUpstreamTag,
-	ForkMetaTag,
 	InstanceMgmtTag,
 	LoggerTag,
 	OpenCodeAPITag,
@@ -749,14 +748,6 @@ export async function createProjectRelay(
 	const connectPtyUpstream = (ptyId: string, cursor?: number) =>
 		connectPtyUpstreamImpl(ptyDeps, ptyId, cursor);
 
-	const forkMeta = {
-		setForkEntry: (
-			sid: string,
-			entry: import("../daemon/fork-metadata.js").ForkEntry,
-		) => sessionMgr.setForkEntry(sid, entry),
-		getForkEntry: (sid: string) => sessionMgr.getForkEntry(sid),
-	};
-
 	const instanceMgmt =
 		config.getInstances != null &&
 		config.addInstance != null &&
@@ -809,7 +800,6 @@ export async function createProjectRelay(
 		Layer.succeed(SessionRegistryTag, registry),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
-		Layer.succeed(ForkMetaTag, forkMeta),
 		Layer.succeed(OrchestrationEngineTag, orchestration.engine),
 	);
 
