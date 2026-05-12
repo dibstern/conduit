@@ -132,33 +132,6 @@ export const RelayFactoryLive = (
 
 						const dbPath = resolve(conduitDir, "events.db");
 
-						const { PersistenceLayer } = yield* Effect.try({
-							try: () =>
-								// Dynamic import to avoid circular dependency
-								require("../persistence/persistence-layer.js") as {
-									PersistenceLayer: typeof import("../persistence/persistence-layer.js").PersistenceLayer;
-								},
-							catch: (cause) =>
-								new RelayFactoryError({
-									reason: "Failed to import PersistenceLayer",
-									cause,
-								}),
-						});
-
-						const persistence = yield* Effect.try({
-							try: () => PersistenceLayer.open(dbPath),
-							catch: (cause) =>
-								new RelayFactoryError({
-									reason: `Failed to open persistence DB at ${dbPath}`,
-									cause,
-								}),
-						});
-
-						// Register cleanup finalizer for the persistence DB
-						yield* Effect.addFinalizer(() =>
-							Effect.sync(() => persistence.close()),
-						);
-
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({
 							try: () => import("../relay/relay-stack.js"),
@@ -186,7 +159,6 @@ export const RelayFactoryLive = (
 									noServer: true,
 									signal: ac.signal,
 									configDir,
-									persistence,
 									persistenceDbPath: dbPath,
 								});
 							},

@@ -8,6 +8,10 @@ import {
 	type PersistenceServiceTag,
 } from "../../effect/persistence-service.js";
 import {
+	ClaudeEventPersistEffectTag,
+	makeClaudeEventPersistEffect,
+} from "./claude-event-persist-effect.js";
+import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
 } from "./event-store-effect.js";
@@ -40,7 +44,8 @@ export type PersistenceEffectContext =
 	| ProjectorCursorEffectTag
 	| ProjectionRunnerEffectTag
 	| ReadQueryEffectTag
-	| ProviderStateEffectTag;
+	| ProviderStateEffectTag
+	| ClaudeEventPersistEffectTag;
 
 export type PersistenceEffectError = PersistenceError | ConfigError.ConfigError;
 
@@ -88,6 +93,15 @@ export function makePersistenceEffectLayer(
 		makeProviderStateEffect,
 	).pipe(Layer.provide(baseLayer));
 
+	const claudeEventPersistLayer = Layer.effect(
+		ClaudeEventPersistEffectTag,
+		makeClaudeEventPersistEffect,
+	).pipe(
+		Layer.provide(
+			Layer.mergeAll(baseLayer, eventStoreLayer, projectionRunnerLayer),
+		),
+	);
+
 	return Layer.mergeAll(
 		baseLayer,
 		eventStoreLayer,
@@ -95,5 +109,6 @@ export function makePersistenceEffectLayer(
 		projectionRunnerLayer,
 		readQueryLayer,
 		providerStateLayer,
+		claudeEventPersistLayer,
 	);
 }

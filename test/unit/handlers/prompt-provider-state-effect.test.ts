@@ -25,7 +25,12 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type {
+	OrchestrationEngine,
+	SendTurnCommand,
+} from "../../../src/lib/provider/orchestration-engine.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
@@ -251,4 +256,197 @@ describe("handleMessage with Effect provider state persistence", () => {
 			),
 		);
 	});
+
+	it.effect("persists Claude user messages through Effect persistence", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-user-effect-"));
+		const filename = join(dir, "events.db");
+		const ws = mockWsHandler("session-claude-user-effect");
+		const overrides = new SessionOverrides();
+		overrides.setModel("session-claude-user-effect", {
+			providerID: "claude",
+			modelID: "claude-sonnet-4-5",
+		});
+		const log = createSilentLogger();
+		const client = {
+			session: {
+				messagesPage: vi.fn(async () => []),
+			},
+		} as unknown as OpenCodeAPI;
+		const sessionMgr = new SessionManager({ client, log });
+		const engine = {
+			getProviderForSession: vi.fn(() => "claude"),
+			dispatch: vi.fn(async () => ({
+				status: "completed" as const,
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+			})),
+		} as unknown as OrchestrationEngine;
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(SessionOverridesTag, overrides),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(ConfigTag, {
+				httpServer: createServer(),
+				opencodeUrl: "http://127.0.0.1:1",
+				projectDir: "/tmp/project",
+				slug: "claude-user-effect-test",
+			} satisfies ProjectRelayConfig),
+			Layer.succeed(PermissionBridgeTag, new PermissionBridge()),
+			Layer.succeed(QuestionBridgeTag, new QuestionBridge()),
+			Layer.succeed(OrchestrationEngineTag, engine),
+			makePersistenceEffectLayer(filename),
+		);
+
+		return Effect.gen(function* () {
+			yield* handleMessage("client-1", {
+				text: "persist this through effect",
+			});
+
+			const readQuery = yield* ReadQueryEffectTag;
+			const messages = yield* readQuery.getSessionMessagesWithParts(
+				"session-claude-user-effect",
+			);
+
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				session_id: "session-claude-user-effect",
+				role: "user",
+				text: "persist this through effect",
+			});
+			expect(messages[0]?.parts).toEqual([
+				expect.objectContaining({
+					type: "text",
+					text: "persist this through effect",
+				}),
+			]);
+		}).pipe(
+			Effect.provide(layer),
+			Effect.ensuring(
+				Effect.sync(() => {
+					overrides.dispose();
+					rmSync(dir, { recursive: true, force: true });
+				}),
+			),
+		);
+	});
+
+	it.effect(
+		"persists Claude event sink messages through Effect persistence",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-sink-effect-"));
+			const filename = join(dir, "events.db");
+			const ws = mockWsHandler("session-claude-sink-effect");
+			const overrides = new SessionOverrides();
+			overrides.setModel("session-claude-sink-effect", {
+				providerID: "claude",
+				modelID: "claude-sonnet-4-5",
+			});
+			const log = createSilentLogger();
+			const client = {
+				session: {
+					messagesPage: vi.fn(async () => []),
+				},
+			} as unknown as OpenCodeAPI;
+			const sessionMgr = new SessionManager({ client, log });
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async (command: SendTurnCommand) => {
+					await command.input.eventSink.push(
+						canonicalEvent(
+							"message.created",
+							"session-claude-sink-effect",
+							{
+								messageId: "assistant-message-1",
+								role: "assistant",
+								sessionId: "session-claude-sink-effect",
+							},
+							{ provider: "claude", createdAt: Date.now() },
+						),
+					);
+					await command.input.eventSink.push(
+						canonicalEvent(
+							"text.delta",
+							"session-claude-sink-effect",
+							{
+								messageId: "assistant-message-1",
+								partId: "assistant-message-1-0",
+								text: "assistant through sink",
+							},
+							{ provider: "claude", createdAt: Date.now() },
+						),
+					);
+					return {
+						status: "completed" as const,
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+					};
+				}),
+			} as unknown as OrchestrationEngine;
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(ConfigTag, {
+					httpServer: createServer(),
+					opencodeUrl: "http://127.0.0.1:1",
+					projectDir: "/tmp/project",
+					slug: "claude-sink-effect-test",
+				} satisfies ProjectRelayConfig),
+				Layer.succeed(PermissionBridgeTag, new PermissionBridge()),
+				Layer.succeed(QuestionBridgeTag, new QuestionBridge()),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				makePersistenceEffectLayer(filename),
+			);
+
+			return Effect.gen(function* () {
+				yield* handleMessage("client-1", { text: "trigger assistant" });
+
+				const readQuery = yield* ReadQueryEffectTag;
+				let messages = yield* readQuery.getSessionMessagesWithParts(
+					"session-claude-sink-effect",
+				);
+				for (let attempt = 0; attempt < 10; attempt++) {
+					if (
+						messages.some((message) => message.id === "assistant-message-1")
+					) {
+						break;
+					}
+					yield* Effect.promise(
+						() => new Promise((resolve) => setTimeout(resolve, 5)),
+					);
+					messages = yield* readQuery.getSessionMessagesWithParts(
+						"session-claude-sink-effect",
+					);
+				}
+
+				const assistant = messages.find(
+					(message) => message.id === "assistant-message-1",
+				);
+				expect(assistant).toMatchObject({
+					role: "assistant",
+					text: "assistant through sink",
+				});
+				expect(assistant?.parts).toEqual([
+					expect.objectContaining({
+						type: "text",
+						text: "assistant through sink",
+					}),
+				]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => {
+						overrides.dispose();
+						rmSync(dir, { recursive: true, force: true });
+					}),
+				),
+			);
+		},
+	);
 });

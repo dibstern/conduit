@@ -41,11 +41,23 @@ function silent(reason: string): TranslationResult {
 
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
-export interface RelayEventSinkPersist {
-	readonly eventStore: { append(event: CanonicalEvent): StoredEvent };
-	readonly projectionRunner: { projectEvent(event: StoredEvent): void };
-	readonly ensureSession: (sessionId: string) => void;
+export interface EffectRelayEventSinkPersist {
+	readonly persistEvent: (event: CanonicalEvent) => void | Promise<void>;
 }
+
+export interface LegacyRelayEventSinkPersist {
+	readonly eventStore: {
+		append(event: CanonicalEvent): StoredEvent;
+	};
+	readonly projectionRunner: {
+		projectEvent(event: StoredEvent): void;
+	};
+	readonly ensureSession: (sessionId: string) => unknown;
+}
+
+export type RelayEventSinkPersist =
+	| EffectRelayEventSinkPersist
+	| LegacyRelayEventSinkPersist;
 
 export interface RelayEventSinkDeps {
 	readonly sessionId: string;
@@ -112,9 +124,13 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			// Persist to SQLite when available (before WS send for durability)
 			if (persist) {
 				try {
-					persist.ensureSession(sessionId);
-					const stored = persist.eventStore.append(event);
-					persist.projectionRunner.projectEvent(stored);
+					if ("persistEvent" in persist) {
+						await persist.persistEvent(event);
+					} else {
+						await persist.ensureSession(sessionId);
+						const stored = await persist.eventStore.append(event);
+						await persist.projectionRunner.projectEvent(stored);
+					}
 				} catch (err) {
 					// Non-fatal — same pattern as dual-write-hook.ts:149.
 					// Covers: disk full, DB locked, projection recovery guard, etc.

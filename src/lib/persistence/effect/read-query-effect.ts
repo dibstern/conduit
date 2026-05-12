@@ -5,6 +5,7 @@ import type {
 	MessagePartRow,
 	MessageRow,
 	MessageWithParts,
+	SessionRow,
 } from "../read-model-types.js";
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -27,6 +28,10 @@ export interface ReadQueryEffect {
 		Record<string, string>,
 		ReadQueryEffectError | SqlError
 	>;
+
+	readonly listSessions: (opts?: {
+		roots?: boolean;
+	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
@@ -100,6 +105,27 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const listSessions = (opts?: {
+		roots?: boolean;
+	}): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
+		Effect.gen(function* () {
+			if (opts?.roots) {
+				return yield* sql<SessionRow>`
+					SELECT * FROM sessions WHERE parent_id IS NULL ORDER BY updated_at DESC`;
+			}
+			return yield* sql<SessionRow>`
+				SELECT * FROM sessions ORDER BY updated_at DESC`;
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "listSessions",
+							cause: e,
+						}),
+			),
+		);
+
 	const getSessionMessagesWithParts = (
 		sessionId: string,
 	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
@@ -149,6 +175,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getToolContent,
 		getSessionStatus,
 		getAllSessionStatuses,
+		listSessions,
 		getSessionMessagesWithParts,
 	} satisfies ReadQueryEffect;
 });

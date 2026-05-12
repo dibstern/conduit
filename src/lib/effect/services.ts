@@ -27,7 +27,7 @@ import type { Logger } from "../logger.js";
 import type { ProviderStateService } from "../persistence/provider-state-service.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
+import type { LegacyRelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { Translator } from "../relay/event-translator.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -225,7 +225,7 @@ export class ReadQueryTag extends Context.Tag("ReadQuery")<
 
 export class ClaudeEventPersistTag extends Context.Tag("ClaudeEventPersist")<
 	ClaudeEventPersistTag,
-	RelayEventSinkPersist
+	LegacyRelayEventSinkPersist
 >() {}
 
 export class ProviderStateServiceTag extends Context.Tag(
@@ -313,7 +313,7 @@ type _AssertCoverage = {
 																		: K extends "orchestrationEngine"
 																			? OrchestrationEngine
 																			: K extends "claudeEventPersist"
-																				? RelayEventSinkPersist
+																				? LegacyRelayEventSinkPersist
 																				: K extends "providerStateService"
 																					? ProviderStateService
 																					: never;

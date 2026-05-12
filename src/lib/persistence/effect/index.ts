@@ -2,6 +2,12 @@
 // Re-exports all Effect-based persistence services.
 
 export {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectError,
+	ClaudeEventPersistEffectTag,
+	makeClaudeEventPersistEffect,
+} from "./claude-event-persist-effect.js";
+export {
 	EventStoreEffect,
 	EventStoreEffectTag,
 	EventStoreError,

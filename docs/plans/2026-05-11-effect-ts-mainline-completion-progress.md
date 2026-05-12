@@ -9,7 +9,7 @@ Every item below must be removed or explicitly reclassified before the migration
 
 - [ ] `startDaemonProcess` imported by CLI.
 - [ ] `Layer.succeed(..., alreadyConstructedInstance)` inside relay composition.
-- [ ] `PersistenceLayer.open(...)` in daemon or relay production paths.
+- [x] `PersistenceLayer.open(...)` in daemon or relay production paths.
 - [x] `Effect.promise(` on rejectable operations.
 - [x] `concurrency: "unbounded"` on dynamic collections.
 - [ ] Throwing helpers called from Effect programs.
@@ -1879,4 +1879,121 @@ Initial failure drove the daemon fixed-port and config-persistence wiring fixes 
 The targeted fixed surfaces now pass/skip cleanly as shown above. A later accidental full integration run also exposed
 unrelated timeouts in `sse-to-ws-pipeline.integration.ts` and `message-lifecycle.integration.ts`; those were not part
 of this slice.
+```
+
+## Phase 5.7: Effect Claude Persistence And Production Factory Cutover
+
+Plan issues found:
+
+- Claude user-message persistence and Claude adapter event-sink persistence were still tied to the legacy
+  `ClaudeEventPersistTag` object, so a relay created with only `persistenceDbPath` could dispatch Claude turns but
+  skip durable history writes.
+- Status reconciliation still required synchronous projected-session reads and legacy `PersistenceLayer.eventStore`
+  writes. That made `PersistenceLayer.open(...)` look removable while silently disabling corrective status events.
+- `RelayFactoryLive` and `startDaemonProcess` both opened `PersistenceLayer` even though `createProjectRelay` already
+  owns the Effect persistence runtime from `persistenceDbPath`.
+
+Changes:
+
+- `src/lib/persistence/effect/claude-event-persist-effect.ts`: added an Effect service for Claude user-message and
+  adapter event persistence. It appends through `EventStoreEffectTag`, projects through `ProjectionRunnerEffectTag`,
+  and ensures recovery before writes.
+- `src/lib/persistence/effect/live.ts` and `src/lib/persistence/effect/index.ts`: added the Claude persistence service
+  to the Effect persistence layer/barrel.
+- `src/lib/handlers/prompt.ts`: Claude persistence now prefers `ClaudeEventPersistEffectTag` for user messages and
+  event-sink writes, with the legacy bridge retained only as fallback.
+- `src/lib/provider/relay-event-sink.ts`: persistence deps now support either the legacy sync append/project shape or
+  a single Effect-backed async `persistEvent` function.
+- `src/lib/effect/session-status-poller.ts`: reconciliation now reads projected sessions through an Effect and accepts
+  Effect corrective writes.
+- `src/lib/persistence/effect/read-query-effect.ts`: added Effect-native `listSessions()`.
+- `src/lib/relay/relay-stack.ts`: status reconciliation now uses `ReadQueryEffectTag`, `EventStoreEffectTag`, and
+  `ProjectionRunnerEffectTag` when `persistenceDbPath` is configured, falling back to legacy deps only for legacy
+  callers.
+- `src/lib/effect/relay-factory-layer.ts` and `src/lib/effect/daemon-main.ts`: production relay factories now pass
+  `persistenceDbPath` only and no longer open or pass `PersistenceLayer`.
+- Tests added/updated for Claude user persistence, Claude event-sink persistence, Effect reconciliation sessions, and
+  relay factory persistence wiring.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 1
+Expected failure:
+  Effect-only Claude handler persistence left projected messages empty.
+```
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts
+Exit: 1
+Expected failure:
+  reconcileNow did not await Effect projected-session reads, so no corrective event was injected.
+```
+
+```text
+$ pnpm vitest run test/unit/effect/relay-factory-effect-persistence.test.ts
+Exit: 1
+Expected failure:
+  RelayFactoryLive still tried to import/open the legacy PersistenceLayer before creating a relay.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed (4)
+```
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  13 passed (13)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/relay-factory-effect-persistence.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/provider/relay-event-sink.test.ts \
+  test/unit/provider/relay-event-sink-persistence.test.ts \
+  test/unit/session/session-status-poller-effect.test.ts \
+  test/unit/effect/relay-factory-effect-persistence.test.ts \
+  test/unit/effect/relay-factory-layer.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  44 passed (44)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 958 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > unit-output.log 2>&1 || (echo "Unit tests failed, see unit-output.log" && tail -n 160 unit-output.log && exit 1)
+Exit: 0
+Test Files  352 passed (352)
+Tests  5117 passed | 2 skipped | 12 todo (5131)
+```
+
+```text
+$ rg -n "PersistenceLayer\\.open" src test
+Exit: 0
+test/unit/persistence/persistence-layer.test.ts:74:            layer = PersistenceLayer.open(dbPath);
+Note: no production `src` hits remain.
 ```

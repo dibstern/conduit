@@ -78,11 +78,14 @@ import {
 	type DualWriteHookPort,
 } from "../persistence/dual-write-hook.js";
 import { EffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
+import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
 	type PersistenceEffectRuntime,
 } from "../persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	canonicalEvent,
 	type SessionStatusValue,
@@ -558,14 +561,20 @@ export async function createProjectRelay(
 				const session = await api.session.get(sessionId);
 				return session.parentID;
 			}).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
-		...(config.persistence != null && readQuery != null
+		...(config.persistenceDbPath != null
 			? {
 					reconciliation: {
 						getRestStatuses: () =>
 							Effect.tryPromise(() => api.session.statuses()),
-						getProjectedSessions: () => readQuery.listSessions(),
+						getProjectedSessions: () =>
+							Effect.gen(function* () {
+								const readQueryEffect = yield* ReadQueryEffectTag;
+								return yield* readQueryEffect.listSessions();
+							}),
 						injectCorrectiveEvent: (sessionId: string, status: string) =>
-							Effect.sync(() => {
+							Effect.gen(function* () {
+								const eventStore = yield* EventStoreEffectTag;
+								const projectionRunner = yield* ProjectionRunnerEffectTag;
 								const event = canonicalEvent(
 									"session.status",
 									sessionId,
@@ -580,14 +589,42 @@ export async function createProjectRelay(
 										},
 									},
 								);
-								// biome-ignore lint/style/noNonNullAssertion: persistence checked above
-								const stored = config.persistence!.eventStore.append(event);
-								// biome-ignore lint/style/noNonNullAssertion: persistence checked above
-								config.persistence!.projectionRunner.projectEvent(stored);
+								const stored = yield* eventStore.append(event);
+								yield* projectionRunner.projectEvent(stored);
 							}),
 					},
 				}
-			: {}),
+			: config.persistence != null && readQuery != null
+				? {
+						reconciliation: {
+							getRestStatuses: () =>
+								Effect.tryPromise(() => api.session.statuses()),
+							getProjectedSessions: () =>
+								Effect.sync(() => readQuery.listSessions()),
+							injectCorrectiveEvent: (sessionId: string, status: string) =>
+								Effect.sync(() => {
+									const event = canonicalEvent(
+										"session.status",
+										sessionId,
+										{
+											sessionId,
+											status: status as SessionStatusValue,
+										},
+										{
+											metadata: {
+												synthetic: true,
+												source: "reconciliation-loop",
+											},
+										},
+									);
+									// biome-ignore lint/style/noNonNullAssertion: persistence checked above
+									const stored = config.persistence!.eventStore.append(event);
+									// biome-ignore lint/style/noNonNullAssertion: persistence checked above
+									config.persistence!.projectionRunner.projectEvent(stored);
+								}),
+						},
+					}
+				: {}),
 	};
 
 	const statusPollerRuntime = makeDeferredStatusPollerRuntime();

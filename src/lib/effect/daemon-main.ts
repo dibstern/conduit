@@ -283,7 +283,6 @@ import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { InstanceManager } from "../instance/instance-manager.js";
 import { createLogger, setLogFormat, setLogLevel } from "../logger.js";
-import { PersistenceLayer } from "../persistence/persistence-layer.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import {
 	effectRouterWithCors,
@@ -743,10 +742,6 @@ export async function startDaemonProcess(
 			const conduitDir = resolve(project.directory, ".conduit");
 			mkdirSync(conduitDir, { recursive: true });
 			const dbPath = resolve(conduitDir, "events.db");
-			const persistence = PersistenceLayer.open(dbPath);
-			signal.addEventListener("abort", () => persistence.close(), {
-				once: true,
-			});
 			const { createProjectRelay } = await import("../relay/relay-stack.js");
 			return createProjectRelay({
 				// biome-ignore lint/style/noNonNullAssertion: relay factory is only invoked after the HTTP server has been started
@@ -795,8 +790,6 @@ export async function startDaemonProcess(
 					setProjectInstance(slug, instanceId),
 				...(pushManager != null && { pushManager }),
 				configDir,
-				// TODO: Wire getCachedUpdate to VersionCheckerTag after Task 6
-				persistence,
 			});
 		};
 	}

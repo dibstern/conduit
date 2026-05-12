@@ -496,15 +496,27 @@ export interface ReconciliationDeps {
 		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
 		any
 	>;
-	readonly getProjectedSessions: () => Array<{
-		id: string;
-		status: string;
-		updated_at: number;
-	}>;
+	readonly getProjectedSessions: () => Effect.Effect<
+		ReadonlyArray<{
+			id: string;
+			status: string;
+			updated_at: number;
+		}>,
+		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
+		any,
+		// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs with the relay runtime context
+		any
+	>;
 	readonly injectCorrectiveEvent: (
 		sessionId: string,
 		status: string,
-	) => Effect.Effect<void>;
+	) => Effect.Effect<
+		void,
+		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
+		any,
+		// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs with the relay runtime context
+		any
+	>;
 }
 
 const runReconciliation = (deps: ReconciliationDeps) =>
@@ -512,7 +524,7 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 		// REST reconciliation
 		yield* Effect.gen(function* () {
 			const restStatuses = yield* deps.getRestStatuses();
-			const sessions = deps.getProjectedSessions();
+			const sessions = yield* deps.getProjectedSessions();
 			const projectedMap = new Map<string, string>();
 			for (const session of sessions) {
 				projectedMap.set(session.id, session.status);
@@ -535,7 +547,7 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 
 		// Staleness check
 		yield* Effect.gen(function* () {
-			const sessions = deps.getProjectedSessions();
+			const sessions = yield* deps.getProjectedSessions();
 			const now = Date.now();
 			for (const session of sessions) {
 				if (

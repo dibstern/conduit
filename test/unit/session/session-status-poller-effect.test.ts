@@ -16,6 +16,7 @@ import {
 	PollerStateTag,
 	poll,
 	reconcile,
+	reconcileNow,
 	type StatusCorrection,
 } from "../../../src/lib/effect/session-status-poller.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -182,6 +183,35 @@ describe("SessionStatusPoller Effect", () => {
 				),
 			);
 		},
+	);
+
+	it.effect("reconcileNow reads projected sessions from an Effect", () =>
+		Effect.gen(function* () {
+			const injected: Array<{ sessionId: string; status: string }> = [];
+
+			yield* reconcileNow({
+				getRestStatuses: () =>
+					Effect.succeed({
+						"session-effect-reconcile": { type: "idle" as const },
+					}),
+				getProjectedSessions: () =>
+					Effect.succeed([
+						{
+							id: "session-effect-reconcile",
+							status: "busy",
+							updated_at: Date.now(),
+						},
+					]),
+				injectCorrectiveEvent: (sessionId, status) =>
+					Effect.sync(() => {
+						injected.push({ sessionId, status });
+					}),
+			});
+
+			expect(injected).toEqual([
+				{ sessionId: "session-effect-reconcile", status: "idle" },
+			]);
+		}).pipe(Effect.provide(makeTestLayer())),
 	);
 
 	it.effect("isProcessing returns false for unknown session", () =>

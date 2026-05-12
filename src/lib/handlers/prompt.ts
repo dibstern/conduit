@@ -16,6 +16,7 @@ import {
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
+import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
 import {
 	type ReadQueryEffect,
@@ -24,7 +25,10 @@ import {
 import { canonicalEvent } from "../persistence/events.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
-import { createRelayEventSink } from "../provider/relay-event-sink.js";
+import {
+	createRelayEventSink,
+	type RelayEventSinkPersist,
+} from "../provider/relay-event-sink.js";
 import type { SendTurnInput } from "../provider/types.js";
 import { isClaudeProvider } from "./model.js";
 import type { PayloadMap } from "./payloads.js";
@@ -192,6 +196,9 @@ export const handleMessage = (
 		const claudeEventPersistOption = yield* Effect.serviceOption(
 			ClaudeEventPersistTag,
 		);
+		const claudeEventPersistEffectOption = yield* Effect.serviceOption(
+			ClaudeEventPersistEffectTag,
+		);
 		const providerStateOption = yield* Effect.serviceOption(
 			ProviderStateServiceTag,
 		);
@@ -233,7 +240,25 @@ export const handleMessage = (
 					: [];
 
 			// Persist user message for Claude sessions (non-fatal)
-			if (providerId === "claude" && claudeEventPersistOption._tag === "Some") {
+			if (
+				providerId === "claude" &&
+				claudeEventPersistEffectOption._tag === "Some"
+			) {
+				const persistResult = yield* Effect.either(
+					claudeEventPersistEffectOption.value.persistUserMessage(
+						activeId,
+						text,
+					),
+				);
+				if (persistResult._tag === "Left") {
+					log.warn(
+						`Non-fatal persistence error for Claude user message: ${formatErrorDetail(persistResult.left)}`,
+					);
+				}
+			} else if (
+				providerId === "claude" &&
+				claudeEventPersistOption._tag === "Some"
+			) {
 				// Persistence failure is non-fatal, must not block message sending
 				const persistResult = yield* Effect.either(
 					Effect.try(() => {
@@ -291,6 +316,23 @@ export const handleMessage = (
 			}
 
 			// Build event sink
+			let eventSinkPersist: RelayEventSinkPersist | undefined;
+			if (
+				providerId === "claude" &&
+				claudeEventPersistEffectOption._tag === "Some"
+			) {
+				const persistEffect = claudeEventPersistEffectOption.value;
+				eventSinkPersist = {
+					persistEvent: (event) =>
+						Effect.runPromise(persistEffect.persistEvent(event)),
+				};
+			} else if (
+				providerId === "claude" &&
+				claudeEventPersistOption._tag === "Some"
+			) {
+				eventSinkPersist = claudeEventPersistOption.value;
+			}
+
 			const eventSink =
 				providerId === "claude"
 					? createRelayEventSink({
@@ -298,9 +340,7 @@ export const handleMessage = (
 							send: (msg) => wsHandler.sendToSession(activeId, msg),
 							clearTimeout: () => overrides.clearProcessingTimeout(activeId),
 							resetTimeout: () => overrides.resetProcessingTimeout(activeId),
-							...(claudeEventPersistOption._tag === "Some"
-								? { persist: claudeEventPersistOption.value }
-								: {}),
+							...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
 							permissionBridge,
 							questionBridge,
 						})
