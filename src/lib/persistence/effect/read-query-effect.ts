@@ -1,6 +1,11 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
+import type {
+	MessagePartRow,
+	MessageRow,
+	MessageWithParts,
+} from "../read-model-types.js";
 
 export class ReadQueryEffectError extends Data.TaggedError(
 	"ReadQueryEffectError",
@@ -22,6 +27,10 @@ export interface ReadQueryEffect {
 		Record<string, string>,
 		ReadQueryEffectError | SqlError
 	>;
+
+	readonly getSessionMessagesWithParts: (
+		sessionId: string,
+	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
 }
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
@@ -91,9 +100,55 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getSessionMessagesWithParts = (
+		sessionId: string,
+	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
+		Effect.gen(function* () {
+			const messages = yield* sql<MessageRow>`
+				SELECT * FROM messages
+				WHERE session_id = ${sessionId}
+				ORDER BY created_at ASC, id ASC`;
+			if (messages.length === 0) return [];
+
+			const parts = yield* sql<MessagePartRow>`
+				WITH target_messages AS (
+					SELECT id FROM messages
+					WHERE session_id = ${sessionId}
+					ORDER BY created_at ASC, id ASC
+				)
+				SELECT mp.* FROM message_parts mp
+				JOIN target_messages tm ON mp.message_id = tm.id
+				ORDER BY mp.message_id, mp.sort_order`;
+
+			const partsByMessage = new Map<string, MessagePartRow[]>();
+			for (const part of parts) {
+				let existing = partsByMessage.get(part.message_id);
+				if (!existing) {
+					existing = [];
+					partsByMessage.set(part.message_id, existing);
+				}
+				existing.push(part);
+			}
+
+			return messages.map((message) => ({
+				...message,
+				parts: partsByMessage.get(message.id) ?? [],
+			}));
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "getSessionMessagesWithParts",
+							cause: e,
+						}),
+			),
+		);
+
 	return {
 		getToolContent,
 		getSessionStatus,
 		getAllSessionStatuses,
+		getSessionMessagesWithParts,
 	} satisfies ReadQueryEffect;
 });

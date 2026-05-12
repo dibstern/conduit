@@ -17,6 +17,10 @@ import {
 } from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../persistence/events.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
@@ -44,19 +48,42 @@ type PromptHistorySessionManager = {
 	): Promise<{ messages: SendTurnInput["history"]; hasMore: boolean }>;
 };
 
-async function loadPriorHistoryForTurn(
+type PriorHistoryReaders = {
+	readQueryEffect?: ReadQueryEffect;
+	readQuery?: ReadQueryService;
+};
+
+function loadPriorHistoryForTurn(
 	sessionId: string,
 	sessionMgr: PromptHistorySessionManager,
-	readQuery?: ReadQueryService,
-): Promise<SendTurnInput["history"]> {
-	if (readQuery) {
-		const rows = readQuery.getSessionMessagesWithParts(sessionId);
-		return messageRowsToHistory(rows, {
-			pageSize: Number.MAX_SAFE_INTEGER,
-		}).messages;
+	readers: PriorHistoryReaders,
+): Effect.Effect<SendTurnInput["history"], unknown> {
+	if (readers.readQueryEffect) {
+		return readers.readQueryEffect.getSessionMessagesWithParts(sessionId).pipe(
+			Effect.map(
+				(rows) =>
+					messageRowsToHistory(rows, {
+						pageSize: Number.MAX_SAFE_INTEGER,
+					}).messages,
+			),
+		);
 	}
-	const history = await sessionMgr.loadPreRenderedHistory(sessionId);
-	return history.messages;
+	if (readers.readQuery) {
+		const readQuery = readers.readQuery;
+		return Effect.try({
+			try: () => {
+				const rows = readQuery.getSessionMessagesWithParts(sessionId);
+				return messageRowsToHistory(rows, {
+					pageSize: Number.MAX_SAFE_INTEGER,
+				}).messages;
+			},
+			catch: (err) => err,
+		});
+	}
+	return Effect.tryPromise({
+		try: () => sessionMgr.loadPreRenderedHistory(sessionId),
+		catch: (err) => err,
+	}).pipe(Effect.map((history) => history.messages));
 }
 
 // ─── Per-session input draft store ──────────────────────────────────────────
@@ -172,6 +199,8 @@ export const handleMessage = (
 			ProviderStateEffectTag,
 		);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+		const readQueryEffectOption =
+			yield* Effect.serviceOption(ReadQueryEffectTag);
 
 		if (engineOption._tag === "Some") {
 			const orchestrationEngine = engineOption.value;
@@ -184,18 +213,16 @@ export const handleMessage = (
 			const priorHistory =
 				providerId === "claude"
 					? yield* Effect.gen(function* () {
+							const historyReaders: PriorHistoryReaders = {
+								...(readQueryEffectOption._tag === "Some"
+									? { readQueryEffect: readQueryEffectOption.value }
+									: {}),
+								...(readQueryOption._tag === "Some"
+									? { readQuery: readQueryOption.value }
+									: {}),
+							};
 							const result = yield* Effect.either(
-								Effect.tryPromise({
-									try: () =>
-										loadPriorHistoryForTurn(
-											activeId,
-											sessionMgr,
-											readQueryOption._tag === "Some"
-												? readQueryOption.value
-												: undefined,
-										),
-									catch: (err) => err,
-								}),
+								loadPriorHistoryForTurn(activeId, sessionMgr, historyReaders),
 							);
 							if (result._tag === "Right") return result.right;
 							log.warn(

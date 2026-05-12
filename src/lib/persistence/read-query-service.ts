@@ -5,92 +5,26 @@
 // (SQLite is blocking) and return plain objects — no ORM, no async.
 
 import { PersistenceError } from "./errors.js";
+import type {
+	ForkMetadata,
+	MessagePartRow,
+	MessageRow,
+	MessageWithParts,
+	PendingApprovalRow,
+	SessionRow,
+	TurnRow,
+} from "./read-model-types.js";
 import type { SqliteClient } from "./sqlite-client.js";
 
-// ─── Row types (match projection table schemas) ─────────────────────────────
-
-export interface SessionRow {
-	id: string;
-	provider: string;
-	provider_sid: string | null;
-	title: string;
-	status: string;
-	parent_id: string | null;
-	fork_point_event: string | null;
-	last_message_at: number | null;
-	created_at: number;
-	updated_at: number;
-}
-
-export interface MessageRow {
-	id: string;
-	session_id: string;
-	turn_id: string | null;
-	role: string;
-	text: string;
-	cost: number | null;
-	tokens_in: number | null;
-	tokens_out: number | null;
-	tokens_cache_read: number | null;
-	tokens_cache_write: number | null;
-	is_streaming: number;
-	created_at: number;
-	updated_at: number;
-}
-
-/** (P1) Normalized message part row from the message_parts table. */
-export interface MessagePartRow {
-	id: string;
-	message_id: string;
-	type: string;
-	text: string;
-	tool_name: string | null;
-	call_id: string | null;
-	input: string | null;
-	result: string | null;
-	duration: number | null;
-	status: string | null;
-	sort_order: number;
-	created_at: number;
-	updated_at: number;
-}
-
-/** Message with its parts pre-loaded (for batch queries). */
-export interface MessageWithParts extends MessageRow {
-	parts: MessagePartRow[];
-}
-
-export interface TurnRow {
-	id: string;
-	session_id: string;
-	state: string;
-	user_message_id: string | null;
-	assistant_message_id: string | null;
-	cost: number | null;
-	tokens_in: number | null;
-	tokens_out: number | null;
-	requested_at: number;
-	started_at: number | null;
-	completed_at: number | null;
-}
-
-export interface PendingApprovalRow {
-	id: string;
-	session_id: string;
-	turn_id: string | null;
-	type: string;
-	status: string;
-	tool_name: string | null;
-	input: string | null;
-	decision: string | null;
-	created_at: number;
-	resolved_at: number | null;
-}
-
-export interface ForkMetadata {
-	parentId: string;
-	forkPointEvent: string | null;
-}
+export type {
+	ForkMetadata,
+	MessagePartRow,
+	MessageRow,
+	MessageWithParts,
+	PendingApprovalRow,
+	SessionRow,
+	TurnRow,
+} from "./read-model-types.js";
 
 // ─── Service ────────────────────────────────────────────────────────────────
 
@@ -409,7 +343,7 @@ export class ReadQueryService {
 	getSessionMessagesWithParts(sessionId: string): MessageWithParts[] {
 		try {
 			const messages = this.db.query<MessageRow>(
-				"SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+				"SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, id ASC",
 				[sessionId],
 			);
 			if (messages.length === 0) return [];
@@ -418,7 +352,7 @@ export class ReadQueryService {
 			// and lets SQLite use idx_message_parts_message via nested-loop join.
 			const parts = this.db.query<MessagePartRow>(
 				`WITH target_messages AS (
-					SELECT id FROM messages WHERE session_id = ? ORDER BY created_at
+					SELECT id FROM messages WHERE session_id = ? ORDER BY created_at ASC, id ASC
 				)
 				SELECT mp.* FROM message_parts mp
 				JOIN target_messages tm ON mp.message_id = tm.id

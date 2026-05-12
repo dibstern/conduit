@@ -13,18 +13,11 @@ import { createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Duration,
-	Effect,
-	Layer,
-	PubSub,
-	Ref,
-	TestClock,
-} from "effect";
+import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
 import { expect } from "vitest";
 import type { OnboardingServerDeps } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { ConfigPersistenceTag } from "../../../src/lib/effect/config-persistence-layer.js";
 import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
@@ -415,9 +408,10 @@ describe("makeDaemonLive wiring", () => {
 
 			const persisted = yield* Effect.gen(function* () {
 				const bus = yield* DaemonEventBusTag;
+				const configPersistence = yield* ConfigPersistenceTag;
 				yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
-				yield* TestClock.adjust(Duration.millis(600));
 				yield* Effect.yieldNow();
+				yield* configPersistence.flush;
 				const raw = readFileSync(join(configDir, "daemon.json"), "utf-8");
 				return JSON.parse(raw) as {
 					projects: Array<{ slug: string; sessionCount?: number }>;
@@ -485,8 +479,8 @@ describe("makeDaemonLive wiring", () => {
 						managed: false,
 						url: "https://opencode.example.test",
 					});
-					yield* TestClock.adjust(Duration.millis(600));
-					yield* Effect.yieldNow();
+					const configPersistence = yield* ConfigPersistenceTag;
+					yield* configPersistence.flush;
 					const raw = readFileSync(join(configDir, "daemon.json"), "utf-8");
 					return JSON.parse(raw) as {
 						projects: Array<{ slug: string; sessionCount?: number }>;
@@ -577,9 +571,10 @@ describe("makeDaemonLive wiring", () => {
 
 				const persisted = yield* Effect.gen(function* () {
 					const bus = yield* DaemonEventBusTag;
+					const configPersistence = yield* ConfigPersistenceTag;
 					yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
-					yield* TestClock.adjust(Duration.millis(600));
 					yield* Effect.yieldNow();
+					yield* configPersistence.flush;
 					const raw = readFileSync(configPath, "utf-8");
 					return JSON.parse(raw) as {
 						projects: Array<{ slug: string; sessionCount?: number }>;

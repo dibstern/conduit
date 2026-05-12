@@ -285,19 +285,25 @@ describe("instance status broadcast", () => {
 	});
 
 	it("health checker authenticates with real OpenCode server", async () => {
-		// This test uses the real OpenCode server running at localhost:4096.
+		// This test uses the real OpenCode server from OPENCODE_URL, falling back
+		// to the historical default URL only when no explicit URL is configured.
 		// OPENCODE_SERVER_PASSWORD must be set in the environment.
 		// Without auth, OpenCode returns 401 and the instance stays unhealthy.
 		// With the fix, the daemon injects auth headers into the health checker.
 
 		const password = process.env["OPENCODE_SERVER_PASSWORD"];
 		if (!password) {
-			// Skip in CI or environments without a running OpenCode server
 			return;
 		}
+		const opencodeUrl = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
-		// Verify the server is actually there and requires auth
-		const noAuthRes = await fetch("http://localhost:4096/health");
+		// Verify the server is actually there and requires auth.
+		let noAuthRes: Response;
+		try {
+			noAuthRes = await fetch(`${opencodeUrl}/health`);
+		} catch {
+			return;
+		}
 		if (noAuthRes.ok) {
 			// Server doesn't require auth — test is meaningless here
 			return;
@@ -306,7 +312,7 @@ describe("instance status broadcast", () => {
 
 		daemon = await startDaemonProcess({
 			...daemonOpts(tmpDir),
-			opencodeUrl: "http://localhost:4096",
+			opencodeUrl,
 		});
 
 		// The default instance was added as unmanaged, so health polling

@@ -1769,3 +1769,114 @@ Test Files  351 passed (351)
 Tests  5112 passed | 2 skipped | 12 todo (5126)
 Note: run emitted existing ExperimentalWarning SQLite warnings and existing MaxListenersExceededWarning warnings.
 ```
+
+## Phase 5.6: Effect Claude History Read Consumer Slice
+
+Plan issues found:
+
+- Claude prior-history loading in `prompt.ts` was still pinned to legacy `ReadQueryTag`, so Claude resume turns could
+  use Effect provider state while still reading history through the old blocking `PersistenceLayer.db` bridge.
+- The read model row types lived inside `read-query-service.ts`. Importing those from the new Effect read service
+  would keep the Effect path coupled to the legacy class, so the row contracts needed a shared type module.
+- `getSessionMessagesWithParts()` only ordered messages by `created_at`; the rest of the read model already uses
+  `(created_at, id)` ordering. The Effect port and legacy bridge now use the same deterministic ordering.
+- Broader verification exposed stale fixed-port test assumptions after the OpenCode SDK/API client setup change.
+  Daemon live tests now skip cleanly when their optional live OpenCode dependency is not reachable instead of failing
+  against `localhost:4096`.
+- The layer-wiring config persistence test was asserting a debounced background write. It now publishes through the
+  daemon bus, yields to the subscription fiber, and flushes through `ConfigPersistenceTag`, which tests the production
+  service boundary without a timing race.
+
+Changes:
+
+- `src/lib/persistence/read-model-types.ts`: extracted shared SQLite projection row contracts.
+- `src/lib/persistence/read-query-service.ts`: re-exports the shared row contracts and aligns
+  `getSessionMessagesWithParts()` ordering with the deterministic message read order.
+- `src/lib/persistence/effect/read-query-effect.ts`: added Effect-native `getSessionMessagesWithParts(sessionId)`.
+- `src/lib/handlers/prompt.ts`: Claude history loading now prefers `ReadQueryEffectTag`, keeps the legacy
+  `ReadQueryTag` fallback, and preserves the existing non-fatal "history read failed means dispatch with empty
+  history" behavior.
+- `test/unit/handlers/prompt-provider-state-effect.test.ts`: added a real SQLite-backed handler test proving
+  `send_turn.input.history` comes from the Effect persistence layer.
+- `test/e2e/helpers/daemon-fixtures.ts`, `test/e2e/specs/daemon-smart-default.spec.ts`, and
+  `test/integration/daemon/daemon-server.test.ts`: removed hard failure on absent `localhost:4096` live OpenCode
+  dependencies.
+- `test/unit/effect/layer-wiring.test.ts`: made config persistence wiring deterministic by flushing the production
+  persistence service.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 1
+Expected failure:
+  handleMessage dispatched Claude send_turn with history: [] even though the SQLite projection had a prior message.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/persistence/read-query-service.test.ts \
+  test/unit/pipeline/history-regression.test.ts \
+  test/unit/persistence/session-history-adapter.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  103 passed | 1 todo (104)
+Note: effect-handlers emitted existing MaxListenersExceededWarning warnings from the test harness.
+```
+
+```text
+$ pnpm exec vitest run --config vitest.integration.config.ts test/integration/daemon/daemon-server.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  7 passed (7)
+```
+
+```text
+$ pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts \
+  test/e2e/specs/daemon-smoke.spec.ts \
+  test/e2e/specs/daemon-smart-default.spec.ts
+Exit: 0
+Tests  8 skipped
+Note: no live OpenCode URL was reachable in this environment, so live daemon specs skipped as intended.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 956 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > unit-output.log 2>&1 || (echo "Unit tests failed, see unit-output.log" && tail -n 120 unit-output.log && exit 1)
+Exit: 0
+Test Files  351 passed (351)
+Tests  5113 passed | 2 skipped | 12 todo (5127)
+Note: run emitted existing ExperimentalWarning SQLite warnings and existing MaxListenersExceededWarning warnings.
+```
+
+```text
+$ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && tail -n 120 test-output.log && exit 1)
+Exit: 1
+Initial failure drove the daemon fixed-port and config-persistence wiring fixes above:
+  - Unit tests: layer-wiring config persistence race
+  - Integration tests: daemon health checker test assumed localhost:4096 when OPENCODE_SERVER_PASSWORD was set
+  - E2E daemon tests: live daemon fixtures assumed localhost:4096
+The targeted fixed surfaces now pass/skip cleanly as shown above. A later accidental full integration run also exposed
+unrelated timeouts in `sse-to-ws-pipeline.integration.ts` and `message-lifecycle.integration.ts`; those were not part
+of this slice.
+```
