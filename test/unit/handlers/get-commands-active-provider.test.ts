@@ -4,6 +4,7 @@ import { expect, vi } from "vitest";
 import {
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
@@ -45,6 +46,14 @@ function mockLogger(): Logger {
 	} as unknown as Logger;
 }
 
+function openCodeSettingsLayer(client: OpenCodeAPI) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	return Layer.merge(
+		apiLayer,
+		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+	);
+}
+
 describe("handleGetCommands active provider", () => {
 	it.effect("returns Claude commands for a Claude-bound active session", () => {
 		const ws = mockWsHandler({
@@ -76,7 +85,7 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OrchestrationEngine;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(OrchestrationEngineTag, engine),
 			Layer.succeed(LoggerTag, mockLogger()),
@@ -116,7 +125,7 @@ describe("handleGetCommands active provider", () => {
 			} as unknown as OrchestrationEngine;
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
+				openCodeSettingsLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(OrchestrationEngineTag, engine),
 			);
@@ -145,7 +154,7 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -177,7 +186,7 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OrchestrationEngine;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(OrchestrationEngineTag, engine),
 			Layer.succeed(LoggerTag, log),

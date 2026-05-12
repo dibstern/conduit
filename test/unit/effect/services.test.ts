@@ -13,6 +13,7 @@ import {
 	LoggerTag,
 	// Core Tags
 	OpenCodeAPITag,
+	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
@@ -34,6 +35,7 @@ import {
 
 const ALL_TAGS = [
 	OpenCodeAPITag,
+	OpenCodeSettingsServiceTag,
 	SessionManagerTag,
 	WebSocketHandlerTag,
 	PermissionBridgeTag,
@@ -71,14 +73,18 @@ describe("Service Tags", () => {
 	});
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
-		// HandlerDeps has 20 fields (13 required + 7 optional) + 1 per-request (ClientId)
-		expect(ALL_TAGS.length).toBe(21);
+		// HandlerDeps has 20 fields (13 required + 7 optional) + 1 extracted handler service + 1 per-request.
+		expect(ALL_TAGS.length).toBe(22);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
 
 	it("OpenCodeAPI tag has correct key", () => {
 		expect(OpenCodeAPITag.key).toBe("OpenCodeAPI");
+	});
+
+	it("OpenCodeSettingsService tag has correct key", () => {
+		expect(OpenCodeSettingsServiceTag.key).toBe("OpenCodeSettingsService");
 	});
 
 	it("SessionManager tag has correct key", () => {

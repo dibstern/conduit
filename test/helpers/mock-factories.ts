@@ -37,6 +37,7 @@ import {
 	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	OpenCodeSettingsServiceLive,
 	PermissionBridgeTag,
 	type PollerManagerShape,
 	PollerManagerTag,
@@ -889,11 +890,15 @@ export function makeTestHandlerLayer(
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
+		openCodeSettingsServiceLayer,
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, sessionOverrides),

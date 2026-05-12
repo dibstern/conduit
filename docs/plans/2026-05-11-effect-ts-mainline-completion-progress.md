@@ -2148,6 +2148,83 @@ Test Files  1 passed (1)
 Tests  6 passed (6)
 ```
 
+## Phase 7.5: Settings Handler Service Contract
+
+Plan issues found:
+
+- `handleGetCommands` should not require OpenCode app reads for Claude-bound sessions. The settings service lookup stays
+  in the OpenCode fallback branch so Claude discovery can run without `OpenCodeSettingsServiceTag`.
+- `handleGetProjects` should not require OpenCode app reads when daemon config already owns the project list. The service
+  lookup stays in the fallback branch only.
+- `handleReloadProviderSession` composes both `handleGetModels` and `handleGetCommands`, so tests that call it need both
+  model and settings service layers.
+
+Changes:
+
+- `src/lib/effect/services.ts`: added `OpenCodeSettingsServiceTag` and `OpenCodeSettingsServiceLive` for
+  `app.commands()` and `app.projects()`.
+- `src/lib/handlers/settings.ts`: moved OpenCode command and project fallback reads through `OpenCodeSettingsServiceTag`.
+- `src/lib/relay/relay-stack.ts` and `test/helpers/mock-factories.ts`: production and shared test layers now provide the
+  settings service from the OpenCode API layer.
+- `test/unit/handlers/settings-service-effect.test.ts`: added behavior tests proving OpenCode command and project reads
+  can run without the Promise `OpenCodeAPITag`.
+- `test/unit/effect/services.test.ts`: registered the new service tag in the tag uniqueness tests.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/handlers/settings-service-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: OpenCodeAPI
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/settings-service-effect.test.ts
+Exit: 1
+Expected failure after command path was green:
+  Service not found: OpenCodeAPI
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/settings-service-effect.test.ts \
+  test/unit/handlers/settings-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/get-commands-active-provider.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts \
+  test/unit/effect/services.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  104 passed (104)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers
+Exit: 0
+Test Files  15 passed (15)
+Tests  141 passed (141)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 969 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  359 passed (359)
+Tests  5147 passed | 2 skipped | 12 todo (5161)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:

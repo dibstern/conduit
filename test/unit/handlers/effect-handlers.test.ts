@@ -21,6 +21,7 @@ import {
 	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
@@ -147,6 +148,23 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 	return Layer.merge(
 		apiLayer,
 		OpenCodeModelServiceLive.pipe(Layer.provide(apiLayer)),
+	);
+}
+
+function openCodeSettingsLayer(client: OpenCodeAPI) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	return Layer.merge(
+		apiLayer,
+		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+	);
+}
+
+function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	return Layer.mergeAll(
+		apiLayer,
+		OpenCodeModelServiceLive.pipe(Layer.provide(apiLayer)),
+		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
 	);
 }
 
@@ -291,7 +309,7 @@ describe("handleGetCommands", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -338,7 +356,7 @@ describe("handleGetProjects", () => {
 		const client = {} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(ConfigTag, config),
 		);
@@ -369,7 +387,7 @@ describe("handleGetProjects", () => {
 			} as unknown as OpenCodeAPI;
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
+				openCodeSettingsLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(ConfigTag, config),
 			);
@@ -494,7 +512,7 @@ describe("handleReloadProviderSession", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
-			openCodeModelLayer(client),
+			openCodeModelAndSettingsLayer(client),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
 		);
@@ -540,7 +558,7 @@ describe("handleReloadProviderSession", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
-			openCodeModelLayer(client),
+			openCodeModelAndSettingsLayer(client),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
 		);

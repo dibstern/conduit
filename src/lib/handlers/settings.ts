@@ -7,7 +7,7 @@ import { Effect } from "effect";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
+	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
@@ -22,7 +22,6 @@ export const handleGetCommands = (
 	_payload: PayloadMap["get_commands"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const activeSessionId = wsHandler.getClientSession(clientId);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -61,7 +60,8 @@ export const handleGetCommands = (
 			return;
 		}
 
-		const commands = yield* Effect.tryPromise(() => client.app.commands());
+		const settingsService = yield* OpenCodeSettingsServiceTag;
+		const commands = yield* settingsService.listCommands();
 		wsHandler.sendTo(clientId, { type: "command_list", commands });
 	});
 
@@ -70,7 +70,6 @@ export const handleGetProjects = (
 	_payload: PayloadMap["get_projects"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const config = yield* ConfigTag;
 
@@ -83,7 +82,8 @@ export const handleGetProjects = (
 		if (config.getProjects) {
 			projects = config.getProjects();
 		} else {
-			const ocProjects = yield* Effect.tryPromise(() => client.app.projects());
+			const settingsService = yield* OpenCodeSettingsServiceTag;
+			const ocProjects = yield* settingsService.listProjects();
 			projects = ocProjects.map((p) => ({
 				slug: p.id ?? "unknown",
 				title: p.name ?? p.id ?? "Unknown",

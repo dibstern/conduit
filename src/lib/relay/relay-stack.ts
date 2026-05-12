@@ -43,6 +43,7 @@ import {
 	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
@@ -851,11 +852,15 @@ export async function createProjectRelay(
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
 
 	const coreBridgeLayers = Layer.mergeAll(
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
+		openCodeSettingsServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(PermissionBridgeTag, permissionBridge),
