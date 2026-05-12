@@ -18,6 +18,7 @@ import {
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
@@ -61,6 +62,7 @@ const authLayer = Layer.succeed(
 const registryLayer = makeProjectRegistryLive();
 const instanceLayer = makeInstanceManagerStateLive();
 const eventBusLayer = DaemonEventBusLive;
+const persistenceLayer = ConfigPersistenceNoopLive;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -88,6 +90,7 @@ const makeSeededInstanceLayer = (
 		InstanceManagerStateTag,
 		Ref.make<InstanceManagerState>({
 			instances: instanceMap,
+			externalUrls: HashMap.empty(),
 			restartTimestamps: HashMap.empty(),
 			config: {
 				maxInstances: 5,
@@ -145,6 +148,7 @@ describe("ProjectDiscoveryLive", () => {
 		Layer.provide(instanceLayer),
 		Layer.provide(registryLayer),
 		Layer.provide(eventBusLayer),
+		Layer.provide(persistenceLayer),
 	);
 
 	it.scoped("builds without error", () =>
@@ -162,6 +166,7 @@ describe("discoverProjectsEffect", () => {
 		instanceLayer,
 		registryLayer,
 		eventBusLayer,
+		persistenceLayer,
 	);
 
 	it.scoped("returns 0 when no instances available", () =>
@@ -185,6 +190,7 @@ describe("discoverProjectsEffect", () => {
 							makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
 							registryLayer,
 							eventBusLayer,
+							persistenceLayer,
 						),
 					),
 				),
@@ -217,6 +223,7 @@ describe("discoverProjectsEffect", () => {
 							],
 						]),
 						eventBusLayer,
+						persistenceLayer,
 					),
 				),
 			),
@@ -243,6 +250,7 @@ describe("discoverProjectsEffect", () => {
 						makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
 						registryLayer,
 						eventBusLayer,
+						persistenceLayer,
 					),
 				),
 			),
@@ -543,6 +551,7 @@ describe("Scoped fiber lifecycle", () => {
 					Layer.provide(instanceLayer),
 					Layer.provide(registryLayer),
 					Layer.provide(eventBusLayer),
+					Layer.provide(persistenceLayer),
 				),
 			);
 			const scope = yield* Scope.make();

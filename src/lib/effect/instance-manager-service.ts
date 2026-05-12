@@ -17,17 +17,16 @@ import {
 	HashMap,
 	Layer,
 	Option,
-	PubSub,
 	Ref,
 	Schedule,
 } from "effect";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
+import { requestConfigSave } from "./config-persistence-service.js";
 import {
-	DaemonEvent,
-	DaemonEventBusTag,
 	publishInstanceError,
 	publishInstanceStatusChanged,
 } from "./daemon-pubsub.js";
+import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
 
 // ─── Error types ──────────────────────────────────────────────────────────
 
@@ -39,6 +38,18 @@ export class InstanceLimitExceeded extends Data.TaggedError(
 
 export class InstanceNotFound extends Data.TaggedError("InstanceNotFound")<{
 	id: string;
+}> {}
+
+export class InstanceAlreadyExists extends Data.TaggedError(
+	"InstanceAlreadyExists",
+)<{
+	id: string;
+}> {}
+
+export class InvalidInstanceUrl extends Data.TaggedError("InvalidInstanceUrl")<{
+	id: string;
+	url: string;
+	cause: unknown;
 }> {}
 
 // ─── Input type ───────────────────────────────────────────────────────────
@@ -56,6 +67,10 @@ export interface InstanceManagerConfig {
 	restartWindowMs: number;
 }
 
+type InstanceReservationFailure =
+	| { readonly _tag: "duplicate"; readonly id: string }
+	| { readonly _tag: "limit"; readonly max: number };
+
 const DEFAULT_CONFIG: InstanceManagerConfig = {
 	maxInstances: 5,
 	healthPollIntervalMs: 5000,
@@ -67,6 +82,7 @@ const DEFAULT_CONFIG: InstanceManagerConfig = {
 
 export interface InstanceManagerState {
 	instances: HashMap.HashMap<string, OpenCodeInstance>;
+	externalUrls: HashMap.HashMap<string, string>;
 	restartTimestamps: HashMap.HashMap<string, ReadonlyArray<number>>;
 	config: InstanceManagerConfig;
 }
@@ -75,9 +91,43 @@ export const emptyInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
 ): InstanceManagerState => ({
 	instances: HashMap.empty(),
+	externalUrls: HashMap.empty(),
 	restartTimestamps: HashMap.empty(),
 	config: { ...DEFAULT_CONFIG, ...config },
 });
+
+const buildInstanceManagerState = (
+	config?: Partial<InstanceManagerConfig>,
+	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
+): InstanceManagerState => {
+	const now = Date.now();
+	return {
+		instances: HashMap.fromIterable(
+			initialInstances.map((instance) => {
+				const opencodeInstance: OpenCodeInstance = {
+					id: instance.id,
+					name: instance.name,
+					port: instance.port,
+					managed: instance.managed,
+					status: "starting",
+					restartCount: 0,
+					createdAt: now,
+					...(instance.env !== undefined ? { env: instance.env } : {}),
+				};
+				return [instance.id, opencodeInstance] as const;
+			}),
+		),
+		externalUrls: HashMap.fromIterable(
+			initialInstances.flatMap((instance) =>
+				instance.url === undefined
+					? []
+					: ([[instance.id, instance.url]] as const),
+			),
+		),
+		restartTimestamps: HashMap.empty(),
+		config: { ...DEFAULT_CONFIG, ...config },
+	};
+};
 
 // ─── Context Tags ─────────────────────────────────────────────────────────
 
@@ -104,10 +154,29 @@ export class PollerFibersTag extends Context.Tag("PollerFibers")<
  */
 export const makeInstanceManagerStateLive = (
 	config?: Partial<InstanceManagerConfig>,
+	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 ): Layer.Layer<InstanceManagerStateTag | PollerFibersTag> =>
 	Layer.scoped(
 		InstanceManagerStateTag,
-		Ref.make(emptyInstanceManagerState(config)),
+		Ref.make(buildInstanceManagerState(config, initialInstances)),
+	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
+
+export const makeInstanceManagerStateFromDaemonStateLive = (
+	config?: Partial<InstanceManagerConfig>,
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	never,
+	DaemonStateTag
+> =>
+	Layer.scoped(
+		InstanceManagerStateTag,
+		Effect.gen(function* () {
+			const stateRef = yield* DaemonStateTag;
+			const state = yield* Ref.get(stateRef);
+			return yield* Ref.make(
+				buildInstanceManagerState(config, state.instances),
+			);
+		}),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
 
 // ─── Key prefix scheme for shared FiberMap ───────────────────────────────
@@ -127,6 +196,19 @@ export const addInstance = (input: AddInstanceInput) =>
 		const ref = yield* InstanceManagerStateTag;
 		const fiberMap = yield* PollerFibersTag;
 
+		const inputExternalUrl = input.url;
+		if (inputExternalUrl !== undefined) {
+			yield* Effect.try({
+				try: () => new URL(inputExternalUrl),
+				catch: (cause) =>
+					new InvalidInstanceUrl({
+						id: input.id,
+						url: inputExternalUrl,
+						cause,
+					}),
+			});
+		}
+
 		const now = yield* Clock.currentTimeMillis;
 		const instance: OpenCodeInstance = {
 			id: input.id,
@@ -144,19 +226,40 @@ export const addInstance = (input: AddInstanceInput) =>
 		// Returns Either-style: the modify function returns a tuple [returnValue, newState].
 		// We return the error (or undefined) as the "return value" and either the
 		// updated state or the original state as the "new state".
-		const capacityError = yield* Ref.modify(ref, (state) => {
-			const currentSize = HashMap.size(state.instances);
-			if (currentSize >= state.config.maxInstances) {
-				// Over capacity — return error marker, leave state unchanged
-				return [state.config.maxInstances, state] as const;
-			}
-			// Under capacity — reserve the slot atomically
-			const newInstances = HashMap.set(state.instances, input.id, instance);
-			return [undefined, { ...state, instances: newInstances }] as const;
-		});
+		const reservationFailure = yield* Ref.modify(
+			ref,
+			(
+				state,
+			): readonly [
+				InstanceReservationFailure | undefined,
+				InstanceManagerState,
+			] => {
+				if (HashMap.has(state.instances, input.id)) {
+					return [{ _tag: "duplicate", id: input.id }, state];
+				}
+				const currentSize = HashMap.size(state.instances);
+				if (currentSize >= state.config.maxInstances) {
+					// Over capacity — return error marker, leave state unchanged
+					return [{ _tag: "limit", max: state.config.maxInstances }, state];
+				}
+				// Under capacity — reserve the slot atomically
+				const newInstances = HashMap.set(state.instances, input.id, instance);
+				const newExternalUrls =
+					inputExternalUrl !== undefined
+						? HashMap.set(state.externalUrls, input.id, inputExternalUrl)
+						: state.externalUrls;
+				return [
+					undefined,
+					{ ...state, instances: newInstances, externalUrls: newExternalUrls },
+				];
+			},
+		);
 
-		if (capacityError !== undefined) {
-			return yield* new InstanceLimitExceeded({ max: capacityError });
+		if (reservationFailure !== undefined) {
+			if (reservationFailure._tag === "duplicate") {
+				return yield* new InstanceAlreadyExists({ id: reservationFailure.id });
+			}
+			return yield* new InstanceLimitExceeded({ max: reservationFailure.max });
 		}
 
 		// Start health poll fiber — FiberMap auto-interrupts if one already exists for this key
@@ -165,6 +268,8 @@ export const addInstance = (input: AddInstanceInput) =>
 			pollerKey(input.id),
 			Effect.never.pipe(Effect.interruptible),
 		);
+
+		yield* requestConfigSave;
 
 		return instance;
 	}).pipe(
@@ -183,11 +288,13 @@ export const removeInstance = (instanceId: string) =>
 		yield* Ref.update(ref, (state) => ({
 			...state,
 			instances: HashMap.remove(state.instances, instanceId),
+			externalUrls: HashMap.remove(state.externalUrls, instanceId),
 			restartTimestamps: HashMap.remove(state.restartTimestamps, instanceId),
 		}));
 
 		yield* FiberMap.remove(fiberMap, pollerKey(instanceId));
 		yield* FiberMap.remove(fiberMap, restartKey(instanceId));
+		yield* requestConfigSave;
 	}).pipe(
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.remove", {
@@ -221,6 +328,28 @@ export const getInstances = Effect.gen(function* () {
 	const state = yield* Ref.get(ref);
 	return HashMap.values(state.instances);
 }).pipe(Effect.withSpan("instance.getAll"));
+
+/**
+ * Get all instance records in daemon.json shape, including unmanaged external
+ * URLs stored outside OpenCodeInstance to keep the transport type clean.
+ */
+export const getPersistedInstanceConfigs = Effect.gen(function* () {
+	const ref = yield* InstanceManagerStateTag;
+	const state = yield* Ref.get(ref);
+	const configs: DaemonInstanceConfig[] = [];
+	for (const inst of HashMap.values(state.instances)) {
+		const externalUrl = HashMap.get(state.externalUrls, inst.id);
+		configs.push({
+			id: inst.id,
+			name: inst.name,
+			port: inst.port,
+			managed: inst.managed,
+			...(inst.env !== undefined ? { env: inst.env } : {}),
+			...(Option.isSome(externalUrl) ? { url: externalUrl.value } : {}),
+		});
+	}
+	return configs;
+}).pipe(Effect.withSpan("instance.getPersistedConfigs"));
 
 // ─── Health Polling ──────────────────────────────────────────────────────
 
@@ -481,17 +610,15 @@ export const updateInstance = (
 			})),
 		}));
 		yield* publishInstanceStatusChanged(instanceId);
+		yield* requestConfigSave;
 	}).pipe(
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.update"),
 	);
 
-/**
- * Publish a ConfigChanged event so listeners (e.g. persistence) can react.
- */
+/** Request config persistence. */
 export const persistConfig = Effect.gen(function* () {
-	const bus = yield* DaemonEventBusTag;
-	yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+	yield* requestConfigSave;
 }).pipe(Effect.withSpan("instance.persistConfig"));
 
 // ─── URL helpers ────────────────────────────────────────────────────────
@@ -511,7 +638,19 @@ export const getExternalUrl = (instanceId: string, daemonHost: string) =>
  * Returns null if the instance is not found.
  */
 export const getInstanceUrl = (instanceId: string) =>
-	getInstance(instanceId).pipe(
-		Effect.map((inst) => `http://localhost:${inst.port}`),
+	Effect.gen(function* () {
+		const ref = yield* InstanceManagerStateTag;
+		const state = yield* Ref.get(ref);
+		const inst = HashMap.get(state.instances, instanceId);
+		if (Option.isNone(inst)) {
+			return yield* new InstanceNotFound({ id: instanceId });
+		}
+		const externalUrl = HashMap.get(state.externalUrls, instanceId);
+		if (Option.isSome(externalUrl)) {
+			return externalUrl.value;
+		}
+		return `http://localhost:${inst.value.port}`;
+	}).pipe(
 		Effect.catchTag("InstanceNotFound", () => Effect.succeed(null)),
+		Effect.withSpan("instance.getInstanceUrl"),
 	);

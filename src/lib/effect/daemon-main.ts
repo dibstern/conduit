@@ -1419,6 +1419,7 @@ export async function startDaemonProcess(
 		},
 		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
+		configSnapshot: buildConfig,
 		relayFactory: (slug: string) =>
 			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
 				Effect.map((p) => ({

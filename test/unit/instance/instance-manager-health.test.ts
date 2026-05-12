@@ -14,6 +14,7 @@ import {
 	TestClock,
 } from "effect";
 import { expect } from "vitest";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
 import {
 	type DaemonEvent,
 	DaemonEventBusLive,
@@ -45,6 +46,7 @@ const testConfig = {
 const testLayer = Layer.mergeAll(
 	makeInstanceManagerStateLive(testConfig),
 	DaemonEventBusLive,
+	ConfigPersistenceNoopLive,
 );
 
 const mkInstance = (

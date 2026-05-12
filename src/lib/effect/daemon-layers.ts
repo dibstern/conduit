@@ -4,7 +4,17 @@
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
 import { NodeFileSystem } from "@effect/platform-node";
-import { Context, Data, Deferred, Effect, Layer, Ref } from "effect";
+import {
+	Context,
+	Data,
+	Deferred,
+	Effect,
+	Layer,
+	PubSub,
+	Ref,
+	Stream,
+} from "effect";
+import type { DaemonConfig } from "../daemon/config-persistence.js";
 import type { DaemonIPCContext } from "../daemon/daemon-ipc.js";
 import {
 	closeHttpServer,
@@ -26,25 +36,38 @@ import {
 } from "../daemon/pid-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { AuthManagerFromConfigLive } from "./auth-middleware.js";
+import {
+	ConfigPersistenceLive,
+	ConfigPersistenceTag,
+	ConfigSnapshotFromEffectStateLive,
+	makeConfigSnapshotLive,
+	makeConfigWriterLive,
+} from "./config-persistence-layer.js";
 import { loadConfig, PersistencePathTag } from "./daemon-config-persistence.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
 } from "./daemon-config-ref.js";
-import { DaemonEventBusLive } from "./daemon-pubsub.js";
+import { DaemonEventBusLive, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { CrashCounterLive } from "./daemon-startup.js";
 import {
 	DaemonStateTag,
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "./daemon-state.js";
-import { makeInstanceManagerStateLive } from "./instance-manager-service.js";
+import {
+	makeInstanceManagerStateFromDaemonStateLive,
+	makeInstanceManagerStateLive,
+} from "./instance-manager-service.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectDiscoveryLive } from "./project-discovery-layer.js";
-import { makeProjectRegistryLive } from "./project-registry-service.js";
+import {
+	makeProjectRegistryFromDaemonStateLive,
+	makeProjectRegistryLive,
+} from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import { RelayFactoryLive } from "./relay-factory-layer.js";
 import { SessionOverridesTag } from "./services.js";
@@ -209,6 +232,32 @@ export const makeSessionOverridesLive = () =>
 			return instance;
 		}),
 	);
+
+// ─── Cross-service Wiring ─────────────────────────────────────────────────
+
+/**
+ * Central daemon event subscriptions. Business services expose direct methods;
+ * this layer owns transitional bus bridges so subscriptions do not hide inside
+ * unrelated service layers.
+ */
+export const DaemonWiringLive: Layer.Layer<
+	never,
+	never,
+	DaemonEventBusTag | ConfigPersistenceTag
+> = Layer.scopedDiscard(
+	Effect.gen(function* () {
+		const bus = yield* DaemonEventBusTag;
+		const persistence = yield* ConfigPersistenceTag;
+		const sub = yield* PubSub.subscribe(bus);
+
+		yield* Effect.forkScoped(
+			Stream.fromQueue(sub).pipe(
+				Stream.filter((event) => event._tag === "ConfigChanged"),
+				Stream.runForEach(() => persistence.requestSave),
+			),
+		);
+	}),
+);
 
 // ─── DaemonState & RelayCache Layers ──────────────────────────────────────
 
@@ -404,6 +453,11 @@ export interface DaemonLiveOptions {
 	// DaemonState + RelayCache (Tasks 1-4 integration)
 	/** Path to daemon.json config file. When set, loads config from disk. */
 	configPath?: string;
+	/**
+	 * Snapshot source for daemon.json writes. The legacy hybrid daemon passes
+	 * its live buildConfig() until project/instance state is fully Effect-owned.
+	 */
+	configSnapshot?: () => DaemonConfig;
 	/** Factory for creating relay instances per slug. */
 	relayFactory?: RelayFactory;
 }
@@ -438,6 +492,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		ProcessErrorHandlerLayer,
 		makePidFileLive(configDir, pidPath, socketPath),
 		CrashCounterLive,
+		makeConfigWriterLive(configDir),
 	);
 
 	// ── Tier 1: Services needing foundation ────────────────────────────────
@@ -469,12 +524,20 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Compose registry layers explicitly to preserve type information.
 	// RelayFactoryLive has R = DaemonConfigRefTag, which is satisfied by
 	// the services tier (via provideMerge passthrough from foundation).
+	const projectRegistryLayer = options.configPath
+		? makeProjectRegistryFromDaemonStateLive
+		: makeProjectRegistryLive();
+	const instanceManagerLayer = options.configPath
+		? makeInstanceManagerStateFromDaemonStateLive()
+		: makeInstanceManagerStateLive();
+
 	let registries = Layer.mergeAll(
-		makeProjectRegistryLive(),
-		makeInstanceManagerStateLive(),
+		projectRegistryLayer,
+		instanceManagerLayer,
 		RelayFactoryLive(configDir),
-		stateLayer,
-	).pipe(Layer.provideMerge(services));
+	)
+		.pipe(Layer.provideMerge(stateLayer))
+		.pipe(Layer.provideMerge(services));
 
 	// RelayCache layer — only include if a factory is provided
 	if (options.relayFactory) {
@@ -483,6 +546,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			makeRelayCacheLayer(options.relayFactory),
 		);
 	}
+
+	const configSnapshotLayer = (
+		options.configSnapshot
+			? makeConfigSnapshotLive(options.configSnapshot)
+			: ConfigSnapshotFromEffectStateLive
+	).pipe(Layer.provideMerge(registries));
 
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
 	const httpAndIpc = Layer.mergeAll(
@@ -493,7 +562,18 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const servers = makeOnboardingServerLive(
 		options.ctx,
 		options.onboarding,
-	).pipe(Layer.provideMerge(httpAndIpc), Layer.provideMerge(registries));
+	).pipe(
+		Layer.provideMerge(httpAndIpc),
+		Layer.provideMerge(configSnapshotLayer),
+	);
+
+	const withConfigPersistence = ConfigPersistenceLive.pipe(
+		Layer.provideMerge(servers),
+	);
+
+	const withDaemonWiring = DaemonWiringLive.pipe(
+		Layer.provideMerge(withConfigPersistence),
+	);
 
 	// ── Tier 4: Background services (optional) ────────────────────────────
 	// When a config is not provided, a no-op stub Layer provides the Tag
@@ -530,7 +610,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		versionCheckLayer,
 		storageMonLayer,
 		portScannerLayer,
-	).pipe(Layer.provideMerge(servers));
+	).pipe(Layer.provideMerge(withDaemonWiring));
 
 	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.

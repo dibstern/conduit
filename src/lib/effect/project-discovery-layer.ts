@@ -22,6 +22,7 @@
 
 import { resolve } from "node:path";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import type { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonEventBusTag } from "./daemon-pubsub.js";
 import {
@@ -49,6 +50,7 @@ export const discoverProjectsEffect: Effect.Effect<
 	never,
 	| DaemonConfigRefTag
 	| DaemonEventBusTag
+	| ConfigPersistenceTag
 	| InstanceManagerStateTag
 	| ProjectRegistryTag
 > = Effect.gen(function* () {
@@ -210,6 +212,7 @@ export const ProjectDiscoveryLive: Layer.Layer<
 	never,
 	| DaemonConfigRefTag
 	| DaemonEventBusTag
+	| ConfigPersistenceTag
 	| InstanceManagerStateTag
 	| ProjectRegistryTag
 > = Layer.scopedDiscard(

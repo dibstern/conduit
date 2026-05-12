@@ -24,7 +24,9 @@ import {
 } from "effect";
 
 import type { StoredProject } from "../types.js";
+import { requestConfigSave } from "./config-persistence-service.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
+import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -70,6 +72,30 @@ export class ProjectAlreadyReady extends Data.TaggedError(
 // ─── State type ──────────────────────────────────────────────────────────────
 
 export type ProjectRegistryState = HashMap.HashMap<string, ProjectState>;
+
+const toStoredProject = (project: DaemonProject): StoredProject => ({
+	slug: project.slug,
+	directory: project.path,
+	title: project.title ?? project.slug,
+	lastUsed: project.addedAt,
+	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
+});
+
+const makeInitialProjectState = (
+	projects: ReadonlyArray<StoredProject>,
+): ProjectRegistryState =>
+	HashMap.fromIterable(
+		projects.map(
+			(project) =>
+				[
+					project.slug,
+					{
+						_tag: "Registering",
+						project,
+					} satisfies ProjectRegistering,
+				] as const,
+		),
+	);
 
 // ─── Context Tag ─────────────────────────────────────────────────────────────
 
@@ -208,6 +234,7 @@ export const addWithoutRelay = (
 			);
 		}
 
+		yield* requestConfigSave;
 		yield* Effect.logInfo("Project registered");
 	}).pipe(
 		Effect.annotateLogs("slug", project.slug),
@@ -246,6 +273,7 @@ export const markReady = (slug: string) =>
 			DaemonEvent.InstanceStatusChanged({ instanceId: slug }),
 		);
 
+		yield* requestConfigSave;
 		yield* Effect.logInfo("Project relay ready");
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
@@ -320,6 +348,7 @@ export const remove = (slug: string) =>
 			DaemonEvent.InstanceRemoved({ instanceId: slug }),
 		);
 
+		yield* requestConfigSave;
 		yield* Effect.logInfo("Project removed");
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
@@ -364,6 +393,7 @@ export const updateProject = (
 			bus,
 			DaemonEvent.InstanceStatusChanged({ instanceId: slug }),
 		);
+		yield* requestConfigSave;
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.updateProject", {
@@ -401,6 +431,7 @@ export const touchLastUsed = (slug: string) =>
 				bus,
 				DaemonEvent.InstanceStatusChanged({ instanceId: slug }),
 			);
+			yield* requestConfigSave;
 		}
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
@@ -482,6 +513,7 @@ export const removeAll = Effect.gen(function* () {
 		{ concurrency: PROJECT_REMOVE_ALL_CONCURRENCY, discard: true },
 	);
 
+	yield* requestConfigSave;
 	yield* Effect.logInfo(`Removed ${allSlugs.length} project(s)`);
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
 
@@ -578,8 +610,26 @@ export const isStarting = (slug: string) =>
  * Create a Layer providing ProjectRegistryTag backed by a Ref<HashMap>.
  * Uses Layer.effect (not scoped) since the Ref itself has no finalizer.
  */
-export const makeProjectRegistryLive = (): Layer.Layer<ProjectRegistryTag> =>
+export const makeProjectRegistryLive = (
+	initialProjects: ReadonlyArray<StoredProject> = [],
+): Layer.Layer<ProjectRegistryTag> =>
 	Layer.effect(
 		ProjectRegistryTag,
-		Ref.make<ProjectRegistryState>(HashMap.empty()),
+		Ref.make<ProjectRegistryState>(makeInitialProjectState(initialProjects)),
 	);
+
+export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
+	ProjectRegistryTag,
+	never,
+	DaemonStateTag
+> = Layer.effect(
+	ProjectRegistryTag,
+	Effect.gen(function* () {
+		const stateRef = yield* DaemonStateTag;
+		const state = yield* Ref.get(stateRef);
+		const initialProjects = state.projects.map(toStoredProject);
+		return yield* Ref.make<ProjectRegistryState>(
+			makeInitialProjectState(initialProjects),
+		);
+	}),
+);

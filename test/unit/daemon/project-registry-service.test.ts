@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue } from "effect";
 import { expect } from "vitest";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
@@ -44,6 +45,7 @@ const makeStubRelayCache = (): RelayCache => ({
 const testLayer = Layer.mergeAll(
 	makeProjectRegistryLive(),
 	DaemonEventBusLive,
+	ConfigPersistenceNoopLive,
 	Layer.succeed(RelayCacheTag, makeStubRelayCache()),
 );
 

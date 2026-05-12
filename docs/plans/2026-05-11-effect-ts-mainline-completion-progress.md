@@ -423,3 +423,110 @@ Review notes:
 - Code quality review: initial minor found that the concurrency tests could fail by Vitest timeout if the
   implementation became too serial. Fixed by waiting only for the first work item, yielding the scheduler,
   and asserting the cap directly before releasing blocked work. Re-review passed with no issues.
+
+## Phase 2: Composition Root, Config Persistence Slice
+
+Plan issue found:
+
+- The plan's CLI runtime gate snippet assumes `makeDaemonLive(options)` can be launched directly from
+  `cli-core.ts` with daemon CLI options. Live code does not match that shape: `makeDaemonLive` currently needs
+  `DaemonLiveOptions` built from lifecycle context, IPC context, router dependencies, and an initial runtime
+  config snapshot.
+- The current `WebSocketRoutingLive` is still a scoped placeholder, so exposing
+  `--daemon-runtime=effect` now would create a user-visible daemon mode that is not behavior-equivalent to
+  the legacy path. That would violate the plan's own "same observable behavior" contract.
+- Safe Phase 2 work therefore starts with making the existing Effect layer graph own real config persistence
+  without switching the process entrypoint yet.
+
+Changes:
+
+- `src/lib/effect/instance-manager-service.ts`: Effect instance state now preserves unmanaged external URLs
+  outside `OpenCodeInstance`, matching the legacy `InstanceManager` model that keeps transport shape clean
+  while still persisting custom remote URLs. Duplicate instance IDs now fail with `InstanceAlreadyExists`
+  instead of overwriting state and risking stale external URLs.
+- `src/lib/effect/config-persistence-layer.ts`: config persistence now writes full daemon.json snapshots via
+  `ConfigSnapshotTag`. The pure Effect snapshot source builds from `DaemonConfigRef`, `ProjectRegistryTag`,
+  and `InstanceManagerStateTag`; write and snapshot failures use typed errors. `ConfigPersistenceLive` exposes
+  `requestSave` and `flush`, coalesces requests with a debounce queue, restores the dirty bit after writer or
+  snapshot failures, and flushes any pending save when its scope closes.
+- `src/lib/effect/daemon-layers.ts`: `makeDaemonLive` now provides the production config writer, a snapshot
+  source, `ConfigPersistenceLive`, and `DaemonWiringLive`. The transitional `ConfigChanged` bus bridge lives in
+  `DaemonWiringLive`, matching the plan rule that cross-service subscriptions belong in daemon wiring rather
+  than inside unrelated services.
+- `src/lib/effect/project-registry-service.ts` and `src/lib/effect/instance-manager-service.ts`: when
+  `makeDaemonLive` is built with `configPath`, Effect project and instance state is seeded from the disk-loaded
+  `DaemonStateTag` before the pure Effect snapshot writer can run. This prevents the future pure Effect
+  entrypoint from overwriting saved projects/instances with empty transitional refs.
+- `src/lib/effect/daemon-main.ts`: the current legacy hybrid daemon passes its live `buildConfig()` into
+  `makeDaemonLive` as the config snapshot source, so any `ConfigChanged` event writes from the actual live
+  legacy registry and instance manager instead of empty transitional Effect refs.
+- `src/lib/effect/project-registry-service.ts` and `src/lib/effect/instance-manager-service.ts`: project and
+  instance mutations that affect daemon.json request config persistence directly, instead of relying on the
+  lossy daemon event bus as the durable signal.
+- Tests assert unmanaged URL round-tripping, duplicate ID rejection, full daemon config snapshot construction,
+  explicit save coalescing, finalizer flush, background retry after transient writer failure, retry-after-
+  snapshot-failure, legacy `ConfigChanged` bridge wiring, disk-loaded project/instance preservation, and
+  `makeDaemonLive` writing `daemon.json` from real Effect project/instance mutations.
+
+Review correction:
+
+- Spec review found a P1 in the first implementation: launching `ConfigPersistenceLive` while snapshotting from
+  empty Effect project/instance refs could overwrite real daemon config in the legacy hybrid runtime. Fixed by
+  introducing `ConfigSnapshotTag`; pure Effect mode keeps the Effect-state snapshot, while `startDaemonProcess`
+  passes the live legacy `buildConfig()` snapshot until those state owners are fully migrated.
+- Code quality review found another P1/P2 class of issues in the first implementation: config persistence was
+  driven only by the lossy `DaemonEventBusLive`/debounce path, had no finalizer flush, tests used only synthetic
+  `ConfigChanged`, duplicate instance IDs could leave stale URLs, and `ConfigSnapshotTag` leaked hidden service
+  requirements. Fixed by adding `ConfigPersistenceTag`, direct mutation-triggered save requests, finalizer
+  flush, duplicate rejection, and environment-capturing snapshot services.
+- Code quality re-review found two more durability issues: the pure Effect default snapshot could still drop
+  disk-loaded projects/instances if used before full registry rehydration, and failed background writes did not
+  self-schedule a retry. Fixed by seeding registries from `DaemonStateTag` when `configPath` is provided and by
+  scheduling a debounced retry after background flush failure.
+- A plan issue was also corrected during implementation: the written plan's runtime-flag step is premature
+  against live source because `WebSocketRoutingLive` is still a placeholder and `makeDaemonLive` does not accept
+  raw CLI daemon options. No `--daemon-runtime=effect` flag was added in this slice.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/instance-manager-service.test.ts
+Exit: 1
+Expected failures:
+  expected 'http://localhost:4096' to be 'https://opencode.example.test'
+  yield* getPersistedInstanceConfigs is not iterable
+```
+
+```text
+$ pnpm vitest run test/unit/effect/config-persistence-layer.test.ts
+Exit: 1
+Expected failure:
+  yield* buildDaemonConfigSnapshot is not iterable
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/instance-manager-service.test.ts test/unit/effect/config-persistence-layer.test.ts test/unit/effect/layer-wiring.test.ts test/unit/relay/project-registry-effect.test.ts test/unit/effect/scoped-fiber-layers.test.ts test/unit/instance/instance-manager-effect.test.ts test/unit/instance/instance-manager-health.test.ts test/unit/daemon/project-registry-service.test.ts
+Exit: 0
+Test Files  8 passed (8)
+Tests  129 passed (129)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 942 files in 190ms. No fixes applied.
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  345 passed (345)
+Tests  5068 passed | 2 skipped | 12 todo (5082)
+```

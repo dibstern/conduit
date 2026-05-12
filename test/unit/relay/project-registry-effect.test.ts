@@ -11,6 +11,7 @@ import {
 	Ref,
 } from "effect";
 import { expect } from "vitest";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
@@ -75,6 +76,7 @@ const TestLayer = Layer.fresh(
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,
 		NoOpRelayCacheLive,
+		ConfigPersistenceNoopLive,
 	),
 );
 
@@ -84,6 +86,7 @@ const FailingRelayTestLayer = Layer.fresh(
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,
 		FailingRelayCacheLive,
+		ConfigPersistenceNoopLive,
 	),
 );
 
@@ -274,6 +277,7 @@ describe("ProjectRegistry Effect - remove", () => {
 				makeProjectRegistryLive(),
 				DaemonEventBusLive,
 				Layer.succeed(RelayCacheTag, trackingCache),
+				ConfigPersistenceNoopLive,
 			),
 		);
 
@@ -625,6 +629,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 						makeProjectRegistryLive(),
 						DaemonEventBusLive,
 						TrackingRelayCacheLive,
+						ConfigPersistenceNoopLive,
 					),
 				);
 

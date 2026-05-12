@@ -7,10 +7,21 @@
 // Each test builds the composed Layer with mock server deps and verifies
 // that the service is accessible and functional.
 
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createServer as createNetServer, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
+import {
+	Deferred,
+	Duration,
+	Effect,
+	Layer,
+	PubSub,
+	Ref,
+	TestClock,
+} from "effect";
 import { expect } from "vitest";
 import type { OnboardingServerDeps } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
@@ -30,11 +41,15 @@ import {
 import { CrashCounterTag } from "../../../src/lib/effect/daemon-startup.js";
 import { DaemonStateTag } from "../../../src/lib/effect/daemon-state.js";
 import {
+	addInstance,
 	InstanceManagerStateTag,
 	PollerFibersTag,
 } from "../../../src/lib/effect/instance-manager-service.js";
 import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
-import { ProjectRegistryTag } from "../../../src/lib/effect/project-registry-service.js";
+import {
+	addWithoutRelay,
+	ProjectRegistryTag,
+} from "../../../src/lib/effect/project-registry-service.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryTag,
@@ -313,23 +328,263 @@ describe("makeDaemonLive wiring", () => {
 
 	// ── Cross-tier wiring: DaemonEventBus is shared ──────────────────────
 
+	it.scoped("DaemonEventBus is shared across all tiers", () =>
+		Effect.gen(function* () {
+			const bus = yield* DaemonEventBusTag;
+
+			// Subscribe before publishing
+			const sub = yield* PubSub.subscribe(bus);
+
+			// Publish an event that does not trigger daemon.json writes.
+			yield* PubSub.publish(bus, DaemonEvent.StatusChanged({ statuses: {} }));
+
+			// Should receive it — proves single bus instance
+			const msg = yield* sub.take;
+			expect(msg._tag).toBe("StatusChanged");
+		}).pipe(Effect.provide(makeDaemonLayer())),
+	);
+
+	it.scoped("ConfigPersistenceLive is wired into makeDaemonLive", () =>
+		Effect.gen(function* () {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-effect-config-"));
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => rmSync(configDir, { recursive: true, force: true })),
+			);
+
+			const base = makeMockOptions();
+			const socketPath = join(configDir, "relay.sock");
+			const options = {
+				...base,
+				configDir,
+				pidPath: join(configDir, "daemon.pid"),
+				socketPath,
+				ctx: {
+					...base.ctx,
+					socketPath,
+				},
+				initialConfig: makeDaemonConfigFromOptions({
+					port: 53124,
+					host: "127.0.0.1",
+					tlsEnabled: false,
+					hostExplicit: false,
+				}),
+				configSnapshot: () => ({
+					pid: process.pid,
+					port: 53124,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [
+						{
+							path: "/tmp/alpha",
+							slug: "alpha",
+							title: "Alpha",
+							addedAt: 1700000000000,
+							instanceId: "remote-1",
+							sessionCount: 4,
+						},
+					],
+					instances: [
+						{
+							id: "remote-1",
+							name: "Remote",
+							port: 4096,
+							managed: false,
+							url: "https://opencode.example.test",
+						},
+					],
+				}),
+			} satisfies DaemonLiveOptions;
+
+			const persisted = yield* Effect.gen(function* () {
+				const bus = yield* DaemonEventBusTag;
+				yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+				yield* TestClock.adjust(Duration.millis(600));
+				yield* Effect.yieldNow();
+				const raw = readFileSync(join(configDir, "daemon.json"), "utf-8");
+				return JSON.parse(raw) as {
+					projects: Array<{ slug: string; sessionCount?: number }>;
+					instances: Array<{ id: string; url?: string }>;
+				};
+			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+
+			expect(persisted.projects).toEqual([
+				expect.objectContaining({ slug: "alpha", sessionCount: 4 }),
+			]);
+			expect(persisted.instances).toEqual([
+				expect.objectContaining({
+					id: "remote-1",
+					url: "https://opencode.example.test",
+				}),
+			]);
+		}),
+	);
+
 	it.scoped(
-		"DaemonEventBus is shared across all tiers (ConfigChanged reaches ConfigPersistence)",
+		"Effect project and instance mutations request config persistence",
 		() =>
 			Effect.gen(function* () {
-				// Verify the bus from Tier 0 is the same one used by ConfigPersistenceLive
-				const bus = yield* DaemonEventBusTag;
+				const configDir = mkdtempSync(join(tmpdir(), "conduit-effect-config-"));
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() =>
+						rmSync(configDir, { recursive: true, force: true }),
+					),
+				);
 
-				// Subscribe before publishing
-				const sub = yield* PubSub.subscribe(bus);
+				const base = makeMockOptions();
+				const socketPath = join(configDir, "relay.sock");
+				const options = {
+					...base,
+					configDir,
+					pidPath: join(configDir, "daemon.pid"),
+					socketPath,
+					ctx: {
+						...base.ctx,
+						socketPath,
+					},
+					initialConfig: makeDaemonConfigFromOptions({
+						port: 53125,
+						host: "127.0.0.1",
+						tlsEnabled: false,
+						hostExplicit: false,
+					}),
+				} satisfies DaemonLiveOptions;
 
-				// Publish a ConfigChanged event
-				yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+				const persisted = yield* Effect.gen(function* () {
+					yield* addWithoutRelay(
+						{
+							slug: "alpha",
+							directory: "/tmp/alpha",
+							title: "Alpha",
+							lastUsed: 1700000000000,
+							instanceId: "remote-1",
+						},
+						{ silent: true },
+					);
+					yield* addInstance({
+						id: "remote-1",
+						name: "Remote",
+						port: 4096,
+						managed: false,
+						url: "https://opencode.example.test",
+					});
+					yield* TestClock.adjust(Duration.millis(600));
+					yield* Effect.yieldNow();
+					const raw = readFileSync(join(configDir, "daemon.json"), "utf-8");
+					return JSON.parse(raw) as {
+						projects: Array<{ slug: string; sessionCount?: number }>;
+						instances: Array<{ id: string; url?: string }>;
+					};
+				}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 
-				// Should receive it — proves single bus instance
-				const msg = yield* sub.take;
-				expect(msg._tag).toBe("ConfigChanged");
-			}).pipe(Effect.provide(makeDaemonLayer())),
+				expect(persisted.projects).toEqual([
+					expect.objectContaining({ slug: "alpha" }),
+				]);
+				expect(persisted.instances).toEqual([
+					expect.objectContaining({
+						id: "remote-1",
+						url: "https://opencode.example.test",
+					}),
+				]);
+			}),
+	);
+
+	it.scoped(
+		"pure Effect snapshot preserves disk-loaded projects and instances",
+		() =>
+			Effect.gen(function* () {
+				const configDir = mkdtempSync(join(tmpdir(), "conduit-effect-config-"));
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() =>
+						rmSync(configDir, { recursive: true, force: true }),
+					),
+				);
+
+				const configPath = join(configDir, "daemon.json");
+				writeFileSync(
+					configPath,
+					JSON.stringify(
+						{
+							pid: process.pid,
+							port: 53126,
+							pinHash: null,
+							tls: false,
+							debug: false,
+							keepAwake: false,
+							dangerouslySkipPermissions: false,
+							projects: [
+								{
+									path: "/tmp/persisted-alpha",
+									slug: "persisted-alpha",
+									title: "Persisted Alpha",
+									addedAt: 1700000000000,
+									instanceId: "remote-1",
+									sessionCount: 7,
+								},
+							],
+							instances: [
+								{
+									id: "remote-1",
+									name: "Remote",
+									port: 4096,
+									managed: false,
+									url: "https://opencode.example.test",
+								},
+							],
+						},
+						null,
+						2,
+					),
+				);
+
+				const base = makeMockOptions();
+				const socketPath = join(configDir, "relay.sock");
+				const options = {
+					...base,
+					configDir,
+					pidPath: join(configDir, "daemon.pid"),
+					socketPath,
+					ctx: {
+						...base.ctx,
+						socketPath,
+					},
+					configPath,
+					initialConfig: makeDaemonConfigFromOptions({
+						port: 0,
+						host: "127.0.0.1",
+						tlsEnabled: false,
+						hostExplicit: false,
+						persistedSessionCounts: new Map([["persisted-alpha", 7]]),
+					}),
+				} satisfies DaemonLiveOptions;
+
+				const persisted = yield* Effect.gen(function* () {
+					const bus = yield* DaemonEventBusTag;
+					yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
+					yield* TestClock.adjust(Duration.millis(600));
+					yield* Effect.yieldNow();
+					const raw = readFileSync(configPath, "utf-8");
+					return JSON.parse(raw) as {
+						projects: Array<{ slug: string; sessionCount?: number }>;
+						instances: Array<{ id: string; url?: string }>;
+					};
+				}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+
+				expect(persisted.projects).toEqual([
+					expect.objectContaining({
+						slug: "persisted-alpha",
+						sessionCount: 7,
+					}),
+				]);
+				expect(persisted.instances).toEqual([
+					expect.objectContaining({
+						id: "remote-1",
+						url: "https://opencode.example.test",
+					}),
+				]);
+			}),
 	);
 
 	// ── Cross-tier wiring: AuthManager reads DaemonConfigRef reactively ──
