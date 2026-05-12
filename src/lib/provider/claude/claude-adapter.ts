@@ -862,7 +862,23 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── resolvePermission ────────────────────────────────────────────────
 
-	async resolvePermission(
+	resolvePermissionEffect(
+		sessionId: string,
+		requestId: string,
+		decision: PermissionDecision,
+	): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.resolvePermissionLocal(sessionId, requestId, decision),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "resolvePermission",
+					cause,
+				}),
+		});
+	}
+
+	private async resolvePermissionLocal(
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
@@ -875,7 +891,23 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── resolveQuestion ──────────────────────────────────────────────────
 
-	async resolveQuestion(
+	resolveQuestionEffect(
+		sessionId: string,
+		requestId: string,
+		answers: Record<string, unknown>,
+	): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.resolveQuestionLocal(sessionId, requestId, answers),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "resolveQuestion",
+					cause,
+				}),
+		});
+	}
+
+	private async resolveQuestionLocal(
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,

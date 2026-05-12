@@ -57,8 +57,8 @@ describe("Provider wiring with Claude adapter", () => {
 				}),
 			sendTurnEffect: () => Effect.die("not implemented"),
 			interruptTurnEffect: () => Effect.void,
-			resolvePermission: async () => {},
-			resolveQuestion: async () => {},
+			resolvePermissionEffect: () => Effect.void,
+			resolveQuestionEffect: () => Effect.void,
 			shutdown: async () => {},
 			endSessionEffect: () => Effect.void,
 		};

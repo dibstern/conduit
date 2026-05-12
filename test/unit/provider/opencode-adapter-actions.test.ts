@@ -83,7 +83,9 @@ describe("OpenCodeAdapter action methods", () => {
 
 	describe("resolvePermission", () => {
 		it("calls client.permission.reply with sessionId, id and decision", async () => {
-			await adapter.resolvePermission("s1", "perm-1", "once");
+			await Effect.runPromise(
+				adapter.resolvePermissionEffect("s1", "perm-1", "once"),
+			);
 
 			expect(client.permission.reply).toHaveBeenCalledWith(
 				"s1",
@@ -93,7 +95,9 @@ describe("OpenCodeAdapter action methods", () => {
 		});
 
 		it("handles 'always' decision", async () => {
-			await adapter.resolvePermission("s1", "perm-2", "always");
+			await Effect.runPromise(
+				adapter.resolvePermissionEffect("s1", "perm-2", "always"),
+			);
 
 			expect(client.permission.reply).toHaveBeenCalledWith(
 				"s1",
@@ -103,7 +107,9 @@ describe("OpenCodeAdapter action methods", () => {
 		});
 
 		it("handles 'reject' decision", async () => {
-			await adapter.resolvePermission("s1", "perm-3", "reject");
+			await Effect.runPromise(
+				adapter.resolvePermissionEffect("s1", "perm-3", "reject"),
+			);
 
 			expect(client.permission.reply).toHaveBeenCalledWith(
 				"s1",
@@ -123,25 +129,41 @@ describe("OpenCodeAdapter action methods", () => {
 			});
 			adapter = new OpenCodeAdapter({ client });
 
-			await expect(
-				adapter.resolvePermission("s1", "bad-perm", "once"),
-			).rejects.toThrow("permission expired");
+			const result = await Effect.runPromise(
+				adapter
+					.resolvePermissionEffect("s1", "bad-perm", "once")
+					.pipe(Effect.either),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderAdapterFailure",
+					providerId: "opencode",
+					operation: "resolvePermission",
+				});
+				expect(result.left.message).toContain("permission expired");
+			}
 		});
 	});
 
 	describe("resolveQuestion", () => {
 		it("calls client.question.reply with id and converted answers", async () => {
-			await adapter.resolveQuestion("s1", "q1", {
-				choice: "yes",
-			});
+			await Effect.runPromise(
+				adapter.resolveQuestionEffect("s1", "q1", {
+					choice: "yes",
+				}),
+			);
 
 			expect(client.question.reply).toHaveBeenCalledWith("q1", [["yes"]]);
 		});
 
 		it("converts array answers to string arrays", async () => {
-			await adapter.resolveQuestion("s1", "q2", {
-				multi: ["a", "b", "c"],
-			});
+			await Effect.runPromise(
+				adapter.resolveQuestionEffect("s1", "q2", {
+					multi: ["a", "b", "c"],
+				}),
+			);
 
 			expect(client.question.reply).toHaveBeenCalledWith("q2", [
 				["a", "b", "c"],
@@ -149,10 +171,12 @@ describe("OpenCodeAdapter action methods", () => {
 		});
 
 		it("handles multiple answer fields", async () => {
-			await adapter.resolveQuestion("s1", "q3", {
-				field1: "value1",
-				field2: ["x", "y"],
-			});
+			await Effect.runPromise(
+				adapter.resolveQuestionEffect("s1", "q3", {
+					field1: "value1",
+					field2: ["x", "y"],
+				}),
+			);
 
 			expect(client.question.reply).toHaveBeenCalledWith("q3", [
 				["value1"],
@@ -172,9 +196,21 @@ describe("OpenCodeAdapter action methods", () => {
 			});
 			adapter = new OpenCodeAdapter({ client });
 
-			await expect(
-				adapter.resolveQuestion("s1", "bad-q", { answer: "yes" }),
-			).rejects.toThrow("question expired");
+			const result = await Effect.runPromise(
+				adapter
+					.resolveQuestionEffect("s1", "bad-q", { answer: "yes" })
+					.pipe(Effect.either),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderAdapterFailure",
+					providerId: "opencode",
+					operation: "resolveQuestion",
+				});
+				expect(result.left.message).toContain("question expired");
+			}
 		});
 	});
 

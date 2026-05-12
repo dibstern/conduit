@@ -232,18 +232,18 @@ export interface ProviderAdapter {
 	): Effect.Effect<void, ProviderAdapterFailure>;
 
 	/** Resolve a pending permission request (from EventSink.requestPermission) */
-	resolvePermission(
+	resolvePermissionEffect(
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
-	): Promise<void>;
+	): Effect.Effect<void, ProviderAdapterFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */
-	resolveQuestion(
+	resolveQuestionEffect(
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
-	): Promise<void>;
+	): Effect.Effect<void, ProviderAdapterFailure>;
 
 	/** Graceful shutdown -- clean up connections, abort pending turns */
 	shutdown(): Promise<void>;

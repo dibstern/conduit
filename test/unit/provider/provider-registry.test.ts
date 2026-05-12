@@ -23,8 +23,8 @@ function makeStubAdapter(providerId: string): ProviderAdapter {
 		),
 		sendTurnEffect: vi.fn(() => Effect.die("not implemented")),
 		interruptTurnEffect: vi.fn(() => Effect.void),
-		resolvePermission: vi.fn(),
-		resolveQuestion: vi.fn(),
+		resolvePermissionEffect: vi.fn(() => Effect.void),
+		resolveQuestionEffect: vi.fn(() => Effect.void),
 		shutdown: vi.fn(),
 		endSessionEffect: vi.fn(() => Effect.void),
 	};

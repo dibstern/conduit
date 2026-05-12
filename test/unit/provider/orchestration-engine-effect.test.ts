@@ -14,6 +14,8 @@ import { createMockEventSink } from "../../helpers/mock-sdk.js";
 
 function makeStubAdapter(providerId: string): ProviderAdapter & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
+	resolvePermissionEffect: ReturnType<typeof vi.fn>;
+	resolveQuestionEffect: ReturnType<typeof vi.fn>;
 } {
 	return {
 		providerId,
@@ -40,8 +42,8 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 			}),
 		),
 		interruptTurnEffect: vi.fn(() => Effect.void),
-		resolvePermission: vi.fn(async () => {}),
-		resolveQuestion: vi.fn(async () => {}),
+		resolvePermissionEffect: vi.fn(() => Effect.void),
+		resolveQuestionEffect: vi.fn(() => Effect.void),
 		shutdown: vi.fn(async () => {}),
 		endSessionEffect: vi.fn(() => Effect.void),
 	};
@@ -198,6 +200,85 @@ describe("OrchestrationEngine dispatchEffect", () => {
 			expect(interruptTurn).not.toHaveBeenCalled();
 			expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
 		}),
+	);
+
+	it.effect(
+		"dispatches permission resolution through the adapter Effect boundary",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const resolvePermission = vi.fn(() => {
+					throw new Error(
+						"legacy Promise resolvePermission should not be called",
+					);
+				});
+				const resolvePermissionEffect = vi.fn(() => Effect.void);
+
+				registry.registerAdapter({
+					...makeStubAdapter("claude"),
+					resolvePermission,
+					resolvePermissionEffect,
+				} as ProviderAdapter & {
+					resolvePermission: typeof resolvePermission;
+					resolvePermissionEffect: typeof resolvePermissionEffect;
+				});
+				engine.bindSession("session-1", "claude");
+
+				yield* engine.dispatchEffect({
+					type: "resolve_permission",
+					sessionId: "session-1",
+					requestId: "perm-1",
+					decision: "once",
+				});
+
+				expect(resolvePermission).not.toHaveBeenCalled();
+				expect(resolvePermissionEffect).toHaveBeenCalledWith(
+					"session-1",
+					"perm-1",
+					"once",
+				);
+			}),
+	);
+
+	it.effect(
+		"dispatches question resolution through the adapter Effect boundary",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const resolveQuestion = vi.fn(() => {
+					throw new Error(
+						"legacy Promise resolveQuestion should not be called",
+					);
+				});
+				const resolveQuestionEffect = vi.fn(() => Effect.void);
+				const answers = { choice: "A" };
+
+				registry.registerAdapter({
+					...makeStubAdapter("claude"),
+					resolveQuestion,
+					resolveQuestionEffect,
+				} as ProviderAdapter & {
+					resolveQuestion: typeof resolveQuestion;
+					resolveQuestionEffect: typeof resolveQuestionEffect;
+				});
+				engine.bindSession("session-1", "claude");
+
+				yield* engine.dispatchEffect({
+					type: "resolve_question",
+					sessionId: "session-1",
+					requestId: "question-1",
+					answers,
+				});
+
+				expect(resolveQuestion).not.toHaveBeenCalled();
+				expect(resolveQuestionEffect).toHaveBeenCalledWith(
+					"session-1",
+					"question-1",
+					answers,
+				);
+			}),
 	);
 
 	it.effect("dispatches endSession through the adapter Effect boundary", () =>

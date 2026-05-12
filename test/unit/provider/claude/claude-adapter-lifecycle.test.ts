@@ -344,7 +344,9 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.resolvePermission("sess-1", "perm-1", "once");
+			await Effect.runPromise(
+				adapter.resolvePermissionEffect("sess-1", "perm-1", "once"),
+			);
 
 			expect(resolvedWith).toContain("once");
 		});
@@ -352,7 +354,9 @@ describe("ClaudeAdapter lifecycle", () => {
 		it("is a no-op for unknown session", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 			// Should not throw
-			await adapter.resolvePermission("nonexistent", "perm-1", "once");
+			await Effect.runPromise(
+				adapter.resolvePermissionEffect("nonexistent", "perm-1", "once"),
+			);
 		});
 
 		it("is a no-op for unknown requestId", async () => {
@@ -363,7 +367,9 @@ describe("ClaudeAdapter lifecycle", () => {
 			).sessions.set("sess-1", ctx);
 
 			// Should not throw
-			await adapter.resolvePermission("sess-1", "nonexistent", "once");
+			await Effect.runPromise(
+				adapter.resolvePermissionEffect("sess-1", "nonexistent", "once"),
+			);
 		});
 	});
 
@@ -506,7 +512,9 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.resolveQuestion("sess-1", "q-1", { answer: "yes" });
+			await Effect.runPromise(
+				adapter.resolveQuestionEffect("sess-1", "q-1", { answer: "yes" }),
+			);
 
 			expect(resolvedAnswers).toEqual({ answer: "yes" });
 			expect(ctx.pendingQuestions.has("q-1")).toBe(false);
@@ -514,7 +522,9 @@ describe("ClaudeAdapter lifecycle", () => {
 
 		it("is a no-op for unknown session", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-			await adapter.resolveQuestion("nonexistent", "q-1", {});
+			await Effect.runPromise(
+				adapter.resolveQuestionEffect("nonexistent", "q-1", {}),
+			);
 		});
 	});
 

@@ -74,8 +74,8 @@ import {
 function makeStubAdapter(providerId: string): ProviderAdapter & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
 	interruptTurnEffect: ReturnType<typeof vi.fn>;
-	resolvePermission: ReturnType<typeof vi.fn>;
-	resolveQuestion: ReturnType<typeof vi.fn>;
+	resolvePermissionEffect: ReturnType<typeof vi.fn>;
+	resolveQuestionEffect: ReturnType<typeof vi.fn>;
 	discoverEffect: ReturnType<typeof vi.fn>;
 	shutdown: ReturnType<typeof vi.fn>;
 	endSessionEffect: ReturnType<typeof vi.fn>;
@@ -105,8 +105,8 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 			}),
 		),
 		interruptTurnEffect: vi.fn(() => Effect.void),
-		resolvePermission: vi.fn(async () => {}),
-		resolveQuestion: vi.fn(async () => {}),
+		resolvePermissionEffect: vi.fn(() => Effect.void),
+		resolveQuestionEffect: vi.fn(() => Effect.void),
 		shutdown: vi.fn(async () => {}),
 		endSessionEffect: vi.fn(() => Effect.void),
 	};
@@ -230,7 +230,7 @@ describe("OrchestrationEngine", () => {
 				decision: "always",
 			});
 
-			expect(opencode.resolvePermission).toHaveBeenCalledWith(
+			expect(opencode.resolvePermissionEffect).toHaveBeenCalledWith(
 				"s1",
 				"perm-1",
 				"always",
@@ -249,7 +249,7 @@ describe("OrchestrationEngine", () => {
 				answers: { choice: "yes" },
 			});
 
-			expect(opencode.resolveQuestion).toHaveBeenCalledWith("s1", "q1", {
+			expect(opencode.resolveQuestionEffect).toHaveBeenCalledWith("s1", "q1", {
 				choice: "yes",
 			});
 		});
@@ -793,8 +793,14 @@ describe("OrchestrationEngine", () => {
 
 		it("dispatch logs error context before re-throwing for resolvePermission", async () => {
 			const failing = makeStubAdapter("opencode");
-			failing.resolvePermission.mockRejectedValue(
-				new Error("Adapter permission failed"),
+			failing.resolvePermissionEffect.mockReturnValue(
+				Effect.fail(
+					new ProviderAdapterFailure({
+						providerId: "opencode",
+						operation: "resolvePermission",
+						cause: new Error("Adapter permission failed"),
+					}),
+				),
 			);
 
 			const reg = new ProviderRegistry();

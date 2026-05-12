@@ -2160,6 +2160,83 @@ Exit: 1
 No remaining discovery/send-turn/interrupt/end-session Promise bridges in provider orchestration.
 ```
 
+## Phase 6.6: Provider Permission And Question Resolution Effect Boundaries
+
+Plan issues found:
+
+- Permission and question resolution were omitted from the Phase 6 high-risk contract list even though they are adapter
+  methods called from orchestration. Leaving them Promise-shaped would keep bridge code in the exact provider command
+  path this phase is supposed to remove.
+- These boundaries are narrower than `sendTurnEffect`: they only route user answers back to pending provider requests.
+  They are safe to migrate together because neither owns session binding, streaming, or provider state persistence.
+- `shutdown()` is now the remaining Promise-shaped provider lifecycle method. It should not be silently renamed without
+  deciding whether shutdown failures become surfaced typed errors or finalizer-style logged errors.
+
+Changes:
+
+- `src/lib/provider/types.ts`: replaced `resolvePermission(...)` and `resolveQuestion(...)` with
+  `resolvePermissionEffect(...)` and `resolveQuestionEffect(...)`.
+- `src/lib/provider/opencode-adapter.ts`: OpenCode permission and question replies now expose Effect methods and map
+  rejected SDK calls to `ProviderAdapterFailure`.
+- `src/lib/provider/claude/claude-adapter.ts`: Claude permission and question resolution now expose Effect methods
+  while preserving no-op behavior for unknown sessions or requests.
+- `src/lib/provider/orchestration-engine.ts`: permission and question commands now call adapter Effect methods directly
+  and use `tapError` only for contextual logging.
+- Provider orchestration, OpenCode action, Claude lifecycle, registry, wiring, and type tests were updated to the new
+  contract.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts
+Exit: 1
+Expected failures:
+  Provider adapter resolvePermission failed for provider claude: legacy Promise resolvePermission should not be called
+  Provider adapter resolveQuestion failed for provider claude: legacy Promise resolveQuestion should not be called
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts \
+  test/unit/provider/orchestration-engine.test.ts \
+  test/unit/provider/opencode-adapter-actions.test.ts \
+  test/unit/provider/claude/claude-adapter-lifecycle.test.ts \
+  test/unit/provider/types.test.ts \
+  test/unit/provider/provider-registry.test.ts \
+  test/unit/provider/claude/provider-wiring.test.ts
+Exit: 0
+Test Files  7 passed (7)
+Tests  100 passed (100)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  32 passed (32)
+Tests  374 passed (374)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 960 files. No fixes applied.
+```
+
+```text
+$ rg -n "try: \\(\\) => adapter\\.|adapter\\.(interruptTurn|discover|endSession|sendTurn|resolvePermission|resolveQuestion)\\(" \
+  src/lib/provider/orchestration-engine.ts src/lib/provider/types.ts \
+  src/lib/provider/opencode-adapter.ts src/lib/provider/claude/claude-adapter.ts test/unit/provider
+Exit: 1
+No remaining discovery/send-turn/interrupt/end-session/permission/question Promise bridges in provider orchestration.
+```
+
 ## Phase 6.3: Provider Interrupt Effect Boundary
 
 Plan issues found:

@@ -10,7 +10,6 @@ import { createLogger } from "../logger.js";
 import {
 	DuplicateCommand,
 	type OrchestrationError,
-	ProviderAdapterFailure,
 	SessionProviderNotBound,
 } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
@@ -275,24 +274,21 @@ export class OrchestrationEngine {
 			);
 			const adapter = yield* this.registry.getAdapterEffect(providerId);
 
-			return yield* Effect.tryPromise({
-				try: () =>
-					adapter.resolvePermission(
-						command.sessionId,
-						command.requestId,
-						command.decision,
+			return yield* adapter
+				.resolvePermissionEffect(
+					command.sessionId,
+					command.requestId,
+					command.decision,
+				)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
+							),
+						),
 					),
-				catch: (cause) => {
-					log.error(
-						`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return new ProviderAdapterFailure({
-						providerId,
-						operation: "resolvePermission",
-						cause,
-					});
-				},
-			});
+				);
 		});
 	}
 
@@ -305,24 +301,21 @@ export class OrchestrationEngine {
 			);
 			const adapter = yield* this.registry.getAdapterEffect(providerId);
 
-			return yield* Effect.tryPromise({
-				try: () =>
-					adapter.resolveQuestion(
-						command.sessionId,
-						command.requestId,
-						command.answers,
+			return yield* adapter
+				.resolveQuestionEffect(
+					command.sessionId,
+					command.requestId,
+					command.answers,
+				)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`resolveQuestion failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
+							),
+						),
 					),
-				catch: (cause) => {
-					log.error(
-						`resolveQuestion failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return new ProviderAdapterFailure({
-						providerId,
-						operation: "resolveQuestion",
-						cause,
-					});
-				},
-			});
+				);
 		});
 	}
 

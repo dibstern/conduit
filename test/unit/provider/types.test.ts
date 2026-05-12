@@ -39,16 +39,16 @@ describe("ProviderAdapter types", () => {
 					providerStateUpdates: [],
 				}),
 			interruptTurnEffect: (_sessionId: string) => Effect.void,
-			resolvePermission: async (
+			resolvePermissionEffect: (
 				_sessionId: string,
 				_requestId: string,
 				_decision: PermissionDecision,
-			) => {},
-			resolveQuestion: async (
+			) => Effect.void,
+			resolveQuestionEffect: (
 				_sessionId: string,
 				_requestId: string,
 				_answers: Record<string, unknown>,
-			) => {},
+			) => Effect.void,
 			shutdown: async () => {},
 			endSessionEffect: (_sessionId: string) => Effect.void,
 		};
@@ -57,8 +57,8 @@ describe("ProviderAdapter types", () => {
 		expect(typeof adapter.discoverEffect).toBe("function");
 		expect(typeof adapter.sendTurnEffect).toBe("function");
 		expect(typeof adapter.interruptTurnEffect).toBe("function");
-		expect(typeof adapter.resolvePermission).toBe("function");
-		expect(typeof adapter.resolveQuestion).toBe("function");
+		expect(typeof adapter.resolvePermissionEffect).toBe("function");
+		expect(typeof adapter.resolveQuestionEffect).toBe("function");
 		expect(typeof adapter.shutdown).toBe("function");
 		expect(typeof adapter.endSessionEffect).toBe("function");
 	});
