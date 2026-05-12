@@ -1,8 +1,7 @@
 // ─── Effect HTTP Router ─────────────────────────────────────────────────────
-// Effect-based HTTP router using @effect/platform, created alongside the
-// existing RequestRouter (http-router.ts). Covers all JSON API routes;
-// auth gate, static files, and SPA serving remain in the imperative router
-// until the full daemon entry point migration.
+// Effect-based HTTP router using @effect/platform. This is the production HTTP
+// route graph for both daemon and relay server modes; Node's request callback
+// only delegates into the handler built from this router.
 //
 // Routes:
 //   GET  /health, /api/status     — health check
@@ -14,6 +13,7 @@
 //   GET  /api/themes              — theme list
 //   GET  /api/setup-info          — setup/onboarding info
 //   GET  /ca/download             — CA certificate download
+//   GET  /auth, /setup, /, /p/*   — SPA/static entry routes
 
 import { readFile } from "node:fs/promises";
 import {

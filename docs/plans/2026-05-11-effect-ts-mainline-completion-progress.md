@@ -623,3 +623,34 @@ Exit: 0
 Test Files  346 passed (346)
 Tests  5074 passed | 2 skipped | 12 todo (5088)
 ```
+
+## Phase 3: HTTP Route Slice Audit
+
+Plan issue found:
+
+- The Phase 3 transition list assumes there is still a production `RequestRouter` serving `/health`, `/info`,
+  `/setup`, auth, static, and `/p/<slug>` routes. Live source no longer has `src/lib/server/http-router.ts` or a
+  `RequestRouter` production path; `daemon-main.ts` and `relay-stack.ts` already build handlers from
+  `effectRouterWithCors`. The stale text was in comments, not active routing.
+
+Changes:
+
+- `src/lib/server/effect-http-router.ts`: updated the module header to reflect that this is now the production
+  HTTP route graph for daemon and relay server modes.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/server/effect-http-router.test.ts test/unit/server/effect-http-router-production.test.ts test/unit/server/http-server-layer.test.ts
+Exit: 0
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
