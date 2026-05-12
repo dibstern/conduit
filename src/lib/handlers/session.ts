@@ -15,6 +15,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
+import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
@@ -366,10 +367,10 @@ export const handleListSessions = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 
-		yield* Effect.tryPromise(() =>
-			sessionMgr.sendDualSessionLists((msg) => wsHandler.sendTo(clientId, msg)),
+		yield* sessionManagerService.sendDualSessionLists((msg) =>
+			wsHandler.sendTo(clientId, msg),
 		);
 	});
 

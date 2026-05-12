@@ -10,6 +10,7 @@ import {
 } from "../../../src/lib/handlers/session.js";
 import {
 	makeMockOpenCodeAPI,
+	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
@@ -68,39 +69,43 @@ describe("session handler wire snapshots", () => {
 
 	it("keeps the list_sessions envelopes stable", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const sessionMgr = makeMockSessionManagerShape({
-			sendDualSessionLists: vi.fn(async (send) => {
-				send({
-					type: "session_list",
-					sessions: [
-						{
-							id: "root-1",
-							title: "Root Session",
-							updatedAt: 100,
-							messageCount: 2,
-						},
-					],
-					roots: true,
-				});
-				send({
-					type: "session_list",
-					sessions: [
-						{
-							id: "child-1",
-							title: "Child Session",
-							updatedAt: 200,
-							messageCount: 4,
-							parentID: "root-1",
-						},
-					],
-					roots: false,
-				});
-			}),
+		const sessionManagerService = makeMockSessionManagerService({
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "root-1",
+								title: "Root Session",
+								updatedAt: 100,
+								messageCount: 2,
+							},
+						],
+						roots: true,
+					});
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "child-1",
+								title: "Child Session",
+								updatedAt: 200,
+								messageCount: 4,
+								parentID: "root-1",
+							},
+						],
+						roots: false,
+					});
+				}),
+			),
 		});
 
 		await Effect.runPromise(
 			handleListSessions("client-1", {}).pipe(
-				Effect.provide(makeTestHandlerLayer({ wsHandler, sessionMgr })),
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
 			),
 		);
 

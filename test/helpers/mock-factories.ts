@@ -13,7 +13,7 @@
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
 import type { PermissionBridge } from "../../src/lib/bridges/permission-bridge.js";
@@ -51,6 +51,11 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../src/lib/effect/services.js";
+import {
+	type SessionManagerService,
+	SessionManagerServiceLive,
+	SessionManagerServiceTag,
+} from "../../src/lib/effect/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	type SessionManagerState,
@@ -724,6 +729,39 @@ export function makeMockSessionManagerShape(
 	} as unknown as SessionManagerShape;
 }
 
+/** Create a mock SessionManagerService for Effect-native handler tests. */
+export function makeMockSessionManagerService(
+	overrides?: Partial<SessionManagerService>,
+): SessionManagerService {
+	return {
+		listSessions: vi.fn(() =>
+			Effect.succeed([
+				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
+			]),
+		),
+		createSession: vi.fn(() => Effect.succeed({ id: "session-new" })),
+		deleteSession: vi.fn(() => Effect.void),
+		recordMessageActivity: vi.fn(() => Effect.void),
+		sendDualSessionLists: vi.fn((send) =>
+			Effect.sync(() => {
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "s1",
+							title: "Session 1",
+							updatedAt: 0,
+							messageCount: 0,
+						},
+					],
+					roots: true,
+				});
+			}),
+		),
+		...overrides,
+	} as unknown as SessionManagerService;
+}
+
 /** Create a mock Logger for Effect tests. */
 export function makeMockLogger(): Logger {
 	return {
@@ -838,6 +876,7 @@ export interface TestHandlerLayerOptions {
 	api?: OpenCodeAPI;
 	wsHandler?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
+	sessionManagerService?: SessionManagerService;
 	overrides?: SessionOverrides;
 	permissionBridge?: PermissionBridge;
 	questionBridge?: QuestionBridge;
@@ -875,6 +914,7 @@ export function makeTestHandlerLayer(
 	const statusPoller: StatusPollerShape = opts?.statusPoller ?? {
 		isProcessing: vi.fn(() => false),
 		clearMessageActivity: vi.fn(),
+		getCurrentStatuses: vi.fn(() => ({})),
 	};
 	const pollerManager: PollerManagerShape = opts?.pollerManager ?? {
 		isPolling: vi.fn(() => true),
@@ -893,12 +933,25 @@ export function makeTestHandlerLayer(
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const sessionManagerServiceLayer = opts?.sessionManagerService
+		? Layer.succeed(SessionManagerServiceTag, opts.sessionManagerService)
+		: SessionManagerServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						openCodeApiLayer,
+						makeSessionManagerStateLive(),
+						Layer.succeed(LoggerTag, log),
+						Layer.succeed(StatusPollerTag, statusPoller),
+					),
+				),
+			);
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		sessionManagerServiceLayer,
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, sessionOverrides),

@@ -34,6 +34,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
 import {
 	filterAgents,
 	handleGetAgents,
@@ -1913,17 +1914,59 @@ describe("handleQuestionReject", () => {
 describe("handleListSessions", () => {
 	it.effect("sends session list to client", () => {
 		const ws = mockWsHandler();
-		const sessionMgr = mockSessionManager();
+		const sendDualSessionLists = vi.fn((send) =>
+			Effect.sync(() => {
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "session-1",
+							title: "Session 1",
+							updatedAt: 100,
+							messageCount: 0,
+						},
+					],
+					roots: true,
+				});
+			}),
+		);
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, {
+				listSessions: vi.fn(() => Effect.succeed([])),
+				createSession: vi.fn(() =>
+					Effect.succeed({
+						id: "session-new",
+						projectID: "project-1",
+						directory: "/tmp/project",
+						title: "Session New",
+						version: "1.0.0",
+						time: { created: 0, updated: 0 },
+					}),
+				),
+				deleteSession: vi.fn(() => Effect.void),
+				recordMessageActivity: vi.fn(() => Effect.void),
+				sendDualSessionLists,
+			}),
 		);
 
 		return handleListSessions("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(sessionMgr.sendDualSessionLists).toHaveBeenCalled();
+				expect(sendDualSessionLists).toHaveBeenCalled();
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "session_list",
+					sessions: [
+						{
+							id: "session-1",
+							title: "Session 1",
+							updatedAt: 100,
+							messageCount: 0,
+						},
+					],
+					roots: true,
+				});
 			}),
 		);
 	});

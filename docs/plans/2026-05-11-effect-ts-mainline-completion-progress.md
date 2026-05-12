@@ -2060,6 +2060,75 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.11: Session List Handler Service Contract
+
+Plan issues found:
+
+- `handleListSessions` looked like a narrow handler conversion, but the existing Effect
+  `SessionManagerService.listSessions` returned raw provider sessions instead of the frontend
+  `SessionInfo[]` shape produced by the legacy `SessionManager`. Converting the handler directly
+  would have dropped title fallback, message-activity ordering, fork metadata, parent IDs,
+  pending-question counts, and processing flags.
+- The existing Effect service rebuilt `cachedParentMap` on roots-only fetches. Legacy
+  `SessionManager.listSessions({ roots: true })` deliberately does not do that because roots-only
+  responses omit children and would wipe subagent parent mappings.
+- `SessionManagerServiceLive` could not remain a `Layer.succeed` of free functions once handlers
+  consumed it directly. The service layer now captures OpenCode, session-manager state, logger, and
+  optional status-poller dependencies so handler effects do not leak service implementation
+  requirements.
+
+Changes:
+
+- Extracted the provider-session to frontend-session projection into
+  `src/lib/session/session-info-list.ts` and reused it from both the legacy class and the Effect
+  service.
+- Extended `SessionManagerService` with Effect-native `sendDualSessionLists`, preserving roots-first
+  delivery, background all-sessions delivery, background failure logging, parent-map preservation,
+  status fallback, and `SessionInfo[]` shaping.
+- Converted `handleListSessions` to use `SessionManagerServiceTag` instead of the legacy
+  `SessionManagerTag`.
+- Updated relay Layer composition so the session-manager state ref and service are built together,
+  then provided from the relay bridge Layer graph.
+- Added handler/service tests and kept the list-session wire snapshot stable.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-manager-service-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: SessionManager
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/session-manager-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  8 passed (8)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 975 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  363 passed (363)
+Tests  5164 passed | 2 skipped | 12 todo (5178)
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

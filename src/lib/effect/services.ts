@@ -48,6 +48,7 @@ export type { WebSocketHandlerShape };
 export interface StatusPollerShape {
 	isProcessing(sessionId: string): boolean;
 	clearMessageActivity(sessionId: string): void;
+	getCurrentStatuses?(): Record<string, SessionStatus>;
 }
 
 /** Shape for the pollerManager field — isPolling + startPolling capabilities. */

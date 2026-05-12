@@ -27,6 +27,10 @@ import {
 } from "./session-status-poller.js";
 import { makeWsHandlerStateLive } from "./ws-handler-service.js";
 
+const SessionManagerStateAndServiceLive = SessionManagerServiceLive.pipe(
+	Layer.provideMerge(makeSessionManagerStateLive()),
+);
+
 /**
  * Composed Layer providing all Effect-native state Tags.
  *
@@ -41,9 +45,7 @@ export const RelayStateLive = Layer.mergeAll(
 	// Session state
 	makeSessionRegistryStateLive(),
 	makeOverridesStateLive(),
-	makeSessionManagerStateLive(),
-	// Session manager Effect service (function references; deps resolved at call time)
-	SessionManagerServiceLive,
+	SessionManagerStateAndServiceLive,
 	// Poller state
 	makePollerManagerStateLive(),
 	makePollerStateLive(),

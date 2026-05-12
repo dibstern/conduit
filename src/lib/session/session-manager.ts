@@ -17,6 +17,7 @@ import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { sessionRowsToSessionInfoList } from "../persistence/session-list-adapter.js";
 import type { HistoryMessage } from "../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
+import { toSessionInfoList } from "./session-info-list.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -589,58 +590,4 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				this.log.warn(`Background all-sessions broadcast failed: ${err}`);
 			});
 	}
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Convert OpenCode SessionDetail[] → sorted SessionInfo[] for the frontend.
- *
- * Sorting priority: last message timestamp (from lastMessageAt map),
- * falling back to session creation time for sessions with no messages.
- * This ensures sessions are ordered by actual conversation activity,
- * not by metadata updates (renames, etc.).
- */
-function toSessionInfoList(
-	sessions: SessionDetail[],
-	statuses?: Record<string, SessionStatus>,
-	lastMessageAt?: ReadonlyMap<string, number>,
-	forkMeta?: ReadonlyMap<string, ForkEntry>,
-	pendingQuestionCounts?: ReadonlyMap<string, number>,
-): SessionInfo[] {
-	return sessions
-		.map((s) => {
-			// For display: use last message time if available, otherwise creation time
-			const lastMsgTime = lastMessageAt?.get(s.id);
-			const displayTime = lastMsgTime ?? s.time?.created ?? 0;
-
-			const forkEntry = forkMeta?.get(s.id);
-			// parentID: prefer OpenCode's value, fall back to conduit's fork metadata
-			// (OpenCode does not set parentID on user-initiated forks, only on subagent sessions)
-			const parentID = s.parentID ?? forkEntry?.parentID;
-
-			const info: SessionInfo = {
-				id: s.id,
-				title: s.title ?? "Untitled",
-				updatedAt: displayTime,
-				messageCount: 0, // OpenCode doesn't include this in list; frontend can fetch if needed
-				...(parentID != null && { parentID }),
-				...(forkEntry != null && { forkMessageId: forkEntry.forkMessageId }),
-				...(forkEntry?.forkPointTimestamp != null && {
-					forkPointTimestamp: forkEntry.forkPointTimestamp,
-				}),
-			};
-			if (statuses) {
-				const status = statuses[s.id];
-				if (status && (status.type === "busy" || status.type === "retry")) {
-					info.processing = true;
-				}
-			}
-			const qCount = pendingQuestionCounts?.get(s.id);
-			if (qCount != null && qCount > 0) {
-				info.pendingQuestionCount = qCount;
-			}
-			return info;
-		})
-		.sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number));
 }

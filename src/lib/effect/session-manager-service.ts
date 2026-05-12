@@ -7,7 +7,10 @@
 // SessionManagerServiceTag bundles them for callers that prefer a service object.
 
 import { Context, Data, Effect, HashMap, Layer, Ref, Schedule } from "effect";
-import { OpenCodeAPITag } from "./services.js";
+import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
+import { toSessionInfoList } from "../session/session-info-list.js";
+import type { RelayMessage, SessionInfo } from "../types.js";
+import { LoggerTag, OpenCodeAPITag, StatusPollerTag } from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 
 // ─── Retry policy ──────────────────────────────────────────────────────────
@@ -25,19 +28,36 @@ export class SessionManagerError extends Data.TaggedError(
 	cause: unknown;
 }> {}
 
+export type ListSessionsOptions = {
+	limit?: number;
+	roots?: boolean;
+	statuses?: Record<string, SessionStatus> | undefined;
+};
+
+type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
+
+const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
+	new Map(HashMap.toEntries(map));
+
 // ─── Free functions ─────────────────────────────────────────────────────────
 
 /**
  * Fetch the session list from the API.
  * Caches the child-to-parent map in state for subagent status propagation.
  */
-export const listSessions = (options?: { limit?: number; roots?: boolean }) =>
+export const listSessions = (options?: ListSessionsOptions) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
+		const clientOptions = {
+			...(options?.limit !== undefined && { limit: options.limit }),
+			...(options?.roots !== undefined && { roots: options.roots }),
+		};
 
 		const sessions = yield* Effect.tryPromise(() =>
-			api.session.list(options),
+			api.session.list(
+				Object.keys(clientOptions).length > 0 ? clientOptions : undefined,
+			),
 		).pipe(
 			Effect.retry(retryPolicy),
 			Effect.mapError(
@@ -46,8 +66,11 @@ export const listSessions = (options?: { limit?: number; roots?: boolean }) =>
 			),
 		);
 
-		// Build parent map from sessions that have a parentID
-		if (sessions) {
+		const state = yield* Ref.get(stateRef);
+
+		// Only rebuild from unfiltered fetches. Roots-only responses omit children
+		// and would wipe the parent map used by status propagation.
+		if (!options?.roots) {
 			let parentMap = HashMap.empty<string, string>();
 			for (const session of sessions) {
 				const rec = session as Record<string, unknown>;
@@ -62,7 +85,13 @@ export const listSessions = (options?: { limit?: number; roots?: boolean }) =>
 			}));
 		}
 
-		return sessions;
+		return toSessionInfoList(
+			sessions,
+			options?.statuses,
+			toReadonlyMap(state.lastMessageAt),
+			toReadonlyMap(state.forkMeta),
+			toReadonlyMap(state.pendingQuestionCounts),
+		);
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
 		Effect.withSpan("session.listSessions"),
@@ -153,29 +182,114 @@ export const recordMessageActivity = (sessionId: string, timestamp?: number) =>
 		Effect.withSpan("session.recordMessageActivity"),
 	);
 
+/**
+ * Send roots-only session list immediately, then all sessions in the background.
+ */
+export const sendDualSessionLists = (
+	send: (msg: SessionListMessage) => void,
+	options?: { statuses?: Record<string, SessionStatus> | undefined },
+) =>
+	Effect.gen(function* () {
+		const log = yield* LoggerTag;
+		const roots = yield* listSessions({
+			roots: true,
+			statuses: options?.statuses,
+		});
+		send({ type: "session_list", sessions: roots, roots: true });
+
+		yield* Effect.forkDaemon(
+			listSessions({ statuses: options?.statuses }).pipe(
+				Effect.tap((all) =>
+					Effect.sync(() =>
+						send({ type: "session_list", sessions: all, roots: false }),
+					),
+				),
+				Effect.catchAll((err) =>
+					Effect.sync(() =>
+						log.warn(`Background all-sessions fetch failed: ${err}`),
+					),
+				),
+			),
+		);
+	}).pipe(
+		Effect.annotateLogs("operation", "sendDualSessionLists"),
+		Effect.withSpan("session.sendDualSessionLists"),
+	);
+
+export interface SessionManagerService {
+	listSessions(
+		options?: ListSessionsOptions,
+	): Effect.Effect<SessionInfo[], SessionManagerError>;
+	createSession(
+		title?: string,
+	): Effect.Effect<SessionDetail, SessionManagerError>;
+	deleteSession(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	recordMessageActivity(
+		sessionId: string,
+		timestamp?: number,
+	): Effect.Effect<void>;
+	sendDualSessionLists(
+		send: (msg: SessionListMessage) => void,
+		options?: { statuses?: Record<string, SessionStatus> | undefined },
+	): Effect.Effect<void, SessionManagerError>;
+}
+
 // ─── Service Tag ────────────────────────────────────────────────────────────
 
 /** Bundled service object for callers that prefer DI over free functions. */
 export class SessionManagerServiceTag extends Context.Tag(
 	"SessionManagerService",
-)<
-	SessionManagerServiceTag,
-	{
-		listSessions: typeof listSessions;
-		createSession: typeof createSession;
-		deleteSession: typeof deleteSession;
-		recordMessageActivity: typeof recordMessageActivity;
-	}
->() {}
+)<SessionManagerServiceTag, SessionManagerService>() {}
 
 // ─── Service Layer ──────────────────────────────────────────────────────────
 
-export const SessionManagerServiceLive = Layer.succeed(
+export const SessionManagerServiceLive: Layer.Layer<
 	SessionManagerServiceTag,
-	{
-		listSessions,
-		createSession,
-		deleteSession,
-		recordMessageActivity,
-	},
+	never,
+	OpenCodeAPITag | SessionManagerStateTag | LoggerTag
+> = Layer.effect(
+	SessionManagerServiceTag,
+	Effect.gen(function* () {
+		const api = yield* OpenCodeAPITag;
+		const stateRef = yield* SessionManagerStateTag;
+		const log = yield* LoggerTag;
+		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const currentStatuses = (
+			explicit?: Record<string, SessionStatus> | undefined,
+		): Record<string, SessionStatus> | undefined =>
+			explicit ??
+			(statusPollerOption._tag === "Some"
+				? statusPollerOption.value.getCurrentStatuses?.()
+				: undefined);
+
+		return {
+			listSessions: (options) =>
+				listSessions({
+					...options,
+					statuses: currentStatuses(options?.statuses),
+				}).pipe(
+					Effect.provideService(OpenCodeAPITag, api),
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			createSession: (title) =>
+				createSession(title).pipe(Effect.provideService(OpenCodeAPITag, api)),
+			deleteSession: (sessionId) =>
+				deleteSession(sessionId).pipe(
+					Effect.provideService(OpenCodeAPITag, api),
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			recordMessageActivity: (sessionId, timestamp) =>
+				recordMessageActivity(sessionId, timestamp).pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			sendDualSessionLists: (send, options) =>
+				sendDualSessionLists(send, {
+					statuses: currentStatuses(options?.statuses),
+				}).pipe(
+					Effect.provideService(LoggerTag, log),
+					Effect.provideService(OpenCodeAPITag, api),
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+		} satisfies SessionManagerService;
+	}),
 );

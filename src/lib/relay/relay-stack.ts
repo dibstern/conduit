@@ -926,7 +926,7 @@ export async function createProjectRelay(
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionEventBridgeLive, SessionLifecycleWiringLive) are added after
 	// wireMonitoring() returns (provides sseTracker, getMonitoringState).
-	const relayStateAndBridges = Layer.merge(RelayStateLive, bridgeLayers);
+	const relayStateAndBridges = Layer.provideMerge(RelayStateLive, bridgeLayers);
 	const baseLayers =
 		persistenceEffectLayer != null
 			? Layer.merge(relayStateAndBridges, persistenceEffectLayer)
