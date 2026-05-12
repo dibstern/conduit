@@ -1997,3 +1997,65 @@ Exit: 0
 test/unit/persistence/persistence-layer.test.ts:74:            layer = PersistenceLayer.open(dbPath);
 Note: no production `src` hits remain.
 ```
+
+## Phase 6.1: Effect Orchestration Dispatch Entry Slice
+
+Plan issues found:
+
+- Converting all provider adapter methods to Effect in one commit would couple OpenCode REST behavior, Claude SDK
+  lifecycle, cancellation, permission questions, and orchestration idempotency. The safer first vertical slice is the
+  live orchestration entry point and provider lookup boundary.
+- `ProviderRegistry.getAdapterOrThrow()` made missing providers stringly thrown errors. The Effect path now has a typed
+  `ProviderNotRegistered` failure while the old throwing method remains only for compatibility.
+- Orchestration idempotency used `Effect.runSync` inside `dispatch()`. The command-processing path now runs as an
+  Effect program, and the Promise `dispatch()` method is just the compatibility edge.
+
+Changes:
+
+- `src/lib/provider/errors.ts`: added typed provider/orchestration errors:
+  `ProviderNotRegistered`, `SessionProviderNotBound`, `DuplicateCommand`, and `ProviderAdapterFailure`.
+- `src/lib/provider/provider-registry.ts`: added `getAdapterEffect(providerId)` for typed lookup failures.
+- `src/lib/provider/orchestration-engine.ts`: added overloaded `dispatchEffect(...)`, moved command idempotency and
+  adapter dispatch into Effect, wraps current Promise adapters with `Effect.tryPromise`, and keeps existing
+  `dispatch(...)` as a Promise boundary.
+- `test/unit/provider/orchestration-engine-effect.test.ts`: added the first behavior test for typed lookup failure and
+  retryable command IDs.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts
+Exit: 1
+Expected failure:
+  engine.dispatchEffect is not a function
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts \
+  test/unit/provider/provider-registry.test.ts \
+  test/unit/provider/orchestration-engine.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  44 passed (44)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  32 passed (32)
+Tests  368 passed (368)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 960 files. No fixes applied.
+```

@@ -3,7 +3,9 @@
 // Maps provider IDs to adapter instances. The OrchestrationEngine uses this
 // to route commands to the correct adapter.
 
+import { Effect } from "effect";
 import { createLogger } from "../logger.js";
+import { ProviderNotRegistered } from "./errors.js";
 import type { ProviderAdapter } from "./types.js";
 
 const log = createLogger("provider-registry");
@@ -22,11 +24,21 @@ export class ProviderRegistry {
 		return this.adapters.get(providerId);
 	}
 
+	/** Get an adapter by provider ID, failing with a typed Effect error if absent. */
+	getAdapterEffect(
+		providerId: string,
+	): Effect.Effect<ProviderAdapter, ProviderNotRegistered> {
+		const adapter = this.adapters.get(providerId);
+		return adapter
+			? Effect.succeed(adapter)
+			: Effect.fail(new ProviderNotRegistered({ providerId }));
+	}
+
 	/** Get an adapter by provider ID, throwing if not registered. */
 	getAdapterOrThrow(providerId: string): ProviderAdapter {
 		const adapter = this.adapters.get(providerId);
 		if (!adapter) {
-			throw new Error(`No adapter registered for provider: ${providerId}`);
+			throw new ProviderNotRegistered({ providerId });
 		}
 		return adapter;
 	}
