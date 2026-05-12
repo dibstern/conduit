@@ -246,7 +246,7 @@ export interface ProviderAdapter {
 	): Effect.Effect<void, ProviderAdapterFailure>;
 
 	/** Graceful shutdown -- clean up connections, abort pending turns */
-	shutdown(): Promise<void>;
+	shutdownEffect(): Effect.Effect<void, ProviderAdapterFailure>;
 
 	/**
 	 * Terminate the provider's session-level state (SDK query, pending turns,

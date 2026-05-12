@@ -2237,6 +2237,87 @@ Exit: 1
 No remaining discovery/send-turn/interrupt/end-session/permission/question Promise bridges in provider orchestration.
 ```
 
+## Phase 6.7: Provider Shutdown Effect Boundary
+
+Plan issues found:
+
+- `shutdown()` was the last Promise-shaped method on `ProviderAdapter`. Leaving it as-is would make the adapter
+  contract mostly Effect-returning while lifecycle cleanup still used a Promise bridge.
+- Shutdown has different semantics from command dispatch: current behavior is best-effort cleanup where individual
+  adapter failures are logged and swallowed. This slice preserves that finalizer-style behavior instead of surfacing one
+  adapter's cleanup failure and skipping the rest.
+- `OrchestrationEngine.shutdown()` and `ProviderRegistry.shutdownAll()` remain Promise wrappers for existing imperative
+  relay cleanup call sites, but both now delegate to `shutdownEffect()` / `shutdownAllEffect()` internally. The adapter
+  contract itself has no Promise methods left.
+
+Changes:
+
+- `src/lib/provider/types.ts`: replaced `shutdown(): Promise<void>` with
+  `shutdownEffect(): Effect.Effect<void, ProviderAdapterFailure>`.
+- `src/lib/provider/opencode-adapter.ts`: OpenCode shutdown now exposes an Effect method and preserves pending-turn
+  rejection/clear behavior.
+- `src/lib/provider/claude/claude-adapter.ts`: Claude shutdown now exposes an Effect method, maps unexpected cleanup
+  rejection to `ProviderAdapterFailure`, and preserves session disposal behavior.
+- `src/lib/provider/provider-registry.ts`: added `shutdownAllEffect()` using bounded Effect concurrency and per-adapter
+  typed-error logging; the existing Promise wrapper delegates to it for current imperative callers.
+- `src/lib/provider/orchestration-engine.ts`: added `shutdownEffect()` and delegates the existing Promise wrapper to it.
+- Provider shutdown, wiring, adapter lifecycle, and type tests were updated to the Effect boundary.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/provider-registry.test.ts
+Exit: 1
+Expected failure:
+  ProviderRegistry.shutdownAll still called the legacy Promise shutdown path:
+  legacy Promise shutdown should not be called
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/provider-registry.test.ts \
+  test/unit/provider/orchestration-engine.test.ts \
+  test/unit/provider/orchestration-engine-effect.test.ts \
+  test/unit/provider/opencode-adapter-actions.test.ts \
+  test/unit/provider/claude/claude-adapter-lifecycle.test.ts \
+  test/unit/provider/claude/claude-adapter-send-turn.test.ts \
+  test/unit/provider/types.test.ts \
+  test/unit/provider/claude/provider-wiring.test.ts \
+  test/unit/provider/orchestration-wiring.test.ts
+Exit: 0
+Test Files  9 passed (9)
+Tests  145 passed (145)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 960 files. No fixes applied.
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  32 passed (32)
+Tests  375 passed (375)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ rg -n "try: \\(\\) => adapter\\.|adapter\\.(interruptTurn|discover|endSession|sendTurn|resolvePermission|resolveQuestion|shutdown)\\(" \
+  src/lib/provider/orchestration-engine.ts src/lib/provider/provider-registry.ts \
+  src/lib/provider/types.ts src/lib/provider/opencode-adapter.ts \
+  src/lib/provider/claude/claude-adapter.ts test/unit/provider
+Exit: 1
+No remaining Promise adapter method bridges for provider discovery, send turn, interrupt, replies, end-session, or shutdown.
+```
+
 ## Phase 6.3: Provider Interrupt Effect Boundary
 
 Plan issues found:

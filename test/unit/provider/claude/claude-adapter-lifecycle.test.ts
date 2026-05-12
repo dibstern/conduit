@@ -75,7 +75,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.close).toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 
 			expect(ctx.stopped).toBe(true);
 		});
@@ -116,7 +116,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 
 			expect(resolvedWith).toContain("reject");
 		});
@@ -138,7 +138,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 
 			expect(rejected).toHaveLength(1);
 			expect(rejected[0]?.message).toContain("shutting down");
@@ -151,7 +151,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 
 			// close/interrupt should NOT be called since session was already stopped
 			expect(ctx.promptQueue.close).not.toHaveBeenCalled();

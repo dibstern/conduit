@@ -302,17 +302,19 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	// ─── shutdown ────────────────────────────────────────────────────────
 
-	async shutdown(): Promise<void> {
-		log.info("OpenCodeAdapter shutting down");
+	shutdownEffect(): Effect.Effect<void> {
+		return Effect.sync(() => {
+			log.info("OpenCodeAdapter shutting down");
 
-		// Reject all pending turns
-		for (const [sessionId, deferred] of this.pendingTurns) {
-			deferred.reject(
-				new Error(
-					`Adapter shutdown -- turn for session ${sessionId} cancelled`,
-				),
-			);
-		}
-		this.pendingTurns.clear();
+			// Reject all pending turns
+			for (const [sessionId, deferred] of this.pendingTurns) {
+				deferred.reject(
+					new Error(
+						`Adapter shutdown -- turn for session ${sessionId} cancelled`,
+					),
+				);
+			}
+			this.pendingTurns.clear();
+		});
 	}
 }

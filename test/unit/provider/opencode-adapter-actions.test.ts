@@ -216,7 +216,9 @@ describe("OpenCodeAdapter action methods", () => {
 
 	describe("shutdown", () => {
 		it("resolves cleanly when no pending turns", async () => {
-			await expect(adapter.shutdown()).resolves.not.toThrow();
+			await expect(
+				Effect.runPromise(adapter.shutdownEffect()),
+			).resolves.not.toThrow();
 		});
 
 		it("rejects pending turns on shutdown", async () => {
@@ -242,7 +244,7 @@ describe("OpenCodeAdapter action methods", () => {
 			);
 
 			// Shutdown while turn is pending
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 
 			await expect(turnPromise).rejects.toThrow("shutdown");
 		});

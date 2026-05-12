@@ -88,7 +88,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeAdapter E2E (real SDK)", () => {
 			expect(eventTypes).toContain("turn.completed");
 
 			// Clean up the adapter
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 		},
 		{ timeout: 120_000 },
 	);

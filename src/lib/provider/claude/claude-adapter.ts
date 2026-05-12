@@ -983,7 +983,19 @@ export class ClaudeAdapter implements ProviderAdapter {
 		await this.disposeSession(ctx, "Session ended (reload)");
 	}
 
-	async shutdown(): Promise<void> {
+	shutdownEffect(): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.shutdownLocal(),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "shutdown",
+					cause,
+				}),
+		});
+	}
+
+	private async shutdownLocal(): Promise<void> {
 		log.info("ClaudeAdapter shutting down");
 		for (const ctx of [...this.sessions.values()]) {
 			await this.disposeSession(ctx, "Adapter shutting down");

@@ -58,15 +58,27 @@ export class ProviderRegistry {
 		return [...this.adapters.keys()];
 	}
 
-	/** Shutdown all registered adapters. Continues on individual failures. */
-	async shutdownAll(): Promise<void> {
-		const results = await Promise.allSettled(
-			[...this.adapters.values()].map((adapter) => adapter.shutdown()),
+	/**
+	 * Shutdown all registered adapters. Continues on individual failures so
+	 * cleanup behaves like finalizers: best-effort, logged, never masking caller
+	 * shutdown.
+	 */
+	shutdownAllEffect(): Effect.Effect<void> {
+		return Effect.forEach(
+			[...this.adapters.values()],
+			(adapter) =>
+				adapter
+					.shutdownEffect()
+					.pipe(
+						Effect.catchAll((error) =>
+							Effect.sync(() => log.warn(`Adapter shutdown failed: ${error}`)),
+						),
+					),
+			{ concurrency: 4, discard: true },
 		);
-		for (const result of results) {
-			if (result.status === "rejected") {
-				log.warn(`Adapter shutdown failed: ${result.reason}`);
-			}
-		}
+	}
+
+	async shutdownAll(): Promise<void> {
+		await Effect.runPromise(this.shutdownAllEffect());
 	}
 }

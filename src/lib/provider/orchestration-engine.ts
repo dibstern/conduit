@@ -401,11 +401,19 @@ export class OrchestrationEngine {
 	}
 
 	/** Shutdown the engine and all adapters. */
+	shutdownEffect(): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
+			yield* this.registry.shutdownAllEffect();
+			yield* Effect.sync(() => {
+				this.sessionBindings.clear();
+				this.processedCommands = Ref.unsafeMake(new Set<string>());
+			});
+		});
+	}
+
 	async shutdown(): Promise<void> {
-		log.info("OrchestrationEngine shutting down");
-		await this.registry.shutdownAll();
-		this.sessionBindings.clear();
-		this.processedCommands = Ref.unsafeMake(new Set<string>());
+		await Effect.runPromise(this.shutdownEffect());
 	}
 
 	// ─── Internal ─────────────────────────────────────────────────────────

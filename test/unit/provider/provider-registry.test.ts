@@ -2,6 +2,7 @@
 
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
 
@@ -25,7 +26,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter {
 		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermissionEffect: vi.fn(() => Effect.void),
 		resolveQuestionEffect: vi.fn(() => Effect.void),
-		shutdown: vi.fn(),
+		shutdownEffect: vi.fn(() => Effect.void),
 		endSessionEffect: vi.fn(() => Effect.void),
 	};
 }
@@ -103,7 +104,7 @@ describe("ProviderRegistry", () => {
 		expect(registry.getAdapterOrThrow("opencode")).toBe(adapter);
 	});
 
-	it("shutdownAll calls shutdown on all adapters", async () => {
+	it("shutdownAll calls shutdownEffect on all adapters", async () => {
 		const a1 = makeStubAdapter("opencode");
 		const a2 = makeStubAdapter("claude");
 		registry.registerAdapter(a1);
@@ -111,22 +112,49 @@ describe("ProviderRegistry", () => {
 
 		await registry.shutdownAll();
 
-		expect(a1.shutdown).toHaveBeenCalledTimes(1);
-		expect(a2.shutdown).toHaveBeenCalledTimes(1);
+		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
+		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
+	});
+
+	it("shutdownAll uses the adapter Effect boundary", async () => {
+		const shutdown = vi.fn(() => {
+			throw new Error("legacy Promise shutdown should not be called");
+		});
+		const shutdownEffect = vi.fn(() => Effect.void);
+		registry.registerAdapter({
+			...makeStubAdapter("claude"),
+			shutdown,
+			shutdownEffect,
+		} as ProviderAdapter & {
+			shutdown: typeof shutdown;
+			shutdownEffect: typeof shutdownEffect;
+		});
+
+		await registry.shutdownAll();
+
+		expect(shutdown).not.toHaveBeenCalled();
+		expect(shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 
 	it("shutdownAll continues even if one adapter fails", async () => {
 		const a1 = makeStubAdapter("opencode");
 		const a2 = makeStubAdapter("claude");
-		// biome-ignore lint/suspicious/noExplicitAny: accessing vi.fn mock method
-		(a1.shutdown as any).mockRejectedValue(new Error("boom"));
+		(a1.shutdownEffect as ReturnType<typeof vi.fn>).mockReturnValue(
+			Effect.fail(
+				new ProviderAdapterFailure({
+					providerId: "opencode",
+					operation: "shutdown",
+					cause: new Error("boom"),
+				}),
+			),
+		);
 		registry.registerAdapter(a1);
 		registry.registerAdapter(a2);
 
 		// Should not throw
 		await registry.shutdownAll();
 
-		expect(a1.shutdown).toHaveBeenCalledTimes(1);
-		expect(a2.shutdown).toHaveBeenCalledTimes(1);
+		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
+		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 });

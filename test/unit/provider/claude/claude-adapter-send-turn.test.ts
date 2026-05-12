@@ -350,7 +350,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 				secondPromise.catch(() => undefined),
 				new Promise((resolve) => setTimeout(resolve, 25)),
 			]);
-			await adapter.shutdown();
+			await Effect.runPromise(adapter.shutdownEffect());
 		}
 	});
 
@@ -453,7 +453,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			promptText.endsWith("\n\nApply the same fix to the other file."),
 		).toBe(true);
 
-		await adapter.shutdown();
+		await Effect.runPromise(adapter.shutdownEffect());
 	});
 
 	it("does not rewrite the restarted agent query when history is empty", async () => {
@@ -508,7 +508,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		);
 		expect(promptText).toBe("Fresh agent prompt.");
 
-		await adapter.shutdown();
+		await Effect.runPromise(adapter.shutdownEffect());
 	});
 
 	it("rejects a Claude agent change while the current turn is active", async () => {
@@ -589,7 +589,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		releaseResult?.();
 		await firstPromise;
-		await adapter.shutdown();
+		await Effect.runPromise(adapter.shutdownEffect());
 	});
 
 	// ── Test 3: Resume uses SDK resume option ─────────────────────────────

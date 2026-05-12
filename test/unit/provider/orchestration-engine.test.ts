@@ -77,7 +77,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 	resolvePermissionEffect: ReturnType<typeof vi.fn>;
 	resolveQuestionEffect: ReturnType<typeof vi.fn>;
 	discoverEffect: ReturnType<typeof vi.fn>;
-	shutdown: ReturnType<typeof vi.fn>;
+	shutdownEffect: ReturnType<typeof vi.fn>;
 	endSessionEffect: ReturnType<typeof vi.fn>;
 } {
 	return {
@@ -107,7 +107,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermissionEffect: vi.fn(() => Effect.void),
 		resolveQuestionEffect: vi.fn(() => Effect.void),
-		shutdown: vi.fn(async () => {}),
+		shutdownEffect: vi.fn(() => Effect.void),
 		endSessionEffect: vi.fn(() => Effect.void),
 	};
 }
@@ -475,8 +475,8 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("shutdown", () => {
-		it("delegates to registry.shutdownAll", async () => {
-			const shutdownSpy = vi.spyOn(registry, "shutdownAll");
+		it("delegates to registry.shutdownAllEffect", async () => {
+			const shutdownSpy = vi.spyOn(registry, "shutdownAllEffect");
 
 			await engine.shutdown();
 

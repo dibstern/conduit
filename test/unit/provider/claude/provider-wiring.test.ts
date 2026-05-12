@@ -59,7 +59,7 @@ describe("Provider wiring with Claude adapter", () => {
 			interruptTurnEffect: () => Effect.void,
 			resolvePermissionEffect: () => Effect.void,
 			resolveQuestionEffect: () => Effect.void,
-			shutdown: async () => {},
+			shutdownEffect: () => Effect.void,
 			endSessionEffect: () => Effect.void,
 		};
 

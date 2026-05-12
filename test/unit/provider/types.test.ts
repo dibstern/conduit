@@ -49,7 +49,7 @@ describe("ProviderAdapter types", () => {
 				_requestId: string,
 				_answers: Record<string, unknown>,
 			) => Effect.void,
-			shutdown: async () => {},
+			shutdownEffect: () => Effect.void,
 			endSessionEffect: (_sessionId: string) => Effect.void,
 		};
 
@@ -59,7 +59,7 @@ describe("ProviderAdapter types", () => {
 		expect(typeof adapter.interruptTurnEffect).toBe("function");
 		expect(typeof adapter.resolvePermissionEffect).toBe("function");
 		expect(typeof adapter.resolveQuestionEffect).toBe("function");
-		expect(typeof adapter.shutdown).toBe("function");
+		expect(typeof adapter.shutdownEffect).toBe("function");
 		expect(typeof adapter.endSessionEffect).toBe("function");
 	});
 
