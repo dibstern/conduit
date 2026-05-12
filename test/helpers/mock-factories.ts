@@ -429,8 +429,6 @@ export function createMockProjectRelay(
 		} as unknown as OrchestrationLayer,
 		effectRuntime: {
 			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],
-			runSync: vi.fn(),
-			dispatch: vi.fn().mockResolvedValue(undefined),
 			dispose: vi.fn().mockResolvedValue(undefined),
 		},
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),

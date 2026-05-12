@@ -32,7 +32,7 @@ import {
 import { PermissionBridge } from "../bridges/permission-bridge.js";
 import { QuestionBridge } from "../bridges/question-bridge.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
-import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
+import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
 import {
 	ClaudeEventPersistTag,
@@ -67,18 +67,12 @@ import {
 } from "../effect/session-status-poller.js";
 import { StaticDirTag } from "../effect/static-file-handler.js";
 import { ENV } from "../env.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
-import { dispatchMessageEffect } from "../handlers/index.js";
+import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
 import { createSdkClientEffect } from "../instance/sdk-factory.js";
-import {
-	createLogger,
-	type Logger,
-	type LogLevel,
-	setLogLevel,
-} from "../logger.js";
+import { createLogger, type Logger } from "../logger.js";
 import { DualWriteHook } from "../persistence/dual-write-hook.js";
 import {
 	canonicalEvent,
@@ -92,10 +86,6 @@ import {
 	createOrchestrationLayer,
 	type OrchestrationLayer,
 } from "../provider/orchestration-wiring.js";
-import {
-	getClientSemaphore,
-	removeClient,
-} from "../server/client-semaphore.js";
 import {
 	CaCertProvider,
 	effectRouterWithCors,
@@ -123,9 +113,6 @@ import { generateSlug } from "../utils.js";
 interface RelayRuntime {
 	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
 	runtime: ManagedRuntime.ManagedRuntime<any, never>;
-	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
-	runSync: <A, E>(effect: Effect.Effect<A, E, any>) => A;
-	dispatch: (clientId: string, type: string, raw: unknown) => Promise<void>;
 	dispose: () => Promise<void>;
 }
 
@@ -142,6 +129,7 @@ import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
+import { handleRelayWsMessage } from "./ws-message-dispatch-effect.js";
 
 // ─── WebSocket library for upstream PTY connections ─────────────────────────
 const requireWs = createRequire(import.meta.url);
@@ -741,6 +729,11 @@ export async function createProjectRelay(
 		log: wsLog,
 	};
 
+	// Late-binding runtime: callbacks fire after full relay initialization, but
+	// registering them here keeps the external WebSocket boundary thin.
+	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic is complex, callers use typed effects
+	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
+
 	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
 		wsLog.info(
 			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
@@ -754,7 +747,12 @@ export async function createProjectRelay(
 	});
 
 	wsHandler.on("client_disconnected", ({ clientId }) => {
-		removeClient(clientId);
+		relayManagedRuntime.runFork(
+			Effect.gen(function* () {
+				const serialization = yield* ClientMessageSerializationTag;
+				yield* serialization.removeClient(clientId);
+			}),
+		);
 		wsLog.info(`Client disconnected: ${clientId}`);
 	});
 
@@ -872,81 +870,25 @@ export async function createProjectRelay(
 	// wireMonitoring() returns (provides sseTracker, getMonitoringState).
 	const baseLayers = Layer.merge(RelayStateLive, bridgeLayers);
 
-	// Late-binding runtime: ManagedRuntime is created after wireMonitoring().
-	// effectRuntime methods reference relayManagedRuntime via closure — safe
-	// because all callers are callbacks (WebSocket handlers) that fire after
-	// full initialization.
-	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic is complex, callers use typed effects
-	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
-
 	const effectRuntime: RelayRuntime = {
 		get runtime() {
 			return relayManagedRuntime;
 		},
-		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
-		runSync: <A, E>(effect: Effect.Effect<A, E, any>) =>
-			relayManagedRuntime.runSync(effect),
-		dispatch: (clientId: string, type: string, raw: unknown) =>
-			relayManagedRuntime.runPromise(
-				dispatchMessageEffect(clientId, type, raw),
-			),
 		dispose: () => relayManagedRuntime.dispose(),
 	};
 
 	// ── WebSocket message handler ───────────────────────────────────────────
 	wsHandler.on("message", ({ clientId, handler, payload }) => {
-		// Rate-limit check (synchronous — stays outside the semaphore)
-		if (handler === "message") {
-			const result = effectRuntime.runSync(
-				Effect.gen(function* () {
-					const limiter = yield* RateLimiterTag;
-					return yield* limiter.checkLimit(clientId);
-				}),
-			);
-			if (!result.allowed) {
-				wsHandler.sendTo(clientId, {
-					type: "system_error",
-					code: "RATE_LIMITED",
-					message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
-				});
-				return;
-			}
-		}
-
-		// Log level changes (synchronous, no semaphore needed)
-		if (handler === "set_log_level") {
-			const level = payload["level"];
-			const validLevels = new Set([
-				"debug",
-				"verbose",
-				"info",
-				"warn",
-				"error",
-			]);
-			if (typeof level === "string" && validLevels.has(level)) {
-				setLogLevel(level as LogLevel);
-				wsLog.info(`Log level changed to ${level} by client ${clientId}`);
-			}
-			return;
-		}
-
-		// Serialize handler execution per-client via Effect Semaphore(1)
-		const sem = getClientSemaphore(clientId);
-		const program = sem.withPermits(1)(
-			Effect.tryPromise(() =>
-				effectRuntime.dispatch(clientId, handler, payload),
-			),
-		);
-		Effect.runPromise(program).catch((err) => {
-			wsLog.error(
-				`Error handling message for ${clientId}:`,
-				formatErrorDetail(err),
-			);
-			wsHandler.sendTo(
+		relayManagedRuntime.runFork(
+			handleRelayWsMessage({
 				clientId,
-				RelayError.fromCaught(err, "HANDLER_ERROR").toSystemError(),
-			);
-		});
+				handler,
+				payload,
+				sendTo: (targetClientId, message) =>
+					wsHandler.sendTo(targetClientId, message),
+				log: wsLog,
+			}),
+		);
 	});
 
 	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────

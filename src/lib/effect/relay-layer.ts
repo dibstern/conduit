@@ -11,6 +11,7 @@
 
 import { Layer } from "effect";
 
+import { ClientMessageSerializationLive } from "./client-message-serialization.js";
 import { DaemonEventBusLive } from "./daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "./instance-manager-service.js";
 import { makePollerManagerStateLive } from "./message-poller.js";
@@ -49,6 +50,7 @@ export const RelayStateLive = Layer.mergeAll(
 	makePollerPubSubLive(),
 	// WebSocket handler state
 	makeWsHandlerStateLive(),
+	ClientMessageSerializationLive,
 	// PTY state
 	PtyManagerStateLive,
 	// Instance management state

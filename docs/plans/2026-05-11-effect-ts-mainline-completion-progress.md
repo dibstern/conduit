@@ -868,3 +868,77 @@ Exit: 0
 $ pnpm lint
 Exit: 0
 ```
+
+## Phase 4: WebSocket Message Dispatch Ownership Slice
+
+Plan issue found:
+
+- `src/lib/relay/relay-stack.ts` still owned WebSocket message dispatch imperatively: it synchronously ran the
+  rate-limit check, special-cased log-level messages, created per-client semaphores through a global server
+  module, wrapped `dispatchMessageEffect(...)` in `Effect.tryPromise`, and launched that wrapper with app-internal
+  `Effect.runPromise(...)`.
+- The old `test/unit/effect/client-message-serialization.test.ts` and
+  `test/unit/server/client-message-queue.test.ts` mostly proved raw semaphore/global-map behavior rather than
+  the relay dispatch boundary. They were not strong enough to prevent the bridge from remaining in production.
+
+Changes:
+
+- `src/lib/effect/client-message-serialization.ts`: added a scoped `ClientMessageSerializationTag` backed by a
+  per-layer `SynchronizedRef<HashMap<string, Semaphore>>`.
+- `src/lib/relay/ws-message-dispatch-effect.ts`: added the Effect-owned WebSocket dispatch boundary for rate
+  limiting, `set_log_level`, per-client serialization, default `dispatchMessageEffect(...)`, and
+  `HANDLER_ERROR` rendering.
+- `src/lib/relay/relay-stack.ts`: reduced the WebSocket callback to `relayManagedRuntime.runFork(...)` and moved
+  client disconnect cleanup into the Effect serialization service.
+- Deleted `src/lib/server/client-semaphore.ts` and the duplicate server queue test.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/client-message-serialization.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 1
+Expected failures:
+  Cannot find module '../../../src/lib/effect/client-message-serialization.js'
+```
+
+```text
+$ pnpm vitest run test/unit/relay/ws-message-dispatch-effect.test.ts -t "pure dispatch interruption"
+Exit: 1
+Expected failure:
+  expected 'Success' to be 'Failure'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/client-message-serialization.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts \
+  test/unit/handlers/dispatch-effect.test.ts \
+  test/unit/relay
+Exit: 0
+Test Files  40 passed (40)
+Tests  528 passed (528)
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  346 passed (346)
+Tests  5081 passed | 2 skipped | 12 todo (5095)
+```
+
+```text
+$ pnpm check
+Exit: 0
+
+$ pnpm lint
+Exit: 0
+
+$ git diff --check
+Exit: 0
+
+$ rg "client-semaphore|getClientSemaphore|client-message-queue" -n src test
+Exit: 1
+No output.
+```
