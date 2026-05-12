@@ -1,0 +1,93 @@
+{
+	"get_commands_opencode_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "command_list",
+				"commands": [
+					{
+						"name": "build",
+						"description": "Run build"
+					},
+					{
+						"name": "test"
+					}
+				]
+			}
+		}
+	],
+	"get_commands_claude_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "command_list",
+				"commands": [
+					{
+						"name": "init",
+						"description": "Init Claude",
+						"args": "[path]"
+					}
+				]
+			}
+		}
+	],
+	"get_commands_opencode_error": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "system_error",
+				"code": "HANDLER_ERROR",
+				"message": "An unknown error occurred in Effect.tryPromise"
+			}
+		}
+	],
+	"get_projects_config_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "project_list",
+				"projects": [
+					{
+						"slug": "proj-1",
+						"title": "Project 1",
+						"directory": "/work/proj",
+						"instanceId": "inst-1"
+					}
+				],
+				"current": "test-project"
+			}
+		}
+	],
+	"get_projects_opencode_fallback_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "project_list",
+				"projects": [
+					{
+						"slug": "p1",
+						"title": "Proj 1",
+						"directory": "/proj1"
+					}
+				],
+				"current": "test-project"
+			}
+		}
+	],
+	"get_projects_opencode_error": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "system_error",
+				"code": "HANDLER_ERROR",
+				"message": "An unknown error occurred in Effect.tryPromise"
+			}
+		}
+	]
+}

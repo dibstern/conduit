@@ -2124,6 +2124,30 @@ Test Files  357 passed (357)
 Tests  5138 passed | 2 skipped | 12 todo (5152)
 ```
 
+## Phase 7.4: Settings Handler Wire Snapshots
+
+Plan issues found:
+
+- `get_commands` has two materially different success envelopes: OpenCode command reads and Claude active-provider
+  discovery. Both need snapshots before moving OpenCode app reads behind an Effect service.
+- `get_projects` has two read paths: daemon config when projects are already registered, and OpenCode app fallback.
+  Only the fallback path should require the OpenCode app-read service.
+
+Changes:
+
+- `test/unit/handlers/settings-wire-snapshots.test.ts`: added wire-envelope tests for OpenCode commands, Claude
+  commands, config-backed projects, OpenCode fallback projects, and dispatch-level error envelopes.
+- `test/snapshots/handlers/settings.json`: pinned the current command/project WebSocket envelopes before conversion.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/settings-wire-snapshots.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  6 passed (6)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:
