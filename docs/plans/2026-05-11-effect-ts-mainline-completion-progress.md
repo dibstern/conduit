@@ -2118,6 +2118,53 @@ Exit: 0
 Checked 963 files. No fixes applied.
 ```
 
+## Phase 7.2: Model Handler Wire Snapshots
+
+Plan issues found:
+
+- `handleGetModels` mixes OpenCode provider reads, active-session model reads, optional Claude discovery, and variant
+  projection. Converting it without a wire snapshot would make subtle frontend-observed envelope changes hard to spot.
+- Provider/model reads should be split from settings/app discovery reads. A broad OpenCode read service would duplicate
+  the old `OpenCodeAPITag` shape and dilute the service boundary.
+
+Changes:
+
+- `test/unit/handlers/model-wire-snapshots.test.ts`: added focused `get_models` wire snapshots for the OpenCode-only
+  model list, active-session `model_info` path, and provider-list failure through `handleRelayWsMessage(...)`.
+- `test/snapshots/handlers/models.json`: committed the current model handler wire contract before extracting a
+  provider/model read service.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-wire-snapshots.test.ts
+Exit: 1
+Expected failure:
+  test/snapshots/handlers/models.json did not exist yet.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  68 passed (68)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 965 files. No fixes applied.
+```
+
 ## Phase 7.0: File Handler Wire Snapshots
 
 Plan issues found:

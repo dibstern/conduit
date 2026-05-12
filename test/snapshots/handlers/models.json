@@ -1,0 +1,110 @@
+{
+	"get_models_opencode_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "model_list",
+				"providers": [
+					{
+						"id": "openai",
+						"name": "OpenAI",
+						"configured": true,
+						"models": [
+							{
+								"id": "gpt-4",
+								"name": "GPT-4",
+								"provider": "openai",
+								"limit": {
+									"context": 128000,
+									"output": 4096
+								},
+								"variants": ["standard", "fast"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "variant_info",
+				"variant": "",
+				"variants": []
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "context_window_info",
+				"contextWindow": "",
+				"options": []
+			}
+		}
+	],
+	"get_models_active_session_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "model_list",
+				"providers": [
+					{
+						"id": "openai",
+						"name": "OpenAI",
+						"configured": true,
+						"models": [
+							{
+								"id": "gpt-4",
+								"name": "GPT-4",
+								"provider": "openai",
+								"variants": ["standard", "fast"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "model_info",
+				"model": "gpt-4",
+				"provider": "openai"
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "variant_info",
+				"variant": "",
+				"variants": ["standard", "fast"]
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "context_window_info",
+				"contextWindow": "",
+				"options": []
+			}
+		}
+	],
+	"get_models_provider_list_error": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "system_error",
+				"code": "HANDLER_ERROR",
+				"message": "An unknown error occurred in Effect.tryPromise"
+			}
+		}
+	]
+}
