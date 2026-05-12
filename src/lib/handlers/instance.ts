@@ -6,7 +6,8 @@
 import { Effect } from "effect";
 import { InstanceManagementServiceTag } from "../effect/instance-management-service.js";
 import { ProjectManagementServiceTag } from "../effect/project-management-service.js";
-import { ScanDepsTag, WebSocketHandlerTag } from "../effect/services.js";
+import { ScanServiceTag } from "../effect/scan-service.js";
+import { WebSocketHandlerTag } from "../effect/services.js";
 import { formatErrorDetail } from "../errors.js";
 import type { OpenCodeInstance, ProjectInfo } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
@@ -280,18 +281,20 @@ export const handleScanNow = (
 	_payload: PayloadMap["scan_now"],
 ) =>
 	Effect.gen(function* () {
-		const scanDepsOption = yield* Effect.serviceOption(ScanDepsTag);
-		if (scanDepsOption._tag === "None") {
+		const scanServiceOption = yield* Effect.serviceOption(ScanServiceTag);
+		if (scanServiceOption._tag === "None") {
 			yield* sendError(clientId, "Port scanning not available");
 			return;
 		}
-		const scanDeps = scanDepsOption.value;
 
-		const scanResult = yield* Effect.either(
-			Effect.tryPromise(() => scanDeps.triggerScan()),
-		);
+		const scanResult = yield* Effect.either(scanServiceOption.value.scanNow());
 		if (scanResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(scanResult.left));
+			yield* sendError(
+				clientId,
+				scanResult.left._tag === "ScanServiceNotAvailable"
+					? scanResult.left.message
+					: formatErrorDetail(scanResult.left.cause),
+			);
 			return;
 		}
 		const wsHandler = yield* WebSocketHandlerTag;

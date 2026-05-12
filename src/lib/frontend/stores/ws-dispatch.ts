@@ -942,6 +942,9 @@ export function handleMessage(msg: RelayMessage): void {
 		case "scan_result":
 			handleScanResult(msg);
 			break;
+		case "system_error":
+			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
+			break;
 
 		// ─── Cross-session notifications ─────────────────────────────────
 		// Broadcast by the server when a notification-worthy event (done,

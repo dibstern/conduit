@@ -30,6 +30,7 @@ import { makePollerManagerStateLive } from "../../src/lib/effect/message-poller.
 import { PendingInteractionServiceLive } from "../../src/lib/effect/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../src/lib/effect/project-management-service.js";
 import { RateLimiterLive } from "../../src/lib/effect/rate-limiter-layer.js";
+import { ScanServiceLive } from "../../src/lib/effect/scan-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
@@ -936,6 +937,7 @@ export function makeTestHandlerLayer(
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
+	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -974,6 +976,7 @@ export function makeTestHandlerLayer(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
+		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,

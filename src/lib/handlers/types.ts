@@ -47,15 +47,6 @@ export interface ProjectManagementDeps {
 	) => void | Promise<void>;
 }
 
-/** Port scan capability — only available in daemon mode. */
-export interface ScanDeps {
-	triggerScan: () => Promise<{
-		discovered: number[];
-		lost: number[];
-		active: number[];
-	}>;
-}
-
 export interface HandlerDeps {
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
@@ -83,8 +74,6 @@ export interface HandlerDeps {
 	instanceMgmt?: InstanceManagementDeps;
 	/** Project management capability group (optional — only available in daemon mode) */
 	projectMgmt?: ProjectManagementDeps;
-	/** Port scan capability (optional — only available in daemon mode) */
-	scanDeps?: ScanDeps;
 	/** SQLite read query service (optional — only available when persistence is configured) */
 	readQuery?: ReadQueryService;
 	/**

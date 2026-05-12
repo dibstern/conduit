@@ -21,7 +21,6 @@ import {
 	PtyManagerTag,
 	// Persistence extension Tags
 	ReadQueryTag,
-	ScanDepsTag,
 	SessionManagerTag,
 	SessionOverridesTag,
 	SessionRegistryTag,
@@ -50,7 +49,6 @@ const ALL_TAGS = [
 	ProviderStateServiceTag,
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-	ScanDepsTag,
 	ClientIdTag,
 ] as const;
 
@@ -70,7 +68,7 @@ describe("Service Tags", () => {
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
 		// Bridge classes are no longer Effect services; count only active Tags.
-		expect(ALL_TAGS.length).toBe(20);
+		expect(ALL_TAGS.length).toBe(19);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -149,10 +147,6 @@ describe("Service Tags", () => {
 
 	it("ProjectMgmt tag has correct key", () => {
 		expect(ProjectMgmtTag.key).toBe("ProjectMgmt");
-	});
-
-	it("ScanDeps tag has correct key", () => {
-		expect(ScanDepsTag.key).toBe("ScanDeps");
 	});
 
 	// ── Per-request Tags ─────────────────────────────────────────────────────

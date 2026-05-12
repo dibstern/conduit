@@ -13,7 +13,6 @@ import type {
 	HandlerDeps,
 	InstanceManagementDeps,
 	ProjectManagementDeps,
-	ScanDeps,
 } from "../handlers/types.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
@@ -358,11 +357,6 @@ export class ProjectMgmtTag extends Context.Tag("ProjectMgmt")<
 	ProjectManagementDeps
 >() {}
 
-export class ScanDepsTag extends Context.Tag("ScanDeps")<
-	ScanDepsTag,
-	ScanDeps
->() {}
-
 // ─── Per-request Tags ──────────────────────────────────────────────────────
 
 export class ClientIdTag extends Context.Tag("ClientId")<
@@ -402,17 +396,15 @@ type _AssertCoverage = {
 													? InstanceManagementDeps
 													: K extends "projectMgmt"
 														? ProjectManagementDeps
-														: K extends "scanDeps"
-															? ScanDeps
-															: K extends "readQuery"
-																? ReadQueryService
-																: K extends "orchestrationEngine"
-																	? OrchestrationEngine
-																	: K extends "claudeEventPersist"
-																		? LegacyRelayEventSinkPersist
-																		: K extends "providerStateService"
-																			? ProviderStateService
-																			: never;
+														: K extends "readQuery"
+															? ReadQueryService
+															: K extends "orchestrationEngine"
+																? OrchestrationEngine
+																: K extends "claudeEventPersist"
+																	? LegacyRelayEventSinkPersist
+																	: K extends "providerStateService"
+																		? ProviderStateService
+																		: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.

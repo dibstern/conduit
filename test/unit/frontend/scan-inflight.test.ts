@@ -78,7 +78,7 @@ describe("scanInFlight state management", () => {
 		});
 	});
 
-	it("clears scanInFlight when server responds with INSTANCE_ERROR", () => {
+	it("clears scanInFlight when server responds with system_error INSTANCE_ERROR", () => {
 		clearInstanceState();
 		const sendFn = vi.fn();
 		triggerScan(sendFn);
@@ -86,8 +86,7 @@ describe("scanInFlight state management", () => {
 
 		// Server sends error instead of scan_result (e.g. triggerScan not wired)
 		const errorMsg: RelayMessage = {
-			type: "error",
-			sessionId: "s1",
+			type: "system_error",
 			code: "INSTANCE_ERROR",
 			message: "Port scanning not available",
 		};

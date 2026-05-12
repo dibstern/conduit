@@ -2060,6 +2060,98 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.31: Scan Handler Domain Service Contract
+
+Plan issues found:
+
+- The remaining `scan_now` browser handler was still wired through `ScanDepsTag`, a Promise-shaped bridge mounted in
+  `relay-stack.ts`.
+- `PortScannerTag` is not the correct replacement for this handler boundary because it only exposes known ports; it
+  cannot trigger an immediate scan or produce the `discovered` / `lost` / `active` response expected by the browser.
+- While auditing the wire behavior, a pre-existing frontend gap surfaced: the server sends scan failures as
+  `system_error` with `INSTANCE_ERROR`, but the scan in-flight unit test only covered a per-session `error` message.
+  That meant the Settings UI could stay stuck on "Scanning..." after a scan failure.
+
+Changes:
+
+- Added `src/lib/effect/scan-service.ts` with `ScanServiceTag`, `ScanServiceLive`, `ScanServiceError`, and
+  `ScanServiceNotAvailable`.
+- Converted `handleScanNow` to consume `ScanServiceTag` instead of `ScanDepsTag`, preserving the existing
+  `scan_result` success envelope and `INSTANCE_ERROR` system-error envelope.
+- Wired `ScanServiceLive` into relay runtime composition and the shared handler test layer from `ConfigTag`.
+- Deleted the legacy `ScanDepsTag` and `ScanDeps` handler dependency type.
+- Updated frontend dispatch so `system_error` with `INSTANCE_ERROR` clears `scanInFlight`, matching the actual server
+  failure envelope.
+- Added service tests, handler-boundary tests, and a real `system_error` frontend scan-inflight regression test.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/scan-service.test.ts test/unit/handlers/scan-service-effect.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/effect/scan-service.js'
+```
+
+```text
+$ pnpm vitest run test/unit/frontend/scan-inflight.test.ts
+Exit: 1
+Expected failure:
+  expected true to be false
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/scan-service.test.ts \
+  test/unit/handlers/scan-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  113 passed (113)
+```
+
+```text
+$ pnpm vitest run test/unit/frontend/scan-inflight.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed (4)
+```
+
+```text
+$ rg -n "ScanDeps|scanDeps" src test --glob '!dist/**'
+Exit: 1
+No legacy scan dependency bridge references remain in app or test source.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 984 files. No fixes applied.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers test/unit/effect/scan-service.test.ts test/unit/effect/services.test.ts \
+  test/unit/mock-factories.test.ts test/unit/frontend/scan-inflight.test.ts
+Exit: 0
+Test Files  26 passed (26)
+Tests  233 passed (233)
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  369 passed (369)
+Tests  5224 passed | 2 skipped | 12 todo (5238)
+```
+
 ## Phase 7.30: Project Management Handler Domain Service Contract
 
 Plan issues found:

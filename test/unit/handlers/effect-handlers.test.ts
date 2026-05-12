@@ -13,6 +13,7 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/effect/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/effect/project-management-service.js";
+import { ScanServiceTag } from "../../../src/lib/effect/scan-service.js";
 import type {
 	SessionManagerShape,
 	WebSocketHandlerShape,
@@ -29,7 +30,6 @@ import {
 	OrchestrationEngineTag,
 	PollerManagerTag,
 	ReadQueryTag,
-	ScanDepsTag,
 	SessionManagerTag,
 	SessionOverridesTag,
 	StatusPollerTag,
@@ -98,10 +98,7 @@ import {
 	handlePtyResize,
 } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
-import type {
-	InstanceManagementDeps,
-	ScanDeps,
-} from "../../../src/lib/handlers/types.js";
+import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
@@ -1864,17 +1861,19 @@ describe("handleScanNow", () => {
 
 	it.effect("sends scan result when available", () => {
 		const ws = mockWsHandler();
-		const scanDeps: ScanDeps = {
-			triggerScan: vi.fn(async () => ({
-				discovered: [8080],
-				lost: [],
-				active: [3000, 8080],
-			})),
+		const scanService = {
+			scanNow: vi.fn(() =>
+				Effect.succeed({
+					discovered: [8080],
+					lost: [],
+					active: [3000, 8080],
+				}),
+			),
 		};
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ScanDepsTag, scanDeps),
+			Layer.succeed(ScanServiceTag, scanService),
 		);
 
 		return handleScanNow("client-1", {}).pipe(

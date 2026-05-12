@@ -38,6 +38,7 @@ import {
 } from "../effect/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../effect/project-management-service.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
+import { ScanServiceLive } from "../effect/scan-service.js";
 import {
 	ClaudeEventPersistTag,
 	ConfigTag,
@@ -53,7 +54,6 @@ import {
 	ProviderStateServiceTag,
 	PtyManagerTag,
 	ReadQueryTag,
-	ScanDepsTag,
 	type SessionManagerShape,
 	SessionManagerTag,
 	SessionOverridesTag,
@@ -856,11 +856,6 @@ export async function createProjectRelay(
 				}
 			: undefined;
 
-	const scanDeps =
-		config.triggerScan != null
-			? { triggerScan: config.triggerScan }
-			: undefined;
-
 	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
 	// RelayStateLive provides all self-constructing Effect-native state Layers.
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
@@ -881,6 +876,7 @@ export async function createProjectRelay(
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
+	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const webSocketHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -907,6 +903,7 @@ export async function createProjectRelay(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
+		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
@@ -954,13 +951,6 @@ export async function createProjectRelay(
 			Layer.merge(instanceMgmtLayer, instanceManagementServiceLayer),
 		);
 	}
-	if (scanDeps != null) {
-		bridgeLayers = Layer.merge(
-			bridgeLayers,
-			Layer.succeed(ScanDepsTag, scanDeps),
-		);
-	}
-
 	const persistenceEffectLayer =
 		config.persistenceDbPath != null
 			? makePersistenceEffectLayer(config.persistenceDbPath)
