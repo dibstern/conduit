@@ -27,8 +27,14 @@ import {
 } from "./session-status-poller.js";
 import { makeWsHandlerStateLive } from "./ws-handler-service.js";
 
-const SessionManagerStateAndServiceLive = SessionManagerServiceLive.pipe(
-	Layer.provideMerge(makeSessionManagerStateLive()),
+const sessionManagerDepsLive = Layer.mergeAll(
+	makeSessionManagerStateLive(),
+	DaemonEventBusLive,
+);
+
+const SessionManagerStateAndServiceLive = Layer.provideMerge(
+	SessionManagerServiceLive,
+	sessionManagerDepsLive,
 );
 
 /**
@@ -57,8 +63,6 @@ export const RelayStateLive = Layer.mergeAll(
 	PtyManagerStateLive,
 	// Instance management state
 	makeInstanceManagerStateLive(),
-	// Event bus
-	DaemonEventBusLive,
 	// Rate limiter (scoped — cleanup fiber runs every 60s)
 	RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
 );

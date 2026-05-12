@@ -21,6 +21,11 @@ import { toSessionInfoList } from "../session/session-info-list.js";
 import type { HistoryMessage } from "../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
 import {
+	DaemonEventBusTag,
+	publishSessionCreated,
+	publishSessionDeleted,
+} from "./daemon-pubsub.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
@@ -608,13 +613,14 @@ export class SessionManagerServiceTag extends Context.Tag(
 export const SessionManagerServiceLive: Layer.Layer<
 	SessionManagerServiceTag,
 	never,
-	OpenCodeAPITag | SessionManagerStateTag | LoggerTag
+	OpenCodeAPITag | SessionManagerStateTag | LoggerTag | DaemonEventBusTag
 > = Layer.effect(
 	SessionManagerServiceTag,
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
 		const log = yield* LoggerTag;
+		const eventBus = yield* DaemonEventBusTag;
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
@@ -668,12 +674,25 @@ export const SessionManagerServiceLive: Layer.Layer<
 		return {
 			listSessions: serviceListSessions,
 			createSession: (title) =>
-				createSession(title).pipe(Effect.provideService(OpenCodeAPITag, api)),
+				Effect.gen(function* () {
+					const session = yield* createSession(title).pipe(
+						Effect.provideService(OpenCodeAPITag, api),
+					);
+					yield* publishSessionCreated(session.id).pipe(
+						Effect.provideService(DaemonEventBusTag, eventBus),
+					);
+					return session;
+				}),
 			deleteSession: (sessionId) =>
-				deleteSession(sessionId).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
+				Effect.gen(function* () {
+					yield* deleteSession(sessionId).pipe(
+						Effect.provideService(OpenCodeAPITag, api),
+						Effect.provideService(SessionManagerStateTag, stateRef),
+					);
+					yield* publishSessionDeleted(sessionId).pipe(
+						Effect.provideService(DaemonEventBusTag, eventBus),
+					);
+				}),
 			renameSession: (sessionId, title) =>
 				renameSession(sessionId, title).pipe(
 					Effect.provideService(OpenCodeAPITag, api),

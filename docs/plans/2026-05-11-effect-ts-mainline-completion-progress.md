@@ -2720,6 +2720,125 @@ $ git diff --check
 Exit: 0
 ```
 
+## Phase 7.21: Session Create/Delete Lifecycle Service Contract
+
+Plan issues found:
+
+- `new_session` and `delete_session` could not safely switch to the existing
+  `SessionManagerService.createSession/deleteSession` methods alone. The legacy
+  `SessionManager.createSession/deleteSession({ silent: true })` suppressed automatic list
+  broadcasts but still emitted `session_lifecycle`, which `SessionEventBridgeLive` forwarded to
+  `DaemonEventBus` for `SessionLifecycleWiringLive`.
+- Lifecycle publication therefore belongs in `SessionManagerServiceLive`, after successful provider
+  mutation and state cleanup. The handlers must keep owning WebSocket switch, delete, and
+  session-list envelopes so the service does not grow hidden broadcast side effects.
+- Adding `DaemonEventBusTag` to `SessionManagerServiceLive` also required Relay layer composition to
+  provide the same bus instance to the service and downstream lifecycle wiring. A private bus inside
+  the service would pass unit tests while dropping production lifecycle events.
+
+Changes:
+
+- Converted `handleNewSession` and `handleDeleteSession` to call
+  `SessionManagerServiceTag.createSession/deleteSession`; `src/lib/handlers/session.ts` no longer
+  imports `SessionManagerTag`.
+- `SessionManagerServiceLive.createSession` now publishes one `SessionCreated` event after the
+  provider create succeeds, and `deleteSession` publishes one `SessionDeleted` event after provider
+  delete and service state cleanup succeed.
+- `RelayStateLive` now builds `SessionManagerServiceLive` with `makeSessionManagerStateLive()` and
+  `DaemonEventBusLive` in one dependency layer, so lifecycle subscribers observe the same bus.
+- Handler tests now make legacy `createSession/deleteSession` throw if the browser lifecycle path
+  regresses to the old manager, while preserving request-id echo, viewer switching, metadata replay,
+  explicit `session_deleted`, and session-list broadcasts.
+- Added `new_session` and `delete_session` wire snapshots for the session switch/status/delete/list
+  envelopes affected by this ownership move.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "creates and switches before broadcasting lists through SessionManagerService"
+Exit: 1
+Expected failure:
+  legacy createSession should not be used
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "deletes and broadcasts lists through SessionManagerService"
+Exit: 1
+Expected failure:
+  legacy deleteSession should not be used
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "live service publishes"
+Exit: 1
+Expected failures:
+  expected null to match object { _tag: 'SessionCreated', sessionId: 'created-session' }
+  expected null to match object { _tag: 'SessionDeleted', sessionId: 'deleted-session' }
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts -t "new_session|delete_session"
+Exit: 1
+Expected failure:
+  new_session_success and delete_session_success snapshots did not exist yet.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleNewSession|handleDeleteSession"
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed | 61 skipped (65)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "live service publishes"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 14 skipped (16)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts -t "new_session|delete_session"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 4 skipped (6)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts \
+  test/unit/effect/session-lifecycle-wiring.test.ts \
+  test/unit/effect/session-event-bridge.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  100 passed (100)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  363 passed (363)
+Tests  5187 passed | 2 skipped | 12 todo (5201)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

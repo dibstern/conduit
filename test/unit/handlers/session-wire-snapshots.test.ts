@@ -2,14 +2,17 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { expect, vi } from "vitest";
 import {
+	handleDeleteSession,
 	handleListSessions,
 	handleLoadMoreHistory,
+	handleNewSession,
 	handleRenameSession,
 	handleViewSession,
 } from "../../../src/lib/handlers/session.js";
+import { RequestId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
@@ -161,6 +164,94 @@ describe("session handler wire snapshots", () => {
 		);
 
 		expect(calls).toEqual(readSnapshots()["rename_session_success"]);
+	});
+
+	it("keeps the new_session switch and broadcast envelopes stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const requestId = Schema.decodeUnknownSync(RequestId)("req-1");
+		const sessionManagerService = makeMockSessionManagerService({
+			createSession: vi.fn(() =>
+				Effect.succeed({
+					id: "new-session",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "New Session",
+					version: "1.0.0",
+					time: { created: 300, updated: 300 },
+				}),
+			),
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "new-session",
+								title: "New Session",
+								updatedAt: 300,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+					send({
+						type: "session_list",
+						sessions: [],
+						roots: false,
+					});
+				}),
+			),
+		});
+
+		await Effect.runPromise(
+			handleNewSession("client-1", { requestId }).pipe(
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["new_session_success"]);
+	});
+
+	it("keeps the delete_session deleted and broadcast envelopes stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler({
+			getClientsForSession: vi.fn(() => []),
+		});
+		const sessionManagerService = makeMockSessionManagerService({
+			deleteSession: vi.fn(() => Effect.void),
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "remaining-session",
+								title: "Remaining Session",
+								updatedAt: 400,
+								messageCount: 1,
+							},
+						],
+						roots: true,
+					});
+					send({
+						type: "session_list",
+						sessions: [],
+						roots: false,
+					});
+				}),
+			),
+		});
+
+		await Effect.runPromise(
+			handleDeleteSession("client-1", { sessionId: "deleted-session" }).pipe(
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["delete_session_success"]);
 	});
 
 	it("keeps the load_more_history response envelope stable", async () => {

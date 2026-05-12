@@ -949,6 +949,7 @@ export function makeTestHandlerLayer(
 						makeSessionManagerStateLive(),
 						Layer.succeed(LoggerTag, log),
 						Layer.succeed(StatusPollerTag, statusPoller),
+						DaemonEventBusLive,
 					),
 				),
 			);

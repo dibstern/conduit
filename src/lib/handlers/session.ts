@@ -10,7 +10,6 @@ import {
 	PollerManagerTag,
 	QuestionBridgeTag,
 	ReadQueryTag,
-	SessionManagerTag,
 	SessionOverridesTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -333,14 +332,11 @@ export const handleNewSession = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const { title, requestId } = payload;
-		const session = yield* Effect.tryPromise(() =>
-			sessionMgr.createSession(title, { silent: true }),
-		);
+		const session = yield* sessionManagerService.createSession(title);
 
 		yield* switchClientToSession(clientId, session.id, {
 			...(requestId != null && { requestId }),
@@ -378,7 +374,6 @@ export const handleDeleteSession = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -388,9 +383,7 @@ export const handleDeleteSession = (
 		// Find ALL clients viewing this session before deletion
 		const viewers = wsHandler.getClientsForSession(id);
 
-		yield* Effect.tryPromise(() =>
-			sessionMgr.deleteSession(id, { silent: true }),
-		);
+		yield* sessionManagerService.deleteSession(id);
 
 		const sessions =
 			viewers.length > 0 ? yield* sessionManagerService.listSessions() : [];

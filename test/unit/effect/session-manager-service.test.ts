@@ -3,12 +3,16 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Ref, TestClock } from "effect";
+import { Effect, HashMap, Layer, Option, Queue, Ref, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import {
 	loadForkMetadata,
 	saveForkMetadata,
 } from "../../../src/lib/daemon/fork-metadata.js";
+import {
+	DaemonEventBusLive,
+	subscribeToDaemonEvents,
+} from "../../../src/lib/effect/daemon-pubsub.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -97,6 +101,81 @@ function makeHistoryMessage(
 }
 
 describe("SessionManagerService", () => {
+	it.scoped(
+		"live service publishes one SessionCreated after create succeeds",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create").mockResolvedValue({
+				id: "created-session",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Created",
+				version: "1.0.0",
+				time: { created: 10, updated: 10 },
+			});
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+				),
+			);
+
+			return Effect.gen(function* () {
+				const sub = yield* subscribeToDaemonEvents;
+				const service = yield* SessionManagerServiceTag;
+
+				const session = yield* service.createSession("Created");
+
+				expect(session.id).toBe("created-session");
+				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
+				const event = yield* Queue.poll(sub);
+				expect(Option.getOrNull(event)).toMatchObject({
+					_tag: "SessionCreated",
+					sessionId: "created-session",
+				});
+				const extra = yield* Queue.poll(sub);
+				expect(Option.isNone(extra)).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		},
+	);
+
+	it.scoped(
+		"live service publishes one SessionDeleted after delete succeeds",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* service.recordMessageActivity("deleted-session", 123);
+				const sub = yield* subscribeToDaemonEvents;
+
+				yield* service.deleteSession("deleted-session");
+
+				expect(api.session.delete).toHaveBeenCalledWith("deleted-session");
+				const event = yield* Queue.poll(sub);
+				expect(Option.getOrNull(event)).toMatchObject({
+					_tag: "SessionDeleted",
+					sessionId: "deleted-session",
+				});
+				const extra = yield* Queue.poll(sub);
+				expect(Option.isNone(extra)).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		},
+	);
+
 	it.effect(
 		"loads pre-rendered history and stores the oldest message cursor",
 		() => {
@@ -676,6 +755,7 @@ describe("SessionManagerService", () => {
 						})),
 					}),
 					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
 				),
 			),
 		);
@@ -738,6 +818,7 @@ describe("SessionManagerService", () => {
 						Layer.succeed(LoggerTag, makeMockLogger()),
 						Layer.succeed(ConfigTag, config),
 						makeSessionManagerStateLive(),
+						DaemonEventBusLive,
 					),
 				),
 			);
