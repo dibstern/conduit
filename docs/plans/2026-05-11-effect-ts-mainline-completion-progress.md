@@ -1567,3 +1567,66 @@ $ pnpm lint
 Exit: 0
 Checked 950 files. No fixes applied.
 ```
+
+## Phase 5.3: Effect Read Query First Consumer Slice
+
+Plan issues found:
+
+- `ReadQueryTag` was still a legacy synchronous `ReadQueryService` bridge over `PersistenceLayer.db`. Moving the
+  entire read surface at once would mix tool-content, status reads, session lists, fork metadata, and full
+  history. The safer first consumer is `get_tool_content`, which has one query and one handler response shape.
+- A handler test that only mocked `getToolContent` would be low signal. The new test seeds a real
+  `@effect/sql-sqlite-node` database through the production Effect persistence layer and then drives the handler.
+
+Changes:
+
+- `src/lib/persistence/effect/read-query-effect.ts`: added `ReadQueryEffectTag` with an Effect-native
+  `getToolContent(toolId)` method backed by `SqlClient`.
+- `src/lib/persistence/effect/live.ts`: includes `ReadQueryEffectTag` in the reusable per-project persistence
+  layer.
+- `src/lib/handlers/tool-content.ts`: prefers `ReadQueryEffectTag` when present and falls back to the legacy
+  `ReadQueryTag` while the larger read surface remains unmigrated.
+- `src/lib/relay/relay-stack.ts`: merges the per-project Effect persistence layer into the relay handler runtime
+  when `persistenceDbPath` is available, so production handlers can resolve `ReadQueryEffectTag`.
+- `test/unit/handlers/tool-content-effect.test.ts`: added a real SQLite-backed handler test for the Effect read
+  path.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts
+Exit: 1
+Expected failure:
+  handler returned NOT_FOUND because it ignored the Effect read service and only checked legacy ReadQueryTag.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts -t "handleGetToolContent"
+Exit: 0
+Test Files  2 passed (2)
+Tests  3 passed | 57 skipped (60)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/persistence/effect-dual-write-hook.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  61 passed (61)
+Note: effect-handlers emitted existing MaxListenersExceededWarning warnings from the test harness.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 952 files. No fixes applied.
+```

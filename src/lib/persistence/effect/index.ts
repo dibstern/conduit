@@ -34,3 +34,9 @@ export {
 	type ProjectionContext,
 	ProjectionError,
 } from "./projectors-effect.js";
+export {
+	makeReadQueryEffect,
+	type ReadQueryEffect,
+	ReadQueryEffectError,
+	ReadQueryEffectTag,
+} from "./read-query-effect.js";

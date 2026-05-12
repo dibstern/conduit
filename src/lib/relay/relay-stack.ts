@@ -80,6 +80,7 @@ import {
 import { EffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
 import {
 	makePersistenceEffectLayer,
+	type PersistenceEffectError,
 	type PersistenceEffectRuntime,
 } from "../persistence/effect/live.js";
 import {
@@ -118,9 +119,14 @@ import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
 /** Runtime bridge between imperative relay-stack and Effect handler pipeline. */
+// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime context is the full relay Layer graph.
+type RelayRuntimeContext = any;
+
 interface RelayRuntime {
-	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags
-	runtime: ManagedRuntime.ManagedRuntime<any, never>;
+	runtime: ManagedRuntime.ManagedRuntime<
+		RelayRuntimeContext,
+		PersistenceEffectError
+	>;
 	dispose: () => Promise<void>;
 }
 
@@ -727,8 +733,10 @@ export async function createProjectRelay(
 
 	// Late-binding runtime: callbacks fire after full relay initialization, but
 	// registering them here keeps the external WebSocket boundary thin.
-	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic is complex, callers use typed effects
-	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
+	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
+		RelayRuntimeContext,
+		PersistenceEffectError
+	>;
 
 	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
 		wsLog.info(
@@ -851,11 +859,20 @@ export async function createProjectRelay(
 		);
 	}
 
+	const persistenceEffectLayer =
+		config.persistenceDbPath != null
+			? makePersistenceEffectLayer(config.persistenceDbPath)
+			: undefined;
+
 	// Compose: self-constructing state layers + imperative bridge layers.
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionEventBridgeLive, SessionLifecycleWiringLive) are added after
 	// wireMonitoring() returns (provides sseTracker, getMonitoringState).
-	const baseLayers = Layer.merge(RelayStateLive, bridgeLayers);
+	const relayStateAndBridges = Layer.merge(RelayStateLive, bridgeLayers);
+	const baseLayers =
+		persistenceEffectLayer != null
+			? Layer.merge(relayStateAndBridges, persistenceEffectLayer)
+			: relayStateAndBridges;
 
 	const effectRuntime: RelayRuntime = {
 		get runtime() {
@@ -896,10 +913,8 @@ export async function createProjectRelay(
 	// ── Dual-write hook (SSE → SQLite event store) ──────────────────────
 	let effectPersistenceRuntime: PersistenceEffectRuntime | undefined;
 	let dualWriteHook: DualWriteHookPort | undefined;
-	if (config.persistenceDbPath != null) {
-		const persistenceRuntime = ManagedRuntime.make(
-			makePersistenceEffectLayer(config.persistenceDbPath),
-		);
+	if (persistenceEffectLayer != null) {
+		const persistenceRuntime = ManagedRuntime.make(persistenceEffectLayer);
 		try {
 			dualWriteHook = new EffectDualWriteHook({
 				runtime: persistenceRuntime,

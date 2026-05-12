@@ -23,6 +23,10 @@ import {
 	createAllEffectProjectors,
 	type EffectProjector,
 } from "./projectors-effect.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "./read-query-effect.js";
 
 export type PersistenceEffectContext =
 	| SqlClient.SqlClient
@@ -30,7 +34,8 @@ export type PersistenceEffectContext =
 	| PersistenceServiceTag
 	| EventStoreEffectTag
 	| ProjectorCursorEffectTag
-	| ProjectionRunnerEffectTag;
+	| ProjectionRunnerEffectTag
+	| ReadQueryEffectTag;
 
 export type PersistenceEffectError = PersistenceError | ConfigError.ConfigError;
 
@@ -68,10 +73,16 @@ export function makePersistenceEffectLayer(
 		makeProjectionRunnerEffect(projectors),
 	).pipe(Layer.provide(Layer.merge(cursorLayer, baseLayer)));
 
+	const readQueryLayer = Layer.effect(
+		ReadQueryEffectTag,
+		makeReadQueryEffect,
+	).pipe(Layer.provide(baseLayer));
+
 	return Layer.mergeAll(
 		baseLayer,
 		eventStoreLayer,
 		cursorLayer,
 		projectionRunnerLayer,
+		readQueryLayer,
 	);
 }

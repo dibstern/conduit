@@ -3,6 +3,7 @@
 
 import { Effect } from "effect";
 import { ReadQueryTag, WebSocketHandlerTag } from "../effect/services.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { PayloadMap } from "./payloads.js";
 
 export const handleGetToolContent = (
@@ -25,13 +26,20 @@ export const handleGetToolContent = (
 			return;
 		}
 
-		// ReadQuery is optional (persistence may not be configured).
-		// Use Effect.serviceOption to handle its absence gracefully.
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+		// Persistence is optional. Prefer the Effect-native read service when
+		// available; keep the legacy sync service as a fallback while Phase 5
+		// migrates the larger read surface.
+		const readQueryEffectOption =
+			yield* Effect.serviceOption(ReadQueryEffectTag);
 		const content =
-			readQueryOption._tag === "Some"
-				? readQueryOption.value.getToolContent(toolId)
-				: undefined;
+			readQueryEffectOption._tag === "Some"
+				? yield* readQueryEffectOption.value.getToolContent(toolId)
+				: yield* Effect.gen(function* () {
+						const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+						return readQueryOption._tag === "Some"
+							? readQueryOption.value.getToolContent(toolId)
+							: undefined;
+					});
 
 		if (content !== undefined) {
 			wsHandler.sendTo(clientId, {
