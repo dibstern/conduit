@@ -13,7 +13,9 @@ import {
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Effect, Ref } from "effect";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { PollerStateTag } from "../../../src/lib/effect/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,
@@ -335,5 +337,30 @@ describe("Status poller → browser processing/done transitions", () => {
 
 		await clientA.close();
 		await clientB.close();
+	});
+
+	it("shares status-poller state with the relay Effect runtime", async () => {
+		harness.mock.sessionStatuses["sess-A"] = { type: "busy" };
+
+		await vi.waitFor(
+			() => expect(harness.relay.isAnySessionProcessing()).toBe(true),
+			{ timeout: 3000 },
+		);
+
+		const relayRuntimeStatus =
+			await harness.relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					const ref = yield* PollerStateTag;
+					const state = yield* Ref.get(ref);
+					return state.previousStatuses["sess-A"]?.type;
+				}),
+			);
+		expect(relayRuntimeStatus).toBe("busy");
+
+		harness.mock.sessionStatuses["sess-A"] = { type: "idle" };
+		await vi.waitFor(
+			() => expect(harness.relay.isAnySessionProcessing()).toBe(false),
+			{ timeout: 3000 },
+		);
 	});
 });

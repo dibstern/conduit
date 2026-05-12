@@ -942,3 +942,101 @@ $ rg "client-semaphore|getClientSemaphore|client-message-queue" -n src test
 Exit: 1
 No output.
 ```
+
+## Phase 4: Status Poller Runtime Ownership Slice
+
+Plan issue found:
+
+- `src/lib/relay/relay-stack.ts` still created a second `ManagedRuntime` for the status poller, even though
+  `RelayStateLive` already owns `PollerStateTag` and `PollerPubSubTag`. That split meant Effect consumers inside
+  the relay runtime could observe different poller state from `statusPoller.getCurrentStatuses()`.
+- The direct fix could not simply pass `relayManagedRuntime` at construction time because `wireMonitoring()` calls
+  `statusPoller.on()` and `statusPoller.start()` before the full relay runtime exists.
+- Code review also found a shutdown race: a late status-poller publish could evaluate monitoring after SSE had
+  disconnected and restart message pollers after `pollerManager.drain()`.
+
+Changes:
+
+- `src/lib/effect/session-status-poller.ts`: added a deferred status-poller runtime adapter. `on()` and `start()`
+  can be registered before attach, but actual subscription and polling work waits for the relay runtime.
+- `src/lib/relay/relay-stack.ts`: removed the separate poller runtime, validates `PollerStateTag` /
+  `PollerPubSubTag` on the main relay runtime, attaches the deferred runtime, wires pollers, then connects SSE.
+- `src/lib/relay/monitoring-wiring.ts`: added `stopMonitoring()` and guards both status callbacks and async
+  message-poller seed completion so relay shutdown cannot start pollers after draining begins.
+- `test/unit/session/session-status-poller-service.test.ts`: covers deferred registration/start and drain-before-attach.
+- `test/unit/relay/status-poller-broadcast.test.ts`: verifies `relay.effectRuntime` sees the same
+  `PollerStateTag` state used by `relay.isAnySessionProcessing()`.
+- `test/unit/relay/monitoring-wiring.test.ts`: covers the shutdown gate and the async seed-completion race.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-service.test.ts \
+  test/unit/relay/status-poller-broadcast.test.ts
+Exit: 1
+Expected failures:
+  makeDeferredStatusPollerRuntime is not a function
+  expected relay runtime status undefined to be busy
+```
+
+```text
+$ pnpm vitest run test/unit/relay/monitoring-wiring.test.ts
+Exit: 1
+Expected failure:
+  harness.result.stopMonitoring is not a function
+```
+
+Review:
+
+- Spec review: approved, with no concrete issues.
+- Lifecycle/code review: found the shutdown race above and requested non-silent subscription failures / tag
+  validation. The patch now stops monitoring during shutdown, reports non-interruption subscription failures, and
+  validates poller tags before SSE can connect.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/relay/monitoring-wiring.test.ts \
+  test/unit/session/session-status-poller-service.test.ts \
+  test/unit/relay/status-poller-broadcast.test.ts \
+  test/unit/session/session-status-poller-effect.test.ts \
+  test/unit/effect/relay-stack-layers.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  21 passed (21)
+```
+
+```text
+$ pnpm check
+Exit: 0
+
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  348 passed (348)
+Tests  5086 passed | 2 skipped | 12 todo (5100)
+```
+
+```text
+$ pnpm vitest run --config vitest.integration.config.ts \
+  test/integration/relay/sse-aware-poller-gating.test.ts \
+  test/integration/flows/relay-lifecycle.integration.ts \
+  test/integration/flows/sse-to-ws-pipeline.integration.ts \
+  test/integration/flows/message-lifecycle.integration.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  29 passed (29)
+```
+
+```text
+$ pnpm test:integration
+Exit: 1
+Blocked by external local dependency:
+  test/integration/daemon/daemon-server.test.ts > health checker authenticates with real OpenCode server
+  TypeError: fetch failed
+  connect ECONNREFUSED ::1:4096 / 127.0.0.1:4096
+```

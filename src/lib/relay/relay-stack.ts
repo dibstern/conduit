@@ -60,9 +60,10 @@ import {
 } from "../effect/services.js";
 import {
 	createStatusPollerService,
-	makePollerPubSubLive,
-	makePollerStateLive,
+	makeDeferredStatusPollerRuntime,
 	type PollDeps,
+	PollerPubSubTag,
+	PollerStateTag,
 	type SessionStatusPollerService,
 } from "../effect/session-status-poller.js";
 import { StaticDirTag } from "../effect/static-file-handler.js";
@@ -573,23 +574,7 @@ export async function createProjectRelay(
 			: {}),
 	};
 
-	// Build a layer providing PollerState + PollerPubSub for the facade runtime.
-	// Layer.memoize ensures a single Ref + PubSub instance across all uses.
-	const pollerLayer = Layer.mergeAll(
-		makePollerStateLive(),
-		makePollerPubSubLive(),
-	);
-	const pollerManagedRuntime = ManagedRuntime.make(pollerLayer);
-
-	// Mini-runtime adapter for the imperative facade
-	const pollerMiniRuntime = {
-		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides its own context
-		runSync: <A, E>(effect: Effect.Effect<A, E, any>): A =>
-			pollerManagedRuntime.runSync(effect),
-		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides its own context
-		runPromise: <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
-			pollerManagedRuntime.runPromise(effect),
-	};
+	const statusPollerRuntime = makeDeferredStatusPollerRuntime();
 
 	const statusPoller: SessionStatusPollerService = createStatusPollerService({
 		pollDeps: pollerPollDeps,
@@ -601,7 +586,11 @@ export async function createProjectRelay(
 		...(config.statusPollerInterval != null && {
 			interval: config.statusPollerInterval,
 		}),
-		runtime: pollerMiniRuntime,
+		runtime: statusPollerRuntime,
+		onSubscriptionFailure: (error) =>
+			statusLog.warn(
+				`Status poller subscription failed: ${formatErrorDetail(error)}`,
+			),
 	});
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
@@ -944,9 +933,6 @@ export async function createProjectRelay(
 		sseStream,
 	);
 
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	await sseStream.connect();
-
 	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
 	// Resolves the deferred promise in OpenCodeAdapter.sendTurn() when a
 	// session transitions to idle, allowing the engine dispatch to complete.
@@ -960,6 +946,7 @@ export async function createProjectRelay(
 		sseTracker,
 		getMonitoringState,
 		setMonitoringState,
+		stopMonitoring,
 		recordDoneDelivered: bindDoneDelivered,
 	} = wireMonitoring({
 		client: api,
@@ -1001,6 +988,13 @@ export async function createProjectRelay(
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	await relayManagedRuntime.runPromise(
+		Effect.gen(function* () {
+			yield* PollerStateTag;
+			yield* PollerPubSubTag;
+		}),
+	);
+	statusPollerRuntime.attach(relayManagedRuntime);
 
 	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
 	wirePollers({
@@ -1018,6 +1012,9 @@ export async function createProjectRelay(
 		pollerLog,
 		onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
 	});
+
+	if (config.signal?.aborted) throw new Error("Relay creation aborted");
+	await sseStream.connect();
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
 	// PermissionTimeoutLive is composed into RelayStateLive — no imperative wiring.
@@ -1044,16 +1041,18 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
-			// 1. Drain event sources (stop + await pending work)
+			// 1. Quiesce monitoring before draining sources so late status changes
+			// cannot restart message pollers during shutdown.
+			stopMonitoring();
+			// 2. Drain event sources (stop + await pending work)
 			await sseStream.drain();
-			await pollerManager.drain();
 			await statusPoller.drain();
-			// 2. Shut down orchestration engine (rejects pending turns)
+			await pollerManager.drain();
+			// 3. Shut down orchestration engine (rejects pending turns)
 			await orchestration.engine.shutdown();
-			// 3. Dispose Effect ManagedRuntimes
+			// 4. Dispose Effect ManagedRuntimes
 			await effectRuntime.dispose();
-			await pollerManagedRuntime.dispose();
-			// 4. Clean up remaining resources
+			// 5. Clean up remaining resources
 			// Permission timeout timer is managed by PermissionTimeoutLive (auto-interrupted on dispose).
 			await overrides.drain();
 			ptyManager.closeAll();

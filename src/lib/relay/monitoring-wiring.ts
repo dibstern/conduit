@@ -5,13 +5,9 @@
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
-import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
-import type { SessionOverrides } from "../session/session-overrides.js";
-import type { SessionRegistry } from "../session/session-registry.js";
 import type { RelayMessage } from "../shared-types.js";
 import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
@@ -32,13 +28,38 @@ import type {
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEStream } from "./sse-stream.js";
 import { sendPushForEvent } from "./sse-wiring.js";
 
 /** Structural interface for the message poller manager's capabilities needed by monitoring wiring. */
 interface PollerManagerLike {
 	startPolling(sessionId: string, seedMessages?: Message[]): void;
 	stopPolling(sessionId: string): void;
+}
+
+interface OpenCodeSessionReaderLike {
+	session: {
+		messages(sessionId: string): Promise<Message[]>;
+	};
+}
+
+interface SessionOverridesLike {
+	clearProcessingTimeout(sessionId: string): void;
+	resetProcessingTimeout(sessionId: string): void;
+}
+
+interface SessionRegistryLike {
+	hasViewers(sessionId: string): boolean;
+}
+
+interface SSEConnectionHealthLike {
+	isConnected(): boolean;
+}
+
+interface MonitoringWsHandlerLike {
+	broadcast(msg: RelayMessage): void;
+	sendToSession(sessionId: string, msg: RelayMessage): void;
+	getClientsForSession(sessionId: string): string[];
+	broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
 }
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
@@ -57,14 +78,14 @@ interface SessionManagerLike {
 }
 
 export interface MonitoringWiringDeps {
-	client: OpenCodeAPI;
-	wsHandler: WebSocketHandlerShape;
+	client: OpenCodeSessionReaderLike;
+	wsHandler: MonitoringWsHandlerLike;
 	sessionMgr: SessionManagerLike;
-	overrides: SessionOverrides;
+	overrides: SessionOverridesLike;
 	statusPoller: SessionStatusPollerService;
 	pollerManager: PollerManagerLike;
-	registry: SessionRegistry;
-	sseStream: SSEStream;
+	registry: SessionRegistryLike;
+	sseStream: SSEConnectionHealthLike;
 	config: {
 		pollerGatingConfig?: Partial<PollerGatingConfig>;
 		pushManager?: PushNotificationManager;
@@ -83,6 +104,8 @@ export interface MonitoringWiringResult {
 	pollerGatingCfg: PollerGatingConfig;
 	getMonitoringState: () => MonitoringState;
 	setMonitoringState: (state: MonitoringState) => void;
+	/** Stop accepting status-poller updates before relay shutdown drains sources. */
+	stopMonitoring: () => void;
 	/**
 	 * Record that a "done" event was delivered via SSE or message poller.
 	 * Prevents the status-poller's processAndApplyDone from synthesizing
@@ -114,6 +137,7 @@ export function wireMonitoring(
 	// ── Monitoring reducer state ──────────────────────────────────────────────
 	const sseTracker = createSessionSSETracker();
 	let monitoringState: MonitoringState = initialMonitoringState();
+	let monitoringActive = true;
 	const pollerGatingCfg: PollerGatingConfig = {
 		...DEFAULT_POLLER_GATING_CONFIG,
 		...config.pollerGatingConfig,
@@ -135,9 +159,13 @@ export function wireMonitoring(
 	// ── Effect executor deps (used by monitoring reducer effects) ─────────
 	const effectDeps: EffectDeps = {
 		startPoller: (sessionId) => {
+			if (!monitoringActive) return;
 			client.session
 				.messages(sessionId)
-				.then((msgs) => pollerManager.startPolling(sessionId, msgs))
+				.then((msgs) => {
+					if (!monitoringActive) return;
+					pollerManager.startPolling(sessionId, msgs);
+				})
 				.catch((err) =>
 					statusLog.warn(
 						`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
@@ -198,6 +226,8 @@ export function wireMonitoring(
 	// ── Session status poller wiring ────────────────────────────────────────
 
 	statusPoller.on("changed", async (statuses, statusesChanged) => {
+		if (!monitoringActive) return;
+
 		// ── Session list broadcast (only when statuses actually changed) ────
 		if (statusesChanged) {
 			try {
@@ -211,6 +241,8 @@ export function wireMonitoring(
 				);
 			}
 		}
+
+		if (!monitoringActive) return;
 
 		// ── Monitoring reducer: evaluate all sessions ──────────────────────
 		const parentMap = sessionMgr.getSessionParentMap();
@@ -262,6 +294,9 @@ export function wireMonitoring(
 		getMonitoringState: () => monitoringState,
 		setMonitoringState: (state: MonitoringState) => {
 			monitoringState = state;
+		},
+		stopMonitoring: () => {
+			monitoringActive = false;
 		},
 		recordDoneDelivered: (sessionId: string) => {
 			doneDeliveredByPrimary.add(sessionId);

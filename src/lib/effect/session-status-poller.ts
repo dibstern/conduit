@@ -10,6 +10,7 @@
 // - HashMap for immutable-friendly maps
 
 import {
+	Cause,
 	Context,
 	Data,
 	Duration,
@@ -622,6 +623,83 @@ export interface SessionStatusPollerService {
 	reconcileNow(): Promise<void>;
 }
 
+export interface StatusPollerRuntime {
+	// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs effects with several context shapes
+	runSync: <A, E>(effect: Effect.Effect<A, E, any>) => A;
+	// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs effects with several context shapes
+	runPromise: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>;
+}
+
+export interface DeferredStatusPollerRuntime extends StatusPollerRuntime {
+	attach(runtime: StatusPollerRuntime): void;
+	isAttached(): boolean;
+	onAttached(callback: () => void): void;
+}
+
+export class StatusPollerRuntimeNotAttachedError extends Error {
+	constructor() {
+		super("SessionStatusPoller runtime is not attached");
+		this.name = "StatusPollerRuntimeNotAttachedError";
+	}
+}
+
+const isDeferredRuntime = (
+	runtime: StatusPollerRuntime,
+): runtime is DeferredStatusPollerRuntime =>
+	"attach" in runtime && "onAttached" in runtime && "isAttached" in runtime;
+
+export function makeDeferredStatusPollerRuntime(): DeferredStatusPollerRuntime {
+	let attachedRuntime: StatusPollerRuntime | null = null;
+	const attachCallbacks: Array<() => void> = [];
+
+	const getRuntime = () => {
+		if (attachedRuntime === null) {
+			throw new StatusPollerRuntimeNotAttachedError();
+		}
+		return attachedRuntime;
+	};
+
+	return {
+		runSync: <A, E>(
+			// biome-ignore lint/suspicious/noExplicitAny: runtime provides the service context after attach
+			effect: Effect.Effect<A, E, any>,
+		): A => getRuntime().runSync(effect),
+		runPromise: <A, E>(
+			// biome-ignore lint/suspicious/noExplicitAny: runtime provides the service context after attach
+			effect: Effect.Effect<A, E, any>,
+		): Promise<A> => {
+			if (attachedRuntime === null) {
+				return Promise.reject(new StatusPollerRuntimeNotAttachedError());
+			}
+			return attachedRuntime.runPromise(effect);
+		},
+		attach(runtime: StatusPollerRuntime): void {
+			if (attachedRuntime !== null) {
+				throw new Error("SessionStatusPoller runtime is already attached");
+			}
+			attachedRuntime = runtime;
+			const callbacks = attachCallbacks.splice(0);
+			let firstError: unknown;
+			for (const callback of callbacks) {
+				try {
+					callback();
+				} catch (error) {
+					firstError ??= error;
+				}
+			}
+			if (firstError) throw firstError;
+		},
+		isAttached: () => attachedRuntime !== null,
+		onAttached(callback: () => void): void {
+			if (attachedRuntime !== null) {
+				callback();
+				return;
+			}
+			attachCallbacks.push(callback);
+		},
+	};
+}
+
 /**
  * Create an imperative facade around the Effect-native poller.
  *
@@ -633,16 +711,13 @@ export function createStatusPollerService(config: {
 	pollDeps: PollDeps;
 	reconciliationDeps?: ReconciliationDeps;
 	interval?: number;
-	runtime: {
-		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags — callers pass effects with various R types
-		runSync: <A, E>(effect: Effect.Effect<A, E, any>) => A;
-		// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime provides all Tags — callers pass effects with various R types
-		runPromise: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>;
-	};
+	runtime: StatusPollerRuntime;
+	onSubscriptionFailure?: (error: unknown) => void;
 }): SessionStatusPollerService {
 	const { pollDeps, reconciliationDeps, runtime } = config;
 	const intervalMs = config.interval ?? DEFAULT_RECONCILIATION_INTERVAL_MS;
 	let timer: ReturnType<typeof setInterval> | null = null;
+	let startRequested = false;
 	const pendingPromises = new Set<Promise<unknown>>();
 
 	const trackPromise = <T>(promise: Promise<T>): Promise<T> => {
@@ -655,6 +730,34 @@ export function createStatusPollerService(config: {
 		return runtime.runPromise(poll(pollDeps));
 	};
 
+	const whenRuntimeAttached = (callback: () => void): void => {
+		if (isDeferredRuntime(runtime)) {
+			runtime.onAttached(callback);
+			return;
+		}
+		callback();
+	};
+
+	const startTimer = () => {
+		if (!startRequested || timer) return;
+		void trackPromise(doPoll());
+		timer = setInterval(() => {
+			void trackPromise(doPoll());
+		}, intervalMs);
+	};
+
+	const reportSubscriptionFailure = (cause: Cause.Cause<unknown>) =>
+		Cause.isInterruptedOnly(cause)
+			? Effect.interrupt
+			: Effect.sync(() => {
+					try {
+						config.onSubscriptionFailure?.(Cause.squash(cause));
+					} catch {
+						// The subscription is a lifecycle task; reporting failures must not
+						// create another unhandled failure path.
+					}
+				});
+
 	return {
 		on(
 			_event: "changed",
@@ -665,8 +768,8 @@ export function createStatusPollerService(config: {
 		) {
 			// Subscribe to the PubSub and forward to callback.
 			// We run a background fiber that reads from the subscription.
-			const fiber = runtime.runPromise(
-				Effect.gen(function* () {
+			whenRuntimeAttached(() => {
+				const subscription = Effect.gen(function* () {
 					const pubsub = yield* PollerPubSubTag;
 					// Use PubSub.subscribe to get a Dequeue, then read in a loop
 					return yield* Effect.scoped(
@@ -696,23 +799,22 @@ export function createStatusPollerService(config: {
 							);
 						}),
 					);
-				}),
-			);
-			// The promise never resolves (infinite loop) — that's intentional.
-			// It will be interrupted when the runtime is disposed.
-			fiber.catch(() => {});
+				}).pipe(Effect.catchAllCause(reportSubscriptionFailure));
+				const fiber = runtime.runPromise(subscription);
+				// The promise never resolves (infinite loop) — that's intentional.
+				// It will be interrupted when the runtime is disposed.
+				fiber.catch(() => {});
+			});
 		},
 
 		start() {
-			if (timer) return;
-			// Immediate first poll
-			void trackPromise(doPoll());
-			timer = setInterval(() => {
-				void trackPromise(doPoll());
-			}, intervalMs);
+			if (startRequested) return;
+			startRequested = true;
+			whenRuntimeAttached(startTimer);
 		},
 
 		stop() {
+			startRequested = false;
 			if (timer) {
 				clearInterval(timer);
 				timer = null;
