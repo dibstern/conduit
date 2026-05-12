@@ -258,6 +258,7 @@ export const handleNewSession = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const { title, requestId } = payload;
@@ -276,8 +277,8 @@ export const handleNewSession = (
 
 		// Session list broadcast — non-blocking
 		yield* Effect.either(
-			Effect.tryPromise(() =>
-				sessionMgr.sendDualSessionLists((msg) => wsHandler.broadcast(msg)),
+			sessionManagerService.sendDualSessionLists((msg) =>
+				wsHandler.broadcast(msg),
 			),
 		).pipe(
 			Effect.tap((result) => {

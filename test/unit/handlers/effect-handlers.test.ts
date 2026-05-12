@@ -34,7 +34,11 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
+import {
+	SessionManagerError,
+	type SessionManagerService,
+	SessionManagerServiceTag,
+} from "../../../src/lib/effect/session-manager-service.js";
 import {
 	filterAgents,
 	handleGetAgents,
@@ -72,6 +76,7 @@ import {
 	handleForkSession,
 	handleListSessions,
 	handleLoadMoreHistory,
+	handleNewSession,
 	handleRenameSession,
 	handleSearchSessions,
 } from "../../../src/lib/handlers/session.js";
@@ -96,7 +101,7 @@ import type { ReadQueryService } from "../../../src/lib/persistence/read-query-s
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
-import type { PermissionId } from "../../../src/lib/shared-types.js";
+import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type {
 	OpenCodeDecision,
 	ProjectRelayConfig,
@@ -1275,6 +1280,42 @@ function makeForkSessionLayer(options?: {
 	);
 }
 
+function makeNewSessionLayer(options?: {
+	ws?: WebSocketHandlerShape;
+	sessionMgr?: SessionManagerShape;
+	sessionManagerService?: SessionManagerService;
+	overrides?: SessionOverrides;
+	log?: Logger;
+}) {
+	const ws = options?.ws ?? mockWsHandler();
+	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
+	const sessionManagerService =
+		options?.sessionManagerService ?? makeMockSessionManagerService();
+	const overrides =
+		options?.overrides ??
+		mockOverrides({
+			hasActiveProcessingTimeout: vi.fn(() => false),
+		});
+	const log = options?.log ?? mockLogger();
+
+	return Layer.mergeAll(
+		Layer.succeed(WebSocketHandlerTag, ws),
+		Layer.succeed(SessionManagerTag, sessionMgr),
+		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		Layer.succeed(SessionOverridesTag, overrides),
+		Layer.succeed(LoggerTag, log),
+		Layer.succeed(StatusPollerTag, {
+			isProcessing: vi.fn(() => false),
+			clearMessageActivity: vi.fn(),
+		}),
+		Layer.succeed(PollerManagerTag, {
+			isPolling: vi.fn(() => true),
+			startPolling: vi.fn(),
+			stopPolling: vi.fn(),
+		}),
+	);
+}
+
 // ─── Tool Content handler tests ───────────────────────────────────────────
 
 describe("handleGetToolContent", () => {
@@ -1969,6 +2010,155 @@ describe("handleListSessions", () => {
 					],
 					roots: true,
 				});
+			}),
+		);
+	});
+});
+
+describe("handleNewSession", () => {
+	it.effect(
+		"creates and switches before broadcasting lists through SessionManagerService",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const legacySendDualSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendDualSessionLists should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				createSession: vi.fn(async () => ({
+					id: "new-session-1",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "New Session",
+					version: "1.0.0",
+					time: { created: 100, updated: 200 },
+				})),
+				sendDualSessionLists: legacySendDualSessionLists,
+			});
+			const sendDualSessionLists = vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "new-session-1",
+								title: "New Session",
+								updatedAt: 200,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				sendDualSessionLists,
+			});
+			const layer = makeNewSessionLayer({
+				ws,
+				sessionMgr,
+				sessionManagerService,
+				log,
+			});
+
+			return handleNewSession("client-1", {
+				title: "New Session",
+				requestId: "request-1" as RequestId,
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(sessionMgr.createSession).toHaveBeenCalledWith("New Session", {
+						silent: true,
+					});
+					expect(ws.setClientSession).toHaveBeenCalledWith(
+						"client-1",
+						"new-session-1",
+					);
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session_switched",
+						id: "new-session-1",
+						sessionId: "new-session-1",
+						requestId: "request-1",
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "status",
+						sessionId: "new-session-1",
+						status: "idle",
+					});
+					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_list",
+						sessions: [
+							{
+								id: "new-session-1",
+								title: "New Session",
+								updatedAt: 200,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+					expect(log.info).toHaveBeenCalledWith(
+						"client=client-1 Created: new-session-1",
+					);
+				}),
+			);
+		},
+	);
+
+	it.effect("logs and completes when the service list broadcast fails", () => {
+		const ws = mockWsHandler();
+		const log = mockLogger();
+		const legacySendDualSessionLists = vi.fn(async () => {
+			throw new Error("legacy sendDualSessionLists should not be used");
+		});
+		const sessionMgr = mockSessionManager({
+			createSession: vi.fn(async () => ({
+				id: "new-session-1",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "",
+				version: "1.0.0",
+				time: { created: 100, updated: 200 },
+			})),
+			sendDualSessionLists: legacySendDualSessionLists,
+		});
+		const sendDualSessionLists = vi.fn(() =>
+			Effect.fail(
+				new SessionManagerError({
+					operation: "sendDualSessionLists",
+					cause: new Error("service unavailable"),
+				}),
+			),
+		);
+		const sessionManagerService = makeMockSessionManagerService({
+			sendDualSessionLists,
+		});
+		const layer = makeNewSessionLayer({
+			ws,
+			sessionMgr,
+			sessionManagerService,
+			log,
+		});
+
+		return handleNewSession("client-1", {}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.setClientSession).toHaveBeenCalledWith(
+					"client-1",
+					"new-session-1",
+				);
+				expect(sendDualSessionLists).toHaveBeenCalled();
+				expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+				expect(log.warn).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"Failed to broadcast session list after new_session",
+					),
+				);
+				expect(log.info).toHaveBeenCalledWith(
+					"client=client-1 Created: new-session-1",
+				);
 			}),
 		);
 	});

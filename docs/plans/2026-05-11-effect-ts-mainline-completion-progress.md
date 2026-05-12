@@ -2169,6 +2169,62 @@ $ pnpm check
 Exit: 0
 ```
 
+## Phase 7.13: New Session List Broadcast Service Contract
+
+Plan issue found:
+
+- `handleNewSession` cannot be blindly moved to `SessionManagerService.createSession` yet because
+  the legacy manager still owns lifecycle-specific behavior around `createSession(title,
+  { silent: true })`, immediate tab switching, request-id echoing, skipped history replay, and
+  skipped poller seeding. The safe Effect boundary for this slice is the post-create
+  `sendDualSessionLists` broadcast only.
+
+Changes:
+
+- Converted `handleNewSession`'s post-create session-list broadcast to call
+  `SessionManagerServiceTag.sendDualSessionLists`.
+- Added handler regressions proving new-session creation still switches the requesting client,
+  broadcasts the service-produced list envelope, does not call the legacy list sender, and logs
+  list-broadcast failures without failing the created session flow.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts
+Exit: 1
+Expected failure:
+  handleNewSession never called SessionManagerServiceTag.sendDualSessionLists.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  61 passed (61)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  66 passed (66)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 975 files. No fixes applied.
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:
