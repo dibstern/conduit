@@ -7,6 +7,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { InstanceManagementServiceLive } from "../../../src/lib/effect/instance-management-service.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -1712,6 +1713,11 @@ function mockInstanceMgmt(): InstanceManagementDeps {
 	};
 }
 
+const makeInstanceManagementLayer = (instanceMgmt: InstanceManagementDeps) =>
+	InstanceManagementServiceLive.pipe(
+		Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
+	);
+
 describe("handleInstanceAdd", () => {
 	it.effect("adds instance and broadcasts list", () => {
 		const ws = mockWsHandler();
@@ -1719,7 +1725,7 @@ describe("handleInstanceAdd", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+			makeInstanceManagementLayer(instanceMgmt),
 		);
 
 		return handleInstanceAdd("client-1", { name: "Test Instance" }).pipe(
@@ -1760,7 +1766,7 @@ describe("handleInstanceRemove", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+			makeInstanceManagementLayer(instanceMgmt),
 		);
 
 		return handleInstanceRemove("client-1", {
@@ -1784,7 +1790,7 @@ describe("handleInstanceStart", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+			makeInstanceManagementLayer(instanceMgmt),
 		);
 
 		return handleInstanceStart("client-1", {
@@ -1810,7 +1816,7 @@ describe("handleInstanceStop", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+			makeInstanceManagementLayer(instanceMgmt),
 		);
 
 		return handleInstanceStop("client-1", {

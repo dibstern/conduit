@@ -31,6 +31,7 @@ import {
 } from "../bridges/client-init.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
 import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
+import { InstanceManagementServiceLive } from "../effect/instance-management-service.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -948,9 +949,13 @@ export async function createProjectRelay(
 		);
 	}
 	if (instanceMgmt != null) {
+		const instanceMgmtLayer = Layer.succeed(InstanceMgmtTag, instanceMgmt);
+		const instanceManagementServiceLayer = InstanceManagementServiceLive.pipe(
+			Layer.provide(instanceMgmtLayer),
+		);
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
-			Layer.succeed(InstanceMgmtTag, instanceMgmt),
+			Layer.merge(instanceMgmtLayer, instanceManagementServiceLayer),
 		);
 	}
 	if (projectMgmt != null) {

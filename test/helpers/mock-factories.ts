@@ -21,6 +21,7 @@ import {
 	type DaemonState,
 	makeDaemonStateLive,
 } from "../../src/lib/effect/daemon-state.js";
+import { InstanceManagementServiceLive } from "../../src/lib/effect/instance-management-service.js";
 import {
 	type InstanceManagerConfig,
 	makeInstanceManagerStateLive,
@@ -32,6 +33,7 @@ import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
+	InstanceMgmtTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
@@ -60,7 +62,10 @@ import {
 import { makeSessionRegistryStateLive } from "../../src/lib/effect/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/effect/session-status-poller.js";
 import { OpenCodeTerminalServiceLive } from "../../src/lib/effect/terminal-service.js";
-import type { HandlerDeps } from "../../src/lib/handlers/types.js";
+import type {
+	HandlerDeps,
+	InstanceManagementDeps,
+} from "../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
@@ -872,6 +877,7 @@ export interface TestHandlerLayerOptions {
 	statusPoller?: StatusPollerShape;
 	pollerManager?: PollerManagerShape;
 	connectPtyUpstream?: ConnectPtyUpstreamShape;
+	instanceMgmt?: InstanceManagementDeps;
 }
 
 /**
@@ -907,6 +913,7 @@ export function makeTestHandlerLayer(
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
+	const instanceMgmt = opts?.instanceMgmt;
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
 	const configLayer = Layer.succeed(ConfigTag, config);
 	const loggerLayer = Layer.succeed(LoggerTag, log);
@@ -950,6 +957,12 @@ export function makeTestHandlerLayer(
 					),
 				),
 			);
+	const instanceManagementServiceLayer =
+		instanceMgmt == null
+			? Layer.empty
+			: InstanceManagementServiceLive.pipe(
+					Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
+				);
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
@@ -957,6 +970,7 @@ export function makeTestHandlerLayer(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		openCodeTerminalServiceLayer,
+		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,
 		sessionManagerServiceLayer,
 		wsHandlerLayer,
@@ -968,6 +982,9 @@ export function makeTestHandlerLayer(
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		connectPtyUpstreamLayer,
+		...(instanceMgmt == null
+			? []
+			: [Layer.succeed(InstanceMgmtTag, instanceMgmt)]),
 	);
 }
 

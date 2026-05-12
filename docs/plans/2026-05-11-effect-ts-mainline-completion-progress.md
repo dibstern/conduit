@@ -2060,6 +2060,85 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.29: Instance Handler Domain Service Contract
+
+Plan issues found:
+
+- Phase 7 groups instance and project management together, but the current handlers have three distinct remaining
+  boundaries: instance lifecycle, project binding, and port scanning. Combining them would mix daemon-owned instance
+  lifecycle with project-registry mutation and scanner behavior in one review.
+- A first service draft was rejected during review because it was handler-shaped: it accepted `clientId`, depended on
+  `WebSocketHandlerTag`, and rendered browser errors itself. That would only hide `InstanceMgmtTag` behind a new name.
+  The corrected boundary is domain-shaped: it returns updated instance lists or typed operation errors, while the
+  handler keeps payload validation and WebSocket envelope rendering.
+- The service still adapts the existing daemon `InstanceMgmtTag` bridge because the current Effect-native
+  `instance-manager-service.ts` does not yet preserve the old class' process spawning, kill, restart, and health-check
+  behavior. Replacing that class-backed daemon owner is a later daemon-owned state/process slice, not a handler
+  contract slice.
+- `ProjectMgmtTag` and `ScanDepsTag` remain open. Project management is split across settings handlers, project
+  binding, and OpenCode fallback reads; scanner migration needs a real `scanNow` Effect service instead of just the
+  current `PortScannerTag.getKnownPorts()`.
+
+Changes:
+
+- Added `src/lib/effect/instance-management-service.ts` with `InstanceManagementServiceTag`,
+  `InstanceManagementServiceLive`, and typed `InstanceManagementServiceError`.
+- Converted instance add/remove/start/stop/update/rename handlers to consume only `InstanceManagementServiceTag` plus
+  `WebSocketHandlerTag`; direct `InstanceMgmtTag` access moved out of `src/lib/handlers/instance.ts`.
+- Kept browser-visible behavior in the handler: unavailable-service messages, validation errors, typed error rendering,
+  and `instance_list` broadcasts after successful mutations.
+- Wired `InstanceManagementServiceLive` into relay runtime composition when daemon instance management is available.
+- Added live-service tests for ID derivation/uniqueness, unmanaged URL defaults, typed start failures, and rename
+  trimming; added handler-boundary tests proving the handler can run without the legacy `InstanceMgmtTag`.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/instance-management-service.test.ts \
+  test/unit/handlers/instance-service-effect.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/effect/instance-management-service.js'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/instance-management-service.test.ts \
+  test/unit/handlers/instance-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  89 passed (89)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers test/unit/effect/instance-management-service.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  22 passed (22)
+Tests  194 passed (194)
+```
+
+```text
+$ rg -n "InstanceMgmtTag|instanceMgmt|addInstance|removeInstance|startInstance|stopInstance|updateInstance|persistConfig" \
+  src/lib/handlers/instance.ts
+Exit: 1
+No direct instance-management bridge access remains in the browser instance lifecycle handlers.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 978 files. No fixes applied.
+```
+
 ## Phase 7.28: Client Init Terminal Replay Service Contract
 
 Plan issues found:

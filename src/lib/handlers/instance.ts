@@ -4,13 +4,14 @@
 // broadcasts updated instance_list to all connected clients after mutations.
 
 import { Effect } from "effect";
+import { InstanceManagementServiceTag } from "../effect/instance-management-service.js";
 import {
-	InstanceMgmtTag,
 	ProjectMgmtTag,
 	ScanDepsTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { formatErrorDetail } from "../errors.js";
+import type { OpenCodeInstance } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 
 /** Default port for CCS (Claude Code Switch) proxy. */
@@ -27,74 +28,38 @@ const sendError = (clientId: string, message: string) =>
 		});
 	});
 
-/** Effect helper: broadcast instance list. */
-const broadcastInstanceList = Effect.gen(function* () {
-	const wsHandler = yield* WebSocketHandlerTag;
-	const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-	if (instanceMgmtOption._tag === "Some") {
-		const instances = instanceMgmtOption.value.getInstances();
+const broadcastInstanceList = (
+	instances: ReadonlyArray<Readonly<OpenCodeInstance>>,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
 		wsHandler.broadcast({ type: "instance_list", instances });
-	}
-});
+	});
 
 export const handleInstanceAdd = (
 	clientId: string,
 	payload: PayloadMap["instance_add"],
 ) =>
 	Effect.gen(function* () {
-		const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-		if (instanceMgmtOption._tag === "None") {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
 			yield* sendError(clientId, "Instance management not available");
 			return;
 		}
-		const instanceMgmt = instanceMgmtOption.value;
-
 		const { name } = payload;
 		if (!name) {
 			yield* sendError(clientId, "Instance name is required");
 			return;
 		}
 
-		// Derive ID from name
-		let id =
-			name
-				.toLowerCase()
-				.replace(/[^a-z0-9-]/g, "-")
-				.replace(/-+/g, "-")
-				.replace(/^-|-$/g, "") || "instance";
-
-		// Ensure uniqueness
-		{
-			let counter = 2;
-			const baseId = id;
-			while (instanceMgmt.getInstances().some((i) => i.id === id)) {
-				id = `${baseId}-${counter}`;
-				counter++;
-			}
-		}
-
-		const addResult = yield* Effect.either(
-			Effect.try(() => {
-				const hasUrl =
-					typeof payload.url === "string" && payload.url.length > 0;
-				const managed =
-					typeof payload.managed === "boolean" ? payload.managed : !hasUrl;
-
-				instanceMgmt.addInstance(id, {
-					name,
-					port: typeof payload.port === "number" ? payload.port : 0,
-					managed,
-					...(payload.env != null && { env: payload.env }),
-					...(hasUrl && payload.url != null && { url: payload.url }),
-				});
-			}),
-		);
+		const addResult = yield* Effect.either(serviceOption.value.add(payload));
 		if (addResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(addResult.left));
+			yield* sendError(clientId, formatErrorDetail(addResult.left.cause));
 			return;
 		}
-		yield* broadcastInstanceList;
-		instanceMgmt.persistConfig();
+		yield* broadcastInstanceList(addResult.right);
 	});
 
 export const handleInstanceRemove = (
@@ -102,13 +67,13 @@ export const handleInstanceRemove = (
 	payload: PayloadMap["instance_remove"],
 ) =>
 	Effect.gen(function* () {
-		const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-		if (instanceMgmtOption._tag === "None") {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
 			yield* sendError(clientId, "Instance management not available");
 			return;
 		}
-		const instanceMgmt = instanceMgmtOption.value;
-
 		const { instanceId } = payload;
 		if (!instanceId) {
 			yield* sendError(clientId, "instanceId is required");
@@ -116,14 +81,13 @@ export const handleInstanceRemove = (
 		}
 
 		const removeResult = yield* Effect.either(
-			Effect.try(() => instanceMgmt.removeInstance(instanceId)),
+			serviceOption.value.remove(instanceId),
 		);
 		if (removeResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(removeResult.left));
+			yield* sendError(clientId, formatErrorDetail(removeResult.left.cause));
 			return;
 		}
-		yield* broadcastInstanceList;
-		instanceMgmt.persistConfig();
+		yield* broadcastInstanceList(removeResult.right);
 	});
 
 export const handleInstanceStart = (
@@ -131,13 +95,13 @@ export const handleInstanceStart = (
 	payload: PayloadMap["instance_start"],
 ) =>
 	Effect.gen(function* () {
-		const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-		if (instanceMgmtOption._tag === "None") {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
 			yield* sendError(clientId, "Instance management not available");
 			return;
 		}
-		const instanceMgmt = instanceMgmtOption.value;
-
 		const { instanceId } = payload;
 		if (!instanceId) {
 			yield* sendError(clientId, "instanceId is required");
@@ -145,13 +109,13 @@ export const handleInstanceStart = (
 		}
 
 		const startResult = yield* Effect.either(
-			Effect.tryPromise(() => instanceMgmt.startInstance(instanceId)),
+			serviceOption.value.start(instanceId),
 		);
 		if (startResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(startResult.left));
+			yield* sendError(clientId, formatErrorDetail(startResult.left.cause));
 			return;
 		}
-		yield* broadcastInstanceList;
+		yield* broadcastInstanceList(startResult.right);
 	});
 
 export const handleInstanceStop = (
@@ -159,13 +123,13 @@ export const handleInstanceStop = (
 	payload: PayloadMap["instance_stop"],
 ) =>
 	Effect.gen(function* () {
-		const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-		if (instanceMgmtOption._tag === "None") {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
 			yield* sendError(clientId, "Instance management not available");
 			return;
 		}
-		const instanceMgmt = instanceMgmtOption.value;
-
 		const { instanceId } = payload;
 		if (!instanceId) {
 			yield* sendError(clientId, "instanceId is required");
@@ -173,13 +137,13 @@ export const handleInstanceStop = (
 		}
 
 		const stopResult = yield* Effect.either(
-			Effect.try(() => instanceMgmt.stopInstance(instanceId)),
+			serviceOption.value.stop(instanceId),
 		);
 		if (stopResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(stopResult.left));
+			yield* sendError(clientId, formatErrorDetail(stopResult.left.cause));
 			return;
 		}
-		yield* broadcastInstanceList;
+		yield* broadcastInstanceList(stopResult.right);
 	});
 
 export const handleInstanceUpdate = (
@@ -187,37 +151,27 @@ export const handleInstanceUpdate = (
 	payload: PayloadMap["instance_update"],
 ) =>
 	Effect.gen(function* () {
-		const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-		if (instanceMgmtOption._tag === "None") {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
 			yield* sendError(clientId, "Instance update not supported");
 			return;
 		}
-		const instanceMgmt = instanceMgmtOption.value;
-
 		const { instanceId } = payload;
 		if (!instanceId) {
 			yield* sendError(clientId, "instanceId is required");
 			return;
 		}
 
-		const updates: {
-			name?: string;
-			env?: Record<string, string>;
-			port?: number;
-		} = {};
-		if (typeof payload.name === "string") updates.name = payload.name;
-		if (typeof payload.port === "number") updates.port = payload.port;
-		if (payload.env !== undefined) updates.env = payload.env;
-
 		const updateResult = yield* Effect.either(
-			Effect.try(() => instanceMgmt.updateInstance(instanceId, updates)),
+			serviceOption.value.update(instanceId, payload),
 		);
 		if (updateResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(updateResult.left));
+			yield* sendError(clientId, formatErrorDetail(updateResult.left.cause));
 			return;
 		}
-		yield* broadcastInstanceList;
-		instanceMgmt.persistConfig();
+		yield* broadcastInstanceList(updateResult.right);
 	});
 
 export const handleInstanceRename = (
@@ -225,13 +179,13 @@ export const handleInstanceRename = (
 	payload: PayloadMap["instance_rename"],
 ) =>
 	Effect.gen(function* () {
-		const instanceMgmtOption = yield* Effect.serviceOption(InstanceMgmtTag);
-		if (instanceMgmtOption._tag === "None") {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
 			yield* sendError(clientId, "Instance management not available");
 			return;
 		}
-		const instanceMgmt = instanceMgmtOption.value;
-
 		const { instanceId, name } = payload;
 		if (!instanceId) {
 			yield* sendError(clientId, "instanceId is required");
@@ -243,16 +197,13 @@ export const handleInstanceRename = (
 		}
 
 		const renameResult = yield* Effect.either(
-			Effect.try(() =>
-				instanceMgmt.updateInstance(instanceId, { name: name.trim() }),
-			),
+			serviceOption.value.rename(instanceId, name),
 		);
 		if (renameResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(renameResult.left));
+			yield* sendError(clientId, formatErrorDetail(renameResult.left.cause));
 			return;
 		}
-		yield* broadcastInstanceList;
-		instanceMgmt.persistConfig();
+		yield* broadcastInstanceList(renameResult.right);
 	});
 
 /** Effect helper: broadcast project list. */
