@@ -2060,6 +2060,70 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.3: Model Handler Service Contract
+
+Plan issues found:
+
+- `handleGetModels` is a bounded OpenCode read workflow, not a reason to add a broad generic OpenCode read service.
+  This slice keeps the service contract to provider-list and active-session reads only.
+- `handleReloadProviderSession` composes `handleGetModels`, so reload tests and relay wiring inherit the model-service
+  requirement even though reload itself still uses `OpenCodeAPITag` for command refreshes.
+- `src/lib/bridges/client-init.ts` still mirrors model-list and active-session model reads through `OpenCodeAPITag`.
+  It is not in Phase 7's handler file list, but it is the next model-read duplication to remove before claiming the
+  model-read boundary is fully Effect-owned.
+- The existing `handleSwitchModel`, `handleSetDefaultModel`, and `handleSwitchVariant` provider-list reads remain outside
+  this slice. They need their own behavioral snapshot or service-contract slice before conversion.
+
+Changes:
+
+- `src/lib/effect/services.ts`: added `OpenCodeModelServiceTag` and `OpenCodeModelServiceLive` backed by
+  `OpenCodeAPITag`, with Effect methods for `provider.list()` and `session.get(...)`.
+- `src/lib/handlers/model.ts`: `handleGetModels` now reads providers and active-session details through the model
+  service instead of wrapping OpenCode API promises locally.
+- `src/lib/relay/relay-stack.ts` and `test/helpers/mock-factories.ts`: production and shared test layers now provide
+  `OpenCodeModelServiceLive` from the OpenCode API layer.
+- `test/unit/handlers/model-service-effect.test.ts`: added a behavior test proving `handleGetModels` can run with the
+  model service and without the Promise `OpenCodeAPITag`.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: OpenCodeAPI
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts \
+  test/unit/handlers/model-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  69 passed (69)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 966 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  357 passed (357)
+Tests  5138 passed | 2 skipped | 12 todo (5152)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:

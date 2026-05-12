@@ -5,6 +5,7 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
@@ -59,14 +60,12 @@ export const handleGetModels = (
 	_payload: PayloadMap["get_models"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const modelService = yield* OpenCodeModelServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 
-		const providerResult = yield* Effect.tryPromise(() =>
-			client.provider.list(),
-		);
+		const providerResult = yield* modelService.listProviders();
 		const connectedSet = new Set(providerResult.connected);
 		const providers = providerResult.providers
 			.map((p) => ({
@@ -135,7 +134,7 @@ export const handleGetModels = (
 		let sessionModel: ModelOverride | undefined;
 		if (activeId) {
 			const sessionResult = yield* Effect.either(
-				Effect.tryPromise(() => client.session.get(activeId)),
+				modelService.getSession(activeId),
 			);
 			if (sessionResult._tag === "Right" && sessionResult.right.modelID) {
 				sessionModel = {

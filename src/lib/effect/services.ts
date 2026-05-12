@@ -155,6 +155,12 @@ export type OpenCodeFileEntry = Awaited<
 export type OpenCodeFileContent = Awaited<
 	ReturnType<OpenCodeAPI["file"]["read"]>
 >;
+export type OpenCodeProviderList = Awaited<
+	ReturnType<OpenCodeAPI["provider"]["list"]>
+>;
+export type OpenCodeSessionDetail = Awaited<
+	ReturnType<OpenCodeAPI["session"]["get"]>
+>;
 
 export interface OpenCodeFileService {
 	list(
@@ -181,6 +187,33 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 		return {
 			list: (path: string) => Effect.tryPromise(() => client.file.list(path)),
 			read: (path: string) => Effect.tryPromise(() => client.file.read(path)),
+		};
+	}),
+);
+
+export interface OpenCodeModelService {
+	listProviders(): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
+	getSession(
+		sessionId: string,
+	): Effect.Effect<OpenCodeSessionDetail, Cause.UnknownException>;
+}
+
+export class OpenCodeModelServiceTag extends Context.Tag(
+	"OpenCodeModelService",
+)<OpenCodeModelServiceTag, OpenCodeModelService>() {}
+
+export const OpenCodeModelServiceLive: Layer.Layer<
+	OpenCodeModelServiceTag,
+	never,
+	OpenCodeAPITag
+> = Layer.effect(
+	OpenCodeModelServiceTag,
+	Effect.gen(function* () {
+		const client = yield* OpenCodeAPITag;
+		return {
+			listProviders: () => Effect.tryPromise(() => client.provider.list()),
+			getSession: (sessionId: string) =>
+				Effect.tryPromise(() => client.session.get(sessionId)),
 		};
 	}),
 );

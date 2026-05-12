@@ -20,6 +20,7 @@ import {
 	LoggerTag,
 	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
+	OpenCodeModelServiceLive,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
@@ -138,6 +139,14 @@ function openCodeFileLayer(client: OpenCodeAPI) {
 	return Layer.merge(
 		apiLayer,
 		OpenCodeFileServiceLive.pipe(Layer.provide(apiLayer)),
+	);
+}
+
+function openCodeModelLayer(client: OpenCodeAPI) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	return Layer.merge(
+		apiLayer,
+		OpenCodeModelServiceLive.pipe(Layer.provide(apiLayer)),
 	);
 }
 
@@ -485,7 +494,7 @@ describe("handleReloadProviderSession", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
 		);
@@ -531,7 +540,7 @@ describe("handleReloadProviderSession", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
 		);
@@ -584,7 +593,7 @@ describe("handleGetModels", () => {
 		const log = mockLogger();
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
@@ -639,7 +648,7 @@ describe("handleGetModels", () => {
 		const log = mockLogger();
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
@@ -703,7 +712,7 @@ describe("handleGetModels", () => {
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
+				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
@@ -781,7 +790,7 @@ describe("handleGetModels", () => {
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
+				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
