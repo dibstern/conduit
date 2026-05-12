@@ -41,6 +41,7 @@ import {
 	InstanceMgmtTag,
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeFileServiceLive,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
@@ -842,8 +843,14 @@ export async function createProjectRelay(
 	// Layer.succeed(Tag, instance). Both are merged into a single Layer tree.
 
 	// Required bridge layers (imperative instances → Effect Tags)
+	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
+	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
+
 	const coreBridgeLayers = Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, api),
+		openCodeApiLayer,
+		openCodeFileServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(PermissionBridgeTag, permissionBridge),

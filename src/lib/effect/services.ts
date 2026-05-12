@@ -6,7 +6,7 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { Context } from "effect";
+import { type Cause, Context, Effect, Layer } from "effect";
 
 import type { PermissionBridge } from "../bridges/permission-bridge.js";
 import type { QuestionBridge } from "../bridges/question-bridge.js";
@@ -148,6 +148,42 @@ export class OpenCodeAPITag extends Context.Tag("OpenCodeAPI")<
 	OpenCodeAPITag,
 	OpenCodeAPI
 >() {}
+
+export type OpenCodeFileEntry = Awaited<
+	ReturnType<OpenCodeAPI["file"]["list"]>
+>[number];
+export type OpenCodeFileContent = Awaited<
+	ReturnType<OpenCodeAPI["file"]["read"]>
+>;
+
+export interface OpenCodeFileService {
+	list(
+		path: string,
+	): Effect.Effect<OpenCodeFileEntry[], Cause.UnknownException>;
+	read(
+		path: string,
+	): Effect.Effect<OpenCodeFileContent, Cause.UnknownException>;
+}
+
+export class OpenCodeFileServiceTag extends Context.Tag("OpenCodeFileService")<
+	OpenCodeFileServiceTag,
+	OpenCodeFileService
+>() {}
+
+export const OpenCodeFileServiceLive: Layer.Layer<
+	OpenCodeFileServiceTag,
+	never,
+	OpenCodeAPITag
+> = Layer.effect(
+	OpenCodeFileServiceTag,
+	Effect.gen(function* () {
+		const client = yield* OpenCodeAPITag;
+		return {
+			list: (path: string) => Effect.tryPromise(() => client.file.list(path)),
+			read: (path: string) => Effect.tryPromise(() => client.file.read(path)),
+		};
+	}),
+);
 
 export class SessionManagerTag extends Context.Tag("SessionManager")<
 	SessionManagerTag,

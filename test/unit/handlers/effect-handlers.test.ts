@@ -19,6 +19,7 @@ import {
 	InstanceMgmtTag,
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeFileServiceLive,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
@@ -130,6 +131,14 @@ function mockLogger(): Logger {
 		error: vi.fn(),
 		debug: vi.fn(),
 	} as unknown as Logger;
+}
+
+function openCodeFileLayer(client: OpenCodeAPI) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	return Layer.merge(
+		apiLayer,
+		OpenCodeFileServiceLive.pipe(Layer.provide(apiLayer)),
+	);
 }
 
 function mockConfig(
@@ -383,7 +392,7 @@ describe("handleGetFileContent", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeFileLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -407,7 +416,7 @@ describe("handleGetFileContent", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeFileLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -436,7 +445,7 @@ describe("handleGetFileList", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeFileLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 

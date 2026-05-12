@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import ignore from "ignore";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
+	OpenCodeFileServiceTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import type { PayloadMap } from "./payloads.js";
@@ -16,11 +16,9 @@ const ALWAYS_SKIP = new Set([".git", ".svn", ".hg"]);
 
 /** Load .gitignore rules via Effect. */
 const loadGitignore = Effect.gen(function* () {
-	const client = yield* OpenCodeAPITag;
+	const files = yield* OpenCodeFileServiceTag;
 	const ig = ignore();
-	const readResult = yield* Effect.either(
-		Effect.tryPromise(() => client.file.read(".gitignore")),
-	);
+	const readResult = yield* Effect.either(files.read(".gitignore"));
 	if (readResult._tag === "Right" && readResult.right.content) {
 		ig.add(readResult.right.content);
 	}
@@ -34,12 +32,12 @@ export const handleGetFileList = (
 	payload: PayloadMap["get_file_list"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const fileService = yield* OpenCodeFileServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 
 		const dirPath = payload.path ?? ".";
 		const [files, ig] = yield* Effect.all([
-			Effect.tryPromise(() => client.file.list(dirPath)),
+			fileService.list(dirPath),
 			loadGitignore,
 		]);
 
@@ -65,12 +63,12 @@ export const handleGetFileContent = (
 	payload: PayloadMap["get_file_content"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const files = yield* OpenCodeFileServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 
 		const { path: filePath } = payload;
 		if (filePath) {
-			const result = yield* Effect.tryPromise(() => client.file.read(filePath));
+			const result = yield* files.read(filePath);
 			const binary = (result as { binary?: boolean }).binary;
 			wsHandler.sendTo(clientId, {
 				type: "file_content",
@@ -86,7 +84,7 @@ export const handleGetFileTree = (
 	_payload: PayloadMap["get_file_tree"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const files = yield* OpenCodeFileServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
@@ -105,7 +103,7 @@ export const handleGetFileTree = (
 					const next = queue.shift();
 					if (next === undefined) break;
 					const { dir, depth } = next;
-					const items = yield* Effect.tryPromise(() => client.file.list(dir));
+					const items = yield* files.list(dir);
 
 					for (const item of items) {
 						if (ALWAYS_SKIP.has(item.name)) continue;

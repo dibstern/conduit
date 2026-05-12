@@ -35,6 +35,7 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeFileServiceLive,
 	PermissionBridgeTag,
 	type PollerManagerShape,
 	PollerManagerTag,
@@ -880,9 +881,14 @@ export function makeTestHandlerLayer(
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
+	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
+	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
 
 	return Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, api),
+		openCodeApiLayer,
+		openCodeFileServiceLayer,
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, sessionOverrides),

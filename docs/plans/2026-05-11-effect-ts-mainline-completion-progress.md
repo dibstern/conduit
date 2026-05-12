@@ -2060,6 +2060,64 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.1: File Handler Effect Service Contract
+
+Plan issues found:
+
+- The first handler conversion should be a narrow service, not a renamed `OpenCodeAPITag`. A broad
+  `OpenCodeReadServiceTag` would hide the old OpenCode API shape behind a new name and make tests mostly prove mock
+  wiring.
+- File handlers are the smallest read-only handler surface already protected by the new wire snapshots, so they are the
+  right first service-contract conversion.
+- Preserving the current `Effect.tryPromise` error surface matters because the new snapshot records the existing
+  `system_error` message for rejected file reads. The file service uses typed `Cause.UnknownException` failures to keep
+  that wire shape stable while moving the Promise bridge out of the handlers.
+
+Changes:
+
+- `src/lib/effect/services.ts`: added `OpenCodeFileServiceTag`, `OpenCodeFileService`, and
+  `OpenCodeFileServiceLive` backed by the existing `OpenCodeAPITag` at the runtime boundary.
+- `src/lib/handlers/files.ts`: replaced direct `OpenCodeAPITag` / `Effect.tryPromise(() => client.file.*)` usage with
+  `OpenCodeFileServiceTag` effects for `.gitignore`, file list, file content, and tree traversal reads.
+- `src/lib/relay/relay-stack.ts`: provides `OpenCodeFileServiceLive` in the production relay runtime from the existing
+  OpenCode API layer.
+- `test/helpers/mock-factories.ts`: provides the file service in shared handler test layers so tests can continue to
+  pass an OpenCode API mock at the boundary.
+- `test/unit/handlers/file-service-effect.test.ts`: proves file handlers can run from an Effect-native file service
+  layer without `OpenCodeAPITag` in their context.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/file-service-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: OpenCodeAPI
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/file-service-effect.test.ts \
+  test/unit/handlers/file-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  70 passed (70)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 963 files. No fixes applied.
+```
+
 ## Phase 7.0: File Handler Wire Snapshots
 
 Plan issues found:
