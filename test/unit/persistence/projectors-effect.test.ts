@@ -9,11 +9,13 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	EventStoreEffectTag,
+	EventStoreError,
 	makeEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	makeProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
+	ProjectionRunnerError,
 } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	makeProjectorCursorEffect,
@@ -379,6 +381,34 @@ function seedSession(sessionId: string, createdAt: number = FIXED_TS) {
 	});
 }
 
+function insertRawEventRow(opts: {
+	sessionId: string;
+	type?: string;
+	data: string;
+	metadata?: string;
+	eventId?: EventId;
+	streamVersion?: number;
+	provider?: string;
+	createdAt?: number;
+}) {
+	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`
+			INSERT INTO events (
+				event_id, session_id, stream_version, type, data, metadata, provider, created_at
+			) VALUES (
+				${opts.eventId ?? createEventId()},
+				${opts.sessionId},
+				${opts.streamVersion ?? 0},
+				${opts.type ?? "session.created"},
+				${opts.data},
+				${opts.metadata ?? "{}"},
+				${opts.provider ?? "opencode"},
+				${opts.createdAt ?? FIXED_TS}
+			)`;
+	});
+}
+
 // ─── Event Store Tests ──────────────────────────────────────────────────────
 
 describe("EventStoreEffect", () => {
@@ -439,6 +469,81 @@ describe("EventStoreEffect", () => {
 				expect(results.length).toBe(2);
 				expect(results[0]?.sequence).toBe(2);
 				expect(results[1]?.sequence).toBe(3);
+			}),
+		));
+
+	it("decodes a valid row inserted directly into SQLite", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-raw");
+				yield* insertRawEventRow({
+					sessionId: "s-raw",
+					data: JSON.stringify({
+						sessionId: "s-raw",
+						title: "Raw Session",
+						provider: "opencode",
+					}),
+				});
+
+				const results = yield* store.readFromSequence(0);
+
+				expect(results).toHaveLength(1);
+				expect(results[0]?.type).toBe("session.created");
+				expect(results[0]?.sessionId).toBe("s-raw");
+				expect(results[0]?.data).toEqual({
+					sessionId: "s-raw",
+					title: "Raw Session",
+					provider: "opencode",
+				});
+			}),
+		));
+
+	it("returns typed EventStoreError for invalid JSON in a stored row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-json");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-json",
+					data: "{not json",
+				});
+
+				const result = yield* Effect.either(store.readFromSequence(0));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
+			}),
+		));
+
+	it("returns typed EventStoreError for schema-invalid stored payload", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-shape");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-shape",
+					data: JSON.stringify({
+						sessionId: "s-invalid-shape",
+					}),
+				});
+
+				const result = yield* Effect.either(store.readFromSequence(0));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
 			}),
 		));
 
@@ -770,6 +875,29 @@ describe("ProjectionRunnerEffect", () => {
 					title: string;
 				}>`SELECT title FROM sessions WHERE id = 's1'`;
 				expect(rows[0]?.title).toBe("Test Session");
+			}),
+		));
+
+	it("recover returns typed ProjectionRunnerError for invalid replay row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-bad-replay");
+				yield* insertRawEventRow({
+					sessionId: "s-bad-replay",
+					data: "{not json",
+				});
+
+				const result = yield* Effect.either(runner.recover());
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(ProjectionRunnerError);
+					if (error instanceof ProjectionRunnerError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
 			}),
 		));
 

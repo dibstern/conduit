@@ -317,16 +317,16 @@ export function canonicalEvent<K extends CanonicalEventType>(
 // ─── Event Metadata Schema ─────────────────────────────────────────────────
 
 export const EventMetadataSchema = Schema.Struct({
-	commandId: Schema.optional(Schema.String),
-	causationEventId: Schema.optional(Schema.String),
-	correlationId: Schema.optional(Schema.String),
-	adapterKey: Schema.optional(Schema.String),
-	providerTurnId: Schema.optional(Schema.String),
-	synthetic: Schema.optional(Schema.Boolean),
-	source: Schema.optional(Schema.String),
-	sseBatchId: Schema.optional(Schema.String),
-	sseBatchSize: Schema.optional(Schema.Number),
-	schemaVersion: Schema.optional(Schema.Number),
+	commandId: Schema.optionalWith(Schema.String, { exact: true }),
+	causationEventId: Schema.optionalWith(Schema.String, { exact: true }),
+	correlationId: Schema.optionalWith(Schema.String, { exact: true }),
+	adapterKey: Schema.optionalWith(Schema.String, { exact: true }),
+	providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
+	synthetic: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	source: Schema.optionalWith(Schema.String, { exact: true }),
+	sseBatchId: Schema.optionalWith(Schema.String, { exact: true }),
+	sseBatchSize: Schema.optionalWith(Schema.Number, { exact: true }),
+	schemaVersion: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 // ─── Payload Schemas ───────────────────────────────────────────────────────
@@ -336,17 +336,17 @@ const SessionStatusSchema = Schema.Literal("idle", "busy", "retry", "error");
 const PermissionDecisionSchema = Schema.Literal("once", "always", "reject");
 
 const TokensSchema = Schema.Struct({
-	input: Schema.optional(Schema.Number),
-	output: Schema.optional(Schema.Number),
-	cacheRead: Schema.optional(Schema.Number),
-	cacheWrite: Schema.optional(Schema.Number),
+	input: Schema.optionalWith(Schema.Number, { exact: true }),
+	output: Schema.optionalWith(Schema.Number, { exact: true }),
+	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
+	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 const MessageCreatedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	role: MessageRoleSchema,
 	sessionId: Schema.String,
-	turnId: Schema.optional(Schema.String),
+	turnId: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const TextDeltaPayloadSchema = Schema.Struct({
@@ -384,8 +384,9 @@ const ToolStartedPayloadSchema = Schema.Struct({
 const ToolRunningPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	partId: Schema.String,
-	metadata: Schema.optional(
+	metadata: Schema.optionalWith(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		{ exact: true },
 	),
 });
 
@@ -406,15 +407,15 @@ const ToolInputUpdatedPayloadSchema = Schema.Struct({
 
 const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
-	cost: Schema.optional(Schema.Number),
-	tokens: Schema.optional(TokensSchema),
-	duration: Schema.optional(Schema.Number),
+	cost: Schema.optionalWith(Schema.Number, { exact: true }),
+	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
+	duration: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 const TurnErrorPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	error: Schema.String,
-	code: Schema.optional(Schema.String),
+	code: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const TurnInterruptedPayloadSchema = Schema.Struct({
@@ -435,7 +436,7 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 const SessionStatusPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	status: SessionStatusSchema,
-	turnId: Schema.optional(Schema.String),
+	turnId: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const SessionProviderChangedPayloadSchema = Schema.Struct({
