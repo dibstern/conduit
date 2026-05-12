@@ -725,3 +725,79 @@ Exit: 0
 Test Files  346 passed (346)
 Tests  5077 passed | 2 skipped | 12 todo (5091)
 ```
+
+## Phase 4: SSE Disconnect Cleanup Slice
+
+Plan issue found:
+
+- `SSEStream.disconnect()` aborted the SDK stream and interrupted its Effect fiber, but the `Effect.async`
+  boundary did not provide an interrupt finalizer. `Fiber.interrupt` could complete before the async generator's
+  `finally` cleanup finished, so relay shutdown could move on before the SSE source had actually released its
+  in-flight resources.
+- Code-quality review found the longer teardown window also opened a reconnect race: a new `connect()` could
+  start while the old `disconnect()` was awaiting cleanup, then the old disconnect could clear the new fiber
+  handle or let stale generator completion mutate connection state.
+- Follow-up self-review found the lifecycle sentinel must be set before abort dispatch, because `AbortController`
+  listeners run synchronously and can re-enter `connect()` during disconnect.
+- Code-quality re-review found `disconnect()`, `connect()`, `disconnect()` could leave a queued reconnect running
+  after the later disconnect completed. The lifecycle now records caller intent with a serialized queue and
+  generation counter, so the last connect/disconnect intent wins.
+
+Changes:
+
+- `src/lib/relay/sse-stream.ts`: the SDK stream consume effect now returns an interrupt finalizer that aborts
+  the active SSE `AbortController` and awaits the in-flight consume promise before interruption completes.
+- `src/lib/relay/sse-stream.ts`: `connect()` now waits for any in-flight disconnect before launching a new fiber,
+  and connect/disconnect calls are serialized through a lifecycle queue with a generation counter.
+- `test/unit/relay/sse-stream.test.ts`: added regression coverage proving `disconnect()` does not settle until
+  the async generator cleanup finishes after abort, and proving reconnect waits behind pending disconnect cleanup.
+  The tests also cover abort-listener reentrancy and a later disconnect canceling a queued reconnect.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/relay/sse-stream.test.ts -t "disconnect waits"
+Exit: 1
+Expected failure:
+  expected true to be false in "disconnect waits for async generator cleanup after abort"
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/relay/sse-stream.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  16 passed (16)
+```
+
+```text
+$ pnpm vitest run test/unit/relay/sse-stream.test.ts \
+  test/unit/relay/sse-stream-effect.test.ts \
+  test/unit/relay/sse-wiring.test.ts \
+  test/unit/relay/race-sse-rehydration.test.ts \
+  test/unit/relay/status-poller-broadcast.test.ts \
+  test/unit/relay/permission-rehydration-wiring.test.ts \
+  test/unit/relay/per-tab-routing-e2e.test.ts
+Exit: 0
+Test Files  7 passed (7)
+Tests  90 passed (90)
+```
+
+```text
+$ pnpm check
+Exit: 0
+
+$ pnpm lint
+Exit: 0
+
+$ git diff --check
+Exit: 0
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  346 passed (346)
+Tests  5081 passed | 2 skipped | 12 todo (5095)
+```
