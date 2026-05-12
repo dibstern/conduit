@@ -196,8 +196,18 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	// ─── interruptTurn ────────────────────────────────────────────────────
 
-	async interruptTurn(sessionId: string): Promise<void> {
-		await this.client.session.abort(sessionId);
+	interruptTurnEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.client.session.abort(sessionId),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "interruptTurn",
+					cause,
+				}),
+		});
 	}
 
 	// ─── resolvePermission ────────────────────────────────────────────────

@@ -37,7 +37,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 			durationMs: 1,
 			providerStateUpdates: [],
 		})),
-		interruptTurn: vi.fn(async () => {}),
+		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermission: vi.fn(async () => {}),
 		resolveQuestion: vi.fn(async () => {}),
 		shutdown: vi.fn(async () => {}),
@@ -130,6 +130,35 @@ describe("OrchestrationEngine dispatchEffect", () => {
 			]);
 			expect(discover).not.toHaveBeenCalled();
 			expect(discoverEffect).toHaveBeenCalledTimes(1);
+		}),
+	);
+
+	it.effect("dispatches interrupt through the adapter Effect boundary", () =>
+		Effect.gen(function* () {
+			const registry = new ProviderRegistry();
+			const engine = new OrchestrationEngine({ registry });
+			const interruptTurn = vi.fn(() => {
+				throw new Error("legacy Promise interrupt should not be called");
+			});
+			const interruptTurnEffect = vi.fn(() => Effect.void);
+
+			registry.registerAdapter({
+				...makeStubAdapter("claude"),
+				interruptTurn,
+				interruptTurnEffect,
+			} as ProviderAdapter & {
+				interruptTurn: typeof interruptTurn;
+				interruptTurnEffect: typeof interruptTurnEffect;
+			});
+			engine.bindSession("session-1", "claude");
+
+			yield* engine.dispatchEffect({
+				type: "interrupt_turn",
+				sessionId: "session-1",
+			});
+
+			expect(interruptTurn).not.toHaveBeenCalled();
+			expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
 		}),
 	);
 });

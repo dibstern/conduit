@@ -2,6 +2,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
@@ -161,7 +162,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 	});
 
-	describe("interruptTurn()", () => {
+	describe("interruptTurnEffect()", () => {
 		it("closes prompt queue and interrupts query", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
@@ -169,7 +170,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.interruptTurn("sess-1");
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
 
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.interrupt).toHaveBeenCalled();
@@ -195,7 +196,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.interruptTurn("sess-1");
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
 
 			expect(resolvedWith).toContain("reject");
 			expect(ctx.pendingApprovals.size).toBe(0);
@@ -218,7 +219,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.interruptTurn("sess-1");
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
 
 			expect(rejected).toHaveLength(1);
 			expect(rejected[0]?.message).toContain("interrupted");
@@ -227,7 +228,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		it("is a no-op when session does not exist", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 			// Should not throw
-			await adapter.interruptTurn("nonexistent");
+			await Effect.runPromise(adapter.interruptTurnEffect("nonexistent"));
 		});
 
 		it("clears in-flight tools", async () => {
@@ -244,7 +245,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.interruptTurn("sess-1");
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
 
 			expect(ctx.inFlightTools.size).toBe(0);
 		});
@@ -273,7 +274,7 @@ describe("ClaudeAdapter lifecycle", () => {
 			).sessions.set("sess-1", ctx);
 
 			// Should not throw even though eventSink is undefined
-			await adapter.interruptTurn("sess-1");
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
 
 			// In-flight tools should still be cleared
 			expect(ctx.inFlightTools.size).toBe(0);
@@ -304,7 +305,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-1", ctx);
 
-			await adapter.interruptTurn("sess-1");
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
 
 			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 				.calls as Array<[CanonicalEvent]>;

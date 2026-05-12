@@ -260,19 +260,17 @@ export class OrchestrationEngine {
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
 			);
 
-			return yield* Effect.tryPromise({
-				try: () => adapter.interruptTurn(command.sessionId),
-				catch: (cause) => {
-					log.error(
-						`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return new ProviderAdapterFailure({
-						providerId,
-						operation: "interruptTurn",
-						cause,
-					});
-				},
-			});
+			return yield* adapter
+				.interruptTurnEffect(command.sessionId)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
 		});
 	}
 

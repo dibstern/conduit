@@ -2,6 +2,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
@@ -1355,7 +1356,9 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const turn2Promise = adapter.sendTurn(input2);
 
 		// Interrupt the second turn
-		await adapter.interruptTurn("session-interrupt-2nd");
+		await Effect.runPromise(
+			adapter.interruptTurnEffect("session-interrupt-2nd"),
+		);
 
 		// After interrupt, the stream consumer ends without a result for the
 		// second turn. The finally block calls rejectTurnIfPending, which rejects

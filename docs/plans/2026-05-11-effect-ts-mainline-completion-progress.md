@@ -2060,6 +2060,85 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 6.3: Provider Interrupt Effect Boundary
+
+Plan issues found:
+
+- `interruptTurn` is the next safe adapter boundary after discovery because it has a narrow session-control surface and
+  does not require changing send-turn streaming, EventSink persistence, or Claude prompt queue ownership.
+- Keeping both `interruptTurn()` and `interruptTurnEffect()` on the adapter contract would preserve the same bridge
+  under a new name. This slice removes the Promise method from `ProviderAdapter` and updates local adapter tests to call
+  the Effect method.
+- OpenCode interruption failures should be asserted through the Effect error channel, not Promise rejection text.
+
+Changes:
+
+- `src/lib/provider/types.ts`: replaced `ProviderAdapter.interruptTurn()` with
+  `interruptTurnEffect(sessionId): Effect.Effect<void, ProviderAdapterFailure>`.
+- `src/lib/provider/opencode-adapter.ts`: OpenCode abort calls now normalize rejected SDK calls to typed
+  `ProviderAdapterFailure`.
+- `src/lib/provider/claude/claude-adapter.ts`: Claude interruption now exposes an Effect method while preserving the
+  existing cleanup behavior for prompt queue close, SDK interrupt, pending approvals/questions, and in-flight tools.
+- `src/lib/provider/orchestration-engine.ts`: `dispatchEffect({ type: "interrupt_turn" })` now calls
+  `adapter.interruptTurnEffect(...)` directly.
+- Provider orchestration, OpenCode action, Claude lifecycle, and type tests were updated to use the Effect interruption
+  boundary.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts
+Exit: 1
+Expected failure:
+  OrchestrationEngine still called the legacy Promise interrupt path:
+  Provider adapter interruptTurn failed for provider claude: legacy Promise interrupt should not be called
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts \
+  test/unit/provider/orchestration-engine.test.ts \
+  test/unit/provider/opencode-adapter-actions.test.ts \
+  test/unit/provider/claude/claude-adapter-lifecycle.test.ts \
+  test/unit/provider/claude/claude-adapter-send-turn.test.ts \
+  test/unit/provider/types.test.ts \
+  test/unit/provider/provider-registry.test.ts \
+  test/unit/provider/claude/provider-wiring.test.ts
+Exit: 0
+Test Files  8 passed (8)
+Tests  130 passed (130)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  32 passed (32)
+Tests  370 passed (370)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 960 files. No fixes applied.
+```
+
+```text
+$ rg -n "try: \\(\\) => adapter\\.|adapter\\.(interruptTurn|discover)\\(" \
+  src/lib/provider/orchestration-engine.ts src/lib/provider/types.ts \
+  src/lib/provider/opencode-adapter.ts src/lib/provider/claude/claude-adapter.ts test/unit/provider
+Exit: 0
+Remaining provider orchestration Promise wrappers:
+  src/lib/provider/orchestration-engine.ts:235: try: () => adapter.sendTurn(command.input)
+  src/lib/provider/orchestration-engine.ts:376: try: () => adapter.endSession(command.sessionId)
+```
+
 ## Phase 6.2: Provider Discovery Effect Boundary
 
 Plan issues found:

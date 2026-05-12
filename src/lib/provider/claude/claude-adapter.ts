@@ -733,7 +733,21 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── interruptTurn ────────────────────────────────────────────────────
 
-	async interruptTurn(sessionId: string): Promise<void> {
+	interruptTurnEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.interruptSession(sessionId),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "interruptTurn",
+					cause,
+				}),
+		});
+	}
+
+	private async interruptSession(sessionId: string): Promise<void> {
 		const ctx = this.sessions.get(sessionId);
 		if (!ctx) return;
 

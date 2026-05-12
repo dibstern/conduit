@@ -1,4 +1,5 @@
 // test/unit/provider/opencode-adapter-actions.test.ts
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
@@ -46,14 +47,14 @@ describe("OpenCodeAdapter action methods", () => {
 		adapter = new OpenCodeAdapter({ client });
 	});
 
-	describe("interruptTurn", () => {
+	describe("interruptTurnEffect", () => {
 		it("calls client.session.abort with the session ID", async () => {
-			await adapter.interruptTurn("session-123");
+			await Effect.runPromise(adapter.interruptTurnEffect("session-123"));
 
 			expect(client.session.abort).toHaveBeenCalledWith("session-123");
 		});
 
-		it("propagates errors from client", async () => {
+		it("returns typed failures from client abort errors", async () => {
 			client = makeStubClient({
 				session: {
 					abort: vi.fn(async () => {
@@ -64,9 +65,19 @@ describe("OpenCodeAdapter action methods", () => {
 			});
 			adapter = new OpenCodeAdapter({ client });
 
-			await expect(adapter.interruptTurn("bad-session")).rejects.toThrow(
-				"session not found",
+			const result = await Effect.runPromise(
+				Effect.either(adapter.interruptTurnEffect("bad-session")),
 			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderAdapterFailure",
+					providerId: "opencode",
+					operation: "interruptTurn",
+				});
+				expect(result.left.message).toContain("session not found");
+			}
 		});
 	});
 

@@ -225,7 +225,9 @@ export interface ProviderAdapter {
 	sendTurn(input: SendTurnInput): Promise<TurnResult>;
 
 	/** Interrupt an in-progress turn */
-	interruptTurn(sessionId: string): Promise<void>;
+	interruptTurnEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderAdapterFailure>;
 
 	/** Resolve a pending permission request (from EventSink.requestPermission) */
 	resolvePermission(

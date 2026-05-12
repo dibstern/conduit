@@ -73,7 +73,7 @@ import {
 
 function makeStubAdapter(providerId: string): ProviderAdapter & {
 	sendTurn: ReturnType<typeof vi.fn>;
-	interruptTurn: ReturnType<typeof vi.fn>;
+	interruptTurnEffect: ReturnType<typeof vi.fn>;
 	resolvePermission: ReturnType<typeof vi.fn>;
 	resolveQuestion: ReturnType<typeof vi.fn>;
 	discoverEffect: ReturnType<typeof vi.fn>;
@@ -102,7 +102,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 			durationMs: 500,
 			providerStateUpdates: [],
 		})),
-		interruptTurn: vi.fn(async () => {}),
+		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermission: vi.fn(async () => {}),
 		resolveQuestion: vi.fn(async () => {}),
 		shutdown: vi.fn(async () => {}),
@@ -204,7 +204,7 @@ describe("OrchestrationEngine", () => {
 				sessionId: "s1",
 			});
 
-			expect(opencode.interruptTurn).toHaveBeenCalledWith("s1");
+			expect(opencode.interruptTurnEffect).toHaveBeenCalledWith("s1");
 		});
 
 		it("throws when session has no provider binding", async () => {
@@ -743,8 +743,14 @@ describe("OrchestrationEngine", () => {
 
 		it("dispatch logs error context before re-throwing for interruptTurn", async () => {
 			const failing = makeStubAdapter("opencode");
-			failing.interruptTurn.mockRejectedValue(
-				new Error("Adapter interrupt failed"),
+			failing.interruptTurnEffect.mockReturnValue(
+				Effect.fail(
+					new ProviderAdapterFailure({
+						providerId: "opencode",
+						operation: "interruptTurn",
+						cause: new Error("Adapter interrupt failed"),
+					}),
+				),
 			);
 
 			const reg = new ProviderRegistry();

@@ -22,7 +22,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter {
 			}),
 		),
 		sendTurn: vi.fn(),
-		interruptTurn: vi.fn(),
+		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermission: vi.fn(),
 		resolveQuestion: vi.fn(),
 		shutdown: vi.fn(),
