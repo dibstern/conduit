@@ -45,6 +45,7 @@ import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
 } from "../../../src/lib/effect/terminal-service.js";
+import { ToolContentServiceLive } from "../../../src/lib/effect/tool-content-service.js";
 import {
 	filterAgents,
 	handleGetAgents,
@@ -1344,6 +1345,7 @@ describe("handleGetToolContent", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(ReadQueryTag, readQuery),
+				ToolContentServiceLive,
 			);
 
 			return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
@@ -1367,7 +1369,10 @@ describe("handleGetToolContent", () => {
 		});
 
 		// No ReadQueryTag provided — serviceOption returns None
-		const layer = Layer.succeed(WebSocketHandlerTag, ws);
+		const layer = Layer.merge(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			ToolContentServiceLive,
+		);
 
 		return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
 			Effect.provide(layer),

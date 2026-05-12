@@ -2,8 +2,8 @@
 // Returns full (pre-truncation) tool result content from the SQLite tool_content table.
 
 import { Effect } from "effect";
-import { ReadQueryTag, WebSocketHandlerTag } from "../effect/services.js";
-import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { WebSocketHandlerTag } from "../effect/services.js";
+import { ToolContentServiceTag } from "../effect/tool-content-service.js";
 import type { PayloadMap } from "./payloads.js";
 
 export const handleGetToolContent = (
@@ -26,20 +26,8 @@ export const handleGetToolContent = (
 			return;
 		}
 
-		// Persistence is optional. Prefer the Effect-native read service when
-		// available; keep the legacy sync service as a fallback while Phase 5
-		// migrates the larger read surface.
-		const readQueryEffectOption =
-			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const content =
-			readQueryEffectOption._tag === "Some"
-				? yield* readQueryEffectOption.value.getToolContent(toolId)
-				: yield* Effect.gen(function* () {
-						const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
-						return readQueryOption._tag === "Some"
-							? readQueryOption.value.getToolContent(toolId)
-							: undefined;
-					});
+		const toolContent = yield* ToolContentServiceTag;
+		const content = yield* toolContent.get(toolId);
 
 		if (content !== undefined) {
 			wsHandler.sendTo(clientId, {

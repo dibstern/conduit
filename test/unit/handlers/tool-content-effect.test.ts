@@ -9,6 +9,10 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
+import {
+	ToolContentServiceLive,
+	ToolContentServiceTag,
+} from "../../../src/lib/effect/tool-content-service.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 
@@ -33,15 +37,46 @@ function mockWsHandler(): WebSocketHandlerShape {
 }
 
 describe("handleGetToolContent with Effect read persistence", () => {
+	it.effect("returns tool content from the Effect service boundary", () => {
+		const ws = mockWsHandler();
+		const toolContent = {
+			get: vi.fn((toolId: string) =>
+				toolId === "tool-service-1"
+					? Effect.succeed("full service output")
+					: Effect.succeed(undefined),
+			),
+		};
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(ToolContentServiceTag, toolContent),
+		);
+
+		return handleGetToolContent("client-1", {
+			toolId: "tool-service-1",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(toolContent.get).toHaveBeenCalledWith("tool-service-1");
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "tool_content",
+					sessionId: "session-effect-read",
+					toolId: "tool-service-1",
+					content: "full service output",
+				});
+			}),
+		);
+	});
+
 	it.effect(
 		"returns tool content from a real Effect SQLite read service",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-tool-content-effect-"));
 			const filename = join(dir, "events.db");
 			const ws = mockWsHandler();
-			const layer = Layer.merge(
+			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				makePersistenceEffectLayer(filename),
+				ToolContentServiceLive,
 			);
 
 			return Effect.gen(function* () {

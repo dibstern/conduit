@@ -67,6 +67,7 @@ import { makeOverridesStateLive } from "../../src/lib/effect/session-overrides-s
 import { makeSessionRegistryStateLive } from "../../src/lib/effect/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/effect/session-status-poller.js";
 import { OpenCodeTerminalServiceLive } from "../../src/lib/effect/terminal-service.js";
+import { ToolContentServiceLive } from "../../src/lib/effect/tool-content-service.js";
 import type {
 	HandlerDeps,
 	InstanceManagementDeps,
@@ -961,6 +962,7 @@ export function makeTestHandlerLayer(
 			),
 		),
 	);
+	const toolContentServiceLayer = ToolContentServiceLive;
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -1001,6 +1003,7 @@ export function makeTestHandlerLayer(
 		projectManagementServiceLayer,
 		scanServiceLayer,
 		agentServiceLayer,
+		toolContentServiceLayer,
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,

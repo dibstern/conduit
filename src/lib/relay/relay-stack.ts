@@ -76,6 +76,7 @@ import {
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
 } from "../effect/terminal-service.js";
+import { ToolContentServiceLive } from "../effect/tool-content-service.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
@@ -906,6 +907,7 @@ export async function createProjectRelay(
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	const toolContentServiceLayer = ToolContentServiceLive;
 
 	const coreBridgeLayers = Layer.mergeAll(
 		openCodeApiLayer,
@@ -916,6 +918,7 @@ export async function createProjectRelay(
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,
+		toolContentServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		webSocketHandlerLayer,
 		Layer.succeed(SessionOverridesTag, overrides),

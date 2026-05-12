@@ -2060,6 +2060,73 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.33: Tool Content Read Service Contract
+
+Plan issues found:
+
+- `handleGetToolContent` was already using the Effect read model when available, but the handler itself still owned
+  the fallback choice between `ReadQueryEffectTag` and legacy `ReadQueryTag`. That left persistence-read ownership in
+  a browser-message handler instead of behind a domain read service.
+- The legacy `ReadQueryTag` fallback cannot be deleted in this slice because `prompt.ts` and `session.ts` still use it.
+  This slice moves the fallback out of the handler and keeps the transition explicit in one service.
+- A read-only subagent audit found source/progress drift in the next adjacent read surface: the progress doc says
+  history pagination is service-owned, but `src/lib/handlers/session.ts` still reads `ReadQueryTag` directly for
+  `view_session` history resolution. That should be the next read-service cleanup before claiming handler read
+  ownership is complete.
+
+Changes:
+
+- Added `src/lib/effect/tool-content-service.ts` with `ToolContentServiceTag`, `ToolContentServiceLive`, and a typed
+  `ToolContentServiceError`.
+- Converted `src/lib/handlers/tool-content.ts` to depend only on `ToolContentServiceTag` and `WebSocketHandlerTag`.
+- Wired `ToolContentServiceLive` into production relay runtime composition and the shared handler test layer.
+- Updated tool-content tests to prove the handler can run from the service boundary without `ReadQueryTag`, while
+  retaining coverage for the real Effect SQLite read path and the legacy fallback path.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/effect/tool-content-service.js'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  90 passed (90)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 988 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  371 passed (371)
+Tests  5232 passed | 2 skipped | 12 todo (5246)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.32: Agent Handler Selection Service Contract
 
 Plan issues found:
