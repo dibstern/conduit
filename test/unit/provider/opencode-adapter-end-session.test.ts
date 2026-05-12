@@ -1,4 +1,5 @@
 // test/unit/provider/opencode-adapter-end-session.test.ts
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createDeferred } from "../../../src/lib/provider/deferred.js";
@@ -37,7 +38,7 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
-describe("OpenCodeAdapter.endSession()", () => {
+describe("OpenCodeAdapter.endSessionEffect()", () => {
 	let client: OpenCodeAPI;
 	let adapter: OpenCodeAdapter;
 
@@ -48,7 +49,7 @@ describe("OpenCodeAdapter.endSession()", () => {
 
 	it("is a no-op when there is no pending turn", async () => {
 		await expect(
-			adapter.endSession("missing-session"),
+			Effect.runPromise(adapter.endSessionEffect("missing-session")),
 		).resolves.toBeUndefined();
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
@@ -66,7 +67,7 @@ describe("OpenCodeAdapter.endSession()", () => {
 			rejected = err;
 		});
 
-		await adapter.endSession("sess-1");
+		await Effect.runPromise(adapter.endSessionEffect("sess-1"));
 		await caught;
 
 		expect(rejected).toBeInstanceOf(Error);
@@ -87,14 +88,14 @@ describe("OpenCodeAdapter.endSession()", () => {
 			/* swallow */
 		});
 
-		await adapter.endSession("sess-2");
+		await Effect.runPromise(adapter.endSessionEffect("sess-2"));
 
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
 
 	it("is idempotent across repeated calls", async () => {
-		await adapter.endSession("sess-idempotent");
-		await adapter.endSession("sess-idempotent");
+		await Effect.runPromise(adapter.endSessionEffect("sess-idempotent"));
+		await Effect.runPromise(adapter.endSessionEffect("sess-idempotent"));
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
 });

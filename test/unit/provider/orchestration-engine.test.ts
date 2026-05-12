@@ -78,7 +78,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 	resolveQuestion: ReturnType<typeof vi.fn>;
 	discoverEffect: ReturnType<typeof vi.fn>;
 	shutdown: ReturnType<typeof vi.fn>;
-	endSession: ReturnType<typeof vi.fn>;
+	endSessionEffect: ReturnType<typeof vi.fn>;
 } {
 	return {
 		providerId,
@@ -106,7 +106,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 		resolvePermission: vi.fn(async () => {}),
 		resolveQuestion: vi.fn(async () => {}),
 		shutdown: vi.fn(async () => {}),
-		endSession: vi.fn(async () => {}),
+		endSessionEffect: vi.fn(() => Effect.void),
 	};
 }
 
@@ -274,7 +274,7 @@ describe("OrchestrationEngine", () => {
 				sessionId: "s-end-1",
 			});
 
-			expect(opencode.endSession).toHaveBeenCalledWith("s-end-1");
+			expect(opencode.endSessionEffect).toHaveBeenCalledWith("s-end-1");
 		});
 
 		it("is a no-op when session has no binding", async () => {
@@ -283,7 +283,7 @@ describe("OrchestrationEngine", () => {
 				sessionId: "unbound",
 			});
 
-			expect(opencode.endSession).not.toHaveBeenCalled();
+			expect(opencode.endSessionEffect).not.toHaveBeenCalled();
 		});
 
 		it("preserves the binding when unbind is omitted", async () => {
@@ -310,7 +310,15 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("propagates adapter errors and preserves binding", async () => {
-			opencode.endSession.mockRejectedValueOnce(new Error("adapter boom"));
+			opencode.endSessionEffect.mockReturnValueOnce(
+				Effect.fail(
+					new ProviderAdapterFailure({
+						providerId: "opencode",
+						operation: "endSession",
+						cause: new Error("adapter boom"),
+					}),
+				),
+			);
 			engine.bindSession("s-err", "opencode");
 
 			await expect(

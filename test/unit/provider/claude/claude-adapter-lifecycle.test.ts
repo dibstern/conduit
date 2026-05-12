@@ -367,7 +367,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 	});
 
-	describe("endSession()", () => {
+	describe("endSessionEffect()", () => {
 		it("closes query and removes session from map", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-end");
@@ -375,7 +375,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-end", ctx);
 
-			await adapter.endSession("sess-end");
+			await Effect.runPromise(adapter.endSessionEffect("sess-end"));
 
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.close).toHaveBeenCalled();
@@ -389,7 +389,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		it("is a no-op for unknown session", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 			// Should not throw
-			await adapter.endSession("nonexistent");
+			await Effect.runPromise(adapter.endSessionEffect("nonexistent"));
 		});
 
 		it("rejects queued turn deferreds with reload reason", async () => {
@@ -413,7 +413,7 @@ describe("ClaudeAdapter lifecycle", () => {
 			d1.promise.catch((e) => rejected.push(e));
 			d2.promise.catch((e) => rejected.push(e));
 
-			await adapter.endSession("sess-reject");
+			await Effect.runPromise(adapter.endSessionEffect("sess-reject"));
 
 			// Flush microtasks
 			await Promise.resolve();
@@ -464,7 +464,7 @@ describe("ClaudeAdapter lifecycle", () => {
 			);
 
 			// End session (user-initiated reload)
-			await adapter.endSession("sess-reload-flow");
+			await Effect.runPromise(adapter.endSessionEffect("sess-reload-flow"));
 			expect(
 				(adapter as unknown as { sessions: Map<string, unknown> }).sessions.has(
 					"sess-reload-flow",

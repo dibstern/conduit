@@ -62,7 +62,7 @@ describe("Provider wiring with Claude adapter", () => {
 			resolvePermission: async () => {},
 			resolveQuestion: async () => {},
 			shutdown: async () => {},
-			endSession: async () => {},
+			endSessionEffect: () => Effect.void,
 		};
 
 		registry.registerAdapter(opencode);

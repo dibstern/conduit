@@ -862,7 +862,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 	/**
 	 * Terminal disposal of a single session: cleanup + reject pending turn
 	 * deferreds + close the SDK query + remove from the session map. Shared
-	 * by endSession() and shutdown(); interruptTurn() still uses cleanupSession
+	 * by endSessionEffect() and shutdown(); interruptTurnEffect() still uses cleanupSession
 	 * alone because interrupt is resumable.
 	 */
 	private async disposeSession(
@@ -896,7 +896,21 @@ export class ClaudeAdapter implements ProviderAdapter {
 		this.sessions.delete(ctx.sessionId);
 	}
 
-	async endSession(sessionId: string): Promise<void> {
+	endSessionEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.endSessionLocal(sessionId),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "endSession",
+					cause,
+				}),
+		});
+	}
+
+	private async endSessionLocal(sessionId: string): Promise<void> {
 		const ctx = this.sessions.get(sessionId);
 		if (!ctx) return; // idempotent
 		log.info(`Ending Claude session: ${sessionId}`);

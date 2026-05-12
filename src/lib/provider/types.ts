@@ -252,5 +252,7 @@ export interface ProviderAdapter {
 	 * from the provider -- that's a higher-level concern. Next sendTurn()
 	 * re-creates state from scratch.
 	 */
-	endSession(sessionId: string): Promise<void>;
+	endSessionEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderAdapterFailure>;
 }

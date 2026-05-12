@@ -372,19 +372,17 @@ export class OrchestrationEngine {
 					`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
 				),
 			);
-			yield* Effect.tryPromise({
-				try: () => adapter.endSession(command.sessionId),
-				catch: (cause) => {
-					log.error(
-						`endSession failed: session=${command.sessionId} provider=${providerId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return new ProviderAdapterFailure({
-						providerId,
-						operation: "endSession",
-						cause,
-					});
-				},
-			});
+			yield* adapter
+				.endSessionEffect(command.sessionId)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`endSession failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
 			if (command.unbind) {
 				yield* Effect.sync(() =>
 					this.sessionBindings.delete(command.sessionId),

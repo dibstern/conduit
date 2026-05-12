@@ -26,7 +26,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter {
 		resolvePermission: vi.fn(),
 		resolveQuestion: vi.fn(),
 		shutdown: vi.fn(),
-		endSession: vi.fn(),
+		endSessionEffect: vi.fn(() => Effect.void),
 	};
 }
 

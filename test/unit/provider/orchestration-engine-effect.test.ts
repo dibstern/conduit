@@ -41,7 +41,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 		resolvePermission: vi.fn(async () => {}),
 		resolveQuestion: vi.fn(async () => {}),
 		shutdown: vi.fn(async () => {}),
-		endSession: vi.fn(async () => {}),
+		endSessionEffect: vi.fn(() => Effect.void),
 	};
 }
 
@@ -159,6 +159,37 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 			expect(interruptTurn).not.toHaveBeenCalled();
 			expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
+		}),
+	);
+
+	it.effect("dispatches endSession through the adapter Effect boundary", () =>
+		Effect.gen(function* () {
+			const registry = new ProviderRegistry();
+			const engine = new OrchestrationEngine({ registry });
+			const endSession = vi.fn(() => {
+				throw new Error("legacy Promise endSession should not be called");
+			});
+			const endSessionEffect = vi.fn(() => Effect.void);
+
+			registry.registerAdapter({
+				...makeStubAdapter("claude"),
+				endSession,
+				endSessionEffect,
+			} as ProviderAdapter & {
+				endSession: typeof endSession;
+				endSessionEffect: typeof endSessionEffect;
+			});
+			engine.bindSession("session-1", "claude");
+
+			yield* engine.dispatchEffect({
+				type: "end_session",
+				sessionId: "session-1",
+				unbind: true,
+			});
+
+			expect(endSession).not.toHaveBeenCalled();
+			expect(endSessionEffect).toHaveBeenCalledWith("session-1");
+			expect(engine.getProviderForSession("session-1")).toBeUndefined();
 		}),
 	);
 });

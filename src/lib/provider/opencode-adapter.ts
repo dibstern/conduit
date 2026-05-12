@@ -236,7 +236,13 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	// ─── endSession ──────────────────────────────────────────────────────
 
-	async endSession(sessionId: string): Promise<void> {
+	endSessionEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderAdapterFailure> {
+		return Effect.sync(() => this.endLocalSession(sessionId));
+	}
+
+	private endLocalSession(sessionId: string): void {
 		// OpenCode owns session state server-side. The adapter's only
 		// per-session state is the pending turn deferred; reject it so the
 		// caller unblocks. We do NOT call client.session.abort -- reload is

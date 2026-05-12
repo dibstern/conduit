@@ -49,7 +49,7 @@ describe("ProviderAdapter types", () => {
 				_answers: Record<string, unknown>,
 			) => {},
 			shutdown: async () => {},
-			endSession: async (_sessionId: string) => {},
+			endSessionEffect: (_sessionId: string) => Effect.void,
 		};
 
 		expect(adapter.providerId).toBe("test");
@@ -59,7 +59,7 @@ describe("ProviderAdapter types", () => {
 		expect(typeof adapter.resolvePermission).toBe("function");
 		expect(typeof adapter.resolveQuestion).toBe("function");
 		expect(typeof adapter.shutdown).toBe("function");
-		expect(typeof adapter.endSession).toBe("function");
+		expect(typeof adapter.endSessionEffect).toBe("function");
 	});
 
 	it("SendTurnInput includes all required fields", () => {
