@@ -2225,6 +2225,32 @@ Test Files  359 passed (359)
 Tests  5147 passed | 2 skipped | 12 todo (5161)
 ```
 
+## Phase 7.6: Model Variant Wire Snapshots
+
+Plan issues found:
+
+- The remaining model-handler OpenCode reads are provider-list lookups used to populate `variant_info` in
+  `switch_model`, `set_default_model`, and `switch_variant`.
+- `switch_model` currently defects if `OrchestrationEngineTag` is missing because the handler wraps a required service
+  lookup in `Effect.either`. The snapshot provides the engine layer to preserve current behavior while documenting this
+  dependency for later cleanup.
+
+Changes:
+
+- `test/unit/handlers/model-wire-snapshots.test.ts`: added OpenCode-provider snapshots for `switch_model`,
+  `switch_variant`, and `set_default_model`.
+- `test/snapshots/handlers/models.json`: pinned the current `model_info`, `default_model_info`, and `variant_info`
+  envelopes before moving the provider-list reads.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-wire-snapshots.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  6 passed (6)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:
