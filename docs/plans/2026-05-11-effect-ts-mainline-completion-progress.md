@@ -2060,6 +2060,83 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.0: File Handler Wire Snapshots
+
+Plan issues found:
+
+- Phase 7 says to snapshot handler envelopes before converting handlers. Existing handler tests asserted mock calls, but
+  there was no committed `test/snapshots/handlers/<handler>.json` baseline.
+- Error envelopes need to be captured through `handleRelayWsMessage(...)`, not just direct handler functions, because
+  the top-level wrapper renders `system_error` messages.
+- The file snapshot captures two current wire quirks without changing behavior: the fixture shape currently emits
+  `node_modules/` in `file_tree`, and rejected file reads currently render as
+  `"An unknown error occurred in Effect.tryPromise"`. Any improvement to those envelopes should be a separate,
+  intentional frontend-coordinated behavior change.
+
+Changes:
+
+- `test/helpers/mock-factories.ts`: added `makeRecordingWebSocketHandler(...)` and `RecordedWebSocketCall` so handler
+  tests can compare normalized outbound WebSocket envelopes.
+- `test/unit/handlers/file-wire-snapshots.test.ts`: added success snapshots for `get_file_list`, `get_file_content`,
+  and `get_file_tree`, plus the top-level `get_file_content` error envelope through `handleRelayWsMessage(...)`.
+- `test/snapshots/handlers/files.json`: committed the current file-handler wire contract before any service conversion.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/handlers/file-wire-snapshots.test.ts
+Exit: 1
+Expected failure:
+  makeRecordingWebSocketHandler was not implemented yet.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/file-wire-snapshots.test.ts
+Exit: 1
+Expected failure:
+  test/snapshots/handlers/files.json did not exist yet.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/file-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  69 passed (69)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 962 files. No fixes applied.
+```
+
+## Phase 6.9: Claude SDK AsyncIterable Boundary Decision
+
+Plan issues found:
+
+- The plan recommends `Stream.fromAsyncIterable(...)` as the canonical Claude SDK AsyncIterable adapter. That remains
+  correct for the target architecture, but the current Claude stream consumer is still owned by an imperative
+  `Promise<void>` stored on the session context.
+- Rewriting only the `for await` loop now would likely add an adapter-local `Effect.runPromise(Stream.runForEach(...))`
+  bridge, moving the Promise runner deeper instead of making lifecycle ownership more Effect-native.
+
+Decision:
+
+- Reclassify the current `for await (const message of ctx.query)` loop as an intentional Claude SDK external boundary
+  for this phase.
+- Defer `Stream.fromAsyncIterable(...)` until the Claude adapter internals move together: Effect-owned session state,
+  pending-turn `Deferred`/queue ownership, and scoped stream fibers. That later slice should preserve existing stream
+  failure, natural-end, stale-resume, and interruption tests.
+
 ## Phase 6.8: Provider Registry Effect Service Layer
 
 Plan issues found:

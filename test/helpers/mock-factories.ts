@@ -63,7 +63,7 @@ import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
 import type { SessionOverrides } from "../../src/lib/session/session-overrides.js";
-import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
 
@@ -609,6 +609,70 @@ export function makeMockWebSocketHandler(
 		on: vi.fn(),
 		once: vi.fn(),
 		...overrides,
+	};
+}
+
+export type RecordedWebSocketCall =
+	| {
+			readonly channel: "broadcast";
+			readonly message: RelayMessage;
+	  }
+	| {
+			readonly channel: "sendTo";
+			readonly clientId: string;
+			readonly message: RelayMessage;
+	  }
+	| {
+			readonly channel: "sendToSession";
+			readonly sessionId: string;
+			readonly message: RelayMessage;
+	  }
+	| {
+			readonly channel: "broadcastPerSessionEvent";
+			readonly sessionId: string;
+			readonly message: RelayMessage;
+	  };
+
+/** Create a WebSocket handler mock that records outbound envelopes. */
+export function makeRecordingWebSocketHandler(
+	overrides?: Partial<WebSocketHandlerShape>,
+): {
+	readonly wsHandler: WebSocketHandlerShape;
+	readonly calls: RecordedWebSocketCall[];
+} {
+	const calls: RecordedWebSocketCall[] = [];
+	const onBroadcast = overrides?.broadcast;
+	const onSendTo = overrides?.sendTo;
+	const onSendToSession = overrides?.sendToSession;
+	const onBroadcastPerSessionEvent = overrides?.broadcastPerSessionEvent;
+
+	return {
+		calls,
+		wsHandler: makeMockWebSocketHandler({
+			...overrides,
+			broadcast: vi.fn((message: RelayMessage) => {
+				calls.push({ channel: "broadcast", message });
+				onBroadcast?.(message);
+			}),
+			sendTo: vi.fn((clientId: string, message: RelayMessage) => {
+				calls.push({ channel: "sendTo", clientId, message });
+				onSendTo?.(clientId, message);
+			}),
+			sendToSession: vi.fn((sessionId: string, message: RelayMessage) => {
+				calls.push({ channel: "sendToSession", sessionId, message });
+				onSendToSession?.(sessionId, message);
+			}),
+			broadcastPerSessionEvent: vi.fn(
+				(sessionId: string, message: RelayMessage) => {
+					calls.push({
+						channel: "broadcastPerSessionEvent",
+						sessionId,
+						message,
+					});
+					onBroadcastPerSessionEvent?.(sessionId, message);
+				},
+			),
+		}),
 	};
 }
 
