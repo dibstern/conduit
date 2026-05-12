@@ -114,6 +114,7 @@ import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { SessionManager } from "../session/session-manager.js";
 import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
+import { readSessionStatusesFromEffect } from "../session/session-status-effect.js";
 import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -545,9 +546,11 @@ export async function createProjectRelay(
 
 	const pollerPollDeps: PollDeps = {
 		getRawStatuses: () =>
-			sqliteReader
-				? Effect.sync(() => sqliteReader.getSessionStatuses())
-				: Effect.tryPromise(() => api.session.statuses()),
+			config.persistenceDbPath != null
+				? readSessionStatusesFromEffect
+				: sqliteReader
+					? Effect.sync(() => sqliteReader.getSessionStatuses())
+					: Effect.tryPromise(() => api.session.statuses()),
 		getSessionParentMap: (): Map<string, string> =>
 			sessionMgr.getSessionParentMap(),
 		resolveParent: (sessionId: string) =>

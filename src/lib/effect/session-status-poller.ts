@@ -307,6 +307,8 @@ export interface PollDeps {
 	readonly getRawStatuses: () => Effect.Effect<
 		Record<string, SessionStatus>,
 		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; poll() handles all errors internally
+		any,
+		// biome-ignore lint/suspicious/noExplicitAny: Effect-backed readers may require services from the attached runtime
 		any
 	>;
 	/** Session parent map for subagent propagation. */
@@ -315,6 +317,8 @@ export interface PollDeps {
 	readonly resolveParent: (sessionId: string) => Effect.Effect<
 		string | undefined,
 		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
+		any,
+		// biome-ignore lint/suspicious/noExplicitAny: callers may require services from the attached runtime
 		any
 	>;
 	/** REST reconciliation deps (optional). */

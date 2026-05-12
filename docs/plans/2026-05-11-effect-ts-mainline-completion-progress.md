@@ -1630,3 +1630,73 @@ $ pnpm lint
 Exit: 0
 Checked 952 files. No fixes applied.
 ```
+
+## Phase 5.4: Effect Status Read Consumer Slice
+
+Plan issues found:
+
+- A subagent audit recommended `ProviderStateServiceTag` as the smallest remaining consumer, but the status-read
+  TDD cycle was already red in this session. Finishing the red/green slice avoided leaving a broken test import and
+  still retired a concrete `ReadQueryService` production read path.
+- `PollDeps.getRawStatuses` was typed as dependency-free even though an Effect-native production reader can require
+  services from the relay runtime. The type boundary needed to admit runtime-provided dependencies rather than
+  forcing a cast or a separate sync bridge.
+
+Changes:
+
+- `src/lib/persistence/effect/read-query-effect.ts`: added `getSessionStatus(sessionId)` and
+  `getAllSessionStatuses()` to the Effect-native read query service.
+- `src/lib/session/session-status-effect.ts`: added Effect helpers that convert projected session statuses into the
+  OpenCode-compatible `{ type }` status map used by the status poller.
+- `src/lib/effect/session-status-poller.ts`: widened `PollDeps` dependency requirements so Effect-backed readers can
+  be provided by the attached runtime.
+- `src/lib/relay/relay-stack.ts`: status polling now prefers the Effect status reader when `persistenceDbPath` is
+  available, while keeping the legacy `SessionStatusSqliteReader` fallback for the remaining bridge period.
+- `test/unit/session/session-status-poller-effect.test.ts`: added a real SQLite-backed poll test that seeds projected
+  statuses through the production Effect persistence layer.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts -t "poll reads projected statuses"
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/session/session-status-effect.js'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts -t "poll reads projected statuses"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 11 skipped (12)
+```
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts \
+  test/unit/session/session-status-sqlite.test.ts \
+  test/unit/relay/status-poller-broadcast.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  22 passed (22)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 953 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  350 passed (350)
+Tests  5111 passed | 2 skipped | 12 todo (5125)
+Note: run emitted existing ExperimentalWarning SQLite warnings and existing MaxListenersExceededWarning warnings.
+```
