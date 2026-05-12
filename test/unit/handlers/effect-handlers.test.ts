@@ -1396,6 +1396,19 @@ describe("handleForkSession", () => {
 			const legacySendDualSessionLists = vi.fn(async () => {
 				throw new Error("legacy sendDualSessionLists should not be used");
 			});
+			const legacyListSessions = vi.fn(async () => {
+				throw new Error("legacy listSessions should not be used");
+			});
+			const serviceListSessions = vi.fn(() =>
+				Effect.succeed([
+					{
+						id: "ses-parent",
+						title: "Parent Session",
+						updatedAt: 100,
+						messageCount: 1,
+					},
+				]),
+			);
 			const serviceSetForkEntry = vi.fn(() => Effect.void);
 			const serviceSendDualSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
@@ -1420,20 +1433,14 @@ describe("handleForkSession", () => {
 			const sessionMgr = mockSessionManager({
 				setForkEntry: legacySetForkEntry,
 				sendDualSessionLists: legacySendDualSessionLists,
-				listSessions: vi.fn(async () => [
-					{
-						id: "ses-parent",
-						title: "Parent Session",
-						updatedAt: 100,
-						messageCount: 1,
-					},
-				]),
+				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
 					messages: [],
 					hasMore: false,
 				})),
 			});
 			const sessionManagerService = makeMockSessionManagerService({
+				listSessions: serviceListSessions,
 				setForkEntry: serviceSetForkEntry,
 				sendDualSessionLists: serviceSendDualSessionLists,
 			});
@@ -1455,6 +1462,8 @@ describe("handleForkSession", () => {
 						forkPointTimestamp: 123,
 					});
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
+					expect(serviceListSessions).toHaveBeenCalledWith();
+					expect(legacyListSessions).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_forked",
 						sessionId: "ses-child",
@@ -2255,9 +2264,13 @@ describe("handleDeleteSession", () => {
 			const legacySendDualSessionLists = vi.fn(async () => {
 				throw new Error("legacy sendDualSessionLists should not be used");
 			});
+			const legacyListSessions = vi.fn(async () => {
+				throw new Error("legacy listSessions should not be used");
+			});
+			const serviceListSessions = vi.fn(() => Effect.succeed([]));
 			const sessionMgr = mockSessionManager({
 				deleteSession: vi.fn(async () => {}),
-				listSessions: vi.fn(async () => []),
+				listSessions: legacyListSessions,
 				sendDualSessionLists: legacySendDualSessionLists,
 			});
 			const sendDualSessionLists = vi.fn((send) =>
@@ -2270,6 +2283,7 @@ describe("handleDeleteSession", () => {
 				}),
 			);
 			const sessionManagerService = makeMockSessionManagerService({
+				listSessions: serviceListSessions,
 				sendDualSessionLists,
 			});
 			const layer = makeSessionLifecycleLayer({
@@ -2291,7 +2305,8 @@ describe("handleDeleteSession", () => {
 						"deleted-session",
 						{ silent: true },
 					);
-					expect(sessionMgr.listSessions).toHaveBeenCalled();
+					expect(serviceListSessions).not.toHaveBeenCalled();
+					expect(legacyListSessions).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",
 						sessionId: "deleted-session",
@@ -2321,18 +2336,22 @@ describe("handleDeleteSession", () => {
 			const legacySendDualSessionLists = vi.fn(async () => {
 				throw new Error("legacy sendDualSessionLists should not be used");
 			});
-			const sessionMgr = mockSessionManager({
-				deleteSession: vi.fn(async () => {}),
-				listSessions: vi.fn(async () => [
+			const legacyListSessions = vi.fn(async () => {
+				throw new Error("legacy listSessions should not be used");
+			});
+			const serviceListSessions = vi.fn(() =>
+				Effect.succeed([
 					{
 						id: "remaining-session",
-						projectID: "project-1",
-						directory: "/tmp/project",
 						title: "Remaining Session",
-						version: "1.0.0",
-						time: { created: 100, updated: 200 },
+						updatedAt: 200,
+						messageCount: 0,
 					},
 				]),
+			);
+			const sessionMgr = mockSessionManager({
+				deleteSession: vi.fn(async () => {}),
+				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
 					messages: [],
 					hasMore: false,
@@ -2356,6 +2375,7 @@ describe("handleDeleteSession", () => {
 				}),
 			);
 			const sessionManagerService = makeMockSessionManagerService({
+				listSessions: serviceListSessions,
 				sendDualSessionLists,
 			});
 			const client = {
@@ -2389,6 +2409,8 @@ describe("handleDeleteSession", () => {
 						"deleted-session",
 						{ silent: true },
 					);
+					expect(serviceListSessions).toHaveBeenCalledWith();
+					expect(legacyListSessions).not.toHaveBeenCalled();
 					expect(ws.setClientSession).toHaveBeenCalledWith(
 						"client-1",
 						"remaining-session",

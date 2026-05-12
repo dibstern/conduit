@@ -319,7 +319,8 @@ export const handleDeleteSession = (
 			sessionMgr.deleteSession(id, { silent: true }),
 		);
 
-		const sessions = yield* Effect.tryPromise(() => sessionMgr.listSessions());
+		const sessions =
+			viewers.length > 0 ? yield* sessionManagerService.listSessions() : [];
 
 		// Switch ALL viewers to the next session
 		if (sessions.length > 0) {
@@ -490,7 +491,7 @@ export const handleForkSession = (
 		}
 
 		// Find the parent title for the notification
-		const sessions = yield* Effect.tryPromise(() => sessionMgr.listSessions());
+		const sessions = yield* sessionManagerService.listSessions();
 		const parent = sessions.find((s) => s.id === sessionId);
 
 		// Broadcast the fork notification

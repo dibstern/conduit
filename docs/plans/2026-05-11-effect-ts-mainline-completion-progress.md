@@ -2394,6 +2394,69 @@ Test Files  363 passed (363)
 Tests  5173 passed | 2 skipped | 12 todo (5187)
 ```
 
+## Phase 7.17: Session Lifecycle List Read Service Contract
+
+Plan issues found:
+
+- After the session-list broadcast migration, `handleDeleteSession` and `handleForkSession` still
+  read session lists through the legacy `SessionManager`. That left the lifecycle handlers split
+  between the Effect service for broadcast state and the legacy manager for control-flow reads.
+- `handleDeleteSession` read the full session list even when no clients were viewing the deleted
+  session. The list is only needed to choose a fallback session for viewers, so the zero-viewer
+  path should not hit either session-list source.
+
+Changes:
+
+- Converted the delete-session viewer fallback read to `SessionManagerServiceTag.listSessions`.
+- Skipped the delete-session fallback read entirely when there are no viewers to switch.
+- Converted the fork-session parent-title lookup to `SessionManagerServiceTag.listSessions`.
+- Tightened handler tests so legacy `sessionMgr.listSessions` throws if either lifecycle path
+  uses it.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleDeleteSession|handleForkSession"
+Exit: 1
+Expected failure:
+  legacy listSessions should not be used
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleDeleteSession|handleForkSession"
+Exit: 0
+Test Files  1 passed (1)
+Tests  5 passed | 58 skipped (63)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  68 passed (68)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && exit 1)
+Exit: 0
+Test Files  363 passed (363)
+Tests  5173 passed | 2 skipped | 12 todo (5187)
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:
