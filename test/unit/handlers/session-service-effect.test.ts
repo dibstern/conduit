@@ -110,6 +110,63 @@ function makeSessionMetadataLayer(options: {
 }
 
 describe("session handlers with Effect-native model service", () => {
+	it.effect(
+		"loads view-session REST history through SessionManagerService",
+		() => {
+			const legacyLoadPreRenderedHistory = vi.fn(async () => {
+				throw new Error("legacy loadPreRenderedHistory should not be used");
+			});
+			const loadPreRenderedHistory = vi.fn(() =>
+				Effect.succeed({
+					messages: [
+						{
+							id: "msg-1",
+							role: "assistant" as const,
+							parts: [{ id: "part-1", type: "text" as const, text: "hello" }],
+						},
+					],
+					hasMore: false,
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory,
+			});
+			const { wsHandler, layer } = makeSessionMetadataLayer({
+				sessionMgr: makeMockSessionManagerShape({
+					loadPreRenderedHistory: legacyLoadPreRenderedHistory,
+				}),
+				sessionManagerService,
+			});
+
+			return handleViewSession(
+				"client-1",
+				{ sessionId: "session-1" },
+				/* skipMetadata */ true,
+			).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
+					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
+					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session_switched",
+						id: "session-1",
+						sessionId: "session-1",
+						history: {
+							messages: [
+								{
+									id: "msg-1",
+									role: "assistant",
+									parts: [{ id: "part-1", type: "text", text: "hello" }],
+								},
+							],
+							hasMore: false,
+						},
+					});
+				}),
+			);
+		},
+	);
+
 	it.effect("loads session model metadata through the model service", () => {
 		const { api, modelService, wsHandler, layer } = makeSessionMetadataLayer(
 			{},

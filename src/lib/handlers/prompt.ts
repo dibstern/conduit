@@ -15,6 +15,7 @@ import {
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
+import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
@@ -572,7 +573,7 @@ export const handleRewind = (clientId: string, payload: PayloadMap["rewind"]) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const messageId = payload.messageId ?? payload.uuid ?? "";
@@ -581,7 +582,7 @@ export const handleRewind = (clientId: string, payload: PayloadMap["rewind"]) =>
 			yield* Effect.tryPromise(() =>
 				client.session.revert(activeId, { messageID: messageId }),
 			);
-			sessionMgr.clearPaginationCursor(activeId);
+			yield* sessionManagerService.clearPaginationCursor(activeId);
 			log.info(
 				`client=${clientId} session=${activeId} Reverted to message: ${messageId}`,
 			);

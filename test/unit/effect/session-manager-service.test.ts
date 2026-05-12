@@ -17,10 +17,14 @@ import {
 	StatusPollerTag,
 } from "../../../src/lib/effect/services.js";
 import {
+	clearPaginationCursor,
 	listSessions,
+	loadHistory,
+	loadPreRenderedHistory,
 	renameSession,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
+	seedPaginationCursor,
 	sendDualSessionLists,
 	setForkEntry,
 } from "../../../src/lib/effect/session-manager-service.js";
@@ -28,6 +32,7 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/effect/session-manager-state.js";
+import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
@@ -36,6 +41,7 @@ import type { SessionRow } from "../../../src/lib/persistence/read-model-types.j
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeMockLogger,
@@ -68,7 +74,167 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 	};
 }
 
+function makeHistoryMessage(
+	id: string,
+	role: "user" | "assistant" = "assistant",
+	text?: string,
+): HistoryMessage {
+	return {
+		id,
+		role,
+		...(text
+			? {
+					parts: [
+						{
+							id: `part-${id}`,
+							type: "text",
+							text,
+						},
+					],
+				}
+			: {}),
+	};
+}
+
 describe("SessionManagerService", () => {
+	it.effect(
+		"loads pre-rendered history and stores the oldest message cursor",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			const messages = [
+				makeHistoryMessage("msg-oldest", "user", "hello"),
+				makeHistoryMessage("msg-newest", "assistant", "**bold**"),
+			];
+			vi.spyOn(api.session, "messagesPage").mockResolvedValue(
+				messages as unknown as Awaited<
+					ReturnType<typeof api.session.messagesPage>
+				>,
+			);
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				const page = yield* loadPreRenderedHistory("session-1");
+				const stateRef = yield* SessionManagerStateTag;
+				const state = yield* Ref.get(stateRef);
+
+				expect(api.session.messagesPage).toHaveBeenCalledWith("session-1", {
+					limit: 50,
+				});
+				expect(page.messages).toHaveLength(2);
+				expect(page.messages[1]?.parts?.[0]?.renderedHtml).toContain(
+					"<strong>bold</strong>",
+				);
+				const cursor = HashMap.get(state.paginationCursors, "session-1");
+				expect(cursor._tag).toBe("Some");
+				if (cursor._tag === "Some") {
+					expect(cursor.value).toBe("msg-oldest");
+				}
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect("returns an empty older page when no cursor is known", () => {
+		const api = makeMockOpenCodeAPI();
+		const messagesPage = vi.spyOn(api.session, "messagesPage");
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+			makeSessionManagerStateLive(),
+		);
+
+		return Effect.gen(function* () {
+			const page = yield* loadHistory("session-1", 50);
+
+			expect(page).toEqual({ messages: [], hasMore: false });
+			expect(messagesPage).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"keeps seed/clear pagination cursor ownership in service state",
+		() => {
+			const layer = makeSessionManagerStateLive();
+
+			return Effect.gen(function* () {
+				yield* seedPaginationCursor("session-1", "msg-oldest");
+				yield* seedPaginationCursor("session-1", "msg-newer");
+
+				const stateRef = yield* SessionManagerStateTag;
+				const seeded = yield* Ref.get(stateRef);
+				const seededCursor = HashMap.get(seeded.paginationCursors, "session-1");
+				expect(seededCursor._tag).toBe("Some");
+				if (seededCursor._tag === "Some") {
+					expect(seededCursor.value).toBe("msg-oldest");
+				}
+
+				yield* clearPaginationCursor("session-1");
+				const cleared = yield* Ref.get(stateRef);
+				expect(HashMap.get(cleared.paginationCursors, "session-1")._tag).toBe(
+					"None",
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"falls back to cursor scan when an older page cursor is stale",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			const staleCursor = new OpenCodeApiError({
+				message: "Invalid cursor",
+				endpoint: "/session/session-1/message",
+				responseStatus: 400,
+				responseBody: { error: "Invalid cursor" },
+			});
+			const messagesPage = vi
+				.spyOn(api.session, "messagesPage")
+				.mockRejectedValueOnce(staleCursor)
+				.mockResolvedValueOnce([
+					makeHistoryMessage("msg-older"),
+					makeHistoryMessage("msg-cursor"),
+					makeHistoryMessage("msg-newer"),
+				] as unknown as Awaited<ReturnType<typeof api.session.messagesPage>>);
+			const logger = makeMockLogger();
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(LoggerTag, logger),
+				makeSessionManagerStateLive({
+					paginationCursors: HashMap.fromIterable([
+						["session-1", "msg-cursor"],
+					]),
+				}),
+			);
+
+			return Effect.gen(function* () {
+				const page = yield* loadHistory("session-1", 50);
+				const stateRef = yield* SessionManagerStateTag;
+				const state = yield* Ref.get(stateRef);
+
+				expect(messagesPage).toHaveBeenNthCalledWith(1, "session-1", {
+					limit: 50,
+					before: "msg-cursor",
+				});
+				expect(messagesPage).toHaveBeenNthCalledWith(2, "session-1", {
+					limit: 10000,
+				});
+				expect(page.messages.map((message) => message.id)).toEqual([
+					"msg-older",
+				]);
+				expect(page.hasMore).toBe(false);
+				expect(HashMap.get(state.paginationCursors, "session-1")._tag).toBe(
+					"None",
+				);
+				expect(logger.warn).toHaveBeenCalledWith(
+					expect.stringContaining("Pagination cursor failed for session-1"),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.effect("renames a session through the provider API", () => {
 		const api = makeMockOpenCodeAPI();
 		const update = vi.spyOn(api.session, "update").mockResolvedValue(undefined);

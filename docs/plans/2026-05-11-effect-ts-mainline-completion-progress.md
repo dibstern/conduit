@@ -2600,6 +2600,126 @@ $ pnpm lint
 Exit: 0
 ```
 
+## Phase 7.20: History Pagination Service Ownership
+
+Plan issues found:
+
+- `load_more_history` could not move to `SessionManagerServiceTag` by itself. The initial
+  `view_session` REST history load owns the cursor that later `load_more_history` consumes, and
+  fork/rewind invalidate that same cursor. Moving only the explicit load-more handler would split
+  pagination state between the legacy `SessionManager` and the Effect service.
+- `src/lib/session/session-switch.ts` still exposes the legacy async switch helper for older
+  bridge surfaces, so this slice only retires the browser Effect handler path. Prompt send-turn
+  prior-history loading still uses the legacy `sessionMgr.loadPreRenderedHistory` boundary and
+  belongs with the prompt/session-send migration.
+- The SQLite view-session path can return a paged `rest-history` source without calling REST, so
+  the Effect switch path now seeds the service cursor from the oldest returned history message when
+  `hasMore` is true. This fixes the same ownership gap for SQLite-backed first pages.
+
+Changes:
+
+- Added service-owned `loadPreRenderedHistory`, `loadHistory`, `seedPaginationCursor`, and
+  `clearPaginationCursor` around `OpenCodeAPITag.session.messagesPage` and
+  `SessionManagerStateTag.paginationCursors`.
+- Preserved legacy history semantics: offset loads without a cursor return an empty final page,
+  the oldest returned message becomes the next cursor, stale 400 cursors fall back to a full cursor
+  scan, and assistant text parts are pre-rendered before history leaves the service.
+- Converted the Effect `handleViewSession` session-switch path to resolve REST history through
+  `SessionManagerServiceTag`, seed the service cursor, and keep the existing `session_switched`,
+  status, notification, and poller behavior.
+- Converted `handleLoadMoreHistory`, `handleForkSession`, and `handleRewind` cursor operations to
+  `SessionManagerServiceTag`.
+- Added handler and wire-snapshot canaries so legacy history/cursor methods throw if the browser
+  Effect path regresses to them.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "history|pagination|cursor"
+Exit: 1
+Expected failure:
+  loadPreRenderedHistory, loadHistory, seedPaginationCursor, and clearPaginationCursor were not
+  implemented on SessionManagerService.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleLoadMoreHistory"
+Exit: 1
+Expected failure:
+  legacy loadPreRenderedHistory should not be used
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts -t "REST history"
+Exit: 1
+Expected failure:
+  SessionManagerService.loadPreRenderedHistory was not called by view_session.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts -t "load_more_history"
+Exit: 1
+Expected failure:
+  load_more_history_success snapshot did not exist yet.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "history|pagination|cursor"
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed | 10 skipped (14)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleLoadMoreHistory|handleRewind"
+Exit: 0
+Test Files  1 passed (1)
+Tests  3 passed | 62 skipped (65)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts -t "REST history"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 3 skipped (4)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts -t "load_more_history"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 3 skipped (4)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts \
+  test/unit/session/session-switch.test.ts \
+  test/unit/relay/markdown-renderer.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  139 passed (139)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

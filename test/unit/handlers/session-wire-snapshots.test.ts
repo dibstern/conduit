@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { expect, vi } from "vitest";
 import {
 	handleListSessions,
+	handleLoadMoreHistory,
 	handleRenameSession,
 	handleViewSession,
 } from "../../../src/lib/handlers/session.js";
@@ -160,5 +161,43 @@ describe("session handler wire snapshots", () => {
 		);
 
 		expect(calls).toEqual(readSnapshots()["rename_session_success"]);
+	});
+
+	it("keeps the load_more_history response envelope stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const sessionManagerService = makeMockSessionManagerService({
+			loadPreRenderedHistory: vi.fn(() =>
+				Effect.succeed({
+					messages: [
+						{
+							id: "msg-1",
+							role: "assistant" as const,
+							parts: [
+								{
+									id: "part-1",
+									type: "text" as const,
+									text: "Rendered",
+									renderedHtml: "<p>Rendered</p>",
+								},
+							],
+						},
+					],
+					hasMore: true,
+					total: 12,
+				}),
+			),
+		});
+
+		await Effect.runPromise(
+			handleLoadMoreHistory("client-1", { offset: 50 }).pipe(
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["load_more_history_success"]);
 	});
 });

@@ -17,41 +17,18 @@ import {
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import {
-	type SessionSwitchDeps,
-	switchClientToSession,
+	buildSessionSwitchedMessage,
+	extractOldestMessageId,
+	patchMissingDone,
+	resolveSessionHistoryFromSqlite,
+	type SessionHistorySource,
+	type SwitchClientOptions,
 } from "../session/session-switch.js";
 import type { PermissionId, RelayMessage } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 const SESSION_METADATA_FANOUT = 4;
-
-/**
- * Build SessionSwitchDeps from Effect context. The narrowed type
- * expected by switchClientToSession is assembled from individual Tags.
- */
-const toSessionSwitchDepsFromContext = Effect.gen(function* () {
-	const sessionMgr = yield* SessionManagerTag;
-	const wsHandler = yield* WebSocketHandlerTag;
-	const statusPoller = yield* StatusPollerTag;
-	const overrides = yield* SessionOverridesTag;
-	const pollerManager = yield* PollerManagerTag;
-	const log = yield* LoggerTag;
-	const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
-
-	return {
-		sessionMgr,
-		wsHandler,
-		statusPoller,
-		overrides,
-		pollerManager,
-		log,
-		getInputDraft: getSessionInputDraft,
-		...(readQueryOption._tag === "Some" && {
-			readQuery: readQueryOption.value,
-		}),
-	} as SessionSwitchDeps;
-});
 
 /**
  * Send metadata (model info, permissions, questions, session list) to a client.
@@ -218,6 +195,108 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		);
 	});
 
+const resolveSessionHistory = (sessionId: string) =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+		const sessionManagerService = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+
+		if (readQueryOption._tag === "Some") {
+			return yield* Effect.try({
+				try: () =>
+					resolveSessionHistoryFromSqlite(sessionId, readQueryOption.value, {
+						pageSize: 50,
+					}),
+				catch: (cause) => cause,
+			});
+		}
+
+		const historyResult = yield* Effect.either(
+			sessionManagerService.loadPreRenderedHistory(sessionId),
+		);
+		if (historyResult._tag === "Right") {
+			return {
+				kind: "rest-history",
+				history: historyResult.right,
+			} satisfies SessionHistorySource;
+		}
+
+		log.warn(`Failed to load history for ${sessionId}: ${historyResult.left}`);
+		return { kind: "empty" } satisfies SessionHistorySource;
+	});
+
+const seedPaginationCursorFromHistory = (
+	sessionId: string,
+	source: SessionHistorySource,
+) =>
+	Effect.gen(function* () {
+		const sessionManagerService = yield* SessionManagerServiceTag;
+		let oldestMessageId: string | undefined;
+
+		if (source.kind === "cached-events" && source.hasMore) {
+			oldestMessageId = extractOldestMessageId(source.events);
+		} else if (source.kind === "rest-history" && source.history.hasMore) {
+			oldestMessageId = source.history.messages[0]?.id;
+		}
+
+		if (oldestMessageId) {
+			yield* sessionManagerService.seedPaginationCursor(
+				sessionId,
+				oldestMessageId,
+			);
+		}
+	});
+
+const switchClientToSession = (
+	clientId: string,
+	sessionId: string,
+	options?: SwitchClientOptions,
+) =>
+	Effect.gen(function* () {
+		if (!sessionId) return;
+
+		const wsHandler = yield* WebSocketHandlerTag;
+		const statusPoller = yield* StatusPollerTag;
+		const overrides = yield* SessionOverridesTag;
+		const pollerManager = yield* PollerManagerTag;
+
+		wsHandler.setClientSession(clientId, sessionId);
+
+		const source: SessionHistorySource = options?.skipHistory
+			? { kind: "empty" }
+			: yield* resolveSessionHistory(sessionId);
+		const patchedSource = patchMissingDone(
+			source,
+			statusPoller,
+			sessionId,
+			overrides,
+		);
+
+		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
+
+		const draft = getSessionInputDraft(sessionId);
+		wsHandler.sendTo(
+			clientId,
+			buildSessionSwitchedMessage(sessionId, patchedSource, {
+				...(draft ? { draft } : {}),
+				...(options?.requestId != null ? { requestId: options.requestId } : {}),
+			}),
+		);
+
+		const isProcessing =
+			statusPoller.isProcessing(sessionId) ||
+			overrides.hasActiveProcessingTimeout(sessionId);
+		wsHandler.sendTo(clientId, {
+			type: "status",
+			sessionId,
+			status: isProcessing ? "processing" : "idle",
+		});
+
+		if (!options?.skipPollerSeed && !pollerManager.isPolling(sessionId)) {
+			pollerManager.startPolling(sessionId);
+		}
+	});
+
 export const handleViewSession = (
 	clientId: string,
 	payload: PayloadMap["view_session"],
@@ -230,10 +309,7 @@ export const handleViewSession = (
 		const { sessionId: id } = payload;
 		if (!id) return;
 
-		const switchDeps = yield* toSessionSwitchDepsFromContext;
-		yield* Effect.tryPromise(() =>
-			switchClientToSession(switchDeps, clientId, id),
-		);
+		yield* switchClientToSession(clientId, id);
 
 		// Broadcast session_viewed notification
 		wsHandler.broadcast({
@@ -266,14 +342,11 @@ export const handleNewSession = (
 			sessionMgr.createSession(title, { silent: true }),
 		);
 
-		const switchDeps = yield* toSessionSwitchDepsFromContext;
-		yield* Effect.tryPromise(() =>
-			switchClientToSession(switchDeps, clientId, session.id, {
-				...(requestId != null && { requestId }),
-				skipHistory: true,
-				skipPollerSeed: true,
-			}),
-		);
+		yield* switchClientToSession(clientId, session.id, {
+			...(requestId != null && { requestId }),
+			skipHistory: true,
+			skipPollerSeed: true,
+		});
 
 		// Session list broadcast — non-blocking
 		yield* Effect.either(
@@ -411,13 +484,14 @@ export const handleLoadMoreHistory = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const sid = payload.sessionId ?? wsHandler.getClientSession(clientId) ?? "";
 		const { offset } = payload;
 		if (sid) {
-			const page = yield* Effect.tryPromise(() =>
-				sessionMgr.loadPreRenderedHistory(sid, offset),
+			const page = yield* sessionManagerService.loadPreRenderedHistory(
+				sid,
+				offset,
 			);
 			wsHandler.sendTo(clientId, {
 				type: "history_page",
@@ -437,7 +511,6 @@ export const handleForkSession = (
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionMgr = yield* SessionManagerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
@@ -455,7 +528,7 @@ export const handleForkSession = (
 		);
 
 		overrides.clearSession(sessionId);
-		sessionMgr.clearPaginationCursor(sessionId);
+		yield* sessionManagerService.clearPaginationCursor(sessionId);
 
 		// Determine fork-point metadata
 		let forkMessageId: string | undefined = messageId;

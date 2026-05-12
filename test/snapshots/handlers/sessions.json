@@ -77,5 +77,31 @@
 				"roots": false
 			}
 		}
+	],
+	"load_more_history_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "history_page",
+				"sessionId": "session-1",
+				"messages": [
+					{
+						"id": "msg-1",
+						"role": "assistant",
+						"parts": [
+							{
+								"id": "part-1",
+								"type": "text",
+								"text": "Rendered",
+								"renderedHtml": "<p>Rendered</p>"
+							}
+						]
+					}
+				],
+				"hasMore": true,
+				"total": 12
+			}
+		}
 	]
 }

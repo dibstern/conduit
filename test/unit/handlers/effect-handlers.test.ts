@@ -2078,6 +2078,11 @@ describe("handleListSessions", () => {
 				),
 				deleteSession: vi.fn(() => Effect.void),
 				renameSession: vi.fn(() => Effect.void),
+				clearPaginationCursor: vi.fn(() => Effect.void),
+				seedPaginationCursor: vi.fn(() => Effect.void),
+				loadPreRenderedHistory: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false }),
+				),
 				recordMessageActivity: vi.fn(() => Effect.void),
 				setForkEntry: vi.fn(() => Effect.void),
 				sendDualSessionLists,
@@ -2690,36 +2695,88 @@ describe("handleSearchSessions", () => {
 });
 
 describe("handleLoadMoreHistory", () => {
-	it.effect("loads history page and sends to client", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const page = { messages: [], hasMore: false };
-		const sessionMgr = mockSessionManager({
-			loadPreRenderedHistory: vi.fn(async () => page),
-		});
+	it.effect(
+		"loads history page through SessionManagerService and sends to client",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const page = {
+				messages: [
+					{
+						id: "msg-1",
+						role: "assistant" as const,
+						parts: [{ id: "part-1", type: "text" as const, text: "hello" }],
+					},
+				],
+				hasMore: true,
+				total: 10,
+			};
+			const legacyLoadPreRenderedHistory = vi.fn(async () => {
+				throw new Error("legacy loadPreRenderedHistory should not be used");
+			});
+			const sessionMgr = mockSessionManager({
+				loadPreRenderedHistory: legacyLoadPreRenderedHistory,
+			});
+			const loadPreRenderedHistory = vi.fn(() => Effect.succeed(page));
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory,
+			});
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionManagerTag, sessionMgr),
-		);
+			const layer = Layer.mergeAll(
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionManagerTag, sessionMgr),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			);
 
-		return handleLoadMoreHistory("client-1", { offset: 50 }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(sessionMgr.loadPreRenderedHistory).toHaveBeenCalledWith(
-					"session-1",
-					50,
-				);
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "history_page",
-					sessionId: "session-1",
-					messages: [],
-					hasMore: false,
-				});
-			}),
-		);
-	});
+			return handleLoadMoreHistory("client-1", { offset: 50 }).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 50);
+					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "history_page",
+						sessionId: "session-1",
+						messages: page.messages,
+						hasMore: true,
+						total: 10,
+					});
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"does nothing when no session id is available for load more",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => undefined),
+			});
+			const loadPreRenderedHistory = vi.fn(() =>
+				Effect.succeed({ messages: [], hasMore: false }),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory,
+			});
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionManagerTag, mockSessionManager()),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			);
+
+			return handleLoadMoreHistory("client-1", { offset: 50 }).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+					expect(ws.sendTo).not.toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type: "history_page" }),
+					);
+				}),
+			);
+		},
+	);
 });
 
 // ─── Prompt handler tests ─────────────────────────────────────────────────
@@ -2825,7 +2882,16 @@ describe("handleRewind", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const sessionMgr = mockSessionManager();
+		const legacyClearPaginationCursor = vi.fn(() => {
+			throw new Error("legacy clearPaginationCursor should not be used");
+		});
+		const sessionMgr = mockSessionManager({
+			clearPaginationCursor: legacyClearPaginationCursor,
+		});
+		const clearPaginationCursor = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			clearPaginationCursor,
+		});
 		const client = {
 			session: { revert: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -2834,6 +2900,7 @@ describe("handleRewind", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(LoggerTag, log),
 		);
 
@@ -2843,9 +2910,8 @@ describe("handleRewind", () => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
 					messageID: "msg-1",
 				});
-				expect(sessionMgr.clearPaginationCursor).toHaveBeenCalledWith(
-					"session-1",
-				);
+				expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
+				expect(legacyClearPaginationCursor).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalled();
 			}),
 		);
