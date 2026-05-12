@@ -352,6 +352,10 @@ export function createMockSSEWiringDeps(
 		translator: createMockTranslator(),
 		sessionMgr:
 			createMockSessionMgr() as unknown as SSEWiringDeps["sessionMgr"],
+		pendingQuestionCounts: {
+			increment: vi.fn(),
+			set: vi.fn(),
+		},
 		permissionBridge:
 			createMockPermissionBridge() as unknown as SSEWiringDeps["permissionBridge"],
 		overrides: createMockOverrides() as unknown as SSEWiringDeps["overrides"],
@@ -748,6 +752,9 @@ export function makeMockSessionManagerService(
 			Effect.succeed({ messages: [], hasMore: false }),
 		),
 		recordMessageActivity: vi.fn(() => Effect.void),
+		incrementPendingQuestionCount: vi.fn(() => Effect.void),
+		decrementPendingQuestionCount: vi.fn(() => Effect.void),
+		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
 		sendDualSessionLists: vi.fn((send) =>
 			Effect.sync(() => {

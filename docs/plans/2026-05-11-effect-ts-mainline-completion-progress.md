@@ -2938,6 +2938,133 @@ $ git diff --check
 Exit: 0
 ```
 
+## Phase 7.23: Permissions Pending-Question Service Contract
+
+Plan issues found:
+
+- `src/lib/handlers/permissions.ts` only used `SessionManagerTag` for pending-question
+  decrements, but replacing that with a handler-local helper would leave the ownership split.
+  Session lists already project `pendingQuestionCounts` from `SessionManagerState`, so question
+  resolution must mutate the same state owner.
+- The long-term boundary is a service-owned pending-question API on `SessionManagerService`.
+  This slice adds increment, decrement, and bulk-set operations together rather than adding only
+  the one decrement method needed by permissions.
+- A subagent audit caught the incomplete version of this slice: SSE `question.asked` and reconnect
+  rehydration still incremented/set pending counts through the legacy manager while permissions
+  decremented through the service. That would make `pendingQuestionCount` wrong after real question
+  flow, so this slice also moves the SSE producer side to the same service-backed state.
+- `handleQuestionReject` can return before resolving any session state when `toolId` is empty, so
+  the service dependency is now requested after that guard.
+
+Changes:
+
+- Added `incrementPendingQuestionCount`, `decrementPendingQuestionCount`, and
+  `setPendingQuestionCounts` free functions to `src/lib/effect/session-manager-service.ts`.
+- Added those operations to `SessionManagerService` and `SessionManagerServiceLive`, backed by
+  `SessionManagerStateTag`.
+- Migrated `handleAskUserResponse` and `handleQuestionReject` in
+  `src/lib/handlers/permissions.ts` from `SessionManagerTag.decrementPendingQuestionCount(...)` to
+  `SessionManagerServiceTag.decrementPendingQuestionCount(...)`.
+- Added a `pendingQuestionCounts` port to `SSEWiringDeps` and routed `question.asked` increments
+  plus reconnect `listPendingQuestions` count replacement through that port instead of
+  `sessionMgr`.
+- Wired the production `pendingQuestionCounts` port in `src/lib/relay/relay-stack.ts` to
+  `SessionManagerServiceTag` using the relay `ManagedRuntime`, keeping the imperative SSE edge
+  thin while sharing `SessionManagerState`.
+- Updated shared test mocks for the new service methods.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "pending question"
+Exit: 1
+Expected failure:
+  pending-question service methods were missing and yielded non-Effect values.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleQuestionReject|handleAskUserResponse"
+Exit: 1
+Expected failure:
+  Service not found: SessionManager
+```
+
+```text
+$ pnpm vitest run test/unit/relay/sse-wiring.test.ts -t "question.asked|pending question counts"
+Exit: 1
+Expected failure:
+  pendingQuestionCounts.increment and pendingQuestionCounts.set were not called because SSE wiring
+  still updated the legacy session manager.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "pending question"
+Exit: 0
+Test Files  1 passed (1)
+Tests  3 passed | 16 skipped (19)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "handleQuestionReject|handleAskUserResponse"
+Exit: 0
+Test Files  1 passed (1)
+Tests  3 passed | 67 skipped (70)
+```
+
+```text
+$ pnpm vitest run test/unit/relay/sse-wiring.test.ts -t "question.asked|pending question counts"
+Exit: 0
+Test Files  1 passed (1)
+Tests  3 passed | 55 skipped (58)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/sse-wiring.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  147 passed (147)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  19 passed (19)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  70 passed (70)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  363 passed (363)
+Tests  5196 passed | 2 skipped | 12 todo (5210)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

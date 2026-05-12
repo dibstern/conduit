@@ -6,7 +6,16 @@
 // Exported free functions can be used directly in Effect pipelines.
 // SessionManagerServiceTag bundles them for callers that prefer a service object.
 
-import { Context, Data, Effect, HashMap, Layer, Ref, Schedule } from "effect";
+import {
+	Context,
+	Data,
+	Effect,
+	HashMap,
+	Layer,
+	Option,
+	Ref,
+	Schedule,
+} from "effect";
 import {
 	type ForkEntry,
 	loadForkMetadata,
@@ -502,6 +511,61 @@ export const recordMessageActivity = (sessionId: string, timestamp?: number) =>
 		Effect.withSpan("session.recordMessageActivity"),
 	);
 
+/** Increment pending question count for a session. */
+export const incrementPendingQuestionCount = (sessionId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		yield* Ref.update(ref, (s) => {
+			const current = Option.getOrElse(
+				HashMap.get(s.pendingQuestionCounts, sessionId),
+				() => 0,
+			);
+			return {
+				...s,
+				pendingQuestionCounts: HashMap.set(
+					s.pendingQuestionCounts,
+					sessionId,
+					current + 1,
+				),
+			};
+		});
+	}).pipe(
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.incrementPendingQuestionCount"),
+	);
+
+/** Decrement pending question count for a session and clear zero counts. */
+export const decrementPendingQuestionCount = (sessionId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		yield* Ref.update(ref, (s) => {
+			const current = Option.getOrElse(
+				HashMap.get(s.pendingQuestionCounts, sessionId),
+				() => 0,
+			);
+			return {
+				...s,
+				pendingQuestionCounts:
+					current <= 1
+						? HashMap.remove(s.pendingQuestionCounts, sessionId)
+						: HashMap.set(s.pendingQuestionCounts, sessionId, current - 1),
+			};
+		});
+	}).pipe(
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.decrementPendingQuestionCount"),
+	);
+
+/** Replace pending question counts from a reconnect/list-pending snapshot. */
+export const setPendingQuestionCounts = (counts: ReadonlyMap<string, number>) =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		yield* Ref.update(ref, (s) => ({
+			...s,
+			pendingQuestionCounts: HashMap.fromIterable(counts),
+		}));
+	}).pipe(Effect.withSpan("session.setPendingQuestionCounts"));
+
 /** Record fork-point metadata for a forked session and persist it to disk. */
 export const setForkEntry = (
 	sessionId: string,
@@ -590,6 +654,11 @@ export interface SessionManagerService {
 	recordMessageActivity(
 		sessionId: string,
 		timestamp?: number,
+	): Effect.Effect<void>;
+	incrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
+	decrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
+	setPendingQuestionCounts(
+		counts: ReadonlyMap<string, number>,
 	): Effect.Effect<void>;
 	setForkEntry(
 		sessionId: string,
@@ -713,6 +782,18 @@ export const SessionManagerServiceLive: Layer.Layer<
 				),
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			incrementPendingQuestionCount: (sessionId) =>
+				incrementPendingQuestionCount(sessionId).pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			decrementPendingQuestionCount: (sessionId) =>
+				decrementPendingQuestionCount(sessionId).pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			setPendingQuestionCounts: (counts) =>
+				setPendingQuestionCounts(counts).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			setForkEntry: (sessionId, entry) =>

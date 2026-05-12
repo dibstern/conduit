@@ -62,6 +62,7 @@ import {
 	handleSwitchVariant,
 } from "../../../src/lib/handlers/model.js";
 import {
+	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
 } from "../../../src/lib/handlers/permissions.js";
@@ -1983,7 +1984,7 @@ describe("handleQuestionReject", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
 		const client = {} as unknown as OpenCodeAPI;
-		const sessionMgr = mockSessionManager();
+		const sessionManagerService = makeMockSessionManagerService();
 		const overrides = mockOverrides({
 			startProcessingTimeout: vi.fn(),
 		});
@@ -1992,7 +1993,7 @@ describe("handleQuestionReject", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(SessionOverridesTag, overrides),
 		);
 
@@ -2009,7 +2010,10 @@ describe("handleQuestionReject", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const sessionMgr = mockSessionManager();
+		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			decrementPendingQuestionCount,
+		});
 		const overrides = mockOverrides({
 			startProcessingTimeout: vi.fn(),
 		});
@@ -2021,7 +2025,7 @@ describe("handleQuestionReject", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(SessionOverridesTag, overrides),
 		);
 
@@ -2035,12 +2039,62 @@ describe("handleQuestionReject", () => {
 						toolId: "que-1",
 					}),
 				);
-				expect(sessionMgr.decrementPendingQuestionCount).toHaveBeenCalledWith(
-					"session-1",
-				);
+				expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
 			}),
 		);
 	});
+});
+
+describe("handleAskUserResponse", () => {
+	it.effect(
+		"answers question via REST API and decrements through service",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const log = mockLogger();
+			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				decrementPendingQuestionCount,
+			});
+			const overrides = mockOverrides({
+				startProcessingTimeout: vi.fn(),
+			});
+			const client = {
+				question: { reply: vi.fn(async () => {}) },
+			} as unknown as OpenCodeAPI;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(SessionOverridesTag, overrides),
+			);
+
+			return handleAskUserResponse("client-1", {
+				toolId: "que-1",
+				answers: { "1": "Approve", "0": "Yes" },
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.question.reply).toHaveBeenCalledWith("que-1", [
+						["Yes"],
+						["Approve"],
+					]);
+					expect(ws.broadcast).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "ask_user_resolved",
+							toolId: "que-1",
+						}),
+					);
+					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
+						"session-1",
+					);
+				}),
+			);
+		},
+	);
 });
 
 // ─── Session handler tests ───────────────────────────────────────────────
@@ -2067,29 +2121,23 @@ describe("handleListSessions", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionManagerServiceTag, {
-				listSessions: vi.fn(() => Effect.succeed([])),
-				createSession: vi.fn(() =>
-					Effect.succeed({
-						id: "session-new",
-						projectID: "project-1",
-						directory: "/tmp/project",
-						title: "Session New",
-						version: "1.0.0",
-						time: { created: 0, updated: 0 },
-					}),
-				),
-				deleteSession: vi.fn(() => Effect.void),
-				renameSession: vi.fn(() => Effect.void),
-				clearPaginationCursor: vi.fn(() => Effect.void),
-				seedPaginationCursor: vi.fn(() => Effect.void),
-				loadPreRenderedHistory: vi.fn(() =>
-					Effect.succeed({ messages: [], hasMore: false }),
-				),
-				recordMessageActivity: vi.fn(() => Effect.void),
-				setForkEntry: vi.fn(() => Effect.void),
-				sendDualSessionLists,
-			}),
+			Layer.succeed(
+				SessionManagerServiceTag,
+				makeMockSessionManagerService({
+					listSessions: vi.fn(() => Effect.succeed([])),
+					createSession: vi.fn(() =>
+						Effect.succeed({
+							id: "session-new",
+							projectID: "project-1",
+							directory: "/tmp/project",
+							title: "Session New",
+							version: "1.0.0",
+							time: { created: 0, updated: 0 },
+						}),
+					),
+					sendDualSessionLists,
+				}),
+			),
 		);
 
 		return handleListSessions("client-1", {}).pipe(

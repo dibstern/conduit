@@ -420,7 +420,13 @@ describe("handleSSEEvent", () => {
 	});
 
 	it("translates and routes question.asked events to the question's session", () => {
-		const deps = createMockSSEWiringDeps();
+		const pendingQuestionCounts = {
+			increment: vi.fn(),
+			set: vi.fn(),
+		};
+		const deps = createMockSSEWiringDeps({
+			pendingQuestionCounts,
+		} as unknown as Partial<SSEWiringDeps>);
 		const translated: RelayMessage = {
 			type: "ask_user",
 			sessionId: "s1",
@@ -444,6 +450,12 @@ describe("handleSSEEvent", () => {
 			translated,
 		);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
+		expect(pendingQuestionCounts.increment).toHaveBeenCalledWith(
+			"active-session",
+		);
+		expect(
+			deps.sessionMgr.incrementPendingQuestionCount,
+		).not.toHaveBeenCalled();
 	});
 
 	it("routes permission.replied events to permissionBridge", () => {
@@ -1015,6 +1027,42 @@ describe("wireSSEConsumer", () => {
 
 		// Should not recover or broadcast anything
 		expect(deps.permissionBridge.recoverPending).not.toHaveBeenCalled();
+	});
+
+	it("sets pending question counts from API on SSE connect", async () => {
+		const listPendingQuestions = vi.fn().mockResolvedValue([
+			{ id: "que-1", sessionID: "sess-a", questions: [] },
+			{ id: "que-2", sessionID: "sess-a", questions: [] },
+			{ id: "que-3", sessionID: "sess-b", questions: [] },
+		]);
+		const pendingQuestionCounts = {
+			increment: vi.fn(),
+			set: vi.fn(),
+		};
+		const deps = createMockSSEWiringDeps({
+			listPendingQuestions,
+			pendingQuestionCounts,
+		} as unknown as Partial<SSEWiringDeps>);
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+
+		wireSSEConsumer(deps, consumer);
+		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
+		listeners.get("connected")!();
+
+		await vi.waitFor(() => {
+			expect(pendingQuestionCounts.set).toHaveBeenCalledWith(
+				new Map([
+					["sess-a", 2],
+					["sess-b", 1],
+				]),
+			);
+		});
+		expect(deps.sessionMgr.setPendingQuestionCounts).not.toHaveBeenCalled();
 	});
 
 	it("broadcasts connection_status 'connected' on connected event", () => {

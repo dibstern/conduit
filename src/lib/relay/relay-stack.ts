@@ -60,6 +60,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
+import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import {
 	createStatusPollerService,
 	makeDeferredStatusPollerRuntime,
@@ -1001,6 +1002,24 @@ export async function createProjectRelay(
 		{
 			translator,
 			sessionMgr,
+			pendingQuestionCounts: {
+				increment: (sessionId) => {
+					relayManagedRuntime.runSync(
+						Effect.gen(function* () {
+							const service = yield* SessionManagerServiceTag;
+							yield* service.incrementPendingQuestionCount(sessionId);
+						}),
+					);
+				},
+				set: (counts) => {
+					relayManagedRuntime.runSync(
+						Effect.gen(function* () {
+							const service = yield* SessionManagerServiceTag;
+							yield* service.setPendingQuestionCounts(counts);
+						}),
+					);
+				},
+			},
 			permissionBridge,
 			overrides,
 			wsHandler,

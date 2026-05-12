@@ -22,6 +22,8 @@ import {
 } from "../../../src/lib/effect/services.js";
 import {
 	clearPaginationCursor,
+	decrementPendingQuestionCount,
+	incrementPendingQuestionCount,
 	listSessions,
 	loadHistory,
 	loadPreRenderedHistory,
@@ -31,6 +33,7 @@ import {
 	seedPaginationCursor,
 	sendDualSessionLists,
 	setForkEntry,
+	setPendingQuestionCounts,
 } from "../../../src/lib/effect/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
@@ -101,6 +104,126 @@ function makeHistoryMessage(
 }
 
 describe("SessionManagerService", () => {
+	it.effect("updates pending question counts in service state", () =>
+		Effect.gen(function* () {
+			const stateRef = yield* SessionManagerStateTag;
+
+			yield* incrementPendingQuestionCount("session-1");
+			yield* incrementPendingQuestionCount("session-1");
+			yield* incrementPendingQuestionCount("session-2");
+
+			let state = yield* Ref.get(stateRef);
+			expect(HashMap.get(state.pendingQuestionCounts, "session-1")).toEqual(
+				Option.some(2),
+			);
+			expect(HashMap.get(state.pendingQuestionCounts, "session-2")).toEqual(
+				Option.some(1),
+			);
+
+			yield* decrementPendingQuestionCount("session-1");
+			state = yield* Ref.get(stateRef);
+			expect(HashMap.get(state.pendingQuestionCounts, "session-1")).toEqual(
+				Option.some(1),
+			);
+
+			yield* decrementPendingQuestionCount("session-1");
+			yield* decrementPendingQuestionCount("missing-session");
+			state = yield* Ref.get(stateRef);
+			expect(HashMap.has(state.pendingQuestionCounts, "session-1")).toBe(false);
+			expect(HashMap.has(state.pendingQuestionCounts, "missing-session")).toBe(
+				false,
+			);
+
+			yield* setPendingQuestionCounts(
+				new Map([
+					["session-3", 3],
+					["session-4", 1],
+				]),
+			);
+			state = yield* Ref.get(stateRef);
+			expect(HashMap.has(state.pendingQuestionCounts, "session-2")).toBe(false);
+			expect(HashMap.get(state.pendingQuestionCounts, "session-3")).toEqual(
+				Option.some(3),
+			);
+			expect(HashMap.get(state.pendingQuestionCounts, "session-4")).toEqual(
+				Option.some(1),
+			);
+		}).pipe(Effect.provide(makeSessionManagerStateLive())),
+	);
+
+	it.effect("live service exposes pending question count operations", () => {
+		const api = makeMockOpenCodeAPI();
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+			),
+		);
+
+		return Effect.gen(function* () {
+			const service = yield* SessionManagerServiceTag;
+			const stateRef = yield* SessionManagerStateTag;
+
+			yield* service.incrementPendingQuestionCount("session-1");
+			yield* service.decrementPendingQuestionCount("session-1");
+
+			const state = yield* Ref.get(stateRef);
+			expect(HashMap.has(state.pendingQuestionCounts, "session-1")).toBe(false);
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"live service projects pending question counts into session lists",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "list").mockResolvedValue([
+				{
+					id: "session-1",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Session 1",
+					version: "1.0.0",
+					time: { created: 10, updated: 20 },
+				},
+			]);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+
+				yield* service.incrementPendingQuestionCount("session-1");
+				yield* service.incrementPendingQuestionCount("session-1");
+				let sessions = yield* service.listSessions();
+				expect(sessions).toEqual([
+					expect.objectContaining({
+						id: "session-1",
+						pendingQuestionCount: 2,
+					}),
+				]);
+
+				yield* service.decrementPendingQuestionCount("session-1");
+				yield* service.decrementPendingQuestionCount("session-1");
+				sessions = yield* service.listSessions();
+				expect(sessions).toEqual([
+					expect.not.objectContaining({
+						pendingQuestionCount: expect.any(Number),
+					}),
+				]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.scoped(
 		"live service publishes one SessionCreated after create succeeds",
 		() => {

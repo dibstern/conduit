@@ -68,9 +68,15 @@ interface SessionManagerLike {
 	setPendingQuestionCounts(counts: Map<string, number>): void;
 }
 
+interface PendingQuestionCountsLike {
+	increment(sessionId: string): void;
+	set(counts: ReadonlyMap<string, number>): void;
+}
+
 export interface SSEWiringDeps {
 	translator: Translator;
 	sessionMgr: SessionManagerLike;
+	pendingQuestionCounts: PendingQuestionCountsLike;
 	permissionBridge: PermissionBridge;
 	overrides: SessionOverrides;
 	wsHandler: {
@@ -265,7 +271,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		// directly.
 		log.debug(`question.asked: event received`);
 		if (eventSessionId) {
-			sessionMgr.incrementPendingQuestionCount(eventSessionId);
+			deps.pendingQuestionCounts.increment(eventSessionId);
 		}
 		if (pushManager) {
 			sendPushForEvent(
@@ -554,7 +560,7 @@ export function wireSSEConsumer(
 							questionCounts.set(sid, (questionCounts.get(sid) ?? 0) + 1);
 						}
 					}
-					deps.sessionMgr.setPendingQuestionCounts(questionCounts);
+					deps.pendingQuestionCounts.set(questionCounts);
 
 					if (pendingQuestions.length === 0) return;
 					log.info(

@@ -12,10 +12,10 @@ import {
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
 	PermissionBridgeTag,
-	SessionManagerTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
+import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import { RelayError } from "../errors.js";
 import type { PermissionDecision } from "../provider/types.js";
 import { fixupConfigFile } from "./fixup-config-file.js";
@@ -205,7 +205,7 @@ export const handleAskUserResponse = (
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const { toolId, answers } = payload;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "";
@@ -245,7 +245,9 @@ export const handleAskUserResponse = (
 				toolId,
 				sessionId,
 			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+			if (sessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
+			}
 			yield* restartProcessingTimeout(sessionId);
 			return true;
 		});
@@ -262,7 +264,9 @@ export const handleAskUserResponse = (
 				toolId,
 				sessionId,
 			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+			if (sessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
+			}
 			yield* restartProcessingTimeout(sessionId);
 			return;
 		}
@@ -291,7 +295,11 @@ export const handleAskUserResponse = (
 						toolId: queId,
 						sessionId,
 					});
-					if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+					if (sessionId) {
+						yield* sessionManagerService.decrementPendingQuestionCount(
+							sessionId,
+						);
+					}
 					yield* restartProcessingTimeout(sessionId);
 					return true;
 				}
@@ -328,11 +336,11 @@ export const handleQuestionReject = (
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const sessionMgr = yield* SessionManagerTag;
 
 		const { toolId } = payload;
 		if (!toolId) return;
 
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "";
 
 		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
@@ -366,7 +374,9 @@ export const handleQuestionReject = (
 				toolId,
 				sessionId,
 			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+			if (sessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
+			}
 			yield* restartProcessingTimeout(sessionId);
 			return true;
 		});
@@ -383,7 +393,9 @@ export const handleQuestionReject = (
 				toolId,
 				sessionId,
 			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+			if (sessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
+			}
 			yield* restartProcessingTimeout(sessionId);
 			return;
 		}
@@ -410,7 +422,11 @@ export const handleQuestionReject = (
 						toolId: queId,
 						sessionId,
 					});
-					if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+					if (sessionId) {
+						yield* sessionManagerService.decrementPendingQuestionCount(
+							sessionId,
+						);
+					}
 					yield* restartProcessingTimeout(sessionId);
 					return true;
 				}
