@@ -17,8 +17,8 @@ import {
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import { RelayError } from "../errors.js";
+import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import type { PermissionDecision } from "../provider/types.js";
-import { fixupConfigFile } from "./fixup-config-file.js";
 import type { PayloadMap } from "./payloads.js";
 
 /**

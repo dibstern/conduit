@@ -71,6 +71,7 @@ function makeSessionMetadataLayer(options: {
 					providerID: "openai",
 				}),
 			),
+			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		} satisfies OpenCodeModelService);
 	const wsHandler = makeMockWebSocketHandler();
 	const sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
@@ -205,6 +206,7 @@ describe("session handlers with Effect-native model service", () => {
 						throw new Error("session metadata unavailable");
 					}),
 				),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const { wsHandler, layer } = makeSessionMetadataLayer({
 				logger,
@@ -248,6 +250,7 @@ describe("session handlers with Effect-native model service", () => {
 					time: { created: 0, updated: 0 },
 				}),
 			),
+			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		};
 		const { wsHandler, layer } = makeSessionMetadataLayer({ modelService });
 

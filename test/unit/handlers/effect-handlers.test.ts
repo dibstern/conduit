@@ -159,7 +159,15 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.merge(
 		apiLayer,
-		OpenCodeModelServiceLive.pipe(Layer.provide(apiLayer)),
+		OpenCodeModelServiceLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					apiLayer,
+					Layer.succeed(ConfigTag, mockConfig()),
+					Layer.succeed(LoggerTag, mockLogger()),
+				),
+			),
+		),
 	);
 }
 
@@ -175,7 +183,15 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.mergeAll(
 		apiLayer,
-		OpenCodeModelServiceLive.pipe(Layer.provide(apiLayer)),
+		OpenCodeModelServiceLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					apiLayer,
+					Layer.succeed(ConfigTag, mockConfig()),
+					Layer.succeed(LoggerTag, mockLogger()),
+				),
+			),
+		),
 		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
 	);
 }

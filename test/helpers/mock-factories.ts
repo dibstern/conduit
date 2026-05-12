@@ -938,11 +938,13 @@ export function makeTestHandlerLayer(
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
+	const configLayer = Layer.succeed(ConfigTag, config);
+	const loggerLayer = Layer.succeed(LoggerTag, log);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
@@ -973,8 +975,8 @@ export function makeTestHandlerLayer(
 		Layer.succeed(PermissionBridgeTag, permissionBridge),
 		Layer.succeed(QuestionBridgeTag, questionBridge),
 		Layer.succeed(PtyManagerTag, ptyManager),
-		Layer.succeed(ConfigTag, config),
-		Layer.succeed(LoggerTag, log),
+		configLayer,
+		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),

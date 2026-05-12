@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -8,6 +9,7 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
@@ -67,6 +69,7 @@ describe("model handlers with Effect-native model service", () => {
 						providerID: "openai",
 					}),
 				),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
 			const layer = Layer.mergeAll(
@@ -130,6 +133,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				getSession: vi.fn(),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
 			const layer = Layer.mergeAll(
@@ -188,6 +192,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				getSession: vi.fn(),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
 			const layer = Layer.mergeAll(
@@ -226,21 +231,11 @@ describe("model handlers with Effect-native model service", () => {
 	);
 
 	it.effect(
-		"sets the OpenCode default model with config writes on the API and variant reads through the model service",
+		"sets the OpenCode default model using the model service without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler();
 			const overrides = makeMockSessionOverrides();
 			const logger = makeMockLogger();
-			const api = {
-				config: {
-					update: vi.fn(async () => undefined),
-				},
-				provider: {
-					list: vi.fn(async () => {
-						throw new Error("provider list must come from model service");
-					}),
-				},
-			} as unknown as OpenCodeAPI;
 			const modelService = {
 				listProviders: vi.fn(() =>
 					Effect.succeed({
@@ -262,10 +257,10 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				getSession: vi.fn(),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
 				Layer.succeed(SessionOverridesTag, overrides),
@@ -285,16 +280,78 @@ describe("model handlers with Effect-native model service", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(api.config.update).toHaveBeenCalledWith({
-						model: "openai/gpt-4",
-					});
-					expect(api.provider.list).not.toHaveBeenCalled();
+					expect(modelService.persistDefaultModel).toHaveBeenCalledWith(
+						"openai",
+						"gpt-4",
+					);
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
 					expect(wsHandler.broadcast).toHaveBeenCalledWith({
 						type: "variant_info",
 						variant: "",
 						variants: ["standard", "fast"],
 					});
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"persists OpenCode default model and relocates the config write in the live model service",
+		() => {
+			const projectDir = mkdtempSync(join(tmpdir(), "conduit-model-live-"));
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-model-live-cfg-"));
+			const logger = makeMockLogger();
+			const api = {
+				config: {
+					update: vi.fn(async (patch: Record<string, unknown>) => {
+						await writeFile(
+							join(projectDir, "config.json"),
+							`${JSON.stringify(patch)}\n`,
+						);
+					}),
+				},
+				provider: {
+					list: vi.fn(async () => ({
+						connected: [],
+						defaults: {},
+						providers: [],
+					})),
+				},
+				session: {
+					get: vi.fn(async () => ({})),
+				},
+			} as unknown as OpenCodeAPI;
+
+			const layer = OpenCodeModelServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(ConfigTag, makeMockConfig({ configDir, projectDir })),
+						Layer.succeed(LoggerTag, logger),
+					),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const modelService = yield* OpenCodeModelServiceTag;
+				yield* modelService.persistDefaultModel("openai", "gpt-4");
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(api.config.update).toHaveBeenCalledWith({
+						model: "openai/gpt-4",
+					});
+					expect(existsSync(join(projectDir, "config.json"))).toBe(false);
+					expect(
+						JSON.parse(
+							readFileSync(join(projectDir, "opencode.json"), "utf-8"),
+						),
+					).toEqual({
+						model: "openai/gpt-4",
+					});
+					expect(logger.info).toHaveBeenCalledWith(
+						expect.stringContaining("Merged config.json"),
+					);
 				}),
 			);
 		},

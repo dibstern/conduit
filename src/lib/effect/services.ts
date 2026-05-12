@@ -18,6 +18,7 @@ import type {
 	ScanDeps,
 } from "../handlers/types.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
+import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import type {
 	Message,
 	SessionDetail,
@@ -203,6 +204,10 @@ export interface OpenCodeModelService {
 	getSession(
 		sessionId: string,
 	): Effect.Effect<OpenCodeSessionDetail, Cause.UnknownException>;
+	persistDefaultModel(
+		providerID: string,
+		modelID: string,
+	): Effect.Effect<void, Cause.UnknownException>;
 }
 
 export class OpenCodeModelServiceTag extends Context.Tag(
@@ -212,15 +217,22 @@ export class OpenCodeModelServiceTag extends Context.Tag(
 export const OpenCodeModelServiceLive: Layer.Layer<
 	OpenCodeModelServiceTag,
 	never,
-	OpenCodeAPITag
+	OpenCodeAPITag | ConfigTag | LoggerTag
 > = Layer.effect(
 	OpenCodeModelServiceTag,
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
+		const config = yield* ConfigTag;
+		const log = yield* LoggerTag;
 		return {
 			listProviders: () => Effect.tryPromise(() => client.provider.list()),
 			getSession: (sessionId: string) =>
 				Effect.tryPromise(() => client.session.get(sessionId)),
+			persistDefaultModel: (providerID: string, modelID: string) =>
+				Effect.tryPromise(async () => {
+					await client.config.update({ model: `${providerID}/${modelID}` });
+					await fixupConfigFile(config.projectDir, log);
+				}),
 		};
 	}),
 );

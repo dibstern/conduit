@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	SessionOverridesTag,
@@ -17,7 +16,6 @@ import {
 } from "../relay/relay-settings.js";
 import type { ModelOverride } from "../session/session-overrides.js";
 import type { ContextWindowOption } from "../shared-types.js";
-import { fixupConfigFile } from "./fixup-config-file.js";
 import type { PayloadMap } from "./payloads.js";
 
 /**
@@ -327,7 +325,7 @@ export const handleSetDefaultModel = (
 	payload: PayloadMap["set_default_model"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const modelService = yield* OpenCodeModelServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
@@ -343,10 +341,7 @@ export const handleSetDefaultModel = (
 
 		// Also persist to OpenCode's project config
 		const updateResult = yield* Effect.either(
-			Effect.tryPromise(async () => {
-				await client.config.update({ model: modelSpec });
-				await fixupConfigFile(config.projectDir, log);
-			}),
+			modelService.persistDefaultModel(provider, model),
 		);
 		if (updateResult._tag === "Left") {
 			log.warn("Failed to persist default model to OpenCode config");
@@ -383,7 +378,6 @@ export const handleSetDefaultModel = (
 				}
 			}
 		} else {
-			const modelService = yield* OpenCodeModelServiceTag;
 			const provListResult = yield* Effect.either(modelService.listProviders());
 			if (provListResult._tag === "Right") {
 				for (const p of provListResult.right.providers) {

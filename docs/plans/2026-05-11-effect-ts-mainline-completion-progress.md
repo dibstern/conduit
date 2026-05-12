@@ -3065,6 +3065,77 @@ $ git diff --check
 Exit: 0
 ```
 
+## Phase 7.24: Default Model Persistence Service Contract
+
+Plan issues found:
+
+- The original Phase 7.3 model-service slice explicitly left `handleSetDefaultModel`'s config write outside the
+  service boundary. That meant the handler still required `OpenCodeAPITag` even though its provider-list read already
+  used `OpenCodeModelServiceTag`.
+- Moving only the provider-list read was not enough to claim the OpenCode model handler path was service-owned:
+  default-model persistence is part of the same model contract and should live behind the same Effect-native service.
+- A first pass only wrapped `client.config.update(...)` and left `fixupConfigFile(...)` in the handler. A reviewer
+  correctly flagged that as a thin bridge, so this slice moves the OpenCode config update and the config-file fixup
+  behind `OpenCodeModelService`.
+- `fixupConfigFile(...)` lived under `src/lib/handlers/` even though permissions and model config writes both use it.
+  This slice moves the helper to the OpenCode instance boundary.
+
+Changes:
+
+- `src/lib/effect/services.ts`: added `OpenCodeModelService.persistDefaultModel(providerID, modelID)` and wired the
+  live service to format `provider/model`, call `client.config.update(...)`, and run the config-file fixup.
+- `src/lib/instance/opencode-config-fixup.ts`: moved the OpenCode config write workaround out of handler code.
+- `src/lib/handlers/model.ts`: `handleSetDefaultModel` now resolves `OpenCodeModelServiceTag` and calls
+  `persistDefaultModel(...)` instead of resolving `OpenCodeAPITag`.
+- `src/lib/handlers/permissions.ts`: updated the config fixup import to use the OpenCode instance helper.
+- `src/lib/relay/relay-stack.ts` and `test/helpers/mock-factories.ts`: provide `ConfigTag` and `LoggerTag` to
+  `OpenCodeModelServiceLive` because the live model service now owns project config persistence.
+- `test/unit/handlers/model-service-effect.test.ts`: updated the default-model behavior test so it provides only the
+  model service, proving the handler no longer needs the Promise-shaped OpenCode API tag; added live-service coverage
+  for the OpenCode config update plus config-file relocation behavior.
+- `test/unit/handlers/session-service-effect.test.ts`: updated typed model-service test doubles for the expanded
+  service contract.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts -t "sets the OpenCode default model"
+Exit: 1
+Expected failure:
+  Service not found: OpenCodeAPI
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts -t "persists OpenCode default model"
+Exit: 1
+Expected failure:
+  yield* (intermediate value) is not iterable
+  (`OpenCodeModelServiceLive` did not expose the domain persistence method yet.)
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts -t "sets the OpenCode default model|persists OpenCode default model"
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed | 3 skipped (5)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts \
+  test/unit/handlers/model-wire-snapshots.test.ts \
+  test/unit/handlers/session-service-effect.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  15 passed (15)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:
