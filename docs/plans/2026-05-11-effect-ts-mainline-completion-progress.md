@@ -2060,6 +2060,84 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.32: Agent Handler Selection Service Contract
+
+Plan issues found:
+
+- A handler-only `get_agents` / `switch_agent` conversion would have created a real state split: `switch_agent`
+  would move to Effect-owned override state while prompt dispatch and reconnect replay could still read the old
+  imperative `SessionOverrides` object.
+- The adjacent `context-window` handler looks similarly small, but moving it now would split model/context state
+  because model selection and default-model persistence still write through the legacy override object. That slice
+  should move with the remaining model/context override migration, not with agent selection.
+
+Changes:
+
+- Added `src/lib/effect/agent-service.ts` with `AgentServiceTag`, `AgentServiceLive`, OpenCode agent filtering,
+  Claude SDK agent discovery through `OrchestrationEngine.dispatchEffect`, stale active-agent cleanup, and
+  `switchAgent` backed by Effect-native override state.
+- Added `clearAgent`, `getDefaultModel`, and `getDefaultContextWindow` helpers to
+  `src/lib/effect/session-overrides-state.ts` so services do not reach into the raw `Ref`.
+- Converted `src/lib/handlers/agent.ts` to depend on `AgentServiceTag` plus `WebSocketHandlerTag` only, and removed
+  the legacy `makeAgentListMessage` helper.
+- Routed prompt dispatch through `AgentServiceTag.getActiveAgent(...)` so a `switch_agent` selection is used by the
+  next OpenCode or Claude turn.
+- Routed client-connect agent-list replay through the same service callback so reconnect bootstrap reads the same
+  Effect-owned active-agent state.
+- Wired `AgentServiceLive` into relay runtime composition and the shared handler test layer.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/session/session-overrides-effect.test.ts test/unit/effect/agent-service.test.ts
+Exit: 1
+Expected failures:
+  Cannot find module '../../../src/lib/effect/agent-service.js'
+  clearAgent/default getter helpers were not implemented
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/agent-prompt-state-effect.test.ts
+Exit: 1
+Expected failure:
+  client.session.prompt called with { text: "implement this" } instead of { text, agent: "plan" }
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/agent-service.test.ts \
+  test/unit/session/session-overrides-effect.test.ts \
+  test/unit/handlers/agent-prompt-state-effect.test.ts \
+  test/unit/handlers/get-agents-active-provider.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/bridges/client-init.test.ts \
+  test/unit/handlers/dispatch-effect.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  9 passed (9)
+Tests  187 passed (187)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 987 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  371 passed (371)
+Tests  5231 passed | 2 skipped | 12 todo (5245)
+```
+
 ## Phase 7.31: Scan Handler Domain Service Contract
 
 Plan issues found:

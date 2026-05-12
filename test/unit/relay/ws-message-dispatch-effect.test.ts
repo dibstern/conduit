@@ -4,11 +4,7 @@ import { expect, vi } from "vitest";
 import { ClientMessageSerializationLive } from "../../../src/lib/effect/client-message-serialization.js";
 import type { RateLimitResult } from "../../../src/lib/effect/rate-limiter-layer.js";
 import { RateLimiterTag } from "../../../src/lib/effect/rate-limiter-layer.js";
-import {
-	OpenCodeAPITag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
 import { filterAgents } from "../../../src/lib/handlers/index.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
@@ -19,6 +15,7 @@ import {
 import type { RelayWsDispatch } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import { handleRelayWsMessage } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 function mockLogger(): Logger {
 	const logger: Logger = {
@@ -245,8 +242,7 @@ describe("handleRelayWsMessage", () => {
 		const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
 		const layer = Layer.mergeAll(
 			makeBaseLayer(),
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, wsHandler),
+			makeTestHandlerLayer({ api: client, wsHandler }),
 		);
 
 		return handleRelayWsMessage({

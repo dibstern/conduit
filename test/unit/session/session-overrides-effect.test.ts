@@ -6,10 +6,13 @@ import { describe, it } from "@effect/vitest";
 import { Duration, Effect, Layer, Ref, TestClock } from "effect";
 import { expect } from "vitest";
 import {
+	clearAgent,
 	clearProcessingTimeout,
 	clearSession,
 	getAgent,
 	getContextWindow,
+	getDefaultContextWindow,
+	getDefaultModel,
 	getModel,
 	getVariant,
 	hasActiveProcessingTimeout,
@@ -144,6 +147,24 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
+	it.effect("clearAgent removes agent without clearing other overrides", () =>
+		Effect.gen(function* () {
+			yield* setAgent("sess-1", "plan");
+			yield* setModel("sess-1", {
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			});
+
+			yield* clearAgent("sess-1");
+
+			expect(yield* getAgent("sess-1")).toBeUndefined();
+			expect(yield* getModel("sess-1")).toEqual({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			});
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
 	// ─── Per-Session Variant ────────────────────────────────────────────────
 
 	it.effect("setVariant/getVariant with fallback to defaultVariant", () =>
@@ -199,6 +220,24 @@ describe("SessionOverrides Effect", () => {
 	it.effect("getContextWindow returns empty string by default", () =>
 		Effect.gen(function* () {
 			expect(yield* getContextWindow("sess-1")).toBe("");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("default getters expose global model and context window", () =>
+		Effect.gen(function* () {
+			yield* setDefaultModel({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			});
+			yield* setDefaultContextWindow("1m");
+
+			const defaultModel = yield* getDefaultModel();
+			const defaultContextWindow = yield* getDefaultContextWindow();
+			expect(defaultModel).toEqual({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			});
+			expect(defaultContextWindow).toBe("1m");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 

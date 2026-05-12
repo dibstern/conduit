@@ -80,6 +80,14 @@ export const setDefaultModel = (model: ModelOverride) =>
 		yield* Ref.update(ref, (s) => ({ ...s, defaultModel: model }));
 	});
 
+/** Get the global default model. */
+export const getDefaultModel = () =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return state.defaultModel;
+	});
+
 /** Set the global default variant. */
 export const setDefaultVariant = (variant: string) =>
 	Effect.gen(function* () {
@@ -95,6 +103,14 @@ export const setDefaultContextWindow = (contextWindow: string) =>
 			...s,
 			defaultContextWindow: contextWindow,
 		}));
+	});
+
+/** Get the global default context window. */
+export const getDefaultContextWindow = () =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return state.defaultContextWindow;
 	});
 
 // ─── Per-Session Model ──────────────────────────────────────────────────────
@@ -159,6 +175,20 @@ export const getAgent = (sessionId: string) =>
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
 		return state.sessions.get(sessionId)?.agent;
+	});
+
+/** Clear the agent override for a session without touching other overrides. */
+export const clearAgent = (sessionId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		yield* Ref.update(ref, (state) => {
+			const entry = state.sessions.get(sessionId);
+			if (!entry?.agent) return state;
+			const next = new Map(state.sessions);
+			const { agent: _, ...rest } = entry;
+			next.set(sessionId, rest);
+			return { ...state, sessions: next };
+		});
 	});
 
 // ─── Per-Session Variant ────────────────────────────────────────────────────

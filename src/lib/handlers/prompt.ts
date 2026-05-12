@@ -1,6 +1,7 @@
 // ─── Prompt Handlers ─────────────────────────────────────────────────────────
 
 import { Effect, Runtime } from "effect";
+import { AgentServiceTag } from "../effect/agent-service.js";
 import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
 import {
 	ClaudeEventPersistTag,
@@ -154,7 +155,11 @@ export const handleMessage = (
 			text,
 			...(images && images.length > 0 && { images }),
 		};
-		const sessionAgent = overrides.getAgent(activeId);
+		const agentServiceOption = yield* Effect.serviceOption(AgentServiceTag);
+		const sessionAgent =
+			agentServiceOption._tag === "Some"
+				? yield* agentServiceOption.value.getActiveAgent(activeId)
+				: overrides.getAgent(activeId);
 		if (sessionAgent) prompt.agent = sessionAgent;
 		const sessionModel = overrides.getModel(activeId);
 		if (sessionModel && overrides.isModelUserSelected(activeId))

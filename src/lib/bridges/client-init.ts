@@ -7,14 +7,14 @@
 // independently testable and relay-stack stays slim.
 
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type { AgentList } from "../effect/agent-service.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingQuestion,
 } from "../effect/pending-interaction-service.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
-import { makeAgentListMessage, toWireAgents } from "../handlers/agent.js";
-import { filterAgents, getSessionInputDraft } from "../handlers/index.js";
+import { getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
@@ -94,6 +94,9 @@ export interface ClientInitDeps {
 	overrides: SessionOverrides;
 	terminal: {
 		replay(clientId: string): Promise<void>;
+	};
+	agentService: {
+		listAgents(activeSessionId: string | undefined): Promise<AgentList>;
 	};
 	pendingInteractions: {
 		listPendingPermissions(): Promise<PendingPermission[]>;
@@ -360,29 +363,12 @@ export async function handleClientConnected(
 
 	// ── Agent list (filter out internal agents) ──────────────────────────
 	try {
-		const activeProviderId =
-			activeId &&
-			typeof deps.orchestrationEngine?.getProviderForSession === "function"
-				? deps.orchestrationEngine.getProviderForSession(activeId)
-				: undefined;
-		if (activeProviderId === "claude" && deps.orchestrationEngine) {
-			const claudeCaps = await deps.orchestrationEngine.dispatch({
-				type: "discover",
-				providerId: "claude",
-			});
-			const agents = toWireAgents(claudeCaps.agents ?? []);
-			wsHandler.sendTo(
-				clientId,
-				makeAgentListMessage(agents, activeId, overrides),
-			);
-		} else {
-			const rawAgents = await client.app.agents();
-			const agents = filterAgents(rawAgents);
-			wsHandler.sendTo(
-				clientId,
-				makeAgentListMessage(agents, activeId, overrides),
-			);
-		}
+		const result = await deps.agentService.listAgents(activeId);
+		wsHandler.sendTo(clientId, {
+			type: "agent_list",
+			agents: [...result.agents],
+			...(result.activeAgentId ? { activeAgentId: result.activeAgentId } : {}),
+		});
 	} catch (err) {
 		sendInitError(err, "Failed to list agents");
 	}

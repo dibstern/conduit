@@ -16,6 +16,7 @@
 import { Effect, Layer } from "effect";
 import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
+import { AgentServiceLive } from "../../src/lib/effect/agent-service.js";
 import { DaemonEventBusLive } from "../../src/lib/effect/daemon-pubsub.js";
 import {
 	type DaemonState,
@@ -41,6 +42,7 @@ import {
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
+	OrchestrationEngineTag,
 	type PollerManagerShape,
 	PollerManagerTag,
 	PtyManagerTag,
@@ -61,6 +63,7 @@ import {
 	makeSessionManagerStateLive,
 	type SessionManagerState,
 } from "../../src/lib/effect/session-manager-state.js";
+import { makeOverridesStateLive } from "../../src/lib/effect/session-overrides-state.js";
 import { makeSessionRegistryStateLive } from "../../src/lib/effect/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/effect/session-status-poller.js";
 import { OpenCodeTerminalServiceLive } from "../../src/lib/effect/terminal-service.js";
@@ -71,6 +74,7 @@ import type {
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
+import type { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
@@ -398,6 +402,9 @@ export function createMockClientInitDeps(
 		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
 		terminal: {
 			replay: vi.fn(async () => undefined),
+		},
+		agentService: {
+			listAgents: vi.fn(async () => ({ agents: [] })),
 		},
 		pendingInteractions: {
 			listPendingPermissions: vi.fn().mockResolvedValue([]),
@@ -880,6 +887,7 @@ export interface TestHandlerLayerOptions {
 	pollerManager?: PollerManagerShape;
 	connectPtyUpstream?: ConnectPtyUpstreamShape;
 	instanceMgmt?: InstanceManagementDeps;
+	orchestrationEngine?: OrchestrationEngine;
 }
 
 /**
@@ -916,9 +924,14 @@ export function makeTestHandlerLayer(
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
 	const instanceMgmt = opts?.instanceMgmt;
+	const overridesStateLayer = makeOverridesStateLive();
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
 	const configLayer = Layer.succeed(ConfigTag, config);
 	const loggerLayer = Layer.succeed(LoggerTag, log);
+	const orchestrationLayer =
+		opts?.orchestrationEngine == null
+			? Layer.empty
+			: Layer.succeed(OrchestrationEngineTag, opts.orchestrationEngine);
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -938,6 +951,16 @@ export function makeTestHandlerLayer(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
+	const agentServiceLayer = AgentServiceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				loggerLayer,
+				overridesStateLayer,
+				orchestrationLayer,
+			),
+		),
+	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -977,6 +1000,7 @@ export function makeTestHandlerLayer(
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
 		scanServiceLayer,
+		agentServiceLayer,
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,
@@ -984,12 +1008,14 @@ export function makeTestHandlerLayer(
 		wsHandlerLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, sessionOverrides),
+		overridesStateLayer,
 		ptyManagerLayer,
 		configLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		connectPtyUpstreamLayer,
+		orchestrationLayer,
 		...(instanceMgmt == null
 			? []
 			: [Layer.succeed(InstanceMgmtTag, instanceMgmt)]),

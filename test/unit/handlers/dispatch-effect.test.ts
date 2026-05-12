@@ -6,23 +6,17 @@
 //   4. Rejects malformed payloads with ParseError
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, type Layer } from "effect";
 import { expect, vi } from "vitest";
 import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
-import {
-	LoggerTag,
-	OpenCodeAPITag,
-	SessionOverridesTag,
-	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+import { getAgent } from "../../../src/lib/effect/session-overrides-state.js";
 import { WebSocketError } from "../../../src/lib/errors.js";
 import {
 	dispatchMessageEffect,
 	filterAgents,
 } from "../../../src/lib/handlers/index.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import type { Logger } from "../../../src/lib/logger.js";
-import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -47,34 +41,6 @@ function mockWsHandler(
 		once: vi.fn(),
 		...overrides,
 	};
-}
-
-function mockLogger(): Logger {
-	return {
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	} as unknown as Logger;
-}
-
-function mockOverrides(
-	overrides?: Partial<SessionOverrides>,
-): SessionOverrides {
-	return {
-		setAgent: vi.fn(),
-		setModel: vi.fn(),
-		setVariant: vi.fn(),
-		setContextWindow: vi.fn(),
-		getModel: vi.fn(),
-		getVariant: vi.fn(),
-		getContextWindow: vi.fn(),
-		setDefaultModel: vi.fn(),
-		defaultModel: undefined,
-		defaultVariant: "",
-		defaultContextWindow: "",
-		...overrides,
-	} as unknown as SessionOverrides;
 }
 
 /**
@@ -109,10 +75,7 @@ describe("dispatchMessageEffect", () => {
 				app: { agents: vi.fn(async () => mockAgents) },
 			} as unknown as OpenCodeAPI;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-			);
+			const layer = makeTestHandlerLayer({ api: client, wsHandler: ws });
 
 			return makeDispatchEffect("client-1", "get_agents", {}, layer).pipe(
 				Effect.tap(() => {
@@ -130,25 +93,14 @@ describe("dispatchMessageEffect", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
-		const overrides = mockOverrides();
-		const log = mockLogger();
+		const layer = makeTestHandlerLayer({ wsHandler: ws });
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
-			Layer.succeed(LoggerTag, log),
-		);
-
-		return makeDispatchEffect(
-			"client-1",
-			"switch_agent",
-			{ agentId: "plan" },
-			layer,
-		).pipe(
-			Effect.tap(() => {
-				expect(overrides.setAgent).toHaveBeenCalledWith("session-42", "plan");
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* dispatchMessageEffect("client-1", "switch_agent", {
+				agentId: "plan",
+			}) as Effect.Effect<void, never>;
+			expect(yield* getAgent("session-42")).toBe("plan");
+		}).pipe(Effect.provide(layer));
 	});
 
 	// ─── Unknown message type ──────────────────────────────────────────────
@@ -214,10 +166,7 @@ describe("dispatchMessageEffect", () => {
 			app: { agents: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
+		const layer = makeTestHandlerLayer({ api: client, wsHandler: ws });
 
 		// get_agents expects {} — no required fields
 		return makeDispatchEffect("client-1", "get_agents", {}, layer).pipe(
@@ -232,25 +181,15 @@ describe("dispatchMessageEffect", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const overrides = mockOverrides();
-		const log = mockLogger();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
-			Layer.succeed(LoggerTag, log),
-		);
+		const layer = makeTestHandlerLayer({ wsHandler: ws });
 
 		// Schema.Struct allows extra keys by default
-		return makeDispatchEffect(
-			"client-1",
-			"switch_agent",
-			{ agentId: "plan", extraField: "should be ignored" },
-			layer,
-		).pipe(
-			Effect.tap(() => {
-				expect(overrides.setAgent).toHaveBeenCalledWith("session-1", "plan");
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* dispatchMessageEffect("client-1", "switch_agent", {
+				agentId: "plan",
+				extraField: "should be ignored",
+			}) as Effect.Effect<void, never>;
+			expect(yield* getAgent("session-1")).toBe("plan");
+		}).pipe(Effect.provide(layer));
 	});
 });

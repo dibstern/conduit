@@ -29,6 +29,7 @@ import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../bridges/client-init.js";
+import { AgentServiceLive, AgentServiceTag } from "../effect/agent-service.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
 import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
 import { InstanceManagementServiceLive } from "../effect/instance-management-service.js";
@@ -776,6 +777,15 @@ export async function createProjectRelay(
 					}),
 				),
 		},
+		agentService: {
+			listAgents: (activeSessionId) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* AgentServiceTag;
+						return yield* service.listAgents(activeSessionId);
+					}),
+				),
+		},
 		pendingInteractions: {
 			listPendingPermissions: () =>
 				relayManagedRuntime.runPromise(
@@ -961,10 +971,14 @@ export async function createProjectRelay(
 	// SessionEventBridgeLive, SessionLifecycleWiringLive) are added after
 	// wireMonitoring() returns (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(RelayStateLive, bridgeLayers);
+	const relayStateServicesAndBridges = Layer.provideMerge(
+		AgentServiceLive,
+		relayStateAndBridges,
+	);
 	const baseLayers =
 		persistenceEffectLayer != null
-			? Layer.merge(relayStateAndBridges, persistenceEffectLayer)
-			: relayStateAndBridges;
+			? Layer.merge(relayStateServicesAndBridges, persistenceEffectLayer)
+			: relayStateServicesAndBridges;
 
 	const effectRuntime: RelayRuntime = {
 		get runtime() {

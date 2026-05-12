@@ -40,6 +40,7 @@ import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/effect/session-manager-service.js";
+import { getAgent } from "../../../src/lib/effect/session-overrides-state.js";
 import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
@@ -106,7 +107,10 @@ import type { OrchestrationEngine } from "../../../src/lib/provider/orchestratio
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
-import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import {
+	makeMockSessionManagerService,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -256,13 +260,8 @@ describe("handleGetAgents", () => {
 				app: { agents: vi.fn(async () => mockAgents) },
 			} as unknown as OpenCodeAPI;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-			);
-
 			return handleGetAgents("client-1", {}).pipe(
-				Effect.provide(layer),
+				Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
 				Effect.tap(() => {
 					expect(client.app.agents).toHaveBeenCalledOnce();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -283,19 +282,12 @@ describe("handleSwitchAgent", () => {
 		const overrides = mockOverrides();
 		const log = mockLogger();
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
-			Layer.succeed(LoggerTag, log),
-		);
-
-		return handleSwitchAgent("client-1", { agentId: "plan" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(overrides.setAgent).toHaveBeenCalledWith("session-42", "plan");
-				expect(log.info).toHaveBeenCalledOnce();
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* handleSwitchAgent("client-1", { agentId: "plan" });
+			expect(yield* getAgent("session-42")).toBe("plan");
+			expect(overrides.setAgent).not.toHaveBeenCalled();
+			expect(log.info).toHaveBeenCalledOnce();
+		}).pipe(Effect.provide(makeTestHandlerLayer({ wsHandler: ws, log })));
 	});
 
 	it.effect("warns when no session is assigned", () => {
@@ -303,14 +295,8 @@ describe("handleSwitchAgent", () => {
 		const overrides = mockOverrides();
 		const log = mockLogger();
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
-			Layer.succeed(LoggerTag, log),
-		);
-
 		return handleSwitchAgent("client-1", { agentId: "build" }).pipe(
-			Effect.provide(layer),
+			Effect.provide(makeTestHandlerLayer({ wsHandler: ws, log })),
 			Effect.tap(() => {
 				expect(overrides.setAgent).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledOnce();
@@ -323,14 +309,8 @@ describe("handleSwitchAgent", () => {
 		const overrides = mockOverrides();
 		const log = mockLogger();
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
-			Layer.succeed(LoggerTag, log),
-		);
-
 		return handleSwitchAgent("client-1", { agentId: "" }).pipe(
-			Effect.provide(layer),
+			Effect.provide(makeTestHandlerLayer({ wsHandler: ws, log })),
 			Effect.tap(() => {
 				expect(overrides.setAgent).not.toHaveBeenCalled();
 				expect(log.info).not.toHaveBeenCalled();

@@ -46,6 +46,9 @@ const TEST_HISTORY = {
 /** Apply test-specific mock return values on top of shared factory defaults. */
 function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 	vi.mocked(deps.client.app.agents).mockResolvedValue(TEST_AGENTS);
+	vi.mocked(deps.agentService.listAgents).mockResolvedValue({
+		agents: [{ id: "coder", name: "coder", description: "Main agent" }],
+	});
 	vi.mocked(deps.client.provider.list).mockResolvedValue(TEST_PROVIDERS);
 	vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockResolvedValue(
 		TEST_HISTORY,
@@ -277,15 +280,19 @@ describe("handleClientConnected — agent list", () => {
 				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
 			}),
 		);
-		vi.mocked(deps.overrides.getModel).mockReturnValue({
-			providerID: "claude",
-			modelID: "claude-sonnet-4-7",
+		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
+			agents: [
+				{ id: "Explore", name: "Explore", description: "Explorer" },
+				{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+				{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
+			],
+			activeAgentId: "Explore",
 		});
-		vi.mocked(deps.overrides.getAgent).mockReturnValue("Explore");
 
 		await handleClientConnected(deps, "client-1");
 
 		expect(deps.client.app.agents).not.toHaveBeenCalled();
+		expect(deps.agentService.listAgents).toHaveBeenCalledWith("session-1");
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "agent_list",
 			agents: [
@@ -317,15 +324,13 @@ describe("handleClientConnected — agent list", () => {
 				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
 			}),
 		);
-		vi.mocked(deps.overrides.getModel).mockReturnValue({
-			providerID: "claude",
-			modelID: "claude-opus-4-7",
+		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
+			agents: [{ id: "Explore", name: "Explore" }],
 		});
-		vi.mocked(deps.overrides.getAgent).mockReturnValue("Missing");
 
 		await handleClientConnected(deps, "client-1");
 
-		expect(deps.overrides.clearAgent).toHaveBeenCalledWith("session-1");
+		expect(deps.agentService.listAgents).toHaveBeenCalledWith("session-1");
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "agent_list",
 			agents: [{ id: "Explore", name: "Explore" }],
@@ -334,7 +339,7 @@ describe("handleClientConnected — agent list", () => {
 
 	it("sends INIT_FAILED when listAgents throws", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.app.agents).mockRejectedValue(
+		vi.mocked(deps.agentService.listAgents).mockRejectedValue(
 			new Error("agents fail"),
 		);
 
