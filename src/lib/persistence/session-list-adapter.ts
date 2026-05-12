@@ -2,6 +2,7 @@
 // ─── Session List Adapter ────────────────────────────────────────────────────
 // Converts SQLite SessionRow[] → SessionInfo[] for the frontend.
 
+import type { ForkEntry } from "../daemon/fork-metadata.js";
 import type { SessionInfo } from "../shared-types.js";
 import type { SessionRow } from "./read-query-service.js";
 
@@ -12,6 +13,7 @@ interface SessionStatus {
 export interface SessionListAdapterOptions {
 	statuses?: Record<string, SessionStatus>;
 	pendingQuestionCounts?: ReadonlyMap<string, number>;
+	forkMeta?: ReadonlyMap<string, ForkEntry>;
 }
 
 /**
@@ -30,11 +32,13 @@ export function sessionRowsToSessionInfoList(
 			messageCount: 0,
 		};
 
-		if (row.parent_id) {
-			info.parentID = row.parent_id;
-		}
-		if (row.fork_point_event) {
-			info.forkMessageId = row.fork_point_event;
+		const forkEntry = opts?.forkMeta?.get(row.id);
+		const parentID = row.parent_id ?? forkEntry?.parentID;
+		const forkMessageId = row.fork_point_event ?? forkEntry?.forkMessageId;
+		if (parentID) info.parentID = parentID;
+		if (forkMessageId) info.forkMessageId = forkMessageId;
+		if (forkEntry?.forkPointTimestamp != null) {
+			info.forkPointTimestamp = forkEntry.forkPointTimestamp;
 		}
 
 		if (opts?.statuses) {

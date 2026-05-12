@@ -430,6 +430,7 @@ export const handleForkSession = (
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 
@@ -481,7 +482,7 @@ export const handleForkSession = (
 
 		// Persist fork-point metadata
 		if (forkMessageId || forkPointTimestamp) {
-			sessionMgr.setForkEntry(forked.id, {
+			yield* sessionManagerService.setForkEntry(forked.id, {
 				forkMessageId: forkMessageId ?? "",
 				parentID: sessionId,
 				...(forkPointTimestamp != null && { forkPointTimestamp }),
@@ -512,8 +513,8 @@ export const handleForkSession = (
 		yield* handleViewSession(clientId, { sessionId: forked.id });
 
 		// Broadcast updated session list
-		yield* Effect.tryPromise(() =>
-			sessionMgr.sendDualSessionLists((msg) => wsHandler.broadcast(msg)),
+		yield* sessionManagerService.sendDualSessionLists((msg) =>
+			wsHandler.broadcast(msg),
 		);
 
 		log.info(

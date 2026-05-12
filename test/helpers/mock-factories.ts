@@ -742,6 +742,7 @@ export function makeMockSessionManagerService(
 		createSession: vi.fn(() => Effect.succeed({ id: "session-new" })),
 		deleteSession: vi.fn(() => Effect.void),
 		recordMessageActivity: vi.fn(() => Effect.void),
+		setForkEntry: vi.fn(() => Effect.void),
 		sendDualSessionLists: vi.fn((send) =>
 			Effect.sync(() => {
 				send({

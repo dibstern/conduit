@@ -2324,6 +2324,76 @@ Exit: 0
 Checked 975 files. No fixes applied.
 ```
 
+## Phase 7.16: Fork Session List Broadcast Service Contract
+
+Plan issues found:
+
+- A mechanical `handleForkSession` broadcast swap would have split fork metadata ownership. The
+  handler wrote fork metadata through the legacy `SessionManager`, while the Effect service list
+  path reads from `SessionManagerStateTag`; the final list broadcast would have lost `parentID`,
+  `forkMessageId`, and `forkPointTimestamp`.
+- `SessionManagerServiceLive` started with empty fork metadata, so persisted fork metadata in
+  `fork-metadata.json` was invisible after a daemon restart.
+- The Effect service list path used provider API reads even when a SQLite read query service was
+  available. That was a source-of-truth regression from the legacy manager, which prefers the
+  read model when present.
+- SQLite session rows persist `parent_id` and `fork_point_event`, but not `forkPointTimestamp`.
+  This slice preserves timestamp metadata through service state and the existing JSON file. A
+  canonical persisted fork event/projector migration remains the durable long-term follow-up.
+
+Changes:
+
+- Added `SessionManagerService.setForkEntry`, backed by `SessionManagerStateTag` and the existing
+  fork metadata JSON persistence.
+- Converted `handleForkSession` to write fork metadata and send the final session-list broadcast
+  through `SessionManagerServiceTag`.
+- Taught `SessionManagerServiceLive` to load persisted fork metadata at layer construction.
+- Taught service `listSessions` to prefer `ReadQueryEffectTag`, fall back to `ReadQueryTag`, and
+  only then call the provider API.
+- Extended the SQLite session-list adapter so service-owned fork metadata overlays rows that do
+  not carry full fork details.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts -t "fork metadata|handleForkSession"
+Exit: 1
+Expected failures:
+  SessionManagerService.setForkEntry was missing.
+  handleForkSession still called legacy sendDualSessionLists.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts \
+  test/unit/persistence/session-list-adapter.test.ts \
+  test/unit/persistence/read-query-service.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  102 passed (102)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && exit 1)
+Exit: 0
+Test Files  363 passed (363)
+Tests  5173 passed | 2 skipped | 12 todo (5187)
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:

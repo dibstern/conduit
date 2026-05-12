@@ -7,10 +7,24 @@
 // SessionManagerServiceTag bundles them for callers that prefer a service object.
 
 import { Context, Data, Effect, HashMap, Layer, Ref, Schedule } from "effect";
+import {
+	type ForkEntry,
+	loadForkMetadata,
+	saveForkMetadata,
+} from "../daemon/fork-metadata.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../persistence/read-model-types.js";
+import { sessionRowsToSessionInfoList } from "../persistence/session-list-adapter.js";
 import { toSessionInfoList } from "../session/session-info-list.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
-import { LoggerTag, OpenCodeAPITag, StatusPollerTag } from "./services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OpenCodeAPITag,
+	ReadQueryTag,
+	StatusPollerTag,
+} from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 
 // ─── Retry policy ──────────────────────────────────────────────────────────
@@ -39,6 +53,37 @@ type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
 const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 	new Map(HashMap.toEntries(map));
 
+const sessionRowsParentMap = (
+	rows: readonly SessionRow[],
+	forkMeta: HashMap.HashMap<string, ForkEntry>,
+): HashMap.HashMap<string, string> => {
+	let parentMap = HashMap.empty<string, string>();
+	for (const row of rows) {
+		const forkEntry = HashMap.get(forkMeta, row.id);
+		const parentID =
+			row.parent_id ??
+			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
+		if (parentID) {
+			parentMap = HashMap.set(parentMap, row.id, parentID);
+		}
+	}
+	return parentMap;
+};
+
+const sessionRowsToInfo = (
+	rows: readonly SessionRow[],
+	options: ListSessionsOptions | undefined,
+	state: {
+		forkMeta: HashMap.HashMap<string, ForkEntry>;
+		pendingQuestionCounts: HashMap.HashMap<string, number>;
+	},
+): SessionInfo[] =>
+	sessionRowsToSessionInfoList(Array.from(rows), {
+		...(options?.statuses !== undefined ? { statuses: options.statuses } : {}),
+		forkMeta: toReadonlyMap(state.forkMeta),
+		pendingQuestionCounts: toReadonlyMap(state.pendingQuestionCounts),
+	});
+
 // ─── Free functions ─────────────────────────────────────────────────────────
 
 /**
@@ -49,6 +94,46 @@ export const listSessions = (options?: ListSessionsOptions) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
+		const readQueryEffectOption =
+			yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+		const sqOpts =
+			options?.roots !== undefined ? { roots: options.roots } : undefined;
+		const state = yield* Ref.get(stateRef);
+
+		if (readQueryEffectOption._tag === "Some") {
+			const rows = yield* readQueryEffectOption.value
+				.listSessions(sqOpts)
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({ operation: "listSessions", cause }),
+					),
+				);
+			if (!options?.roots) {
+				yield* Ref.update(stateRef, (s) => ({
+					...s,
+					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
+				}));
+			}
+			return sessionRowsToInfo(rows, options, state);
+		}
+
+		if (readQueryOption._tag === "Some") {
+			const rows = yield* Effect.try({
+				try: () => readQueryOption.value.listSessions(sqOpts),
+				catch: (cause) =>
+					new SessionManagerError({ operation: "listSessions", cause }),
+			});
+			if (!options?.roots) {
+				yield* Ref.update(stateRef, (s) => ({
+					...s,
+					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
+				}));
+			}
+			return sessionRowsToInfo(rows, options, state);
+		}
+
 		const clientOptions = {
 			...(options?.limit !== undefined && { limit: options.limit }),
 			...(options?.roots !== undefined && { roots: options.roots }),
@@ -65,8 +150,6 @@ export const listSessions = (options?: ListSessionsOptions) =>
 					new SessionManagerError({ operation: "listSessions", cause }),
 			),
 		);
-
-		const state = yield* Ref.get(stateRef);
 
 		// Only rebuild from unfiltered fetches. Roots-only responses omit children
 		// and would wipe the parent map used by status propagation.
@@ -182,6 +265,36 @@ export const recordMessageActivity = (sessionId: string, timestamp?: number) =>
 		Effect.withSpan("session.recordMessageActivity"),
 	);
 
+/** Record fork-point metadata for a forked session and persist it to disk. */
+export const setForkEntry = (
+	sessionId: string,
+	entry: ForkEntry,
+	configDir?: string,
+) =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		const forkMeta = yield* Ref.modify(ref, (s) => {
+			const nextForkMeta = HashMap.set(s.forkMeta, sessionId, entry);
+			return [
+				nextForkMeta,
+				{
+					...s,
+					forkMeta: nextForkMeta,
+				},
+			] as const;
+		});
+
+		yield* Effect.try({
+			try: () =>
+				saveForkMetadata(new Map(HashMap.toEntries(forkMeta)), configDir),
+			catch: (cause) =>
+				new SessionManagerError({ operation: "setForkEntry", cause }),
+		});
+	}).pipe(
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.setForkEntry"),
+	);
+
 /**
  * Send roots-only session list immediately, then all sessions in the background.
  */
@@ -228,6 +341,10 @@ export interface SessionManagerService {
 		sessionId: string,
 		timestamp?: number,
 	): Effect.Effect<void>;
+	setForkEntry(
+		sessionId: string,
+		entry: ForkEntry,
+	): Effect.Effect<void, SessionManagerError>;
 	sendDualSessionLists(
 		send: (msg: SessionListMessage) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
@@ -254,6 +371,24 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const stateRef = yield* SessionManagerStateTag;
 		const log = yield* LoggerTag;
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const configDir =
+			configOption._tag === "Some" ? configOption.value.configDir : undefined;
+		const readQueryEffectOption =
+			yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+		if (configOption._tag === "Some") {
+			const forkMeta = loadForkMetadata(configDir);
+			if (forkMeta.size > 0) {
+				yield* Ref.update(stateRef, (s) => {
+					let nextForkMeta = s.forkMeta;
+					for (const [sessionId, entry] of forkMeta) {
+						nextForkMeta = HashMap.set(nextForkMeta, sessionId, entry);
+					}
+					return { ...s, forkMeta: nextForkMeta };
+				});
+			}
+		}
 		const currentStatuses = (
 			explicit?: Record<string, SessionStatus> | undefined,
 		): Record<string, SessionStatus> | undefined =>
@@ -261,16 +396,32 @@ export const SessionManagerServiceLive: Layer.Layer<
 			(statusPollerOption._tag === "Some"
 				? statusPollerOption.value.getCurrentStatuses?.()
 				: undefined);
+		const serviceListSessions = (options?: ListSessionsOptions) => {
+			const base = listSessions({
+				...options,
+				statuses: currentStatuses(options?.statuses),
+			}).pipe(
+				Effect.provideService(OpenCodeAPITag, api),
+				Effect.provideService(SessionManagerStateTag, stateRef),
+			);
+			const withEffectRead =
+				readQueryEffectOption._tag === "Some"
+					? base.pipe(
+							Effect.provideService(
+								ReadQueryEffectTag,
+								readQueryEffectOption.value,
+							),
+						)
+					: base;
+			return readQueryOption._tag === "Some"
+				? withEffectRead.pipe(
+						Effect.provideService(ReadQueryTag, readQueryOption.value),
+					)
+				: withEffectRead;
+		};
 
 		return {
-			listSessions: (options) =>
-				listSessions({
-					...options,
-					statuses: currentStatuses(options?.statuses),
-				}).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
+			listSessions: serviceListSessions,
 			createSession: (title) =>
 				createSession(title).pipe(Effect.provideService(OpenCodeAPITag, api)),
 			deleteSession: (sessionId) =>
@@ -282,14 +433,37 @@ export const SessionManagerServiceLive: Layer.Layer<
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
-			sendDualSessionLists: (send, options) =>
-				sendDualSessionLists(send, {
-					statuses: currentStatuses(options?.statuses),
-				}).pipe(
-					Effect.provideService(LoggerTag, log),
-					Effect.provideService(OpenCodeAPITag, api),
+			setForkEntry: (sessionId, entry) =>
+				setForkEntry(sessionId, entry, configDir).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
+			sendDualSessionLists: (send, options) =>
+				Effect.gen(function* () {
+					const roots = yield* serviceListSessions({
+						roots: true,
+						statuses: options?.statuses,
+					});
+					send({ type: "session_list", sessions: roots, roots: true });
+
+					yield* Effect.forkDaemon(
+						serviceListSessions({ statuses: options?.statuses }).pipe(
+							Effect.tap((all) =>
+								Effect.sync(() =>
+									send({
+										type: "session_list",
+										sessions: all,
+										roots: false,
+									}),
+								),
+							),
+							Effect.catchAll((err) =>
+								Effect.sync(() =>
+									log.warn(`Background all-sessions fetch failed: ${err}`),
+								),
+							),
+						),
+					);
+				}),
 		} satisfies SessionManagerService;
 	}),
 );

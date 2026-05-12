@@ -1232,6 +1232,7 @@ function makeForkSessionLayer(options?: {
 	client?: OpenCodeAPI;
 	ws?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
+	sessionManagerService?: SessionManagerService;
 	overrides?: SessionOverrides;
 	log?: Logger;
 }) {
@@ -1252,6 +1253,8 @@ function makeForkSessionLayer(options?: {
 		} as unknown as OpenCodeAPI);
 	const ws = options?.ws ?? mockWsHandler();
 	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
+	const sessionManagerService =
+		options?.sessionManagerService ?? makeMockSessionManagerService();
 	const overrides =
 		options?.overrides ??
 		mockOverrides({
@@ -1264,7 +1267,7 @@ function makeForkSessionLayer(options?: {
 		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerTag, sessionMgr),
-		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
@@ -1386,71 +1389,125 @@ describe("handleGetToolContent", () => {
 });
 
 describe("handleForkSession", () => {
-	it.effect("stores explicit fork metadata through SessionManagerTag", () => {
-		const setForkEntry = vi.fn();
-		const ws = mockWsHandler();
-		const sessionMgr = mockSessionManager({
-			setForkEntry,
-			listSessions: vi.fn(async () => [
-				{
-					id: "ses-parent",
-					title: "Parent Session",
-					updatedAt: 100,
-					messageCount: 1,
-				},
-			]),
-			loadPreRenderedHistory: vi.fn(async () => ({
-				messages: [],
-				hasMore: false,
-			})),
-		});
-		const layer = makeForkSessionLayer({ sessionMgr, ws });
+	it.effect(
+		"stores explicit fork metadata through SessionManagerService",
+		() => {
+			const legacySetForkEntry = vi.fn();
+			const legacySendDualSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendDualSessionLists should not be used");
+			});
+			const serviceSetForkEntry = vi.fn(() => Effect.void);
+			const serviceSendDualSessionLists = vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "ses-child",
+								title: "Forked Session",
+								updatedAt: 201,
+								messageCount: 0,
+								parentID: "ses-parent",
+								forkMessageId: "msg-1",
+								forkPointTimestamp: 123,
+							},
+						],
+						roots: false,
+					});
+				}),
+			);
+			const ws = mockWsHandler();
+			const sessionMgr = mockSessionManager({
+				setForkEntry: legacySetForkEntry,
+				sendDualSessionLists: legacySendDualSessionLists,
+				listSessions: vi.fn(async () => [
+					{
+						id: "ses-parent",
+						title: "Parent Session",
+						updatedAt: 100,
+						messageCount: 1,
+					},
+				]),
+				loadPreRenderedHistory: vi.fn(async () => ({
+					messages: [],
+					hasMore: false,
+				})),
+			});
+			const sessionManagerService = makeMockSessionManagerService({
+				setForkEntry: serviceSetForkEntry,
+				sendDualSessionLists: serviceSendDualSessionLists,
+			});
+			const layer = makeForkSessionLayer({
+				sessionMgr,
+				sessionManagerService,
+				ws,
+			});
 
-		return handleForkSession("client-1", {
-			sessionId: "ses-parent",
-			messageId: "msg-1",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(setForkEntry).toHaveBeenCalledWith("ses-child", {
-					forkMessageId: "msg-1",
-					parentID: "ses-parent",
-					forkPointTimestamp: 123,
-				});
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "session_forked",
-					sessionId: "ses-child",
-					session: {
-						id: "ses-child",
-						title: "Forked Session",
-						updatedAt: 201,
-						parentID: "ses-parent",
+			return handleForkSession("client-1", {
+				sessionId: "ses-parent",
+				messageId: "msg-1",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(serviceSetForkEntry).toHaveBeenCalledWith("ses-child", {
 						forkMessageId: "msg-1",
+						parentID: "ses-parent",
 						forkPointTimestamp: 123,
-					},
-					parentId: "ses-parent",
-					parentTitle: "Parent Session",
-				});
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "session_switched",
-					id: "ses-child",
-					sessionId: "ses-child",
-					history: {
-						messages: [],
-						hasMore: false,
-					},
-				});
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "status",
-					sessionId: "ses-child",
-					status: "idle",
-				});
-			}),
-		);
-	});
+					});
+					expect(legacySetForkEntry).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_forked",
+						sessionId: "ses-child",
+						session: {
+							id: "ses-child",
+							title: "Forked Session",
+							updatedAt: 201,
+							parentID: "ses-parent",
+							forkMessageId: "msg-1",
+							forkPointTimestamp: 123,
+						},
+						parentId: "ses-parent",
+						parentTitle: "Parent Session",
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session_switched",
+						id: "ses-child",
+						sessionId: "ses-child",
+						history: {
+							messages: [],
+							hasMore: false,
+						},
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "status",
+						sessionId: "ses-child",
+						status: "idle",
+					});
+					expect(serviceSendDualSessionLists).toHaveBeenCalled();
+					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledWith({
+						type: "session_list",
+						sessions: [
+							{
+								id: "ses-child",
+								title: "Forked Session",
+								updatedAt: 201,
+								messageCount: 0,
+								parentID: "ses-parent",
+								forkMessageId: "msg-1",
+								forkPointTimestamp: 123,
+							},
+						],
+						roots: false,
+					});
+				}),
+			);
+		},
+	);
 
 	it.effect("uses the whole-session fork fallback message as metadata", () => {
-		const setForkEntry = vi.fn();
+		const legacySetForkEntry = vi.fn();
+		const serviceSetForkEntry = vi.fn(() => Effect.void);
 		const messagesPage = vi.fn(async () => [{ id: "msg-last" }]);
 		const client = {
 			session: {
@@ -1465,14 +1522,21 @@ describe("handleForkSession", () => {
 			permission: { list: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI;
 		const sessionMgr = mockSessionManager({
-			setForkEntry,
+			setForkEntry: legacySetForkEntry,
 			listSessions: vi.fn(async () => []),
 			loadPreRenderedHistory: vi.fn(async () => ({
 				messages: [],
 				hasMore: false,
 			})),
 		});
-		const layer = makeForkSessionLayer({ client, sessionMgr });
+		const sessionManagerService = makeMockSessionManagerService({
+			setForkEntry: serviceSetForkEntry,
+		});
+		const layer = makeForkSessionLayer({
+			client,
+			sessionMgr,
+			sessionManagerService,
+		});
 
 		return handleForkSession("client-1", {
 			sessionId: "ses-parent",
@@ -1480,11 +1544,12 @@ describe("handleForkSession", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(messagesPage).toHaveBeenCalledWith("ses-child", { limit: 1 });
-				expect(setForkEntry).toHaveBeenCalledWith("ses-child", {
+				expect(serviceSetForkEntry).toHaveBeenCalledWith("ses-child", {
 					forkMessageId: "msg-last",
 					parentID: "ses-parent",
 					forkPointTimestamp: 200,
 				});
+				expect(legacySetForkEntry).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -2004,6 +2069,7 @@ describe("handleListSessions", () => {
 				),
 				deleteSession: vi.fn(() => Effect.void),
 				recordMessageActivity: vi.fn(() => Effect.void),
+				setForkEntry: vi.fn(() => Effect.void),
 				sendDualSessionLists,
 			}),
 		);
