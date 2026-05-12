@@ -27,6 +27,8 @@ import type { StoredProject } from "../types.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
+const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
+
 // ─── Project state discriminated union ───────────────────────────────────────
 
 export interface ProjectRegistering {
@@ -477,7 +479,7 @@ export const removeAll = Effect.gen(function* () {
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
 				);
 			}),
-		{ concurrency: "unbounded" },
+		{ concurrency: PROJECT_REMOVE_ALL_CONCURRENCY, discard: true },
 	);
 
 	yield* Effect.logInfo(`Removed ${allSlugs.length} project(s)`);

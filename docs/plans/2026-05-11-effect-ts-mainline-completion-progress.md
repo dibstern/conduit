@@ -11,7 +11,7 @@ Every item below must be removed or explicitly reclassified before the migration
 - [ ] `Layer.succeed(..., alreadyConstructedInstance)` inside relay composition.
 - [ ] `PersistenceLayer.open(...)` in daemon or relay production paths.
 - [ ] `Effect.promise(` on rejectable operations.
-- [ ] `concurrency: "unbounded"` on dynamic collections.
+- [x] `concurrency: "unbounded"` on dynamic collections.
 - [ ] Throwing helpers called from Effect programs.
 - [ ] App-internal `Effect.runPromise` / `Effect.runSync`.
 
@@ -352,3 +352,74 @@ curl -sS "http://127.0.0.1:65272/health"
 
 Before each later phase opens a PR, rerun this checklist and record the exact daemon CLI invocation, provider,
 project paths, and pass/fail observations.
+
+## Task 1.3: Remove Unsafe Dynamic Unbounded Concurrency
+
+Plan issue found:
+
+- The plan suggested `daemonConfig.maxConcurrentInstances` for status correction fanout. The live
+  `DaemonRuntimeConfig` has no such field, so this task uses a named module constant instead of adding a
+  config field that nothing currently owns.
+
+Changes:
+
+- `src/lib/effect/session-status-poller.ts`: replaced unbounded status correction fanout with
+  `STATUS_CORRECTION_CONCURRENCY = 8`.
+- `src/lib/effect/project-registry-service.ts`: replaced unbounded `removeAll` relay invalidation fanout with
+  `PROJECT_REMOVE_ALL_CONCURRENCY = 4` and `discard: true`.
+- `src/lib/handlers/session.ts`: replaced the fixed four-item metadata fanout with
+  `SESSION_METADATA_FANOUT = 4` and `discard: true`.
+- Added regression tests that submit more work than each dynamic cap and assert all work completes while
+  max observed concurrency stays within the cap.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts test/unit/relay/project-registry-effect.test.ts
+Exit: 1
+Expected failures:
+test/unit/session/session-status-poller-effect.test.ts:
+  expected 12 to be less than or equal to 8
+test/unit/relay/project-registry-effect.test.ts:
+  expected 7 to be less than or equal to 4
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/session/session-status-poller-effect.test.ts test/unit/relay/project-registry-effect.test.ts test/unit/handlers/effect-handlers.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  107 passed (107)
+```
+
+```text
+$ rg -n "concurrency: \"unbounded\"" src || true
+Exit: 0
+Output: <none>
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 941 files in 270ms. No fixes applied.
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  345 passed (345)
+Tests  5057 passed | 2 skipped | 12 todo (5071)
+```
+
+Review notes:
+
+- Spec review: passed with no issues.
+- Code quality review: initial minor found that the concurrency tests could fail by Vitest timeout if the
+  implementation became too serial. Fixed by waiting only for the first work item, yielding the scheduler,
+  and asserting the cap directly before releasing blocked work. Re-review passed with no issues.

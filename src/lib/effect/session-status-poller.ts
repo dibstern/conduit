@@ -28,6 +28,8 @@ import { computeAugmentedStatuses } from "../session/status-augmentation.js";
 
 const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
+const STATUS_CORRECTION_CONCURRENCY = 8;
+
 /**
  * How long a message-activity busy flag stays valid after the last
  * markMessageActivity() call. 10s = ~13 polls at 750ms.
@@ -291,7 +293,7 @@ export const reconcile = (
 		const corrections = diffStatuses(prevMap, dbSessions, apiSessions);
 
 		yield* Effect.forEach(corrections, applyCorrection, {
-			concurrency: "unbounded",
+			concurrency: STATUS_CORRECTION_CONCURRENCY,
 			discard: true,
 		});
 	}).pipe(Effect.withSpan("statusPoller.reconcile"));

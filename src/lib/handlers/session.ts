@@ -23,6 +23,8 @@ import type { PermissionId, RelayMessage } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { getSessionInputDraft } from "./prompt.js";
 
+const SESSION_METADATA_FANOUT = 4;
+
 /**
  * Build SessionSwitchDeps from Effect context. The narrowed type
  * expected by switchClientToSession is assembled from individual Tags.
@@ -214,7 +216,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					),
 				),
 			],
-			{ concurrency: "unbounded" },
+			{ concurrency: SESSION_METADATA_FANOUT, discard: true },
 		);
 	});
 

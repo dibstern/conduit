@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, HashMap, Layer, Ref } from "effect";
+import { Deferred, Duration, Effect, Fiber, HashMap, Layer, Ref } from "effect";
 import { expect, vi } from "vitest";
 import {
 	clearMessageActivity,
@@ -56,6 +56,61 @@ describe("SessionStatusPoller Effect", () => {
 			});
 			yield* reconcile(mockDb, mockApi, applyCorrection);
 			expect(corrections.length).toBeGreaterThanOrEqual(1);
+		}).pipe(Effect.provide(makeTestLayer())),
+	);
+
+	it.effect("reconcile caps correction concurrency without dropping work", () =>
+		Effect.gen(function* () {
+			const sessionCount = 12;
+			const maxAllowedConcurrency = 8;
+			const dbSessions = Array.from({ length: sessionCount }, (_, index) => ({
+				id: `s${index}`,
+				status: "idle",
+			}));
+			const apiSessions = dbSessions.map((session) => ({
+				...session,
+				status: "busy",
+			}));
+			const current = yield* Ref.make(0);
+			const maxObserved = yield* Ref.make(0);
+			const processed = yield* Ref.make<ReadonlyArray<string>>([]);
+			const firstCorrectionStarted = yield* Deferred.make<void>();
+			const releaseCorrections = yield* Deferred.make<void>();
+			const applyCorrection = (correction: StatusCorrection) =>
+				Effect.gen(function* () {
+					const inFlight = yield* Ref.updateAndGet(current, (n) => n + 1);
+					yield* Ref.update(maxObserved, (n) => Math.max(n, inFlight));
+					yield* Deferred.succeed(firstCorrectionStarted, void 0).pipe(
+						Effect.ignore,
+					);
+					yield* Deferred.await(releaseCorrections);
+					yield* Ref.update(processed, (ids) => [...ids, correction.sessionId]);
+					yield* Ref.update(current, (n) => n - 1);
+				});
+
+			const fiber = yield* Effect.fork(
+				reconcile(
+					{
+						getSessionStatuses: () => Effect.succeed(dbSessions),
+					},
+					{
+						getSessionStatuses: () => Effect.succeed(apiSessions),
+					},
+					applyCorrection,
+				),
+			);
+			yield* Deferred.await(firstCorrectionStarted);
+			for (let index = 0; index < maxAllowedConcurrency; index++) {
+				yield* Effect.yieldNow();
+			}
+			expect(yield* Ref.get(maxObserved)).toBe(maxAllowedConcurrency);
+			yield* Deferred.succeed(releaseCorrections, void 0);
+			yield* Fiber.join(fiber);
+
+			expect(yield* Ref.get(maxObserved)).toBeLessThanOrEqual(
+				maxAllowedConcurrency,
+			);
+			expect(new Set(yield* Ref.get(processed)).size).toBe(sessionCount);
 		}).pipe(Effect.provide(makeTestLayer())),
 	);
 
