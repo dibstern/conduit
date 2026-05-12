@@ -1253,7 +1253,7 @@ function makeForkSessionLayer(options?: {
 	const log = options?.log ?? mockLogger();
 
 	return Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, client),
+		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, overrides),

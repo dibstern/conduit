@@ -2357,6 +2357,74 @@ Test Files  1 passed (1)
 Tests  1 passed (1)
 ```
 
+## Phase 7.9: Session Metadata Service Contract
+
+Plan issues found:
+
+- `sendSessionMetadata(...)` still needs `OpenCodeAPITag` for pending permission and question API replay, so this
+  slice must not remove the raw API from the whole helper.
+- The model metadata lookup is the only session-handler read that belongs to `OpenCodeModelServiceTag`; fork,
+  message, and pagination APIs remain separate future service boundaries.
+- Fork-session tests exercise metadata replay after switching to the forked session, so their custom helper must provide
+  the model service too.
+
+Changes:
+
+- `src/lib/handlers/session.ts`: moved the metadata `client.session.get(id)` read to
+  `OpenCodeModelServiceTag.getSession(id)`.
+- `test/unit/handlers/session-service-effect.test.ts`: added behavior tests proving session model metadata comes from
+  the model service, model lookup failures remain non-fatal, and sessions without `modelID` still skip `model_info`.
+- `test/unit/handlers/effect-handlers.test.ts`: updated fork-session test wiring to provide `OpenCodeModelServiceLive`
+  from the same mock OpenCode API.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts
+Exit: 1
+Expected failure:
+  modelService.getSession was never called because sendSessionMetadata still used api.session.get.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  69 passed (69)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers
+Exit: 0
+Test Files  17 passed (17)
+Tests  151 passed (151)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 972 files. No fixes applied.
+```
+
+```text
+$ rg -n "client\\.(provider\\.list|session\\.get)\\(|provider\\.list\\(|session\\.get\\(" \
+  src/lib/handlers src/lib/bridges/client-init.ts
+Exit: 0
+Remaining direct model/session reads:
+  src/lib/bridges/client-init.ts:174: client.session.get(activeId)
+  src/lib/bridges/client-init.ts:361: client.provider.list()
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:

@@ -5,6 +5,7 @@ import { mapQuestionFields } from "../bridges/question-bridge.js";
 import {
 	LoggerTag,
 	OpenCodeAPITag,
+	OpenCodeModelServiceTag,
 	PermissionBridgeTag,
 	PollerManagerTag,
 	QuestionBridgeTag,
@@ -60,6 +61,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
+		const modelService = yield* OpenCodeModelServiceTag;
 		const permissionBridge = yield* PermissionBridgeTag;
 		const questionBridge = yield* QuestionBridgeTag;
 		const sessionMgr = yield* SessionManagerTag;
@@ -69,9 +71,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 			[
 				// Model info
 				Effect.gen(function* () {
-					const session = yield* Effect.tryPromise(() =>
-						client.session.get(id),
-					);
+					const session = yield* modelService.getSession(id);
 					if (session.modelID) {
 						wsHandler.sendTo(clientId, {
 							type: "model_info",
