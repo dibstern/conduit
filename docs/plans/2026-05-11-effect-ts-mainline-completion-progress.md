@@ -2251,6 +2251,87 @@ Test Files  1 passed (1)
 Tests  6 passed (6)
 ```
 
+## Phase 7.7: Model Variant Service Contract
+
+Plan issues found:
+
+- `switch_model`, `switch_variant`, and the variant-list half of `set_default_model` are OpenCode provider-list reads,
+  not reasons for the handlers to depend on the raw OpenCode API.
+- `set_default_model` still legitimately needs `OpenCodeAPITag` for `client.config.update(...)`; this slice only moves
+  the read side to `OpenCodeModelServiceTag`.
+- `switch_model` treated the orchestration engine as optional at runtime but still yielded `OrchestrationEngineTag`
+  through a required-service lookup. `pnpm check` caught that as a static Effect requirement in tests that did not
+  provide the engine. The long-term fix is to use `Effect.serviceOption(OrchestrationEngineTag)` for session binding,
+  matching the existing optional discovery branches.
+- Because Effect requirements are not flow-sensitive by dynamic payload values, Claude branch tests still provide a
+  model service layer but assert its provider-list method is not called.
+
+Changes:
+
+- `src/lib/handlers/model.ts`: routed non-Claude provider-list reads in `handleSwitchModel`,
+  `handleSetDefaultModel`, and `handleSwitchVariant` through `OpenCodeModelServiceTag.listProviders()`.
+- `src/lib/handlers/model.ts`: kept `OpenCodeAPITag` in `handleSetDefaultModel` for the OpenCode config write and
+  removed it from `handleSwitchModel` and `handleSwitchVariant`.
+- `src/lib/handlers/model.ts`: changed optional session-provider binding in `handleSwitchModel` to
+  `Effect.serviceOption(OrchestrationEngineTag)`.
+- `test/unit/handlers/model-service-effect.test.ts`: added behavior tests proving OpenCode variant reads use the model
+  service instead of the raw API.
+- `test/unit/handlers/effect-handlers.test.ts`: updated non-Claude tests to provide the model service layer and Claude
+  tests to assert the OpenCode provider list is not called.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts
+Exit: 1
+Expected failure:
+  switch_variant required OpenCodeAPI before reaching the model service path.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts
+Exit: 1
+Expected failure:
+  switch_model required OpenCodeAPI before reaching the model service path.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/model-service-effect.test.ts
+Exit: 1
+Expected failure:
+  set_default_model still called api.provider.list instead of OpenCodeModelServiceTag.listProviders().
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  16 passed (16)
+Tests  153 passed (153)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 969 files. No fixes applied.
+```
+
+```text
+$ rg -n "client\\.(provider\\.list|session\\.get)\\(|provider\\.list\\(|session\\.get\\(" \
+  src/lib/handlers src/lib/bridges/client-init.ts
+Exit: 0
+Remaining direct model/session reads:
+  src/lib/bridges/client-init.ts:174: client.session.get(activeId)
+  src/lib/bridges/client-init.ts:361: client.provider.list()
+  src/lib/handlers/session.ts:73: client.session.get(id)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:

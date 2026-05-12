@@ -850,7 +850,7 @@ describe("handleSwitchModel", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
@@ -905,7 +905,7 @@ describe("handleSwitchModel", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
@@ -923,6 +923,7 @@ describe("handleSwitchModel", () => {
 					type: "discover",
 					providerId: "claude",
 				});
+				expect(client.provider.list).not.toHaveBeenCalled();
 				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
 					type: "variant_info",
 					variant: "",
@@ -970,7 +971,7 @@ describe("handleSwitchVariant", () => {
 		});
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
@@ -985,6 +986,7 @@ describe("handleSwitchVariant", () => {
 					type: "discover",
 					providerId: "claude",
 				});
+				expect(client.provider.list).not.toHaveBeenCalled();
 				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
 					type: "variant_info",
 					variant: "high",
@@ -1026,7 +1028,7 @@ describe("handleSwitchVariant", () => {
 			});
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
+				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),

@@ -215,7 +215,6 @@ export const handleSwitchModel = (
 	payload: PayloadMap["switch_model"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
@@ -230,17 +229,15 @@ export const handleSwitchModel = (
 					modelID: modelId,
 				});
 				// Bind session to the correct provider adapter
-				const engineResult = yield* Effect.either(
-					Effect.gen(function* () {
-						const engine = yield* OrchestrationEngineTag;
-						const providerAdapterId = isClaudeProvider(providerId)
-							? "claude"
-							: "opencode";
-						engine.bindSession(clientSession, providerAdapterId);
-					}),
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
 				);
-				// engineResult ignored — orchestration engine is optional
-				void engineResult;
+				if (engineOption._tag === "Some") {
+					const providerAdapterId = isClaudeProvider(providerId)
+						? "claude"
+						: "opencode";
+					engineOption.value.bindSession(clientSession, providerAdapterId);
+				}
 				wsHandler.sendToSession(clientSession, {
 					type: "model_info",
 					model: modelId,
@@ -286,8 +283,9 @@ export const handleSwitchModel = (
 					}
 				}
 			} else {
+				const modelService = yield* OpenCodeModelServiceTag;
 				const provListResult = yield* Effect.either(
-					Effect.tryPromise(() => client.provider.list()),
+					modelService.listProviders(),
 				);
 				if (provListResult._tag === "Right") {
 					for (const p of provListResult.right.providers) {
@@ -385,9 +383,8 @@ export const handleSetDefaultModel = (
 				}
 			}
 		} else {
-			const provListResult = yield* Effect.either(
-				Effect.tryPromise(() => client.provider.list()),
-			);
+			const modelService = yield* OpenCodeModelServiceTag;
+			const provListResult = yield* Effect.either(modelService.listProviders());
 			if (provListResult._tag === "Right") {
 				for (const p of provListResult.right.providers) {
 					const m = (p.models ?? []).find((mod) => mod.id === model);
@@ -418,7 +415,6 @@ export const handleSwitchVariant = (
 	payload: PayloadMap["switch_variant"],
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
@@ -476,8 +472,9 @@ export const handleSwitchVariant = (
 					}
 				}
 			} else {
+				const modelService = yield* OpenCodeModelServiceTag;
 				const provListResult = yield* Effect.either(
-					Effect.tryPromise(() => client.provider.list()),
+					modelService.listProviders(),
 				);
 				if (provListResult._tag === "Right") {
 					for (const p of provListResult.right.providers) {
