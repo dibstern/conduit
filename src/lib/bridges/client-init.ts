@@ -19,7 +19,6 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { PtyManager } from "../relay/pty-manager.js";
 import type {
 	ModelOverride,
 	SessionOverrides,
@@ -28,7 +27,7 @@ import {
 	type SessionSwitchDeps,
 	switchClientToSession,
 } from "../session/session-switch.js";
-import type { ContextWindowOption, PtyInfo } from "../shared-types.js";
+import type { ContextWindowOption } from "../shared-types.js";
 import type {
 	OpenCodeInstance,
 	PendingPermission,
@@ -93,7 +92,9 @@ export interface ClientInitDeps {
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
-	ptyManager: PtyManager;
+	terminal: {
+		replay(clientId: string): Promise<void>;
+	};
 	pendingInteractions: {
 		listPendingPermissions(): Promise<PendingPermission[]>;
 		recoverPendingPermissions(
@@ -139,14 +140,8 @@ export async function handleClientConnected(
 	clientId: string,
 	requestedSessionId?: string,
 ): Promise<void> {
-	const {
-		wsHandler,
-		client,
-		sessionMgr,
-		overrides,
-		ptyManager,
-		pendingInteractions,
-	} = deps;
+	const { wsHandler, client, sessionMgr, overrides, pendingInteractions } =
+		deps;
 
 	const sendInitError = (err: unknown, prefix: string) => {
 		deps.log.warn(`${prefix}: ${formatErrorDetail(err)}`);
@@ -538,34 +533,7 @@ export async function handleClientConnected(
 	}
 
 	// ── PTY list + scrollback replay ─────────────────────────────────────
-	if (ptyManager.sessionCount > 0) {
-		const ptys = ptyManager.listSessions();
-		wsHandler.sendTo(clientId, {
-			type: "pty_list",
-			// PtyManager.listSessions() returns minimal {id, status} objects;
-			// the frontend only uses those fields from the pty_list message.
-			ptys: ptys as unknown as PtyInfo[],
-		});
-		// Replay scrollback for each PTY to this specific client
-		for (const { id: ptyId } of ptys) {
-			const scrollback = ptyManager.getScrollback(ptyId);
-			if (scrollback) {
-				wsHandler.sendTo(clientId, {
-					type: "pty_output",
-					ptyId,
-					data: scrollback,
-				});
-			}
-			const session = ptyManager.getSession(ptyId);
-			if (session?.exited) {
-				wsHandler.sendTo(clientId, {
-					type: "pty_exited",
-					ptyId,
-					exitCode: session.exitCode ?? 0,
-				});
-			}
-		}
-	}
+	await deps.terminal.replay(clientId);
 
 	// ── Instance list ─────────────────────────────────────────────────────
 	if (deps.getInstances) {

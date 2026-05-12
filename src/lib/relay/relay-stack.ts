@@ -70,7 +70,10 @@ import {
 	type SessionStatusPollerService,
 } from "../effect/session-status-poller.js";
 import { StaticDirTag } from "../effect/static-file-handler.js";
-import { OpenCodeTerminalServiceLive } from "../effect/terminal-service.js";
+import {
+	OpenCodeTerminalServiceLive,
+	OpenCodeTerminalServiceTag,
+} from "../effect/terminal-service.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
@@ -763,7 +766,15 @@ export async function createProjectRelay(
 		client: api,
 		sessionMgr,
 		overrides,
-		ptyManager,
+		terminal: {
+			replay: (clientId) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* OpenCodeTerminalServiceTag;
+						yield* service.replay(clientId);
+					}),
+				),
+		},
 		pendingInteractions: {
 			listPendingPermissions: () =>
 				relayManagedRuntime.runPromise(

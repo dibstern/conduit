@@ -24,6 +24,7 @@ const makeTerminalService = (
 ): OpenCodeTerminalService => ({
 	create: vi.fn(() => Effect.void),
 	list: vi.fn(() => Effect.void),
+	replay: vi.fn(() => Effect.void),
 	sendInput: vi.fn(() => Effect.void),
 	close: vi.fn(() => Effect.void),
 	resize: vi.fn(() => Effect.void),

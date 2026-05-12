@@ -76,7 +76,7 @@ describe("mock-factories", () => {
 			expect(deps.client).toBeDefined();
 			expect(deps.sessionMgr).toBeDefined();
 			expect(deps.overrides).toBeDefined();
-			expect(deps.ptyManager).toBeDefined();
+			expect(deps.terminal.replay).toBeDefined();
 			expect(deps.pendingInteractions.listPendingPermissions).toBeDefined();
 			expect(deps.log).toBeDefined();
 		});

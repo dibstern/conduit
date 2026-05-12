@@ -2060,6 +2060,89 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.28: Client Init Terminal Replay Service Contract
+
+Plan issues found:
+
+- Phase 7.27 moved terminal handlers to `OpenCodeTerminalService`, but `client-init` still read `PtyManager`
+  directly for reconnect replay. Leaving that in place would keep two PTY owners: handlers would use the Effect
+  terminal boundary, while new-client bootstrap would keep coupling to relay-local PTY internals.
+- Moving replay to `PtyManagerStateTag` would repeat the false-migration problem from the handler slice. The replay
+  behavior needs the production `PtyManager` scrollback and exit state until the full PTY owner is migrated, so the
+  correct boundary is the terminal service, not a parallel state Ref.
+- The bridge test should prove `client-init` depends only on a terminal replay port. The wire behavior belongs in the
+  terminal service tests, where it can exercise the real in-memory `PtyManager` rather than duplicating low-level
+  fixture setup in the bootstrap handler.
+
+Changes:
+
+- Added `OpenCodeTerminalService.replay(clientId)` to send tracked PTY sessions, scrollback, and exited state to a
+  single reconnecting client.
+- Replaced `ClientInitDeps.ptyManager` with a narrow `terminal.replay(clientId)` port.
+- Wired the relay bootstrap dependency through `OpenCodeTerminalServiceTag` in the relay `ManagedRuntime`.
+- Updated mock factories and handler service mocks for the expanded terminal service interface.
+- Moved replay wire behavior coverage from `client-init` tests into `test/unit/effect/terminal-service.test.ts`, while
+  keeping a `client-init` boundary test that proves bootstrap calls the terminal replay port.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/terminal-service.test.ts --testNamePattern "replays|replay"
+Exit: 1
+Expected failure:
+  service.replay is not a function
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/terminal-service.test.ts --testNamePattern "replays|replay"
+Exit: 0
+Tests  2 passed | 5 skipped (7)
+```
+
+```text
+$ pnpm vitest run test/unit/mock-factories.test.ts \
+  test/unit/effect/terminal-service.test.ts \
+  test/unit/bridges/client-init.test.ts \
+  test/unit/handlers/terminal-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  143 passed (143)
+```
+
+```text
+$ rg -n "ptyManager|PtyManager|PtyInfo" src/lib/bridges/client-init.ts test/unit/bridges/client-init.test.ts
+Exit: 1
+No remaining direct PTY manager reads in client-init or its tests.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 975 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  363 passed (363)
+Tests  5196 passed | 2 skipped | 12 todo (5210)
+```
+
+```text
+$ pnpm exec vitest run --config vitest.integration.config.ts test/integration/flows/terminal.integration.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  9 passed (9)
+```
+
 ## Phase 7.27: Terminal Handler Service Contract
 
 Plan issues found:

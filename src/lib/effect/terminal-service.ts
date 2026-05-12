@@ -23,6 +23,7 @@ export class TerminalServiceError extends Data.TaggedError(
 export interface OpenCodeTerminalService {
 	create(clientId: string): Effect.Effect<void>;
 	list(clientId: string): Effect.Effect<void, TerminalServiceError>;
+	replay(clientId: string): Effect.Effect<void>;
 	sendInput(ptyId: string, data: string): Effect.Effect<void>;
 	close(ptyId: string): Effect.Effect<void, TerminalServiceError>;
 	resize(
@@ -202,6 +203,33 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 									`client=${clientId} session=${session} Failed to reconnect upstream: ${ptyId}: ${formatErrorDetail(reconnectResult.left.cause)}`,
 								);
 							}
+						}
+					}
+				}),
+			replay: (clientId: string) =>
+				Effect.sync(() => {
+					if (ptyManager.sessionCount === 0) return;
+					const ptys = ptyManager.listSessions();
+					wsHandler.sendTo(clientId, {
+						type: "pty_list",
+						ptys: ptys as unknown as PtyInfo[],
+					});
+					for (const { id: ptyId } of ptys) {
+						const scrollback = ptyManager.getScrollback(ptyId);
+						if (scrollback) {
+							wsHandler.sendTo(clientId, {
+								type: "pty_output",
+								ptyId,
+								data: scrollback,
+							});
+						}
+						const session = ptyManager.getSession(ptyId);
+						if (session?.exited) {
+							wsHandler.sendTo(clientId, {
+								type: "pty_exited",
+								ptyId,
+								exitCode: session.exitCode ?? 0,
+							});
 						}
 					}
 				}),

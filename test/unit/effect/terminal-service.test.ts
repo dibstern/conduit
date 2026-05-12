@@ -207,4 +207,58 @@ describe("OpenCodeTerminalServiceLive", () => {
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	it.effect("replays tracked PTY sessions, scrollback, and exit state", () => {
+		const ptyManager = new PtyManager({ log: makeMockLogger() });
+		const wsHandler = makeMockWebSocketHandler();
+		ptyManager.registerSession("pty-running", makeUpstream(openState));
+		ptyManager.appendScrollback("pty-running", "hello\n");
+		ptyManager.registerSession("pty-exited", makeUpstream(closedState));
+		ptyManager.appendScrollback("pty-exited", "done\n");
+		ptyManager.markExited("pty-exited", 7);
+		const layer = makeLayer({ ptyManager, wsHandler });
+
+		return Effect.gen(function* () {
+			const service = yield* OpenCodeTerminalServiceTag;
+			yield* service.replay("client-1");
+
+			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "pty_list",
+				ptys: [
+					{ id: "pty-running", status: "running" },
+					{ id: "pty-exited", status: "exited" },
+				],
+			});
+			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "pty_output",
+				ptyId: "pty-running",
+				data: "hello\n",
+			});
+			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "pty_output",
+				ptyId: "pty-exited",
+				data: "done\n",
+			});
+			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "pty_exited",
+				ptyId: "pty-exited",
+				exitCode: 7,
+			});
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect("does not replay a pty_list when no PTYs are tracked", () => {
+		const wsHandler = makeMockWebSocketHandler();
+		const layer = makeLayer({ wsHandler });
+
+		return Effect.gen(function* () {
+			const service = yield* OpenCodeTerminalServiceTag;
+			yield* service.replay("client-1");
+
+			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+				"client-1",
+				expect.objectContaining({ type: "pty_list" }),
+			);
+		}).pipe(Effect.provide(layer));
+	});
 });

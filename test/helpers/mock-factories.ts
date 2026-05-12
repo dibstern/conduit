@@ -389,8 +389,9 @@ export function createMockClientInitDeps(
 		sessionMgr:
 			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
 		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
-		ptyManager:
-			createMockPtyManager() as unknown as ClientInitDeps["ptyManager"],
+		terminal: {
+			replay: vi.fn(async () => undefined),
+		},
 		pendingInteractions: {
 			listPendingPermissions: vi.fn().mockResolvedValue([]),
 			recoverPendingPermissions: vi.fn().mockResolvedValue([]),

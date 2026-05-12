@@ -610,70 +610,12 @@ describe("handleClientConnected — defaultModel priority", () => {
 // ─── PTY replay ──────────────────────────────────────────────────────────────
 
 describe("handleClientConnected — PTY replay", () => {
-	it("sends pty_list and replays scrollback for each session", async () => {
+	it("replays terminal state through the terminal replay port", async () => {
 		const deps = createMockClientInitDeps();
-		(deps.ptyManager as { sessionCount: number }).sessionCount = 2;
-		vi.mocked(deps.ptyManager.listSessions).mockReturnValue([
-			{ id: "pty-1", status: "running" },
-			{ id: "pty-2", status: "running" },
-		]);
-		vi.mocked(deps.ptyManager.getScrollback).mockImplementation((id) => {
-			if (id === "pty-1") return "$ ls\nfoo.ts\n";
-			return "";
-		});
 
 		await handleClientConnected(deps, "client-1");
 
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "pty_list",
-			ptys: [
-				{ id: "pty-1", status: "running" },
-				{ id: "pty-2", status: "running" },
-			],
-		});
-		// Scrollback replayed for pty-1 (has content)
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "pty_output",
-			ptyId: "pty-1",
-			data: "$ ls\nfoo.ts\n",
-		});
-	});
-
-	it("sends pty_exited for exited PTY sessions", async () => {
-		const deps = createMockClientInitDeps();
-		(deps.ptyManager as { sessionCount: number }).sessionCount = 1;
-		vi.mocked(deps.ptyManager.listSessions).mockReturnValue([
-			{ id: "pty-1", status: "exited" },
-		]);
-		vi.mocked(deps.ptyManager.getScrollback).mockReturnValue("done\n");
-		vi.mocked(deps.ptyManager.getSession).mockReturnValue({
-			exited: true,
-			exitCode: 1,
-			upstream: {} as unknown,
-			scrollback: [],
-			scrollbackSize: 0,
-		} as ReturnType<typeof deps.ptyManager.getSession>);
-
-		await handleClientConnected(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "pty_exited",
-			ptyId: "pty-1",
-			exitCode: 1,
-		});
-	});
-
-	it("does not send pty_list when no PTY sessions exist", async () => {
-		const deps = createMockClientInitDeps();
-		// sessionCount is 0 by default
-
-		await handleClientConnected(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const ptyListCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "pty_list",
-		);
-		expect(ptyListCalls).toHaveLength(0);
+		expect(deps.terminal.replay).toHaveBeenCalledWith("client-1");
 	});
 });
 
