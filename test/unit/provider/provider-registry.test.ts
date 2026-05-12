@@ -21,7 +21,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter {
 				commands: [],
 			}),
 		),
-		sendTurn: vi.fn(),
+		sendTurnEffect: vi.fn(() => Effect.die("not implemented")),
 		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermission: vi.fn(),
 		resolveQuestion: vi.fn(),

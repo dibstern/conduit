@@ -1002,7 +1002,7 @@ export async function createProjectRelay(
 	);
 
 	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
-	// Resolves the deferred promise in OpenCodeAdapter.sendTurn() when a
+	// Resolves the deferred promise in OpenCodeAdapter.sendTurnEffect() when a
 	// session transitions to idle, allowing the engine dispatch to complete.
 	orchestration.wireSSEToAdapter((event, handler) => {
 		sseStream.on(event, handler);

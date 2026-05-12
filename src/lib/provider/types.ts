@@ -222,7 +222,9 @@ export interface ProviderAdapter {
 	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
-	sendTurn(input: SendTurnInput): Promise<TurnResult>;
+	sendTurnEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, ProviderAdapterFailure>;
 
 	/** Interrupt an in-progress turn */
 	interruptTurnEffect(
@@ -249,7 +251,7 @@ export interface ProviderAdapter {
 	/**
 	 * Terminate the provider's session-level state (SDK query, pending turns,
 	 * approvals, queued messages). Idempotent. Does NOT unbind the session
-	 * from the provider -- that's a higher-level concern. Next sendTurn()
+	 * from the provider -- that's a higher-level concern. Next sendTurnEffect()
 	 * re-creates state from scratch.
 	 */
 	endSessionEffect(

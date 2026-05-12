@@ -455,12 +455,14 @@ describe("ClaudeAdapter lifecycle", () => {
 
 			const sink = createMockEventSink();
 			// Establish session
-			await adapter.sendTurn(
-				makeBaseSendTurnInput({
-					sessionId: "sess-reload-flow",
-					turnId: "turn-1",
-					eventSink: sink,
-				}),
+			await Effect.runPromise(
+				adapter.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "sess-reload-flow",
+						turnId: "turn-1",
+						eventSink: sink,
+					}),
+				),
 			);
 
 			// End session (user-initiated reload)
@@ -472,12 +474,14 @@ describe("ClaudeAdapter lifecycle", () => {
 			).toBe(false);
 
 			// Next sendTurn should create a brand new query
-			const r2 = await adapter.sendTurn(
-				makeBaseSendTurnInput({
-					sessionId: "sess-reload-flow",
-					turnId: "turn-2",
-					eventSink: sink,
-				}),
+			const r2 = await Effect.runPromise(
+				adapter.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "sess-reload-flow",
+						turnId: "turn-2",
+						eventSink: sink,
+					}),
+				),
 			);
 			expect(r2.status).toBe("completed");
 			expect(factory).toHaveBeenCalledTimes(2);

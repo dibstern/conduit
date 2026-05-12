@@ -27,7 +27,7 @@ export interface OrchestrationLayer {
 	/**
 	 * Wire SSE session.status idle events to notifyTurnCompleted().
 	 * Must be called once after the SSEStream is created so that
-	 * OpenCodeAdapter.sendTurn() deferred promises can resolve when
+	 * OpenCodeAdapter.sendTurnEffect() deferred promises can resolve when
 	 * the session transitions to idle.
 	 */
 	wireSSEToAdapter(

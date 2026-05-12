@@ -2060,6 +2060,106 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 6.5: Provider Send-Turn Effect Boundary
+
+Plan issues found:
+
+- `sendTurn` is the highest-risk provider boundary because it owns long-lived streaming, pending turn deferreds,
+  EventSink writes, AbortController bridging, Claude same-session locking, and orchestration's session binding rule.
+  It needed its own slice instead of being bundled with discovery, interrupt, or end-session migration.
+- Structured provider failures must stay `TurnResult.status === "error"` when the provider reports an expected turn
+  error. Only thrown/rejected adapter defects become `ProviderAdapterFailure` in the Effect error channel.
+- Claude's SDK output stream can end after a completed turn while the context remains in the session map. A same-agent
+  follow-up must not enqueue into that dead stream, but an agent-change follow-up still needs the old context so it can
+  restart with the prior conversation transcript. The implementation uses an explicit ended-stream marker rather than
+  incorrectly marking naturally-ended streams as stopped sessions.
+- The Phase 6 plan omits `resolvePermission`, `resolveQuestion`, and `shutdown` from the Effect-returning adapter
+  contract list. Those are still Promise-shaped after this slice and need follow-up slices; shutdown needs an explicit
+  decision about whether finalizer failures are surfaced or typed-and-logged.
+
+Changes:
+
+- `src/lib/provider/types.ts`: replaced `ProviderAdapter.sendTurn(...)` with
+  `sendTurnEffect(input): Effect.Effect<TurnResult, ProviderAdapterFailure>`.
+- `src/lib/provider/opencode-adapter.ts`: OpenCode turn sending now exposes an Effect method while preserving the SSE
+  deferred completion path and expected `send_failed` `TurnResult` behavior.
+- `src/lib/provider/claude/claude-adapter.ts`: Claude turn sending now exposes an Effect method, keeps same-session
+  locking on the local Promise implementation, and tracks naturally-ended SDK streams separately from stopped sessions.
+- `src/lib/provider/orchestration-engine.ts`: `dispatchEffect({ type: "send_turn" })` now calls
+  `adapter.sendTurnEffect(...)` directly and preserves the rule that successful Effects bind the session, including
+  structured error `TurnResult`s, while failed Effects do not bind.
+- Provider unit, integration, and expensive-real E2E test call sites were updated to use `Effect.runPromise(...)` or
+  `Effect.either(...)` at the test boundary.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts
+Exit: 1
+Expected failure:
+  OrchestrationEngine still called the legacy Promise sendTurn path:
+  Provider adapter sendTurn failed for provider opencode: legacy Promise sendTurn should not be called
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts \
+  test/unit/provider/orchestration-engine.test.ts \
+  test/unit/provider/opencode-adapter-send-turn.test.ts \
+  test/unit/provider/opencode-adapter-actions.test.ts \
+  test/unit/provider/claude/claude-adapter-send-turn.test.ts \
+  test/unit/provider/claude/claude-adapter-lifecycle.test.ts \
+  test/unit/provider/types.test.ts \
+  test/unit/provider/provider-registry.test.ts \
+  test/unit/provider/claude/provider-wiring.test.ts
+Exit: 0
+Test Files  9 passed (9)
+Tests  139 passed (139)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  32 passed (32)
+Tests  372 passed (372)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 960 files. No fixes applied.
+```
+
+```text
+$ pnpm exec vitest run --config vitest.integration.config.ts \
+  test/integration/flows/claude-adapter.integration.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  353 passed (353)
+Tests  5122 passed | 2 skipped | 12 todo (5136)
+```
+
+```text
+$ rg -n "try: \\(\\) => adapter\\.|adapter\\.(interruptTurn|discover|endSession|sendTurn)\\(" \
+  src/lib/provider/orchestration-engine.ts src/lib/provider/types.ts \
+  src/lib/provider/opencode-adapter.ts src/lib/provider/claude/claude-adapter.ts test/unit/provider
+Exit: 1
+No remaining discovery/send-turn/interrupt/end-session Promise bridges in provider orchestration.
+```
+
 ## Phase 6.3: Provider Interrupt Effect Boundary
 
 Plan issues found:

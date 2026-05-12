@@ -59,7 +59,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 
 		const input = makeBaseSendTurnInput({ sessionId: "session-new" });
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// queryFactory was called exactly once
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
@@ -108,19 +108,23 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		const sink1 = createMockEventSink();
 		const sink2 = createMockEventSink();
-		await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-one",
-				turnId: "turn-1",
-				eventSink: sink1,
-			}),
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-one",
+					turnId: "turn-1",
+					eventSink: sink1,
+				}),
+			),
 		);
-		await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-two",
-				turnId: "turn-2",
-				eventSink: sink2,
-			}),
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-two",
+					turnId: "turn-2",
+					eventSink: sink2,
+				}),
+			),
 		);
 
 		const secondCall = queryFactorySpy.mock.calls[1]?.[0] as {
@@ -213,7 +217,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 
 		// First turn
-		const turn1Promise = adapter.sendTurn(input1);
+		const turn1Promise = Effect.runPromise(adapter.sendTurnEffect(input1));
 		const turn1Result = await turn1Promise;
 
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
@@ -227,7 +231,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const turn2Promise = adapter.sendTurn(input2);
+		const turn2Promise = Effect.runPromise(adapter.sendTurnEffect(input2));
 		// Unblock the second message
 		resolveSecond?.();
 		const turn2Result = await turn2Promise;
@@ -302,23 +306,27 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 
-		const firstResult = await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-agent",
-				turnId: "turn-1",
-				agent: "Explore",
-				eventSink: sink,
-			}),
+		const firstResult = await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent",
+					turnId: "turn-1",
+					agent: "Explore",
+					eventSink: sink,
+				}),
+			),
 		);
 		expect(firstResult.status).toBe("completed");
 
-		const secondPromise = adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-agent",
-				turnId: "turn-2",
-				agent: "Plan",
-				eventSink: sink,
-			}),
+		const secondPromise = Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent",
+					turnId: "turn-2",
+					agent: "Plan",
+					eventSink: sink,
+				}),
+			),
 		);
 
 		try {
@@ -370,48 +378,52 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 
-		await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-agent-history",
-				turnId: "turn-1",
-				agent: "Explore",
-				eventSink: sink,
-			}),
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent-history",
+					turnId: "turn-1",
+					agent: "Explore",
+					eventSink: sink,
+				}),
+			),
 		);
 
-		const secondResult = await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-agent-history",
-				turnId: "turn-2",
-				prompt: "Apply the same fix to the other file.",
-				agent: "Plan",
-				eventSink: sink,
-				history: [
-					{
-						role: "user",
-						content: "Find the config bug.",
-						parts: [{ type: "text", text: "Find the config bug." }],
-					},
-					{
-						role: "assistant",
-						content: "I will inspect the file.",
-						parts: [
-							{ type: "text", text: "I will inspect the file." },
-							{
-								type: "tool_use",
-								id: "toolu_1",
-								name: "Read",
-								input: { file_path: "/tmp/config.ts" },
-							},
-							{
-								type: "tool_result",
-								tool_use_id: "toolu_1",
-								content: "export const broken = true;",
-							},
-						],
-					},
-				],
-			}),
+		const secondResult = await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent-history",
+					turnId: "turn-2",
+					prompt: "Apply the same fix to the other file.",
+					agent: "Plan",
+					eventSink: sink,
+					history: [
+						{
+							role: "user",
+							content: "Find the config bug.",
+							parts: [{ type: "text", text: "Find the config bug." }],
+						},
+						{
+							role: "assistant",
+							content: "I will inspect the file.",
+							parts: [
+								{ type: "text", text: "I will inspect the file." },
+								{
+									type: "tool_use",
+									id: "toolu_1",
+									name: "Read",
+									input: { file_path: "/tmp/config.ts" },
+								},
+								{
+									type: "tool_result",
+									tool_use_id: "toolu_1",
+									content: "export const broken = true;",
+								},
+							],
+						},
+					],
+				}),
+			),
 		);
 
 		expect(secondResult.status).toBe("completed");
@@ -468,23 +480,27 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 
-		await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-agent-no-history",
-				turnId: "turn-1",
-				agent: "Explore",
-				eventSink: sink,
-			}),
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent-no-history",
+					turnId: "turn-1",
+					agent: "Explore",
+					eventSink: sink,
+				}),
+			),
 		);
-		await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-agent-no-history",
-				turnId: "turn-2",
-				prompt: "Fresh agent prompt.",
-				agent: "Plan",
-				eventSink: sink,
-				history: [],
-			}),
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent-no-history",
+					turnId: "turn-2",
+					prompt: "Fresh agent prompt.",
+					agent: "Plan",
+					eventSink: sink,
+					history: [],
+				}),
+			),
 		);
 
 		const promptText = await readFirstPromptText(
@@ -542,23 +558,27 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
-		const firstPromise = adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-active-agent",
-				turnId: "turn-1",
-				agent: "Explore",
-				eventSink: sink,
-			}),
+		const firstPromise = Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-active-agent",
+					turnId: "turn-1",
+					agent: "Explore",
+					eventSink: sink,
+				}),
+			),
 		);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		const secondResult = await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-active-agent",
-				turnId: "turn-2",
-				agent: "Plan",
-				eventSink: sink,
-			}),
+		const secondResult = await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-active-agent",
+					turnId: "turn-2",
+					agent: "Plan",
+					eventSink: sink,
+				}),
+			),
 		);
 
 		expect(secondResult.status).toBe("error");
@@ -589,7 +609,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			providerState: { resumeSessionId: "prev-sdk-session-123" },
 		});
 
-		await adapter.sendTurn(input);
+		await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -618,7 +638,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			abortSignal: abortController.signal,
 		});
 
-		await adapter.sendTurn(input);
+		await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -647,7 +667,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			variant: "high",
 		});
 
-		await adapter.sendTurn(input);
+		await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -672,7 +692,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			sessionId: "session-default-effort",
 		});
 
-		await adapter.sendTurn(input);
+		await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -693,12 +713,14 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			queryFactory: queryFactorySpy,
 		});
 
-		await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-sonnet-1m",
-				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-				contextWindow: "1m",
-			}),
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-sonnet-1m",
+					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					contextWindow: "1m",
+				}),
+			),
 		);
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
@@ -724,12 +746,14 @@ describe("ClaudeAdapter.sendTurn()", () => {
 				queryFactory: queryFactorySpy,
 			});
 
-			await adapter.sendTurn(
-				makeBaseSendTurnInput({
-					sessionId,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-					...(contextWindow ? { contextWindow } : {}),
-				}),
+			await Effect.runPromise(
+				adapter.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId,
+						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+						...(contextWindow ? { contextWindow } : {}),
+					}),
+				),
 			);
 
 			const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
@@ -753,12 +777,14 @@ describe("ClaudeAdapter.sendTurn()", () => {
 				queryFactory: queryFactorySpy,
 			});
 
-			await adapter.sendTurn(
-				makeBaseSendTurnInput({
-					sessionId: `session-${modelId}`,
-					model: { providerId: "claude", modelId },
-					contextWindow: "1m",
-				}),
+			await Effect.runPromise(
+				adapter.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: `session-${modelId}`,
+						model: { providerId: "claude", modelId },
+						contextWindow: "1m",
+					}),
+				),
 			);
 
 			const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
@@ -837,39 +863,45 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 
-		const turn1 = await adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-context-switch",
-				turnId: "turn-1",
-				eventSink: sink,
-				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-				contextWindow: "200k",
-			}),
+		const turn1 = await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-context-switch",
+					turnId: "turn-1",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					contextWindow: "200k",
+				}),
+			),
 		);
 		expect(turn1.status).toBe("completed");
 		expect(setModel).not.toHaveBeenCalled();
 
-		const turn2Promise = adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-context-switch",
-				turnId: "turn-2",
-				eventSink: sink,
-				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-				contextWindow: "1m",
-			}),
+		const turn2Promise = Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-context-switch",
+					turnId: "turn-2",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					contextWindow: "1m",
+				}),
+			),
 		);
 		resolveSecond?.();
 		const turn2 = await turn2Promise;
 		expect(turn2.status).toBe("completed");
 
-		const turn3Promise = adapter.sendTurn(
-			makeBaseSendTurnInput({
-				sessionId: "session-context-switch",
-				turnId: "turn-3",
-				eventSink: sink,
-				model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-				contextWindow: "200k",
-			}),
+		const turn3Promise = Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-context-switch",
+					turnId: "turn-3",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					contextWindow: "200k",
+				}),
+			),
 		);
 		resolveThird?.();
 		const turn3 = await turn3Promise;
@@ -912,7 +944,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		await adapter.sendTurn(input);
+		await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// The sink should have received events for the translated messages.
 		// System init -> session.status, result -> turn.completed
@@ -972,7 +1004,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 		// translateError should have fired a turn.error event
@@ -1002,7 +1034,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
@@ -1084,8 +1116,8 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 
 		// Fire both concurrently
-		const p1 = adapter.sendTurn(input1);
-		const p2 = adapter.sendTurn(input2);
+		const p1 = Effect.runPromise(adapter.sendTurnEffect(input1));
+		const p2 = Effect.runPromise(adapter.sendTurnEffect(input2));
 
 		// First turn resolves immediately (result1 is yielded right away)
 		const r1 = await p1;
@@ -1118,7 +1150,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("completed");
 		expect(result.providerStateUpdates).toBeDefined();
@@ -1148,9 +1180,9 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			sessionId: "session-no-result",
 		});
 
-		await expect(adapter.sendTurn(input)).rejects.toThrow(
-			"SDK stream ended without result",
-		);
+		await expect(
+			Effect.runPromise(adapter.sendTurnEffect(input)),
+		).rejects.toThrow("SDK stream ended without result");
 	});
 
 	// ── Test: canUseTool is wired to SDK options ──────────────────────────
@@ -1171,7 +1203,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		await adapter.sendTurn(input);
+		await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -1258,7 +1290,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sink,
 		});
-		const r1 = await adapter.sendTurn(input1);
+		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 		expect(r1.cost).toBe(0.05);
 		expect(r1.tokens.input).toBe(100);
@@ -1271,7 +1303,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sink,
 		});
-		const turn2Promise = adapter.sendTurn(input2);
+		const turn2Promise = Effect.runPromise(adapter.sendTurnEffect(input2));
 		resolveSecond?.();
 		const r2 = await turn2Promise;
 
@@ -1343,7 +1375,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sink,
 		});
-		const r1 = await adapter.sendTurn(input1);
+		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 
 		// Second turn - enqueue, then interrupt
@@ -1353,7 +1385,9 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sink,
 		});
-		const turn2Promise = adapter.sendTurn(input2);
+		const turn2Promise = Effect.runPromise(
+			adapter.sendTurnEffect(input2).pipe(Effect.either),
+		);
 
 		// Interrupt the second turn
 		await Effect.runPromise(
@@ -1365,14 +1399,17 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		// the deferred with "SDK stream ended without result". This is the
 		// expected behavior — the turn is rejected, not resolved, because no
 		// result message was yielded.
-		try {
-			const r2 = await turn2Promise;
-			// If it resolves (e.g., via resolveErrorTurn), accept error/interrupted
-			expect(["error", "interrupted"]).toContain(r2.status);
-		} catch (err) {
-			// The stream consumer's finally block rejects with this message
-			expect(err).toBeInstanceOf(Error);
-			expect((err as Error).message).toBe("SDK stream ended without result");
+		const turn2Result = await turn2Promise;
+		expect(turn2Result._tag).toBe("Left");
+		if (turn2Result._tag === "Left") {
+			expect(turn2Result.left).toMatchObject({
+				_tag: "ProviderAdapterFailure",
+				providerId: "claude",
+				operation: "sendTurn",
+			});
+			expect(turn2Result.left.message).toContain(
+				"SDK stream ended without result",
+			);
 		}
 	});
 
@@ -1437,7 +1474,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sinkA,
 		});
-		await adapter.sendTurn(input1);
+		await Effect.runPromise(adapter.sendTurnEffect(input1));
 
 		// Second turn with sinkB
 		const input2 = makeBaseSendTurnInput({
@@ -1446,7 +1483,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sinkB,
 		});
-		const turn2Promise = adapter.sendTurn(input2);
+		const turn2Promise = Effect.runPromise(adapter.sendTurnEffect(input2));
 		resolveSecond?.();
 		await turn2Promise;
 
@@ -1506,8 +1543,8 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		// Fire both concurrently for different sessions
 		const [rA, rB] = await Promise.all([
-			adapter.sendTurn(inputA),
-			adapter.sendTurn(inputB),
+			Effect.runPromise(adapter.sendTurnEffect(inputA)),
+			Effect.runPromise(adapter.sendTurnEffect(inputB)),
 		]);
 
 		expect(rA.status).toBe("completed");
@@ -1573,7 +1610,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 
 		// Despite translateError's internal push failing, the turn should still
 		// resolve with error status via resolveErrorTurn.
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
 		expect(result.error?.message).toBe("SDK kaboom");
@@ -1647,7 +1684,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// Turn should resolve with error status
 		expect(result.status).toBe("error");
@@ -1696,7 +1733,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sink,
 		});
-		const r1 = await adapter.sendTurn(input1);
+		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 
 		// Manually mark the session as stopped (simulating interruptTurn, etc.)
@@ -1713,7 +1750,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sink,
 		});
-		const r2 = await adapter.sendTurn(input2);
+		const r2 = await Effect.runPromise(adapter.sendTurnEffect(input2));
 
 		expect(r2.status).toBe("completed");
 		expect(r2.cost).toBe(0.09);
@@ -1770,7 +1807,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			providerState: { resumeSessionId: "stale-sdk-session-xyz" },
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
@@ -1831,7 +1868,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			providerState: { resumeSessionId: "dead-sdk-session-abc" },
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
@@ -1891,7 +1928,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			providerState: { resumeSessionId: "valid-sdk-session-123" },
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
@@ -1952,7 +1989,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
@@ -2019,7 +2056,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		});
 
 		// First turn should resolve successfully (result1 is yielded)
-		const r1 = await adapter.sendTurn(input1);
+		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 		expect(r1.cost).toBe(0.05);
 
@@ -2040,7 +2077,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		// error path picks it up) or might reject (if the session was already
 		// cleaned up). We just ensure it doesn't hang.
 		try {
-			const r2 = await adapter.sendTurn(input2);
+			const r2 = await Effect.runPromise(adapter.sendTurnEffect(input2));
 			// If it resolves, it should indicate an error status
 			expect(["error", "completed"]).toContain(r2.status);
 		} catch (err) {

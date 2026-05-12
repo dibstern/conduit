@@ -30,13 +30,14 @@ describe("ProviderAdapter types", () => {
 					supportsRevert: false,
 					commands: [],
 				}),
-			sendTurn: async (_input: SendTurnInput) => ({
-				status: "completed" as const,
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			}),
+			sendTurnEffect: (_input: SendTurnInput) =>
+				Effect.succeed({
+					status: "completed" as const,
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				}),
 			interruptTurnEffect: (_sessionId: string) => Effect.void,
 			resolvePermission: async (
 				_sessionId: string,
@@ -54,7 +55,7 @@ describe("ProviderAdapter types", () => {
 
 		expect(adapter.providerId).toBe("test");
 		expect(typeof adapter.discoverEffect).toBe("function");
-		expect(typeof adapter.sendTurn).toBe("function");
+		expect(typeof adapter.sendTurnEffect).toBe("function");
 		expect(typeof adapter.interruptTurnEffect).toBe("function");
 		expect(typeof adapter.resolvePermission).toBe("function");
 		expect(typeof adapter.resolveQuestion).toBe("function");

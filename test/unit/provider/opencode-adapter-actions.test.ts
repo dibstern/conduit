@@ -185,23 +185,25 @@ describe("OpenCodeAdapter action methods", () => {
 
 		it("rejects pending turns on shutdown", async () => {
 			// Start a turn that won't be completed
-			const turnPromise = adapter.sendTurn({
-				sessionId: "s1",
-				turnId: "t1",
-				prompt: "hello",
-				history: [],
-				providerState: {},
-				model: { providerId: "anthropic", modelId: "claude-sonnet" },
-				workspaceRoot: "/tmp",
-				eventSink: {
-					push: vi.fn(),
-					requestPermission: vi.fn(),
-					requestQuestion: vi.fn(),
-					resolvePermission: vi.fn(),
-					resolveQuestion: vi.fn(),
-				},
-				abortSignal: new AbortController().signal,
-			});
+			const turnPromise = Effect.runPromise(
+				adapter.sendTurnEffect({
+					sessionId: "s1",
+					turnId: "t1",
+					prompt: "hello",
+					history: [],
+					providerState: {},
+					model: { providerId: "anthropic", modelId: "claude-sonnet" },
+					workspaceRoot: "/tmp",
+					eventSink: {
+						push: vi.fn(),
+						requestPermission: vi.fn(),
+						requestQuestion: vi.fn(),
+						resolvePermission: vi.fn(),
+						resolveQuestion: vi.fn(),
+					},
+					abortSignal: new AbortController().signal,
+				}),
+			);
 
 			// Shutdown while turn is pending
 			await adapter.shutdown();

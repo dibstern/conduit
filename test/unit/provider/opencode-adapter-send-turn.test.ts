@@ -1,4 +1,5 @@
 // test/unit/provider/opencode-adapter-send-turn.test.ts
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -83,7 +84,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 
 	it("calls sendMessageAsync on the client", async () => {
 		const input = makeSendTurnInput();
-		const resultPromise = adapter.sendTurn(input);
+		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// Simulate turn completion via the adapter's internal callback
 		adapter.notifyTurnCompleted("s1", {
@@ -108,7 +109,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 			agent: "coder",
 		});
 
-		const resultPromise = adapter.sendTurn(input);
+		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 		adapter.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
@@ -130,7 +131,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 	it("passes variant to sendMessageAsync", async () => {
 		const input = makeSendTurnInput({ variant: "thinking" });
 
-		const resultPromise = adapter.sendTurn(input);
+		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 		adapter.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
@@ -161,7 +162,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 		adapter = new OpenCodeAdapter({ client });
 
 		const input = makeSendTurnInput();
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 		expect(result.error?.message).toContain("HTTP 500");
@@ -173,7 +174,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 			abortSignal: abortController.signal,
 		});
 
-		const resultPromise = adapter.sendTurn(input);
+		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// Simulate abort
 		abortController.abort();
@@ -193,7 +194,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 
 	it("records start time for duration calculation", async () => {
 		const input = makeSendTurnInput();
-		const resultPromise = adapter.sendTurn(input);
+		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// Small delay to ensure non-zero duration
 		await new Promise((r) => setTimeout(r, 10));
@@ -212,7 +213,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 
 	it("only resolves for the matching session", async () => {
 		const input = makeSendTurnInput({ sessionId: "s1" });
-		const resultPromise = adapter.sendTurn(input);
+		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// Notify a different session -- should not resolve s1
 		adapter.notifyTurnCompleted("s2", {

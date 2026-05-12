@@ -55,9 +55,7 @@ describe("Provider wiring with Claude adapter", () => {
 					supportsRevert: true,
 					commands: [],
 				}),
-			sendTurn: async () => {
-				throw new Error("not implemented");
-			},
+			sendTurnEffect: () => Effect.die("not implemented"),
 			interruptTurnEffect: () => Effect.void,
 			resolvePermission: async () => {},
 			resolveQuestion: async () => {},

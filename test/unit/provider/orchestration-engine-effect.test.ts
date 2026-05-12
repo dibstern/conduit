@@ -13,7 +13,7 @@ import type {
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
 
 function makeStubAdapter(providerId: string): ProviderAdapter & {
-	sendTurn: ReturnType<typeof vi.fn>;
+	sendTurnEffect: ReturnType<typeof vi.fn>;
 } {
 	return {
 		providerId,
@@ -30,13 +30,15 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 				commands: [],
 			}),
 		),
-		sendTurn: vi.fn(async () => ({
-			status: "completed" as const,
-			cost: 0,
-			tokens: { input: 1, output: 1 },
-			durationMs: 1,
-			providerStateUpdates: [],
-		})),
+		sendTurnEffect: vi.fn(() =>
+			Effect.succeed({
+				status: "completed" as const,
+				cost: 0,
+				tokens: { input: 1, output: 1 },
+				durationMs: 1,
+				providerStateUpdates: [],
+			}),
+		),
 		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermission: vi.fn(async () => {}),
 		resolveQuestion: vi.fn(async () => {}),
@@ -100,9 +102,45 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const result = yield* engine.dispatchEffect(command);
 
 				expect(result).toMatchObject({ status: "completed" });
-				expect(adapter.sendTurn).toHaveBeenCalledTimes(1);
+				expect(adapter.sendTurnEffect).toHaveBeenCalledTimes(1);
 				expect(engine.getProviderForSession("session-1")).toBe("opencode");
 			}),
+	);
+
+	it.effect("dispatches sendTurn through the adapter Effect boundary", () =>
+		Effect.gen(function* () {
+			const registry = new ProviderRegistry();
+			const engine = new OrchestrationEngine({ registry });
+			const command = sendTurnCommand();
+			const sendTurn = vi.fn(() => {
+				throw new Error("legacy Promise sendTurn should not be called");
+			});
+			const sendTurnEffect = vi.fn(() =>
+				Effect.succeed({
+					status: "completed" as const,
+					cost: 0,
+					tokens: { input: 1, output: 1 },
+					durationMs: 1,
+					providerStateUpdates: [],
+				}),
+			);
+
+			registry.registerAdapter({
+				...makeStubAdapter("opencode"),
+				sendTurn,
+				sendTurnEffect,
+			} as ProviderAdapter & {
+				sendTurn: typeof sendTurn;
+				sendTurnEffect: typeof sendTurnEffect;
+			});
+
+			const result = yield* engine.dispatchEffect(command);
+
+			expect(result).toMatchObject({ status: "completed" });
+			expect(sendTurn).not.toHaveBeenCalled();
+			expect(sendTurnEffect).toHaveBeenCalledWith(command.input);
+			expect(engine.getProviderForSession("session-1")).toBe("opencode");
+		}),
 	);
 
 	it.effect("dispatches discovery through the adapter Effect boundary", () =>

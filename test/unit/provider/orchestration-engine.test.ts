@@ -72,7 +72,7 @@ import {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function makeStubAdapter(providerId: string): ProviderAdapter & {
-	sendTurn: ReturnType<typeof vi.fn>;
+	sendTurnEffect: ReturnType<typeof vi.fn>;
 	interruptTurnEffect: ReturnType<typeof vi.fn>;
 	resolvePermission: ReturnType<typeof vi.fn>;
 	resolveQuestion: ReturnType<typeof vi.fn>;
@@ -95,13 +95,15 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 				commands: [],
 			}),
 		),
-		sendTurn: vi.fn(async () => ({
-			status: "completed" as const,
-			cost: 0.01,
-			tokens: { input: 100, output: 50 },
-			durationMs: 500,
-			providerStateUpdates: [],
-		})),
+		sendTurnEffect: vi.fn(() =>
+			Effect.succeed({
+				status: "completed" as const,
+				cost: 0.01,
+				tokens: { input: 100, output: 50 },
+				durationMs: 500,
+				providerStateUpdates: [],
+			}),
+		),
 		interruptTurnEffect: vi.fn(() => Effect.void),
 		resolvePermission: vi.fn(async () => {}),
 		resolveQuestion: vi.fn(async () => {}),
@@ -146,7 +148,7 @@ describe("OrchestrationEngine", () => {
 				},
 			});
 
-			expect(opencode.sendTurn).toHaveBeenCalledTimes(1);
+			expect(opencode.sendTurnEffect).toHaveBeenCalledTimes(1);
 			expect(result).toMatchObject({ status: "completed" });
 		});
 
@@ -425,7 +427,7 @@ describe("OrchestrationEngine", () => {
 			await engine.dispatch(makeCommand());
 			await engine.dispatch(makeCommand()); // Should not throw
 
-			expect(opencode.sendTurn).toHaveBeenCalledTimes(2);
+			expect(opencode.sendTurnEffect).toHaveBeenCalledTimes(2);
 		});
 	});
 
@@ -496,7 +498,7 @@ describe("OrchestrationEngine", () => {
 	// ─── Claude adapter integration ─────────────────────────────────────────
 	// These tests use a real ClaudeAdapter with an injected queryFactory
 	// to verify the full dispatch path:
-	// OrchestrationEngine.dispatch(SendTurnCommand) → ClaudeAdapter.sendTurn()
+	// OrchestrationEngine.dispatch(SendTurnCommand) → ClaudeAdapter.sendTurnEffect()
 	// → SDK query() → stream consumer → canonical events via EventSink.
 
 	describe("Claude adapter integration", () => {
@@ -647,7 +649,15 @@ describe("OrchestrationEngine", () => {
 			// A throwing sendTurn should not create a binding — the session is
 			// not viable at the provider. This tests the fix for C3 (stale binding).
 			const throwingAdapter = makeStubAdapter("thrower");
-			throwingAdapter.sendTurn.mockRejectedValue(new Error("Adapter crash"));
+			throwingAdapter.sendTurnEffect.mockReturnValue(
+				Effect.fail(
+					new ProviderAdapterFailure({
+						providerId: "thrower",
+						operation: "sendTurn",
+						cause: new Error("Adapter crash"),
+					}),
+				),
+			);
 
 			const throwingRegistry = new ProviderRegistry();
 			throwingRegistry.registerAdapter(throwingAdapter);

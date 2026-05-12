@@ -6,6 +6,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
@@ -174,7 +175,7 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 			workspaceRoot: workspace,
 		});
 
-		const result = await adapter.sendTurn(input);
+		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// ── Verify TurnResult ──────────────────────────────────────────
 		expect(result.status).toBe("completed");
@@ -431,7 +432,7 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 		});
 
 		// Start the turn (non-blocking; the query will pause at permission phase)
-		const turnPromise = adapter.sendTurn(input);
+		const turnPromise = Effect.runPromise(adapter.sendTurnEffect(input));
 
 		// Wait for the permission phase to be ready
 		await permissionPhaseReady;

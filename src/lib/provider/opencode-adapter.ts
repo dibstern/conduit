@@ -103,7 +103,21 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	// ─── sendTurn ─────────────────────────────────────────────────────────
 
-	async sendTurn(input: SendTurnInput): Promise<TurnResult> {
+	sendTurnEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.sendTurnLocal(input),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "sendTurn",
+					cause,
+				}),
+		});
+	}
+
+	private async sendTurnLocal(input: SendTurnInput): Promise<TurnResult> {
 		const { sessionId, prompt, model, images, agent, variant, abortSignal } =
 			input;
 
@@ -176,7 +190,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	/**
 	 * Called by the SSE event pipeline when a turn completes, errors, or
-	 * is interrupted. Resolves the pending sendTurn() promise.
+	 * is interrupted. Resolves the pending sendTurnEffect() promise.
 	 *
 	 * This is the bridge between the existing SSE-based event flow and the
 	 * new adapter interface. The SSE pipeline continues to own the connection;

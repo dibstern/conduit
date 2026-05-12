@@ -5,7 +5,7 @@
  * The SDK's `query()` returns a long-lived session: you feed it an
  * AsyncIterable of user messages and read back an AsyncIterable of SDK
  * messages. One `query()` runs for the entire conduit session (not per turn).
- * sendTurn() enqueues into the prompt queue; a background consumer drains
+ * sendTurnEffect() enqueues into the prompt queue; a background consumer drains
  * the output stream and translates events for EventSink.
  *
  * SDK types are imported from `@anthropic-ai/claude-agent-sdk` and

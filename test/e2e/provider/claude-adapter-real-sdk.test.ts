@@ -1,6 +1,6 @@
 // test/e2e/provider/claude-adapter-real-sdk.test.ts
 /**
- * E2E test for ClaudeAdapter.sendTurn() against the real Claude Agent SDK.
+ * E2E test for ClaudeAdapter.sendTurnEffect() against the real Claude Agent SDK.
  *
  * This test makes a real API call to Anthropic's API using your OAuth session.
  * It is gated behind the RUN_EXPENSIVE_E2E=1 environment variable and is
@@ -8,6 +8,7 @@
  *
  *   pnpm test:e2e:expensive-real-prompts
  */
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
@@ -50,7 +51,7 @@ function createCollectingEventSink(): EventSink & {
 
 describe.skipIf(!RUN_EXPENSIVE)("ClaudeAdapter E2E (real SDK)", () => {
 	it(
-		"full turn: sendTurn() resolves with completed TurnResult and emits canonical events",
+		"full turn: sendTurnEffect() resolves with completed TurnResult and emits canonical events",
 		async () => {
 			const adapter = new ClaudeAdapter({
 				workspaceRoot: process.cwd(),
@@ -60,17 +61,19 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeAdapter E2E (real SDK)", () => {
 			const sink = createCollectingEventSink();
 			const abortController = new AbortController();
 
-			const result = await adapter.sendTurn({
-				sessionId: `e2e-real-sdk-test-${Date.now()}`,
-				turnId: "turn-1",
-				prompt: "Reply with exactly: hello world",
-				history: [],
-				providerState: {},
-				model: { providerId: "claude", modelId: "claude-haiku-4-5" },
-				workspaceRoot: process.cwd(),
-				eventSink: sink,
-				abortSignal: abortController.signal,
-			});
+			const result = await Effect.runPromise(
+				adapter.sendTurnEffect({
+					sessionId: `e2e-real-sdk-test-${Date.now()}`,
+					turnId: "turn-1",
+					prompt: "Reply with exactly: hello world",
+					history: [],
+					providerState: {},
+					model: { providerId: "claude", modelId: "claude-haiku-4-5" },
+					workspaceRoot: process.cwd(),
+					eventSink: sink,
+					abortSignal: abortController.signal,
+				}),
+			);
 
 			// ── TurnResult assertions ──────────────────────────────────────
 			expect(result.status).toBe("completed");

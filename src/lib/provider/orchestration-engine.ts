@@ -231,15 +231,7 @@ export class OrchestrationEngine {
 			// Bind AFTER sendTurn succeeds — if it throws, the session is not
 			// viable at the provider and should not be bound. Error TurnResults
 			// (non-throwing) still bind because the session exists at the provider.
-			const result = yield* Effect.tryPromise({
-				try: () => adapter.sendTurn(command.input),
-				catch: (cause) =>
-					new ProviderAdapterFailure({
-						providerId: command.providerId,
-						operation: "sendTurn",
-						cause,
-					}),
-			});
+			const result = yield* adapter.sendTurnEffect(command.input);
 			yield* Effect.sync(() =>
 				this.sessionBindings.set(command.input.sessionId, command.providerId),
 			);

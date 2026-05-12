@@ -5,7 +5,7 @@
  *
  * Architectural notes:
  * - One SDK query() per conduit session, not per turn.
- * - First sendTurn() creates an EffectPromptQueue (backed by Effect Queue)
+ * - First sendTurnEffect() creates an EffectPromptQueue (backed by Effect Queue)
  *   + calls query() + starts a background stream consumer. Subsequent
  *   turns enqueue into the existing queue.
  * - Discovery reads the live model list from a 5-minute TTL cache shared
@@ -211,7 +211,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 	/** Active SDK sessions, keyed by conduit sessionId. */
 	protected readonly sessions = new Map<string, ClaudeSessionContext>();
 
-	/** Per-session mutex: prevents duplicate session creation on concurrent sendTurn(). */
+	/** Per-session mutex: prevents duplicate session creation on concurrent sendTurnEffect(). */
 	private readonly sessionLocks = new Map<string, Promise<TurnResult>>();
 
 	/** Per-session queue of deferreds for in-flight turns. */
@@ -219,6 +219,13 @@ export class ClaudeAdapter implements ProviderAdapter {
 		string,
 		Deferred<TurnResult>[]
 	>();
+
+	/**
+	 * Sessions whose SDK output stream has naturally ended. The session context is
+	 * still useful for agent-change transcript restarts, but same-agent follow-up
+	 * turns need a fresh query instead of enqueueing into a dead prompt queue.
+	 */
+	private readonly endedSessionStreams = new Set<string>();
 
 	/** Permission bridge is stateless; the live sink comes from the session context. */
 	private permissionBridge: ClaudePermissionBridge =
@@ -299,7 +306,21 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── sendTurn ─────────────────────────────────────────────────────────
 
-	async sendTurn(input: SendTurnInput): Promise<TurnResult> {
+	sendTurnEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.sendTurnLocal(input),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "sendTurn",
+					cause,
+				}),
+		});
+	}
+
+	private async sendTurnLocal(input: SendTurnInput): Promise<TurnResult> {
 		const { sessionId } = input;
 
 		// Per-session mutex: prevent duplicate session creation
@@ -310,7 +331,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 				return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
 			}
 			await pending;
-			return this.sendTurn(input);
+			return this.sendTurnLocal(input);
 		}
 
 		const existingCtx = this.sessions.get(sessionId);
@@ -320,6 +341,16 @@ export class ClaudeAdapter implements ProviderAdapter {
 			// queue; enqueueing would throw. Evict silently and create fresh.
 			log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
 			this.sessions.delete(sessionId);
+			this.endedSessionStreams.delete(sessionId);
+		} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
+			if (this.hasPendingTurn(sessionId)) {
+				return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
+			}
+			return this.restartSessionForAgentChange(existingCtx, input);
+		} else if (existingCtx && this.endedSessionStreams.has(sessionId)) {
+			log.info(`Evicting ended session stream on sendTurn: ${sessionId}`);
+			this.sessions.delete(sessionId);
+			this.endedSessionStreams.delete(sessionId);
 		} else if (existingCtx) {
 			return this.enqueueTurn(existingCtx, input);
 		}
@@ -333,6 +364,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		input: SendTurnInput,
 	): Promise<TurnResult> {
 		const { sessionId } = input;
+		this.endedSessionStreams.delete(sessionId);
 
 		// Create a deferred for this turn
 		const deferred = createDeferred<TurnResult>();
@@ -562,6 +594,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 			}
 			this.resolveErrorTurn(ctx, err);
 		} finally {
+			this.endedSessionStreams.add(ctx.sessionId);
 			this.rejectTurnIfPending(
 				ctx,
 				new Error("SDK stream ended without result"),
@@ -894,6 +927,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		}
 
 		this.sessions.delete(ctx.sessionId);
+		this.endedSessionStreams.delete(ctx.sessionId);
 	}
 
 	endSessionEffect(
