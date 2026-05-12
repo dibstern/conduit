@@ -118,7 +118,7 @@ function mockPino() {
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
 // AUDIT FIX (AP-1): Use `it.live` (not `it.scoped`) because subscriber fibers
-// use real async (Effect.promise wrapping REST calls). TestClock freezes
+// use real async REST calls wrapped in Effect.tryPromise. TestClock freezes
 // Effect.sleep — tests would hang. Pipe `Effect.scoped` explicitly for stream
 // subscription scope.
 
