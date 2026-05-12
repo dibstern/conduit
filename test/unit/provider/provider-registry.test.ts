@@ -1,4 +1,6 @@
 // test/unit/provider/provider-registry.test.ts
+
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
@@ -6,17 +8,19 @@ import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
 function makeStubAdapter(providerId: string): ProviderAdapter {
 	return {
 		providerId,
-		discover: vi.fn(async () => ({
-			models: [],
-			supportsTools: false,
-			supportsThinking: false,
-			supportsPermissions: false,
-			supportsQuestions: false,
-			supportsAttachments: false,
-			supportsFork: false,
-			supportsRevert: false,
-			commands: [],
-		})),
+		discoverEffect: vi.fn(() =>
+			Effect.succeed({
+				models: [],
+				supportsTools: false,
+				supportsThinking: false,
+				supportsPermissions: false,
+				supportsQuestions: false,
+				supportsAttachments: false,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+		),
 		sendTurn: vi.fn(),
 		interruptTurn: vi.fn(),
 		resolvePermission: vi.fn(),

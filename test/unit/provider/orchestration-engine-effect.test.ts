@@ -6,7 +6,10 @@ import {
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
+import type {
+	AdapterCapabilities,
+	ProviderAdapter,
+} from "../../../src/lib/provider/types.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
 
 function makeStubAdapter(providerId: string): ProviderAdapter & {
@@ -14,17 +17,19 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 } {
 	return {
 		providerId,
-		discover: vi.fn(async () => ({
-			models: [],
-			supportsTools: false,
-			supportsThinking: false,
-			supportsPermissions: false,
-			supportsQuestions: false,
-			supportsAttachments: false,
-			supportsFork: false,
-			supportsRevert: false,
-			commands: [],
-		})),
+		discoverEffect: vi.fn(() =>
+			Effect.succeed({
+				models: [],
+				supportsTools: false,
+				supportsThinking: false,
+				supportsPermissions: false,
+				supportsQuestions: false,
+				supportsAttachments: false,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+		),
 		sendTurn: vi.fn(async () => ({
 			status: "completed" as const,
 			cost: 0,
@@ -37,6 +42,20 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 		resolveQuestion: vi.fn(async () => {}),
 		shutdown: vi.fn(async () => {}),
 		endSession: vi.fn(async () => {}),
+	};
+}
+
+function capabilities(): AdapterCapabilities {
+	return {
+		models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }],
+		supportsTools: true,
+		supportsThinking: true,
+		supportsPermissions: true,
+		supportsQuestions: true,
+		supportsAttachments: true,
+		supportsFork: false,
+		supportsRevert: false,
+		commands: [],
 	};
 }
 
@@ -84,5 +103,33 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				expect(adapter.sendTurn).toHaveBeenCalledTimes(1);
 				expect(engine.getProviderForSession("session-1")).toBe("opencode");
 			}),
+	);
+
+	it.effect("dispatches discovery through the adapter Effect boundary", () =>
+		Effect.gen(function* () {
+			const registry = new ProviderRegistry();
+			const engine = new OrchestrationEngine({ registry });
+			const discover = vi.fn(() => {
+				throw new Error("legacy Promise discover should not be called");
+			});
+			const discoverEffect = vi.fn(() => Effect.succeed(capabilities()));
+
+			registry.registerAdapter({
+				...makeStubAdapter("claude"),
+				discover,
+				discoverEffect,
+			} as ProviderAdapter & { discover: typeof discover });
+
+			const result = yield* engine.dispatchEffect({
+				type: "discover",
+				providerId: "claude",
+			});
+
+			expect(result.models).toEqual([
+				{ id: "sonnet", name: "Sonnet", providerId: "claude" },
+			]);
+			expect(discover).not.toHaveBeenCalled();
+			expect(discoverEffect).toHaveBeenCalledTimes(1);
+		}),
 	);
 });

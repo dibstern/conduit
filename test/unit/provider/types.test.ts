@@ -1,4 +1,6 @@
 // test/unit/provider/types.test.ts
+
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type {
 	AdapterCapabilities,
@@ -16,17 +18,18 @@ describe("ProviderAdapter types", () => {
 		// Compile-time check: if the interface changes shape, this won't compile.
 		const adapter: ProviderAdapter = {
 			providerId: "test",
-			discover: async () => ({
-				models: [],
-				supportsTools: false,
-				supportsThinking: false,
-				supportsPermissions: false,
-				supportsQuestions: false,
-				supportsAttachments: false,
-				supportsFork: false,
-				supportsRevert: false,
-				commands: [],
-			}),
+			discoverEffect: () =>
+				Effect.succeed({
+					models: [],
+					supportsTools: false,
+					supportsThinking: false,
+					supportsPermissions: false,
+					supportsQuestions: false,
+					supportsAttachments: false,
+					supportsFork: false,
+					supportsRevert: false,
+					commands: [],
+				}),
 			sendTurn: async (_input: SendTurnInput) => ({
 				status: "completed" as const,
 				cost: 0,
@@ -50,7 +53,7 @@ describe("ProviderAdapter types", () => {
 		};
 
 		expect(adapter.providerId).toBe("test");
-		expect(typeof adapter.discover).toBe("function");
+		expect(typeof adapter.discoverEffect).toBe("function");
 		expect(typeof adapter.sendTurn).toBe("function");
 		expect(typeof adapter.interruptTurn).toBe("function");
 		expect(typeof adapter.resolvePermission).toBe("function");

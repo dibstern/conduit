@@ -2059,3 +2059,72 @@ $ pnpm lint
 Exit: 0
 Checked 960 files. No fixes applied.
 ```
+
+## Phase 6.2: Provider Discovery Effect Boundary
+
+Plan issues found:
+
+- Starting Phase 6 by converting every adapter method would still mix discovery, send-turn streaming, interruption,
+  permission resolution, and Claude prompt queue lifecycle in one slice. Discovery is the smallest real adapter
+  boundary because it has no event sink, session binding, prompt queue, or cancellation ownership.
+- A Promise rejection assertion would not prove Effect migration. The OpenCode discovery failure test now reads the
+  Effect error channel directly and asserts `ProviderAdapterFailure`.
+- Claude discovery intentionally falls back to built-in models when the capability probe fails, so this slice does not
+  force probe failures into typed adapter failures.
+
+Changes:
+
+- `src/lib/provider/types.ts`: replaced `ProviderAdapter.discover()` with
+  `discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure>`.
+- `src/lib/provider/opencode-adapter.ts`: discovery now exposes an Effect method and normalizes rejected OpenCode SDK
+  calls to `ProviderAdapterFailure` at the adapter edge.
+- `src/lib/provider/claude/claude-adapter.ts`: discovery now exposes an Effect method while preserving Claude's
+  capability-probe fallback behavior.
+- `src/lib/provider/orchestration-engine.ts`: `dispatchEffect({ type: "discover" })` calls the adapter Effect method
+  directly instead of wrapping an adapter Promise internally.
+- Provider discovery/type/orchestration tests were updated to use `discoverEffect()`, with a behavior test proving the
+  legacy Promise discovery path is not called.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts
+Exit: 1
+Expected failure:
+  OrchestrationEngine still called the legacy Promise discover path:
+  Provider adapter discover failed for provider claude: legacy Promise discover should not be called
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts \
+  test/unit/provider/orchestration-engine.test.ts \
+  test/unit/provider/provider-registry.test.ts \
+  test/unit/provider/types.test.ts \
+  test/unit/provider/opencode-adapter-discover.test.ts \
+  test/unit/provider/claude/claude-adapter-discover.test.ts \
+  test/unit/provider/claude/provider-wiring.test.ts
+Exit: 0
+Test Files  7 passed (7)
+Tests  83 passed (83)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  32 passed (32)
+Tests  369 passed (369)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 960 files. No fixes applied.
+```

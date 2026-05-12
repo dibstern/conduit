@@ -4,7 +4,9 @@
 // Adapters are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Adapters turn prompts into event streams.
 
+import type { Effect } from "effect";
 import type { CanonicalEvent } from "../persistence/events.js";
+import type { ProviderAdapterFailure } from "./errors.js";
 
 // ─── Permission / Question Decisions ────────────────────────────────────────
 
@@ -217,7 +219,7 @@ export interface ProviderAdapter {
 	readonly providerId: string;
 
 	/** Query the provider for available models, commands, and capabilities */
-	discover(): Promise<AdapterCapabilities>;
+	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurn(input: SendTurnInput): Promise<TurnResult>;

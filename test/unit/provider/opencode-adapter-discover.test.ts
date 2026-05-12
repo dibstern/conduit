@@ -1,4 +1,6 @@
 // test/unit/provider/opencode-adapter-discover.test.ts
+
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
@@ -61,7 +63,7 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
-describe("OpenCodeAdapter.discover()", () => {
+describe("OpenCodeAdapter.discoverEffect()", () => {
 	let client: OpenCodeAPI;
 	let adapter: OpenCodeAdapter;
 
@@ -75,7 +77,7 @@ describe("OpenCodeAdapter.discover()", () => {
 	});
 
 	it("discovers models from all providers", async () => {
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 
 		expect(caps.models).toHaveLength(2);
 		expect(caps.models[0]).toMatchObject({
@@ -90,7 +92,7 @@ describe("OpenCodeAdapter.discover()", () => {
 	});
 
 	it("discovers commands", async () => {
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 
 		const commands = caps.commands.filter((c) => c.source === "builtin");
 		expect(commands.length).toBeGreaterThanOrEqual(2);
@@ -99,7 +101,7 @@ describe("OpenCodeAdapter.discover()", () => {
 	});
 
 	it("discovers skills as project-skill commands", async () => {
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 
 		const skills = caps.commands.filter((c) => c.source === "project-skill");
 		expect(skills).toHaveLength(1);
@@ -107,7 +109,7 @@ describe("OpenCodeAdapter.discover()", () => {
 	});
 
 	it("sets capability flags for OpenCode", async () => {
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 
 		expect(caps.supportsTools).toBe(true);
 		expect(caps.supportsThinking).toBe(true);
@@ -130,7 +132,7 @@ describe("OpenCodeAdapter.discover()", () => {
 		});
 		adapter = new OpenCodeAdapter({ client });
 
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 		expect(caps.models).toEqual([]);
 	});
 
@@ -144,11 +146,11 @@ describe("OpenCodeAdapter.discover()", () => {
 		});
 		adapter = new OpenCodeAdapter({ client });
 
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 		expect(caps.commands).toEqual([]);
 	});
 
-	it("handles API errors gracefully", async () => {
+	it("returns typed failures when provider discovery rejects", async () => {
 		client = makeStubClient({
 			provider: {
 				list: vi.fn(async () => {
@@ -158,7 +160,19 @@ describe("OpenCodeAdapter.discover()", () => {
 		});
 		adapter = new OpenCodeAdapter({ client });
 
-		await expect(adapter.discover()).rejects.toThrow("network error");
+		const result = await Effect.runPromise(
+			Effect.either(adapter.discoverEffect()),
+		);
+
+		expect(result._tag).toBe("Left");
+		if (result._tag === "Left") {
+			expect(result.left).toMatchObject({
+				_tag: "ProviderAdapterFailure",
+				providerId: "opencode",
+				operation: "discover",
+			});
+			expect(result.left.message).toContain("network error");
+		}
 	});
 
 	it("passes workspace directory for command/skill discovery", async () => {
@@ -167,7 +181,7 @@ describe("OpenCodeAdapter.discover()", () => {
 			workspaceRoot: "/my/project",
 		});
 
-		await adapter.discover();
+		await Effect.runPromise(adapter.discoverEffect());
 
 		expect(client.app.commands).toHaveBeenCalled();
 		expect(client.app.skills).toHaveBeenCalledWith("/my/project");
@@ -176,7 +190,7 @@ describe("OpenCodeAdapter.discover()", () => {
 	it("omits directory for commands when no workspace", async () => {
 		adapter = new OpenCodeAdapter({ client });
 
-		await adapter.discover();
+		await Effect.runPromise(adapter.discoverEffect());
 
 		expect(client.app.commands).toHaveBeenCalled();
 		expect(client.app.skills).toHaveBeenCalledWith(undefined);

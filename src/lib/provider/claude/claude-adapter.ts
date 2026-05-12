@@ -20,9 +20,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import { Effect } from "effect";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
 import { createDeferred, type Deferred } from "../deferred.js";
+import { ProviderAdapterFailure } from "../errors.js";
 import type {
 	AdapterCapabilities,
 	CommandInfo,
@@ -233,7 +235,19 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── discover ─────────────────────────────────────────────────────────
 
-	async discover(): Promise<AdapterCapabilities> {
+	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.discoverCapabilities(),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "discover",
+					cause,
+				}),
+		});
+	}
+
+	private async discoverCapabilities(): Promise<AdapterCapabilities> {
 		const userBase = join(homedir(), ".claude");
 		const projectBase = join(this.deps.workspaceRoot, ".claude");
 

@@ -2,6 +2,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
 import {
@@ -9,7 +10,7 @@ import {
 	resetCapabilityCacheForTesting,
 } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 
-describe("ClaudeAdapter.discover()", () => {
+describe("ClaudeAdapter.discoverEffect()", () => {
 	let workspace: string;
 
 	beforeEach(() => {
@@ -54,7 +55,7 @@ describe("ClaudeAdapter.discover()", () => {
 
 	it("returns capabilities with models, tools, thinking, permissions, questions", async () => {
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 
 		expect(caps.models.length).toBeGreaterThan(0);
 		expect(caps.models.every((m) => m.providerId === "claude")).toBe(true);
@@ -74,7 +75,7 @@ describe("ClaudeAdapter.discover()", () => {
 
 	it("enumerates built-in commands", async () => {
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 		const builtins = caps.commands.filter((c) => c.source === "builtin");
 		expect(builtins.length).toBeGreaterThan(0);
 		expect(builtins.some((c) => c.name === "init")).toBe(true);
@@ -84,7 +85,7 @@ describe("ClaudeAdapter.discover()", () => {
 
 	it("enumerates project commands from .claude/commands", async () => {
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 		const projectCmds = caps.commands.filter(
 			(c) => c.source === "project-command",
 		);
@@ -95,7 +96,7 @@ describe("ClaudeAdapter.discover()", () => {
 
 	it("enumerates project skills from .claude/skills", async () => {
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		const caps = await adapter.discover();
+		const caps = await Effect.runPromise(adapter.discoverEffect());
 		const projectSkills = caps.commands.filter(
 			(c) => c.source === "project-skill",
 		);
@@ -109,7 +110,7 @@ describe("ClaudeAdapter.discover()", () => {
 		mkdirSync(emptyWorkspace, { recursive: true });
 		try {
 			const adapter = new ClaudeAdapter({ workspaceRoot: emptyWorkspace });
-			const caps = await adapter.discover();
+			const caps = await Effect.runPromise(adapter.discoverEffect());
 			// Should still have builtins
 			expect(caps.commands.some((c) => c.source === "builtin")).toBe(true);
 			// No project commands or skills
@@ -140,7 +141,7 @@ describe("ClaudeAdapter.discover()", () => {
 			}));
 
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-			const caps = await adapter.discover();
+			const caps = await Effect.runPromise(adapter.discoverEffect());
 			expect(caps.models).toHaveLength(1);
 			expect(caps.models[0]?.id).toBe("claude-opus-4-7");
 		});
@@ -151,7 +152,7 @@ describe("ClaudeAdapter.discover()", () => {
 			});
 
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-			const caps = await adapter.discover();
+			const caps = await Effect.runPromise(adapter.discoverEffect());
 			expect(caps.models.length).toBeGreaterThan(0);
 			expect(caps.models.every((m) => m.providerId === "claude")).toBe(true);
 		});
@@ -172,8 +173,8 @@ describe("ClaudeAdapter.discover()", () => {
 
 			const a1 = new ClaudeAdapter({ workspaceRoot: workspace });
 			const a2 = new ClaudeAdapter({ workspaceRoot: workspace });
-			await a1.discover();
-			await a2.discover();
+			await Effect.runPromise(a1.discoverEffect());
+			await Effect.runPromise(a2.discoverEffect());
 			expect(probe).toHaveBeenCalledTimes(1);
 		});
 
@@ -187,7 +188,7 @@ describe("ClaudeAdapter.discover()", () => {
 			}));
 
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-			const caps = await adapter.discover();
+			const caps = await Effect.runPromise(adapter.discoverEffect());
 			expect(caps.agents).toEqual([
 				{ id: "Explore", name: "Explore", description: "Codebase explorer" },
 			]);
@@ -208,7 +209,7 @@ describe("ClaudeAdapter.discover()", () => {
 			}));
 
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-			const caps = await adapter.discover();
+			const caps = await Effect.runPromise(adapter.discoverEffect());
 			const names = caps.commands.map((c) => c.name);
 			expect(names).toContain("new-command");
 			expect(names.filter((name) => name === "init")).toHaveLength(1);

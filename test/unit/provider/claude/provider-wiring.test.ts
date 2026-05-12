@@ -2,6 +2,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
@@ -42,17 +43,18 @@ describe("Provider wiring with Claude adapter", () => {
 		// Create a minimal mock for opencode adapter
 		const opencode = {
 			providerId: "opencode",
-			discover: async () => ({
-				models: [],
-				supportsTools: true,
-				supportsThinking: true,
-				supportsPermissions: true,
-				supportsQuestions: true,
-				supportsAttachments: true,
-				supportsFork: true,
-				supportsRevert: true,
-				commands: [],
-			}),
+			discoverEffect: () =>
+				Effect.succeed({
+					models: [],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: true,
+					supportsRevert: true,
+					commands: [],
+				}),
 			sendTurn: async () => {
 				throw new Error("not implemented");
 			},

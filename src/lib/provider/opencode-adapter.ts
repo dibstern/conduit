@@ -3,10 +3,12 @@
 // Wraps the existing OpenCodeClient REST API behind the ProviderAdapter
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
+import { Effect } from "effect";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
 import { createDeferred, type Deferred } from "./deferred.js";
+import { ProviderAdapterFailure } from "./errors.js";
 import type {
 	AdapterCapabilities,
 	CommandInfo,
@@ -42,7 +44,19 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	// ─── discover ─────────────────────────────────────────────────────────
 
-	async discover(): Promise<AdapterCapabilities> {
+	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure> {
+		return Effect.tryPromise({
+			try: () => this.discoverCapabilities(),
+			catch: (cause) =>
+				new ProviderAdapterFailure({
+					providerId: this.providerId,
+					operation: "discover",
+					cause,
+				}),
+		});
+	}
+
+	private async discoverCapabilities(): Promise<AdapterCapabilities> {
 		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
 			this.client.provider.list(),
 			this.client.app.commands(),

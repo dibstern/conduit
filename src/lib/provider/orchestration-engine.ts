@@ -341,19 +341,17 @@ export class OrchestrationEngine {
 	): Effect.Effect<AdapterCapabilities, OrchestrationError> {
 		return Effect.gen(this, function* () {
 			const adapter = yield* this.registry.getAdapterEffect(command.providerId);
-			return yield* Effect.tryPromise({
-				try: () => adapter.discover(),
-				catch: (cause) => {
-					log.error(
-						`discover failed: provider=${command.providerId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return new ProviderAdapterFailure({
-						providerId: command.providerId,
-						operation: "discover",
-						cause,
-					});
-				},
-			});
+			return yield* adapter
+				.discoverEffect()
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`discover failed: provider=${command.providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
 		});
 	}
 

@@ -55,6 +55,7 @@ vi.mock("../../../src/lib/logger.js", () => ({
 }));
 
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
+import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -75,23 +76,25 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 	interruptTurn: ReturnType<typeof vi.fn>;
 	resolvePermission: ReturnType<typeof vi.fn>;
 	resolveQuestion: ReturnType<typeof vi.fn>;
-	discover: ReturnType<typeof vi.fn>;
+	discoverEffect: ReturnType<typeof vi.fn>;
 	shutdown: ReturnType<typeof vi.fn>;
 	endSession: ReturnType<typeof vi.fn>;
 } {
 	return {
 		providerId,
-		discover: vi.fn(async () => ({
-			models: [],
-			supportsTools: false,
-			supportsThinking: false,
-			supportsPermissions: false,
-			supportsQuestions: false,
-			supportsAttachments: false,
-			supportsFork: false,
-			supportsRevert: false,
-			commands: [],
-		})),
+		discoverEffect: vi.fn(() =>
+			Effect.succeed({
+				models: [],
+				supportsTools: false,
+				supportsThinking: false,
+				supportsPermissions: false,
+				supportsQuestions: false,
+				supportsAttachments: false,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			}),
+		),
 		sendTurn: vi.fn(async () => ({
 			status: "completed" as const,
 			cost: 0.01,
@@ -257,7 +260,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "opencode",
 			});
 
-			expect(opencode.discover).toHaveBeenCalledTimes(1);
+			expect(opencode.discoverEffect).toHaveBeenCalledTimes(1);
 			expect(result).toMatchObject({ models: [] });
 		});
 	});
@@ -794,7 +797,15 @@ describe("OrchestrationEngine", () => {
 
 		it("dispatch logs error context before re-throwing for discover", async () => {
 			const failing = makeStubAdapter("opencode");
-			failing.discover.mockRejectedValue(new Error("Adapter discover failed"));
+			failing.discoverEffect.mockReturnValue(
+				Effect.fail(
+					new ProviderAdapterFailure({
+						providerId: "opencode",
+						operation: "discover",
+						cause: new Error("Adapter discover failed"),
+					}),
+				),
+			);
 
 			const reg = new ProviderRegistry();
 			reg.registerAdapter(failing);
