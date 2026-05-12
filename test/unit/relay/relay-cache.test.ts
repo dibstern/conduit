@@ -1,5 +1,15 @@
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	Logger,
+	Option,
+	Scope,
+} from "effect";
 import { expect, vi } from "vitest";
 
 import {
@@ -111,6 +121,116 @@ describe("RelayCache", () => {
 			expect(relays).toHaveLength(2);
 			expect(relay2).not.toBe(relay1);
 			expect(relay2.slug).toBe("my-project");
+		}),
+	);
+
+	it.scoped("invalidate awaits an async relay stop before returning", () =>
+		Effect.gen(function* () {
+			const stopStarted = yield* Deferred.make<void>();
+			const releaseStop = yield* Deferred.make<void>();
+			const stopFinished = yield* Deferred.make<void>();
+			const relay: Relay = {
+				...makeTestRelay("my-project"),
+				stop: vi.fn(() =>
+					Effect.runPromise(
+						Effect.gen(function* () {
+							yield* Deferred.succeed(stopStarted, undefined);
+							yield* Deferred.await(releaseStop);
+							yield* Deferred.succeed(stopFinished, undefined);
+						}),
+					),
+				),
+			};
+			const factory: RelayFactory = () => Effect.succeed(relay);
+
+			const layer = makeRelayCacheLive(factory);
+			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			yield* cache.get("my-project");
+
+			const invalidateFiber = yield* Effect.fork(
+				cache.invalidate("my-project"),
+			);
+			yield* Deferred.await(stopStarted);
+
+			const beforeRelease = yield* Fiber.poll(invalidateFiber);
+			yield* Deferred.succeed(releaseStop, undefined);
+			yield* Fiber.join(invalidateFiber);
+			yield* Deferred.await(stopFinished);
+
+			expect(Option.isNone(beforeRelease)).toBe(true);
+		}),
+	);
+
+	it.effect("scope close awaits async relay stop finalizers", () =>
+		Effect.gen(function* () {
+			const stopStarted = yield* Deferred.make<void>();
+			const releaseStop = yield* Deferred.make<void>();
+			const stopFinished = yield* Deferred.make<void>();
+			const relay: Relay = {
+				...makeTestRelay("my-project"),
+				stop: vi.fn(() =>
+					Effect.runPromise(
+						Effect.gen(function* () {
+							yield* Deferred.succeed(stopStarted, undefined);
+							yield* Deferred.await(releaseStop);
+							yield* Deferred.succeed(stopFinished, undefined);
+						}),
+					),
+				),
+			};
+			const factory: RelayFactory = () => Effect.succeed(relay);
+			const scope = yield* Scope.make();
+			const context = yield* Layer.buildWithScope(
+				makeRelayCacheLive(factory),
+				scope,
+			);
+			const cache = Context.get(context, RelayCacheTag);
+			yield* cache.get("my-project");
+
+			const closeFiber = yield* Effect.fork(Scope.close(scope, Exit.void));
+			yield* Deferred.await(stopStarted);
+
+			const beforeRelease = yield* Fiber.poll(closeFiber);
+			yield* Deferred.succeed(releaseStop, undefined);
+			yield* Fiber.join(closeFiber);
+			yield* Deferred.await(stopFinished);
+
+			expect(Option.isNone(beforeRelease)).toBe(true);
+		}),
+	);
+
+	it.scoped("invalidate logs and swallows relay stop rejection", () =>
+		Effect.gen(function* () {
+			const messages: unknown[] = [];
+			const logger = Logger.make<unknown, void>((options) => {
+				if (options.logLevel._tag === "Error") {
+					messages.push(options.message);
+				}
+			});
+			const relay: Relay = {
+				...makeTestRelay("my-project"),
+				stop: vi.fn(() => Promise.reject(new Error("stop failed"))),
+			};
+			const factory: RelayFactory = () => Effect.succeed(relay);
+
+			const layer = makeRelayCacheLive(factory);
+			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const exit = yield* Effect.gen(function* () {
+				yield* cache.get("my-project");
+				return yield* Effect.exit(cache.invalidate("my-project"));
+			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger)));
+
+			const renderedMessages = messages
+				.flatMap((message) =>
+					Array.isArray(message) ? message.map(String) : [String(message)],
+				)
+				.join("\n");
+
+			expect(Exit.isSuccess(exit)).toBe(true);
+			expect(relay.stop).toHaveBeenCalledTimes(1);
+			expect(renderedMessages).toContain(
+				"relay stop failed during cache finalization",
+			);
 		}),
 	);
 

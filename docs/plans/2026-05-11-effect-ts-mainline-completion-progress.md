@@ -654,3 +654,74 @@ Exit: 0
 $ pnpm lint
 Exit: 0
 ```
+
+## Phase 4: Relay Cache Async Stop Slice
+
+Plan issue found:
+
+- `RelayCache` already used `ScopedRef`, but its finalizer wrapped `relay.stop()` in `Effect.sync`. Because
+  production `ProjectRelay.stop()` is async, invalidating a relay or closing the cache scope could return before
+  relay drains, runtime disposal, PTY cleanup, and WebSocket shutdown completed. That looked scope-owned while
+  still leaking asynchronous cleanup outside the scope.
+
+Changes:
+
+- `src/lib/effect/relay-cache.ts`: widened the relay finalizer contract to `void | Promise<void>`, added typed
+  `RelayStopError`, and now awaits `relay.stop()` via `Effect.tryPromise` inside the scoped finalizer. Finalizer
+  failures are logged and do not make scope close fail.
+- `test/unit/relay/relay-cache.test.ts`: added regression coverage proving both `cache.invalidate(slug)` and
+  cache scope closure wait for async relay stop promises before returning. Review follow-up tightened test
+  cleanup so failed assertions cannot strand mock stop promises, and added coverage that rejected stops are
+  logged and swallowed by cache invalidation.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/relay/relay-cache.test.ts
+Exit: 1
+Expected failures:
+  expected false to be true in "invalidate awaits an async relay stop before returning"
+  expected false to be true in "scope close awaits async relay stop finalizers"
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/relay/relay-cache.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  8 passed (8)
+```
+
+```text
+$ pnpm vitest run test/unit/relay/relay-cache.test.ts test/unit/daemon/project-registry-service.test.ts test/unit/relay/project-registry-effect.test.ts test/unit/daemon/daemon-layers.test.ts test/unit/daemon/full-layer-composition.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  61 passed (61)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+```
+
+```text
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+First run exit: 1
+Observed one unrelated/order-sensitive failure:
+  test/unit/server/http-server-layer.test.ts > HTTP Server Layer > health endpoint responds via real HTTP server
+  expected 302 to be 200
+
+$ pnpm vitest run test/unit/server/http-server-layer.test.ts -t "health endpoint responds via real HTTP server"
+Exit: 0
+
+$ env -u OPENCODE_SERVER_PASSWORD pnpm test:unit
+Exit: 0
+Test Files  346 passed (346)
+Tests  5077 passed | 2 skipped | 12 todo (5091)
+```

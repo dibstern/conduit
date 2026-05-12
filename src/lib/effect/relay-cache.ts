@@ -10,6 +10,7 @@
 
 import {
 	Context,
+	Data,
 	Effect,
 	HashMap,
 	Layer,
@@ -27,7 +28,17 @@ export interface Relay {
 	wsHandler: {
 		handleUpgrade: (req: unknown, socket: unknown, head: unknown) => void;
 	};
-	stop: () => void;
+	stop: () => void | Promise<void>;
+}
+
+export class RelayStopError extends Data.TaggedError("RelayStopError")<{
+	slug: string;
+	cause: unknown;
+}> {
+	get message(): string {
+		const inner = this.cause instanceof Error ? this.cause.message : this.cause;
+		return `Failed to stop relay "${this.slug}": ${String(inner)}`;
+	}
 }
 
 // ─── RelayFactory ───────────────────────────────────────────────────────────
@@ -56,6 +67,18 @@ export class RelayCacheTag extends Context.Tag("RelayCache")<
 
 type CacheEntry = ScopedRef.ScopedRef<Relay | null>;
 type CacheMap = HashMap.HashMap<string, CacheEntry>;
+
+const stopRelayFinalizer = (relay: Relay) =>
+	Effect.tryPromise({
+		try: async () => {
+			await relay.stop();
+		},
+		catch: (cause) => new RelayStopError({ slug: relay.slug, cause }),
+	}).pipe(
+		Effect.catchAll((error) =>
+			Effect.logError("relay stop failed during cache finalization", error),
+		),
+	);
 
 /**
  * Create a Layer providing RelayCacheTag backed by ScopedRef + HashMap.
@@ -102,9 +125,7 @@ export const makeRelayCacheLive = (
 							scopedRef,
 							Effect.gen(function* () {
 								const relay = yield* factory(slug);
-								yield* Effect.addFinalizer(() =>
-									Effect.sync(() => relay.stop()),
-								);
+								yield* Effect.addFinalizer(() => stopRelayFinalizer(relay));
 								return relay;
 							}),
 						);
