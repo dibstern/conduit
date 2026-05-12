@@ -1,0 +1,13 @@
+{
+	"view_session_model_info_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "model_info",
+				"model": "gpt-4",
+				"provider": "openai"
+			}
+		}
+	]
+}

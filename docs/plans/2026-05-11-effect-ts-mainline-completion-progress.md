@@ -2332,6 +2332,31 @@ Remaining direct model/session reads:
   src/lib/handlers/session.ts:73: client.session.get(id)
 ```
 
+## Phase 7.8: Session Metadata Wire Snapshot
+
+Plan issues found:
+
+- `sendSessionMetadata(...)` emits several independent messages concurrently. A full call-order snapshot would be
+  noisy and could fail on unrelated session-list ordering, so this checkpoint pins the `model_info` envelope that will
+  be affected by moving `client.session.get(id)`.
+- The session handler still needs `OpenCodeAPITag` for pending permission and question API reads. This checkpoint is
+  only for the model metadata read.
+
+Changes:
+
+- `test/unit/handlers/session-wire-snapshots.test.ts`: added a `view_session` snapshot test for the model metadata
+  envelope.
+- `test/snapshots/handlers/sessions.json`: recorded the current `model_info` message produced by session metadata.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:
