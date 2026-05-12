@@ -2060,6 +2060,74 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.34: View Session Effect History Read Contract
+
+Plan issues found:
+
+- Phase 7.20 recorded history-pagination ownership, but live `src/lib/handlers/session.ts` still preferred the legacy
+  synchronous `ReadQueryTag` path for `view_session` history. That was source/progress drift.
+- The correct boundary is not a new generic session-read bridge: projected history rows already belong to the Effect
+  read model via `ReadQueryEffectTag.getSessionMessagesWithParts(...)`, while REST history fallback stays with
+  `SessionManagerService`.
+- `resolveSessionHistoryFromSqlite(...)` still serves legacy/test callers, so this slice extracts the row-to-wire
+  conversion as a pure helper and uses it from both the legacy helper and the Effect handler path.
+
+Changes:
+
+- `src/lib/handlers/session.ts`: `view_session` history resolution now prefers `ReadQueryEffectTag` and no longer
+  imports or reads `ReadQueryTag`.
+- `src/lib/session/session-switch.ts`: extracted `resolveSessionHistoryFromRows(...)` so Effect rows and legacy
+  `ReadQueryService` rows share the same `session_switched` history projection.
+- `test/unit/handlers/session-service-effect.test.ts`: added a behavior test proving `handleViewSession` uses
+  `ReadQueryEffectTag.getSessionMessagesWithParts(...)` and does not fall back to REST history when Effect SQLite is
+  available.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts -t "SQLite history"
+Exit: 1
+Expected failure:
+  expected getSessionMessagesWithParts to be called with "session-1"; Number of calls: 0
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts \
+  test/unit/session/session-switch-sqlite.test.ts \
+  test/unit/provider/relay-event-sink-persistence.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  102 passed (102)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 988 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  371 passed (371)
+Tests  5233 passed | 2 skipped | 12 todo (5247)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.33: Tool Content Read Service Contract
 
 Plan issues found:

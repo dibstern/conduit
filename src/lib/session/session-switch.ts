@@ -4,6 +4,7 @@
 // of constructing session_switched messages manually.
 
 import { isLastTurnActive } from "../event-classify.js";
+import type { MessageWithParts } from "../persistence/read-model-types.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import type { HistoryMessage, RequestId } from "../shared-types.js";
@@ -244,7 +245,13 @@ export function resolveSessionHistoryFromSqlite(
 	opts: { pageSize: number },
 ): SessionHistorySource {
 	const rows = readQuery.getSessionMessagesWithParts(sessionId);
+	return resolveSessionHistoryFromRows(rows, opts);
+}
 
+export function resolveSessionHistoryFromRows(
+	rows: MessageWithParts[],
+	opts: { pageSize: number },
+): SessionHistorySource {
 	if (rows.length === 0) {
 		return { kind: "empty" };
 	}

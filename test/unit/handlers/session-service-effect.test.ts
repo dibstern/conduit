@@ -27,6 +27,10 @@ import {
 } from "../../../src/lib/effect/session-manager-service.js";
 import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockLogger,
@@ -160,6 +164,105 @@ describe("session handlers with Effect-native model service", () => {
 									id: "msg-1",
 									role: "assistant",
 									parts: [{ id: "part-1", type: "text", text: "hello" }],
+								},
+							],
+							hasMore: false,
+						},
+					});
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"loads view-session SQLite history through ReadQueryEffectTag",
+		() => {
+			const loadPreRenderedHistory = vi.fn(() =>
+				Effect.succeed({ messages: [], hasMore: false }),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory,
+			});
+			const readQueryEffect = {
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() =>
+					Effect.succeed([
+						{
+							id: "msg-sqlite-1",
+							session_id: "session-1",
+							turn_id: "turn-1",
+							role: "user",
+							text: "Earlier prompt",
+							cost: null,
+							tokens_in: null,
+							tokens_out: null,
+							tokens_cache_read: null,
+							tokens_cache_write: null,
+							is_streaming: 0,
+							created_at: 10,
+							updated_at: 11,
+							parts: [
+								{
+									id: "part-sqlite-1",
+									message_id: "msg-sqlite-1",
+									type: "text",
+									text: "Earlier prompt",
+									tool_name: null,
+									call_id: null,
+									input: null,
+									result: null,
+									duration: null,
+									status: null,
+									sort_order: 0,
+									created_at: 10,
+									updated_at: 11,
+								},
+							],
+						},
+					]),
+				),
+			} satisfies ReadQueryEffect;
+			const { wsHandler, layer } = makeSessionMetadataLayer({
+				sessionManagerService,
+			});
+
+			return handleViewSession(
+				"client-1",
+				{ sessionId: "session-1" },
+				/* skipMetadata */ true,
+			).pipe(
+				Effect.provide(
+					Layer.merge(
+						layer,
+						Layer.succeed(ReadQueryEffectTag, readQueryEffect),
+					),
+				),
+				Effect.tap(() => {
+					expect(
+						readQueryEffect.getSessionMessagesWithParts,
+					).toHaveBeenCalledWith("session-1");
+					expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session_switched",
+						id: "session-1",
+						sessionId: "session-1",
+						history: {
+							messages: [
+								{
+									id: "msg-sqlite-1",
+									role: "user",
+									text: "Earlier prompt",
+									time: { created: 10, completed: 11 },
+									parts: [
+										{
+											id: "part-sqlite-1",
+											type: "text",
+											text: "Earlier prompt",
+										},
+									],
 								},
 							],
 							hasMore: false,

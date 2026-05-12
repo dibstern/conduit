@@ -8,17 +8,17 @@ import {
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
-	ReadQueryTag,
 	SessionOverridesTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
 	patchMissingDone,
-	resolveSessionHistoryFromSqlite,
+	resolveSessionHistoryFromRows,
 	type SessionHistorySource,
 	type SwitchClientOptions,
 } from "../session/session-switch.js";
@@ -195,18 +195,14 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 
 const resolveSessionHistory = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		if (readQueryOption._tag === "Some") {
-			return yield* Effect.try({
-				try: () =>
-					resolveSessionHistoryFromSqlite(sessionId, readQueryOption.value, {
-						pageSize: 50,
-					}),
-				catch: (cause) => cause,
-			});
+			const rows =
+				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
+			return resolveSessionHistoryFromRows(rows, { pageSize: 50 });
 		}
 
 		const historyResult = yield* Effect.either(
