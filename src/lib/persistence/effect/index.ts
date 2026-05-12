@@ -35,6 +35,13 @@ export {
 	ProjectionError,
 } from "./projectors-effect.js";
 export {
+	makeProviderStateEffect,
+	type ProviderStateEffect,
+	ProviderStateEffectError,
+	ProviderStateEffectTag,
+	type ProviderStateEffectUpdate,
+} from "./provider-state-effect.js";
+export {
 	makeReadQueryEffect,
 	type ReadQueryEffect,
 	ReadQueryEffectError,

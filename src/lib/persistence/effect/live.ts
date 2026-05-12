@@ -24,6 +24,10 @@ import {
 	type EffectProjector,
 } from "./projectors-effect.js";
 import {
+	makeProviderStateEffect,
+	ProviderStateEffectTag,
+} from "./provider-state-effect.js";
+import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "./read-query-effect.js";
@@ -35,7 +39,8 @@ export type PersistenceEffectContext =
 	| EventStoreEffectTag
 	| ProjectorCursorEffectTag
 	| ProjectionRunnerEffectTag
-	| ReadQueryEffectTag;
+	| ReadQueryEffectTag
+	| ProviderStateEffectTag;
 
 export type PersistenceEffectError = PersistenceError | ConfigError.ConfigError;
 
@@ -78,11 +83,17 @@ export function makePersistenceEffectLayer(
 		makeReadQueryEffect,
 	).pipe(Layer.provide(baseLayer));
 
+	const providerStateLayer = Layer.effect(
+		ProviderStateEffectTag,
+		makeProviderStateEffect,
+	).pipe(Layer.provide(baseLayer));
+
 	return Layer.mergeAll(
 		baseLayer,
 		eventStoreLayer,
 		cursorLayer,
 		projectionRunnerLayer,
 		readQueryLayer,
+		providerStateLayer,
 	);
 }

@@ -1700,3 +1700,72 @@ Test Files  350 passed (350)
 Tests  5111 passed | 2 skipped | 12 todo (5125)
 Note: run emitted existing ExperimentalWarning SQLite warnings and existing MaxListenersExceededWarning warnings.
 ```
+
+## Phase 5.5: Effect Provider State Consumer Slice
+
+Plan issues found:
+
+- The original plan groups provider work under Phase 6, but `provider_state` is a persistence-owned resume cursor
+  table used by `prompt.ts`. Leaving it on `ProviderStateServiceTag` would keep Claude resume state tied to the
+  legacy `PersistenceLayer.db` bridge after the read-query migration began.
+- The `handleMessage` dispatch callback is still Promise-based fire-and-forget. This slice keeps that behavior and
+  runs the Effect provider-state save as a non-fatal asynchronous persistence write. Fully joining provider execution
+  into Effect belongs with the Phase 6 provider contract conversion.
+
+Changes:
+
+- `src/lib/persistence/effect/provider-state-effect.ts`: added Effect-native `ProviderStateEffectTag` with
+  `getState`, transactional `saveUpdates`, and `clearState` over `@effect/sql`.
+- `src/lib/persistence/effect/live.ts`: includes `ProviderStateEffectTag` in the reusable per-project Effect
+  persistence layer.
+- `src/lib/handlers/prompt.ts`: prefers `ProviderStateEffectTag` for provider-state reads/writes and keeps the
+  legacy `ProviderStateServiceTag` fallback during the bridge period.
+- `test/unit/handlers/prompt-provider-state-effect.test.ts`: added a real SQLite-backed handler test that verifies
+  existing Claude resume state is passed into `send_turn` and returned updates persist for the next turn.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/persistence/effect/provider-state-effect.js'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/persistence/provider-state-service.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  69 passed (69)
+Note: effect-handlers emitted existing MaxListenersExceededWarning warnings from the test harness.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 955 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  351 passed (351)
+Tests  5112 passed | 2 skipped | 12 todo (5126)
+Note: run emitted existing ExperimentalWarning SQLite warnings and existing MaxListenersExceededWarning warnings.
+```

@@ -16,6 +16,7 @@ import {
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
+import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
 import { canonicalEvent } from "../persistence/events.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
@@ -167,6 +168,9 @@ export const handleMessage = (
 		const providerStateOption = yield* Effect.serviceOption(
 			ProviderStateServiceTag,
 		);
+		const providerStateEffectOption = yield* Effect.serviceOption(
+			ProviderStateEffectTag,
+		);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
 
 		if (engineOption._tag === "Some") {
@@ -281,9 +285,11 @@ export const handleMessage = (
 				prompt: text,
 				history: priorHistory,
 				providerState:
-					providerStateOption._tag === "Some"
-						? (providerStateOption.value.getState(activeId) ?? {})
-						: {},
+					providerStateEffectOption._tag === "Some"
+						? yield* providerStateEffectOption.value.getState(activeId)
+						: providerStateOption._tag === "Some"
+							? (providerStateOption.value.getState(activeId) ?? {})
+							: {},
 				...(model && overrides.isModelUserSelected(activeId)
 					? {
 							model: {
@@ -333,18 +339,26 @@ export const handleMessage = (
 						result.status !== "error" &&
 						result.providerStateUpdates?.length
 					) {
-						try {
-							if (providerStateOption._tag === "Some") {
-								providerStateOption.value.saveUpdates(
-									activeId,
-									result.providerStateUpdates.map((u) => ({
-										key: u.key,
-										value: String(u.value),
-									})),
+						const updates = result.providerStateUpdates.map((u) => ({
+							key: u.key,
+							value: String(u.value),
+						}));
+						if (providerStateEffectOption._tag === "Some") {
+							void Effect.runPromise(
+								providerStateEffectOption.value.saveUpdates(activeId, updates),
+							).catch((err) => {
+								log.warn(
+									`Non-fatal provider state persistence error for ${activeId}: ${formatErrorDetail(err)}`,
 								);
+							});
+						} else {
+							try {
+								if (providerStateOption._tag === "Some") {
+									providerStateOption.value.saveUpdates(activeId, updates);
+								}
+							} catch {
+								// Non-fatal
 							}
-						} catch {
-							// Non-fatal
 						}
 					}
 					// Auto-rename Claude sessions after first successful turn
