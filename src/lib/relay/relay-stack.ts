@@ -36,6 +36,7 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../effect/pending-interaction-service.js";
+import { ProjectManagementServiceLive } from "../effect/project-management-service.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
 import {
 	ClaudeEventPersistTag,
@@ -49,7 +50,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	ProjectMgmtTag,
 	ProviderStateServiceTag,
 	PtyManagerTag,
 	ReadQueryTag,
@@ -856,14 +856,6 @@ export async function createProjectRelay(
 				}
 			: undefined;
 
-	const projectMgmt =
-		config.getProjects != null && config.setProjectInstance != null
-			? {
-					getProjects: config.getProjects,
-					setProjectInstance: config.setProjectInstance,
-				}
-			: undefined;
-
 	const scanDeps =
 		config.triggerScan != null
 			? { triggerScan: config.triggerScan }
@@ -885,6 +877,9 @@ export async function createProjectRelay(
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
+	);
+	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
+		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const webSocketHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
@@ -911,6 +906,7 @@ export async function createProjectRelay(
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		projectManagementServiceLayer,
 		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
@@ -956,12 +952,6 @@ export async function createProjectRelay(
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
 			Layer.merge(instanceMgmtLayer, instanceManagementServiceLayer),
-		);
-	}
-	if (projectMgmt != null) {
-		bridgeLayers = Layer.merge(
-			bridgeLayers,
-			Layer.succeed(ProjectMgmtTag, projectMgmt),
 		);
 	}
 	if (scanDeps != null) {

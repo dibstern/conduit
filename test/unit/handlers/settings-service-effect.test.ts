@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { ProjectManagementServiceLive } from "../../../src/lib/effect/project-management-service.js";
 import {
 	ConfigTag,
 	OpenCodeSettingsServiceTag,
@@ -58,11 +59,20 @@ describe("settings handlers with Effect-native settings service", () => {
 			const config = makeMockConfig({
 				slug: "test-project",
 			});
+			const settingsLayer = Layer.succeed(
+				OpenCodeSettingsServiceTag,
+				settingsService,
+			);
+			const configLayer = Layer.succeed(ConfigTag, config);
+			const projectServiceLayer = ProjectManagementServiceLive.pipe(
+				Layer.provide(Layer.mergeAll(configLayer, settingsLayer)),
+			);
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
+				settingsLayer,
+				projectServiceLayer,
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(ConfigTag, config),
+				configLayer,
 			);
 
 			return handleGetProjects("client-1", {}).pipe(

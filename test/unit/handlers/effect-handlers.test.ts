@@ -12,6 +12,7 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/effect/pending-interaction-service.js";
+import { ProjectManagementServiceLive } from "../../../src/lib/effect/project-management-service.js";
 import type {
 	SessionManagerShape,
 	WebSocketHandlerShape,
@@ -176,6 +177,21 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 	return Layer.merge(
 		apiLayer,
 		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+	);
+}
+
+function projectManagementLayer(
+	client: OpenCodeAPI,
+	config: ProjectRelayConfig,
+) {
+	const settingsLayer = openCodeSettingsLayer(client);
+	const configLayer = Layer.succeed(ConfigTag, config);
+	return Layer.mergeAll(
+		settingsLayer,
+		configLayer,
+		ProjectManagementServiceLive.pipe(
+			Layer.provide(Layer.mergeAll(configLayer, settingsLayer)),
+		),
 	);
 }
 
@@ -384,9 +400,8 @@ describe("handleGetProjects", () => {
 		const client = {} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			openCodeSettingsLayer(client),
+			projectManagementLayer(client, config),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ConfigTag, config),
 		);
 
 		return handleGetProjects("client-1", {}).pipe(
@@ -415,9 +430,8 @@ describe("handleGetProjects", () => {
 			} as unknown as OpenCodeAPI;
 
 			const layer = Layer.mergeAll(
-				openCodeSettingsLayer(client),
+				projectManagementLayer(client, config),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(ConfigTag, config),
 			);
 
 			return handleGetProjects("client-1", {}).pipe(

@@ -5,13 +5,10 @@
 
 import { Effect } from "effect";
 import { InstanceManagementServiceTag } from "../effect/instance-management-service.js";
-import {
-	ProjectMgmtTag,
-	ScanDepsTag,
-	WebSocketHandlerTag,
-} from "../effect/services.js";
+import { ProjectManagementServiceTag } from "../effect/project-management-service.js";
+import { ScanDepsTag, WebSocketHandlerTag } from "../effect/services.js";
 import { formatErrorDetail } from "../errors.js";
-import type { OpenCodeInstance } from "../shared-types.js";
+import type { OpenCodeInstance, ProjectInfo } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 
 /** Default port for CCS (Claude Code Switch) proxy. */
@@ -207,26 +204,25 @@ export const handleInstanceRename = (
 	});
 
 /** Effect helper: broadcast project list. */
-const broadcastProjectList = Effect.gen(function* () {
-	const wsHandler = yield* WebSocketHandlerTag;
-	const projectMgmtOption = yield* Effect.serviceOption(ProjectMgmtTag);
-	if (projectMgmtOption._tag === "Some") {
-		const projects = projectMgmtOption.value.getProjects();
+const broadcastProjectList = (projects: ReadonlyArray<ProjectInfo>) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
 		wsHandler.broadcast({ type: "project_list", projects });
-	}
-});
+	});
 
 export const handleSetProjectInstance = (
 	clientId: string,
 	payload: PayloadMap["set_project_instance"],
 ) =>
 	Effect.gen(function* () {
-		const projectMgmtOption = yield* Effect.serviceOption(ProjectMgmtTag);
-		if (projectMgmtOption._tag === "None") {
+		const projectServiceOption = yield* Effect.serviceOption(
+			ProjectManagementServiceTag,
+		);
+		if (projectServiceOption._tag === "None") {
 			yield* sendError(clientId, "Project instance binding not available");
 			return;
 		}
-		const projectMgmt = projectMgmtOption.value;
+		const projectService = projectServiceOption.value;
 
 		const { slug, instanceId } = payload;
 		if (!slug) {
@@ -239,15 +235,18 @@ export const handleSetProjectInstance = (
 		}
 
 		const setResult = yield* Effect.either(
-			Effect.tryPromise(() =>
-				Promise.resolve(projectMgmt.setProjectInstance(slug, instanceId)),
-			),
+			projectService.setProjectInstance(slug, instanceId),
 		);
 		if (setResult._tag === "Left") {
-			yield* sendError(clientId, formatErrorDetail(setResult.left));
+			yield* sendError(
+				clientId,
+				setResult.left._tag === "ProjectManagementNotSupported"
+					? setResult.left.message
+					: formatErrorDetail(setResult.left.cause),
+			);
 			return;
 		}
-		yield* broadcastProjectList;
+		yield* broadcastProjectList(setResult.right);
 	});
 
 export const handleProxyDetect = (

@@ -2060,6 +2060,94 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.30: Project Management Handler Domain Service Contract
+
+Plan issues found:
+
+- Phase 7 grouped instance and project management together, but project management spans settings handlers,
+  `set_project_instance`, config-backed daemon callbacks, and OpenCode fallback reads. Treating this as part of the
+  instance lifecycle service would have mixed browser wire rendering with daemon registry behavior.
+- The correct boundary is domain-shaped, not handler-shaped: `ProjectManagementService` owns project listing,
+  fallback mapping, mutations, unsupported capability errors, and typed operation failures. Browser handlers keep
+  payload validation and stable WebSocket envelopes.
+- `set_project_instance` is dispatched from the instance handler module but semantically mutates project bindings. Its
+  existing browser-visible error code is still `INSTANCE_ERROR`; changing that during the service migration would be a
+  compatibility change.
+- `ProjectMgmtTag` remains for daemon/IPC legacy code, but browser handlers no longer consume it. Scan migration remains
+  open until there is a real Effect `scanNow` service; `ScanDepsTag` is not part of this project-management slice.
+
+Changes:
+
+- Added `src/lib/effect/project-management-service.ts` with `ProjectManagementServiceTag`,
+  `ProjectManagementServiceLive`, `ProjectManagementServiceError`, and `ProjectManagementNotSupported`.
+- Converted `get_projects`, `add_project`, `remove_project`, and `rename_project` handlers to consume
+  `ProjectManagementServiceTag` instead of direct `ConfigTag` / `OpenCodeSettingsServiceTag` project callbacks.
+- Converted `set_project_instance` to consume `ProjectManagementServiceTag` instead of `ProjectMgmtTag`, while
+  preserving its existing `INSTANCE_ERROR` envelope and `{ type: "project_list", projects }` broadcast shape.
+- Wired `ProjectManagementServiceLive` into the relay runtime and shared handler test layer from
+  `ConfigTag + OpenCodeSettingsServiceLive`.
+- Added service tests for config-backed listing, OpenCode fallback mapping, unsupported mutations, callback failure
+  wrapping, rename refresh, and project-instance binding.
+- Added handler-boundary tests for `get_projects`, `add_project`, `rename_project`, `remove_project` failure rendering,
+  and `set_project_instance` success/unavailable/failure behavior without the legacy `ProjectMgmtTag`.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/project-management-service.test.ts
+Exit: 1
+Expected failure:
+  Cannot find module '../../../src/lib/effect/project-management-service.js'
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/project-management-service-effect.test.ts
+Exit: 1
+Expected failures before handler conversion:
+  Service not found: Config
+  setProjectInstance service spy had 0 calls
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/project-management-service.test.ts \
+  test/unit/handlers/project-management-service-effect.test.ts \
+  test/unit/handlers/settings-service-effect.test.ts \
+  test/unit/handlers/settings-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  105 passed (105)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers test/unit/effect/project-management-service.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  23 passed (23)
+Tests  205 passed (205)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 981 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  367 passed (367)
+Tests  5218 passed | 2 skipped | 12 todo (5232)
+```
+
 ## Phase 7.29: Instance Handler Domain Service Contract
 
 Plan issues found:

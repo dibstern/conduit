@@ -28,6 +28,7 @@ import {
 } from "../../src/lib/effect/instance-manager-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/effect/message-poller.js";
 import { PendingInteractionServiceLive } from "../../src/lib/effect/pending-interaction-service.js";
+import { ProjectManagementServiceLive } from "../../src/lib/effect/project-management-service.js";
 import { RateLimiterLive } from "../../src/lib/effect/rate-limiter-layer.js";
 import {
 	ConfigTag,
@@ -932,6 +933,9 @@ export function makeTestHandlerLayer(
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
+		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
+	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -969,6 +973,7 @@ export function makeTestHandlerLayer(
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		projectManagementServiceLayer,
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,

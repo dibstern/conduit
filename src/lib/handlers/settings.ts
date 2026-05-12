@@ -5,17 +5,33 @@ import { homedir } from "node:os";
 import { basename, dirname } from "node:path";
 import { Effect } from "effect";
 import {
-	ConfigTag,
+	type ProjectManagementNotSupported,
+	type ProjectManagementServiceError,
+	ProjectManagementServiceTag,
+} from "../effect/project-management-service.js";
+import {
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
-import { RelayError } from "../errors.js";
+import { type ErrorCode, RelayError } from "../errors.js";
 import type { PayloadMap } from "./payloads.js";
 
 const MAX_PROJECT_TITLE_LENGTH = 100;
 const MAX_DIR_ENTRIES = 50;
+
+const toProjectSystemError = (
+	error: ProjectManagementServiceError | ProjectManagementNotSupported,
+	code: ErrorCode,
+) => {
+	if (error._tag === "ProjectManagementNotSupported") {
+		return new RelayError(error.message, {
+			code: "NOT_SUPPORTED",
+		}).toSystemError();
+	}
+	return RelayError.fromCaught(error.cause, code).toSystemError();
+};
 
 export const handleGetCommands = (
 	clientId: string,
@@ -71,29 +87,15 @@ export const handleGetProjects = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const config = yield* ConfigTag;
-
-		let projects: ReadonlyArray<{
-			slug: string;
-			title: string;
-			directory: string;
-			instanceId?: string;
-		}>;
-		if (config.getProjects) {
-			projects = config.getProjects();
-		} else {
-			const settingsService = yield* OpenCodeSettingsServiceTag;
-			const ocProjects = yield* settingsService.listProjects();
-			projects = ocProjects.map((p) => ({
-				slug: p.id ?? "unknown",
-				title: p.name ?? p.id ?? "Unknown",
-				directory: p.path ?? "",
-			}));
-		}
+		const projectService = yield* ProjectManagementServiceTag;
+		const projects = yield* projectService
+			.list()
+			.pipe(Effect.mapError((error) => error.cause));
+		const current = yield* projectService.currentSlug();
 		wsHandler.sendTo(clientId, {
 			type: "project_list",
 			projects,
-			current: config.slug,
+			current,
 		});
 	});
 
@@ -103,7 +105,7 @@ export const handleAddProject = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const config = yield* ConfigTag;
+		const projectService = yield* ProjectManagementServiceTag;
 
 		const { directory } = payload;
 		if (!directory || typeof directory !== "string") {
@@ -115,41 +117,22 @@ export const handleAddProject = (
 			);
 			return;
 		}
-		if (!config.addProject) {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("Adding projects is not supported in this mode", {
-					code: "NOT_SUPPORTED",
-				}).toSystemError(),
-			);
-			return;
-		}
-		const addProject = config.addProject;
 		const addResult = yield* Effect.either(
-			Effect.tryPromise(() => {
-				const { instanceId } = payload;
-				return addProject(directory, instanceId);
-			}),
+			projectService.add(directory, payload.instanceId),
 		);
 		if (addResult._tag === "Left") {
 			wsHandler.sendTo(
 				clientId,
-				RelayError.fromCaught(
-					addResult.left,
-					"ADD_PROJECT_FAILED",
-				).toSystemError(),
+				toProjectSystemError(addResult.left, "ADD_PROJECT_FAILED"),
 			);
 			return;
 		}
-		const project = addResult.right;
-		const updatedProjects = config.getProjects
-			? config.getProjects()
-			: [project];
+		const current = yield* projectService.currentSlug();
 		wsHandler.sendTo(clientId, {
 			type: "project_list",
-			projects: updatedProjects,
-			current: config.slug,
-			addedSlug: project.slug,
+			projects: addResult.right.projects,
+			current,
+			addedSlug: addResult.right.project.slug,
 		});
 	});
 
@@ -168,7 +151,7 @@ export const handleRemoveProject = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const config = yield* ConfigTag;
+		const projectService = yield* ProjectManagementServiceTag;
 
 		const { slug } = payload;
 		if (!slug || typeof slug !== "string") {
@@ -180,36 +163,19 @@ export const handleRemoveProject = (
 			);
 			return;
 		}
-		if (!config.removeProject) {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("Removing projects is not supported in this mode", {
-					code: "NOT_SUPPORTED",
-				}).toSystemError(),
-			);
-			return;
-		}
-		const removeProject = config.removeProject;
-		const removeResult = yield* Effect.either(
-			Effect.tryPromise(async () => {
-				await removeProject(slug);
-			}),
-		);
+		const removeResult = yield* Effect.either(projectService.remove(slug));
 		if (removeResult._tag === "Left") {
 			wsHandler.sendTo(
 				clientId,
-				RelayError.fromCaught(
-					removeResult.left,
-					"REMOVE_PROJECT_FAILED",
-				).toSystemError(),
+				toProjectSystemError(removeResult.left, "REMOVE_PROJECT_FAILED"),
 			);
 			return;
 		}
-		const updatedProjects = config.getProjects ? config.getProjects() : [];
+		const current = yield* projectService.currentSlug();
 		wsHandler.broadcast({
 			type: "project_list",
-			projects: updatedProjects,
-			current: config.slug,
+			projects: removeResult.right,
+			current,
 		});
 	});
 
@@ -219,7 +185,7 @@ export const handleRenameProject = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const config = yield* ConfigTag;
+		const projectService = yield* ProjectManagementServiceTag;
 
 		const { slug } = payload;
 		if (!slug || typeof slug !== "string") {
@@ -227,15 +193,6 @@ export const handleRenameProject = (
 				clientId,
 				new RelayError("rename_project requires a non-empty 'slug' field", {
 					code: "INVALID_REQUEST",
-				}).toSystemError(),
-			);
-			return;
-		}
-		if (!config.setProjectTitle) {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("Renaming projects is not supported in this mode", {
-					code: "NOT_SUPPORTED",
 				}).toSystemError(),
 			);
 			return;
@@ -251,25 +208,21 @@ export const handleRenameProject = (
 			return;
 		}
 		title = title.slice(0, MAX_PROJECT_TITLE_LENGTH);
-		const setProjectTitle = config.setProjectTitle;
 		const renameResult = yield* Effect.either(
-			Effect.try(() => setProjectTitle(slug, title)),
+			projectService.rename(slug, title),
 		);
 		if (renameResult._tag === "Left") {
 			wsHandler.sendTo(
 				clientId,
-				RelayError.fromCaught(
-					renameResult.left,
-					"RENAME_PROJECT_FAILED",
-				).toSystemError(),
+				toProjectSystemError(renameResult.left, "RENAME_PROJECT_FAILED"),
 			);
 			return;
 		}
-		const updatedProjects = config.getProjects ? config.getProjects() : [];
+		const current = yield* projectService.currentSlug();
 		wsHandler.broadcast({
 			type: "project_list",
-			projects: updatedProjects,
-			current: config.slug,
+			projects: renameResult.right,
+			current,
 		});
 	});
 
