@@ -2425,6 +2425,31 @@ Remaining direct model/session reads:
   src/lib/bridges/client-init.ts:361: client.provider.list()
 ```
 
+## Phase 7.10: List Sessions Wire Snapshot
+
+Plan issues found:
+
+- Converting the full session manager tag at once would touch session switching, metadata replay, fork metadata,
+  history pagination, deletion, search, rename, and prompt-path side effects in one slice. The smallest safe first
+  session-manager boundary is `handleListSessions`, which only forwards `sendDualSessionLists(...)` output to the
+  connecting client.
+- A list snapshot should include both root and non-root envelopes because the frontend distinguishes the two lists by
+  the `roots` flag.
+
+Changes:
+
+- `test/unit/handlers/session-wire-snapshots.test.ts`: added a `list_sessions` wire snapshot.
+- `test/snapshots/handlers/sessions.json`: recorded the two current `session_list` envelopes.
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-wire-snapshots.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
 ## Phase 7.1: File Handler Effect Service Contract
 
 Plan issues found:

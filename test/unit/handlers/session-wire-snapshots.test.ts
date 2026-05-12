@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import { handleViewSession } from "../../../src/lib/handlers/session.js";
+import {
+	handleListSessions,
+	handleViewSession,
+} from "../../../src/lib/handlers/session.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerShape,
@@ -61,5 +64,46 @@ describe("session handler wire snapshots", () => {
 		expect(modelInfoCalls).toEqual(
 			readSnapshots()["view_session_model_info_success"],
 		);
+	});
+
+	it("keeps the list_sessions envelopes stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const sessionMgr = makeMockSessionManagerShape({
+			sendDualSessionLists: vi.fn(async (send) => {
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "root-1",
+							title: "Root Session",
+							updatedAt: 100,
+							messageCount: 2,
+						},
+					],
+					roots: true,
+				});
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "child-1",
+							title: "Child Session",
+							updatedAt: 200,
+							messageCount: 4,
+							parentID: "root-1",
+						},
+					],
+					roots: false,
+				});
+			}),
+		});
+
+		await Effect.runPromise(
+			handleListSessions("client-1", {}).pipe(
+				Effect.provide(makeTestHandlerLayer({ wsHandler, sessionMgr })),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["list_sessions_success"]);
 	});
 });

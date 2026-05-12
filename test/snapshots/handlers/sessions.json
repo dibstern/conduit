@@ -9,5 +9,40 @@
 				"provider": "openai"
 			}
 		}
+	],
+	"list_sessions_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "session_list",
+				"sessions": [
+					{
+						"id": "root-1",
+						"title": "Root Session",
+						"updatedAt": 100,
+						"messageCount": 2
+					}
+				],
+				"roots": true
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "session_list",
+				"sessions": [
+					{
+						"id": "child-1",
+						"title": "Child Session",
+						"updatedAt": 200,
+						"messageCount": 4,
+						"parentID": "root-1"
+					}
+				],
+				"roots": false
+			}
+		}
 	]
 }
