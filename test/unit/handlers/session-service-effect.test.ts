@@ -19,12 +19,17 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
+import {
+	type SessionManagerService,
+	SessionManagerServiceTag,
+} from "../../../src/lib/effect/session-manager-service.js";
 import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	makeMockLogger,
 	makeMockPermissionBridge,
 	makeMockQuestionBridge,
+	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
 	makeMockSessionOverrides,
 	makeMockWebSocketHandler,
@@ -35,6 +40,7 @@ function makeSessionMetadataLayer(options: {
 	readonly logger?: ReturnType<typeof makeMockLogger>;
 	readonly modelService?: OpenCodeModelService;
 	readonly sessionMgr?: SessionManagerShape;
+	readonly sessionManagerService?: SessionManagerService;
 }) {
 	const api =
 		options.api ??
@@ -68,6 +74,8 @@ function makeSessionMetadataLayer(options: {
 		} satisfies OpenCodeModelService);
 	const wsHandler = makeMockWebSocketHandler();
 	const sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
+	const sessionManagerService =
+		options.sessionManagerService ?? makeMockSessionManagerService();
 	const statusPoller: StatusPollerShape = {
 		isProcessing: vi.fn(() => false),
 		clearMessageActivity: vi.fn(),
@@ -90,6 +98,7 @@ function makeSessionMetadataLayer(options: {
 			Layer.succeed(OpenCodeModelServiceTag, modelService),
 			Layer.succeed(WebSocketHandlerTag, wsHandler),
 			Layer.succeed(SessionManagerTag, sessionMgr),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(SessionOverridesTag, makeMockSessionOverrides()),
 			Layer.succeed(LoggerTag, logger),
 			Layer.succeed(PermissionBridgeTag, makeMockPermissionBridge()),
@@ -123,7 +132,12 @@ describe("session handlers with Effect-native model service", () => {
 	it.effect(
 		"logs model metadata lookup failures and still sends session lists",
 		() => {
-			const sendDualSessionLists = vi.fn(async () => undefined);
+			const legacySendDualSessionLists = vi.fn(async () => {
+				throw new Error("legacy session manager sendDual should not be called");
+			});
+			const sessionManagerService = makeMockSessionManagerService({
+				sendDualSessionLists: vi.fn(() => Effect.void),
+			});
 			const logger = makeMockLogger();
 			const modelService: OpenCodeModelService = {
 				listProviders: vi.fn(() =>
@@ -138,7 +152,10 @@ describe("session handlers with Effect-native model service", () => {
 			const { wsHandler, layer } = makeSessionMetadataLayer({
 				logger,
 				modelService,
-				sessionMgr: makeMockSessionManagerShape({ sendDualSessionLists }),
+				sessionMgr: makeMockSessionManagerShape({
+					sendDualSessionLists: legacySendDualSessionLists,
+				}),
+				sessionManagerService,
 			});
 
 			return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
@@ -152,7 +169,8 @@ describe("session handlers with Effect-native model service", () => {
 						model: "gpt-4",
 						provider: "openai",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(sessionManagerService.sendDualSessionLists).toHaveBeenCalled();
 				}),
 			);
 		},

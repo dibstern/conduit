@@ -65,7 +65,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const modelService = yield* OpenCodeModelServiceTag;
 		const permissionBridge = yield* PermissionBridgeTag;
 		const questionBridge = yield* QuestionBridgeTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		// Run all metadata sends concurrently, catching errors individually
 		yield* Effect.all(
@@ -202,19 +202,17 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 				),
 
 				// Session list
-				Effect.tryPromise(() =>
-					sessionMgr.sendDualSessionLists((msg) =>
-						wsHandler.sendTo(clientId, msg),
-					),
-				).pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to send session list to ${clientId}: ${err instanceof Error ? err.message : err}`,
+				sessionManagerService
+					.sendDualSessionLists((msg) => wsHandler.sendTo(clientId, msg))
+					.pipe(
+						Effect.catchAll((err) =>
+							Effect.sync(() =>
+								log.warn(
+									`Failed to send session list to ${clientId}: ${err instanceof Error ? err.message : err}`,
+								),
 							),
 						),
 					),
-				),
 			],
 			{ concurrency: SESSION_METADATA_FANOUT, discard: true },
 		);

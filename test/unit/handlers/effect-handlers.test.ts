@@ -101,6 +101,7 @@ import type {
 	OpenCodeDecision,
 	ProjectRelayConfig,
 } from "../../../src/lib/types.js";
+import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -1257,6 +1258,7 @@ function makeForkSessionLayer(options?: {
 		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerTag, sessionMgr),
+		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),

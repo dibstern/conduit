@@ -2129,6 +2129,46 @@ Test Files  363 passed (363)
 Tests  5164 passed | 2 skipped | 12 todo (5178)
 ```
 
+## Phase 7.12: View Session Metadata List Service Contract
+
+Plan issue found:
+
+- `sendSessionMetadata` still used `Effect.tryPromise(() => sessionMgr.sendDualSessionLists(...))`.
+  That left the view-session metadata path on the legacy `SessionManagerTag` even after the direct
+  `list_sessions` handler moved to `SessionManagerServiceTag`.
+
+Changes:
+
+- Converted the session-list send inside `sendSessionMetadata` to call
+  `SessionManagerServiceTag.sendDualSessionLists` directly.
+- Tightened the handler regression test so the legacy session manager list sender throws if called,
+  while the Effect service sender succeeds.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts
+Exit: 1
+Expected failure:
+  legacySendDualSessionLists was called once by view-session metadata.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-wire-snapshots.test.ts \
+  test/unit/handlers/effect-handlers.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  64 passed (64)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
 ## Phase 7.3: Model Handler Service Contract
 
 Plan issues found:
