@@ -7,6 +7,10 @@
 // independently testable and relay-stack stays slim.
 
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type {
+	PendingPermissionRecoveryInput,
+	PendingQuestion,
+} from "../effect/pending-interaction-service.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { makeAgentListMessage, toWireAgents } from "../handlers/agent.js";
@@ -25,8 +29,11 @@ import {
 	switchClientToSession,
 } from "../session/session-switch.js";
 import type { ContextWindowOption, PtyInfo } from "../shared-types.js";
-import type { OpenCodeInstance, RelayMessage } from "../types.js";
-import type { PermissionBridge } from "./permission-bridge.js";
+import type {
+	OpenCodeInstance,
+	PendingPermission,
+	RelayMessage,
+} from "../types.js";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
 
@@ -87,7 +94,13 @@ export interface ClientInitDeps {
 	sessionMgr: SessionManagerLike;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
-	permissionBridge: Pick<PermissionBridge, "getPending" | "recoverPending">;
+	pendingInteractions: {
+		listPendingPermissions(): Promise<PendingPermission[]>;
+		recoverPendingPermissions(
+			permissions: readonly PendingPermissionRecoveryInput[],
+		): Promise<PendingPermission[]>;
+		listPendingQuestions(sessionId?: string): Promise<PendingQuestion[]>;
+	};
 	/** Optional poller for session processing state */
 	statusPoller?: Pick<
 		SessionStatusPollerService,
@@ -132,7 +145,7 @@ export async function handleClientConnected(
 		sessionMgr,
 		overrides,
 		ptyManager,
-		permissionBridge,
+		pendingInteractions,
 	} = deps;
 
 	const sendInitError = (err: unknown, prefix: string) => {
@@ -227,10 +240,10 @@ export async function handleClientConnected(
 	}
 
 	// ── Pending permissions + questions (reconnect replay) ───────────────
-	// First replay any permissions already tracked in-memory by the bridge.
-	const bridgePending = permissionBridge.getPending();
+	// First replay any permissions already tracked by the pending interaction service.
+	const servicePending = await pendingInteractions.listPendingPermissions();
 	const sentPermissionIds = new Set<string>();
-	for (const perm of bridgePending) {
+	for (const perm of servicePending) {
 		wsHandler.sendTo(clientId, {
 			type: "permission_request",
 			sessionId: perm.sessionId,
@@ -246,26 +259,26 @@ export async function handleClientConnected(
 		const apiPermissions = await client.permission.list();
 		const newPerms = apiPermissions.filter((p) => !sentPermissionIds.has(p.id));
 		if (newPerms.length > 0) {
-			const recovered = permissionBridge.recoverPending(
-				newPerms.map((p) => {
-					const raw = p as {
-						id: string;
-						permission: string;
-						sessionID?: string;
-						patterns?: string[];
-						metadata?: Record<string, unknown>;
-						always?: string[];
-					};
-					return {
-						id: raw.id,
-						permission: raw.permission,
-						...(raw.sessionID != null && { sessionId: raw.sessionID }),
-						...(raw.patterns != null && { patterns: raw.patterns }),
-						...(raw.metadata != null && { metadata: raw.metadata }),
-						...(raw.always != null && { always: raw.always }),
-					};
-				}),
-			);
+			const recoveryInput = newPerms.map((p) => {
+				const raw = p as {
+					id: string;
+					permission: string;
+					sessionID?: string;
+					patterns?: string[];
+					metadata?: Record<string, unknown>;
+					always?: string[];
+				};
+				return {
+					id: raw.id,
+					permission: raw.permission,
+					...(raw.sessionID != null && { sessionId: raw.sessionID }),
+					...(raw.patterns != null && { patterns: raw.patterns }),
+					...(raw.metadata != null && { metadata: raw.metadata }),
+					...(raw.always != null && { always: raw.always }),
+				};
+			});
+			const recovered =
+				await pendingInteractions.recoverPendingPermissions(recoveryInput);
 			for (const perm of recovered) {
 				wsHandler.sendTo(clientId, {
 					type: "permission_request",
@@ -283,11 +296,34 @@ export async function handleClientConnected(
 	}
 	// Replay pending questions for the client's active session only
 	try {
+		const sentQuestionIds = new Set<string>();
+		const servicePendingQuestions =
+			await pendingInteractions.listPendingQuestions(activeId);
+		for (const pq of servicePendingQuestions) {
+			if (pq.sessionId && activeId && pq.sessionId !== activeId) continue;
+			wsHandler.sendTo(clientId, {
+				type: "ask_user",
+				sessionId: pq.sessionId || activeId || "",
+				toolId: pq.requestId,
+				questions: pq.questions.map((q) => ({
+					question: q.question,
+					header: q.header ?? "",
+					options: (q.options ?? []) as Array<{
+						label: string;
+						description?: string;
+					}>,
+					multiSelect: q.multiSelect ?? false,
+				})),
+				...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
+			});
+			sentQuestionIds.add(pq.requestId);
+		}
 		const pendingQuestions = await client.question.list();
 		deps.log.debug(
 			`client=${clientId} listPendingQuestions returned ${pendingQuestions.length} question(s)${pendingQuestions.length > 0 ? `: ${JSON.stringify(pendingQuestions.map((q) => ({ id: q.id, hasQuestions: !!q["questions"], hasTool: !!q["tool"] })))}` : ""}`,
 		);
 		for (const pq of pendingQuestions) {
+			if (sentQuestionIds.has(pq.id)) continue;
 			// Filter: only send questions belonging to the client's active session
 			const qSessionId = pq["sessionID"] as string | undefined;
 			if (qSessionId && activeId && qSessionId !== activeId) continue;

@@ -1,8 +1,6 @@
 // ─── Handler Types ───────────────────────────────────────────────────────────
 // Shared types used by all handler modules.
 
-import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type {
 	PollerManagerShape,
 	SessionManagerShape,
@@ -70,8 +68,6 @@ export interface HandlerDeps {
 	};
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
-	permissionBridge: PermissionBridge;
-	questionBridge: QuestionBridge;
 	overrides: SessionOverrides;
 	ptyManager: PtyManager;
 	config: ProjectRelayConfig;

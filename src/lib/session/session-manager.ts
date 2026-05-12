@@ -163,6 +163,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				...(resolvedStatuses !== undefined
 					? { statuses: resolvedStatuses }
 					: {}),
+				forkMeta: this.forkMeta,
 				pendingQuestionCounts: this.pendingQuestionCounts,
 			});
 

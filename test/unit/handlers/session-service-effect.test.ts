@@ -16,7 +16,6 @@ import {
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
-	QuestionBridgeTag,
 	SessionManagerTag,
 	SessionOverridesTag,
 	StatusPollerTag,
@@ -31,7 +30,6 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockLogger,
-	makeMockQuestionBridge,
 	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
 	makeMockSessionOverrides,
@@ -92,24 +90,25 @@ function makeSessionMetadataLayer(options: {
 
 	const logger = options.logger ?? makeMockLogger();
 
+	const baseLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, api),
+		Layer.succeed(OpenCodeModelServiceTag, modelService),
+		Layer.succeed(WebSocketHandlerTag, wsHandler),
+		Layer.succeed(SessionManagerTag, sessionMgr),
+		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		Layer.succeed(SessionOverridesTag, makeMockSessionOverrides()),
+		Layer.succeed(LoggerTag, logger),
+		PendingInteractionServiceLive,
+		Layer.succeed(StatusPollerTag, statusPoller),
+		Layer.succeed(PollerManagerTag, pollerManager),
+	);
+
 	return {
 		api,
 		logger,
 		modelService,
 		wsHandler,
-		layer: Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(OpenCodeModelServiceTag, modelService),
-			Layer.succeed(WebSocketHandlerTag, wsHandler),
-			Layer.succeed(SessionManagerTag, sessionMgr),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(SessionOverridesTag, makeMockSessionOverrides()),
-			Layer.succeed(LoggerTag, logger),
-			PendingInteractionServiceLive,
-			Layer.succeed(QuestionBridgeTag, makeMockQuestionBridge()),
-			Layer.succeed(StatusPollerTag, statusPoller),
-			Layer.succeed(PollerManagerTag, pollerManager),
-		),
+		layer: baseLayer,
 	};
 }
 
@@ -191,7 +190,7 @@ describe("session handlers with Effect-native model service", () => {
 	});
 
 	it.effect(
-		"replays pending permissions from PendingInteractionService without PermissionBridgeTag",
+		"replays pending permissions from PendingInteractionService",
 		() => {
 			const { wsHandler, layer } = makeSessionMetadataLayer({});
 
@@ -226,6 +225,47 @@ describe("session handlers with Effect-native model service", () => {
 			);
 		},
 	);
+
+	it.effect("replays pending questions from PendingInteractionService", () => {
+		const { wsHandler, layer } = makeSessionMetadataLayer({});
+
+		return Effect.gen(function* () {
+			const pendingInteractions = yield* PendingInteractionServiceTag;
+			yield* pendingInteractions.recordQuestionRequest({
+				requestId: "question-1",
+				sessionId: "session-1",
+				questions: [
+					{
+						question: "Continue?",
+						header: "Confirm",
+						options: [{ label: "Yes", description: "Continue" }],
+						multiSelect: false,
+					},
+				],
+				toolCallId: "toolu-1",
+			});
+
+			yield* handleViewSession("client-1", { sessionId: "session-1" });
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "ask_user",
+					sessionId: "session-1",
+					toolId: "question-1",
+					questions: [
+						{
+							question: "Continue?",
+							header: "Confirm",
+							options: [{ label: "Yes", description: "Continue" }],
+							multiSelect: false,
+						},
+					],
+					toolUseId: "toolu-1",
+				});
+			}),
+		);
+	});
 
 	it.effect(
 		"logs model metadata lookup failures and still sends session lists",

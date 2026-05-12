@@ -3,9 +3,7 @@ import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../../../src/lib/bridges/client-init.js";
-import { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
-import type { OpenCodeEvent } from "../../../src/lib/types.js";
 import { createMockClientInitDeps } from "../../helpers/mock-factories.js";
 
 /** Cast a plain string to PermissionId for test data. */
@@ -718,7 +716,9 @@ describe("handleClientConnected — no active session", () => {
 describe("handleClientConnected — pending permissions", () => {
 	it("sends pending permission requests to reconnecting client", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("perm-1"),
 				sessionId: "ses-1",
@@ -757,7 +757,7 @@ describe("handleClientConnected — pending permissions", () => {
 
 	it("does not send permission_request when no pending permissions", async () => {
 		const deps = createMockClientInitDeps();
-		// getPending returns [] by default
+		// listPendingPermissions returns [] by default
 
 		await handleClientConnected(deps, "client-1");
 
@@ -770,7 +770,9 @@ describe("handleClientConnected — pending permissions", () => {
 
 	it("replayed permissions include sessionId", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("perm-1"),
 				sessionId: "ses-xyz",
@@ -854,7 +856,9 @@ describe("handleClientConnected — pending questions", () => {
 
 	it("sends both pending permissions and questions together", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("perm-1"),
 				sessionId: "ses-1",
@@ -990,34 +994,26 @@ describe("handleClientConnected — error resilience", () => {
 	});
 });
 
-// ─── Gap 3: Real bridges integration ─────────────────────────────────────────
-// Previous tests use vi.fn() mocks for bridges. These tests use real
-// PermissionBridge instances to verify the actual data shape from getPending()
-// matches what handleClientConnected sends. Questions are now fetched via the
-// REST API (client.question.list), so those tests use mock return values
-// in the API format (with `multiple` instead of `multiSelect`).
+// ─── Pending interaction integration ─────────────────────────────────────────
+// Permissions are replayed from the Effect-owned pending interaction port.
+// Questions are replayed first from the same port, then from the OpenCode REST
+// API with field mapping (`multiple` → `multiSelect`).
 
-describe("handleClientConnected — real bridges integration (Gap 3)", () => {
-	it("replays permission from real PermissionBridge populated via onPermissionRequest", async () => {
-		const bridge = new PermissionBridge();
-
-		// Feed a real SSE event through the bridge
-		const sseEvent: OpenCodeEvent = {
-			type: "permission.asked",
-			properties: {
-				id: "perm-real-1",
-				permission: "file_write",
-				patterns: ["/tmp/test.txt"],
-				metadata: { foo: "bar" },
+describe("handleClientConnected — pending interaction integration", () => {
+	it("replays permission from the pending interaction port", async () => {
+		const deps = createMockClientInitDeps();
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
+			{
+				requestId: pid("perm-real-1"),
+				sessionId: "",
+				toolName: "file_write",
+				toolInput: { patterns: ["/tmp/test.txt"], metadata: { foo: "bar" } },
 				always: ["shell_exec"],
+				timestamp: 1000,
 			},
-		};
-		bridge.onPermissionRequest(sseEvent);
-		expect(bridge.size).toBe(1);
-
-		const deps = createMockClientInitDeps({
-			permissionBridge: bridge,
-		});
+		]);
 
 		await handleClientConnected(deps, "client-1");
 
@@ -1077,32 +1073,28 @@ describe("handleClientConnected — real bridges integration (Gap 3)", () => {
 		});
 	});
 
-	it("replays multiple pending items from real PermissionBridge and API questions simultaneously", async () => {
-		// Populate real PermissionBridge with 2 permissions
-		const pBridge = new PermissionBridge();
-		pBridge.onPermissionRequest({
-			type: "permission.asked",
-			properties: {
-				id: "perm-r1",
-				permission: "shell_exec",
-				patterns: [],
-				metadata: { cmd: "npm install" },
+	it("replays multiple pending permissions and API questions simultaneously", async () => {
+		const deps = createMockClientInitDeps();
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
+			{
+				requestId: pid("perm-r1"),
+				sessionId: "",
+				toolName: "shell_exec",
+				toolInput: { patterns: [], metadata: { cmd: "npm install" } },
+				always: [],
+				timestamp: 1000,
 			},
-		});
-		pBridge.onPermissionRequest({
-			type: "permission.asked",
-			properties: {
-				id: "perm-r2",
-				permission: "file_write",
-				patterns: ["/src/**"],
-				metadata: {},
+			{
+				requestId: pid("perm-r2"),
+				sessionId: "",
+				toolName: "file_write",
+				toolInput: { patterns: ["/src/**"], metadata: {} },
+				always: [],
+				timestamp: 1001,
 			},
-		});
-		expect(pBridge.size).toBe(2);
-
-		const deps = createMockClientInitDeps({
-			permissionBridge: pBridge,
-		});
+		]);
 
 		// Mock the REST API to return 1 pending question
 		vi.mocked(deps.client.question.list).mockResolvedValue([
@@ -1140,8 +1132,10 @@ describe("handleClientConnected — real bridges integration (Gap 3)", () => {
 describe("handleClientConnected — API permission rehydration", () => {
 	it("fetches permissions from API and sends them to connecting client", async () => {
 		const deps = createMockClientInitDeps();
-		// Bridge has nothing — simulates relay restart where bridge state is lost
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([]);
+		// Pending interaction service has nothing — simulates relay restart where service state is lost
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([]);
 		// But API has a pending permission
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
@@ -1153,8 +1147,10 @@ describe("handleClientConnected — API permission rehydration", () => {
 				always: [],
 			},
 		]);
-		// recoverPending returns the recovered entries
-		vi.mocked(deps.permissionBridge.recoverPending).mockReturnValue([
+		// recoverPendingPermissions returns the recovered entries
+		vi.mocked(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("per_api1"),
 				sessionId: "ses-abc",
@@ -1169,8 +1165,10 @@ describe("handleClientConnected — API permission rehydration", () => {
 
 		// Should call the API
 		expect(deps.client.permission.list).toHaveBeenCalled();
-		// Should recover into bridge (sessionID mapped to sessionId for bridge)
-		expect(deps.permissionBridge.recoverPending).toHaveBeenCalledWith([
+		// Should recover into pending interaction service (sessionID mapped to sessionId)
+		expect(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).toHaveBeenCalledWith([
 			{
 				id: "per_api1",
 				sessionId: "ses-abc",
@@ -1190,12 +1188,14 @@ describe("handleClientConnected — API permission rehydration", () => {
 		});
 	});
 
-	it("sends both bridge-cached and API-fetched permissions without duplicates", async () => {
+	it("sends both service-cached and API-fetched permissions without duplicates", async () => {
 		const deps = createMockClientInitDeps();
-		// Bridge already has one permission
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([
+		// Pending interaction service already has one permission
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
 			{
-				requestId: pid("per_bridge1"),
+				requestId: pid("per_service1"),
 				sessionId: "ses-1",
 				toolName: "shell_exec",
 				toolInput: { patterns: [], metadata: {} },
@@ -1203,7 +1203,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 				timestamp: 1000,
 			},
 		]);
-		// API returns a different permission (not in bridge)
+		// API returns a different permission (not in service)
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_api2",
@@ -1214,7 +1214,9 @@ describe("handleClientConnected — API permission rehydration", () => {
 				always: [],
 			},
 		]);
-		vi.mocked(deps.permissionBridge.recoverPending).mockReturnValue([
+		vi.mocked(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("per_api2"),
 				sessionId: "ses-2",
@@ -1231,19 +1233,21 @@ describe("handleClientConnected — API permission rehydration", () => {
 		const permCalls = sendToCalls.filter(
 			(c) => (c[1] as { type: string }).type === "permission_request",
 		);
-		// Should have both: one from bridge, one from API
+		// Should have both: one from service, one from API
 		expect(permCalls).toHaveLength(2);
 		const requestIds = permCalls.map(
 			(c) => (c[1] as { requestId: string }).requestId,
 		);
-		expect(requestIds).toContain("per_bridge1");
+		expect(requestIds).toContain("per_service1");
 		expect(requestIds).toContain("per_api2");
 	});
 
-	it("deduplicates permissions that exist in both bridge and API", async () => {
+	it("deduplicates permissions that exist in both service and API", async () => {
 		const deps = createMockClientInitDeps();
-		// Bridge has permission per_dup
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([
+		// Pending interaction service has permission per_dup
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("per_dup"),
 				sessionId: "ses-1",
@@ -1264,8 +1268,10 @@ describe("handleClientConnected — API permission rehydration", () => {
 				always: [],
 			},
 		]);
-		// recoverPending won't return anything new since bridge already has it
-		vi.mocked(deps.permissionBridge.recoverPending).mockReturnValue([]);
+		// recoverPendingPermissions won't return anything new since service already has it
+		vi.mocked(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).mockResolvedValue([]);
 
 		await handleClientConnected(deps, "client-1");
 
@@ -1273,7 +1279,7 @@ describe("handleClientConnected — API permission rehydration", () => {
 		const permCalls = sendToCalls.filter(
 			(c) => (c[1] as { type: string }).type === "permission_request",
 		);
-		// Should only send once (from bridge replay), not duplicated from API
+		// Should only send once (from service replay), not duplicated from API
 		expect(permCalls).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect((permCalls[0]![1] as { requestId: string }).requestId).toBe(
@@ -1286,10 +1292,12 @@ describe("handleClientConnected — API permission rehydration", () => {
 		vi.mocked(deps.client.permission.list).mockRejectedValue(
 			new Error("API down"),
 		);
-		// Bridge still has a permission
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([
+		// Pending interaction service still has a permission
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([
 			{
-				requestId: pid("per_bridge"),
+				requestId: pid("per_service"),
 				sessionId: "ses-1",
 				toolName: "Bash",
 				toolInput: { patterns: [], metadata: {} },
@@ -1303,11 +1311,11 @@ describe("handleClientConnected — API permission rehydration", () => {
 			handleClientConnected(deps, "client-1"),
 		).resolves.toBeUndefined();
 
-		// Bridge permission should still be sent
+		// Pending interaction service permission should still be sent
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "permission_request",
 			sessionId: "ses-1",
-			requestId: pid("per_bridge"),
+			requestId: pid("per_service"),
 			toolName: "Bash",
 			toolInput: { patterns: [], metadata: {} },
 		});
@@ -1315,7 +1323,9 @@ describe("handleClientConnected — API permission rehydration", () => {
 
 	it("maps API sessionID field to sessionId in recovered permissions", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.permissionBridge.getPending).mockReturnValue([]);
+		vi.mocked(
+			deps.pendingInteractions.listPendingPermissions,
+		).mockResolvedValue([]);
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_sess",
@@ -1325,7 +1335,9 @@ describe("handleClientConnected — API permission rehydration", () => {
 				metadata: {},
 			},
 		]);
-		vi.mocked(deps.permissionBridge.recoverPending).mockReturnValue([
+		vi.mocked(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).mockResolvedValue([
 			{
 				requestId: pid("per_sess"),
 				sessionId: "ses_325b9c3caffeFlhLvFRycK1ruF",

@@ -341,7 +341,28 @@ describe("createRelayEventSink — persistence", () => {
 describe("createRelayEventSink — permission/question", () => {
 	it("emits permission_request and resolves when resolvePermission is called", async () => {
 		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
+		let resolvePermission:
+			| ((response: { decision: "once" | "always" | "reject" }) => void)
+			| undefined;
+		const pendingInteractions = {
+			beginPermissionRequest: vi.fn(
+				() =>
+					new Promise<{ decision: "once" | "always" | "reject" }>((resolve) => {
+						resolvePermission = resolve;
+					}),
+			),
+			resolvePermissionRequest: vi.fn((_requestId, response) => {
+				resolvePermission?.(response);
+				return true;
+			}),
+			beginQuestionRequest: vi.fn(),
+			resolveQuestionRequest: vi.fn(),
+		};
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			pendingInteractions,
+		});
 		const pending = sink.requestPermission({
 			requestId: "req_1",
 			toolName: "Bash",
@@ -364,6 +385,101 @@ describe("createRelayEventSink — permission/question", () => {
 		sink.resolvePermission("req_1", { decision: "once" });
 		const response = await pending;
 		expect(response.decision).toBe("once");
+		expect(pendingInteractions.resolvePermissionRequest).toHaveBeenCalledWith(
+			"req_1",
+			{ decision: "once" },
+		);
+	});
+
+	it("tracks permission and question replay state through the pending interaction port", async () => {
+		const send = vi.fn();
+		let resolvePermission:
+			| ((response: { decision: "once" | "always" | "reject" }) => void)
+			| undefined;
+		let resolveQuestion:
+			| ((answers: Record<string, unknown>) => void)
+			| undefined;
+		const pendingInteractions = {
+			beginPermissionRequest: vi.fn(
+				() =>
+					new Promise<{ decision: "once" | "always" | "reject" }>((resolve) => {
+						resolvePermission = resolve;
+					}),
+			),
+			resolvePermissionRequest: vi.fn((_requestId, response) => {
+				resolvePermission?.(response);
+				return true;
+			}),
+			beginQuestionRequest: vi.fn(
+				() =>
+					new Promise<Record<string, unknown>>((resolve) => {
+						resolveQuestion = resolve;
+					}),
+			),
+			resolveQuestionRequest: vi.fn((_requestId, answers) => {
+				resolveQuestion?.(answers);
+				return true;
+			}),
+		};
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			pendingInteractions,
+		});
+
+		const permission = sink.requestPermission({
+			requestId: "req_1",
+			toolName: "Bash",
+			toolInput: { command: "whoami" },
+			sessionId: "ses-1",
+			turnId: "turn_1",
+			providerItemId: "toolu_1",
+			always: ["Bash"],
+		});
+		expect(pendingInteractions.beginPermissionRequest).toHaveBeenCalledWith({
+			requestId: "req_1",
+			sessionId: "ses-1",
+			toolName: "Bash",
+			toolInput: { command: "whoami" },
+			always: ["Bash"],
+		});
+		sink.resolvePermission("req_1", { decision: "once" });
+		await expect(permission).resolves.toEqual({ decision: "once" });
+		expect(pendingInteractions.resolvePermissionRequest).toHaveBeenCalledWith(
+			"req_1",
+			{ decision: "once" },
+		);
+
+		const question = sink.requestQuestion({
+			requestId: "que_1",
+			questions: [
+				{
+					question: "Continue?",
+					header: "Confirm",
+					options: [{ label: "Yes", description: "Continue" }],
+					multiSelect: false,
+					custom: true,
+				},
+			],
+		});
+		expect(pendingInteractions.beginQuestionRequest).toHaveBeenCalledWith({
+			requestId: "que_1",
+			sessionId: "ses-1",
+			questions: [
+				{
+					question: "Continue?",
+					header: "Confirm",
+					options: [{ label: "Yes", description: "Continue" }],
+					multiSelect: false,
+				},
+			],
+		});
+		sink.resolveQuestion("que_1", { "0": "Yes" });
+		await expect(question).resolves.toEqual({ "0": "Yes" });
+		expect(pendingInteractions.resolveQuestionRequest).toHaveBeenCalledWith(
+			"que_1",
+			{ "0": "Yes" },
+		);
 	});
 });
 

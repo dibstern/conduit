@@ -39,6 +39,7 @@ import {
 	LoggerTag,
 	OpenCodeAPITag,
 	ReadQueryTag,
+	SessionManagerTag,
 	StatusPollerTag,
 } from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
@@ -691,6 +692,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const log = yield* LoggerTag;
 		const eventBus = yield* DaemonEventBusTag;
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const legacySessionManagerOption =
+			yield* Effect.serviceOption(SessionManagerTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
@@ -797,9 +800,22 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			setForkEntry: (sessionId, entry) =>
-				setForkEntry(sessionId, entry, configDir).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
+				Effect.gen(function* () {
+					yield* setForkEntry(sessionId, entry, configDir).pipe(
+						Effect.provideService(SessionManagerStateTag, stateRef),
+					);
+					if (legacySessionManagerOption._tag === "Some") {
+						yield* Effect.try({
+							try: () =>
+								legacySessionManagerOption.value.setForkEntry(sessionId, entry),
+							catch: (cause) =>
+								new SessionManagerError({
+									operation: "setForkEntry",
+									cause,
+								}),
+						});
+					}
+				}),
 			sendDualSessionLists: (send, options) =>
 				Effect.gen(function* () {
 					const roots = yield* serviceListSessions({

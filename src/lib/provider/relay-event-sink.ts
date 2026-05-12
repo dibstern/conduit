@@ -2,7 +2,7 @@
 // Translates adapter-emitted CanonicalEvents into RelayMessages and pushes
 // them straight to WebSocket clients. Used for the in-process Claude SDK path
 // (ClaudeAdapter) where there is no SSE stream to piggy-back on. Permissions
-// and questions are bridged through the same path so the UI receives the
+// and questions are routed through the same path so the UI receives the
 // familiar RelayMessage shapes.
 
 import { createLogger } from "../logger.js";
@@ -10,7 +10,6 @@ import type { CanonicalEvent, StoredEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
-import { createDeferred, type Deferred } from "./deferred.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -68,22 +67,20 @@ export interface RelayEventSinkDeps {
 	readonly resetTimeout?: () => void;
 	/** Optional: persist events to SQLite for session history survival. */
 	readonly persist?: RelayEventSinkPersist;
-	/** Optional: permission bridge for tracking pending permissions (enables replay on session switch). */
-	readonly permissionBridge?: {
-		trackPending(entry: {
+	/** Effect-owned pending interaction state. Required when permission/question methods are used. */
+	readonly pendingInteractions?: {
+		beginPermissionRequest(entry: {
 			requestId: PermissionId;
 			sessionId: string;
 			toolName: string;
 			toolInput: Record<string, unknown>;
 			always: string[];
-			timestamp: number;
-		}): void;
-		/** Clean up the bridge entry when a permission is resolved. */
-		onPermissionReplied(requestId: string): boolean;
-	};
-	/** Optional: question bridge for tracking pending questions (enables replay on session switch). */
-	readonly questionBridge?: {
-		trackPending(entry: {
+		}): Promise<PermissionResponse>;
+		resolvePermissionRequest(
+			requestId: string,
+			response: PermissionResponse,
+		): boolean | undefined | Promise<boolean>;
+		beginQuestionRequest(entry: {
 			requestId: string;
 			sessionId: string;
 			questions: Array<{
@@ -93,10 +90,12 @@ export interface RelayEventSinkDeps {
 				multiSelect?: boolean;
 			}>;
 			toolCallId?: string;
-			timestamp: number;
-		}): void;
-		/** Clean up the bridge entry when a question is resolved. */
-		onResolved(requestId: string): boolean;
+		}): Promise<Record<string, unknown>>;
+		resolveQuestionRequest(
+			requestId: string,
+			answers: Record<string, unknown>,
+		): boolean | undefined | Promise<boolean>;
+		cancelSessionInteractions?(reason: string): void | Promise<void>;
 	};
 }
 
@@ -107,15 +106,21 @@ export type RelayEventSink = EventSink;
 export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	const { sessionId, send, clearTimeout, resetTimeout, persist } = deps;
 
-	const pendingPermissions = new Map<string, Deferred<PermissionResponse>>();
-	const pendingQuestions = new Map<string, Deferred<Record<string, unknown>>>();
-
 	function reset(): void {
 		if (resetTimeout) resetTimeout();
 	}
 
 	function finish(): void {
 		if (clearTimeout) clearTimeout();
+	}
+
+	function pendingInteractions() {
+		if (!deps.pendingInteractions) {
+			throw new Error(
+				"RelayEventSink requires pendingInteractions for permission/question requests",
+			);
+		}
+		return deps.pendingInteractions;
 	}
 
 	return {
@@ -155,18 +160,13 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			request: PermissionRequest,
 		): Promise<PermissionResponse> {
 			reset();
-			// Register with the permission bridge so this permission can be
-			// replayed when the user switches sessions and comes back.
-			if (deps.permissionBridge) {
-				deps.permissionBridge.trackPending({
-					requestId: request.requestId as PermissionId,
-					sessionId,
-					toolName: request.toolName,
-					toolInput: request.toolInput as Record<string, unknown>,
-					always: request.always ?? [],
-					timestamp: Date.now(),
-				});
-			}
+			const pendingResponse = pendingInteractions().beginPermissionRequest({
+				requestId: request.requestId as PermissionId,
+				sessionId,
+				toolName: request.toolName,
+				toolInput: request.toolInput as Record<string, unknown>,
+				always: request.always ?? [],
+			});
 			send({
 				type: "permission_request",
 				sessionId,
@@ -175,30 +175,24 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				toolInput: request.toolInput,
 				always: request.always ?? [],
 			});
-			const deferred = createDeferred<PermissionResponse>();
-			pendingPermissions.set(request.requestId, deferred);
-			return deferred.promise;
+			return pendingResponse;
 		},
 
 		async requestQuestion(
 			request: QuestionRequest,
 		): Promise<Record<string, unknown>> {
 			reset();
-			// Register with the question bridge so this question can be
-			// replayed when the user switches sessions and comes back.
-			if (deps.questionBridge) {
-				deps.questionBridge.trackPending({
-					requestId: request.requestId,
-					sessionId,
-					questions: request.questions.map((q) => ({
-						question: q.question,
-						header: q.header,
-						options: q.options,
-						multiSelect: q.multiSelect ?? false,
-					})),
-					timestamp: Date.now(),
-				});
-			}
+			const questions = request.questions.map((q) => ({
+				question: q.question,
+				header: q.header,
+				options: q.options,
+				multiSelect: q.multiSelect ?? false,
+			}));
+			const pendingAnswers = pendingInteractions().beginQuestionRequest({
+				requestId: request.requestId,
+				sessionId,
+				questions,
+			});
 			send({
 				type: "ask_user",
 				sessionId,
@@ -211,43 +205,36 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					custom: q.custom ?? true,
 				})),
 			});
-			const deferred = createDeferred<Record<string, unknown>>();
-			pendingQuestions.set(request.requestId, deferred);
-			return deferred.promise;
+			return pendingAnswers;
 		},
 
 		resolvePermission(requestId: string, response: PermissionResponse): void {
-			const deferred = pendingPermissions.get(requestId);
-			if (!deferred) {
+			if (!deps.pendingInteractions) {
 				log.warn(
-					`resolvePermission: no pending request ${requestId} (session=${sessionId})`,
+					`resolvePermission: no pending interaction port for ${requestId} (session=${sessionId})`,
 				);
 				return;
 			}
-			pendingPermissions.delete(requestId);
-			// Clean up the bridge entry so it is no longer replayed on
-			// session switch / reconnect.
-			if (deps.permissionBridge) {
-				deps.permissionBridge.onPermissionReplied(requestId);
-			}
-			deferred.resolve(response);
+			void deps.pendingInteractions.resolvePermissionRequest(
+				requestId,
+				response,
+			);
 		},
 
 		resolveQuestion(requestId: string, answers: Record<string, unknown>): void {
-			const deferred = pendingQuestions.get(requestId);
-			if (!deferred) {
+			if (!deps.pendingInteractions) {
 				log.warn(
-					`resolveQuestion: no pending request ${requestId} (session=${sessionId})`,
+					`resolveQuestion: no pending interaction port for ${requestId} (session=${sessionId})`,
 				);
 				return;
 			}
-			pendingQuestions.delete(requestId);
-			// Clean up the bridge entry so it is no longer replayed on
-			// session switch / reconnect.
-			if (deps.questionBridge) {
-				deps.questionBridge.onResolved(requestId);
+			void deps.pendingInteractions.resolveQuestionRequest(requestId, answers);
+		},
+
+		cancelSessionInteractions(reason: string): void {
+			if (deps.pendingInteractions?.cancelSessionInteractions) {
+				void deps.pendingInteractions.cancelSessionInteractions(reason);
 			}
-			deferred.resolve(answers);
 		},
 	};
 }

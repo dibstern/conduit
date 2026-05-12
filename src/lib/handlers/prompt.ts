@@ -1,15 +1,14 @@
 // ─── Prompt Handlers ─────────────────────────────────────────────────────────
 
-import { Effect } from "effect";
+import { Effect, Runtime } from "effect";
+import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
 import {
 	ClaudeEventPersistTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
 	ProviderStateServiceTag,
-	QuestionBridgeTag,
 	ReadQueryTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
@@ -112,8 +111,9 @@ export const handleMessage = (
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const config = yield* ConfigTag;
-		const permissionBridge = yield* PermissionBridgeTag;
-		const questionBridge = yield* QuestionBridgeTag;
+		const pendingInteractionService = yield* PendingInteractionServiceTag;
+		const runtime = yield* Effect.runtime<never>();
+		const runPending = Runtime.runPromise(runtime);
 
 		const { text, images } = payload;
 		const activeId = wsHandler.getClientSession(clientId);
@@ -340,8 +340,41 @@ export const handleMessage = (
 							clearTimeout: () => overrides.clearProcessingTimeout(activeId),
 							resetTimeout: () => overrides.resetProcessingTimeout(activeId),
 							...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
-							permissionBridge,
-							questionBridge,
+							pendingInteractions: {
+								beginPermissionRequest: (input) =>
+									runPending(
+										pendingInteractionService
+											.beginPermissionRequest(input)
+											.pipe(Effect.flatMap((pending) => pending.awaitResponse)),
+									),
+								resolvePermissionRequest: (requestId, response) =>
+									runPending(
+										pendingInteractionService.resolvePermissionRequest(
+											requestId,
+											response,
+										),
+									),
+								beginQuestionRequest: (input) =>
+									runPending(
+										pendingInteractionService
+											.beginQuestionRequest(input)
+											.pipe(Effect.flatMap((pending) => pending.awaitAnswers)),
+									),
+								resolveQuestionRequest: (requestId, answers) =>
+									runPending(
+										pendingInteractionService.resolveQuestionRequest(
+											requestId,
+											answers,
+										),
+									),
+								cancelSessionInteractions: (reason) =>
+									runPending(
+										pendingInteractionService.cancelSessionInteractions(
+											activeId,
+											reason,
+										),
+									),
+							},
 						})
 					: NOOP_EVENT_SINK;
 

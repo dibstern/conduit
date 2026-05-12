@@ -8,7 +8,6 @@ import {
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
-	QuestionBridgeTag,
 	ReadQueryTag,
 	SessionOverridesTag,
 	StatusPollerTag,
@@ -40,7 +39,6 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const log = yield* LoggerTag;
 		const modelService = yield* OpenCodeModelServiceTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const questionBridge = yield* QuestionBridgeTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		// Run all metadata sends concurrently, catching errors individually
@@ -114,8 +112,9 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 				Effect.gen(function* () {
 					const sentQuestionIds = new Set<string>();
 
-					const bridgePendingQuestions = questionBridge.getPending();
-					for (const pq of bridgePendingQuestions) {
+					const servicePendingQuestions =
+						yield* pendingInteractions.listPendingQuestions(id);
+					for (const pq of servicePendingQuestions) {
 						if (pq.sessionId && pq.sessionId !== id) continue;
 						wsHandler.sendTo(clientId, {
 							type: "ask_user",

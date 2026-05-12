@@ -56,6 +56,7 @@ export interface EventSink {
 	requestQuestion(request: QuestionRequest): Promise<Record<string, unknown>>;
 	resolvePermission(requestId: string, response: PermissionResponse): void;
 	resolveQuestion(requestId: string, answers: Record<string, unknown>): void;
+	cancelSessionInteractions?(reason: string): void | Promise<void>;
 }
 
 // ─── Turn Types ─────────────────────────────────────────────────────────────

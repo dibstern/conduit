@@ -18,7 +18,6 @@ describe("mock-factories", () => {
 			expect(deps.wsHandler.sendToSession).toBeDefined();
 			expect(deps.client).toBeDefined();
 			expect(deps.sessionMgr).toBeDefined();
-			expect(deps.permissionBridge).toBeDefined();
 			expect(deps.overrides).toBeDefined();
 			expect(deps.ptyManager).toBeDefined();
 			expect(deps.config).toBeDefined();
@@ -78,7 +77,7 @@ describe("mock-factories", () => {
 			expect(deps.sessionMgr).toBeDefined();
 			expect(deps.overrides).toBeDefined();
 			expect(deps.ptyManager).toBeDefined();
-			expect(deps.permissionBridge.getPending).toBeDefined();
+			expect(deps.pendingInteractions.listPendingPermissions).toBeDefined();
 			expect(deps.log).toBeDefined();
 		});
 

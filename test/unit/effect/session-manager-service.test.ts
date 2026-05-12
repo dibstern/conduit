@@ -18,6 +18,7 @@ import {
 	LoggerTag,
 	OpenCodeAPITag,
 	ReadQueryTag,
+	SessionManagerTag,
 	StatusPollerTag,
 } from "../../../src/lib/effect/services.js";
 import {
@@ -961,6 +962,51 @@ describe("SessionManagerService", () => {
 						forkPointTimestamp: 250,
 					},
 				]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
+			);
+		},
+	);
+
+	it.effect(
+		"live service mirrors fork metadata into the legacy session manager bridge",
+		() => {
+			const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-bridge-"));
+			const api = makeMockOpenCodeAPI();
+			const legacySetForkEntry = vi.fn();
+			const config: ProjectRelayConfig = {
+				httpServer: createServer(),
+				opencodeUrl: "http://localhost:4096",
+				projectDir: "/tmp/project",
+				slug: "project",
+				configDir: tmpDir,
+			};
+			const layer = SessionManagerServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(LoggerTag, makeMockLogger()),
+						Layer.succeed(ConfigTag, config),
+						Layer.succeed(SessionManagerTag, {
+							setForkEntry: legacySetForkEntry,
+						} as never),
+						makeSessionManagerStateLive(),
+						DaemonEventBusLive,
+					),
+				),
+			);
+			const entry = {
+				parentID: "parent-1",
+				forkMessageId: "msg-1",
+				forkPointTimestamp: 250,
+			};
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* service.setForkEntry("forked-1", entry);
+
+				expect(legacySetForkEntry).toHaveBeenCalledWith("forked-1", entry);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),

@@ -8,8 +8,6 @@
 
 import { type Cause, Context, Effect, Layer } from "effect";
 
-import type { PermissionBridge } from "../bridges/permission-bridge.js";
-import type { QuestionBridge } from "../bridges/question-bridge.js";
 import type { ForkEntry } from "../daemon/fork-metadata.js";
 import type {
 	HandlerDeps,
@@ -271,16 +269,6 @@ export class WebSocketHandlerTag extends Context.Tag("WebSocketHandler")<
 	WebSocketHandlerShape
 >() {}
 
-export class PermissionBridgeTag extends Context.Tag("PermissionBridge")<
-	PermissionBridgeTag,
-	PermissionBridge
->() {}
-
-export class QuestionBridgeTag extends Context.Tag("QuestionBridge")<
-	QuestionBridgeTag,
-	QuestionBridge
->() {}
-
 export class SessionOverridesTag extends Context.Tag("SessionOverrides")<
 	SessionOverridesTag,
 	SessionOverrides
@@ -394,41 +382,37 @@ type _AssertCoverage = {
 			? OpenCodeAPI
 			: K extends "sessionMgr"
 				? SessionManagerShape
-				: K extends "permissionBridge"
-					? PermissionBridge
-					: K extends "questionBridge"
-						? QuestionBridge
-						: K extends "overrides"
-							? SessionOverrides
-							: K extends "ptyManager"
-								? PtyManager
-								: K extends "config"
-									? ProjectRelayConfig
-									: K extends "log"
-										? Logger
-										: K extends "statusPoller"
-											? StatusPollerShape
-											: K extends "registry"
-												? SessionRegistry
-												: K extends "pollerManager"
-													? PollerManagerShape
-													: K extends "connectPtyUpstream"
-														? ConnectPtyUpstreamShape
-														: K extends "instanceMgmt"
-															? InstanceManagementDeps
-															: K extends "projectMgmt"
-																? ProjectManagementDeps
-																: K extends "scanDeps"
-																	? ScanDeps
-																	: K extends "readQuery"
-																		? ReadQueryService
-																		: K extends "orchestrationEngine"
-																			? OrchestrationEngine
-																			: K extends "claudeEventPersist"
-																				? LegacyRelayEventSinkPersist
-																				: K extends "providerStateService"
-																					? ProviderStateService
-																					: never;
+				: K extends "overrides"
+					? SessionOverrides
+					: K extends "ptyManager"
+						? PtyManager
+						: K extends "config"
+							? ProjectRelayConfig
+							: K extends "log"
+								? Logger
+								: K extends "statusPoller"
+									? StatusPollerShape
+									: K extends "registry"
+										? SessionRegistry
+										: K extends "pollerManager"
+											? PollerManagerShape
+											: K extends "connectPtyUpstream"
+												? ConnectPtyUpstreamShape
+												: K extends "instanceMgmt"
+													? InstanceManagementDeps
+													: K extends "projectMgmt"
+														? ProjectManagementDeps
+														: K extends "scanDeps"
+															? ScanDeps
+															: K extends "readQuery"
+																? ReadQueryService
+																: K extends "orchestrationEngine"
+																	? OrchestrationEngine
+																	: K extends "claudeEventPersist"
+																		? LegacyRelayEventSinkPersist
+																		: K extends "providerStateService"
+																			? ProviderStateService
+																			: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.

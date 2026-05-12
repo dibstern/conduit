@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createRelayEventSink,
@@ -187,23 +187,32 @@ describe("Event translation — structural minimum (safety net)", () => {
 });
 
 describe("RelayEventSink lifecycle", () => {
-	it("pending permission cleaned up after resolution via bridge", async () => {
+	it("pending permission resolves through the pending interaction port", async () => {
 		let trackedId: string | undefined;
 		let repliedId: string | undefined;
+		let resolvePermission:
+			| ((response: { decision: "once" | "always" | "reject" }) => void)
+			| undefined;
 
 		const { sink } = createCaptureSink({
-			permissionBridge: {
-				trackPending(entry) {
+			pendingInteractions: {
+				beginPermissionRequest(entry) {
 					trackedId = entry.requestId;
+					return new Promise((resolve) => {
+						resolvePermission = resolve;
+					});
 				},
-				onPermissionReplied(requestId) {
+				resolvePermissionRequest(requestId, response) {
 					repliedId = requestId;
+					resolvePermission?.(response);
 					return true;
 				},
+				beginQuestionRequest: async () => ({}),
+				resolveQuestionRequest: () => true,
 			},
 		});
 
-		// Request permission — creates pending deferred + bridge entry
+		// Request permission — creates pending service entry
 		const permissionPromise = sink.requestPermission({
 			requestId: "perm-1",
 			sessionId: SESSION_ID,
@@ -216,7 +225,6 @@ describe("RelayEventSink lifecycle", () => {
 
 		expect(trackedId).toBe("perm-1");
 
-		// Resolve it
 		sink.resolvePermission("perm-1", { decision: "reject" });
 
 		const result = await permissionPromise;
@@ -224,15 +232,20 @@ describe("RelayEventSink lifecycle", () => {
 		expect(repliedId).toBe("perm-1");
 	});
 
-	it("DESIGN GAP: no explicit teardown — unresolved permissions leak", () => {
-		// Documents that RelayEventSink has no dispose/cleanup method.
-		// Pending promises hang forever if the sink is GC'd without resolution.
-		// When a teardown method is added, replace this with a real test.
-		const { sink } = createCaptureSink();
+	it("cancels service-owned pending interactions through the port", () => {
+		const cancelSessionInteractions = vi.fn();
+		const { sink } = createCaptureSink({
+			pendingInteractions: {
+				beginPermissionRequest: async () => ({ decision: "reject" }),
+				resolvePermissionRequest: () => true,
+				beginQuestionRequest: async () => ({}),
+				resolveQuestionRequest: () => true,
+				cancelSessionInteractions,
+			},
+		});
 
-		// Verify no dispose method exists
-		expect("dispose" in sink).toBe(false);
-		expect("close" in sink).toBe(false);
-		expect("destroy" in sink).toBe(false);
+		sink.cancelSessionInteractions?.("session ended");
+
+		expect(cancelSessionInteractions).toHaveBeenCalledWith("session ended");
 	});
 });

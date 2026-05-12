@@ -6,15 +6,12 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
-import { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/effect/pending-interaction-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
-	QuestionBridgeTag,
 	SessionOverridesTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
@@ -102,8 +99,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					projectDir: "/tmp/project",
 					slug: "provider-state-test",
 				} satisfies ProjectRelayConfig),
-				Layer.succeed(PermissionBridgeTag, new PermissionBridge()),
-				Layer.succeed(QuestionBridgeTag, new QuestionBridge()),
+				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				makePersistenceEffectLayer(filename),
 			);
@@ -192,8 +188,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				projectDir: "/tmp/project",
 				slug: "history-test",
 			} satisfies ProjectRelayConfig),
-			Layer.succeed(PermissionBridgeTag, new PermissionBridge()),
-			Layer.succeed(QuestionBridgeTag, new QuestionBridge()),
+			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
 			makePersistenceEffectLayer(filename),
 		);
@@ -294,8 +289,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				projectDir: "/tmp/project",
 				slug: "claude-user-effect-test",
 			} satisfies ProjectRelayConfig),
-			Layer.succeed(PermissionBridgeTag, new PermissionBridge()),
-			Layer.succeed(QuestionBridgeTag, new QuestionBridge()),
+			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
 			makePersistenceEffectLayer(filename),
 		);
@@ -400,8 +394,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					projectDir: "/tmp/project",
 					slug: "claude-sink-effect-test",
 				} satisfies ProjectRelayConfig),
-				Layer.succeed(PermissionBridgeTag, new PermissionBridge()),
-				Layer.succeed(QuestionBridgeTag, new QuestionBridge()),
+				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				makePersistenceEffectLayer(filename),
 			);

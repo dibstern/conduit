@@ -15,12 +15,10 @@ import {
 	OpenCodeAPITag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
 	PollerManagerTag,
 	ProjectMgmtTag,
 	ProviderStateServiceTag,
 	PtyManagerTag,
-	QuestionBridgeTag,
 	// Persistence extension Tags
 	ReadQueryTag,
 	ScanDepsTag,
@@ -38,8 +36,6 @@ const ALL_TAGS = [
 	OpenCodeSettingsServiceTag,
 	SessionManagerTag,
 	WebSocketHandlerTag,
-	PermissionBridgeTag,
-	QuestionBridgeTag,
 	SessionOverridesTag,
 	PtyManagerTag,
 	ConfigTag,
@@ -73,8 +69,8 @@ describe("Service Tags", () => {
 	});
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
-		// HandlerDeps has 20 fields (13 required + 7 optional) + 1 extracted handler service + 1 per-request.
-		expect(ALL_TAGS.length).toBe(22);
+		// Bridge classes are no longer Effect services; count only active Tags.
+		expect(ALL_TAGS.length).toBe(20);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -93,14 +89,6 @@ describe("Service Tags", () => {
 
 	it("WebSocketHandler tag has correct key", () => {
 		expect(WebSocketHandlerTag.key).toBe("WebSocketHandler");
-	});
-
-	it("PermissionBridge tag has correct key", () => {
-		expect(PermissionBridgeTag.key).toBe("PermissionBridge");
-	});
-
-	it("QuestionBridge tag has correct key", () => {
-		expect(QuestionBridgeTag.key).toBe("QuestionBridge");
 	});
 
 	it("SessionOverrides tag has correct key", () => {

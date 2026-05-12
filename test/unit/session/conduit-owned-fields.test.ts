@@ -157,6 +157,46 @@ describe("conduit-owned fields survive session list refresh", () => {
 			expect(third[0]?.forkMessageId).toBe("msg_1");
 		});
 
+		it("SQLite-backed listSessions also includes service-owned fork metadata", async () => {
+			const readQuery = {
+				listSessions: vi.fn().mockReturnValue([
+					{
+						id: "ses_forked",
+						provider: "opencode",
+						provider_sid: null,
+						title: "Forked",
+						status: "idle",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: null,
+						created_at: 1000,
+						updated_at: 2000,
+					},
+				]),
+			};
+			const mockClient = {
+				session: { list: vi.fn() },
+			} as unknown as OpenCodeAPI;
+
+			const mgr = new SessionManager({
+				client: mockClient,
+				configDir: tmpDir,
+				readQuery: readQuery as never,
+			});
+			mgr.setForkEntry("ses_forked", {
+				forkMessageId: "msg_sqlite",
+				parentID: "ses_parent",
+				forkPointTimestamp: 1500,
+			});
+
+			const sessions = await mgr.listSessions();
+
+			expect(mockClient.session.list).not.toHaveBeenCalled();
+			expect(sessions[0]?.parentID).toBe("ses_parent");
+			expect(sessions[0]?.forkMessageId).toBe("msg_sqlite");
+			expect(sessions[0]?.forkPointTimestamp).toBe(1500);
+		});
+
 		it("searchSessions also includes fork metadata", async () => {
 			const mockClient = {
 				session: {

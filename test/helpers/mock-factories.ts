@@ -16,8 +16,6 @@
 import { Effect, Layer } from "effect";
 import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
-import type { PermissionBridge } from "../../src/lib/bridges/permission-bridge.js";
-import type { QuestionBridge } from "../../src/lib/bridges/question-bridge.js";
 import { DaemonEventBusLive } from "../../src/lib/effect/daemon-pubsub.js";
 import {
 	type DaemonState,
@@ -39,11 +37,9 @@ import {
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
-	PermissionBridgeTag,
 	type PollerManagerShape,
 	PollerManagerTag,
 	PtyManagerTag,
-	QuestionBridgeTag,
 	type SessionManagerShape,
 	SessionManagerTag,
 	SessionOverridesTag,
@@ -230,27 +226,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
-function createMockPermissionBridge(): HandlerDeps["permissionBridge"] {
-	return {
-		onPermissionResponse: vi.fn().mockReturnValue(null),
-		onPermissionRequest: vi.fn(),
-		onPermissionReplied: vi.fn(),
-		getPending: vi.fn().mockReturnValue([]),
-		checkTimeouts: vi.fn().mockReturnValue([]),
-		findPendingForSession: vi.fn().mockReturnValue([]),
-		recoverPending: vi.fn(),
-	} as unknown as HandlerDeps["permissionBridge"];
-}
-
-function createMockQuestionBridge(): HandlerDeps["questionBridge"] {
-	return {
-		trackPending: vi.fn(),
-		onResolved: vi.fn().mockReturnValue(false),
-		getPending: vi.fn().mockReturnValue([]),
-		size: 0,
-	} as unknown as HandlerDeps["questionBridge"];
-}
-
 function createMockOverrides(): HandlerDeps["overrides"] {
 	return {
 		agent: undefined,
@@ -323,8 +298,6 @@ export function createMockHandlerDeps(
 		wsHandler: createMockWsHandlerFull(),
 		client: createMockClient(),
 		sessionMgr: createMockSessionMgr(),
-		permissionBridge: createMockPermissionBridge(),
-		questionBridge: createMockQuestionBridge(),
 		overrides: createMockOverrides(),
 		ptyManager: createMockPtyManager(),
 		config: createMockConfig(),
@@ -417,9 +390,10 @@ export function createMockClientInitDeps(
 		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
 		ptyManager:
 			createMockPtyManager() as unknown as ClientInitDeps["ptyManager"],
-		permissionBridge: {
-			getPending: vi.fn().mockReturnValue([]),
-			recoverPending: vi.fn().mockReturnValue([]),
+		pendingInteractions: {
+			listPendingPermissions: vi.fn().mockResolvedValue([]),
+			recoverPendingPermissions: vi.fn().mockResolvedValue([]),
+			listPendingQuestions: vi.fn().mockResolvedValue([]),
 		},
 		log: createSilentLogger(),
 		...overrides,
@@ -441,8 +415,6 @@ export function createMockProjectRelay(
 		client: createMockClient() as unknown as ProjectRelay["client"],
 		sessionMgr: createMockSessionMgr() as unknown as ProjectRelay["sessionMgr"],
 		translator: {} as unknown as ProjectRelay["translator"],
-		permissionBridge:
-			createMockPermissionBridge() as unknown as ProjectRelay["permissionBridge"],
 		orchestration: {
 			engine: {
 				dispatch: vi.fn().mockResolvedValue({
@@ -850,35 +822,6 @@ export function makeMockSessionOverrides(
 	} as unknown as SessionOverrides;
 }
 
-/** Create a mock PermissionBridge for Effect tests. */
-export function makeMockPermissionBridge(
-	overrides?: Partial<PermissionBridge>,
-): PermissionBridge {
-	return {
-		onPermissionResponse: vi.fn(() => null),
-		onPermissionRequest: vi.fn(),
-		onPermissionReplied: vi.fn(),
-		getPending: vi.fn(() => []),
-		checkTimeouts: vi.fn(() => []),
-		findPendingForSession: vi.fn(() => []),
-		recoverPending: vi.fn(),
-		...overrides,
-	} as unknown as PermissionBridge;
-}
-
-/** Create a mock QuestionBridge for Effect tests. */
-export function makeMockQuestionBridge(
-	overrides?: Partial<QuestionBridge>,
-): QuestionBridge {
-	return {
-		trackPending: vi.fn(),
-		onResolved: vi.fn(() => false),
-		getPending: vi.fn(() => []),
-		size: 0,
-		...overrides,
-	} as unknown as QuestionBridge;
-}
-
 /** Create a mock PtyManager for Effect tests. */
 export function makeMockPtyManager(
 	overrides?: Partial<PtyManager>,
@@ -921,8 +864,6 @@ export interface TestHandlerLayerOptions {
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
 	overrides?: SessionOverrides;
-	permissionBridge?: PermissionBridge;
-	questionBridge?: QuestionBridge;
 	ptyManager?: PtyManager;
 	config?: ProjectRelayConfig;
 	log?: Logger;
@@ -949,8 +890,6 @@ export function makeTestHandlerLayer(
 	const wsHandler = opts?.wsHandler ?? makeMockWebSocketHandler();
 	const sessionMgr = opts?.sessionMgr ?? makeMockSessionManagerShape();
 	const sessionOverrides = opts?.overrides ?? makeMockSessionOverrides();
-	const permissionBridge = opts?.permissionBridge ?? makeMockPermissionBridge();
-	const questionBridge = opts?.questionBridge ?? makeMockQuestionBridge();
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
 	const config = opts?.config ?? makeMockConfig();
 	const log = opts?.log ?? makeMockLogger();
@@ -1002,8 +941,6 @@ export function makeTestHandlerLayer(
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionOverridesTag, sessionOverrides),
-		Layer.succeed(PermissionBridgeTag, permissionBridge),
-		Layer.succeed(QuestionBridgeTag, questionBridge),
 		Layer.succeed(PtyManagerTag, ptyManager),
 		configLayer,
 		loggerLayer,

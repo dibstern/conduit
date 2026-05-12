@@ -18,7 +18,6 @@ import {
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
-import type { PermissionDecision } from "../provider/types.js";
 import type { PayloadMap } from "./payloads.js";
 
 /**
@@ -140,7 +139,7 @@ export const handlePermissionResponse = (
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 
 		const { requestId, decision, persistScope, persistPattern } = payload;
-		const sessionId = wsHandler.getClientSession(clientId) ?? "?";
+		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
 		const resultOption =
 			yield* pendingInteractions.resolvePermissionFromBrowser(
 				requestId,
@@ -149,40 +148,28 @@ export const handlePermissionResponse = (
 		const result = Option.getOrUndefined(resultOption);
 
 		if (result) {
+			const sessionId = result.sessionId || visibleSessionId || "?";
 			log.info(
 				`client=${clientId} session=${sessionId} ${result.toolName}: ${result.mapped}`,
 			);
 
-			// Route through OrchestrationEngine for Claude sessions
+			let isClaudeSession = false;
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 			if (engineOption._tag === "Some") {
 				const engine = engineOption.value;
 				const providerId = engine.getProviderForSession(sessionId);
 				if (providerId === "claude") {
-					const dispatchResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engine.dispatch({
-								type: "resolve_permission",
-								sessionId,
-								requestId,
-								decision: result.mapped as PermissionDecision,
-							}),
-						),
-					);
-					if (dispatchResult._tag === "Left") {
-						log.warn(
-							`client=${clientId} session=${sessionId} engine resolve_permission failed: ${dispatchResult.left}`,
-						);
-					}
+					isClaudeSession = true;
 				}
 			}
 
-			// Also call the OpenCode REST API (harmless no-op for Claude sessions)
-			yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.permission.reply(sessionId, requestId, result.mapped),
-				),
-			);
+			if (!isClaudeSession) {
+				yield* Effect.either(
+					Effect.tryPromise(() =>
+						client.permission.reply(sessionId, requestId, result.mapped),
+					),
+				);
+			}
 
 			wsHandler.broadcast({
 				type: "permission_resolved",
@@ -221,43 +208,44 @@ export const handleAskUserResponse = (
 			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: formatted })}`,
 		);
 
-		// Route through OrchestrationEngine for Claude sessions
-		const engineHandled = yield* Effect.gen(function* () {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None" || !sessionId) return false;
-			const engine = engineOption.value;
-			const providerId = engine.getProviderForSession(sessionId);
-			if (providerId !== "claude") return false;
-
-			const dispatchResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engine.dispatch({
-						type: "resolve_question",
-						sessionId,
-						requestId: toolId,
-						answers: answers as Record<string, unknown>,
-					}),
-				),
-			);
-			if (dispatchResult._tag === "Left") {
-				log.warn(
-					`client=${clientId} session=${sessionId} engine resolve_question failed: ${dispatchResult.left}`,
+		const pendingInteractionsOption = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
+		if (pendingInteractionsOption._tag === "Some") {
+			const resolvedOption =
+				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
+					toolId,
+					answers as Record<string, unknown>,
 				);
-				return false;
+			const resolved = Option.getOrUndefined(resolvedOption);
+			if (resolved) {
+				const questionSessionId = resolved.sessionId || sessionId;
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				if (engineOption._tag === "Some") {
+					const providerId =
+						engineOption.value.getProviderForSession(questionSessionId);
+					if (providerId !== "claude") {
+						log.warn(
+							`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+						);
+					}
+				}
+				wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId: questionSessionId,
+				});
+				if (questionSessionId) {
+					yield* sessionManagerService.decrementPendingQuestionCount(
+						questionSessionId,
+					);
+				}
+				yield* restartProcessingTimeout(questionSessionId);
+				return;
 			}
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				toolId,
-				sessionId,
-			});
-			if (sessionId) {
-				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
-			}
-			yield* restartProcessingTimeout(sessionId);
-			return true;
-		});
-
-		if (engineHandled) return;
+		}
 
 		// OpenCode REST API path with fallback (preserving recovery logic)
 		const replyResult = yield* Effect.either(
@@ -350,43 +338,44 @@ export const handleQuestionReject = (
 
 		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
 
-		// Route through OrchestrationEngine for Claude sessions
-		const engineHandled = yield* Effect.gen(function* () {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None" || !sessionId) return false;
-			const engine = engineOption.value;
-			const providerId = engine.getProviderForSession(sessionId);
-			if (providerId !== "claude") return false;
-
-			const dispatchResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engine.dispatch({
-						type: "resolve_question",
-						sessionId,
-						requestId: toolId,
-						answers: {},
-					}),
-				),
-			);
-			if (dispatchResult._tag === "Left") {
-				log.warn(
-					`client=${clientId} session=${sessionId} engine resolve_question (reject) failed: ${dispatchResult.left}`,
+		const pendingInteractionsOption = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
+		if (pendingInteractionsOption._tag === "Some") {
+			const resolvedOption =
+				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
+					toolId,
+					{},
 				);
-				return false;
+			const resolved = Option.getOrUndefined(resolvedOption);
+			if (resolved) {
+				const questionSessionId = resolved.sessionId || sessionId;
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				if (engineOption._tag === "Some") {
+					const providerId =
+						engineOption.value.getProviderForSession(questionSessionId);
+					if (providerId !== "claude") {
+						log.warn(
+							`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+						);
+					}
+				}
+				wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId: questionSessionId,
+				});
+				if (questionSessionId) {
+					yield* sessionManagerService.decrementPendingQuestionCount(
+						questionSessionId,
+					);
+				}
+				yield* restartProcessingTimeout(questionSessionId);
+				return;
 			}
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				toolId,
-				sessionId,
-			});
-			if (sessionId) {
-				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
-			}
-			yield* restartProcessingTimeout(sessionId);
-			return true;
-		});
-
-		if (engineHandled) return;
+		}
 
 		// OpenCode REST API path with fallback (preserving recovery logic)
 		const rejectResult = yield* Effect.either(

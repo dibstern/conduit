@@ -1,6 +1,6 @@
 // ─── Relay Stack ─────────────────────────────────────────────────────────────
 // The complete relay wiring: OpenCode client, SSE consumer, event translator,
-// WebSocket handler, session manager, permission/question bridges.
+// WebSocket handler, session manager, and Effect-owned relay services.
 //
 // Extracted from skeleton.ts so integration tests exercise the exact same
 // wiring as production. skeleton.ts is now a thin CLI wrapper around this.
@@ -29,8 +29,6 @@ import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../bridges/client-init.js";
-import { PermissionBridge } from "../bridges/permission-bridge.js";
-import { QuestionBridge } from "../bridges/question-bridge.js";
 import { AuthManagerTag } from "../effect/auth-middleware.js";
 import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
 import {
@@ -49,12 +47,10 @@ import {
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
 	PollerManagerTag,
 	ProjectMgmtTag,
 	ProviderStateServiceTag,
 	PtyManagerTag,
-	QuestionBridgeTag,
 	ReadQueryTag,
 	ScanDepsTag,
 	type SessionManagerShape,
@@ -372,7 +368,6 @@ export interface ProjectRelay {
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
-	permissionBridge: PermissionBridge;
 	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
 	orchestration: OrchestrationLayer;
 	/** Effect ManagedRuntime for dispatching through the Effect handler pipeline. */
@@ -425,7 +420,6 @@ export interface RelayStack {
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
-	permissionBridge: PermissionBridge;
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;
@@ -441,7 +435,7 @@ export interface RelayStack {
  * Create a per-project relay that attaches to an existing HTTP server.
  *
  * Sets up all relay components (OpenCode client, SSE consumer, translator,
- * session manager, bridges, WebSocket handler) and wires the full event
+ * session manager, WebSocket handler, and Effect-owned services) and wires the full event
  * pipeline. Does NOT create or manage an HTTP server — the caller owns it.
  *
  * Used by both `createRelayStack()` (for standalone/skeleton mode) and the
@@ -497,7 +491,6 @@ export async function createProjectRelay(
 	});
 
 	const translator = createTranslator();
-	const permissionBridge = new PermissionBridge();
 	const sessionMgr = new SessionManager({
 		client: api,
 		log: sessionLog,
@@ -756,8 +749,12 @@ export async function createProjectRelay(
 			})()
 		: undefined;
 
-	// ── Question bridge ────────────────────────────────────────────────────
-	const questionBridge = new QuestionBridge();
+	// Late-binding runtime: callbacks fire after full relay initialization, but
+	// registering them here keeps the external WebSocket boundary thin.
+	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
+		RelayRuntimeContext,
+		PersistenceEffectError
+	>;
 
 	// ── Client init deps + connection handlers ──────────────────────────────
 	const clientInitDeps: ClientInitDeps = {
@@ -766,7 +763,29 @@ export async function createProjectRelay(
 		sessionMgr,
 		overrides,
 		ptyManager,
-		permissionBridge,
+		pendingInteractions: {
+			listPendingPermissions: () =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* PendingInteractionServiceTag;
+						return yield* service.listPendingPermissions();
+					}),
+				),
+			recoverPendingPermissions: (permissions) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* PendingInteractionServiceTag;
+						return yield* service.recoverPendingPermissions(permissions);
+					}),
+				),
+			listPendingQuestions: (sessionId) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* PendingInteractionServiceTag;
+						return yield* service.listPendingQuestions(sessionId);
+					}),
+				),
+		},
 		statusPoller,
 		...(config.getInstances != null && { getInstances: config.getInstances }),
 		...(config.getCachedUpdate != null && {
@@ -778,13 +797,6 @@ export async function createProjectRelay(
 		...(readQuery != null && { readQuery }),
 		log: wsLog,
 	};
-
-	// Late-binding runtime: callbacks fire after full relay initialization, but
-	// registering them here keeps the external WebSocket boundary thin.
-	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
-		RelayRuntimeContext,
-		PersistenceEffectError
-	>;
 
 	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
 		wsLog.info(
@@ -846,8 +858,7 @@ export async function createProjectRelay(
 
 	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
 	// RelayStateLive provides all self-constructing Effect-native state Layers.
-	// Bridge layers wrap already-constructed imperative instances via
-	// Layer.succeed(Tag, instance). Both are merged into a single Layer tree.
+	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
 	// Required bridge layers (imperative instances → Effect Tags)
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
@@ -872,8 +883,6 @@ export async function createProjectRelay(
 		pendingInteractionServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(PermissionBridgeTag, permissionBridge),
-		Layer.succeed(QuestionBridgeTag, questionBridge),
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(PtyManagerTag, ptyManager),
 		configLayer,
@@ -1168,7 +1177,6 @@ export async function createProjectRelay(
 		client: api,
 		sessionMgr,
 		translator,
-		permissionBridge,
 		orchestration,
 		effectRuntime,
 		...(config.persistence ? { persistence: config.persistence } : {}),
@@ -1431,7 +1439,6 @@ export async function createRelayStack(
 		client: relay.client,
 		sessionMgr: relay.sessionMgr,
 		translator: relay.translator,
-		permissionBridge: relay.permissionBridge,
 
 		getPort() {
 			const addr = httpServer.address();

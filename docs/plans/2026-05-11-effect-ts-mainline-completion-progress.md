@@ -2060,6 +2060,192 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.26: Pending Interaction Waiter Ownership And Bridge Removal
+
+Plan issues found:
+
+- Treating `PermissionBridgeTag` / `QuestionBridgeTag` as thin Effect wrappers would preserve the real split-brain
+  bug: replay metadata would live in one owner while Claude SDK waiters lived in `RelayEventSink` local maps.
+- Browser permission/question handlers must not both resolve the service waiter and dispatch a Claude engine
+  resolution command. That double-resolution path can race and log false "unknown request" failures.
+- Browser permission/question responses must use the pending service's owner session, not the answering client's
+  currently visible session. Otherwise a global permission or replayed question answered while viewing another session
+  replies to OpenCode, routes provider detection, updates pending counts, and broadcasts resolution against the wrong
+  session.
+- Permission timeout handling cannot only delete replay metadata. Once waiters are service-owned, timeout eviction must
+  also fail the active waiter or the SDK request can hang after the UI sees a timeout.
+- Keeping optional bridge fallback branches in `client-init` or `relay-event-sink` would leave a production
+  compatibility path that bypasses the new Effect owner. Those branches were removed rather than documented as
+  temporary debt.
+- Full-suite replay exposed a separate mid-migration split-brain: `handleForkSession` writes fork metadata through
+  `SessionManagerService`, but some SSE/status refresh broadcasts still flow through the legacy `SessionManager`.
+  While both managers coexist, service-owned fork metadata must be mirrored into the legacy bridge or later
+  `session_list` refreshes can erase fork rendering metadata in the browser.
+- The legacy `SessionManager` SQLite read-query path also dropped its own `forkMeta` overlay before adapting rows.
+  That made fork metadata preservation depend on whether a session list used the provider API or SQLite projection.
+
+Changes:
+
+- Expanded `PendingInteractionService` so it owns pending permission replay, pending question replay, active
+  permission/question waiters, browser resolution, SDK-side resolution, session cancellation, recovery, and timeout
+  eviction.
+- Migrated Claude `RelayEventSink` interaction requests to the pending interaction service port. The sink no longer
+  keeps local pending maps and no longer accepts generic permission/question bridge dependencies.
+- Migrated `handleMessage` to build Claude event sinks from `PendingInteractionServiceTag`; `PermissionBridgeTag` and
+  `QuestionBridgeTag` were removed from handler dependencies and the relay Layer graph.
+- Migrated Claude browser permission/question response paths to resolve through the pending interaction service instead
+  of redispatching into the orchestration engine.
+- Returned the service-owned permission/question session from browser resolution and used it for REST replies, provider
+  routing, pending-question counts, processing timeout restarts, and browser resolution broadcasts.
+- Migrated `handleClientConnected(...)` and session metadata question replay to `PendingInteractionServiceTag`, with
+  OpenCode API recovery still deduped against service-owned state.
+- Mirrored `SessionManagerServiceLive.setForkEntry(...)` into the legacy `SessionManagerTag` while that compatibility
+  bridge remains, so legacy SSE/status broadcasts cannot overwrite fork metadata with stale session rows.
+- Fixed the legacy `SessionManager` SQLite list path to pass its in-memory fork metadata into
+  `sessionRowsToSessionInfoList(...)`, matching the provider API list path.
+- Deleted the unused generic `PermissionBridge`, the dormant `RelayTimers` wrapper, and the stale `QuestionBridge`
+  state class. `question-bridge.ts` now only contains the still-used OpenCode question field mapper.
+- Confirmed the AGENTS guidance reflects the current OpenCode SDK/API client and Claude Agent SDK setup rather than a
+  fixed `localhost:4096` OpenCode debug instance.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/pending-interaction-service.test.ts -t "fails active permission waiters"
+Exit: 1
+Expected failure:
+  waiter remained unresolved after takeTimedOutPermissions removed the replay entry.
+```
+
+```text
+$ pnpm check
+Exit: 2
+Expected failure:
+  tests/helpers still provided PermissionBridgeTag and QuestionBridgeTag after the source tags were removed.
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts --testNamePattern "legacy session manager bridge"
+Exit: 1
+Expected failure:
+  service.setForkEntry() did not call the legacy SessionManagerTag bridge.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts --testNamePattern "pending permission session"
+Exit: 1
+Expected failure:
+  permission_response for a service-owned permission used the responding client's visible session instead of the
+  permission's owner session.
+```
+
+```text
+$ pnpm vitest run test/unit/effect/pending-interaction-service.test.ts test/unit/handlers/effect-handlers.test.ts --testNamePattern "owner session|visible session|pending question session|maps browser permission decisions"
+Exit: 1
+Expected failure:
+  service-owned question resolution returned no owner session, and browser answer/reject handlers fell through to the
+  OpenCode REST path when the client was viewing another session.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/pending-interaction-service.test.ts -t "fails active permission waiters|takes timed-out"
+Exit: 0
+Tests 2 passed | 6 skipped
+```
+
+```text
+$ pnpm vitest run test/unit/bridges/question-bridge.test.ts \
+  test/unit/provider/relay-event-sink.test.ts \
+  test/unit/pipeline/event-translation-snapshots.test.ts \
+  test/unit/bridges/client-init.test.ts \
+  test/unit/effect/pending-interaction-service.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  10 passed (10)
+Tests  204 passed (204)
+Note: run emitted existing Node SQLite experimental warnings.
+```
+
+```text
+$ pnpm vitest run test/unit/session/conduit-owned-fields.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  7 passed (7)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts --testNamePattern "legacy session manager bridge"
+Exit: 0
+Tests  1 passed | 19 skipped
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts --testNamePattern "pending permission session"
+Exit: 0
+Tests  1 passed | 72 skipped
+```
+
+```text
+$ pnpm vitest run test/unit/effect/pending-interaction-service.test.ts test/unit/handlers/effect-handlers.test.ts --testNamePattern "owner session|visible session|pending question session|maps browser permission decisions"
+Exit: 0
+Tests  4 passed | 80 skipped
+```
+
+```text
+$ pnpm exec playwright test --config test/e2e/playwright-replay.config.ts test/e2e/specs/fork-session.spec.ts --project=desktop
+Exit: 0
+Tests  5 passed
+```
+
+```text
+$ pnpm exec vitest run --config vitest.contract.config.ts test/contract/tool-sse-transitions.contract.ts --reporter=verbose
+Exit: 0
+Test Files  1 passed (1)
+Tests  13 passed (13)
+Note: this reran the live OpenCode contract failure seen during `pnpm test:all`; the narrow rerun passed in 146.88s.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 972 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > unit-output.log 2>&1 || (echo "Unit tests failed, see unit-output.log" && exit 1)
+Exit: 0
+Test Files  361 passed (361)
+Tests  5188 passed | 2 skipped | 12 todo (5202)
+Note: run emitted existing Node SQLite experimental warnings and an existing MaxListenersExceededWarning in component tests.
+```
+
+```text
+$ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && exit 1)
+Exit: 0
+All steps passed, including unit, integration, contract, E2E, multi-instance, subagent, visual, Storybook build, and
+Storybook visual tests.
+```
+
+```text
+$ rg -n "PermissionBridgeTag|QuestionBridgeTag|permission-bridge|relay-timers|class QuestionBridge|permissionBridge\\??:|questionBridge\\??:" \
+  src test --glob '!test/e2e/fixtures/subagent-snapshot.json' --glob '!src/lib/provider/claude/*' \
+  --glob '!test/unit/provider/claude/*'
+Exit: 1
+No remaining generic permission/question bridge tags, generic permission bridge module, dormant relay timers, or
+generic question bridge state outside the Claude SDK adapter boundary.
+```
+
 ## Phase 7.11: Session List Handler Service Contract
 
 Plan issues found:

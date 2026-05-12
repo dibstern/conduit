@@ -7,8 +7,6 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import type { PermissionBridge } from "../../../src/lib/bridges/permission-bridge.js";
-import type { QuestionBridge } from "../../../src/lib/bridges/question-bridge.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -27,10 +25,8 @@ import {
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
 	PollerManagerTag,
 	PtyManagerTag,
-	QuestionBridgeTag,
 	ReadQueryTag,
 	ScanDepsTag,
 	SessionManagerTag,
@@ -1221,25 +1217,6 @@ function mockSessionManager(
 	} as unknown as SessionManagerShape;
 }
 
-function mockPermissionBridge(
-	overrides?: Partial<PermissionBridge>,
-): PermissionBridge {
-	return {
-		onPermissionResponse: vi.fn(() => null),
-		getPending: vi.fn(() => []),
-		...overrides,
-	} as unknown as PermissionBridge;
-}
-
-function mockQuestionBridge(
-	overrides?: Partial<QuestionBridge>,
-): QuestionBridge {
-	return {
-		getPending: vi.fn(() => []),
-		...overrides,
-	} as unknown as QuestionBridge;
-}
-
 function mockPtyManager(overrides?: Partial<PtyManager>): PtyManager {
 	return {
 		closeSession: vi.fn(),
@@ -1292,8 +1269,6 @@ function makeForkSessionLayer(options?: {
 		PendingInteractionServiceLive,
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
-		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
-		Layer.succeed(QuestionBridgeTag, mockQuestionBridge()),
 		Layer.succeed(StatusPollerTag, {
 			isProcessing: vi.fn(() => false),
 			clearMessageActivity: vi.fn(),
@@ -1342,8 +1317,6 @@ function makeSessionLifecycleLayer(options?: {
 		PendingInteractionServiceLive,
 		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
-		Layer.succeed(PermissionBridgeTag, mockPermissionBridge()),
-		Layer.succeed(QuestionBridgeTag, mockQuestionBridge()),
 		Layer.succeed(StatusPollerTag, {
 			isProcessing: vi.fn(() => false),
 			clearMessageActivity: vi.fn(),
@@ -1921,7 +1894,7 @@ describe("handleScanNow", () => {
 
 describe("handlePermissionResponse", () => {
 	it.effect(
-		"processes permission response through PendingInteractionService without PermissionBridgeTag",
+		"processes permission response through PendingInteractionService",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -1967,6 +1940,62 @@ describe("handlePermissionResponse", () => {
 						expect.objectContaining({
 							type: "permission_resolved",
 							requestId: "perm-1",
+							decision: "once",
+						}),
+					);
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"uses the pending permission session when the responding client is viewing another session",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "visible-session"),
+			});
+			const log = mockLogger();
+			const client = {
+				permission: { reply: vi.fn(async () => {}) },
+				config: { get: vi.fn(async () => ({})) },
+			} as unknown as OpenCodeAPI;
+			const config = mockConfig();
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+			);
+
+			return Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				yield* pendingInteractions.recordPermissionRequest({
+					requestId: "perm-cross-session" as PermissionId,
+					sessionId: "permission-session",
+					toolName: "Bash",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+				});
+
+				yield* handlePermissionResponse("client-1", {
+					requestId: "perm-cross-session" as PermissionId,
+					decision: "allow",
+				});
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.permission.reply).toHaveBeenCalledWith(
+						"permission-session",
+						"perm-cross-session",
+						"once",
+					);
+					expect(ws.broadcast).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "permission_resolved",
+							sessionId: "permission-session",
+							requestId: "perm-cross-session",
 							decision: "once",
 						}),
 					);
@@ -2114,6 +2143,72 @@ describe("handleQuestionReject", () => {
 			}),
 		);
 	});
+
+	it.effect(
+		"uses the pending question session when rejecting a Claude question from another visible session",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "visible-session"),
+			});
+			const log = mockLogger();
+			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				decrementPendingQuestionCount,
+			});
+			const overrides = mockOverrides({
+				startProcessingTimeout: vi.fn(),
+			});
+			const client = {
+				question: {
+					reject: vi.fn(async () => {}),
+					list: vi.fn(async () => []),
+				},
+			} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn((sessionId: string) =>
+					sessionId === "question-session" ? "claude" : "opencode",
+				),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(SessionOverridesTag, overrides),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				yield* pendingInteractions.recordQuestionRequest({
+					requestId: "que-claude",
+					sessionId: "question-session",
+					questions: [{ question: "Continue?" }],
+				});
+				yield* handleQuestionReject("client-1", { toolId: "que-claude" });
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.question.reject).not.toHaveBeenCalled();
+					expect(engine.getProviderForSession).toHaveBeenCalledWith(
+						"question-session",
+					);
+					expect(ws.broadcast).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "ask_user_resolved",
+							toolId: "que-claude",
+							sessionId: "question-session",
+						}),
+					);
+					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
+						"question-session",
+					);
+				}),
+			);
+		},
+	);
 });
 
 describe("handleAskUserResponse", () => {
@@ -2161,6 +2256,75 @@ describe("handleAskUserResponse", () => {
 					);
 					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
 						"session-1",
+					);
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"uses the pending question session when answering a Claude question from another visible session",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "visible-session"),
+			});
+			const log = mockLogger();
+			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				decrementPendingQuestionCount,
+			});
+			const overrides = mockOverrides({
+				startProcessingTimeout: vi.fn(),
+			});
+			const client = {
+				question: {
+					reply: vi.fn(async () => {}),
+					list: vi.fn(async () => []),
+				},
+			} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn((sessionId: string) =>
+					sessionId === "question-session" ? "claude" : "opencode",
+				),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(SessionOverridesTag, overrides),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				yield* pendingInteractions.recordQuestionRequest({
+					requestId: "que-claude",
+					sessionId: "question-session",
+					questions: [{ question: "Continue?" }],
+				});
+				yield* handleAskUserResponse("client-1", {
+					toolId: "que-claude",
+					answers: { "0": "Yes" },
+				});
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.question.reply).not.toHaveBeenCalled();
+					expect(engine.getProviderForSession).toHaveBeenCalledWith(
+						"question-session",
+					);
+					expect(ws.broadcast).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "ask_user_resolved",
+							toolId: "que-claude",
+							sessionId: "question-session",
+						}),
+					);
+					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
+						"question-session",
 					);
 				}),
 			);
@@ -3068,8 +3232,6 @@ describe("handleMessage", () => {
 		const overrides = mockOverrides();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
-		const permissionBridge = mockPermissionBridge();
-		const questionBridge = mockQuestionBridge();
 		const client = {} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
@@ -3079,8 +3241,7 @@ describe("handleMessage", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
-			Layer.succeed(QuestionBridgeTag, questionBridge),
+			PendingInteractionServiceLive,
 		);
 
 		return handleMessage("client-1", { text: "hello" }).pipe(
@@ -3105,8 +3266,6 @@ describe("handleMessage", () => {
 		const overrides = mockOverrides();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
-		const permissionBridge = mockPermissionBridge();
-		const questionBridge = mockQuestionBridge();
 		const client = {} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
@@ -3116,8 +3275,7 @@ describe("handleMessage", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
-			Layer.succeed(QuestionBridgeTag, questionBridge),
+			PendingInteractionServiceLive,
 		);
 
 		return handleMessage("client-1", { text: "" }).pipe(
@@ -3148,8 +3306,6 @@ describe("handleMessage", () => {
 		});
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
-		const permissionBridge = mockPermissionBridge();
-		const questionBridge = mockQuestionBridge();
 		const client = {} as unknown as OpenCodeAPI;
 		const engine = {
 			getProviderForSession: vi.fn(() => "claude"),
@@ -3169,8 +3325,7 @@ describe("handleMessage", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
-			Layer.succeed(QuestionBridgeTag, questionBridge),
+			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
 		);
 
@@ -3189,6 +3344,87 @@ describe("handleMessage", () => {
 			}),
 		);
 	});
+
+	it.effect(
+		"builds Claude event sinks from PendingInteractionService without bridge tags",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const overrides = mockOverrides({
+				getAgent: vi.fn(() => undefined),
+				getModel: vi.fn(() => ({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-5",
+				})),
+				getVariant: vi.fn(() => ""),
+				getContextWindow: vi.fn(() => ""),
+				isModelUserSelected: vi.fn(() => true),
+				startProcessingTimeout: vi.fn(),
+				resetProcessingTimeout: vi.fn(),
+			});
+			const sessionManagerService = makeMockSessionManagerService();
+			const config = mockConfig();
+			const client = {} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async (command) => {
+					if (
+						typeof command === "object" &&
+						command !== null &&
+						"type" in command &&
+						command.type === "send_turn"
+					) {
+						void command.input.eventSink.requestQuestion({
+							requestId: "que-service-1",
+							questions: [
+								{
+									question: "Continue?",
+									header: "Confirm",
+									options: [{ label: "Yes", description: "Continue" }],
+									multiSelect: false,
+									custom: true,
+								},
+							],
+						});
+					}
+					return {
+						status: "completed",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					};
+				}),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(SessionOverridesTag, overrides),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, engine),
+			);
+
+			return Effect.gen(function* () {
+				yield* handleMessage("client-1", { text: "hello world" });
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				const pendingQuestions =
+					yield* pendingInteractions.listPendingQuestions("session-1");
+				expect(pendingQuestions).toEqual([
+					expect.objectContaining({
+						requestId: "que-service-1",
+						sessionId: "session-1",
+					}),
+				]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"passes prior SQLite history into Claude engine send_turn input",
@@ -3211,8 +3447,6 @@ describe("handleMessage", () => {
 			});
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
-			const permissionBridge = mockPermissionBridge();
-			const questionBridge = mockQuestionBridge();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
@@ -3268,8 +3502,7 @@ describe("handleMessage", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
-				Layer.succeed(PermissionBridgeTag, permissionBridge),
-				Layer.succeed(QuestionBridgeTag, questionBridge),
+				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				Layer.succeed(ReadQueryTag, readQuery),
 			);
@@ -3351,8 +3584,6 @@ describe("handleMessage", () => {
 				loadPreRenderedHistory,
 			});
 			const config = mockConfig();
-			const permissionBridge = mockPermissionBridge();
-			const questionBridge = mockQuestionBridge();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
@@ -3373,8 +3604,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
-				Layer.succeed(PermissionBridgeTag, permissionBridge),
-				Layer.succeed(QuestionBridgeTag, questionBridge),
+				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 			);
 
@@ -3469,8 +3699,6 @@ describe("handleMessage", () => {
 				sendDualSessionLists,
 			});
 			const config = mockConfig();
-			const permissionBridge = mockPermissionBridge();
-			const questionBridge = mockQuestionBridge();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
@@ -3491,8 +3719,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
-				Layer.succeed(PermissionBridgeTag, permissionBridge),
-				Layer.succeed(QuestionBridgeTag, questionBridge),
+				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 			);
 
@@ -3557,8 +3784,6 @@ describe("handleMessage", () => {
 			sendDualSessionLists,
 		});
 		const config = mockConfig();
-		const permissionBridge = mockPermissionBridge();
-		const questionBridge = mockQuestionBridge();
 		const client = {} as unknown as OpenCodeAPI;
 		const engine = {
 			getProviderForSession: vi.fn(() => "claude"),
@@ -3579,8 +3804,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
-			Layer.succeed(QuestionBridgeTag, questionBridge),
+			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
 		);
 
@@ -3617,8 +3841,6 @@ describe("handleMessage", () => {
 			const sessionMgr = mockSessionManager();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
-			const permissionBridge = mockPermissionBridge();
-			const questionBridge = mockQuestionBridge();
 			const client = {} as unknown as OpenCodeAPI;
 			const dispatchError = new Error("dispatch failed");
 			const engine = {
@@ -3636,8 +3858,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
-				Layer.succeed(PermissionBridgeTag, permissionBridge),
-				Layer.succeed(QuestionBridgeTag, questionBridge),
+				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 			);
 
@@ -3689,8 +3910,6 @@ describe("handleMessage", () => {
 			recordMessageActivity,
 		});
 		const config = mockConfig();
-		const permissionBridge = mockPermissionBridge();
-		const questionBridge = mockQuestionBridge();
 		const client = {
 			session: { prompt: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -3703,8 +3922,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(PermissionBridgeTag, permissionBridge),
-			Layer.succeed(QuestionBridgeTag, questionBridge),
+			PendingInteractionServiceLive,
 		);
 
 		return handleMessage("client-1", { text: "hello world" }).pipe(

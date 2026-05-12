@@ -842,6 +842,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 			}
 		}
 		ctx.pendingQuestions.clear();
+		await ctx.eventSink?.cancelSessionInteractions?.(reason);
 
 		// 4. Close prompt queue
 		try {
