@@ -75,7 +75,7 @@ export type OrchestrationCommand =
 	| DiscoverCommand
 	| EndSessionCommand;
 
-// biome-ignore lint/suspicious/noConfusingVoidType: void is needed for Promise<void> overloads
+// biome-ignore lint/suspicious/noConfusingVoidType: void is needed in the command result union.
 export type OrchestrationResult = TurnResult | AdapterCapabilities | void;
 
 // ─── Session Binding ────────────────────────────────────────────────────────
@@ -396,10 +396,6 @@ export class OrchestrationEngine {
 				this.processedCommands = Ref.unsafeMake(new Set<string>());
 			});
 		});
-	}
-
-	async shutdown(): Promise<void> {
-		await Effect.runPromise(this.shutdownEffect());
 	}
 
 	// ─── Internal ─────────────────────────────────────────────────────────

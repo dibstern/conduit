@@ -1,14 +1,15 @@
 // test/unit/provider/orchestration-wiring.test.ts
-import { Effect } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import { createOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import {
-	ProviderRegistry,
-	ProviderRegistryTag,
-} from "../../../src/lib/provider/provider-registry.js";
+	createOrchestrationLayer,
+	getOrchestrationLayer,
+	makeOrchestrationRuntimeLayer,
+} from "../../../src/lib/provider/orchestration-wiring.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -63,19 +64,22 @@ describe("Orchestration wiring", () => {
 		expect(layer.registry.hasAdapter("opencode")).toBe(true);
 	});
 
-	it("exposes the provider registry through an Effect service layer", async () => {
+	it("exposes orchestration services through the scoped runtime layer", async () => {
 		const client = makeStubClient();
-		const layer = createOrchestrationLayer({ client });
-
-		const service = await Effect.runPromise(
-			Effect.gen(function* () {
-				return yield* ProviderRegistryTag;
-			}).pipe(Effect.provide(layer.registryLayer)),
+		const runtime = ManagedRuntime.make(
+			makeOrchestrationRuntimeLayer({ client }),
 		);
 
-		expect(service).toBe(layer.registry);
-		expect(service.hasAdapter("opencode")).toBe(true);
-		expect(service.hasAdapter("claude")).toBe(true);
+		try {
+			const layer = await runtime.runPromise(getOrchestrationLayer);
+
+			expect(layer.engine).toBeInstanceOf(OrchestrationEngine);
+			expect(layer.registry).toBeInstanceOf(ProviderRegistry);
+			expect(layer.registry.hasAdapter("opencode")).toBe(true);
+			expect(layer.registry.hasAdapter("claude")).toBe(true);
+		} finally {
+			await runtime.dispose();
+		}
 	});
 
 	it("engine can discover opencode capabilities", async () => {
@@ -97,7 +101,7 @@ describe("Orchestration wiring", () => {
 		const layer = createOrchestrationLayer({ client });
 
 		// Should not throw
-		await layer.engine.shutdown();
+		await Effect.runPromise(layer.engine.shutdownEffect());
 	});
 
 	it("accepts optional workspace root", () => {

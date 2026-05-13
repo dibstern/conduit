@@ -4,7 +4,8 @@
 // engine) from an OpenCodeClient. Used by relay-stack.ts to instantiate the
 // provider layer alongside the existing relay pipeline.
 
-import { Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
+import { OrchestrationEngineTag } from "../effect/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
@@ -24,7 +25,6 @@ export interface OrchestrationLayerOptions {
 export interface OrchestrationLayer {
 	readonly engine: OrchestrationEngine;
 	readonly registry: ProviderRegistry;
-	readonly registryLayer: Layer.Layer<ProviderRegistryTag>;
 	readonly adapter: OpenCodeAdapter;
 	/**
 	 * Wire SSE session.status idle events to notifyTurnCompleted().
@@ -46,15 +46,22 @@ const TURN_COMPLETE_RESULT: TurnResult = {
 };
 
 /**
- * Create the full orchestration layer.
- *
- * Instantiates the ProviderRegistry, registers the OpenCodeAdapter,
- * and creates the OrchestrationEngine. The layer sits alongside the
- * existing relay pipeline -- it doesn't replace it yet.
+ * Scoped orchestration components built by the relay runtime layer.
  */
-export function createOrchestrationLayer(
+interface OrchestrationComponents {
+	readonly engine: OrchestrationEngine;
+	readonly registry: ProviderRegistry;
+	readonly adapter: OpenCodeAdapter;
+}
+
+class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
+	OrchestrationComponentsTag,
+	OrchestrationComponents
+>() {}
+
+function createOrchestrationComponents(
 	options: OrchestrationLayerOptions,
-): OrchestrationLayer {
+): OrchestrationComponents {
 	const registry = new ProviderRegistry();
 
 	const adapter = new OpenCodeAdapter({
@@ -71,8 +78,15 @@ export function createOrchestrationLayer(
 	});
 	registry.registerAdapter(claudeAdapter);
 
-	const registryLayer = Layer.succeed(ProviderRegistryTag, registry);
 	const engine = new OrchestrationEngine({ registry });
+
+	return { engine, registry, adapter };
+}
+
+function createOrchestrationView(
+	components: OrchestrationComponents,
+): OrchestrationLayer {
+	const { adapter, engine, registry } = components;
 
 	function wireSSEToAdapter(
 		sseOn: (event: "event", handler: (e: unknown) => void) => void,
@@ -99,5 +113,55 @@ export function createOrchestrationLayer(
 		});
 	}
 
-	return { engine, registry, registryLayer, adapter, wireSSEToAdapter };
+	return { engine, registry, adapter, wireSSEToAdapter };
 }
+
+/**
+ * Create an imperative view over orchestration components.
+ *
+ * Kept for narrow unit tests and compatibility surfaces. Production relay
+ * wiring uses makeOrchestrationRuntimeLayer() so adapter shutdown is owned by
+ * the relay runtime Scope.
+ */
+export function createOrchestrationLayer(
+	options: OrchestrationLayerOptions,
+): OrchestrationLayer {
+	return createOrchestrationView(createOrchestrationComponents(options));
+}
+
+export const makeOrchestrationRuntimeLayer = (
+	options: OrchestrationLayerOptions,
+): Layer.Layer<ProviderRegistryTag | OrchestrationEngineTag> => {
+	const componentsLayer = Layer.scoped(
+		OrchestrationComponentsTag,
+		Effect.gen(function* () {
+			const components = createOrchestrationComponents(options);
+			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
+			return components;
+		}),
+	);
+	const registryLayer = Layer.effect(
+		ProviderRegistryTag,
+		Effect.map(OrchestrationComponentsTag, (components) => components.registry),
+	);
+	const engineLayer = Layer.effect(
+		OrchestrationEngineTag,
+		Effect.map(OrchestrationComponentsTag, (components) => components.engine),
+	);
+
+	return Layer.mergeAll(registryLayer, engineLayer).pipe(
+		Layer.provide(componentsLayer),
+	);
+};
+
+export const getOrchestrationLayer = Effect.gen(function* () {
+	const engine = yield* OrchestrationEngineTag;
+	const registry = yield* ProviderRegistryTag;
+	const adapter = yield* registry.getAdapterEffect("opencode");
+	if (!(adapter instanceof OpenCodeAdapter)) {
+		return yield* Effect.dieMessage(
+			"opencode provider is not an OpenCodeAdapter",
+		);
+	}
+	return createOrchestrationView({ engine, registry, adapter });
+});

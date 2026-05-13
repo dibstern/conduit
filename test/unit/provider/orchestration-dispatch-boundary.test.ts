@@ -29,7 +29,28 @@ describe("orchestration dispatch boundary", () => {
 			"utf8",
 		);
 
-		expect(source).not.toContain("shutdownAll(): Promise");
-		expect(source).not.toContain("Effect.runPromise(this.shutdownAllEffect())");
+		expect(source).not.toMatch(/(?:^|\n)\s*(?:async\s+)?shutdownAll\s*\(/);
+		expect(source).not.toMatch(/Effect\s*\.\s*run(?:Promise|Sync)\s*\(/);
+	});
+
+	it("orchestration engine exposes only the Effect shutdown boundary", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/orchestration-engine.ts"),
+			"utf8",
+		);
+
+		expect(source).not.toMatch(/(?:^|\n)\s*(?:async\s+)?shutdown\s*\(/);
+		expect(source).not.toMatch(/Effect\s*\.\s*run(?:Promise|Sync)\s*\(/);
+	});
+
+	it("relay stop lets the scoped runtime own orchestration shutdown", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/relay/relay-stack.ts"),
+			"utf8",
+		);
+
+		expect(source).not.toContain("orchestration.engine.shutdown");
+		expect(source).not.toContain("orchestration.engine.shutdownEffect");
+		expect(source).not.toContain("Layer.succeed(OrchestrationEngineTag");
 	});
 });

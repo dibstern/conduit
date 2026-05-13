@@ -521,11 +521,11 @@ describe("OrchestrationEngine", () => {
 		});
 	});
 
-	describe("shutdown", () => {
+	describe("shutdownEffect", () => {
 		it("delegates to registry.shutdownAllEffect", async () => {
 			const shutdownSpy = vi.spyOn(registry, "shutdownAllEffect");
 
-			await engine.shutdown();
+			await Effect.runPromise(engine.shutdownEffect());
 
 			expect(shutdownSpy).toHaveBeenCalledTimes(1);
 		});
@@ -534,7 +534,7 @@ describe("OrchestrationEngine", () => {
 			engine.bindSession("s1", "opencode");
 			engine.bindSession("s2", "opencode");
 
-			await engine.shutdown();
+			await Effect.runPromise(engine.shutdownEffect());
 
 			expect(engine.getProviderForSession("s1")).toBeUndefined();
 			expect(engine.getProviderForSession("s2")).toBeUndefined();

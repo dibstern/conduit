@@ -2695,6 +2695,104 @@ Exit: 1
 No hits.
 ```
 
+## Phase 6.45: Scoped Orchestration Runtime Ownership
+
+Plan issues found:
+
+- Deleting `OrchestrationEngine.shutdown(): Promise<void>` alone would only move `Effect.runPromise(...)` from
+  `orchestration-engine.ts` to `relay-stack.ts`. That is not a real migration because relay shutdown would still
+  hand-manage provider orchestration outside the runtime Scope.
+- The real owner is the relay runtime layer: SSE, status pollers, and message pollers must drain first, then runtime
+  disposal should run scoped finalizers for provider adapters and orchestration state.
+- The `sdk-factory.ts` `fetch` callback remains an external Promise-shaped SDK boundary. The SSE stream
+  `Fiber.interrupt(...)` bridge is a separate future lifecycle slice, not part of provider orchestration ownership.
+
+Changes:
+
+- `src/lib/provider/orchestration-wiring.ts`: added `makeOrchestrationRuntimeLayer(...)`, which constructs the
+  provider registry, OpenCode adapter, Claude adapter, and orchestration engine inside a scoped layer. The layer
+  registers `engine.shutdownEffect()` as its finalizer and exposes `ProviderRegistryTag` plus
+  `OrchestrationEngineTag`.
+- `src/lib/relay/relay-stack.ts`: composes the scoped orchestration layer into the relay runtime graph instead of
+  injecting `Layer.succeed(OrchestrationEngineTag, orchestration.engine)` and `orchestration.registryLayer`.
+  `ProjectRelay.stop()` now drains SSE/status/message pollers first, then lets `effectRuntime.dispose()` run provider
+  shutdown through scoped finalizers.
+- `src/lib/provider/orchestration-engine.ts`: removed the legacy `shutdown(): Promise<void>` facade. Callers use
+  `shutdownEffect()` directly or rely on the scoped runtime finalizer.
+- `test/unit/provider/orchestration-scoped-layer.test.ts`: added a behavior test proving runtime disposal shuts down
+  both registered adapters.
+- `test/unit/provider/orchestration-dispatch-boundary.test.ts`: extended the static guard so orchestration cannot
+  reintroduce the Promise shutdown facade, a local `Effect.runPromise(this.shutdownEffect())`, or relay-stack's old
+  hand-managed `orchestration.engine.shutdown...` call. A review pass tightened this from exact-string matching to
+  regex guards that also catch `async shutdown(...)` Promise facades and local `Effect.runPromise` / `Effect.runSync`
+  calls in orchestration shutdown owners.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts
+Exit: 1
+Expected failure:
+  expected source not to contain 'shutdown(): Promise'
+```
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-scoped-layer.test.ts
+Exit: 1
+Expected failure:
+  (0 , makeOrchestrationRuntimeLayer) is not a function
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-scoped-layer.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts test/unit/provider/orchestration-wiring.test.ts test/unit/provider/orchestration-engine.test.ts test/unit/provider/provider-registry.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  63 passed (63)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  35 passed (35)
+Tests  393 passed (393)
+Note: run emitted an existing OpenCodeAdapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm vitest run test/unit/relay test/unit/handlers/effect-handlers.test.ts test/unit/handlers/model.test.ts test/unit/handlers/settings.test.ts test/unit/handlers/reload.test.ts test/unit/handlers/context-window.test.ts
+Exit: 0
+Test Files  40 passed (40)
+Tests  594 passed (594)
+Note: run emitted existing SQLite warnings and status-poller info logs.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 995 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-unit-output.log 2>&1
+Exit: 0
+Test Files  378 passed (378)
+Tests  5221 passed | 2 skipped | 12 todo (5235)
+```
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts test/unit/provider/orchestration-scoped-layer.test.ts test/unit/provider/orchestration-wiring.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  16 passed (16)
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

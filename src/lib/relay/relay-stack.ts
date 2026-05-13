@@ -122,7 +122,8 @@ import { ProviderStateService } from "../persistence/provider-state-service.js";
 import { ReadQueryService } from "../persistence/read-query-service.js";
 import { SessionSeeder } from "../persistence/session-seeder.js";
 import {
-	createOrchestrationLayer,
+	getOrchestrationLayer,
+	makeOrchestrationRuntimeLayer,
 	type OrchestrationLayer,
 } from "../provider/orchestration-wiring.js";
 import {
@@ -506,8 +507,8 @@ export async function createProjectRelay(
 		authHeaders,
 	});
 
-	// ── Orchestration layer (Phase 5: provider adapter routing) ─────────────
-	const orchestration = createOrchestrationLayer({
+	// ── Orchestration runtime layer (provider adapter routing) ──────────────
+	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		client: api,
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 	});
@@ -852,15 +853,16 @@ export async function createProjectRelay(
 		...(config.getCachedUpdate != null && {
 			getCachedUpdate: config.getCachedUpdate,
 		}),
-		...(orchestration != null && {
-			discoverClaudeCapabilities: () =>
-				relayManagedRuntime.runPromise(
-					orchestration.engine.dispatchEffect({
+		discoverClaudeCapabilities: () =>
+			relayManagedRuntime.runPromise(
+				Effect.gen(function* () {
+					const engine = yield* OrchestrationEngineTag;
+					return yield* engine.dispatchEffect({
 						type: "discover",
 						providerId: "claude",
-					}),
-				),
-		}),
+					});
+				}),
+			),
 		...(readQuery != null && { readQuery }),
 		log: wsLog,
 	};
@@ -978,8 +980,7 @@ export async function createProjectRelay(
 		Layer.succeed(SessionRegistryTag, registry),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		connectPtyUpstreamLayer,
-		Layer.succeed(OrchestrationEngineTag, orchestration.engine),
-		orchestration.registryLayer,
+		orchestrationRuntimeLayer,
 	);
 
 	// Optional bridge layers (only included when deps are present)
@@ -1152,13 +1153,6 @@ export async function createProjectRelay(
 		sseStream,
 	);
 
-	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
-	// Resolves the deferred promise in OpenCodeAdapter.sendTurnEffect() when a
-	// session transitions to idle, allowing the engine dispatch to complete.
-	orchestration.wireSSEToAdapter((event, handler) => {
-		sseStream.on(event, handler);
-	});
-
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
 	const {
 		pipelineDeps,
@@ -1207,8 +1201,9 @@ export async function createProjectRelay(
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
-	await relayManagedRuntime.runPromise(
+	const orchestration = await relayManagedRuntime.runPromise(
 		Effect.gen(function* () {
+			const orchestrationView = yield* getOrchestrationLayer;
 			yield* PollerStateTag;
 			yield* PollerPubSubTag;
 			if (initialDefaultModel) {
@@ -1217,9 +1212,17 @@ export async function createProjectRelay(
 			if (initialDefaultVariant) {
 				yield* setDefaultVariant(initialDefaultVariant);
 			}
+			return orchestrationView;
 		}),
 	);
 	statusPollerRuntime.attach(relayManagedRuntime);
+
+	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
+	// Resolves the deferred promise in OpenCodeAdapter.sendTurnEffect() when a
+	// session transitions to idle, allowing the engine dispatch to complete.
+	orchestration.wireSSEToAdapter((event, handler) => {
+		sseStream.on(event, handler);
+	});
 
 	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
 	wirePollers({
@@ -1277,12 +1280,11 @@ export async function createProjectRelay(
 			await sseStream.drain();
 			await statusPoller.drain();
 			await pollerManager.drain();
-			// 3. Shut down orchestration engine (rejects pending turns)
-			await orchestration.engine.shutdown();
-			// 4. Dispose Effect ManagedRuntimes
+			// 3. Dispose Effect ManagedRuntimes. Scoped finalizers own provider
+			// adapter shutdown and other Effect-managed resources.
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();
-			// 5. Clean up remaining resources
+			// 4. Clean up remaining resources
 			// Permission and processing timeout timers are managed by scoped Effect layers.
 			ptyManager.closeAll();
 			await wsHandler.drain();
