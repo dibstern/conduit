@@ -1,4 +1,6 @@
 // test/unit/provider/claude/types.test.ts
+
+import type { Effect } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
 	ClaudeResumeCursor,
@@ -77,6 +79,12 @@ describe("Claude adapter types", () => {
 	it("PromptQueueController has enqueue and close", () => {
 		expectTypeOf<PromptQueueController>().toHaveProperty("enqueue");
 		expectTypeOf<PromptQueueController>().toHaveProperty("close");
+		expectTypeOf<PromptQueueController["enqueue"]>().returns.toEqualTypeOf<
+			Effect.Effect<void>
+		>();
+		expectTypeOf<PromptQueueController["close"]>().returns.toEqualTypeOf<
+			Effect.Effect<void>
+		>();
 	});
 
 	it("SDKUserMessage has the expected shape", () => {

@@ -1132,6 +1132,47 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 	});
 
+	it("does not leave concurrent callers blocked when session setup fails", async () => {
+		let adapter!: ClaudeAdapter;
+		let secondPromise: Promise<unknown> | undefined;
+
+		const input1 = makeBaseSendTurnInput({
+			sessionId: "session-concurrent-setup-fail",
+			turnId: "turn-1",
+			prompt: "First",
+		});
+		const input2 = makeBaseSendTurnInput({
+			sessionId: "session-concurrent-setup-fail",
+			turnId: "turn-2",
+			prompt: "Second",
+		});
+
+		queryFactorySpy = vi.fn(() => {
+			secondPromise ??= Effect.runPromise(
+				adapter.sendTurnEffect(input2).pipe(Effect.either),
+			);
+			throw new Error("query setup failed");
+		});
+		adapter = new ClaudeAdapter({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const first = await Effect.runPromise(
+			adapter.sendTurnEffect(input1).pipe(Effect.either),
+		);
+		expect(first._tag).toBe("Left");
+
+		const second = await Promise.race([
+			secondPromise,
+			new Promise<"timeout">((resolve) =>
+				setTimeout(() => resolve("timeout"), 50),
+			),
+		]);
+		expect(second).not.toBe("timeout");
+		expect(second).toMatchObject({ _tag: "Left" });
+	});
+
 	// ── Test 8: sendTurn() without persistence (eventSink only) ───────────
 
 	it("sendTurn() works with eventSink as only required dep", async () => {

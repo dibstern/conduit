@@ -12,6 +12,8 @@
  * re-exported for convenience. Conduit-specific types (session context,
  * pending approvals, tool tracking, etc.) are defined here.
  */
+
+import type { Effect } from "effect";
 import type { EventSink, PermissionDecision } from "../types.js";
 
 // ─── SDK Type Re-exports ──────────────────────────────────────────────────
@@ -146,6 +148,6 @@ export interface ClaudeSessionContext {
  * here to decouple ClaudeSessionContext from the concrete class.
  */
 export interface PromptQueueController extends AsyncIterable<SDKUserMessage> {
-	enqueue(message: SDKUserMessage): void;
-	close(): void;
+	enqueue(message: SDKUserMessage): Effect.Effect<void>;
+	close(): Effect.Effect<void>;
 }

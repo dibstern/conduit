@@ -2475,6 +2475,124 @@ Exit: 0
 Checked 994 files in 294ms. No fixes applied.
 ```
 
+## Phase 6.43: Claude Prompt Queue Effect Boundary
+
+Plan issues found:
+
+- The next-wave Phase 7 note said `claude/effect-prompt-queue.ts` was already Effect-native. That was false: the file
+  created its queue with `Effect.runSync(...)`, offered messages with `Effect.runSync(...)`, and drove consumer waits
+  with `Effect.runPromiseExit(...)`.
+- Changing only `PromptQueueController.enqueue(...)` / `close(...)` would have moved the runtime bridge into
+  `ClaudeAdapter`. The adapter send-turn, enqueue-turn, restart, cleanup, end-session, and shutdown paths had to yield
+  the queue Effects directly.
+- `test/unit/effect/prompt-queue.test.ts` only tested raw Effect Queue behavior. Once the concrete Claude queue tests
+  covered FIFO, blocking, drain-before-close, idempotent close, and single-consumer behavior, that raw library test no
+  longer carried useful product signal.
+- The first implementation reused the first turn's unresolved result deferred as the session setup lock. If
+  `queryFactory(...)` failed while a concurrent caller had already joined the setup lock, that concurrent caller could
+  block forever instead of receiving the setup failure.
+- Interrupt cleanup closed the active queue/session but did not reject already queued turn deferreds. Those callers
+  could be orphaned after the session was stopped.
+
+Changes:
+
+- `src/lib/provider/claude/effect-prompt-queue.ts`: replaced the sync queue wrapper with an Effect-constructed queue.
+  Producer methods now return `Effect.Effect<void>`, close enqueues an end sentinel so buffered messages drain before
+  termination, and the only Promise boundary is the SDK-facing `AsyncIterator`.
+- `src/lib/provider/claude/types.ts`: made `PromptQueueController.enqueue(...)` and `close(...)` Effect-returning.
+- `src/lib/provider/claude/claude-adapter.ts`: converted send-turn/session lifecycle helpers to Effect programs so
+  prompt queue creation, enqueue, and close are yielded instead of bridged through `Effect.runPromise(...)` or
+  `Effect.runSync(...)`. Session setup now uses an explicit setup lock instead of the first turn's result deferred, and
+  interrupt/dispose cleanup rejects queued turn deferreds with the lifecycle reason.
+- `test/unit/provider/claude/prompt-queue.test.ts`: updated the behavior tests to exercise the Effect-returning public
+  queue interface and added a static guard against reintroducing local runtime bridges in the queue file.
+- `test/unit/effect/prompt-queue.test.ts`: deleted the low-signal raw Effect Queue tests.
+- `docs/plans/effect-ts-next-wave/phase-7-remaining-migration.md`: corrected the stale note about the Claude prompt
+  queue boundary.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/claude/prompt-queue.test.ts --testNamePattern "Effect-returning"
+Exit: 1
+Expected failure:
+  expected false to be true
+```
+
+```text
+$ pnpm vitest run test/unit/provider/claude/claude-adapter-send-turn.test.ts --testNamePattern "setup fails"
+Exit: 1
+Expected failure:
+  Test timed out in 5000ms.
+```
+
+```text
+$ pnpm vitest run test/unit/provider/claude/claude-adapter-lifecycle.test.ts --testNamePattern "queued turn deferreds"
+Exit: 1
+Expected failure:
+  expected [] to have a length of 2
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/claude/prompt-queue.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  11 passed (11)
+```
+
+```text
+$ pnpm vitest run test/unit/provider/claude/prompt-queue.test.ts test/unit/provider/claude/types.test.ts test/unit/provider/claude/claude-adapter-lifecycle.test.ts test/unit/provider/claude/claude-adapter-send-turn.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  77 passed (77)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  33 passed (33)
+Tests  387 passed (387)
+Note: run emitted an existing OpenCodeAdapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 993 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-unit-output.log 2>&1
+Exit: 0
+Test Files  376 passed (376)
+Tests  5215 passed | 2 skipped | 12 todo (5229)
+```
+
+```text
+$ rg -n "Effect\\.run(Promise|Sync)|Effect\\.promise|EffectPromptQueue\\.create|enqueue\\(message: SDKUserMessage\\): void|close\\(\\): void" src/lib/provider/claude
+Exit: 1
+No hits.
+```
+
+```text
+$ pnpm test:all > test-output.log 2>&1
+Exit: 1
+Passed steps:
+  Type check, lint, unit, integration, contract, build, E2E daemon, E2E multi-instance, E2E visual,
+  Storybook build, Storybook visual.
+Failed steps:
+  E2E replay tests: 9 failures, all in test/e2e/specs/scroll-stability.spec.ts scroll-position/button assertions.
+  E2E subagent tests: 3 failures in test/e2e/specs/subagent-sessions.spec.ts navigation/back-bar visibility.
+No failed test touched the Claude provider or prompt queue files changed in this slice.
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

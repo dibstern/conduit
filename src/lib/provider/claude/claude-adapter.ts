@@ -41,10 +41,11 @@ import {
 	isInterruptedResult,
 } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
-import { EffectPromptQueue } from "./effect-prompt-queue.js";
+import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
 import type {
 	ClaudeSessionContext,
+	PromptQueueController,
 	Query,
 	Options as SDKOptions,
 	SDKResultMessage,
@@ -67,6 +68,10 @@ function claudeApiModelId(
 		return `${modelId}[1m]`;
 	}
 	return modelId;
+}
+
+function asError(cause: unknown): Error {
+	return cause instanceof Error ? cause : new Error(String(cause));
 }
 
 // ─── Built-in command catalog ──────────────────────────────────────────────
@@ -212,7 +217,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 	protected readonly sessions = new Map<string, ClaudeSessionContext>();
 
 	/** Per-session mutex: prevents duplicate session creation on concurrent sendTurnEffect(). */
-	private readonly sessionLocks = new Map<string, Promise<TurnResult>>();
+	private readonly sessionLocks = new Map<string, Promise<void>>();
 
 	/** Per-session queue of deferreds for in-flight turns. */
 	private readonly turnDeferredQueues = new Map<
@@ -238,6 +243,22 @@ export class ClaudeAdapter implements ProviderAdapter {
 		this.queryFactory =
 			deps.queryFactory ??
 			(sdkQuery as NonNullable<ClaudeAdapterDeps["queryFactory"]>);
+	}
+
+	private mapProviderFailure<A>(
+		operation: string,
+		effect: Effect.Effect<A, unknown>,
+	): Effect.Effect<A, ProviderAdapterFailure> {
+		return effect.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ProviderAdapterFailure({
+						providerId: this.providerId,
+						operation,
+						cause,
+					}),
+			),
+		);
 	}
 
 	// ─── discover ─────────────────────────────────────────────────────────
@@ -309,204 +330,244 @@ export class ClaudeAdapter implements ProviderAdapter {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderAdapterFailure> {
-		return Effect.tryPromise({
-			try: () => this.sendTurnLocal(input),
-			catch: (cause) =>
-				new ProviderAdapterFailure({
-					providerId: this.providerId,
-					operation: "sendTurn",
-					cause,
-				}),
-		});
+		return this.mapProviderFailure("sendTurn", this.sendTurnLocalEffect(input));
 	}
 
-	private async sendTurnLocal(input: SendTurnInput): Promise<TurnResult> {
-		const { sessionId } = input;
+	private sendTurnLocalEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			const { sessionId } = input;
 
-		// Per-session mutex: prevent duplicate session creation
-		const pending = this.sessionLocks.get(sessionId);
-		if (pending) {
+			// Per-session mutex: prevent duplicate session creation.
+			const pending = this.sessionLocks.get(sessionId);
+			if (pending) {
+				const existingCtx = this.sessions.get(sessionId);
+				if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
+					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
+				}
+				yield* Effect.tryPromise({
+					try: () => pending,
+					catch: (cause) => cause,
+				});
+				return yield* this.sendTurnLocalEffect(input);
+			}
+
 			const existingCtx = this.sessions.get(sessionId);
-			if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
-				return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
+			if (existingCtx?.stopped) {
+				// Safety net: any path that stopped this context (interruptTurn,
+				// endSession, shutdown) leaves it in sessions with a closed prompt
+				// queue; enqueueing would throw. Evict silently and create fresh.
+				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
+				this.sessions.delete(sessionId);
+				this.endedSessionStreams.delete(sessionId);
+			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
+				if (this.hasPendingTurn(sessionId)) {
+					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
+				}
+				return yield* this.restartSessionForAgentChangeEffect(
+					existingCtx,
+					input,
+				);
+			} else if (existingCtx && this.endedSessionStreams.has(sessionId)) {
+				log.info(`Evicting ended session stream on sendTurn: ${sessionId}`);
+				this.sessions.delete(sessionId);
+				this.endedSessionStreams.delete(sessionId);
+			} else if (existingCtx) {
+				return yield* this.enqueueTurnEffect(existingCtx, input);
 			}
-			await pending;
-			return this.sendTurnLocal(input);
-		}
 
-		const existingCtx = this.sessions.get(sessionId);
-		if (existingCtx?.stopped) {
-			// Safety net: any path that stopped this context (interruptTurn,
-			// endSession, shutdown) leaves it in sessions with a closed prompt
-			// queue; enqueueing would throw. Evict silently and create fresh.
-			log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
-			this.sessions.delete(sessionId);
-			this.endedSessionStreams.delete(sessionId);
-		} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
-			if (this.hasPendingTurn(sessionId)) {
-				return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
-			}
-			return this.restartSessionForAgentChange(existingCtx, input);
-		} else if (existingCtx && this.endedSessionStreams.has(sessionId)) {
-			log.info(`Evicting ended session stream on sendTurn: ${sessionId}`);
-			this.sessions.delete(sessionId);
-			this.endedSessionStreams.delete(sessionId);
-		} else if (existingCtx) {
-			return this.enqueueTurn(existingCtx, input);
-		}
-
-		return this.createSessionAndSendTurn(input);
+			return yield* this.createSessionAndSendTurnEffect(input);
+		});
 	}
 
 	// ─── createSessionAndSendTurn ─────────────────────────────────────────
 
-	private async createSessionAndSendTurn(
+	private createSessionAndSendTurnEffect(
 		input: SendTurnInput,
-	): Promise<TurnResult> {
-		const { sessionId } = input;
-		this.endedSessionStreams.delete(sessionId);
+	): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			const { sessionId } = input;
+			this.endedSessionStreams.delete(sessionId);
 
-		// Create a deferred for this turn
-		const deferred = createDeferred<TurnResult>();
-		this.pushTurnDeferred(sessionId, deferred);
+			// Create a deferred for this turn.
+			const deferred = createDeferred<TurnResult>();
+			this.pushTurnDeferred(sessionId, deferred);
 
-		// Set session lock synchronously before any await
-		this.sessionLocks.set(sessionId, deferred.promise);
+			// Set session lock synchronously before any effectful boundary.
+			const setupLock = createDeferred<void>();
+			setupLock.promise.catch(() => undefined);
+			this.sessionLocks.set(sessionId, setupLock.promise);
 
-		try {
-			// 1. Create prompt queue
-			const promptQueue = EffectPromptQueue.create();
+			let promptQueue: PromptQueueController | undefined;
+			const setup = Effect.gen(this, function* () {
+				// 1. Create prompt queue.
+				const queue = yield* makeEffectPromptQueue();
+				promptQueue = queue;
 
-			// 2. Build initial user message and enqueue
-			const userMessage = this.buildUserMessage(input);
-			promptQueue.enqueue(userMessage);
+				// 2. Build initial user message and enqueue.
+				const userMessage = this.buildUserMessage(input);
+				yield* queue.enqueue(userMessage);
 
-			// 3. Build query options
-			const abortController = new AbortController();
-			// Wire the input's abort signal to our abort controller
-			if (input.abortSignal) {
-				if (input.abortSignal.aborted) {
-					abortController.abort();
-				} else {
-					input.abortSignal.addEventListener(
-						"abort",
-						() => abortController.abort(),
-						{ once: true },
-					);
+				// 3. Build query options.
+				const abortController = new AbortController();
+				// Wire the input's abort signal to our abort controller.
+				if (input.abortSignal) {
+					if (input.abortSignal.aborted) {
+						abortController.abort();
+					} else {
+						input.abortSignal.addEventListener(
+							"abort",
+							() => abortController.abort(),
+							{ once: true },
+						);
+					}
 				}
-			}
 
-			const bridge = this.getPermissionBridge();
+				const bridge = this.getPermissionBridge();
 
-			const resumeSessionId =
-				typeof input.providerState["resumeSessionId"] === "string"
-					? input.providerState["resumeSessionId"]
-					: undefined;
-			const apiModelId = claudeApiModelId(
-				input.model?.modelId,
-				input.contextWindow,
+				const resumeSessionId =
+					typeof input.providerState["resumeSessionId"] === "string"
+						? input.providerState["resumeSessionId"]
+						: undefined;
+				const apiModelId = claudeApiModelId(
+					input.model?.modelId,
+					input.contextWindow,
+				);
+
+				// 4. Create session context (query assigned after creation below).
+				const ctx: ClaudeSessionContext = {
+					sessionId,
+					workspaceRoot: input.workspaceRoot,
+					startedAt: new Date().toISOString(),
+					promptQueue: queue,
+					// Placeholder — immediately overwritten after query factory call.
+					query: undefined as unknown as ClaudeSessionContext["query"],
+					pendingApprovals: new Map(),
+					pendingQuestions: new Map(),
+					inFlightTools: new Map(),
+					eventSink: input.eventSink,
+					streamConsumer: undefined,
+					currentTurnId: input.turnId,
+					currentModel: input.model?.modelId,
+					...(apiModelId ? { currentApiModelId: apiModelId } : {}),
+					...(input.agent ? { currentAgent: input.agent } : {}),
+					resumeSessionId,
+					lastAssistantUuid: undefined,
+					turnCount: 0,
+					stopped: false,
+				};
+
+				// 5. Build SDK options — canUseTool captures ctx by reference.
+				const options: SDKOptions = {
+					cwd: input.workspaceRoot,
+					abortController,
+					includePartialMessages: true,
+					settingSources: ["user", "project", "local"],
+					canUseTool: bridge.createCanUseTool(ctx),
+					...(apiModelId ? { model: apiModelId } : {}),
+					...(resumeSessionId ? { resume: resumeSessionId } : {}),
+					...(input.agent ? { agent: input.agent } : {}),
+					...(input.variant
+						? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
+						: {}),
+				};
+
+				// 6. Call query factory and assign to context.
+				const query = yield* Effect.try({
+					try: () =>
+						this.queryFactory({
+							prompt: queue,
+							options,
+						}),
+					catch: (cause) => cause,
+				});
+				(ctx as { query: ClaudeSessionContext["query"] }).query = query;
+
+				// 7. Store session.
+				this.sessions.set(sessionId, ctx);
+
+				// 8. Start background stream consumer.
+				const translator = new ClaudeEventTranslator({
+					sink: input.eventSink,
+				});
+				ctx.streamConsumer = this.runStreamConsumer(ctx, translator);
+			});
+
+			yield* setup.pipe(
+				Effect.tap(() =>
+					Effect.sync(() => {
+						setupLock.resolve(undefined);
+					}),
+				),
+				Effect.catchAll((err) =>
+					Effect.gen(this, function* () {
+						this.turnDeferredQueues.delete(sessionId);
+						setupLock.reject(asError(err));
+						if (promptQueue) {
+							yield* promptQueue.close().pipe(Effect.ignore);
+						}
+						return yield* Effect.fail(err);
+					}),
+				),
+				Effect.ensuring(
+					Effect.sync(() => {
+						// Clear the lock (but keep the deferred -- it resolves via the stream).
+						this.sessionLocks.delete(sessionId);
+					}),
+				),
 			);
 
-			// 4. Create session context (query assigned after creation below)
-			const ctx: ClaudeSessionContext = {
-				sessionId,
-				workspaceRoot: input.workspaceRoot,
-				startedAt: new Date().toISOString(),
-				promptQueue,
-				// Placeholder — immediately overwritten after query factory call
-				query: undefined as unknown as ClaudeSessionContext["query"],
-				pendingApprovals: new Map(),
-				pendingQuestions: new Map(),
-				inFlightTools: new Map(),
-				eventSink: input.eventSink,
-				streamConsumer: undefined,
-				currentTurnId: input.turnId,
-				currentModel: input.model?.modelId,
-				...(apiModelId ? { currentApiModelId: apiModelId } : {}),
-				...(input.agent ? { currentAgent: input.agent } : {}),
-				resumeSessionId,
-				lastAssistantUuid: undefined,
-				turnCount: 0,
-				stopped: false,
-			};
-
-			// 5. Build SDK options — canUseTool captures ctx by reference
-			const options: SDKOptions = {
-				cwd: input.workspaceRoot,
-				abortController,
-				includePartialMessages: true,
-				settingSources: ["user", "project", "local"],
-				canUseTool: bridge.createCanUseTool(ctx),
-				...(apiModelId ? { model: apiModelId } : {}),
-				...(resumeSessionId ? { resume: resumeSessionId } : {}),
-				...(input.agent ? { agent: input.agent } : {}),
-				...(input.variant
-					? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
-					: {}),
-			};
-
-			// 6. Call query factory and assign to context
-			const query = this.queryFactory({
-				prompt: promptQueue,
-				options,
+			return yield* Effect.tryPromise({
+				try: () => deferred.promise,
+				catch: (cause) => cause,
 			});
-			(ctx as { query: ClaudeSessionContext["query"] }).query = query;
-
-			// 7. Store session
-			this.sessions.set(sessionId, ctx);
-
-			// 8. Start background stream consumer
-			const translator = new ClaudeEventTranslator({
-				sink: input.eventSink,
-			});
-			ctx.streamConsumer = this.runStreamConsumer(ctx, translator);
-		} catch (err) {
-			// Clean up on failure
-			this.turnDeferredQueues.delete(sessionId);
-			throw err;
-		} finally {
-			// Clear the lock (but keep the deferred -- it resolves via the stream)
-			this.sessionLocks.delete(sessionId);
-		}
-
-		return deferred.promise;
+		});
 	}
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
-	private async enqueueTurn(
+	private enqueueTurnEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
-	): Promise<TurnResult> {
-		if (this.hasAgentChanged(ctx, input)) {
-			if (this.hasPendingTurn(ctx.sessionId)) {
-				return this.agentSwitchDuringActiveTurnResult(ctx, input);
+	): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			if (this.hasAgentChanged(ctx, input)) {
+				if (this.hasPendingTurn(ctx.sessionId)) {
+					return this.agentSwitchDuringActiveTurnResult(ctx, input);
+				}
+				return yield* this.restartSessionForAgentChangeEffect(ctx, input);
 			}
-			return this.restartSessionForAgentChange(ctx, input);
-		}
 
-		const baseModelId = input.model?.modelId ?? ctx.currentModel;
-		const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
-		if (apiModelId && apiModelId !== ctx.currentApiModelId) {
-			await ctx.query.setModel(apiModelId);
-			ctx.currentApiModelId = apiModelId;
-		}
-		if (input.model?.modelId) {
-			ctx.currentModel = input.model.modelId;
-		}
+			const baseModelId = input.model?.modelId ?? ctx.currentModel;
+			const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
+			if (apiModelId && apiModelId !== ctx.currentApiModelId) {
+				yield* Effect.tryPromise({
+					try: () => ctx.query.setModel(apiModelId),
+					catch: (cause) => cause,
+				});
+				ctx.currentApiModelId = apiModelId;
+			}
+			if (input.model?.modelId) {
+				ctx.currentModel = input.model.modelId;
+			}
 
-		const deferred = createDeferred<TurnResult>();
-		this.pushTurnDeferred(ctx.sessionId, deferred);
+			const deferred = createDeferred<TurnResult>();
+			this.pushTurnDeferred(ctx.sessionId, deferred);
 
-		// Update turn id and event sink on context (latest sink wins)
-		ctx.currentTurnId = input.turnId;
-		ctx.eventSink = input.eventSink;
+			// Update turn id and event sink on context (latest sink wins).
+			ctx.currentTurnId = input.turnId;
+			ctx.eventSink = input.eventSink;
 
-		// Build and enqueue the user message
-		const userMessage = this.buildUserMessage(input);
-		ctx.promptQueue.enqueue(userMessage);
+			// Build and enqueue the user message.
+			const userMessage = this.buildUserMessage(input);
+			yield* ctx.promptQueue.enqueue(userMessage);
 
-		return deferred.promise;
+			return yield* Effect.tryPromise({
+				try: () => deferred.promise,
+				catch: (cause) => cause,
+			});
+		});
 	}
 
 	private hasPendingTurn(sessionId: string): boolean {
@@ -537,25 +598,32 @@ export class ClaudeAdapter implements ProviderAdapter {
 		};
 	}
 
-	private async restartSessionForAgentChange(
+	private restartSessionForAgentChangeEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
-	): Promise<TurnResult> {
-		const oldStreamConsumer = ctx.streamConsumer;
-		await this.disposeSession(ctx, "Claude agent changed");
-		if (oldStreamConsumer) {
-			await oldStreamConsumer.catch(() => undefined);
-		}
+	): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			const oldStreamConsumer = ctx.streamConsumer;
+			yield* this.disposeSessionEffect(ctx, "Claude agent changed");
+			if (oldStreamConsumer) {
+				yield* Effect.tryPromise({
+					try: () => oldStreamConsumer.catch(() => undefined),
+					catch: (cause) => cause,
+				});
+			}
 
-		const providerState = { ...input.providerState };
-		delete providerState["resumeSessionId"];
-		const transcript = serializePriorConversation(input.history);
-		const prompt =
-			transcript.length > 0 ? `${transcript}\n\n${input.prompt}` : input.prompt;
-		return this.createSessionAndSendTurn({
-			...input,
-			providerState,
-			prompt,
+			const providerState = { ...input.providerState };
+			delete providerState["resumeSessionId"];
+			const transcript = serializePriorConversation(input.history);
+			const prompt =
+				transcript.length > 0
+					? `${transcript}\n\n${input.prompt}`
+					: input.prompt;
+			return yield* this.createSessionAndSendTurnEffect({
+				...input,
+				providerState,
+				prompt,
+			});
 		});
 	}
 
@@ -769,23 +837,26 @@ export class ClaudeAdapter implements ProviderAdapter {
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderAdapterFailure> {
-		return Effect.tryPromise({
-			try: () => this.interruptSession(sessionId),
-			catch: (cause) =>
-				new ProviderAdapterFailure({
-					providerId: this.providerId,
-					operation: "interruptTurn",
-					cause,
-				}),
-		});
+		return this.mapProviderFailure(
+			"interruptTurn",
+			this.interruptSessionEffect(sessionId),
+		);
 	}
 
-	private async interruptSession(sessionId: string): Promise<void> {
-		const ctx = this.sessions.get(sessionId);
-		if (!ctx) return;
+	private interruptSessionEffect(
+		sessionId: string,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const ctx = this.sessions.get(sessionId);
+			if (!ctx) return;
 
-		log.info(`Interrupting turn for session ${sessionId}`);
-		await this.cleanupSession(ctx, "Turn interrupted");
+			log.info(`Interrupting turn for session ${sessionId}`);
+			yield* this.cleanupSessionEffect(ctx, "Turn interrupted");
+			yield* this.rejectQueuedTurnDeferredsEffect(
+				ctx.sessionId,
+				"Turn interrupted",
+			);
+		});
 	}
 
 	// ─── cleanupSession ──────────────────────────────────────────────────
@@ -796,15 +867,15 @@ export class ClaudeAdapter implements ProviderAdapter {
 	 * pending approvals with deny, rejects pending questions, closes the
 	 * prompt queue, and interrupts the SDK query.
 	 */
-	private async cleanupSession(
+	private cleanupSessionEffect(
 		ctx: ClaudeSessionContext,
 		reason: string,
-	): Promise<void> {
-		if (ctx.stopped) return;
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			if (ctx.stopped) return;
 
-		// 1. Complete in-flight tools as failed via EventSink
-		for (const [, tool] of ctx.inFlightTools) {
-			try {
+			// 1. Complete in-flight tools as failed via EventSink.
+			for (const [, tool] of ctx.inFlightTools) {
 				const event = canonicalEvent(
 					"tool.completed",
 					ctx.sessionId,
@@ -816,49 +887,52 @@ export class ClaudeAdapter implements ProviderAdapter {
 					},
 					{ provider: "claude" },
 				);
-				await ctx.eventSink?.push(event);
-			} catch {
-				// Best-effort — sink may be closed or aborted
+				if (ctx.eventSink) {
+					yield* Effect.tryPromise({
+						try: () => ctx.eventSink?.push(event) ?? Promise.resolve(),
+						catch: (cause) => cause,
+					}).pipe(Effect.ignore);
+				}
 			}
-		}
-		ctx.inFlightTools.clear();
+			ctx.inFlightTools.clear();
 
-		// 2. Resolve pending approvals with deny
-		for (const pending of ctx.pendingApprovals.values()) {
-			try {
-				pending.resolve("reject");
-			} catch {
-				// Already resolved
+			// 2. Resolve pending approvals with deny.
+			for (const pending of ctx.pendingApprovals.values()) {
+				yield* Effect.try({
+					try: () => pending.resolve("reject"),
+					catch: (cause) => cause,
+				}).pipe(Effect.ignore);
 			}
-		}
-		ctx.pendingApprovals.clear();
+			ctx.pendingApprovals.clear();
 
-		// 3. Reject pending questions
-		for (const pending of ctx.pendingQuestions.values()) {
-			try {
-				pending.reject(new Error(reason));
-			} catch {
-				// Already resolved
+			// 3. Reject pending questions.
+			for (const pending of ctx.pendingQuestions.values()) {
+				yield* Effect.try({
+					try: () => pending.reject(new Error(reason)),
+					catch: (cause) => cause,
+				}).pipe(Effect.ignore);
 			}
-		}
-		ctx.pendingQuestions.clear();
-		await ctx.eventSink?.cancelSessionInteractions?.(reason);
+			ctx.pendingQuestions.clear();
 
-		// 4. Close prompt queue
-		try {
-			ctx.promptQueue.close();
-		} catch {
-			// Queue already closed
-		}
+			if (ctx.eventSink?.cancelSessionInteractions) {
+				yield* Effect.tryPromise({
+					try: () =>
+						Promise.resolve(ctx.eventSink?.cancelSessionInteractions?.(reason)),
+					catch: (cause) => cause,
+				}).pipe(Effect.ignore);
+			}
 
-		// 5. Interrupt SDK query
-		try {
-			await ctx.query.interrupt();
-		} catch {
-			// Session may already be finished
-		}
+			// 4. Close prompt queue.
+			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
-		(ctx as { stopped: boolean }).stopped = true;
+			// 5. Interrupt SDK query.
+			yield* Effect.tryPromise({
+				try: () => ctx.query.interrupt(),
+				catch: (cause) => cause,
+			}).pipe(Effect.ignore);
+
+			(ctx as { stopped: boolean }).stopped = true;
+		});
 	}
 
 	// ─── resolvePermission ────────────────────────────────────────────────
@@ -868,26 +942,19 @@ export class ClaudeAdapter implements ProviderAdapter {
 		requestId: string,
 		decision: PermissionDecision,
 	): Effect.Effect<void, ProviderAdapterFailure> {
-		return Effect.tryPromise({
-			try: () => this.resolvePermissionLocal(sessionId, requestId, decision),
-			catch: (cause) =>
-				new ProviderAdapterFailure({
-					providerId: this.providerId,
-					operation: "resolvePermission",
-					cause,
-				}),
-		});
-	}
+		return this.mapProviderFailure(
+			"resolvePermission",
+			Effect.gen(this, function* () {
+				const ctx = this.sessions.get(sessionId);
+				if (!ctx) return;
 
-	private async resolvePermissionLocal(
-		sessionId: string,
-		requestId: string,
-		decision: PermissionDecision,
-	): Promise<void> {
-		const ctx = this.sessions.get(sessionId);
-		if (!ctx) return;
-
-		await this.permissionBridge.resolvePermission(ctx, requestId, decision);
+				yield* Effect.tryPromise({
+					try: () =>
+						this.permissionBridge.resolvePermission(ctx, requestId, decision),
+					catch: (cause) => cause,
+				});
+			}),
+		);
 	}
 
 	// ─── resolveQuestion ──────────────────────────────────────────────────
@@ -897,30 +964,22 @@ export class ClaudeAdapter implements ProviderAdapter {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderAdapterFailure> {
-		return Effect.tryPromise({
-			try: () => this.resolveQuestionLocal(sessionId, requestId, answers),
-			catch: (cause) =>
-				new ProviderAdapterFailure({
-					providerId: this.providerId,
-					operation: "resolveQuestion",
-					cause,
-				}),
-		});
-	}
+		return this.mapProviderFailure(
+			"resolveQuestion",
+			Effect.gen(this, function* () {
+				const ctx = this.sessions.get(sessionId);
+				if (!ctx) return;
 
-	private async resolveQuestionLocal(
-		sessionId: string,
-		requestId: string,
-		answers: Record<string, unknown>,
-	): Promise<void> {
-		const ctx = this.sessions.get(sessionId);
-		if (!ctx) return;
-
-		const pending = ctx.pendingQuestions.get(requestId);
-		if (pending) {
-			pending.resolve(answers);
-			ctx.pendingQuestions.delete(requestId);
-		}
+				const pending = ctx.pendingQuestions.get(requestId);
+				if (pending) {
+					yield* Effect.try({
+						try: () => pending.resolve(answers),
+						catch: (cause) => cause,
+					});
+					ctx.pendingQuestions.delete(requestId);
+				}
+			}),
+		);
 	}
 
 	// ─── disposeSession / endSession / shutdown ──────────────────────────
@@ -931,77 +990,75 @@ export class ClaudeAdapter implements ProviderAdapter {
 	 * by endSessionEffect() and shutdown(); interruptTurnEffect() still uses cleanupSession
 	 * alone because interrupt is resumable.
 	 */
-	private async disposeSession(
+	private disposeSessionEffect(
 		ctx: ClaudeSessionContext,
 		reason: string,
-	): Promise<void> {
-		await this.cleanupSession(ctx, reason);
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			yield* this.cleanupSessionEffect(ctx, reason);
 
-		// Reject any pending turn deferreds. cleanupSession only rejects one
-		// via the stream consumer's finally; additional queued-up deferreds
-		// would orphan otherwise.
-		const queue = this.turnDeferredQueues.get(ctx.sessionId);
-		if (queue) {
+			yield* this.rejectQueuedTurnDeferredsEffect(ctx.sessionId, reason);
+
+			// Terminal close of the SDK query (vs interrupt(), which is resumable).
+			yield* Effect.try({
+				try: () => ctx.query.close(),
+				catch: (cause) => cause,
+			}).pipe(Effect.ignore);
+
+			this.sessions.delete(ctx.sessionId);
+			this.endedSessionStreams.delete(ctx.sessionId);
+		});
+	}
+
+	private rejectQueuedTurnDeferredsEffect(
+		sessionId: string,
+		reason: string,
+	): Effect.Effect<void, never> {
+		return Effect.gen(this, function* () {
+			const queue = this.turnDeferredQueues.get(sessionId);
+			if (!queue) return;
 			for (const d of queue) {
-				try {
-					d.reject(new Error(reason));
-				} catch {
-					// Already settled
-				}
+				yield* Effect.try({
+					try: () => d.reject(new Error(reason)),
+					catch: (cause) => cause,
+				}).pipe(Effect.ignore);
 			}
-			this.turnDeferredQueues.delete(ctx.sessionId);
-		}
-
-		// Terminal close of the SDK query (vs interrupt(), which is resumable).
-		try {
-			ctx.query.close();
-		} catch {
-			// Already closed
-		}
-
-		this.sessions.delete(ctx.sessionId);
-		this.endedSessionStreams.delete(ctx.sessionId);
+			this.turnDeferredQueues.delete(sessionId);
+		});
 	}
 
 	endSessionEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderAdapterFailure> {
-		return Effect.tryPromise({
-			try: () => this.endSessionLocal(sessionId),
-			catch: (cause) =>
-				new ProviderAdapterFailure({
-					providerId: this.providerId,
-					operation: "endSession",
-					cause,
-				}),
-		});
+		return this.mapProviderFailure(
+			"endSession",
+			this.endSessionLocalEffect(sessionId),
+		);
 	}
 
-	private async endSessionLocal(sessionId: string): Promise<void> {
-		const ctx = this.sessions.get(sessionId);
-		if (!ctx) return; // idempotent
-		log.info(`Ending Claude session: ${sessionId}`);
-		await this.disposeSession(ctx, "Session ended (reload)");
+	private endSessionLocalEffect(
+		sessionId: string,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const ctx = this.sessions.get(sessionId);
+			if (!ctx) return; // idempotent
+			log.info(`Ending Claude session: ${sessionId}`);
+			yield* this.disposeSessionEffect(ctx, "Session ended (reload)");
+		});
 	}
 
 	shutdownEffect(): Effect.Effect<void, ProviderAdapterFailure> {
-		return Effect.tryPromise({
-			try: () => this.shutdownLocal(),
-			catch: (cause) =>
-				new ProviderAdapterFailure({
-					providerId: this.providerId,
-					operation: "shutdown",
-					cause,
-				}),
-		});
+		return this.mapProviderFailure("shutdown", this.shutdownLocalEffect());
 	}
 
-	private async shutdownLocal(): Promise<void> {
-		log.info("ClaudeAdapter shutting down");
-		for (const ctx of [...this.sessions.values()]) {
-			await this.disposeSession(ctx, "Adapter shutting down");
-		}
-		this.sessions.clear(); // safety net
+	private shutdownLocalEffect(): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			log.info("ClaudeAdapter shutting down");
+			for (const ctx of [...this.sessions.values()]) {
+				yield* this.disposeSessionEffect(ctx, "Adapter shutting down");
+			}
+			this.sessions.clear(); // safety net
+		});
 	}
 
 	// ─── Internal: permission bridge access ──────────────────────────────

@@ -29,8 +29,8 @@ function makeFakeSessionContext(
 		workspaceRoot: "/tmp/ws",
 		startedAt: new Date().toISOString(),
 		promptQueue: {
-			close: vi.fn(),
-			enqueue: vi.fn(),
+			close: vi.fn(() => Effect.void),
+			enqueue: vi.fn(() => Effect.void),
 			[Symbol.asyncIterator]: vi.fn(),
 		} as unknown as ClaudeSessionContext["promptQueue"],
 		query: {
@@ -202,6 +202,43 @@ describe("ClaudeAdapter lifecycle", () => {
 			expect(ctx.pendingApprovals.size).toBe(0);
 		});
 
+		it("rejects all queued turn deferreds with interrupt reason", async () => {
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const ctx = makeFakeSessionContext("sess-interrupt-reject");
+			(
+				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
+			).sessions.set("sess-interrupt-reject", ctx);
+
+			const d1 = createDeferred<TurnResult>();
+			const d2 = createDeferred<TurnResult>();
+			(
+				adapter as unknown as {
+					turnDeferredQueues: Map<string, (typeof d1)[]>;
+				}
+			).turnDeferredQueues.set("sess-interrupt-reject", [d1, d2]);
+
+			const rejected: Error[] = [];
+			d1.promise.catch((e) => rejected.push(e));
+			d2.promise.catch((e) => rejected.push(e));
+
+			await Effect.runPromise(
+				adapter.interruptTurnEffect("sess-interrupt-reject"),
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(rejected).toHaveLength(2);
+			expect(rejected[0]?.message).toContain("interrupted");
+			expect(rejected[1]?.message).toContain("interrupted");
+			expect(
+				(
+					adapter as unknown as {
+						turnDeferredQueues: Map<string, unknown>;
+					}
+				).turnDeferredQueues.has("sess-interrupt-reject"),
+			).toBe(false);
+		});
+
 		it("rejects pending questions", async () => {
 			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 			const rejected: Error[] = [];
@@ -321,6 +358,29 @@ describe("ClaudeAdapter lifecycle", () => {
 				partId: "tool-2",
 				result: null,
 			});
+		});
+
+		it("treats cancelSessionInteractions as best-effort when it throws synchronously", async () => {
+			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const sink = createMockEventSink();
+			sink.cancelSessionInteractions = vi.fn(() => {
+				throw new Error("interaction cancel failed");
+			});
+			const ctx = makeFakeSessionContext("sess-1", {
+				eventSink: sink,
+			});
+			(
+				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
+			).sessions.set("sess-1", ctx);
+
+			await Effect.runPromise(adapter.interruptTurnEffect("sess-1"));
+
+			expect(sink.cancelSessionInteractions).toHaveBeenCalledWith(
+				"Turn interrupted",
+			);
+			expect(ctx.promptQueue.close).toHaveBeenCalled();
+			expect(ctx.query.interrupt).toHaveBeenCalled();
+			expect(ctx.stopped).toBe(true);
 		});
 	});
 

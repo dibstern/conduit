@@ -11,7 +11,10 @@ export type { ClaudeEventTranslatorDeps } from "./claude-event-translator.js";
 export { ClaudeEventTranslator } from "./claude-event-translator.js";
 export type { ClaudePermissionBridgeDeps } from "./claude-permission-bridge.js";
 export { ClaudePermissionBridge } from "./claude-permission-bridge.js";
-export { EffectPromptQueue } from "./effect-prompt-queue.js";
+export {
+	EffectPromptQueue,
+	makeEffectPromptQueue,
+} from "./effect-prompt-queue.js";
 export type {
 	CanUseTool,
 	ClaudeResumeCursor,
