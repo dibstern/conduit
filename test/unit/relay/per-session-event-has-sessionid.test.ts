@@ -2,6 +2,7 @@
 // Exercises each emission site and asserts sessionId presence on emitted events.
 // Server Task 1: sessionId was added to every per-session RelayMessage variant.
 
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import { handleSSEEvent } from "../../../src/lib/relay/sse-wiring.js";
@@ -120,15 +121,17 @@ describe("RelayEventSink push() attaches sessionId", () => {
 			send: (msg) => sent.push(msg),
 		});
 
-		await sink.push({
-			type: "text.delta",
-			sessionId: "ses_sink",
-			eventId: "e1",
-			provider: "test",
-			createdAt: Date.now(),
-			data: { text: "hello", messageId: "m1", partId: "p1" },
-			metadata: {},
-		});
+		await Effect.runPromise(
+			sink.push({
+				type: "text.delta",
+				sessionId: "ses_sink",
+				eventId: "e1",
+				provider: "test",
+				createdAt: Date.now(),
+				data: { text: "hello", messageId: "m1", partId: "p1" },
+				metadata: {},
+			}),
+		);
 
 		expect(sent.length).toBeGreaterThan(0);
 		for (const msg of sent) {
@@ -145,20 +148,22 @@ describe("RelayEventSink push() attaches sessionId", () => {
 			send: (msg) => sent.push(msg),
 		});
 
-		await sink.push({
-			type: "turn.completed",
-			sessionId: "ses_turn",
-			eventId: "e2",
-			provider: "test",
-			createdAt: Date.now(),
-			data: {
-				messageId: "m1",
-				tokens: { input: 10, output: 20 },
-				cost: 0.01,
-				duration: 100,
-			},
-			metadata: {},
-		});
+		await Effect.runPromise(
+			sink.push({
+				type: "turn.completed",
+				sessionId: "ses_turn",
+				eventId: "e2",
+				provider: "test",
+				createdAt: Date.now(),
+				data: {
+					messageId: "m1",
+					tokens: { input: 10, output: 20 },
+					cost: 0.01,
+					duration: 100,
+				},
+				metadata: {},
+			}),
+		);
 
 		const done = sent.find((m) => m.type === "done");
 		expect(done).toBeDefined();

@@ -1,4 +1,5 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
@@ -19,9 +20,11 @@ function makeStubSink(): EventSink & { events: CanonicalEvent[] } {
 	const events: CanonicalEvent[] = [];
 	return {
 		events,
-		push: vi.fn(async (event: CanonicalEvent) => {
-			events.push(event);
-		}),
+		push: vi.fn((event: CanonicalEvent) =>
+			Effect.sync(() => {
+				events.push(event);
+			}),
+		),
 		requestPermission: vi.fn(),
 		requestQuestion: vi.fn(),
 		resolvePermission: vi.fn(),
@@ -85,7 +88,10 @@ describe("ClaudeEventTranslator", () => {
 	beforeEach(() => {
 		sink = makeStubSink();
 		ctx = makeCtx();
-		translator = new ClaudeEventTranslator({ sink });
+		translator = new ClaudeEventTranslator({
+			sink,
+			runEffect: Effect.runPromise,
+		});
 	});
 
 	// ─── 1. system (subtype init) ────────────────────────────────────────

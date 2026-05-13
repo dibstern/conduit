@@ -65,7 +65,7 @@ describe("ProviderAdapter types", () => {
 
 	it("SendTurnInput includes all required fields", () => {
 		const mockSink: EventSink = {
-			push: async () => {},
+			push: () => Effect.void,
 			requestPermission: async () => ({ decision: "once" }),
 			requestQuestion: async () => ({}),
 			resolvePermission: () => {},
@@ -87,13 +87,14 @@ describe("ProviderAdapter types", () => {
 		expect(input.sessionId).toBe("s1");
 		expect(input.turnId).toBe("t1");
 		expect(input.eventSink).toBe(mockSink);
+		expect(Effect.isEffect(mockSink.push({} as never))).toBe(true);
 		expect(typeof mockSink.resolvePermission).toBe("function");
 		expect(typeof mockSink.resolveQuestion).toBe("function");
 	});
 
 	it("SendTurnInput supports optional fields", () => {
 		const mockSink: EventSink = {
-			push: async () => {},
+			push: () => Effect.void,
 			requestPermission: async () => ({ decision: "once" }),
 			requestQuestion: async () => ({}),
 			resolvePermission: () => {},

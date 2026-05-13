@@ -2565,7 +2565,7 @@ Exit: 0
 ```text
 $ pnpm lint
 Exit: 0
-Checked 993 files. No fixes applied.
+Checked 994 files. No fixes applied.
 ```
 
 ```text
@@ -2591,6 +2591,108 @@ Failed steps:
   E2E replay tests: 9 failures, all in test/e2e/specs/scroll-stability.spec.ts scroll-position/button assertions.
   E2E subagent tests: 3 failures in test/e2e/specs/subagent-sessions.spec.ts navigation/back-bar visibility.
 No failed test touched the Claude provider or prompt queue files changed in this slice.
+```
+
+## Phase 6.44: Claude EventSink Push Effect Boundary
+
+Plan issues found:
+
+- After Phase 6.43, the next live provider-side bridge was not the prompt queue. It was
+  `src/lib/handlers/prompt.ts` adapting `ClaudeEventPersistEffect.persistEvent(...)` back to a Promise for
+  `RelayEventSink`.
+- Moving `Effect.runPromise(...)` from the prompt handler into `RelayEventSink` would only hide the bridge. The
+  long-term boundary is for the in-process `EventSink.push(...)` path to return an Effect program, with Promise
+  bridging only at the Claude SDK async-iterator edge.
+- The progress doc's original grep inventory still contains historical Claude prompt queue bridge hits. Those are no
+  longer live after Phase 6.43, so this slice records a fresh scoped grep for the current Claude event sink boundary.
+
+Changes:
+
+- `src/lib/provider/types.ts`: changed `EventSink.push(event)` from `Promise<void>` to
+  `Effect.Effect<void, unknown>`.
+- `src/lib/provider/relay-event-sink.ts`: made `push(...)` compose reset, optional persistence, translation, websocket
+  send, and timeout finishing as an Effect. Effect persistence now runs directly; legacy persistence remains non-fatal
+  through `Effect.try(...)` + logged debug output.
+- `src/lib/handlers/prompt.ts`: removed the local `Effect.runPromise(persistEffect.persistEvent(event))` bridge and
+  passes the Effect persistence service directly into `RelayEventSink`.
+- `src/lib/provider/claude/claude-adapter.ts`: yields cleanup `EventSink.push(...)` effects directly and passes an
+  explicit `Runtime.runPromise(...)` runner to the Claude translator at the SDK async-iterator edge.
+- `src/lib/provider/claude/claude-event-translator.ts`: uses the injected runner when SDK async translation needs to
+  execute a sink push Effect.
+- `test/unit/provider/event-sink-effect-boundary.test.ts`: added a static regression guard so the prompt handler and
+  relay event sink cannot reintroduce a local runtime bridge for Claude event persistence.
+- Provider, relay-event-sink, pipeline/rejoin, and real-SDK test fixtures were updated for the Effect-returning push
+  contract.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/relay-event-sink.test.ts --testNamePattern "Effect-native persistence"
+Exit: 1
+Expected failure:
+  expected [] to deeply equal [ 'text.delta' ]
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/relay-event-sink.test.ts --testNamePattern "Effect-native persistence"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 15 skipped (16)
+```
+
+```text
+$ pnpm vitest run test/unit/provider/relay-event-sink.test.ts test/unit/provider/relay-event-sink-persistence.test.ts test/unit/handlers/effect-handlers.test.ts test/unit/provider/claude/claude-adapter-send-turn.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  131 passed (131)
+```
+
+```text
+$ pnpm vitest run test/unit/provider/event-sink.test.ts test/unit/provider/claude/claude-event-translator.test.ts test/unit/provider/claude/claude-translator-normalized-input.test.ts test/unit/provider/claude/tool-use-buffering.test.ts test/unit/provider/claude/claude-permission-bridge.test.ts test/unit/provider/types.test.ts test/unit/provider/opencode-adapter-send-turn.test.ts
+Exit: 0
+Test Files  7 passed (7)
+Tests  87 passed (87)
+```
+
+```text
+$ pnpm vitest run test/unit/pipeline/event-translation-snapshots.test.ts test/unit/pipeline/rejoin-integration.test.ts test/unit/pipeline/claude-session-rejoin.test.ts test/unit/relay/per-session-event-has-sessionid.test.ts test/unit/provider/relay-event-sink-translation-shape.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  59 passed | 3 todo (62)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 993 files. No fixes applied.
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  34 passed (34)
+Tests  390 passed (390)
+Note: run emitted an existing OpenCodeAdapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm test:unit > test-unit-output.log 2>&1
+Exit: 0
+Test Files  377 passed (377)
+Tests  5218 passed | 2 skipped | 12 todo (5232)
+```
+
+```text
+$ rg -n "Effect\\.run(Promise|Sync|PromiseExit|SyncExit)|Effect\\.promise\\(|Layer\\.succeed\\(|PersistenceLayer\\.open|concurrency: \"unbounded\"" src/lib/handlers/prompt.ts src/lib/provider/relay-event-sink.ts src/lib/provider/claude/claude-adapter.ts src/lib/provider/claude/claude-event-translator.ts src/lib/provider/types.ts
+Exit: 1
+No hits.
 ```
 
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion

@@ -1,4 +1,5 @@
 // test/unit/provider/claude/claude-permission-bridge.test.ts
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudePermissionBridge } from "../../../../src/lib/provider/claude/claude-permission-bridge.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
@@ -9,7 +10,7 @@ import type {
 
 function makeSink(): EventSink {
 	return {
-		push: vi.fn(async () => {}),
+		push: vi.fn(() => Effect.void),
 		requestPermission: vi.fn(async () => ({ decision: "once" as const })),
 		requestQuestion: vi.fn(),
 		resolvePermission: vi.fn(),
@@ -22,7 +23,7 @@ function makeInteractiveSink(): EventSink & {
 } {
 	const pending = new Map<string, (response: PermissionResponse) => void>();
 	return {
-		push: vi.fn(async () => {}),
+		push: vi.fn(() => Effect.void),
 		requestPermission: vi.fn(
 			async (request) =>
 				new Promise<PermissionResponse>((resolve) => {

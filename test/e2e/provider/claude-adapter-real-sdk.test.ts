@@ -29,9 +29,10 @@ function createCollectingEventSink(): EventSink & {
 	const events: CanonicalEvent[] = [];
 	return {
 		events,
-		async push(event: CanonicalEvent): Promise<void> {
-			events.push(event);
-		},
+		push: (event: CanonicalEvent) =>
+			Effect.sync(() => {
+				events.push(event);
+			}),
 		async requestPermission(
 			_request: PermissionRequest,
 		): Promise<PermissionResponse> {

@@ -4,6 +4,7 @@
 // without knowing about SQLite internals. Permission and question requests
 // block the adapter's turn loop until the user resolves them.
 
+import { Effect } from "effect";
 import { createLogger } from "../logger.js";
 import type { EventStore } from "../persistence/event-store.js";
 import type { CanonicalEvent } from "../persistence/events.js";
@@ -60,9 +61,11 @@ export class EventSinkImpl implements EventSink {
 	}
 
 	/** Append an event to the store and project it eagerly. */
-	async push(event: CanonicalEvent): Promise<void> {
-		const stored = this.eventStore.append(event);
-		this.projectionRunner.projectEvent(stored);
+	push(event: CanonicalEvent): Effect.Effect<void, unknown> {
+		return Effect.sync(() => {
+			const stored = this.eventStore.append(event);
+			this.projectionRunner.projectEvent(stored);
+		});
 	}
 
 	/**

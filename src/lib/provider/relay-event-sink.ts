@@ -5,6 +5,7 @@
 // and questions are routed through the same path so the UI receives the
 // familiar RelayMessage shapes.
 
+import { Effect } from "effect";
 import { createLogger } from "../logger.js";
 import type { CanonicalEvent, StoredEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
@@ -41,7 +42,9 @@ function silent(reason: string): TranslationResult {
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
 export interface EffectRelayEventSinkPersist {
-	readonly persistEvent: (event: CanonicalEvent) => void | Promise<void>;
+	readonly persistEvent: (
+		event: CanonicalEvent,
+	) => Effect.Effect<void, unknown>;
 }
 
 export interface LegacyRelayEventSinkPersist {
@@ -124,36 +127,47 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	}
 
 	return {
-		async push(event: CanonicalEvent): Promise<void> {
-			reset();
-			// Persist to SQLite when available (before WS send for durability)
-			if (persist) {
-				try {
-					if ("persistEvent" in persist) {
-						await persist.persistEvent(event);
-					} else {
-						await persist.ensureSession(sessionId);
-						const stored = await persist.eventStore.append(event);
-						await persist.projectionRunner.projectEvent(stored);
-					}
-				} catch (err) {
-					// Non-fatal — same pattern as dual-write-hook.ts:149.
-					// Covers: disk full, DB locked, projection recovery guard, etc.
-					log.debug(
-						`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+		push(event: CanonicalEvent): Effect.Effect<void, never> {
+			return Effect.gen(function* () {
+				yield* Effect.sync(reset);
+				// Persist to SQLite when available (before WS send for durability)
+				if (persist) {
+					const persistResult = yield* Effect.either(
+						"persistEvent" in persist
+							? persist.persistEvent(event)
+							: Effect.try({
+									try: () => {
+										persist.ensureSession(sessionId);
+										const stored = persist.eventStore.append(event);
+										persist.projectionRunner.projectEvent(stored);
+									},
+									catch: (cause) => cause,
+								}),
 					);
+					if (persistResult._tag === "Left") {
+						// Non-fatal — same pattern as dual-write-hook.ts:149.
+						// Covers: disk full, DB locked, projection recovery guard, etc.
+						yield* Effect.sync(() => {
+							const err = persistResult.left;
+							log.debug(
+								`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+							);
+						});
+					}
 				}
-			}
-			const result = translateCanonicalEvent(event);
-			if (result.kind === "emit") {
-				for (const raw of result.messages) {
-					const m = tagWithSessionId(raw, sessionId);
-					send(m);
-					const isTerminal =
-						m.type === "done" || (m.type === "error" && m.code !== "RETRY");
-					if (isTerminal) finish();
-				}
-			}
+				yield* Effect.sync(() => {
+					const result = translateCanonicalEvent(event);
+					if (result.kind === "emit") {
+						for (const raw of result.messages) {
+							const m = tagWithSessionId(raw, sessionId);
+							send(m);
+							const isTerminal =
+								m.type === "done" || (m.type === "error" && m.code !== "RETRY");
+							if (isTerminal) finish();
+						}
+					}
+				});
+			});
 		},
 
 		async requestPermission(

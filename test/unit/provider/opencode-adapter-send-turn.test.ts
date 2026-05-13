@@ -46,9 +46,11 @@ function makeStubEventSink(): EventSink & {
 	const pushedEvents: CanonicalEvent[] = [];
 	return {
 		pushedEvents,
-		push: vi.fn(async (event: CanonicalEvent) => {
-			pushedEvents.push(event);
-		}),
+		push: vi.fn((event: CanonicalEvent) =>
+			Effect.sync(() => {
+				pushedEvents.push(event);
+			}),
+		),
 		requestPermission: vi.fn(async () => ({
 			decision: "once" as const,
 		})),

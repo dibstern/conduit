@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
@@ -27,12 +28,14 @@ describe("createRelayEventSink — translation", () => {
 	it("maps text.delta → delta RelayMessage", async () => {
 		const send = vi.fn();
 		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await sink.push(
-			makeEvent("text.delta", {
-				messageId: "msg_1",
-				partId: "part_1",
-				text: "Hello",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("text.delta", {
+					messageId: "msg_1",
+					partId: "part_1",
+					text: "Hello",
+				}),
+			),
 		);
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
@@ -50,13 +53,15 @@ describe("createRelayEventSink — translation", () => {
 			send,
 			clearTimeout,
 		});
-		await sink.push(
-			makeEvent("turn.completed", {
-				messageId: "msg_1",
-				tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
-				cost: 0.01,
-				duration: 1234,
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("turn.completed", {
+					messageId: "msg_1",
+					tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+					cost: 0.01,
+					duration: 1234,
+				}),
+			),
 		);
 		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
 		expect(calls.some((m) => m.type === "result")).toBe(true);
@@ -72,12 +77,14 @@ describe("createRelayEventSink — translation", () => {
 			send,
 			clearTimeout,
 		});
-		await sink.push(
-			makeEvent("turn.error", {
-				messageId: "msg_1",
-				error: "boom",
-				code: "provider_error",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("turn.error", {
+					messageId: "msg_1",
+					error: "boom",
+					code: "provider_error",
+				}),
+			),
 		);
 		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
 		expect(
@@ -99,11 +106,15 @@ describe("createRelayEventSink — translation", () => {
 			clearTimeout,
 			resetTimeout,
 		});
-		await sink.push(
-			makeEvent(
-				"session.status",
-				{ sessionId: "ses-1", status: "retry" },
-				{ correlationId: "Retrying (attempt 3/10) · HTTP 502 · next in 2.2s" },
+		await Effect.runPromise(
+			sink.push(
+				makeEvent(
+					"session.status",
+					{ sessionId: "ses-1", status: "retry" },
+					{
+						correlationId: "Retrying (attempt 3/10) · HTTP 502 · next in 2.2s",
+					},
+				),
 			),
 		);
 		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
@@ -127,12 +138,14 @@ describe("createRelayEventSink — translation", () => {
 			send,
 			clearTimeout,
 		});
-		await sink.push(
-			makeEvent("turn.error", {
-				messageId: "msg_1",
-				error: "rate limit",
-				code: "provider_error",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("turn.error", {
+					messageId: "msg_1",
+					error: "rate limit",
+					code: "provider_error",
+				}),
+			),
 		);
 		expect(clearTimeout).toHaveBeenCalled();
 	});
@@ -145,11 +158,15 @@ describe("createRelayEventSink — translation", () => {
 			send,
 			clearTimeout,
 		});
-		await sink.push(
-			makeEvent("session.status", { sessionId: "ses-1", status: "idle" }),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("session.status", { sessionId: "ses-1", status: "idle" }),
+			),
 		);
-		await sink.push(
-			makeEvent("session.status", { sessionId: "ses-1", status: "busy" }),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("session.status", { sessionId: "ses-1", status: "busy" }),
+			),
 		);
 		expect(send).not.toHaveBeenCalled();
 		expect(clearTimeout).not.toHaveBeenCalled();
@@ -158,14 +175,16 @@ describe("createRelayEventSink — translation", () => {
 	it("maps tool.started → tool_start + tool_executing", async () => {
 		const send = vi.fn();
 		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await sink.push(
-			makeEvent("tool.started", {
-				messageId: "msg_1",
-				partId: "part_1",
-				toolName: "Bash",
-				callId: "call_1",
-				input: { command: "ls" },
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("tool.started", {
+					messageId: "msg_1",
+					partId: "part_1",
+					toolName: "Bash",
+					callId: "call_1",
+					input: { command: "ls" },
+				}),
+			),
 		);
 		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
 		expect(calls[0]).toMatchObject({
@@ -183,12 +202,14 @@ describe("createRelayEventSink — translation", () => {
 	it("maps thinking.delta → thinking_delta", async () => {
 		const send = vi.fn();
 		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await sink.push(
-			makeEvent("thinking.delta", {
-				messageId: "msg_1",
-				partId: "part_1",
-				text: "pondering",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("thinking.delta", {
+					messageId: "msg_1",
+					partId: "part_1",
+					text: "pondering",
+				}),
+			),
 		);
 		expect(send).toHaveBeenCalledWith({
 			type: "thinking_delta",
@@ -228,7 +249,7 @@ describe("createRelayEventSink — persistence", () => {
 			partId: "part_1",
 			text: "Hello",
 		});
-		await sink.push(event);
+		await Effect.runPromise(sink.push(event));
 
 		expect(ensureSession).toHaveBeenCalledWith("ses-1");
 		expect(eventStore.append).toHaveBeenCalledWith(event);
@@ -245,12 +266,14 @@ describe("createRelayEventSink — persistence", () => {
 		const send = vi.fn();
 		const sink = createRelayEventSink({ sessionId: "ses-1", send });
 
-		await sink.push(
-			makeEvent("text.delta", {
-				messageId: "msg_1",
-				partId: "part_1",
-				text: "Hello",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("text.delta", {
+					messageId: "msg_1",
+					partId: "part_1",
+					text: "Hello",
+				}),
+			),
 		);
 
 		expect(send).toHaveBeenCalledWith({
@@ -288,12 +311,14 @@ describe("createRelayEventSink — persistence", () => {
 			persist: { eventStore, projectionRunner, ensureSession },
 		});
 
-		await sink.push(
-			makeEvent("text.delta", {
-				messageId: "msg_1",
-				partId: "part_1",
-				text: "Hello",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("text.delta", {
+					messageId: "msg_1",
+					partId: "part_1",
+					text: "Hello",
+				}),
+			),
 		);
 
 		expect(send).toHaveBeenCalledWith({
@@ -320,12 +345,14 @@ describe("createRelayEventSink — persistence", () => {
 			persist: { eventStore, projectionRunner, ensureSession },
 		});
 
-		await sink.push(
-			makeEvent("text.delta", {
-				messageId: "msg_1",
-				partId: "part_1",
-				text: "Hello",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("text.delta", {
+					messageId: "msg_1",
+					partId: "part_1",
+					text: "Hello",
+				}),
+			),
 		);
 
 		expect(send).toHaveBeenCalledWith({
@@ -335,6 +362,44 @@ describe("createRelayEventSink — persistence", () => {
 			messageId: "msg_1",
 		});
 		expect(projectionRunner.projectEvent).not.toHaveBeenCalled();
+	});
+
+	it("runs Effect-native persistence programs before sending to WebSocket", async () => {
+		const order: string[] = [];
+		const send = vi.fn(() => {
+			order.push("send");
+		});
+		const persisted: string[] = [];
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			persist: {
+				persistEvent: (event) =>
+					Effect.sync(() => {
+						order.push("persist");
+						persisted.push(event.type);
+					}),
+			},
+		});
+
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("text.delta", {
+					messageId: "msg_1",
+					partId: "part_1",
+					text: "Hello",
+				}),
+			),
+		);
+
+		expect(persisted).toEqual(["text.delta"]);
+		expect(order).toEqual(["persist", "send"]);
+		expect(send).toHaveBeenCalledWith({
+			type: "delta",
+			sessionId: "ses-1",
+			text: "Hello",
+			messageId: "msg_1",
+		});
 	});
 });
 
@@ -491,26 +556,32 @@ describe("createRelayEventSink — thinking lifecycle", () => {
 			send: (msg) => sent.push(msg),
 		});
 
-		await sink.push(
-			makeEvent("thinking.start", {
-				messageId: "msg-1",
-				partId: "part-1",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("thinking.start", {
+					messageId: "msg-1",
+					partId: "part-1",
+				}),
+			),
 		);
 
-		await sink.push(
-			makeEvent("thinking.delta", {
-				messageId: "msg-1",
-				partId: "part-1",
-				text: "Let me think...",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("thinking.delta", {
+					messageId: "msg-1",
+					partId: "part-1",
+					text: "Let me think...",
+				}),
+			),
 		);
 
-		await sink.push(
-			makeEvent("thinking.end", {
-				messageId: "msg-1",
-				partId: "part-1",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("thinking.end", {
+					messageId: "msg-1",
+					partId: "part-1",
+				}),
+			),
 		);
 
 		const types = sent.map((m) => m.type);

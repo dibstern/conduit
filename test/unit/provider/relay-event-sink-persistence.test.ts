@@ -1,4 +1,5 @@
 // Integration test: RelayEventSink → real EventStore + ProjectionRunner → SQLite → session history
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersistenceLayer } from "../../../src/lib/persistence/persistence-layer.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
@@ -34,12 +35,16 @@ describe("RelayEventSink persistence integration", () => {
 		});
 
 		// Push a message.created + text.delta (simulates Claude assistant turn)
-		await sink.push(
-			makeMessageCreatedEvent("s1", "m1", {
-				role: "assistant",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				makeMessageCreatedEvent("s1", "m1", {
+					role: "assistant",
+				}),
+			),
 		);
-		await sink.push(makeTextDelta("s1", "m1", "Hello from Claude"));
+		await Effect.runPromise(
+			sink.push(makeTextDelta("s1", "m1", "Hello from Claude")),
+		);
 
 		// Verify session history is now available from SQLite
 		const readQuery = new ReadQueryService(layer.db);
@@ -77,8 +82,10 @@ describe("RelayEventSink persistence integration", () => {
 			},
 		});
 
-		await sink.push(
-			makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+		await Effect.runPromise(
+			sink.push(
+				makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+			),
 		);
 
 		// Verify session row exists with correct provider

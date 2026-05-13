@@ -336,28 +336,32 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
 				dispatch: vi.fn(async (command: SendTurnCommand) => {
-					await command.input.eventSink.push(
-						canonicalEvent(
-							"message.created",
-							"session-claude-sink-effect",
-							{
-								messageId: "assistant-message-1",
-								role: "assistant",
-								sessionId: "session-claude-sink-effect",
-							},
-							{ provider: "claude", createdAt: Date.now() },
+					await Effect.runPromise(
+						command.input.eventSink.push(
+							canonicalEvent(
+								"message.created",
+								"session-claude-sink-effect",
+								{
+									messageId: "assistant-message-1",
+									role: "assistant",
+									sessionId: "session-claude-sink-effect",
+								},
+								{ provider: "claude", createdAt: Date.now() },
+							),
 						),
 					);
-					await command.input.eventSink.push(
-						canonicalEvent(
-							"text.delta",
-							"session-claude-sink-effect",
-							{
-								messageId: "assistant-message-1",
-								partId: "assistant-message-1-0",
-								text: "assistant through sink",
-							},
-							{ provider: "claude", createdAt: Date.now() },
+					await Effect.runPromise(
+						command.input.eventSink.push(
+							canonicalEvent(
+								"text.delta",
+								"session-claude-sink-effect",
+								{
+									messageId: "assistant-message-1",
+									partId: "assistant-message-1-0",
+									text: "assistant through sink",
+								},
+								{ provider: "claude", createdAt: Date.now() },
+							),
 						),
 					);
 					return {

@@ -50,7 +50,7 @@ import type { PromptOptions } from "./types.js";
 // OpenCodeAdapter routes messages via REST + SSE, not EventSink. The sink is
 // required by the SendTurnInput interface but unused on the OpenCode path.
 const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
-	push: () => Promise.resolve(),
+	push: () => Effect.void,
 	requestPermission: () => Promise.resolve({ decision: "once" as const }),
 	requestQuestion: () => Promise.resolve({}),
 	resolvePermission: () => {},
@@ -321,11 +321,7 @@ export const handleMessage = (
 				providerId === "claude" &&
 				claudeEventPersistEffectOption._tag === "Some"
 			) {
-				const persistEffect = claudeEventPersistEffectOption.value;
-				eventSinkPersist = {
-					persistEvent: (event) =>
-						Effect.runPromise(persistEffect.persistEvent(event)),
-				};
+				eventSinkPersist = claudeEventPersistEffectOption.value;
 			} else if (
 				providerId === "claude" &&
 				claudeEventPersistOption._tag === "Some"

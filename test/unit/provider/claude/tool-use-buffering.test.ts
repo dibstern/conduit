@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
@@ -41,14 +42,16 @@ function makeTranslator() {
 	const events: CanonicalEvent[] = [];
 	const translator = new ClaudeEventTranslator({
 		sink: {
-			push: async (e: CanonicalEvent) => {
-				events.push(e);
-			},
+			push: (e: CanonicalEvent) =>
+				Effect.sync(() => {
+					events.push(e);
+				}),
 			requestPermission: vi.fn(),
 			requestQuestion: vi.fn(),
 			resolvePermission: vi.fn(),
 			resolveQuestion: vi.fn(),
 		},
+		runEffect: Effect.runPromise,
 	});
 	return { translator, events };
 }

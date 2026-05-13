@@ -51,7 +51,7 @@ export interface QuestionRequest {
  *   pending request when the UI returns an answer.
  */
 export interface EventSink {
-	push(event: CanonicalEvent): Promise<void>;
+	push(event: CanonicalEvent): Effect.Effect<void, unknown>;
 	requestPermission(request: PermissionRequest): Promise<PermissionResponse>;
 	requestQuestion(request: QuestionRequest): Promise<Record<string, unknown>>;
 	resolvePermission(requestId: string, response: PermissionResponse): void;

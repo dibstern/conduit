@@ -20,6 +20,7 @@
  * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
  */
 import { randomUUID } from "node:crypto";
+import type { Effect } from "effect";
 import type {
 	CanonicalEvent,
 	CanonicalEventType,
@@ -131,6 +132,7 @@ export function isInterruptedResult(result: SDKResultMessage): boolean {
 
 export interface ClaudeEventTranslatorDeps {
 	readonly sink: EventSink;
+	readonly runEffect: (effect: Effect.Effect<void, unknown>) => Promise<void>;
 }
 
 export class ClaudeEventTranslator {
@@ -843,6 +845,6 @@ export class ClaudeEventTranslator {
 	// ─── Push Helper ─────────────────────────────────────────────────────
 
 	private async push(event: CanonicalEvent): Promise<void> {
-		await this.deps.sink.push(event);
+		await this.deps.runEffect(this.deps.sink.push(event));
 	}
 }

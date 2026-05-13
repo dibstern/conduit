@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -60,12 +61,14 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		});
 
 		// Phase 1: streaming while viewing
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "hello",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "hello",
+				}),
+			),
 		);
 		expect(
 			delivery.getInbox("c1").filter((m) => m.type === "delta"),
@@ -73,12 +76,14 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 
 		// Phase 2: navigate away
 		delivery.switchSession("c1", "other-session");
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: " world",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: " world",
+				}),
+			),
 		);
 		// Client should NOT receive this — viewing other session
 		expect(
@@ -87,12 +92,14 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 
 		// Phase 3: navigate back
 		delivery.switchSession("c1", SESSION);
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "!",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "!",
+				}),
+			),
 		);
 		// Client SHOULD receive this — back on the session
 		expect(
@@ -110,37 +117,45 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		});
 
 		// thinking.start while viewing
-		await sink.push(
-			canonicalEvent("thinking.start", SESSION, {
-				messageId: "msg-1",
-				partId: "pt1",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("thinking.start", SESSION, {
+					messageId: "msg-1",
+					partId: "pt1",
+				}),
+			),
 		);
 
 		// Navigate away during thinking
 		delivery.switchSession("c1", "other");
-		await sink.push(
-			canonicalEvent("thinking.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "pt1",
-				text: "deep thought",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("thinking.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "pt1",
+					text: "deep thought",
+				}),
+			),
 		);
-		await sink.push(
-			canonicalEvent("thinking.end", SESSION, {
-				messageId: "msg-1",
-				partId: "pt1",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("thinking.end", SESSION, {
+					messageId: "msg-1",
+					partId: "pt1",
+				}),
+			),
 		);
 
 		// Navigate back — text begins
 		delivery.switchSession("c1", SESSION);
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "answer",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "answer",
+				}),
+			),
 		);
 
 		const inbox = delivery.getInbox("c1");
@@ -193,12 +208,14 @@ describe("Multi-client / multi-tab delivery", () => {
 			send: (msg) => delivery.deliverToSession(SESSION, msg),
 		});
 
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "shared delta",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "shared delta",
+				}),
+			),
 		);
 
 		// Both tabs received the event
@@ -224,12 +241,14 @@ describe("Multi-client / multi-tab delivery", () => {
 		// tab-1 navigates away
 		delivery.switchSession("tab-1", "other-session");
 
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "only tab-2",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "only tab-2",
+				}),
+			),
 		);
 
 		// tab-2 received, tab-1 did not
@@ -256,12 +275,14 @@ describe("Multi-client / multi-tab delivery", () => {
 		delivery.switchSession("tab-1", "other");
 		delivery.switchSession("tab-1", SESSION);
 
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "after return",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "after return",
+				}),
+			),
 		);
 
 		expect(
@@ -287,12 +308,14 @@ describe("Multi-client / multi-tab delivery", () => {
 		delivery.switchSession("tab-1", "other-1");
 		delivery.switchSession("tab-2", "other-2");
 
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "while both away",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "while both away",
+				}),
+			),
 		);
 
 		// Neither received
@@ -307,12 +330,14 @@ describe("Multi-client / multi-tab delivery", () => {
 		delivery.switchSession("tab-1", SESSION);
 		delivery.switchSession("tab-2", SESSION);
 
-		await sink.push(
-			canonicalEvent("text.delta", SESSION, {
-				messageId: "msg-1",
-				partId: "p1",
-				text: "after both return",
-			}),
+		await Effect.runPromise(
+			sink.push(
+				canonicalEvent("text.delta", SESSION, {
+					messageId: "msg-1",
+					partId: "p1",
+					text: "after both return",
+				}),
+			),
 		);
 
 		// Both received the new event

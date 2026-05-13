@@ -1,4 +1,5 @@
 // test/unit/provider/event-sink.test.ts
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { EventSinkImpl } from "../../../src/lib/provider/event-sink.js";
@@ -64,7 +65,7 @@ describe("EventSinkImpl", () => {
 	describe("push", () => {
 		it("appends event to store and projects it", async () => {
 			const event = makeEvent();
-			await sink.push(event);
+			await Effect.runPromise(sink.push(event));
 
 			expect(eventStore.append).toHaveBeenCalledWith(event);
 			expect(projectionRunner.projectEvent).toHaveBeenCalledTimes(1);
@@ -72,16 +73,16 @@ describe("EventSinkImpl", () => {
 
 		it("projects the stored event (with sequence)", async () => {
 			const event = makeEvent();
-			await sink.push(event);
+			await Effect.runPromise(sink.push(event));
 
 			const projected = projectionRunner.projectEvent.mock.calls[0]?.[0];
 			expect(projected.sequence).toBe(1);
 		});
 
 		it("handles multiple sequential pushes", async () => {
-			await sink.push(makeEvent({ eventId: "e1" }));
-			await sink.push(makeEvent({ eventId: "e2" }));
-			await sink.push(makeEvent({ eventId: "e3" }));
+			await Effect.runPromise(sink.push(makeEvent({ eventId: "e1" })));
+			await Effect.runPromise(sink.push(makeEvent({ eventId: "e2" })));
+			await Effect.runPromise(sink.push(makeEvent({ eventId: "e3" })));
 
 			expect(eventStore.append).toHaveBeenCalledTimes(3);
 			expect(projectionRunner.projectEvent).toHaveBeenCalledTimes(3);

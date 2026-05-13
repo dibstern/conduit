@@ -1640,8 +1640,8 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		// Create a sink whose push throws on turn.error, simulating a broken
 		// translateError path (since translateError calls sink.push).
 		const sink = createMockEventSink();
-		(sink.push as ReturnType<typeof vi.fn>).mockRejectedValue(
-			new Error("sink is broken"),
+		(sink.push as ReturnType<typeof vi.fn>).mockImplementation(() =>
+			Effect.fail(new Error("sink is broken")),
 		);
 
 		const input = makeBaseSendTurnInput({

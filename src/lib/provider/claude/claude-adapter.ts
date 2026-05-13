@@ -20,7 +20,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Effect } from "effect";
+import { Effect, Runtime } from "effect";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
 import { createDeferred, type Deferred } from "../deferred.js";
@@ -488,8 +488,10 @@ export class ClaudeAdapter implements ProviderAdapter {
 				this.sessions.set(sessionId, ctx);
 
 				// 8. Start background stream consumer.
+				const runtime = yield* Effect.runtime<never>();
 				const translator = new ClaudeEventTranslator({
 					sink: input.eventSink,
+					runEffect: Runtime.runPromise(runtime),
 				});
 				ctx.streamConsumer = this.runStreamConsumer(ctx, translator);
 			});
@@ -888,10 +890,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 					{ provider: "claude" },
 				);
 				if (ctx.eventSink) {
-					yield* Effect.tryPromise({
-						try: () => ctx.eventSink?.push(event) ?? Promise.resolve(),
-						catch: (cause) => cause,
-					}).pipe(Effect.ignore);
+					yield* ctx.eventSink.push(event).pipe(Effect.ignore);
 				}
 			}
 			ctx.inFlightTools.clear();
