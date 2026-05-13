@@ -224,4 +224,31 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not read client-init model data through the raw OpenCode client", () => {
+		const path = "src/lib/bridges/client-init.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredReadPatterns = [
+			{
+				pattern: /client\.session\.get\(/,
+				reason: "active session model reads belong to OpenCodeModelService",
+			},
+			{
+				pattern: /client\.provider\.list\(/,
+				reason: "provider/model list reads belong to OpenCodeModelService",
+			},
+		] as const;
+
+		const hits = retiredReadPatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

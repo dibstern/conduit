@@ -12,6 +12,10 @@ import type {
 	PendingPermissionRecoveryInput,
 	PendingQuestion,
 } from "../effect/pending-interaction-service.js";
+import type {
+	OpenCodeProviderList,
+	OpenCodeSessionDetail,
+} from "../effect/services.js";
 import type { ModelOverride } from "../effect/session-overrides-state.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
@@ -106,6 +110,10 @@ export interface ClientInitDeps {
 	agentService: {
 		listAgents(activeSessionId: string | undefined): Promise<AgentList>;
 	};
+	modelService: {
+		getSession(sessionId: string): Promise<OpenCodeSessionDetail>;
+		listProviders(): Promise<OpenCodeProviderList>;
+	};
 	pendingInteractions: {
 		listPendingPermissions(): Promise<PendingPermission[]>;
 		recoverPendingPermissions(
@@ -192,7 +200,7 @@ export async function handleClientConnected(
 
 		// Send model/agent info from the active session
 		try {
-			const session = await client.session.get(activeId);
+			const session = await deps.modelService.getSession(activeId);
 			if (session.modelID) {
 				activeSessionModel = {
 					modelID: session.modelID,
@@ -385,7 +393,7 @@ export async function handleClientConnected(
 
 	// ── Provider/model list + auto-select default ────────────────────────
 	try {
-		const providerResult = await client.provider.list();
+		const providerResult = await deps.modelService.listProviders();
 		const connectedSet = new Set(providerResult.connected);
 		const providers = providerResult.providers
 			.map((p) => ({

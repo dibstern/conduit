@@ -385,6 +385,23 @@ export function createMockClientInitDeps(
 		agentService: {
 			listAgents: vi.fn(async () => ({ agents: [] })),
 		},
+		modelService: {
+			getSession: vi.fn(async () => ({
+				id: "s1",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Session 1",
+				version: "1.0.0",
+				time: { created: 0, updated: 0 },
+				modelID: "gpt-4",
+				providerID: "openai",
+			})),
+			listProviders: vi.fn(async () => ({
+				providers: [],
+				defaults: {},
+				connected: [],
+			})),
+		},
 		pendingInteractions: {
 			listPendingPermissions: vi.fn().mockResolvedValue([]),
 			recoverPendingPermissions: vi.fn().mockResolvedValue([]),

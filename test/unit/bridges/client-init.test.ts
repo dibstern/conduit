@@ -14,11 +14,6 @@ const pid = (s: string) => s as PermissionId;
 // The shared factory provides minimal defaults. These helpers set the richer
 // mock return values that this test file's assertions depend on.
 
-const TEST_AGENTS = [
-	{ id: "1", name: "coder", description: "Main agent" },
-	{ id: "2", name: "title", description: "Title generator" },
-];
-
 const TEST_PROVIDERS = {
 	providers: [
 		{
@@ -61,11 +56,10 @@ const makeClaudeCapabilities = (
 
 /** Apply test-specific mock return values on top of shared factory defaults. */
 function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
-	vi.mocked(deps.client.app.agents).mockResolvedValue(TEST_AGENTS);
 	vi.mocked(deps.agentService.listAgents).mockResolvedValue({
 		agents: [{ id: "coder", name: "coder", description: "Main agent" }],
 	});
-	vi.mocked(deps.client.provider.list).mockResolvedValue(TEST_PROVIDERS);
+	vi.mocked(deps.modelService.listProviders).mockResolvedValue(TEST_PROVIDERS);
 	vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockResolvedValue(
 		TEST_HISTORY,
 	);
@@ -151,6 +145,53 @@ describe("handleClientConnected — REST API history", () => {
 // ─── Model info ──────────────────────────────────────────────────────────────
 
 describe("handleClientConnected — model info", () => {
+	it("loads session and provider models through the Effect model service", async () => {
+		const deps = applyTestDefaults(createMockClientInitDeps());
+		vi.mocked(deps.client.session.get).mockRejectedValue(
+			new Error("legacy session.get should not be used"),
+		);
+		vi.mocked(deps.client.provider.list).mockRejectedValue(
+			new Error("legacy provider.list should not be used"),
+		);
+		vi.mocked(deps.modelService.getSession).mockResolvedValue({
+			id: "session-1",
+			modelID: "gpt-4",
+			providerID: "openai",
+		} as Awaited<ReturnType<typeof deps.modelService.getSession>>);
+		vi.mocked(deps.modelService.listProviders).mockResolvedValue(
+			TEST_PROVIDERS,
+		);
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.modelService.getSession).toHaveBeenCalledWith("session-1");
+		expect(deps.modelService.listProviders).toHaveBeenCalledOnce();
+		expect(deps.client.session.get).not.toHaveBeenCalled();
+		expect(deps.client.provider.list).not.toHaveBeenCalled();
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "model_info",
+			model: "gpt-4",
+			provider: "openai",
+		});
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "model_list",
+			providers: [
+				{
+					id: "openai",
+					name: "OpenAI",
+					configured: true,
+					models: [
+						{
+							id: "gpt-4",
+							name: "GPT-4",
+							provider: "openai",
+						},
+					],
+				},
+			],
+		});
+	});
+
 	it("sends model_info when session has modelID", async () => {
 		const deps = createMockClientInitDeps();
 
@@ -165,10 +206,10 @@ describe("handleClientConnected — model info", () => {
 
 	it("sends model_info from Effect override state when session has no model", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.session.get).mockResolvedValue({
+		vi.mocked(deps.modelService.getSession).mockResolvedValue({
 			id: "s1",
 			modelID: "",
-		} as Awaited<ReturnType<typeof deps.client.session.get>>);
+		} as Awaited<ReturnType<typeof deps.modelService.getSession>>);
 		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
 			providerID: "anthropic",
 			modelID: "claude-3",
@@ -185,7 +226,7 @@ describe("handleClientConnected — model info", () => {
 
 	it("sends Effect override model_info as fallback when getSession fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.session.get).mockRejectedValue(
+		vi.mocked(deps.modelService.getSession).mockRejectedValue(
 			new Error("session fail"),
 		);
 		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
@@ -210,10 +251,10 @@ describe("handleClientConnected — model info", () => {
 
 	it("does not send model_info when neither session nor override state have model", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.session.get).mockResolvedValue({
+		vi.mocked(deps.modelService.getSession).mockResolvedValue({
 			id: "s1",
 			modelID: "",
-		} as Awaited<ReturnType<typeof deps.client.session.get>>);
+		} as Awaited<ReturnType<typeof deps.modelService.getSession>>);
 		// overrides.model is already undefined by default
 
 		await handleClientConnected(deps, "client-1");
@@ -497,7 +538,7 @@ describe("handleClientConnected — model list", () => {
 			),
 			overrideState,
 		} as unknown as Partial<ClientInitDeps>);
-		vi.mocked(deps.client.session.get).mockResolvedValue({
+		vi.mocked(deps.modelService.getSession).mockResolvedValue({
 			id: "session-1",
 			projectID: "project-1",
 			directory: "/tmp/project",
@@ -505,7 +546,7 @@ describe("handleClientConnected — model list", () => {
 			version: "1.0.0",
 			time: { created: 0, updated: 0 },
 		});
-		vi.mocked(deps.client.provider.list).mockResolvedValue({
+		vi.mocked(deps.modelService.listProviders).mockResolvedValue({
 			connected: ["openai"],
 			defaults: {},
 			providers: [
@@ -572,7 +613,7 @@ describe("handleClientConnected — model list", () => {
 
 	it("sends INIT_FAILED when listProviders throws", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.provider.list).mockRejectedValue(
+		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
 			new Error("providers fail"),
 		);
 
@@ -929,7 +970,7 @@ describe("handleClientConnected — pending questions", () => {
 describe("handleClientConnected — error resilience", () => {
 	it("continues sending remaining data when getSession fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.session.get).mockRejectedValue(
+		vi.mocked(deps.modelService.getSession).mockRejectedValue(
 			new Error("session fail"),
 		);
 
@@ -952,12 +993,18 @@ describe("handleClientConnected — error resilience", () => {
 
 	it("does not crash when all API calls fail", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.client.session.get).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.modelService.getSession).mockRejectedValue(
+			new Error("fail"),
+		);
 		vi.mocked(deps.sessionMgr.sendDualSessionLists).mockRejectedValue(
 			new Error("fail"),
 		);
-		vi.mocked(deps.client.app.agents).mockRejectedValue(new Error("fail"));
-		vi.mocked(deps.client.provider.list).mockRejectedValue(new Error("fail"));
+		vi.mocked(deps.agentService.listAgents).mockRejectedValue(
+			new Error("fail"),
+		);
+		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
+			new Error("fail"),
+		);
 		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockRejectedValue(
 			new Error("fail"),
 		);

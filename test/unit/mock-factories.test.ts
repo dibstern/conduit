@@ -76,6 +76,8 @@ describe("mock-factories", () => {
 			expect(deps.sessionMgr).toBeDefined();
 			expect(deps.overrideState.hasActiveProcessingTimeout).toBeDefined();
 			expect(deps.terminal.replay).toBeDefined();
+			expect(deps.modelService.getSession).toBeDefined();
+			expect(deps.modelService.listProviders).toBeDefined();
 			expect(deps.pendingInteractions.listPendingPermissions).toBeDefined();
 			expect(deps.log).toBeDefined();
 		});

@@ -49,6 +49,7 @@ import {
 	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
@@ -779,6 +780,22 @@ export async function createProjectRelay(
 					Effect.gen(function* () {
 						const service = yield* AgentServiceTag;
 						return yield* service.listAgents(activeSessionId);
+					}),
+				),
+		},
+		modelService: {
+			getSession: (sessionId) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* OpenCodeModelServiceTag;
+						return yield* service.getSession(sessionId);
+					}),
+				),
+			listProviders: () =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* OpenCodeModelServiceTag;
+						return yield* service.listProviders();
 					}),
 				),
 		},

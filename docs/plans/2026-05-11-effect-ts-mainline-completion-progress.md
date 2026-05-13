@@ -2170,6 +2170,78 @@ $ git diff --check
 Exit: 0
 ```
 
+## Phase 9.9: Client Init Model Service Boundary
+
+Plan issues found:
+
+- The Phase 9 grep audit correctly flagged `src/lib/bridges/client-init.ts` for direct
+  `client.session.get(...)` and `client.provider.list(...)` reads after the model handlers already had an
+  `OpenCodeModelService` boundary.
+- Keeping those reads on `OpenCodeAPI` meant reconnect bootstrap still bypassed the relay Effect runtime for active
+  session model lookup and provider/model list hydration. The long-term shape is a narrow model-service port backed by
+  `OpenCodeModelServiceTag`, not a broad raw-client dependency.
+- `client-init` still legitimately keeps the raw client for pending permission/question rehydration. Removing that
+  should be a separate consumer migration, not hidden inside the model-read slice.
+
+Changes:
+
+- `src/lib/bridges/client-init.ts`: added a narrow async `modelService` dependency and routed active-session model
+  lookup plus provider/model list hydration through it.
+- `src/lib/relay/relay-stack.ts`: backs the `client-init` model-service port from the relay `ManagedRuntime` using
+  `OpenCodeModelServiceTag`.
+- `test/unit/bridges/client-init.test.ts`: added a regression test that makes legacy `client.session.get(...)` and
+  `client.provider.list(...)` throw, while the Effect model-service port succeeds; existing model/bootstrap tests now
+  seed the same port.
+- `test/unit/effect/runtime-boundary-grep.test.ts`: added a static guard blocking direct client-init model reads from
+  returning.
+- `test/helpers/mock-factories.ts` and `test/unit/mock-factories.test.ts`: updated `ClientInitDeps` fixtures for the
+  new model-service port and removed stale `client.app.agents` setup from client-init tests.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/bridges/client-init.test.ts test/unit/mock-factories.test.ts
+Exit: 1
+Expected failure:
+  handleClientConnected still called the raw OpenCode client, so the new model-service regression saw
+  deps.modelService.getSession called 0 times and several provider/model bootstrap expectations failed.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/bridges/client-init.test.ts \
+  test/unit/mock-factories.test.ts \
+  test/unit/handlers/model-service-effect.test.ts \
+  test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  73 passed (73)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 1002 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  384 passed (384)
+Tests  5242 passed | 2 skipped | 12 todo (5256)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 9.4: Retire Dead SessionRegistry Bridge
 
 Plan issues found:
