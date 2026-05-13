@@ -138,4 +138,21 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not keep unused monitoring bridge services", () => {
+		const retiredNames =
+			/\b(?:MonitoringStateLive|MonitoringStateTag|SSETrackerLive|SSETrackerTag)\b/;
+		const hits = tsFiles(SRC_LIB).flatMap((file) => {
+			const relPath = relative(REPO_ROOT, file);
+			return readFileSync(file, "utf8")
+				.split("\n")
+				.flatMap((line, index) =>
+					retiredNames.test(line)
+						? [{ path: relPath, line: index + 1, source: line.trim() }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
 });

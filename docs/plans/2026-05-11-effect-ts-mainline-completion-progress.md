@@ -2190,6 +2190,57 @@ Exit: 0
 Checked 1001 files. No fixes applied.
 ```
 
+## Phase 9.6: Delete Unused Monitoring Bridge Module
+
+Plan issues found:
+
+- `src/lib/effect/monitoring-state-service.ts` exported `MonitoringStateLive` and `SSETrackerLive`, but no production
+  code or tests consumed either Tag or Layer.
+- `SSETrackerLive` used `Layer.succeed(...)` around an immediately-created mutable `Map`, which would share state
+  between Layer builds if it were ever wired in. Since the real monitoring path still creates its tracker in
+  `wireMonitoring(...)`, keeping this module was dead migration scaffolding rather than useful Effect ownership.
+
+Changes:
+
+- Deleted `src/lib/effect/monitoring-state-service.ts`.
+- Added a runtime-boundary regression guard that blocks reintroducing the unused monitoring tracker Tags/Layers.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 1
+Expected failure:
+  src/lib/effect/monitoring-state-service.ts exported MonitoringStateTag, MonitoringStateLive,
+  SSETrackerTag, and SSETrackerLive.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  4 passed (4)
+```
+
+```text
+$ rg -n "monitoring-state-service|MonitoringStateLive|MonitoringStateTag|SSETrackerLive|SSETrackerTag" src test -g '*.ts'
+Exit: 0
+Only the runtime-boundary regression test's retired-name regex remains.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 1000 files. No fixes applied.
+```
+
 ## Phase 8.1: Frontend Transport Protocol Boundary
 
 Plan issues found:
