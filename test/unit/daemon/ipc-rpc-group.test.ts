@@ -29,11 +29,9 @@ import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-	SessionOverridesTag,
 } from "../../../src/lib/effect/services.js";
 import { makeOverridesStateLive } from "../../../src/lib/effect/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 
 const makeTestFileSystem = () => {
 	const files = new Map<string, string>();
@@ -154,7 +152,6 @@ const makeTestLayer = () =>
 			setProjectInstance: () => {},
 		}),
 		makeMockInstanceMgmt(),
-		Layer.succeed(SessionOverridesTag, new SessionOverrides()),
 		makeOverridesStateLive(),
 		makeMockKeepAwake(),
 		makeMockConfigRef(),

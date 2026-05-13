@@ -20,7 +20,6 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { SessionOverrides } from "../session/session-overrides.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
@@ -66,6 +65,7 @@ export interface ClientInitOverrideState {
 	getContextWindow(sessionId: string): Promise<string>;
 	getDefaultContextWindow(): Promise<string>;
 	setDefaultModel(model: ModelOverride): Promise<void>;
+	hasActiveProcessingTimeout(sessionId: string): Promise<boolean>;
 }
 
 function findContextWindowOptions(
@@ -100,7 +100,6 @@ export interface ClientInitDeps {
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerLike;
 	overrideState: ClientInitOverrideState;
-	overrides: SessionOverrides;
 	terminal: {
 		replay(clientId: string): Promise<void>;
 	};
@@ -152,8 +151,7 @@ export async function handleClientConnected(
 	clientId: string,
 	requestedSessionId?: string,
 ): Promise<void> {
-	const { wsHandler, client, sessionMgr, overrides, pendingInteractions } =
-		deps;
+	const { wsHandler, client, sessionMgr, pendingInteractions } = deps;
 	const { overrideState } = deps;
 
 	const sendInitError = (err: unknown, prefix: string) => {
@@ -180,7 +178,9 @@ export async function handleClientConnected(
 				sessionMgr,
 				wsHandler,
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
-				overrides,
+				processingTimeouts: {
+					hasActiveProcessingTimeout: overrideState.hasActiveProcessingTimeout,
+				},
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
 				...(deps.readQuery != null && { readQuery: deps.readQuery }),

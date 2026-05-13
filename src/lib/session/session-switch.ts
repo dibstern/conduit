@@ -69,8 +69,8 @@ export interface SessionSwitchDeps {
 	};
 	readonly statusPoller?: { isProcessing(sessionId: string): boolean };
 	/** Check if a Claude SDK turn is in progress (processing timeout active). */
-	readonly overrides?: {
-		hasActiveProcessingTimeout(sessionId: string): boolean;
+	readonly processingTimeouts?: {
+		hasActiveProcessingTimeout(sessionId: string): boolean | Promise<boolean>;
 	};
 	readonly pollerManager?: {
 		isPolling(sessionId: string): boolean;
@@ -162,12 +162,14 @@ export function patchMissingDone(
 	source: SessionHistorySource,
 	statusPoller: SessionSwitchDeps["statusPoller"],
 	sessionId: string,
-	overrides?: SessionSwitchDeps["overrides"],
+	processingTimeouts?: {
+		hasActiveProcessingTimeout(sessionId: string): boolean;
+	},
 ): SessionHistorySource {
 	if (source.kind !== "cached-events") return source;
 	// F3 fix: widen guard to check both poller and processing timeout
 	if (statusPoller?.isProcessing(sessionId)) return source;
-	if (overrides?.hasActiveProcessingTimeout(sessionId)) return source;
+	if (processingTimeouts?.hasActiveProcessingTimeout(sessionId)) return source;
 
 	if (!isLastTurnActive(source.events)) return source;
 
@@ -322,15 +324,15 @@ export async function switchClientToSession(
 	const source: SessionHistorySource = options?.skipHistory
 		? { kind: "empty" }
 		: await resolveSessionHistory(sessionId, deps);
+	const hasActiveTimeout =
+		(await deps.processingTimeouts?.hasActiveProcessingTimeout(sessionId)) ??
+		false;
 
 	// Patch missing done event for idle sessions served from cache
-	// F3 fix: pass overrides so the guard checks both poller and processing timeout
-	const patchedSource = patchMissingDone(
-		source,
-		deps.statusPoller,
-		sessionId,
-		deps.overrides,
-	);
+	// F3 fix: pass timeout state so the guard checks both poller and Claude SDK turns
+	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId, {
+		hasActiveProcessingTimeout: () => hasActiveTimeout,
+	});
 
 	// Seed pagination cursor only when the cache is incomplete (hasMore=true).
 	// Complete caches cover the full session — no server fallback needed.
@@ -351,8 +353,7 @@ export async function switchClientToSession(
 
 	// Send processing status — check both OpenCode poller and Claude SDK timeout
 	const isProcessing =
-		deps.statusPoller?.isProcessing(sessionId) ||
-		deps.overrides?.hasActiveProcessingTimeout(sessionId);
+		deps.statusPoller?.isProcessing(sessionId) || hasActiveTimeout;
 	deps.wsHandler.sendTo(clientId, {
 		type: "status",
 		sessionId,

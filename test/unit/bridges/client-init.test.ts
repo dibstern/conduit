@@ -505,6 +505,7 @@ describe("handleClientConnected — model list", () => {
 			getContextWindow: vi.fn(async () => "1m"),
 			getDefaultContextWindow: vi.fn(async () => ""),
 			setDefaultModel: vi.fn(async () => undefined),
+			hasActiveProcessingTimeout: vi.fn(async () => false),
 		};
 		const deps = createMockClientInitDeps({
 			orchestrationEngine: {
@@ -1405,6 +1406,27 @@ describe("handleClientConnected — processing status on connect", () => {
 			type: "status",
 			sessionId: expect.any(String),
 			status: "idle",
+		});
+	});
+
+	it("sends status 'processing' when Effect timeout state is active", async () => {
+		const deps = createMockClientInitDeps({
+			statusPoller: {
+				isProcessing: vi.fn().mockReturnValue(false),
+				getCurrentStatuses: vi.fn().mockReturnValue({}),
+			} as unknown as NonNullable<ClientInitDeps["statusPoller"]>,
+			overrideState: {
+				...createMockClientInitDeps().overrideState,
+				hasActiveProcessingTimeout: vi.fn().mockResolvedValue(true),
+			},
+		});
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "status",
+			sessionId: expect.any(String),
+			status: "processing",
 		});
 	});
 

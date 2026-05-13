@@ -17,7 +17,6 @@ import {
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
 	SessionManagerTag,
-	SessionOverridesTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -25,6 +24,10 @@ import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/effect/session-manager-service.js";
+import {
+	makeOverridesStateLive,
+	startProcessingTimeout,
+} from "../../../src/lib/effect/session-overrides-state.js";
 import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
@@ -36,7 +39,6 @@ import {
 	makeMockLogger,
 	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
-	makeMockSessionOverrides,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
@@ -100,11 +102,11 @@ function makeSessionMetadataLayer(options: {
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-		Layer.succeed(SessionOverridesTag, makeMockSessionOverrides()),
 		Layer.succeed(LoggerTag, logger),
 		PendingInteractionServiceLive,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
+		makeOverridesStateLive(),
 	);
 
 	return {
@@ -291,6 +293,32 @@ describe("session handlers with Effect-native model service", () => {
 			}),
 		);
 	});
+
+	it.effect(
+		"reports processing when the Effect timeout state has an active turn",
+		() => {
+			const { wsHandler, layer } = makeSessionMetadataLayer({});
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* handleViewSession(
+					"client-1",
+					{ sessionId: "session-1" },
+					/* skipMetadata */ true,
+				);
+
+				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "status",
+					sessionId: "session-1",
+					status: "processing",
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"replays pending permissions from PendingInteractionService",

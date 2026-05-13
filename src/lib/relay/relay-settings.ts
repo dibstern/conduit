@@ -4,8 +4,8 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ModelOverride } from "../effect/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
-import type { ModelOverride } from "../session/session-overrides.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

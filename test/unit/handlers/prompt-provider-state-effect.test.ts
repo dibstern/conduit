@@ -12,12 +12,14 @@ import {
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
-import { makeOverridesStateLive } from "../../../src/lib/effect/session-overrides-state.js";
+import {
+	makeOverridesStateLive,
+	setModel,
+} from "../../../src/lib/effect/session-overrides-state.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -29,7 +31,6 @@ import type {
 	OrchestrationEngine,
 	SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
-import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
@@ -55,6 +56,12 @@ function mockWsHandler(
 	};
 }
 
+const setClaudeModel = (sessionId: string) =>
+	setModel(sessionId, {
+		providerID: "claude",
+		modelID: "claude-sonnet-4-5",
+	});
+
 describe("handleMessage with Effect provider state persistence", () => {
 	it.effect(
 		"passes existing provider state into dispatch and persists returned updates",
@@ -62,11 +69,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-provider-state-effect-"));
 			const filename = join(dir, "events.db");
 			const ws = mockWsHandler();
-			const overrides = new SessionOverrides();
-			overrides.setModel("session-provider-state", {
-				providerID: "claude",
-				modelID: "claude-sonnet-4-5",
-			});
 			const log = createSilentLogger();
 			const client = {
 				session: {
@@ -88,7 +90,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(
 					SessionManagerServiceTag,
@@ -107,6 +108,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* setClaudeModel("session-provider-state");
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
 				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
@@ -146,7 +148,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Effect.provide(layer),
 				Effect.ensuring(
 					Effect.sync(() => {
-						overrides.dispose();
 						rmSync(dir, { recursive: true, force: true });
 					}),
 				),
@@ -158,11 +159,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-history-effect-"));
 		const filename = join(dir, "events.db");
 		const ws = mockWsHandler("session-history-effect");
-		const overrides = new SessionOverrides();
-		overrides.setModel("session-history-effect", {
-			providerID: "claude",
-			modelID: "claude-sonnet-4-5",
-		});
 		const log = createSilentLogger();
 		const client = {
 			session: {
@@ -181,7 +177,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 			Layer.succeed(ConfigTag, {
@@ -197,6 +192,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* setClaudeModel("session-history-effect");
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`
 				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
@@ -249,7 +245,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			Effect.provide(layer),
 			Effect.ensuring(
 				Effect.sync(() => {
-					overrides.dispose();
 					rmSync(dir, { recursive: true, force: true });
 				}),
 			),
@@ -260,11 +255,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-user-effect-"));
 		const filename = join(dir, "events.db");
 		const ws = mockWsHandler("session-claude-user-effect");
-		const overrides = new SessionOverrides();
-		overrides.setModel("session-claude-user-effect", {
-			providerID: "claude",
-			modelID: "claude-sonnet-4-5",
-		});
 		const log = createSilentLogger();
 		const client = {
 			session: {
@@ -283,7 +273,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 			Layer.succeed(ConfigTag, {
@@ -299,6 +288,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* setClaudeModel("session-claude-user-effect");
 			yield* handleMessage("client-1", {
 				text: "persist this through effect",
 			});
@@ -324,7 +314,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			Effect.provide(layer),
 			Effect.ensuring(
 				Effect.sync(() => {
-					overrides.dispose();
 					rmSync(dir, { recursive: true, force: true });
 				}),
 			),
@@ -337,11 +326,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-sink-effect-"));
 			const filename = join(dir, "events.db");
 			const ws = mockWsHandler("session-claude-sink-effect");
-			const overrides = new SessionOverrides();
-			overrides.setModel("session-claude-sink-effect", {
-				providerID: "claude",
-				modelID: "claude-sonnet-4-5",
-			});
 			const log = createSilentLogger();
 			const client = {
 				session: {
@@ -386,7 +370,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(
 					SessionManagerServiceTag,
@@ -405,6 +388,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* setClaudeModel("session-claude-sink-effect");
 				yield* handleMessage("client-1", { text: "trigger assistant" });
 
 				const readQuery = yield* ReadQueryEffectTag;
@@ -442,7 +426,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Effect.provide(layer),
 				Effect.ensuring(
 					Effect.sync(() => {
-						overrides.dispose();
 						rmSync(dir, { recursive: true, force: true });
 					}),
 				),

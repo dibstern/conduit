@@ -211,7 +211,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
 			"active-session",
 		);
 	});
@@ -230,7 +230,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
 			"other-session",
 		);
 	});
@@ -253,10 +253,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
 			"active-session",
 		);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("does not reset processing timeout when no sessionID is present", () => {
@@ -277,8 +279,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).not.toHaveBeenCalled();
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets processing timeout on non-done events for active session", () => {
@@ -299,8 +305,10 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalled();
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets processing timeout on non-done events for any session (per-session timer)", () => {
@@ -321,10 +329,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
 			"other-session",
 		);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets processing timeout on retry events for active session", () => {
@@ -345,8 +355,12 @@ describe("handleSSEEvent", () => {
 		handleSSEEvent(deps, event);
 
 		// The error message should reset the timeout (it's not "done")
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledTimes(1);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).toHaveBeenCalledTimes(1);
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("does not reset processing timeout when no sessionID is present", () => {
@@ -367,8 +381,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).not.toHaveBeenCalled();
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("records permission.asked events through pending permission state", () => {

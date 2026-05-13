@@ -32,7 +32,7 @@ function createHarness() {
 			sendDualSessionLists: vi.fn(async () => {}),
 			getSessionParentMap: () => new Map(),
 		},
-		overrides: {
+		processingTimeouts: {
 			clearProcessingTimeout: vi.fn(),
 			resetProcessingTimeout: vi.fn(),
 		},

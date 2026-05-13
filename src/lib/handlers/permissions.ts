@@ -12,10 +12,13 @@ import {
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+import {
+	PROCESSING_TIMEOUT_DURATION,
+	startProcessingTimeout,
+} from "../effect/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import type { PayloadMap } from "./payloads.js";
@@ -46,27 +49,28 @@ function formatAnswers(rawAnswers: Record<string, string>): string[][] {
 const restartProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		if (!sessionId) return;
-		const overrides = yield* SessionOverridesTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
-		overrides.startProcessingTimeout(sessionId, () => {
-			log.warn(
-				`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
-			);
-			wsHandler.sendToSession(
-				sessionId,
-				new RelayError(
-					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-					{ code: "PROCESSING_TIMEOUT" },
-				).toMessage(sessionId),
-			);
-			wsHandler.sendToSession(sessionId, {
-				type: "done",
-				sessionId,
-				code: 1,
-			});
-		});
+		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
+			Effect.sync(() => {
+				log.warn(
+					`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
+				);
+				wsHandler.sendToSession(
+					sessionId,
+					new RelayError(
+						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+						{ code: "PROCESSING_TIMEOUT" },
+					).toMessage(sessionId),
+				);
+				wsHandler.sendToSession(sessionId, {
+					type: "done",
+					sessionId,
+					code: 1,
+				});
+			}),
+		);
 	});
 
 /** Persist permission rule to opencode.jsonc. */

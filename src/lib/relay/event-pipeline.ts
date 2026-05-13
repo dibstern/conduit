@@ -133,11 +133,13 @@ export function resolveTimeout(
 // ─── Side-effect application ─────────────────────────────────────────────────
 
 /** Dependencies for applying pipeline side effects. */
+export interface ProcessingTimeoutsPort {
+	clearProcessingTimeout(sessionId: string): void;
+	resetProcessingTimeout(sessionId: string): void;
+}
+
 export interface PipelineDeps {
-	overrides: {
-		clearProcessingTimeout(sessionId: string): void;
-		resetProcessingTimeout(sessionId: string): void;
-	};
+	processingTimeouts: ProcessingTimeoutsPort;
 	/**
 	 * Phase 0b: per-session events are broadcast to every client on the
 	 * project's `/p/<slug>` regardless of `view_session` state. The
@@ -170,9 +172,9 @@ export function applyPipelineResult(
 	deps: PipelineDeps,
 ): void {
 	if (result.timeout === "clear" && sessionId) {
-		deps.overrides.clearProcessingTimeout(sessionId);
+		deps.processingTimeouts.clearProcessingTimeout(sessionId);
 	} else if (result.timeout === "reset" && sessionId) {
-		deps.overrides.resetProcessingTimeout(sessionId);
+		deps.processingTimeouts.resetProcessingTimeout(sessionId);
 	}
 	// Phase 0b: always firehose to the project. The route field is retained
 	// as a "had-viewers?" signal for cross-session notification decisions.

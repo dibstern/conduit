@@ -16,10 +16,8 @@ import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-	SessionOverridesTag,
 } from "../../../src/lib/effect/services.js";
 import { makeOverridesStateLive } from "../../../src/lib/effect/session-overrides-state.js";
-import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 
 // ─── In-memory test FileSystem ────────────────────────────────────────────────
 
@@ -149,7 +147,6 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 			}),
 			persistConfig: () => {},
 		}),
-		Layer.succeed(SessionOverridesTag, new SessionOverrides()),
 		makeOverridesStateLive(),
 		makeMockKeepAwake(),
 		makeMockConfigRef(),

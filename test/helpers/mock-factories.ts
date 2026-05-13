@@ -48,7 +48,6 @@ import {
 	PtyManagerTag,
 	type SessionManagerShape,
 	SessionManagerTag,
-	SessionOverridesTag,
 	type StatusPollerShape,
 	StatusPollerTag,
 	type WebSocketHandlerShape,
@@ -80,7 +79,6 @@ import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wi
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
-import type { SessionOverrides } from "../../src/lib/session/session-overrides.js";
 import type { PermissionId } from "../../src/lib/shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 
@@ -239,38 +237,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
-function createMockOverrides(): HandlerDeps["overrides"] {
-	return {
-		agent: undefined,
-		model: undefined,
-		variant: "",
-		contextWindow: "",
-		defaultModel: undefined,
-		defaultVariant: "",
-		defaultContextWindow: "",
-		modelUserSelected: false,
-		setAgent: vi.fn(),
-		setModel: vi.fn(),
-		setModelDefault: vi.fn(),
-		setDefaultModel: vi.fn(),
-		setVariant: vi.fn(),
-		setContextWindow: vi.fn(),
-		getModel: vi.fn().mockReturnValue(undefined),
-		getAgent: vi.fn().mockReturnValue(undefined),
-		clearAgent: vi.fn(),
-		getVariant: vi.fn().mockReturnValue(""),
-		getContextWindow: vi.fn().mockReturnValue(""),
-		isModelUserSelected: vi.fn().mockReturnValue(false),
-		clear: vi.fn(),
-		clearSession: vi.fn(),
-		startProcessingTimeout: vi.fn(),
-		clearProcessingTimeout: vi.fn(),
-		resetProcessingTimeout: vi.fn(),
-		hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
-		dispose: vi.fn(),
-	} as unknown as HandlerDeps["overrides"];
-}
-
 function createMockClientInitOverrideState(): ClientInitDeps["overrideState"] {
 	return {
 		getModel: vi.fn().mockResolvedValue(undefined),
@@ -280,6 +246,7 @@ function createMockClientInitOverrideState(): ClientInitDeps["overrideState"] {
 		getContextWindow: vi.fn().mockResolvedValue(""),
 		getDefaultContextWindow: vi.fn().mockResolvedValue(""),
 		setDefaultModel: vi.fn().mockResolvedValue(undefined),
+		hasActiveProcessingTimeout: vi.fn().mockResolvedValue(false),
 	};
 }
 
@@ -323,7 +290,6 @@ export function createMockHandlerDeps(
 		wsHandler: createMockWsHandlerFull(),
 		client: createMockClient(),
 		sessionMgr: createMockSessionMgr(),
-		overrides: createMockOverrides(),
 		ptyManager: createMockPtyManager(),
 		config: createMockConfig(),
 		log: createSilentLogger(),
@@ -385,7 +351,10 @@ export function createMockSSEWiringDeps(
 					})),
 			),
 		},
-		overrides: createMockOverrides() as unknown as SSEWiringDeps["overrides"],
+		processingTimeouts: {
+			clearProcessingTimeout: vi.fn(),
+			resetProcessingTimeout: vi.fn(),
+		},
 		wsHandler: {
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),
@@ -413,7 +382,6 @@ export function createMockClientInitDeps(
 		sessionMgr:
 			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
 		overrideState: createMockClientInitOverrideState(),
-		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
 		terminal: {
 			replay: vi.fn(async () => undefined),
 		},
@@ -817,41 +785,6 @@ export function makeMockLogger(): Logger {
 	} as unknown as Logger;
 }
 
-/** Create a mock SessionOverrides for Effect tests. */
-export function makeMockSessionOverrides(
-	overrides?: Partial<SessionOverrides>,
-): SessionOverrides {
-	return {
-		agent: undefined,
-		model: undefined,
-		variant: "",
-		contextWindow: "",
-		defaultModel: undefined,
-		defaultVariant: "",
-		defaultContextWindow: "",
-		modelUserSelected: false,
-		setAgent: vi.fn(),
-		setModel: vi.fn(),
-		setModelDefault: vi.fn(),
-		setDefaultModel: vi.fn(),
-		setVariant: vi.fn(),
-		setContextWindow: vi.fn(),
-		getModel: vi.fn(() => undefined),
-		getAgent: vi.fn(() => undefined),
-		getVariant: vi.fn(() => ""),
-		getContextWindow: vi.fn(() => ""),
-		isModelUserSelected: vi.fn(() => false),
-		clear: vi.fn(),
-		clearSession: vi.fn(),
-		startProcessingTimeout: vi.fn(),
-		clearProcessingTimeout: vi.fn(),
-		resetProcessingTimeout: vi.fn(),
-		hasActiveProcessingTimeout: vi.fn(() => false),
-		dispose: vi.fn(),
-		...overrides,
-	} as unknown as SessionOverrides;
-}
-
 /** Create a mock PtyManager for Effect tests. */
 export function makeMockPtyManager(
 	overrides?: Partial<PtyManager>,
@@ -893,7 +826,6 @@ export interface TestHandlerLayerOptions {
 	wsHandler?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
-	overrides?: SessionOverrides;
 	ptyManager?: PtyManager;
 	config?: ProjectRelayConfig;
 	log?: Logger;
@@ -921,7 +853,6 @@ export function makeTestHandlerLayer(
 	const api = opts?.api ?? makeMockOpenCodeAPI();
 	const wsHandler = opts?.wsHandler ?? makeMockWebSocketHandler();
 	const sessionMgr = opts?.sessionMgr ?? makeMockSessionManagerShape();
-	const sessionOverrides = opts?.overrides ?? makeMockSessionOverrides();
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
 	const config = opts?.config ?? makeMockConfig();
 	const log = opts?.log ?? makeMockLogger();
@@ -1023,7 +954,6 @@ export function makeTestHandlerLayer(
 		sessionManagerServiceLayer,
 		wsHandlerLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
-		Layer.succeed(SessionOverridesTag, sessionOverrides),
 		overridesStateLayer,
 		ptyManagerLayer,
 		configLayer,

@@ -8,12 +8,14 @@ import {
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
-	SessionOverridesTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
-import { clearSession as clearEffectOverrideSession } from "../effect/session-overrides-state.js";
+import {
+	clearSession as clearEffectOverrideSession,
+	hasActiveProcessingTimeout,
+} from "../effect/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	buildSessionSwitchedMessage,
@@ -252,20 +254,17 @@ const switchClientToSession = (
 
 		const wsHandler = yield* WebSocketHandlerTag;
 		const statusPoller = yield* StatusPollerTag;
-		const overrides = yield* SessionOverridesTag;
 		const pollerManager = yield* PollerManagerTag;
+		const hasActiveTimeout = yield* hasActiveProcessingTimeout(sessionId);
 
 		wsHandler.setClientSession(clientId, sessionId);
 
 		const source: SessionHistorySource = options?.skipHistory
 			? { kind: "empty" }
 			: yield* resolveSessionHistory(sessionId);
-		const patchedSource = patchMissingDone(
-			source,
-			statusPoller,
-			sessionId,
-			overrides,
-		);
+		const patchedSource = patchMissingDone(source, statusPoller, sessionId, {
+			hasActiveProcessingTimeout: () => hasActiveTimeout,
+		});
 
 		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
 
@@ -279,8 +278,7 @@ const switchClientToSession = (
 		);
 
 		const isProcessing =
-			statusPoller.isProcessing(sessionId) ||
-			overrides.hasActiveProcessingTimeout(sessionId);
+			statusPoller.isProcessing(sessionId) || hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
@@ -501,7 +499,6 @@ export const handleForkSession = (
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 
 		const sessionId =
@@ -517,7 +514,6 @@ export const handleForkSession = (
 		);
 
 		yield* clearEffectOverrideSession(sessionId);
-		overrides.clearSession(sessionId);
 		yield* sessionManagerService.clearPaginationCursor(sessionId);
 
 		// Determine fork-point metadata

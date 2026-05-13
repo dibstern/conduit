@@ -1,16 +1,24 @@
 // ─── Session Overrides State (Effect) ──────────────────────────────────────
 // Effect-native replacement for the imperative SessionOverrides class.
-// Uses Ref<OverridesState> for atomic state and Fiber for timeout management.
+// Uses Ref<OverridesState> for atomic state and FiberMap for timeout management.
 //
 // Pattern (mirrors SessionRegistryState / SessionManagerState):
 //   OverridesStateTag → Ref.Ref<OverridesState>
 //   makeOverridesStateLive() → Layer providing the Tag
 //   Pure functions: setModel, getModel, setAgent, getAgent, etc.
 //
-// Uses native Map (not HashMap) because SessionState contains
-// Fiber.RuntimeFiber references. Documented exception per conventions.
+// Uses native Map (not HashMap) because this state is an in-memory owner for
+// runtime resources and callback closures. Documented exception per conventions.
 
-import { Context, type Duration, Effect, Fiber, Layer, Ref } from "effect";
+import {
+	Context,
+	type Duration,
+	Effect,
+	Fiber,
+	FiberMap,
+	Layer,
+	Ref,
+} from "effect";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,17 +33,21 @@ export interface SessionState {
 	variant?: string;
 	contextWindow?: string;
 	modelUserSelected: boolean;
-	processingTimeoutFiber?: Fiber.RuntimeFiber<void>;
 	processingTimeoutCallback?: () => Effect.Effect<void>;
+	processingTimeoutToken?: symbol;
 }
 
 export interface OverridesState {
 	sessions: Map<string, SessionState>;
+	processingTimeoutFibers: FiberMap.FiberMap<string, void>;
 	defaultModel: ModelOverride | undefined;
 	defaultAgent: string | undefined;
 	defaultVariant: string;
 	defaultContextWindow: string;
 }
+
+export const PROCESSING_TIMEOUT_DURATION =
+	"2 minutes" satisfies Duration.DurationInput;
 
 // ─── Context Tag ────────────────────────────────────────────────────────────
 
@@ -47,14 +59,18 @@ export class OverridesStateTag extends Context.Tag("OverridesState")<
 // ─── Layer factory ──────────────────────────────────────────────────────────
 
 export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
-	Layer.effect(
+	Layer.scoped(
 		OverridesStateTag,
-		Ref.make<OverridesState>({
-			sessions: new Map(),
-			defaultModel: undefined,
-			defaultAgent: undefined,
-			defaultVariant: "",
-			defaultContextWindow: "",
+		Effect.gen(function* () {
+			const processingTimeoutFibers = yield* FiberMap.make<string, void>();
+			return yield* Ref.make<OverridesState>({
+				sessions: new Map(),
+				processingTimeoutFibers,
+				defaultModel: undefined,
+				defaultAgent: undefined,
+				defaultVariant: "",
+				defaultContextWindow: "",
+			});
 		}),
 	);
 
@@ -72,6 +88,59 @@ const getOrCreate = (
 	next.set(sessionId, fresh);
 	return [next, fresh];
 };
+
+const withoutProcessingTimeout = (entry: SessionState): SessionState => {
+	const {
+		processingTimeoutCallback: _,
+		processingTimeoutToken: __,
+		...rest
+	} = entry;
+	return rest;
+};
+
+const isCurrentProcessingTimeout = (
+	ref: Ref.Ref<OverridesState>,
+	sessionId: string,
+	token: symbol,
+) =>
+	Ref.get(ref).pipe(
+		Effect.map(
+			(state) =>
+				state.sessions.get(sessionId)?.processingTimeoutToken === token,
+		),
+	);
+
+const completeProcessingTimeout = (
+	ref: Ref.Ref<OverridesState>,
+	sessionId: string,
+	token: symbol,
+	onTimeout: () => Effect.Effect<void>,
+) =>
+	Effect.gen(function* () {
+		const shouldRun = yield* Ref.modify(ref, (state) => {
+			const entry = state.sessions.get(sessionId);
+			if (!entry || entry.processingTimeoutToken !== token) {
+				return [false, state] as const;
+			}
+			const next = new Map(state.sessions);
+			next.set(sessionId, withoutProcessingTimeout(entry));
+			return [true, { ...state, sessions: next }] as const;
+		});
+		if (shouldRun) {
+			yield* onTimeout();
+		}
+	});
+
+const makeProcessingTimeoutEffect = (
+	ref: Ref.Ref<OverridesState>,
+	sessionId: string,
+	duration: Duration.DurationInput,
+	token: symbol,
+	onTimeout: () => Effect.Effect<void>,
+) =>
+	Effect.sleep(duration).pipe(
+		Effect.andThen(completeProcessingTimeout(ref, sessionId, token, onTimeout)),
+	);
 
 // ─── Default Model / Variant ────────────────────────────────────────────────
 
@@ -272,18 +341,15 @@ export const getContextWindow = (sessionId: string) =>
 export const clearSession = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
-		// Read fiber reference first, then update state, then interrupt.
-		// Fiber.interrupt is an Effect so it cannot live inside Ref.update.
-		const fiber = yield* Ref.modify(ref, (state) => {
-			const entry = state.sessions.get(sessionId);
-			const fib = entry?.processingTimeoutFiber;
+		const timeoutFibers = yield* Ref.modify(ref, (state) => {
 			const next = new Map(state.sessions);
 			next.delete(sessionId);
-			return [fib, { ...state, sessions: next }] as const;
+			return [
+				state.processingTimeoutFibers,
+				{ ...state, sessions: next },
+			] as const;
 		});
-		if (fiber) {
-			yield* Fiber.interrupt(fiber);
-		}
+		yield* FiberMap.remove(timeoutFibers, sessionId);
 	});
 
 // ─── Processing Timeout ─────────────────────────────────────────────────────
@@ -300,33 +366,30 @@ export const startProcessingTimeout = (
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
-
-		// Cancel existing fiber (if any)
-		const oldFiber = yield* Ref.modify(ref, (state) => {
-			const entry = state.sessions.get(sessionId);
-			return [entry?.processingTimeoutFiber, state] as const;
-		});
-		if (oldFiber) {
-			yield* Fiber.interrupt(oldFiber);
-		}
-
-		// Fork a new timeout fiber (scoped — interrupted when scope closes)
-		const fiber = yield* Effect.sleep(duration).pipe(
-			Effect.andThen(onTimeout()),
-			Effect.forkScoped,
-		);
-
-		// Store the fiber and callback in session state
-		yield* Ref.update(ref, (state) => {
+		const token = Symbol(sessionId);
+		const timeoutFibers = yield* Ref.modify(ref, (state) => {
 			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
 			const next = new Map(sessions);
 			next.set(sessionId, {
 				...entry,
-				processingTimeoutFiber: fiber,
 				processingTimeoutCallback: onTimeout,
+				processingTimeoutToken: token,
 			});
-			return { ...state, sessions: next };
+			return [
+				state.processingTimeoutFibers,
+				{ ...state, sessions: next },
+			] as const;
 		});
+
+		const fiber = yield* FiberMap.run(
+			timeoutFibers,
+			sessionId,
+			makeProcessingTimeoutEffect(ref, sessionId, duration, token, onTimeout),
+		);
+
+		if (!(yield* isCurrentProcessingTimeout(ref, sessionId, token))) {
+			yield* Fiber.interrupt(fiber);
+		}
 	});
 
 /**
@@ -339,55 +402,60 @@ export const resetProcessingTimeout = (
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
-		const state = yield* Ref.get(ref);
-		const entry = state.sessions.get(sessionId);
-		const cb = entry?.processingTimeoutCallback;
-		const fib = entry?.processingTimeoutFiber;
+		const resetState = yield* Ref.modify(ref, (state) => {
+			const entry = state.sessions.get(sessionId);
+			const cb = entry?.processingTimeoutCallback;
+			if (!entry?.processingTimeoutToken || !cb) {
+				return [undefined, state] as const;
+			}
+			const token = Symbol(sessionId);
+			const next = new Map(state.sessions);
+			next.set(sessionId, {
+				...entry,
+				processingTimeoutCallback: cb,
+				processingTimeoutToken: token,
+			});
+			return [
+				{ callback: cb, timeoutFibers: state.processingTimeoutFibers, token },
+				{ ...state, sessions: next },
+			] as const;
+		});
+		if (!resetState) return;
 
-		if (!fib || !cb) return; // no-op
-
-		// Interrupt old fiber
-		yield* Fiber.interrupt(fib);
-
-		// Fork new timeout fiber
-		const newFiber = yield* Effect.sleep(duration).pipe(
-			Effect.andThen(cb()),
-			Effect.forkScoped,
+		const fiber = yield* FiberMap.run(
+			resetState.timeoutFibers,
+			sessionId,
+			makeProcessingTimeoutEffect(
+				ref,
+				sessionId,
+				duration,
+				resetState.token,
+				resetState.callback,
+			),
 		);
 
-		// Update state with new fiber (keep same callback)
-		yield* Ref.update(ref, (s) => {
-			const existing = s.sessions.get(sessionId);
-			if (!existing) return s;
-			const next = new Map(s.sessions);
-			next.set(sessionId, {
-				...existing,
-				processingTimeoutFiber: newFiber,
-			});
-			return { ...s, sessions: next };
-		});
+		if (
+			!(yield* isCurrentProcessingTimeout(ref, sessionId, resetState.token))
+		) {
+			yield* Fiber.interrupt(fiber);
+		}
 	});
 
 /** Cancel the processing timeout for a specific session. */
 export const clearProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
-		const fiber = yield* Ref.modify(ref, (state) => {
+		const timeoutFibers = yield* Ref.modify(ref, (state) => {
 			const entry = state.sessions.get(sessionId);
-			if (!entry) return [undefined, state] as const;
-			const fib = entry.processingTimeoutFiber;
+			if (!entry) return [state.processingTimeoutFibers, state] as const;
 			const next = new Map(state.sessions);
-			const {
-				processingTimeoutFiber: _,
-				processingTimeoutCallback: __,
-				...rest
-			} = entry;
-			next.set(sessionId, rest);
-			return [fib, { ...state, sessions: next }] as const;
+			next.set(sessionId, withoutProcessingTimeout(entry));
+			return [
+				state.processingTimeoutFibers,
+				{ ...state, sessions: next },
+			] as const;
 		});
-		if (fiber) {
-			yield* Fiber.interrupt(fiber);
-		}
+		yield* FiberMap.remove(timeoutFibers, sessionId);
 	});
 
 /** Check if a session has an active processing timeout. */
@@ -395,7 +463,7 @@ export const hasActiveProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId)?.processingTimeoutFiber !== undefined;
+		return state.sessions.get(sessionId)?.processingTimeoutToken !== undefined;
 	});
 
 // ─── Debug / Test ───────────────────────────────────────────────────────────

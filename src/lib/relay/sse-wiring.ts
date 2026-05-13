@@ -12,11 +12,14 @@ import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
 import type { PushNotificationManager } from "../server/push.js";
-import type { SessionOverrides } from "../session/session-overrides.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { PendingPermission, RelayMessage } from "../types.js";
-import { applyPipelineResult, processEvent } from "./event-pipeline.js";
+import {
+	applyPipelineResult,
+	type ProcessingTimeoutsPort,
+	processEvent,
+} from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
 import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
@@ -89,7 +92,7 @@ export interface SSEWiringDeps {
 	sessionMgr: SessionManagerLike;
 	pendingQuestionCounts: PendingQuestionCountsLike;
 	pendingPermissions: PendingPermissionsLike;
-	overrides: SessionOverrides;
+	processingTimeouts: ProcessingTimeoutsPort;
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
@@ -203,7 +206,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	const {
 		translator,
 		sessionMgr,
-		overrides,
+		processingTimeouts,
 		wsHandler,
 		pushManager,
 		pipelineLog,
@@ -433,7 +436,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		msg = pipeResult.msg;
 
 		applyPipelineResult(pipeResult, targetSessionId, {
-			overrides,
+			processingTimeouts,
 			wsHandler,
 			log: pipelineLog,
 		});

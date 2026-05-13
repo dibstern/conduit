@@ -34,11 +34,7 @@ import {
 	handleShutdown,
 } from "./ipc-handlers.js";
 import type { KeepAwakeTag } from "./keep-awake-layer.js";
-import type {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-	SessionOverridesTag,
-} from "./services.js";
+import type { InstanceMgmtTag, ProjectMgmtTag } from "./services.js";
 import type { OverridesStateTag } from "./session-overrides-state.js";
 
 // ─── Dependency type ─────────────────────────────────────────────────────────
@@ -51,7 +47,6 @@ export type IpcHandlerDeps =
 	| PersistencePathTag
 	| InstanceMgmtTag
 	| ProjectMgmtTag
-	| SessionOverridesTag
 	| OverridesStateTag
 	| KeepAwakeTag
 	| ShutdownSignalTag;

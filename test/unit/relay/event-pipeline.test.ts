@@ -229,7 +229,7 @@ describe("processEvent (composed pipeline)", () => {
 // ─── applyPipelineResult ─────────────────────────────────────────────────────
 
 function makeDeps(): PipelineDeps & {
-	overrides: {
+	processingTimeouts: {
 		clearProcessingTimeout: ReturnType<typeof vi.fn>;
 		resetProcessingTimeout: ReturnType<typeof vi.fn>;
 	};
@@ -244,7 +244,7 @@ function makeDeps(): PipelineDeps & {
 	const verboseSpy = vi.fn();
 	const infoSpy = vi.fn();
 	return {
-		overrides: {
+		processingTimeouts: {
 			clearProcessingTimeout: vi.fn(),
 			resetProcessingTimeout: vi.fn(),
 		},
@@ -273,10 +273,12 @@ describe("applyPipelineResult", () => {
 			source: "sse",
 		};
 		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
 			"ses_abc",
 		);
-		expect(deps.overrides.resetProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets timeout for normal events", () => {
@@ -290,10 +292,12 @@ describe("applyPipelineResult", () => {
 			source: "sse",
 		};
 		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
 			"ses_abc",
 		);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	// messageCache removed in Task 50.5 — applyPipelineResult no longer records
@@ -356,7 +360,11 @@ describe("applyPipelineResult", () => {
 			source: "sse",
 		};
 		applyPipelineResult(result, undefined, deps);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
-		expect(deps.overrides.resetProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 });

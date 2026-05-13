@@ -13,6 +13,7 @@ import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
 	applyPipelineResult,
 	type PipelineDeps,
+	type ProcessingTimeoutsPort,
 	processEvent,
 } from "./event-pipeline.js";
 import {
@@ -40,11 +41,6 @@ interface OpenCodeSessionReaderLike {
 	session: {
 		messages(sessionId: string): Promise<Message[]>;
 	};
-}
-
-interface SessionOverridesLike {
-	clearProcessingTimeout(sessionId: string): void;
-	resetProcessingTimeout(sessionId: string): void;
 }
 
 interface SessionRegistryLike {
@@ -81,7 +77,7 @@ export interface MonitoringWiringDeps {
 	client: OpenCodeSessionReaderLike;
 	wsHandler: MonitoringWsHandlerLike;
 	sessionMgr: SessionManagerLike;
-	overrides: SessionOverridesLike;
+	processingTimeouts: ProcessingTimeoutsPort;
 	statusPoller: SessionStatusPollerService;
 	pollerManager: PollerManagerLike;
 	registry: SessionRegistryLike;
@@ -123,7 +119,7 @@ export function wireMonitoring(
 		client,
 		wsHandler,
 		sessionMgr,
-		overrides,
+		processingTimeouts,
 		statusPoller,
 		pollerManager,
 		registry,
@@ -151,7 +147,7 @@ export function wireMonitoring(
 
 	// ── Shared pipeline deps (used by status poller + message poller) ──────
 	const pipelineDeps: PipelineDeps = {
-		overrides,
+		processingTimeouts,
 		wsHandler,
 		log: pipelineLog,
 	};
@@ -217,7 +213,7 @@ export function wireMonitoring(
 			}
 		},
 		clearProcessingTimeout: (sessionId) =>
-			overrides.clearProcessingTimeout(sessionId),
+			processingTimeouts.clearProcessingTimeout(sessionId),
 		clearMessageActivity: (sessionId) =>
 			statusPoller.clearMessageActivity(sessionId),
 		log: statusLog,

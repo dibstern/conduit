@@ -107,10 +107,10 @@ describe("switchClientToSession status event sessionId", () => {
 		expect(payload.status).toBe("processing");
 	});
 
-	it("status is 'processing' with correct sessionId when overrides has active timeout", async () => {
+	it("status is 'processing' with correct sessionId when timeout state is active", async () => {
 		const deps = createFullDeps({
 			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
-			overrides: {
+			processingTimeouts: {
 				hasActiveProcessingTimeout: vi.fn().mockReturnValue(true),
 			},
 		});
@@ -126,10 +126,10 @@ describe("switchClientToSession status event sessionId", () => {
 		expect(payload.status).toBe("processing");
 	});
 
-	it("status is 'idle' with correct sessionId when both poller and overrides say idle", async () => {
+	it("status is 'idle' with correct sessionId when both poller and timeout state say idle", async () => {
 		const deps = createFullDeps({
 			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
-			overrides: {
+			processingTimeouts: {
 				hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 			},
 		});

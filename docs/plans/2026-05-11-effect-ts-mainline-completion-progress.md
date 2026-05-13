@@ -2060,6 +2060,131 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
+
+Plan issues found:
+
+- Processing timeouts cut across prompt dispatch, permission/question replies, session status synthesis, reconnect
+  bootstrap, SSE event handling, status-poller idle handling, and relay shutdown. Migrating only handlers would leave
+  the relay pipeline reading stale timeout state.
+- The first Effect implementation used `forkScoped` from request-handler effects. That failed under
+  `ManagedRuntime.runPromise(...)` because the request effect does not provide an ambient `Scope`; the timeout fibers
+  need to be owned by the long-lived override-state Layer instead.
+- After the timeout consumers moved to `OverridesStateTag`, keeping `SessionOverridesTag` provisioned in
+  `relay-stack.ts` became a false bridge. The plan's bridge-deletion rule applies here, so the imperative
+  `SessionOverrides` class, tag, daemon layer, relay construction, and class tests were removed in this slice.
+- The remaining relay callback calls to timeout state are still external callback boundaries. They run through the
+  relay `ManagedRuntime`, while the timeout fibers themselves are scoped and drained by `makeOverridesStateLive()`.
+
+Changes:
+
+- `src/lib/effect/session-overrides-state.ts`: owns processing timeout fibers with a scoped `FiberMap`; start/reset use
+  per-session tokens so stale fibers cannot clear or fire newer turns, and timeout completion clears the active marker
+  before invoking the callback.
+- `src/lib/handlers/prompt.ts`: starts, clears, and resets processing timeouts through Effect state for OpenCode and
+  Claude turns, including cancel and dispatch-failure cleanup.
+- `src/lib/handlers/permissions.ts`: permission/question answer and reject paths restart processing timeouts through
+  Effect state.
+- `src/lib/handlers/session.ts`, `src/lib/session/session-switch.ts`, and `src/lib/bridges/client-init.ts`: session
+  status synthesis and reconnect bootstrap now read active processing timeouts from Effect state, including async reads
+  at the client-init boundary.
+- `src/lib/relay/event-pipeline.ts`, `src/lib/relay/sse-wiring.ts`, `src/lib/relay/monitoring-wiring.ts`, and
+  `src/lib/relay/relay-stack.ts`: relay event/status wiring now depends on a narrow `ProcessingTimeoutsPort` backed by
+  the relay `ManagedRuntime`, not the old override object.
+- Deleted `src/lib/session/session-overrides.ts` and `test/unit/session/session-overrides.test.ts`; removed
+  `SessionOverridesTag`, `makeSessionOverridesLive()`, and all production/test Layer provisioning for the deleted tag.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/session/session-overrides-effect.test.ts --testNamePattern "managed overrides layer scope"
+Exit: 1
+Expected failure:
+  Service not found: effect/Scope
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-processing-timeout-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: SessionOverrides
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/session-service-effect.test.ts --testNamePattern "reports processing"
+Exit: 1
+Expected failure:
+  expected "idle", received "processing" only after Effect timeout state became the source of truth.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/permissions-processing-timeout-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: SessionOverrides
+```
+
+Verification:
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 991 files. No fixes applied.
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/prompt-processing-timeout-effect.test.ts \
+  test/unit/handlers/permissions-processing-timeout-effect.test.ts \
+  test/unit/session/session-overrides-effect.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/relay/event-pipeline.test.ts \
+  test/unit/relay/sse-wiring.test.ts \
+  test/unit/relay/monitoring-wiring.test.ts \
+  test/unit/relay/effect-executor.test.ts \
+  test/unit/session/session-switch.test.ts \
+  test/unit/session/synthesized-status-sessionid.test.ts \
+  test/unit/session/patchMissingDone-claude-sdk.test.ts \
+  test/unit/bridges/client-init.test.ts \
+  test/unit/mock-factories.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/effect/daemon-layers.test.ts \
+  test/unit/daemon/ipc-handlers.test.ts \
+  test/unit/daemon/ipc-dispatch.test.ts \
+  test/unit/daemon/ipc-rpc-group.test.ts
+Exit: 0
+Test Files  20 passed (20)
+Tests  418 passed (418)
+```
+
+```text
+$ pnpm test:integration -- test/integration/effect-layers.test.ts
+Exit: 0
+Note: the integration config ignored the file filter and ran the full integration suite.
+Test Files  24 passed (24)
+Tests  127 passed | 1 skipped (128)
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  375 passed (375)
+Tests  5206 passed | 2 skipped | 12 todo (5220)
+```
+
+```text
+$ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && exit 1)
+Exit: 0
+All steps passed, including check, lint, unit, integration, contract, build, E2E replay, multi-instance, subagent,
+Storybook build, and Storybook visual tests.
+```
+
 ## Phase 7.38: Model And Variant Override State Contract
 
 Plan issues found:

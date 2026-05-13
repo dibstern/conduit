@@ -34,7 +34,6 @@ import {
 	removeSocketFile,
 	writePidFile,
 } from "../daemon/pid-manager.js";
-import { SessionOverrides } from "../session/session-overrides.js";
 import { AuthManagerFromConfigLive } from "./auth-middleware.js";
 import {
 	ConfigPersistenceLive,
@@ -70,7 +69,6 @@ import {
 } from "./project-registry-service.js";
 import { makeRelayCacheLive, type RelayFactory } from "./relay-cache.js";
 import { HttpServerRefTag, RelayFactoryLive } from "./relay-factory-layer.js";
-import { SessionOverridesTag } from "./services.js";
 import { SessionPrefetchLive } from "./session-prefetch-layer.js";
 import {
 	StorageMonitorLive,
@@ -218,24 +216,6 @@ export const makeStorageMonitorLive = (
 export const makePortScannerLive = (
 	config: Parameters<typeof PortScannerLive>[0],
 ) => PortScannerLive(config);
-
-/**
- * SessionOverrides layer — manages per-session state (model, agent, timeout),
- * drains (clears all timers) on scope close.
- */
-export const makeSessionOverridesLive = () =>
-	Layer.scoped(
-		SessionOverridesTag,
-		Effect.gen(function* () {
-			const instance = new SessionOverrides();
-			yield* Effect.addFinalizer(() =>
-				loggedFinalizerPromise("SessionOverrides.drain", () =>
-					instance.drain(),
-				),
-			);
-			return instance;
-		}),
-	);
 
 // ─── Cross-service Wiring ─────────────────────────────────────────────────
 

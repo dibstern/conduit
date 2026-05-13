@@ -31,7 +31,6 @@ import {
 	PollerManagerTag,
 	ReadQueryTag,
 	SessionManagerTag,
-	SessionOverridesTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -45,6 +44,7 @@ import {
 	getContextWindow,
 	getModel,
 	getVariant,
+	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
 	setAgent,
 	setContextWindow,
@@ -52,6 +52,7 @@ import {
 	setDefaultModel,
 	setModel,
 	setVariant,
+	startProcessingTimeout,
 } from "../../../src/lib/effect/session-overrides-state.js";
 import {
 	type OpenCodeTerminalService,
@@ -124,7 +125,6 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -245,25 +245,6 @@ function mockConfig(
 	} as unknown as ProjectRelayConfig;
 }
 
-function mockOverrides(
-	overrides?: Partial<SessionOverrides>,
-): SessionOverrides {
-	return {
-		setAgent: vi.fn(),
-		setModel: vi.fn(),
-		setVariant: vi.fn(),
-		setContextWindow: vi.fn(),
-		getModel: vi.fn(),
-		getVariant: vi.fn(),
-		getContextWindow: vi.fn(),
-		setDefaultModel: vi.fn(),
-		defaultModel: undefined,
-		defaultVariant: "",
-		defaultContextWindow: "",
-		...overrides,
-	} as unknown as SessionOverrides;
-}
-
 // ─── Agent handler tests ───────────────────────────────────────────────────
 
 describe("handleGetAgents", () => {
@@ -299,26 +280,22 @@ describe("handleSwitchAgent", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
-		const overrides = mockOverrides();
 		const log = mockLogger();
 
 		return Effect.gen(function* () {
 			yield* handleSwitchAgent("client-1", { agentId: "plan" });
 			expect(yield* getAgent("session-42")).toBe("plan");
-			expect(overrides.setAgent).not.toHaveBeenCalled();
 			expect(log.info).toHaveBeenCalledOnce();
 		}).pipe(Effect.provide(makeTestHandlerLayer({ wsHandler: ws, log })));
 	});
 
 	it.effect("warns when no session is assigned", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
-		const overrides = mockOverrides();
 		const log = mockLogger();
 
 		return handleSwitchAgent("client-1", { agentId: "build" }).pipe(
 			Effect.provide(makeTestHandlerLayer({ wsHandler: ws, log })),
 			Effect.tap(() => {
-				expect(overrides.setAgent).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledOnce();
 			}),
 		);
@@ -326,13 +303,11 @@ describe("handleSwitchAgent", () => {
 
 	it.effect("does nothing when agentId is empty", () => {
 		const ws = mockWsHandler();
-		const overrides = mockOverrides();
 		const log = mockLogger();
 
 		return handleSwitchAgent("client-1", { agentId: "" }).pipe(
 			Effect.provide(makeTestHandlerLayer({ wsHandler: ws, log })),
 			Effect.tap(() => {
-				expect(overrides.setAgent).not.toHaveBeenCalled();
 				expect(log.info).not.toHaveBeenCalled();
 			}),
 		);
@@ -544,7 +519,6 @@ describe("handleReloadProviderSession", () => {
 			provider: { list: vi.fn(async () => ({ connected: [], providers: [] })) },
 			app: { commands: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides();
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
@@ -552,7 +526,6 @@ describe("handleReloadProviderSession", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
 			openCodeModelAndSettingsLayer(client),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
 			makeOverridesStateLive(),
 		);
@@ -591,7 +564,6 @@ describe("handleReloadProviderSession", () => {
 				commands: vi.fn(async () => []),
 			},
 		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides();
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
@@ -599,7 +571,6 @@ describe("handleReloadProviderSession", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
 			openCodeModelAndSettingsLayer(client),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
 			makeOverridesStateLive(),
 		);
@@ -1221,7 +1192,6 @@ function makeForkSessionLayer(options?: {
 	ws?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
-	overrides?: SessionOverrides;
 	log?: Logger;
 }) {
 	const client =
@@ -1243,12 +1213,6 @@ function makeForkSessionLayer(options?: {
 	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
 		options?.sessionManagerService ?? makeMockSessionManagerService();
-	const overrides =
-		options?.overrides ??
-		mockOverrides({
-			clearSession: vi.fn(),
-			hasActiveProcessingTimeout: vi.fn(() => false),
-		});
 	const log = options?.log ?? mockLogger();
 
 	return Layer.mergeAll(
@@ -1257,7 +1221,6 @@ function makeForkSessionLayer(options?: {
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
-		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(StatusPollerTag, {
 			isProcessing: vi.fn(() => false),
@@ -1277,7 +1240,6 @@ function makeSessionLifecycleLayer(options?: {
 	ws?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
-	overrides?: SessionOverrides;
 	log?: Logger;
 }) {
 	const ws = options?.ws ?? mockWsHandler();
@@ -1293,11 +1255,6 @@ function makeSessionLifecycleLayer(options?: {
 			permission: { list: vi.fn(async () => []) },
 			question: { list: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI);
-	const overrides =
-		options?.overrides ??
-		mockOverrides({
-			hasActiveProcessingTimeout: vi.fn(() => false),
-		});
 	const log = options?.log ?? mockLogger();
 
 	return Layer.mergeAll(
@@ -1306,7 +1263,6 @@ function makeSessionLifecycleLayer(options?: {
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
-		Layer.succeed(SessionOverridesTag, overrides),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(StatusPollerTag, {
 			isProcessing: vi.fn(() => false),
@@ -1317,6 +1273,7 @@ function makeSessionLifecycleLayer(options?: {
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
 		}),
+		makeOverridesStateLive(),
 	);
 }
 
@@ -1389,13 +1346,7 @@ describe("handleForkSession", () => {
 	it.effect(
 		"clears Effect override state for the forked source session",
 		() => {
-			const legacyClearSession = vi.fn();
-			const layer = makeForkSessionLayer({
-				overrides: mockOverrides({
-					clearSession: legacyClearSession,
-					hasActiveProcessingTimeout: vi.fn(() => false),
-				}),
-			});
+			const layer = makeForkSessionLayer();
 
 			return Effect.gen(function* () {
 				yield* setModel("ses-parent", {
@@ -1415,7 +1366,6 @@ describe("handleForkSession", () => {
 				expect(yield* getAgent("ses-parent")).toBeUndefined();
 				expect(yield* getVariant("ses-parent")).toBe("");
 				expect(yield* getContextWindow("ses-parent")).toBe("");
-				expect(legacyClearSession).toHaveBeenCalledWith("ses-parent");
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -2101,16 +2051,13 @@ describe("handleQuestionReject", () => {
 		const log = mockLogger();
 		const client = {} as unknown as OpenCodeAPI;
 		const sessionManagerService = makeMockSessionManagerService();
-		const overrides = mockOverrides({
-			startProcessingTimeout: vi.fn(),
-		});
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(SessionOverridesTag, overrides),
+			makeOverridesStateLive(),
 		);
 
 		return handleQuestionReject("client-1", { toolId: "" }).pipe(
@@ -2130,9 +2077,6 @@ describe("handleQuestionReject", () => {
 		const sessionManagerService = makeMockSessionManagerService({
 			decrementPendingQuestionCount,
 		});
-		const overrides = mockOverrides({
-			startProcessingTimeout: vi.fn(),
-		});
 		const client = {
 			question: { reject: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -2142,7 +2086,7 @@ describe("handleQuestionReject", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(SessionOverridesTag, overrides),
+			makeOverridesStateLive(),
 		);
 
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
@@ -2171,9 +2115,6 @@ describe("handleQuestionReject", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				decrementPendingQuestionCount,
 			});
-			const overrides = mockOverrides({
-				startProcessingTimeout: vi.fn(),
-			});
 			const client = {
 				question: {
 					reject: vi.fn(async () => {}),
@@ -2191,9 +2132,9 @@ describe("handleQuestionReject", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(SessionOverridesTag, overrides),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -2239,9 +2180,6 @@ describe("handleAskUserResponse", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				decrementPendingQuestionCount,
 			});
-			const overrides = mockOverrides({
-				startProcessingTimeout: vi.fn(),
-			});
 			const client = {
 				question: { reply: vi.fn(async () => {}) },
 			} as unknown as OpenCodeAPI;
@@ -2251,7 +2189,7 @@ describe("handleAskUserResponse", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(SessionOverridesTag, overrides),
+				makeOverridesStateLive(),
 			);
 
 			return handleAskUserResponse("client-1", {
@@ -2289,9 +2227,6 @@ describe("handleAskUserResponse", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				decrementPendingQuestionCount,
 			});
-			const overrides = mockOverrides({
-				startProcessingTimeout: vi.fn(),
-			});
 			const client = {
 				question: {
 					reply: vi.fn(async () => {}),
@@ -2309,9 +2244,9 @@ describe("handleAskUserResponse", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(SessionOverridesTag, overrides),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -3110,9 +3045,6 @@ describe("handleCancel", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const overrides = mockOverrides({
-			clearProcessingTimeout: vi.fn(),
-		});
 		const client = {
 			session: { abort: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -3120,37 +3052,38 @@ describe("handleCancel", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
+			makeOverridesStateLive(),
 		);
 
-		return handleCancel("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith(
-					"session-1",
-				);
-				expect(client.session.abort).toHaveBeenCalledWith("session-1");
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* startProcessingTimeout(
+				"session-1",
+				"2 minutes",
+				() => Effect.void,
+			);
+			yield* handleCancel("client-1", {});
+
+			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+			expect(client.session.abort).toHaveBeenCalledWith("session-1");
+			expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
+				type: "done",
+				sessionId: "session-1",
+				code: 1,
+			});
+		}).pipe(Effect.provide(layer));
 	});
 
 	it.effect("does nothing when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
-		const overrides = mockOverrides();
 		const client = {} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
+			makeOverridesStateLive(),
 		);
 
 		return handleCancel("client-1", {}).pipe(
@@ -3245,7 +3178,6 @@ describe("handleMessage", () => {
 	it.effect("sends error when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
-		const overrides = mockOverrides();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
@@ -3253,7 +3185,6 @@ describe("handleMessage", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
@@ -3280,7 +3211,6 @@ describe("handleMessage", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const overrides = mockOverrides();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
@@ -3288,7 +3218,6 @@ describe("handleMessage", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
@@ -3311,17 +3240,6 @@ describe("handleMessage", () => {
 			getClientsForSession: vi.fn(() => ["client-1"]),
 		});
 		const log = mockLogger();
-		const overrides = mockOverrides({
-			getAgent: vi.fn(() => undefined),
-			getModel: vi.fn(() => ({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-5",
-			})),
-			getVariant: vi.fn(() => ""),
-			getContextWindow: vi.fn(() => "1m"),
-			isModelUserSelected: vi.fn(() => true),
-			startProcessingTimeout: vi.fn(),
-		});
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
@@ -3339,7 +3257,6 @@ describe("handleMessage", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
@@ -3371,18 +3288,6 @@ describe("handleMessage", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const log = mockLogger();
-			const overrides = mockOverrides({
-				getAgent: vi.fn(() => undefined),
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-5",
-				})),
-				getVariant: vi.fn(() => ""),
-				getContextWindow: vi.fn(() => ""),
-				isModelUserSelected: vi.fn(() => true),
-				startProcessingTimeout: vi.fn(),
-				resetProcessingTimeout: vi.fn(),
-			});
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -3421,7 +3326,6 @@ describe("handleMessage", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
@@ -3453,17 +3357,6 @@ describe("handleMessage", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const log = mockLogger();
-			const overrides = mockOverrides({
-				getAgent: vi.fn(() => "Plan"),
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-5",
-				})),
-				getVariant: vi.fn(() => ""),
-				getContextWindow: vi.fn(() => ""),
-				isModelUserSelected: vi.fn(() => true),
-				startProcessingTimeout: vi.fn(),
-			});
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -3523,7 +3416,6 @@ describe("handleMessage", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
@@ -3571,17 +3463,6 @@ describe("handleMessage", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const log = mockLogger();
-			const overrides = mockOverrides({
-				getAgent: vi.fn(() => undefined),
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-5",
-				})),
-				getVariant: vi.fn(() => ""),
-				getContextWindow: vi.fn(() => ""),
-				isModelUserSelected: vi.fn(() => true),
-				startProcessingTimeout: vi.fn(),
-			});
 			const legacyLoadPreRenderedHistory = vi.fn(async () => {
 				throw new Error("legacy prompt history load should not be used");
 			});
@@ -3630,7 +3511,6 @@ describe("handleMessage", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
@@ -3681,17 +3561,6 @@ describe("handleMessage", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const log = mockLogger();
-			const overrides = mockOverrides({
-				getAgent: vi.fn(() => undefined),
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-5",
-				})),
-				getVariant: vi.fn(() => ""),
-				getContextWindow: vi.fn(() => ""),
-				isModelUserSelected: vi.fn(() => true),
-				startProcessingTimeout: vi.fn(),
-			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy auto-rename listSessions should not be used");
 			});
@@ -3750,7 +3619,6 @@ describe("handleMessage", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
@@ -3791,17 +3659,6 @@ describe("handleMessage", () => {
 			getClientsForSession: vi.fn(() => ["client-1"]),
 		});
 		const log = mockLogger();
-		const overrides = mockOverrides({
-			getAgent: vi.fn(() => undefined),
-			getModel: vi.fn(() => ({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-5",
-			})),
-			getVariant: vi.fn(() => ""),
-			getContextWindow: vi.fn(() => ""),
-			isModelUserSelected: vi.fn(() => true),
-			startProcessingTimeout: vi.fn(),
-		});
 		const sessionMgr = mockSessionManager();
 		const listSessions = vi.fn(() =>
 			Effect.succeed([
@@ -3836,7 +3693,6 @@ describe("handleMessage", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
@@ -3864,18 +3720,6 @@ describe("handleMessage", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const log = mockLogger();
-			const overrides = mockOverrides({
-				getAgent: vi.fn(() => undefined),
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-5",
-				})),
-				getVariant: vi.fn(() => ""),
-				getContextWindow: vi.fn(() => ""),
-				isModelUserSelected: vi.fn(() => true),
-				startProcessingTimeout: vi.fn(),
-				clearProcessingTimeout: vi.fn(),
-			});
 			const sessionMgr = mockSessionManager();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
@@ -3891,7 +3735,6 @@ describe("handleMessage", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
@@ -3905,9 +3748,7 @@ describe("handleMessage", () => {
 				yield* handleMessage("client-1", { text: "First prompt" });
 				yield* flushDispatchContinuation();
 
-				expect(overrides.clearProcessingTimeout).toHaveBeenCalledWith(
-					"session-1",
-				);
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
 				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
 					type: "done",
 					sessionId: "session-1",
@@ -3931,13 +3772,6 @@ describe("handleMessage", () => {
 			getClientsForSession: vi.fn(() => ["client-1"]),
 		});
 		const log = mockLogger();
-		const overrides = mockOverrides({
-			getAgent: vi.fn(() => undefined),
-			getModel: vi.fn(() => undefined),
-			getVariant: vi.fn(() => ""),
-			isModelUserSelected: vi.fn(() => false),
-			startProcessingTimeout: vi.fn(),
-		});
 		const legacyRecordMessageActivity = vi.fn(() => {
 			throw new Error("legacy recordMessageActivity should not be used");
 		});
@@ -3956,7 +3790,6 @@ describe("handleMessage", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),

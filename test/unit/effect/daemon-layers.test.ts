@@ -1,34 +1,14 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Layer, Scope } from "effect";
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import {
 	DaemonLifecycleLayerError,
-	makeSessionOverridesLive,
 	ProcessErrorHandlerLayer,
 	ShutdownAwaiterLive,
 	ShutdownSignalTag,
 	SignalHandlerLayer,
 } from "../../../src/lib/effect/daemon-layers.js";
 import { DaemonHandleTag } from "../../../src/lib/effect/daemon-main.js";
-import { makePinoLoggerLive } from "../../../src/lib/effect/pino-logger-layer.js";
-import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
-
-function makePinoSpies() {
-	return {
-		debug: vi.fn(),
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		child: vi.fn(),
-	};
-}
-
-function mockPino() {
-	const root = makePinoSpies();
-	const child = makePinoSpies();
-	root.child.mockReturnValue(child);
-	return { root, child };
-}
 
 describe("SignalHandlerLayer", () => {
 	it.scoped("installs signal handlers on layer build", () =>
@@ -75,39 +55,6 @@ describe("DaemonLifecycleLayerError", () => {
 				cause: 42,
 			});
 			expect(err.message).toBe("startIPCServer failed: 42");
-		}),
-	);
-});
-
-describe("SessionOverrides layer finalizer", () => {
-	it.effect("logs drain rejection and lets scope close complete", () =>
-		Effect.gen(function* () {
-			const cause = new Error("drain exploded");
-			const drainSpy = vi
-				.spyOn(SessionOverrides.prototype, "drain")
-				.mockRejectedValueOnce(cause);
-			const pino = mockPino();
-
-			try {
-				const closeExit = yield* Effect.gen(function* () {
-					const scope = yield* Scope.make();
-					yield* Layer.buildWithScope(makeSessionOverridesLive(), scope);
-					return yield* Effect.exit(Scope.close(scope, Exit.void));
-				}).pipe(
-					// biome-ignore lint/suspicious/noExplicitAny: mock shape satisfies the subset of PinoLogger used by the bridge
-					Effect.provide(makePinoLoggerLive(pino.root as any)),
-				);
-
-				expect(closeExit._tag).toBe("Success");
-				expect(drainSpy).toHaveBeenCalled();
-				expect(pino.root.error).toHaveBeenCalled();
-				// biome-ignore lint/style/noNonNullAssertion: call count verified above
-				expect(String(pino.root.error.mock.calls[0]![0])).toContain(
-					"SessionOverrides.drain failed during shutdown",
-				);
-			} finally {
-				drainSpy.mockRestore();
-			}
 		}),
 	);
 });

@@ -14,7 +14,6 @@ import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionOverrides } from "../session/session-overrides.js";
 import type { SessionRegistry } from "../session/session-registry.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
@@ -59,7 +58,6 @@ export interface HandlerDeps {
 	};
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
-	overrides: SessionOverrides;
 	ptyManager: PtyManager;
 	config: ProjectRelayConfig;
 	log: Logger;

@@ -39,7 +39,6 @@ import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-	SessionOverridesTag,
 } from "../../../src/lib/effect/services.js";
 import {
 	getAgent,
@@ -47,7 +46,6 @@ import {
 	makeOverridesStateLive,
 } from "../../../src/lib/effect/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 
 // ─── In-memory test FileSystem ────────────────────────────────────────────────
 
@@ -137,9 +135,6 @@ const makeMockInstanceMgmt = (overrides?: Partial<InstanceManagementDeps>) =>
 		...overrides,
 	});
 
-const makeMockSessionOverrides = () =>
-	Layer.succeed(SessionOverridesTag, new SessionOverrides());
-
 /** Mock KeepAwakeTag — tracks activate/deactivate calls. */
 const makeMockKeepAwake = () =>
 	Layer.effect(
@@ -187,7 +182,6 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 		makeDaemonStateLive(stateOverrides),
 		makeMockProjectMgmt(),
 		makeMockInstanceMgmt(),
-		makeMockSessionOverrides(),
 		makeOverridesStateLive(),
 		makeMockKeepAwake(),
 		makeMockConfigRef(),
@@ -469,8 +463,6 @@ describe("IPC handlers", () => {
 	describe("handleSetAgent", () => {
 		it.effect("sets agent via Effect override state using slug", () =>
 			Effect.gen(function* () {
-				const overrides = yield* SessionOverridesTag;
-
 				const result = yield* handleSetAgent({
 					cmd: "set_agent",
 					slug: "my-project",
@@ -480,7 +472,6 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 				// IPC protocol uses slug as the override-state key.
 				expect(yield* getAgent("my-project")).toBe("claude-3");
-				expect(overrides.getAgent("my-project")).toBeUndefined();
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
@@ -490,8 +481,6 @@ describe("IPC handlers", () => {
 	describe("handleSetModel", () => {
 		it.effect("sets model via Effect override state using slug", () =>
 			Effect.gen(function* () {
-				const overrides = yield* SessionOverridesTag;
-
 				const result = yield* handleSetModel({
 					cmd: "set_model",
 					slug: "my-project",
@@ -504,7 +493,6 @@ describe("IPC handlers", () => {
 				expect(model).toBeDefined();
 				expect(model?.providerID).toBe("anthropic");
 				expect(model?.modelID).toBe("claude-3-opus");
-				expect(overrides.getModel("my-project")).toBeUndefined();
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});

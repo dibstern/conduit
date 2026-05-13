@@ -57,19 +57,22 @@ import {
 	ReadQueryTag,
 	type SessionManagerShape,
 	SessionManagerTag,
-	SessionOverridesTag,
 	SessionRegistryTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import {
+	clearProcessingTimeout,
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
 	getDefaultVariant,
 	getModel,
 	getVariant,
+	hasActiveProcessingTimeout,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
 	setDefaultModel,
 	setDefaultVariant,
 } from "../effect/session-overrides-state.js";
@@ -139,7 +142,6 @@ import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { SessionManager } from "../session/session-manager.js";
-import { SessionOverrides } from "../session/session-overrides.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import { readSessionStatusesFromEffect } from "../session/session-status-effect.js";
 import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
@@ -524,9 +526,6 @@ export async function createProjectRelay(
 		...(config.configDir != null && { configDir: config.configDir }),
 	});
 
-	// Per-session overrides (agent, model, processing timeout)
-	const overrides = new SessionOverrides();
-
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
 	let initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
@@ -774,6 +773,16 @@ export async function createProjectRelay(
 		RelayRuntimeContext,
 		PersistenceEffectError
 	>;
+	const processingTimeouts = {
+		clearProcessingTimeout: (sessionId: string) => {
+			relayManagedRuntime.runFork(clearProcessingTimeout(sessionId));
+		},
+		resetProcessingTimeout: (sessionId: string) => {
+			relayManagedRuntime.runFork(
+				resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
+			);
+		},
+	};
 
 	// ── Client init deps + connection handlers ──────────────────────────────
 	const clientInitDeps: ClientInitDeps = {
@@ -794,8 +803,9 @@ export async function createProjectRelay(
 				relayManagedRuntime.runPromise(getDefaultContextWindow()),
 			setDefaultModel: (model) =>
 				relayManagedRuntime.runPromise(setDefaultModel(model)),
+			hasActiveProcessingTimeout: (sessionId) =>
+				relayManagedRuntime.runPromise(hasActiveProcessingTimeout(sessionId)),
 		},
-		overrides,
 		terminal: {
 			replay: (clientId) =>
 				relayManagedRuntime.runPromise(
@@ -955,7 +965,6 @@ export async function createProjectRelay(
 		toolContentServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		webSocketHandlerLayer,
-		Layer.succeed(SessionOverridesTag, overrides),
 		ptyManagerLayer,
 		configLayer,
 		loggerLayer,
@@ -1120,7 +1129,7 @@ export async function createProjectRelay(
 						}),
 					),
 			},
-			overrides,
+			processingTimeouts,
 			wsHandler,
 			...(config.pushManager != null && { pushManager: config.pushManager }),
 			log: sseLog,
@@ -1156,7 +1165,7 @@ export async function createProjectRelay(
 		client: api,
 		wsHandler,
 		sessionMgr,
-		overrides,
+		processingTimeouts,
 		statusPoller,
 		pollerManager,
 		registry,
@@ -1268,8 +1277,7 @@ export async function createProjectRelay(
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();
 			// 5. Clean up remaining resources
-			// Permission timeout timer is managed by PermissionTimeoutLive (auto-interrupted on dispose).
-			await overrides.drain();
+			// Permission and processing timeout timers are managed by scoped Effect layers.
 			ptyManager.closeAll();
 			await wsHandler.drain();
 		},

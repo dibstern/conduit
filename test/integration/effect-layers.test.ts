@@ -42,7 +42,6 @@ import {
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-	SessionOverridesTag,
 } from "../../src/lib/effect/services.js";
 import {
 	makeSessionManagerStateLive,
@@ -59,7 +58,6 @@ import {
 	makePollerStateLive,
 	PollerStateTag,
 } from "../../src/lib/effect/session-status-poller.js";
-import { SessionOverrides } from "../../src/lib/session/session-overrides.js";
 
 // ─── In-memory FileSystem for IPC persistence ────────────────────────────────
 
@@ -188,7 +186,6 @@ const ipcDepsLayer = Layer.mergeAll(
 		}),
 		persistConfig: () => {},
 	}),
-	Layer.succeed(SessionOverridesTag, new SessionOverrides()),
 	makeOverridesStateLive(),
 	makeMockKeepAwake(),
 	makeMockConfigRef(),
@@ -277,7 +274,7 @@ describe("Integration: Full Layer Composition", () => {
 		),
 	);
 
-	it.effect("SessionOverrides set/get/clear", () =>
+	it.effect("Effect override state set/get/clear", () =>
 		Effect.gen(function* () {
 			const model = { providerID: "anthropic", modelID: "claude-4" };
 

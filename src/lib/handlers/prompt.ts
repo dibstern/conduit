@@ -10,7 +10,6 @@ import {
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
 	ProviderStateServiceTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import {
@@ -18,11 +17,16 @@ import {
 	SessionManagerServiceTag,
 } from "../effect/session-manager-service.js";
 import {
+	clearProcessingTimeout,
 	getAgent,
 	getContextWindow,
 	getModel,
 	getVariant,
 	isModelUserSelected,
+	type OverridesStateTag,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
+	startProcessingTimeout,
 } from "../effect/session-overrides-state.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
@@ -100,13 +104,13 @@ export const handleMessage = (
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const config = yield* ConfigTag;
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
-		const runtime = yield* Effect.runtime<never>();
+		const runtime = yield* Effect.runtime<OverridesStateTag>();
 		const runPending = Runtime.runPromise(runtime);
+		const runTimeout = Runtime.runFork(runtime);
 
 		const { text, images } = payload;
 		const activeId = wsHandler.getClientSession(clientId);
@@ -167,23 +171,25 @@ export const handleMessage = (
 			sessionId: activeId,
 			status: "processing",
 		});
-		overrides.startProcessingTimeout(activeId, () => {
-			log.warn(
-				`client=${clientId} session=${activeId} Processing timeout (120s) — broadcasting done`,
-			);
-			wsHandler.sendToSession(
-				activeId,
-				new RelayError(
-					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-					{ code: "PROCESSING_TIMEOUT" },
-				).toMessage(activeId),
-			);
-			wsHandler.sendToSession(activeId, {
-				type: "done",
-				sessionId: activeId,
-				code: 1,
-			});
-		});
+		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
+			Effect.sync(() => {
+				log.warn(
+					`client=${clientId} session=${activeId} Processing timeout (120s) — broadcasting done`,
+				);
+				wsHandler.sendToSession(
+					activeId,
+					new RelayError(
+						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+						{ code: "PROCESSING_TIMEOUT" },
+					).toMessage(activeId),
+				);
+				wsHandler.sendToSession(activeId, {
+					type: "done",
+					sessionId: activeId,
+					code: 1,
+				});
+			}),
+		);
 
 		// Check if orchestration engine is available
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -332,8 +338,14 @@ export const handleMessage = (
 					? createRelayEventSink({
 							sessionId: activeId,
 							send: (msg) => wsHandler.sendToSession(activeId, msg),
-							clearTimeout: () => overrides.clearProcessingTimeout(activeId),
-							resetTimeout: () => overrides.resetProcessingTimeout(activeId),
+							clearTimeout: () => {
+								runTimeout(clearProcessingTimeout(activeId));
+							},
+							resetTimeout: () => {
+								runTimeout(
+									resetProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION),
+								);
+							},
 							...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
 							pendingInteractions: {
 								beginPermissionRequest: (input) =>
@@ -402,12 +414,12 @@ export const handleMessage = (
 			};
 
 			const handleDispatchFailure = (sendErr: unknown) =>
-				Effect.sync(() => {
+				Effect.gen(function* () {
 					log.warn(
 						`client=${clientId} session=${activeId} Failed to send message:`,
 						formatErrorDetail(sendErr),
 					);
-					overrides.clearProcessingTimeout(activeId);
+					yield* clearProcessingTimeout(activeId);
 					wsHandler.sendToSession(activeId, {
 						type: "done",
 						sessionId: activeId,
@@ -430,7 +442,7 @@ export const handleMessage = (
 						log.warn(
 							`client=${clientId} session=${activeId} engine dispatch error: ${msg}`,
 						);
-						overrides.clearProcessingTimeout(activeId);
+						yield* clearProcessingTimeout(activeId);
 						wsHandler.sendToSession(activeId, {
 							type: "done",
 							sessionId: activeId,
@@ -540,7 +552,7 @@ export const handleMessage = (
 					`client=${clientId} session=${activeId} Failed to send message:`,
 					formatErrorDetail(sendResult.left),
 				);
-				overrides.clearProcessingTimeout(activeId);
+				yield* clearProcessingTimeout(activeId);
 				wsHandler.sendToSession(activeId, {
 					type: "done",
 					sessionId: activeId,
@@ -565,13 +577,12 @@ export const handleCancel = (
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 
 		const activeId = wsHandler.getClientSession(clientId);
 		if (activeId) {
 			log.info(`client=${clientId} session=${activeId} Aborting`);
-			overrides.clearProcessingTimeout(activeId);
+			yield* clearProcessingTimeout(activeId);
 
 			// Route through OrchestrationEngine for Claude sessions
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);

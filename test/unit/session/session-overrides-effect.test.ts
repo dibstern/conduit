@@ -3,8 +3,15 @@
 // Ref<OverridesState> + Fiber timeout management.
 
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, Layer, Ref, TestClock } from "effect";
-import { expect } from "vitest";
+import {
+	Duration,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Ref,
+	TestClock,
+} from "effect";
+import { expect, it as vitestIt } from "vitest";
 import {
 	clearAgent,
 	clearProcessingTimeout,
@@ -342,6 +349,37 @@ describe("SessionOverrides Effect", () => {
 	);
 
 	// ─── Processing Timeout ─────────────────────────────────────────────────
+
+	vitestIt(
+		"processing timeout runs in the managed overrides layer scope",
+		async () => {
+			const runtime = ManagedRuntime.make(makeOverridesStateLive());
+			let called = false;
+
+			try {
+				await runtime.runPromise(
+					startProcessingTimeout("sess-1", Duration.millis(10), () =>
+						Effect.sync(() => {
+							called = true;
+						}),
+					),
+				);
+
+				expect(
+					await runtime.runPromise(hasActiveProcessingTimeout("sess-1")),
+				).toBe(true);
+
+				await new Promise((resolve) => setTimeout(resolve, 50));
+
+				expect(called).toBe(true);
+				expect(
+					await runtime.runPromise(hasActiveProcessingTimeout("sess-1")),
+				).toBe(false);
+			} finally {
+				await runtime.dispose();
+			}
+		},
+	);
 
 	it.scoped("processing timeout fires after duration", () =>
 		Effect.gen(function* () {

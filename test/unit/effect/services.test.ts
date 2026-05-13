@@ -22,7 +22,6 @@ import {
 	// Persistence extension Tags
 	ReadQueryTag,
 	SessionManagerTag,
-	SessionOverridesTag,
 	SessionRegistryTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -35,7 +34,6 @@ const ALL_TAGS = [
 	OpenCodeSettingsServiceTag,
 	SessionManagerTag,
 	WebSocketHandlerTag,
-	SessionOverridesTag,
 	PtyManagerTag,
 	ConfigTag,
 	LoggerTag,
@@ -68,7 +66,7 @@ describe("Service Tags", () => {
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
 		// Bridge classes are no longer Effect services; count only active Tags.
-		expect(ALL_TAGS.length).toBe(19);
+		expect(ALL_TAGS.length).toBe(18);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -87,10 +85,6 @@ describe("Service Tags", () => {
 
 	it("WebSocketHandler tag has correct key", () => {
 		expect(WebSocketHandlerTag.key).toBe("WebSocketHandler");
-	});
-
-	it("SessionOverrides tag has correct key", () => {
-		expect(SessionOverridesTag.key).toBe("SessionOverrides");
 	});
 
 	it("PtyManager tag has correct key", () => {
