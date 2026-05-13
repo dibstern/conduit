@@ -2866,6 +2866,74 @@ Test Files  379 passed (379)
 Tests  5223 passed | 2 skipped | 12 todo (5237)
 ```
 
+## Phase 9.2: SDK Client Construction Boundary
+
+Plan issues found:
+
+- `src/lib/instance/sdk-factory.ts` had two different boundaries collapsed into one Effect wrapper. SDK client
+  construction is synchronous, so production call sites should not run `Effect.runSync(createSdkClientEffect(...))`.
+- The `fetchWithRetry(...)` bridge inside the returned `fetch` callback is different. The OpenCode SDK config type
+  requires `fetch?: (request: Request) => ReturnType<typeof fetch>`, generated SDK code awaits that callback directly,
+  and `GapEndpoints` also consumes a Promise-shaped Fetch API. Removing that bridge locally would only hide or duplicate
+  retry behavior, so it is now documented as an external SDK/fetch boundary instead of treated as an app-internal
+  ownership bridge.
+
+Changes:
+
+- `src/lib/instance/sdk-factory.ts`: split out synchronous `createSdkClient(...)` and kept
+  `createSdkClientEffect(...)` as a thin wrapper for Effect-native call sites.
+- `src/lib/relay/relay-stack.ts`, `src/lib/effect/project-discovery-layer.ts`, and
+  `src/lib/effect/daemon-main.ts`: switched synchronous SDK client construction to `createSdkClient(...)`, deleting the
+  local `runSync` construction bridges and dynamic `effect` imports used only for those bridges.
+- `test/unit/instance/sdk-factory-effect-boundary.test.ts`: added a guard so production call sites cannot reintroduce
+  `runSync(createSdkClientEffect(...))`.
+- `test/unit/effect/sdk-factory.test.ts`: added behavior coverage proving the returned Promise-shaped fetch preserves
+  retry behavior, and that SDK-style single-`Request` auth stays in SDK config headers while GapEndpoints-style calls
+  receive injected `Authorization`.
+- `docs/plans/2026-05-11-effect-ts-mainline-completion-plan.md`: added the SDK fetch callback to the final allowed
+  external-boundary exception table.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/instance/sdk-factory-effect-boundary.test.ts
+Exit: 1
+Expected failure:
+  expected source not to match /(?:Effect|Eff)\s*\.\s*runSync\s*\(\s*createSdkClientEffect\s*\(/
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/instance/sdk-factory-effect-boundary.test.ts test/unit/effect/sdk-factory.test.ts test/unit/effect/retry-fetch.test.ts test/unit/instance/gap-endpoints.test.ts test/unit/instance/opencode-api.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  39 passed (39)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 998 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
+```text
+$ pnpm test:unit > test-unit-output.log 2>&1
+Exit: 0
+Test Files  381 passed (381)
+Tests  5228 passed | 2 skipped | 12 todo (5242)
+```
+
 ## Phase 9.1: Tagged IPC Decode Boundary
 
 Plan issues found:

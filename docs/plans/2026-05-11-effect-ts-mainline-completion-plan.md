@@ -692,6 +692,7 @@ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/eff
 | Pattern | Allowed location | Why |
 |---|---|---|
 | `Effect.runPromise` / `Effect.runSync` | `src/bin/cli-core.ts` only, after the entrypoint switch is complete | Process entrypoint must run an Effect at the top |
+| `Effect.runPromise` | `src/lib/instance/sdk-factory.ts` inside the returned `fetch` callback only | OpenCode SDK and GapEndpoints require a standard Promise-shaped Fetch callback; the callback delegates to the Effect retry transport |
 | `Effect.runPromise` (frontend) | `src/lib/frontend/transport/runtime.ts` | Browser entrypoint, owned by `ManagedRuntime` |
 | `Effect.promise` | only inside finalizers where the promise is provably non-rejecting, with inline comment | Some Node APIs return `Promise<void>` that cannot reject |
 | `concurrency: "unbounded"` | none (every site must be capped or documented as a fixed-size fanout with inline comment naming the size) | Plan rule |

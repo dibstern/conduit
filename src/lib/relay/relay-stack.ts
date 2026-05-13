@@ -98,7 +98,7 @@ import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
-import { createSdkClientEffect } from "../instance/sdk-factory.js";
+import { createSdkClient } from "../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../logger.js";
 import {
 	DualWriteHook,
@@ -484,15 +484,13 @@ export async function createProjectRelay(
 		client: sdkClient,
 		fetch: sdkFetch,
 		authHeaders,
-	} = Effect.runSync(
-		createSdkClientEffect({
-			baseUrl: config.opencodeUrl,
-			...(config.noServer &&
-				config.projectDir != null && {
-					directory: config.projectDir,
-				}),
-		}),
-	);
+	} = createSdkClient({
+		baseUrl: config.opencodeUrl,
+		...(config.noServer &&
+			config.projectDir != null && {
+				directory: config.projectDir,
+			}),
+	});
 
 	const gapEndpoints = new GapEndpoints({
 		baseUrl: config.opencodeUrl,

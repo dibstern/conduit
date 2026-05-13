@@ -1657,13 +1657,8 @@ export async function startDaemonProcess(
 		if (!discoveryUrl) return;
 		const discoveryLog = createLogger("relay").child("discovery");
 		try {
-			const { createSdkClientEffect } = await import(
-				"../instance/sdk-factory.js"
-			);
-			const { Effect: Eff } = await import("effect");
-			const { client } = Eff.runSync(
-				createSdkClientEffect({ baseUrl: discoveryUrl }),
-			);
+			const { createSdkClient } = await import("../instance/sdk-factory.js");
+			const { client } = createSdkClient({ baseUrl: discoveryUrl });
 			const result = await client.project.list();
 			const projects =
 				(

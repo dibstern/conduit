@@ -88,13 +88,8 @@ export const discoverProjectsEffect: Effect.Effect<
 	// Call OpenCode project list API
 	const projects = yield* Effect.tryPromise({
 		try: async () => {
-			const { createSdkClientEffect } = await import(
-				"../instance/sdk-factory.js"
-			);
-			const { Effect: Eff } = await import("effect");
-			const { client } = Eff.runSync(
-				createSdkClientEffect({ baseUrl: opencodeUrl }),
-			);
+			const { createSdkClient } = await import("../instance/sdk-factory.js");
+			const { client } = createSdkClient({ baseUrl: opencodeUrl });
 			const result = await client.project.list();
 			return (
 				(
