@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -248,6 +248,97 @@ describe("Effect runtime boundary grep", () => {
 						: [],
 				),
 		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not keep production legacy persistence bridges", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/types.ts",
+				pattern:
+					/\bpersistence\?:\s*import\("\.\/persistence\/persistence-layer\.js"\)\.PersistenceLayer/,
+				reason:
+					"ProjectRelayConfig should expose the Effect persistence DB path only",
+			},
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern:
+					/\b(?:config\.persistence|new ReadQueryService|new ProviderStateService|new SessionSeeder|new DualWriteHook|ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag)\b/,
+				reason:
+					"relay-stack must not bridge legacy persistence objects into Effect services",
+			},
+			{
+				path: "src/lib/handlers/prompt.ts",
+				pattern:
+					/\b(?:ClaudeEventPersistTag|ProviderStateServiceTag|claudeEventPersistOption|providerStateOption|canonicalEvent)\b/,
+				reason: "prompt dispatch must use Effect persistence services only",
+			},
+			{
+				path: "src/lib/effect/session-manager-service.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/bridges/client-init.ts",
+				pattern: /\b(?:ReadQueryService|readQuery\?:|deps\.readQuery)\b/,
+				reason:
+					"client init must not pass sync ReadQueryService into session switching",
+			},
+			{
+				path: "src/lib/session/session-switch.ts",
+				pattern:
+					/\b(?:ReadQueryService|readQuery\?:|deps\.readQuery|resolveSessionHistoryFromSqlite)\b/,
+				reason:
+					"session switching must not accept the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/session/session-manager.ts",
+				pattern:
+					/\b(?:ReadQueryService|readQuery\?:|this\.readQuery|private readonly readQuery)\b/,
+				reason:
+					"SessionManager must not expose a sync persistence read-query fallback",
+			},
+			{
+				path: "src/lib/session/session-status-sqlite.ts",
+				pattern: /./,
+				reason:
+					"unused sync SessionStatusSqliteReader wrapper should stay deleted",
+				optional: true,
+			},
+			{
+				path: "src/lib/effect/services.ts",
+				pattern:
+					/\b(?:ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag|LegacyRelayEventSinkPersist)\b/,
+				reason: "legacy persistence Tags must be deleted",
+			},
+			{
+				path: "src/lib/handlers/types.ts",
+				pattern:
+					/\b(?:readQuery\?:|claudeEventPersist\?:|providerStateService\?:)\b/,
+				reason:
+					"HandlerDeps must not advertise retired legacy persistence fields",
+			},
+			{
+				path: "src/lib/provider/relay-event-sink.ts",
+				pattern: /\bLegacyRelayEventSinkPersist\b/,
+				reason: "RelayEventSink persistence should be Effect-only",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const fullPath = join(REPO_ROOT, path);
+			if (!existsSync(fullPath)) return [];
+			const source = readFileSync(fullPath, "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
 
 		expect(hits).toEqual([]);
 	});

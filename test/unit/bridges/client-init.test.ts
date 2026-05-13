@@ -36,7 +36,7 @@ const TEST_HISTORY = {
 	hasMore: false,
 	total: 1,
 } as Awaited<
-	ReturnType<ClientInitDeps["sessionMgr"]["loadPreRenderedHistory"]>
+	ReturnType<ClientInitDeps["sessionService"]["loadPreRenderedHistory"]>
 >;
 
 const makeClaudeCapabilities = (
@@ -60,7 +60,7 @@ function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 		agents: [{ id: "coder", name: "coder", description: "Main agent" }],
 	});
 	vi.mocked(deps.modelService.listProviders).mockResolvedValue(TEST_PROVIDERS);
-	vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockResolvedValue(
+	vi.mocked(deps.sessionService.loadPreRenderedHistory).mockResolvedValue(
 		TEST_HISTORY,
 	);
 	return deps;
@@ -68,9 +68,43 @@ function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 
 // ─── Session with REST history ───────────────────────────────────────────────
 // MessageCache has been removed (Task 50.5). resolveSessionHistory now always
-// uses the REST path (sessionMgr.loadPreRenderedHistory) or SQLite.
+// uses the REST path (sessionService.loadPreRenderedHistory) or SQLite.
 
 describe("handleClientConnected — session with REST history", () => {
+	it("bootstraps active session through the Effect-backed session service", async () => {
+		const deps = applyTestDefaults(createMockClientInitDeps());
+		vi.mocked(deps.sessionService.getDefaultSessionId).mockResolvedValue(
+			"claude-session",
+		);
+		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockRejectedValue(
+			new Error("REST fallback should not be used when resolver is present"),
+		);
+		vi.mocked(deps.sessionService.resolveSessionHistory).mockResolvedValue({
+			kind: "rest-history",
+			history: {
+				messages: [{ id: "m1", role: "user", content: "from sqlite" }],
+				hasMore: false,
+			},
+		});
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.sessionService.getDefaultSessionId).toHaveBeenCalledOnce();
+		expect(deps.sessionService.resolveSessionHistory).toHaveBeenCalledWith(
+			"claude-session",
+		);
+		expect(deps.sessionService.loadPreRenderedHistory).not.toHaveBeenCalled();
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "session_switched",
+			id: "claude-session",
+			sessionId: "claude-session",
+			history: {
+				messages: [{ id: "m1", role: "user", content: "from sqlite" }],
+				hasMore: false,
+			},
+		});
+	});
+
 	it("sends session_switched with REST history on connect", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
 
@@ -128,7 +162,7 @@ describe("handleClientConnected — REST API history", () => {
 
 	it("sends session_switched without data when REST API fails", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockRejectedValue(
+		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockRejectedValue(
 			new Error("REST fail"),
 		);
 
@@ -286,7 +320,7 @@ describe("handleClientConnected — session list", () => {
 
 	it("sends INIT_FAILED when sendDualSessionLists throws", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.sessionMgr.sendDualSessionLists).mockRejectedValue(
+		vi.mocked(deps.sessionService.sendDualSessionLists).mockRejectedValue(
 			new Error("list fail"),
 		);
 
@@ -707,7 +741,7 @@ describe("handleClientConnected — PTY replay", () => {
 describe("handleClientConnected — no active session", () => {
 	it("skips session info and model info when no active session", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.sessionMgr.getDefaultSessionId).mockResolvedValue(
+		vi.mocked(deps.sessionService.getDefaultSessionId).mockResolvedValue(
 			undefined as unknown as string,
 		);
 
@@ -996,7 +1030,7 @@ describe("handleClientConnected — error resilience", () => {
 		vi.mocked(deps.modelService.getSession).mockRejectedValue(
 			new Error("fail"),
 		);
-		vi.mocked(deps.sessionMgr.sendDualSessionLists).mockRejectedValue(
+		vi.mocked(deps.sessionService.sendDualSessionLists).mockRejectedValue(
 			new Error("fail"),
 		);
 		vi.mocked(deps.agentService.listAgents).mockRejectedValue(
@@ -1005,7 +1039,7 @@ describe("handleClientConnected — error resilience", () => {
 		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
 			new Error("fail"),
 		);
-		vi.mocked(deps.sessionMgr.loadPreRenderedHistory).mockRejectedValue(
+		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockRejectedValue(
 			new Error("fail"),
 		);
 
@@ -1461,8 +1495,8 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		await handleClientConnected(deps, "client-1");
 
-		// sessionMgr.sendDualSessionLists should have been called with statuses
-		expect(deps.sessionMgr.sendDualSessionLists).toHaveBeenCalledWith(
+		// sessionService.sendDualSessionLists should have been called with statuses
+		expect(deps.sessionService.sendDualSessionLists).toHaveBeenCalledWith(
 			expect.any(Function),
 			{ statuses: { s1: { type: "busy" } } },
 		);

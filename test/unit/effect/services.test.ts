@@ -3,7 +3,6 @@ import { Context, Effect } from "effect";
 import { expect } from "vitest";
 
 import {
-	ClaudeEventPersistTag,
 	// Per-request Tags
 	ClientIdTag,
 	ConfigTag,
@@ -17,10 +16,7 @@ import {
 	OrchestrationEngineTag,
 	PollerManagerTag,
 	ProjectMgmtTag,
-	ProviderStateServiceTag,
 	PtyManagerTag,
-	// Persistence extension Tags
-	ReadQueryTag,
 	SessionManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -40,9 +36,6 @@ const ALL_TAGS = [
 	PollerManagerTag,
 	ConnectPtyUpstreamTag,
 	OrchestrationEngineTag,
-	ReadQueryTag,
-	ClaudeEventPersistTag,
-	ProviderStateServiceTag,
 	InstanceMgmtTag,
 	ProjectMgmtTag,
 	ClientIdTag,
@@ -64,7 +57,7 @@ describe("Service Tags", () => {
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
 		// Bridge classes are no longer Effect services; count only active Tags.
-		expect(ALL_TAGS.length).toBe(17);
+		expect(ALL_TAGS.length).toBe(14);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -111,20 +104,6 @@ describe("Service Tags", () => {
 
 	it("OrchestrationEngine tag has correct key", () => {
 		expect(OrchestrationEngineTag.key).toBe("OrchestrationEngine");
-	});
-
-	// ── Persistence extension Tags ───────────────────────────────────────────
-
-	it("ReadQuery tag has correct key", () => {
-		expect(ReadQueryTag.key).toBe("ReadQuery");
-	});
-
-	it("ClaudeEventPersist tag has correct key", () => {
-		expect(ClaudeEventPersistTag.key).toBe("ClaudeEventPersist");
-	});
-
-	it("ProviderStateService tag has correct key", () => {
-		expect(ProviderStateServiceTag.key).toBe("ProviderStateService");
 	});
 
 	// ── Daemon-only Tags ─────────────────────────────────────────────────────

@@ -157,23 +157,11 @@ export class ProjectRegistry {
 	}
 
 	/**
-	 * Trigger SQLite event-store eviction across all ready relays.
-	 * Replaces the former MessageCache-based per-session eviction with
-	 * age-based batch eviction via EventStoreEviction (Task 51).
-	 * Returns a summary string per relay that ran eviction, or empty array
-	 * if no relays have persistence configured.
+	 * Retained for call-site compatibility. Storage pressure is now owned by
+	 * Effect daemon storage monitoring, so relay-local eviction is a no-op.
 	 */
 	evictOldestSessions(_maxPerRelay: number): string[] {
-		const summaries: string[] = [];
-		for (const [slug, entry] of this.readyEntries()) {
-			const result = entry.relay.persistence?.eviction.evictSync();
-			if (result && (result.eventsDeleted > 0 || result.receiptsDeleted > 0)) {
-				summaries.push(
-					`${slug}: evicted ${result.eventsDeleted} events, ${result.receiptsDeleted} receipts`,
-				);
-			}
-		}
-		return summaries;
+		return [];
 	}
 
 	// ── Lifecycle ────────────────────────────────────────────────────────

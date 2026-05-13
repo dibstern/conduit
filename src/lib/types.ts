@@ -293,8 +293,6 @@ export interface ProjectRelayConfig {
 	 * Default: 750ms. Tests can use a shorter interval for faster feedback.
 	 */
 	messagePollerInterval?: number;
-	/** Optional: shared PersistenceLayer for SQLite event store. */
-	persistence?: import("./persistence/persistence-layer.js").PersistenceLayer;
 	/** Optional: SQLite event-store path for Effect-native persistence services. */
 	persistenceDbPath?: string;
 }

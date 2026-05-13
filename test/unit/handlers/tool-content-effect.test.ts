@@ -6,7 +6,6 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
-	ReadQueryTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -17,8 +16,6 @@ import {
 } from "../../../src/lib/effect/tool-content-service.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 
 function mockWsHandler(): WebSocketHandlerShape {
 	return {
@@ -109,78 +106,25 @@ describe("handleGetToolContent with Effect read persistence", () => {
 		},
 	);
 
-	it.effect(
-		"does not fall back to the legacy read query when Effect persistence is unavailable",
-		() => {
-			const ws = mockWsHandler();
-			const legacyReadQuery = {
-				getToolContent: vi.fn(() => "legacy output"),
-			} as unknown as ReadQueryService;
-			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag, ws),
-				ToolContentServiceNoop,
-				Layer.succeed(ReadQueryTag, legacyReadQuery),
-			);
+	it.effect("returns NOT_FOUND when Effect persistence is unavailable", () => {
+		const ws = mockWsHandler();
+		const layer = Layer.mergeAll(
+			Layer.succeed(WebSocketHandlerTag, ws),
+			ToolContentServiceNoop,
+		);
 
-			return handleGetToolContent("client-1", {
-				toolId: "tool-legacy-only",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(legacyReadQuery.getToolContent).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "error",
-						sessionId: "session-effect-read",
-						code: "NOT_FOUND",
-						message: "Full tool content not available",
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"prefers Effect read query and ignores legacy read query when both are provided",
-		() => {
-			const ws = mockWsHandler();
-			const effectReadQuery = {
-				getToolContent: vi.fn(() => Effect.succeed("effect output")),
-				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
-			};
-			const legacyReadQuery = {
-				getToolContent: vi.fn(() => {
-					throw new Error("legacy read query should not be used");
-				}),
-			} as unknown as ReadQueryService;
-			const layer = Layer.provideMerge(
-				ToolContentServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(ReadQueryEffectTag, effectReadQuery),
-					Layer.succeed(ReadQueryTag, legacyReadQuery),
-				),
-			);
-
-			return handleGetToolContent("client-1", {
-				toolId: "tool-effect-first",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(effectReadQuery.getToolContent).toHaveBeenCalledWith(
-						"tool-effect-first",
-					);
-					expect(legacyReadQuery.getToolContent).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "tool_content",
-						sessionId: "session-effect-read",
-						toolId: "tool-effect-first",
-						content: "effect output",
-					});
-				}),
-			);
-		},
-	);
+		return handleGetToolContent("client-1", {
+			toolId: "tool-legacy-only",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "error",
+					sessionId: "session-effect-read",
+					code: "NOT_FOUND",
+					message: "Full tool content not available",
+				});
+			}),
+		);
+	});
 });

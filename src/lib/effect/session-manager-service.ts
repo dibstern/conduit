@@ -38,7 +38,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
-	ReadQueryTag,
 	SessionManagerTag,
 	StatusPollerTag,
 } from "./services.js";
@@ -126,7 +125,6 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		const stateRef = yield* SessionManagerStateTag;
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
 		const sqOpts =
 			options?.roots !== undefined ? { roots: options.roots } : undefined;
 		const state = yield* Ref.get(stateRef);
@@ -140,21 +138,6 @@ export const listSessions = (options?: ListSessionsOptions) =>
 							new SessionManagerError({ operation: "listSessions", cause }),
 					),
 				);
-			if (!options?.roots) {
-				yield* Ref.update(stateRef, (s) => ({
-					...s,
-					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
-				}));
-			}
-			return sessionRowsToInfo(rows, options, state);
-		}
-
-		if (readQueryOption._tag === "Some") {
-			const rows = yield* Effect.try({
-				try: () => readQueryOption.value.listSessions(sqOpts),
-				catch: (cause) =>
-					new SessionManagerError({ operation: "listSessions", cause }),
-			});
 			if (!options?.roots) {
 				yield* Ref.update(stateRef, (s) => ({
 					...s,
@@ -632,6 +615,9 @@ export const sendDualSessionLists = (
 	);
 
 export interface SessionManagerService {
+	getDefaultSessionId(
+		title?: string,
+	): Effect.Effect<string, SessionManagerError>;
 	listSessions(
 		options?: ListSessionsOptions,
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
@@ -699,7 +685,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
 		if (configOption._tag === "Some") {
 			const forkMeta = loadForkMetadata(configDir);
 			if (forkMeta.size > 0) {
@@ -736,14 +721,25 @@ export const SessionManagerServiceLive: Layer.Layer<
 							),
 						)
 					: base;
-			return readQueryOption._tag === "Some"
-				? withEffectRead.pipe(
-						Effect.provideService(ReadQueryTag, readQueryOption.value),
-					)
-				: withEffectRead;
+			return withEffectRead;
 		};
 
 		return {
+			getDefaultSessionId: (title) =>
+				Effect.gen(function* () {
+					const sessions = yield* serviceListSessions();
+					if (sessions.length > 0) {
+						const topLevel = sessions.find((session) => !session.parentID);
+						return (topLevel ?? sessions[0])?.id ?? "";
+					}
+					const session = yield* createSession(title).pipe(
+						Effect.provideService(OpenCodeAPITag, api),
+					);
+					yield* publishSessionCreated(session.id).pipe(
+						Effect.provideService(DaemonEventBusTag, eventBus),
+					);
+					return session.id;
+				}),
 			listSessions: serviceListSessions,
 			createSession: (title) =>
 				Effect.gen(function* () {

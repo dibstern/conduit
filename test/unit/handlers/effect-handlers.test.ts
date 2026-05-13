@@ -29,7 +29,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	ReadQueryTag,
 	SessionManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -123,7 +122,6 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
@@ -3509,12 +3507,6 @@ describe("handleMessage", () => {
 					providerStateUpdates: [],
 				})),
 			} as unknown as OrchestrationEngine;
-			const legacyReadQuery = {
-				getSessionMessagesWithParts: vi.fn(() => {
-					throw new Error("legacy read query should not be used");
-				}),
-			} as unknown as ReadQueryService;
-
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
@@ -3524,7 +3516,6 @@ describe("handleMessage", () => {
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				Layer.succeed(ReadQueryTag, legacyReadQuery),
 				makeOverridesStateLive(),
 			);
 
@@ -3532,9 +3523,6 @@ describe("handleMessage", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-					expect(
-						legacyReadQuery.getSessionMessagesWithParts,
-					).not.toHaveBeenCalled();
 					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
 					expect(engine.dispatchEffect).toHaveBeenCalledWith(
 						expect.objectContaining({

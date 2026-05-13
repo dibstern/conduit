@@ -42,7 +42,6 @@ import { makePtyRuntimeLive } from "../effect/pty-manager-layer.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
 import { ScanServiceLive } from "../effect/scan-service.js";
 import {
-	ClaudeEventPersistTag,
 	ConfigTag,
 	InstanceMgmtTag,
 	LoggerTag,
@@ -53,8 +52,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	ProviderStateServiceTag,
-	ReadQueryTag,
 	type SessionManagerShape,
 	SessionManagerTag,
 	StatusPollerTag,
@@ -99,10 +96,7 @@ import { OpenCodeAPI } from "../instance/opencode-api.js";
 // OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
 import { createSdkClient } from "../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../logger.js";
-import {
-	DualWriteHook,
-	type DualWriteHookPort,
-} from "../persistence/dual-write-hook.js";
+import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
 import { EffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import {
@@ -116,10 +110,6 @@ import {
 	canonicalEvent,
 	type SessionStatusValue,
 } from "../persistence/events.js";
-import type { PersistenceLayer } from "../persistence/persistence-layer.js";
-import { ProviderStateService } from "../persistence/provider-state-service.js";
-import { ReadQueryService } from "../persistence/read-query-service.js";
-import { SessionSeeder } from "../persistence/session-seeder.js";
 import {
 	getOrchestrationLayer,
 	makeOrchestrationRuntimeLayer,
@@ -144,7 +134,10 @@ import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { SessionManager } from "../session/session-manager.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import { readSessionStatusesFromEffect } from "../session/session-status-effect.js";
-import { SessionStatusSqliteReader } from "../session/session-status-sqlite.js";
+import {
+	resolveSessionHistoryFromRows,
+	type SessionHistorySource,
+} from "../session/session-switch.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
@@ -388,8 +381,6 @@ export interface ProjectRelay {
 	orchestration: OrchestrationLayer;
 	/** Effect ManagedRuntime for dispatching through the Effect handler pipeline. */
 	effectRuntime: RelayRuntime;
-	/** SQLite persistence layer — present when the relay was configured with a db path. */
-	persistence?: PersistenceLayer;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -533,17 +524,6 @@ export async function createProjectRelay(
 		}
 	}
 
-	// ── SQLite read query service (reads from projected tables) ──
-	// Created early so it can be shared with the status poller and handler deps.
-	const readQuery = config.persistence
-		? new ReadQueryService(config.persistence.db)
-		: undefined;
-
-	// ── Provider state service (resume cursor persistence) ──
-	const providerStateService = config.persistence
-		? new ProviderStateService(config.persistence.db)
-		: undefined;
-
 	// ── Session status reconciliation loop (Effect-native) ─────────────────
 	// Background job that detects and corrects status mismatches between
 	// the projected SQLite state and OpenCode's REST API. Default interval
@@ -552,17 +532,11 @@ export async function createProjectRelay(
 	// Uses the Effect-native PollerStateTag + PollerPubSubTag for state and
 	// event broadcasting, with a thin imperative facade for wiring code.
 
-	const sqliteReader = readQuery
-		? new SessionStatusSqliteReader(readQuery)
-		: undefined;
-
 	const pollerPollDeps: PollDeps = {
 		getRawStatuses: () =>
 			config.persistenceDbPath != null
 				? readSessionStatusesFromEffect
-				: sqliteReader
-					? Effect.sync(() => sqliteReader.getSessionStatuses())
-					: Effect.tryPromise(() => api.session.statuses()),
+				: Effect.tryPromise(() => api.session.statuses()),
 		getSessionParentMap: (): Map<string, string> =>
 			sessionMgr.getSessionParentMap(),
 		resolveParent: (sessionId: string) =>
@@ -603,48 +577,16 @@ export async function createProjectRelay(
 							}),
 					},
 				}
-			: config.persistence != null && readQuery != null
-				? {
-						reconciliation: {
-							getRestStatuses: () =>
-								Effect.tryPromise(() => api.session.statuses()),
-							getProjectedSessions: () =>
-								Effect.sync(() => readQuery.listSessions()),
-							injectCorrectiveEvent: (sessionId: string, status: string) =>
-								Effect.sync(() => {
-									const event = canonicalEvent(
-										"session.status",
-										sessionId,
-										{
-											sessionId,
-											status: status as SessionStatusValue,
-										},
-										{
-											metadata: {
-												synthetic: true,
-												source: "reconciliation-loop",
-											},
-										},
-									);
-									// biome-ignore lint/style/noNonNullAssertion: persistence checked above
-									const stored = config.persistence!.eventStore.append(event);
-									// biome-ignore lint/style/noNonNullAssertion: persistence checked above
-									config.persistence!.projectionRunner.projectEvent(stored);
-								}),
-						},
-					}
-				: {}),
+			: {}),
 	};
 
 	const statusPollerRuntime = makeDeferredStatusPollerRuntime();
 
 	const statusPoller: SessionStatusPollerService = createStatusPollerService({
 		pollDeps: pollerPollDeps,
-		...(config.persistence != null &&
-			readQuery != null &&
-			pollerPollDeps.reconciliation != null && {
-				reconciliationDeps: pollerPollDeps.reconciliation,
-			}),
+		...(pollerPollDeps.reconciliation != null && {
+			reconciliationDeps: pollerPollDeps.reconciliation,
+		}),
 		...(config.statusPollerInterval != null && {
 			interval: config.statusPollerInterval,
 		}),
@@ -714,18 +656,6 @@ export async function createProjectRelay(
 		}),
 	});
 
-	// ── Claude event persistence (reuses existing persistence layer) ──────
-	const claudeEventPersist = config.persistence
-		? (() => {
-				const seeder = new SessionSeeder(config.persistence.db);
-				return {
-					eventStore: config.persistence.eventStore,
-					projectionRunner: config.persistence.projectionRunner,
-					ensureSession: (sid: string) => seeder.ensureSession(sid, "claude"),
-				};
-			})()
-		: undefined;
-
 	// Late-binding runtime: callbacks fire after full relay initialization, but
 	// registering them here keeps the external WebSocket boundary thin.
 	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
@@ -743,11 +673,72 @@ export async function createProjectRelay(
 		},
 	};
 
+	const resolveClientInitHistory = (
+		sessionId: string,
+	): Promise<SessionHistorySource> =>
+		relayManagedRuntime.runPromise(
+			Effect.gen(function* () {
+				const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+				if (readQueryOption._tag === "Some") {
+					const rows =
+						yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
+					return resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+				}
+
+				const sessionManagerService = yield* SessionManagerServiceTag;
+				const historyResult = yield* Effect.either(
+					sessionManagerService.loadPreRenderedHistory(sessionId),
+				);
+				if (historyResult._tag === "Right") {
+					return {
+						kind: "rest-history",
+						history: historyResult.right,
+					} satisfies SessionHistorySource;
+				}
+
+				const logger = yield* LoggerTag;
+				logger.warn(
+					`Failed to load client init history for ${sessionId}: ${formatErrorDetail(historyResult.left)}`,
+				);
+				return { kind: "empty" } satisfies SessionHistorySource;
+			}),
+		);
+
 	// ── Client init deps + connection handlers ──────────────────────────────
 	const clientInitDeps: ClientInitDeps = {
 		wsHandler,
 		client: api,
-		sessionMgr,
+		sessionService: {
+			getDefaultSessionId: (title) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* SessionManagerServiceTag;
+						return yield* service.getDefaultSessionId(title);
+					}),
+				),
+			sendDualSessionLists: (send, options) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* SessionManagerServiceTag;
+						return yield* service.sendDualSessionLists(send, options);
+					}),
+				),
+			resolveSessionHistory: resolveClientInitHistory,
+			loadPreRenderedHistory: (sessionId, offset) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* SessionManagerServiceTag;
+						return yield* service.loadPreRenderedHistory(sessionId, offset);
+					}),
+				),
+			seedPaginationCursor: (sessionId, messageId) =>
+				relayManagedRuntime.runPromise(
+					Effect.gen(function* () {
+						const service = yield* SessionManagerServiceTag;
+						return yield* service.seedPaginationCursor(sessionId, messageId);
+					}),
+				),
+		},
 		overrideState: {
 			getModel: (sessionId) =>
 				relayManagedRuntime.runPromise(getModel(sessionId)),
@@ -837,7 +828,6 @@ export async function createProjectRelay(
 					});
 				}),
 			),
-		...(readQuery != null && { readQuery }),
 		log: wsLog,
 	};
 
@@ -964,24 +954,6 @@ export async function createProjectRelay(
 	// biome-ignore lint/suspicious/noExplicitAny: Layer output union is broad; callers infer correctly.
 	let bridgeLayers: Layer.Layer<any, PersistenceEffectError, never> =
 		coreBridgeLayers;
-	if (readQuery != null) {
-		bridgeLayers = Layer.merge(
-			bridgeLayers,
-			Layer.succeed(ReadQueryTag, readQuery),
-		);
-	}
-	if (claudeEventPersist != null) {
-		bridgeLayers = Layer.merge(
-			bridgeLayers,
-			Layer.succeed(ClaudeEventPersistTag, claudeEventPersist),
-		);
-	}
-	if (providerStateService != null) {
-		bridgeLayers = Layer.merge(
-			bridgeLayers,
-			Layer.succeed(ProviderStateServiceTag, providerStateService),
-		);
-	}
 	if (instanceMgmt != null) {
 		const instanceMgmtLayer = Layer.succeed(InstanceMgmtTag, instanceMgmt);
 		const instanceManagementServiceLayer = InstanceManagementServiceLive.pipe(
@@ -1031,14 +1003,6 @@ export async function createProjectRelay(
 		log: sseLog,
 	});
 
-	// ── Run projector recovery (required before projectEvent works) ──────
-	// ProjectionRunner guards projectEvent() behind a recovery check.
-	// Without this call, all projections silently fail (caught by try/catch
-	// in DualWriteHook and RelayEventSink) and the messages table stays empty.
-	if (config.persistence) {
-		config.persistence.projectionRunner.recover();
-	}
-
 	// ── Dual-write hook (SSE → SQLite event store) ──────────────────────
 	let effectPersistenceRuntime: PersistenceEffectRuntime | undefined;
 	let dualWriteHook: DualWriteHookPort | undefined;
@@ -1054,11 +1018,6 @@ export async function createProjectRelay(
 			await persistenceRuntime.dispose();
 			throw err;
 		}
-	} else if (config.persistence) {
-		dualWriteHook = new DualWriteHook({
-			persistence: config.persistence,
-			log: log.child("dual-write"),
-		});
 	}
 
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
@@ -1248,7 +1207,6 @@ export async function createProjectRelay(
 		translator,
 		orchestration,
 		effectRuntime,
-		...(config.persistence ? { persistence: config.persistence } : {}),
 
 		isAnySessionProcessing() {
 			const statuses = statusPoller.getCurrentStatuses();

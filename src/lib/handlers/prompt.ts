@@ -4,12 +4,10 @@ import { Effect, Runtime } from "effect";
 import { AgentServiceTag } from "../effect/agent-service.js";
 import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
 import {
-	ClaudeEventPersistTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	ProviderStateServiceTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import {
@@ -35,7 +33,6 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
-import { canonicalEvent } from "../persistence/events.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
 	createRelayEventSink,
@@ -193,14 +190,8 @@ export const handleMessage = (
 
 		// Check if orchestration engine is available
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		const claudeEventPersistOption = yield* Effect.serviceOption(
-			ClaudeEventPersistTag,
-		);
 		const claudeEventPersistEffectOption = yield* Effect.serviceOption(
 			ClaudeEventPersistEffectTag,
-		);
-		const providerStateOption = yield* Effect.serviceOption(
-			ProviderStateServiceTag,
 		);
 		const providerStateEffectOption = yield* Effect.serviceOption(
 			ProviderStateEffectTag,
@@ -255,64 +246,6 @@ export const handleMessage = (
 						`Non-fatal persistence error for Claude user message: ${formatErrorDetail(persistResult.left)}`,
 					);
 				}
-			} else if (
-				providerId === "claude" &&
-				claudeEventPersistOption._tag === "Some"
-			) {
-				// Persistence failure is non-fatal, must not block message sending
-				const persistResult = yield* Effect.either(
-					Effect.try(() => {
-						const claudeEventPersist = claudeEventPersistOption.value;
-						const now = Date.now();
-						const userMsgId = crypto.randomUUID();
-						claudeEventPersist.ensureSession(activeId);
-						const storedSession = claudeEventPersist.eventStore.append(
-							canonicalEvent(
-								"session.created",
-								activeId,
-								{
-									sessionId: activeId,
-									title: "Claude Session",
-									provider: "claude",
-								},
-								{ provider: "claude", createdAt: now },
-							),
-						);
-						claudeEventPersist.projectionRunner.projectEvent(storedSession);
-						const storedCreated = claudeEventPersist.eventStore.append(
-							canonicalEvent(
-								"message.created",
-								activeId,
-								{
-									messageId: userMsgId,
-									role: "user",
-									sessionId: activeId,
-								},
-								{ provider: "claude", createdAt: now },
-							),
-						);
-						claudeEventPersist.projectionRunner.projectEvent(storedCreated);
-						const storedDelta = claudeEventPersist.eventStore.append(
-							canonicalEvent(
-								"text.delta",
-								activeId,
-								{
-									messageId: userMsgId,
-									partId: `${userMsgId}-0`,
-									text,
-								},
-								{ provider: "claude", createdAt: now },
-							),
-						);
-						claudeEventPersist.projectionRunner.projectEvent(storedDelta);
-					}),
-				);
-				// Log but don't block (intentional recovery — non-fatal persistence failure)
-				if (persistResult._tag === "Left") {
-					log.warn(
-						`Non-fatal persistence error for Claude user message: ${persistResult.left}`,
-					);
-				}
 			}
 
 			// Build event sink
@@ -322,11 +255,6 @@ export const handleMessage = (
 				claudeEventPersistEffectOption._tag === "Some"
 			) {
 				eventSinkPersist = claudeEventPersistEffectOption.value;
-			} else if (
-				providerId === "claude" &&
-				claudeEventPersistOption._tag === "Some"
-			) {
-				eventSinkPersist = claudeEventPersistOption.value;
 			}
 
 			const eventSink =
@@ -389,9 +317,7 @@ export const handleMessage = (
 				providerState:
 					providerStateEffectOption._tag === "Some"
 						? yield* providerStateEffectOption.value.getState(activeId)
-						: providerStateOption._tag === "Some"
-							? (providerStateOption.value.getState(activeId) ?? {})
-							: {},
+						: {},
 				...(model && sessionModelUserSelected
 					? {
 							model: {
@@ -469,14 +395,6 @@ export const handleMessage = (
 								log.warn(
 									`Non-fatal provider state persistence error for ${activeId}: ${formatErrorDetail(saveResult.left)}`,
 								);
-							}
-						} else {
-							if (providerStateOption._tag === "Some") {
-								yield* Effect.try({
-									try: () =>
-										providerStateOption.value.saveUpdates(activeId, updates),
-									catch: (err) => err,
-								}).pipe(Effect.catchAll(() => Effect.void));
 							}
 						}
 					}

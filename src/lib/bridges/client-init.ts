@@ -22,9 +22,9 @@ import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { AdapterCapabilities } from "../provider/types.js";
 import {
+	type SessionHistorySource,
 	type SessionSwitchDeps,
 	switchClientToSession,
 } from "../session/session-switch.js";
@@ -37,8 +37,8 @@ import type {
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
 
-/** Narrowed SessionManager capabilities needed by client-init. */
-interface SessionManagerLike {
+/** Effect-backed session bootstrap capabilities needed by client-init. */
+export interface ClientInitSessionService {
 	getDefaultSessionId(title?: string): Promise<string>;
 	sendDualSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
@@ -48,7 +48,7 @@ interface SessionManagerLike {
 				| undefined;
 		},
 	): Promise<void>;
-	// Methods used through SessionSwitchDeps (passed to switchClientToSession)
+	resolveSessionHistory(sessionId: string): Promise<SessionHistorySource>;
 	loadPreRenderedHistory(
 		sessionId: string,
 		offset?: number,
@@ -57,7 +57,10 @@ interface SessionManagerLike {
 		hasMore: boolean;
 		total?: number;
 	}>;
-	seedPaginationCursor(sessionId: string, messageId: string): void;
+	seedPaginationCursor(
+		sessionId: string,
+		messageId: string,
+	): void | Promise<void>;
 	getLastMessageAtMap?(): ReadonlyMap<string, number>;
 }
 
@@ -102,7 +105,7 @@ export interface ClientInitDeps {
 		markClientBootstrapped: (clientId: string) => void;
 	};
 	client: OpenCodeAPI;
-	sessionMgr: SessionManagerLike;
+	sessionService: ClientInitSessionService;
 	overrideState: ClientInitOverrideState;
 	terminal: {
 		replay(clientId: string): Promise<void>;
@@ -132,8 +135,6 @@ export interface ClientInitDeps {
 	getCachedUpdate?: () => string | null;
 	/** Optional Claude SDK capability discovery, provided by the relay Effect runtime. */
 	discoverClaudeCapabilities?: () => Promise<AdapterCapabilities>;
-	/** SQLite read query service (optional — absent when persistence is not configured) */
-	readQuery?: ReadQueryService;
 	log: Logger;
 }
 
@@ -159,7 +160,7 @@ export async function handleClientConnected(
 	clientId: string,
 	requestedSessionId?: string,
 ): Promise<void> {
-	const { wsHandler, client, sessionMgr, pendingInteractions } = deps;
+	const { wsHandler, client, sessionService, pendingInteractions } = deps;
 	const { overrideState } = deps;
 
 	const sendInitError = (err: unknown, prefix: string) => {
@@ -174,7 +175,7 @@ export async function handleClientConnected(
 	// Use the requested session (from ?session= query param) if provided,
 	// otherwise compute the default (most recent or newly created).
 	const activeId =
-		requestedSessionId || (await sessionMgr.getDefaultSessionId());
+		requestedSessionId || (await sessionService.getDefaultSessionId());
 	let activeSessionModel: ModelOverride | undefined;
 	if (activeId) {
 		// pollerManager intentionally omitted — not available in ClientInitDeps.
@@ -183,7 +184,7 @@ export async function handleClientConnected(
 		// adds new required fields that this object doesn't provide.
 		await switchClientToSession(
 			{
-				sessionMgr,
+				sessionMgr: sessionService,
 				wsHandler,
 				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
 				processingTimeouts: {
@@ -191,7 +192,7 @@ export async function handleClientConnected(
 				},
 				log: deps.log,
 				getInputDraft: getSessionInputDraft,
-				...(deps.readQuery != null && { readQuery: deps.readQuery }),
+				resolveSessionHistory: sessionService.resolveSessionHistory,
 			} satisfies SessionSwitchDeps,
 			clientId,
 			activeId,
@@ -242,7 +243,7 @@ export async function handleClientConnected(
 	// per-client by WebSocketHandler and flushed by markClientBootstrapped.
 	try {
 		const statuses = deps.statusPoller?.getCurrentStatuses();
-		await sessionMgr.sendDualSessionLists(
+		await sessionService.sendDualSessionLists(
 			(msg) => wsHandler.sendTo(clientId, msg),
 			{ statuses },
 		);

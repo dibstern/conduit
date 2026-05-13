@@ -7,7 +7,7 @@
 
 import { Effect } from "effect";
 import { createLogger } from "../logger.js";
-import type { CanonicalEvent, StoredEvent } from "../persistence/events.js";
+import type { CanonicalEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
@@ -47,19 +47,7 @@ export interface EffectRelayEventSinkPersist {
 	) => Effect.Effect<void, unknown>;
 }
 
-export interface LegacyRelayEventSinkPersist {
-	readonly eventStore: {
-		append(event: CanonicalEvent): StoredEvent;
-	};
-	readonly projectionRunner: {
-		projectEvent(event: StoredEvent): void;
-	};
-	readonly ensureSession: (sessionId: string) => unknown;
-}
-
-export type RelayEventSinkPersist =
-	| EffectRelayEventSinkPersist
-	| LegacyRelayEventSinkPersist;
+export type RelayEventSinkPersist = EffectRelayEventSinkPersist;
 
 export interface RelayEventSinkDeps {
 	readonly sessionId: string;
@@ -133,16 +121,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// Persist to SQLite when available (before WS send for durability)
 				if (persist) {
 					const persistResult = yield* Effect.either(
-						"persistEvent" in persist
-							? persist.persistEvent(event)
-							: Effect.try({
-									try: () => {
-										persist.ensureSession(sessionId);
-										const stored = persist.eventStore.append(event);
-										persist.projectionRunner.projectEvent(stored);
-									},
-									catch: (cause) => cause,
-								}),
+						persist.persistEvent(event),
 					);
 					if (persistResult._tag === "Left") {
 						// Non-fatal — same pattern as dual-write-hook.ts:149.

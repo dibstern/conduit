@@ -13,8 +13,6 @@ import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
-import { sessionRowsToSessionInfoList } from "../persistence/session-list-adapter.js";
 import type { HistoryMessage } from "../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
 import { toSessionInfoList } from "./session-info-list.js";
@@ -33,8 +31,6 @@ export interface SessionManagerOptions {
 	getStatuses?: () => Record<string, SessionStatus>;
 	/** Config directory for fork metadata persistence */
 	configDir?: string;
-	/** SQLite read query service (optional — absent when persistence is not configured) */
-	readQuery?: ReadQueryService;
 }
 
 export interface SessionManagerEvents {
@@ -65,7 +61,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly directory: string | undefined;
 	private readonly getStatuses: (() => Record<string, SessionStatus>) | null;
 	private readonly configDir: string | undefined;
-	private readonly readQuery: ReadQueryService | undefined;
 
 	/**
 	 * Cached child→parent map built from the most recent session list fetch.
@@ -116,7 +111,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.directory = options.directory;
 		this.getStatuses = options.getStatuses ?? null;
 		this.configDir = options.configDir;
-		this.readQuery = options.readQuery;
 		this.forkMeta = loadForkMetadata(options.configDir);
 	}
 
@@ -153,34 +147,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		statuses?: Record<string, SessionStatus> | undefined;
 		roots?: boolean;
 	}): Promise<SessionInfo[]> {
-		// SQLite is the sole read path when persistence is configured.
-		if (this.readQuery) {
-			const sqOpts =
-				options?.roots !== undefined ? { roots: options.roots } : undefined;
-			const rows = this.readQuery.listSessions(sqOpts);
-			const resolvedStatuses = options?.statuses ?? this.getStatuses?.();
-			const sqliteResult = sessionRowsToSessionInfoList(rows, {
-				...(resolvedStatuses !== undefined
-					? { statuses: resolvedStatuses }
-					: {}),
-				forkMeta: this.forkMeta,
-				pendingQuestionCounts: this.pendingQuestionCounts,
-			});
-
-			// Update side-effect state from SQLite rows
-			if (!options?.roots) {
-				this._lastKnownSessionCount = sqliteResult.length;
-				this.cachedParentMap = new Map<string, string>();
-				for (const row of rows) {
-					if (row.parent_id) {
-						this.cachedParentMap.set(row.id, row.parent_id);
-					}
-				}
-			}
-
-			return sqliteResult;
-		}
-
 		const clientOpts =
 			options?.roots !== undefined ? { roots: options.roots } : undefined;
 		const sessions = await this.client.session.list(clientOpts);
@@ -503,17 +469,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 	/** Look up fork-point metadata for a session. Returns undefined if not a fork. */
 	getForkEntry(sessionId: string): ForkEntry | undefined {
-		// SQLite is the sole read path when persistence is configured.
-		if (this.readQuery) {
-			const meta = this.readQuery.getForkMetadata(sessionId);
-			if (meta) {
-				return {
-					forkMessageId: meta.forkPointEvent ?? "",
-					parentID: meta.parentId,
-				};
-			}
-			// Fall through to in-memory on SQLite miss
-		}
 		return this.forkMeta.get(sessionId);
 	}
 

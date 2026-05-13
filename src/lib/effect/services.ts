@@ -22,10 +22,7 @@ import type {
 	SessionStatus,
 } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
-import type { ProviderStateService } from "../persistence/provider-state-service.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { LegacyRelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { Translator } from "../relay/event-translator.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -308,22 +305,6 @@ export class TranslatorTag extends Context.Tag("Translator")<
 	Translator
 >() {}
 
-// ─── Persistence extension Tags (when SQLite configured) ───────────────────
-
-export class ReadQueryTag extends Context.Tag("ReadQuery")<
-	ReadQueryTag,
-	ReadQueryService
->() {}
-
-export class ClaudeEventPersistTag extends Context.Tag("ClaudeEventPersist")<
-	ClaudeEventPersistTag,
-	LegacyRelayEventSinkPersist
->() {}
-
-export class ProviderStateServiceTag extends Context.Tag(
-	"ProviderStateService",
-)<ProviderStateServiceTag, ProviderStateService>() {}
-
 // ─── Daemon lifecycle Tags ────────────────────────────────────────────────
 
 // ShutdownSignalTag moved to daemon-layers.ts to break circular dependency.
@@ -385,15 +366,9 @@ type _AssertCoverage = {
 											? InstanceManagementDeps
 											: K extends "projectMgmt"
 												? ProjectManagementDeps
-												: K extends "readQuery"
-													? ReadQueryService
-													: K extends "orchestrationEngine"
-														? OrchestrationEngine
-														: K extends "claudeEventPersist"
-															? LegacyRelayEventSinkPersist
-															: K extends "providerStateService"
-																? ProviderStateService
-																: never;
+												: K extends "orchestrationEngine"
+													? OrchestrationEngine
+													: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.

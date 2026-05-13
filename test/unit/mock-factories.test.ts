@@ -73,7 +73,7 @@ describe("mock-factories", () => {
 			expect(deps.wsHandler.sendTo).toBeDefined();
 			expect(deps.wsHandler.setClientSession).toBeDefined();
 			expect(deps.client).toBeDefined();
-			expect(deps.sessionMgr).toBeDefined();
+			expect(deps.sessionService).toBeDefined();
 			expect(deps.overrideState.hasActiveProcessingTimeout).toBeDefined();
 			expect(deps.terminal.replay).toBeDefined();
 			expect(deps.modelService.getSession).toBeDefined();

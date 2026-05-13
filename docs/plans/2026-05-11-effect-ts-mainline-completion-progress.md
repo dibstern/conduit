@@ -2060,6 +2060,135 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 9.10: Delete Legacy Persistence Bridge Fallbacks
+
+Plan issues found:
+
+- Production still accepted legacy persistence bridge objects after the Effect persistence services were already in
+  place. `ProjectRelayConfig.persistence`, relay-stack `ReadQueryService` / `ProviderStateService` /
+  `SessionSeeder` / `DualWriteHook` fallback wiring, legacy prompt persistence branches, legacy handler deps, and
+  legacy persistence service Tags all kept a second persistence path alive.
+- A reviewer caught that deleting only the relay-stack bridge was incomplete: `client-init` could still pass a sync
+  `ReadQueryService` into `session-switch`, and `session-switch` preferred that reader over the service-owned history
+  path. The long-term fix was to remove the bridge from `ClientInitDeps`, `SessionSwitchDeps`, and `SessionManager`
+  rather than marking it out of scope.
+- A second review caught the next ownership issue: after removing the sync reader, new-client bootstrap still routed
+  default-session selection and history replay through the REST-only `SessionManager`. That would miss
+  SQLite-owned Claude/conduit sessions on reconnect. Client init now depends on an Effect-backed
+  `ClientInitSessionService`, with relay-stack history resolution reading `ReadQueryEffectTag` before falling back to
+  the service-owned REST history path.
+- `relay-stack.ts` had a hidden status-reconciliation coupling: reconciliation deps were gated on the legacy
+  `config.persistence && readQuery` shape. Removing the legacy branch without fixing that guard would have silently
+  disabled Effect-backed status correction. Reconciliation is now enabled whenever the Effect reconciliation branch is
+  present.
+- `ProjectRegistry.evictOldestSessions()` still reached through `ProjectRelay.persistence`; this contradicted the
+  existing no-op behavior and the Effect storage-monitor ownership, so it is now explicitly a no-op.
+- The original relay-stack dual-write test mostly checked source strings. A relay-stack smoke now starts a mock
+  OpenCode server with `persistenceDbPath`, emits SSE events, and verifies the SQLite read model through
+  `ReadQueryEffectTag`.
+
+Changes:
+
+- Removed `ProjectRelayConfig.persistence` and the returned `ProjectRelay.persistence` field.
+- Removed relay-stack construction and Layer wiring for legacy `ReadQueryService`, `ProviderStateService`,
+  `SessionSeeder`, `DualWriteHook`, `ReadQueryTag`, `ClaudeEventPersistTag`, and `ProviderStateServiceTag`.
+- Kept relay status reads and reconciliation on Effect persistence via `ReadQueryEffectTag`, `EventStoreEffectTag`,
+  and `ProjectionRunnerEffectTag`.
+- Converted prompt persistence and provider-state handling to Effect-only ports:
+  `ClaudeEventPersistEffectTag` and `ProviderStateEffectTag`.
+- Removed legacy persistence fields from `HandlerDeps`, `RelayEventSinkPersist`, and `SessionManagerServiceLive`.
+- Removed the sync read-query bridge from `client-init`, `session-switch`, and `SessionManager`; deleted the unused
+  `SessionStatusSqliteReader` wrapper.
+- Added `SessionManagerService.getDefaultSessionId()` so client bootstrap can select or create the active session
+  through the Effect session service.
+- Moved client-init session list, active-session bootstrap, history replay, and pagination cursor seeding behind
+  `ClientInitSessionService`; relay-stack backs that service with `SessionManagerServiceTag` and `ReadQueryEffectTag`.
+- Changed `session-switch` to accept a service-owned history resolver and to seed pagination cursors for both cached
+  event replays and Effect/REST history pages when more history is available.
+- Expanded the runtime boundary guard to block reintroducing these production persistence bridges.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 1
+Expected failure:
+  New production legacy persistence bridge guard found 58 hits across ProjectRelayConfig,
+  relay-stack, prompt, session-manager-service, services, handlers/types, and RelayEventSink.
+```
+
+Focused verification:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/session/session-switch.test.ts \
+  test/unit/session/session-switch-sqlite.test.ts \
+  test/unit/session/conduit-owned-fields.test.ts \
+  test/unit/bridges/client-init.test.ts \
+  test/unit/relay/relay-stack-dual-write-wiring.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/effect/session-manager-service.test.ts \
+  test/unit/effect/relay-factory-effect-persistence.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/handlers/tool-content-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/mock-factories.test.ts \
+  test/unit/provider/relay-event-sink.test.ts \
+  test/unit/provider/relay-event-sink-persistence.test.ts
+Exit: 0
+Test Files  15 passed (15)
+Tests  269 passed (269)
+```
+
+Broader verification:
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 1000 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  383 passed (383)
+Tests  5232 passed | 2 skipped | 12 todo (5246)
+```
+
+```text
+$ pnpm test:contract
+Exit: 0
+Test Files  8 passed (8)
+Tests  81 passed (81)
+```
+
+```text
+$ pnpm test:integration
+Exit: 1
+Failure while run concurrently with pnpm test:contract:
+  test/integration/media-generation.integration.ts > setup scene generates GIF without errors
+  page.goto("http://localhost:4173/setup") timed out after 30000ms.
+```
+
+```text
+$ pnpm vitest run --config vitest.integration.config.ts test/integration/media-generation.integration.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
+```text
+$ pnpm test:integration
+Exit: 0
+Test Files  24 passed (24)
+Tests  127 passed | 1 skipped (128)
+```
+
 ## Phase 9.8: Daemon WebSocket Router Layer Ownership
 
 Plan issues found:

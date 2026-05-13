@@ -9,10 +9,7 @@ import type { SessionStatusPollerService } from "../effect/session-status-poller
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
-import type { ProviderStateService } from "../persistence/provider-state-service.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
@@ -69,8 +66,6 @@ export interface HandlerDeps {
 	instanceMgmt?: InstanceManagementDeps;
 	/** Project management capability group (optional — only available in daemon mode) */
 	projectMgmt?: ProjectManagementDeps;
-	/** SQLite read query service (optional — only available when persistence is configured) */
-	readQuery?: ReadQueryService;
 	/**
 	 * Phase 5: OrchestrationEngine for routing prompts through provider adapters.
 	 * When set, handleMessage() dispatches through the engine instead of calling
@@ -78,13 +73,6 @@ export interface HandlerDeps {
 	 * always provides it via relay-stack.ts.
 	 */
 	orchestrationEngine?: OrchestrationEngine;
-	/**
-	 * Claude event persistence deps (optional — only when SQLite is configured).
-	 * Passed to RelayEventSink so Claude SDK events survive session switches.
-	 */
-	claudeEventPersist?: RelayEventSinkPersist;
-	/** Provider state service for resume cursor persistence (optional). */
-	providerStateService?: ProviderStateService;
 }
 
 // Re-export PromptOptions so prompt.ts can use it without a separate import

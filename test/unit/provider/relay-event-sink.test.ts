@@ -221,27 +221,14 @@ describe("createRelayEventSink — translation", () => {
 });
 
 describe("createRelayEventSink — persistence", () => {
-	it("persists events to eventStore and projects them when persist deps provided", async () => {
+	it("runs Effect persistence when persist deps are provided", async () => {
 		const send = vi.fn();
-		const appendResult = {
-			eventId: "evt_1",
-			sessionId: "ses-1",
-			type: "text.delta" as const,
-			data: { messageId: "msg_1", partId: "part_1", text: "Hello" },
-			metadata: {},
-			provider: "claude",
-			createdAt: Date.now(),
-			sequence: 1,
-			streamVersion: 1,
-		};
-		const eventStore = { append: vi.fn(() => appendResult) };
-		const projectionRunner = { projectEvent: vi.fn() };
-		const ensureSession = vi.fn();
+		const persistEvent = vi.fn(() => Effect.void);
 
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send,
-			persist: { eventStore, projectionRunner, ensureSession },
+			persist: { persistEvent },
 		});
 
 		const event = makeEvent("text.delta", {
@@ -251,9 +238,7 @@ describe("createRelayEventSink — persistence", () => {
 		});
 		await Effect.runPromise(sink.push(event));
 
-		expect(ensureSession).toHaveBeenCalledWith("ses-1");
-		expect(eventStore.append).toHaveBeenCalledWith(event);
-		expect(projectionRunner.projectEvent).toHaveBeenCalledWith(appendResult);
+		expect(persistEvent).toHaveBeenCalledWith(event);
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
 			sessionId: "ses-1",
@@ -284,31 +269,14 @@ describe("createRelayEventSink — persistence", () => {
 		});
 	});
 
-	it("continues sending to WebSocket even if projection throws", async () => {
+	it("continues sending to WebSocket even if Effect persistence fails", async () => {
 		const send = vi.fn();
-		const appendResult = {
-			eventId: "evt_1",
-			sessionId: "ses-1",
-			type: "text.delta" as const,
-			data: { messageId: "msg_1", partId: "part_1", text: "Hello" },
-			metadata: {},
-			provider: "claude",
-			createdAt: Date.now(),
-			sequence: 1,
-			streamVersion: 1,
-		};
-		const eventStore = { append: vi.fn(() => appendResult) };
-		const projectionRunner = {
-			projectEvent: vi.fn(() => {
-				throw new Error("projection boom");
-			}),
-		};
-		const ensureSession = vi.fn();
+		const persistEvent = vi.fn(() => Effect.fail(new Error("disk full")));
 
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send,
-			persist: { eventStore, projectionRunner, ensureSession },
+			persist: { persistEvent },
 		});
 
 		await Effect.runPromise(
@@ -327,41 +295,6 @@ describe("createRelayEventSink — persistence", () => {
 			text: "Hello",
 			messageId: "msg_1",
 		});
-	});
-
-	it("continues sending to WebSocket even if eventStore.append throws", async () => {
-		const send = vi.fn();
-		const eventStore = {
-			append: vi.fn(() => {
-				throw new Error("disk full");
-			}),
-		};
-		const projectionRunner = { projectEvent: vi.fn() };
-		const ensureSession = vi.fn();
-
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			send,
-			persist: { eventStore, projectionRunner, ensureSession },
-		});
-
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("text.delta", {
-					messageId: "msg_1",
-					partId: "part_1",
-					text: "Hello",
-				}),
-			),
-		);
-
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "ses-1",
-			text: "Hello",
-			messageId: "msg_1",
-		});
-		expect(projectionRunner.projectEvent).not.toHaveBeenCalled();
 	});
 
 	it("runs Effect-native persistence programs before sending to WebSocket", async () => {

@@ -368,6 +368,12 @@ export function createMockSSEWiringDeps(
 export function createMockClientInitDeps(
 	overrides?: Partial<ClientInitDeps>,
 ): ClientInitDeps {
+	const sessionService =
+		createMockSessionMgr() as unknown as ClientInitDeps["sessionService"];
+	sessionService.resolveSessionHistory = vi.fn(async (sessionId) => ({
+		kind: "rest-history" as const,
+		history: await sessionService.loadPreRenderedHistory(sessionId),
+	}));
 	return {
 		wsHandler: {
 			broadcast: vi.fn(),
@@ -376,8 +382,7 @@ export function createMockClientInitDeps(
 			markClientBootstrapped: vi.fn(),
 		},
 		client: createMockClient() as unknown as ClientInitDeps["client"],
-		sessionMgr:
-			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
+		sessionService,
 		overrideState: createMockClientInitOverrideState(),
 		terminal: {
 			replay: vi.fn(async () => undefined),
@@ -755,6 +760,7 @@ export function makeMockSessionManagerService(
 	overrides?: Partial<SessionManagerService>,
 ): SessionManagerService {
 	return {
+		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
 		listSessions: vi.fn(() =>
 			Effect.succeed([
 				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
