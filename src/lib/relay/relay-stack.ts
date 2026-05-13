@@ -171,7 +171,7 @@ import { connectPtyUpstream as connectPtyUpstreamImpl } from "./pty-upstream.js"
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { SessionEventBridgeLive } from "./session-event-bridge.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
-import { SSEStream } from "./sse-stream.js";
+import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 import { handleRelayWsMessage } from "./ws-message-dispatch-effect.js";
@@ -387,7 +387,7 @@ export class EffectRelayServer {
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
 	wsHandler: WebSocketHandlerShape;
-	sseStream: SSEStream;
+	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
@@ -439,7 +439,7 @@ export interface RelayStackConfig {
 export interface RelayStack {
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
-	sseStream: SSEStream;
+	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
@@ -1243,8 +1243,9 @@ export async function createProjectRelay(
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	try {
-		await sseStream.connect();
+		await relayManagedRuntime.runPromise(sseStream.connectEffect());
 	} catch (err) {
+		await effectRuntime.dispose();
 		await effectPersistenceRuntime?.dispose();
 		throw err;
 	}
@@ -1277,7 +1278,7 @@ export async function createProjectRelay(
 			// cannot restart message pollers during shutdown.
 			stopMonitoring();
 			// 2. Drain event sources (stop + await pending work)
-			await sseStream.drain();
+			await relayManagedRuntime.runPromise(sseStream.drainEffect());
 			await statusPoller.drain();
 			await pollerManager.drain();
 			// 3. Dispose Effect ManagedRuntimes. Scoped finalizers own provider

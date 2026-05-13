@@ -2793,6 +2793,79 @@ Test Files  3 passed (3)
 Tests  16 passed (16)
 ```
 
+## Phase 7.40: SSE Stream Effect Lifecycle Boundary
+
+Plan issues found:
+
+- The production `SSEStream` was not fully Promise-owned or Effect-owned: it started the consume loop with
+  `Effect.runFork(...)`, held the runtime fiber in an imperative field, then stopped it by calling
+  `Effect.runPromise(Fiber.interrupt(...))`.
+- Replacing the class with `src/lib/effect/sse-stream.ts` would mix transport migration with lifecycle migration. The
+  production path is SDK-backed (`api.event.subscribe({ signal })`), while the existing Effect stream module is a raw
+  `text/event-stream` HTTP parser.
+- The existing lifecycle queue protects real races: reconnect queued behind disconnect cleanup, later disconnect
+  canceling queued reconnect, and reentrant connect from abort listeners. The slice keeps that serialization and ports
+  it to the Effect lifecycle API instead of deleting it.
+
+Changes:
+
+- `src/lib/relay/sse-stream.ts`: added `connectEffect()`, `disconnectEffect()`, and `drainEffect()`. The consume loop
+  now starts with `Effect.forkDaemon(...)` inside `connectEffect()`, and shutdown yields `Fiber.interrupt(...)` inside
+  `disconnectEffect()` so async generator cleanup is still awaited without a local `Effect.runPromise(...)` bridge.
+- `src/lib/relay/sse-stream.ts`, `src/lib/relay/sse-wiring.ts`, `src/lib/relay/poller-wiring.ts`, and
+  `src/lib/relay/relay-stack.ts`: split the exposed SSE surface into narrow event, health, and lifecycle ports so
+  wiring code no longer depends on the concrete SDK-backed class where it only needs callbacks or health.
+- `src/lib/relay/relay-stack.ts`: production relay startup and shutdown now run `sseStream.connectEffect()` and
+  `sseStream.drainEffect()` through the relay runtime boundary instead of calling Promise lifecycle methods.
+- `test/unit/relay/sse-stream.test.ts`: existing cleanup and lifecycle-race tests now drive the Effect lifecycle
+  methods, preserving the prior behavior expectations.
+- `test/unit/relay/sse-stream-effect-boundary.test.ts`: added static guards preventing `Effect.runPromise` /
+  `Effect.runSync` from returning to `SSEStream`, and preventing production relay wiring from calling the old
+  Promise-shaped SSE lifecycle.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/relay/sse-stream-effect-boundary.test.ts
+Exit: 1
+Expected failure:
+  expected source not to match /Effect\\s*\\.\\s*run(?:Promise|Sync)\\s*\\(/
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/relay/sse-stream-effect-boundary.test.ts test/unit/relay/sse-stream.test.ts test/unit/relay/sse-wiring.test.ts test/unit/relay/monitoring-wiring.test.ts test/unit/relay/relay-stack-default-overrides.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  79 passed (79)
+```
+
+```text
+$ pnpm vitest run test/unit/relay
+Exit: 0
+Test Files  40 passed (40)
+Tests  520 passed (520)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 996 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-unit-output.log 2>&1
+Exit: 0
+Test Files  379 passed (379)
+Tests  5223 passed | 2 skipped | 12 todo (5237)
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

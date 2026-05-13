@@ -17,7 +17,7 @@ import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEStream } from "./sse-stream.js";
+import type { SSEStreamEvents } from "./sse-stream.js";
 import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 
 /** Structural interface for the message poller manager's capabilities needed by poller wiring. */
@@ -38,7 +38,7 @@ interface SessionManagerLike {
 
 export interface PollerWiringDeps {
 	pollerManager: PollerManagerLike;
-	sseStream: SSEStream;
+	sseStream: SSEStreamEvents;
 	statusPoller: SessionStatusPollerService;
 	wsHandler: WebSocketHandlerShape;
 	sessionMgr: SessionManagerLike;

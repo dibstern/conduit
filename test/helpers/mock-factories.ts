@@ -407,8 +407,12 @@ export function createMockProjectRelay(
 		wsHandler:
 			createMockWsHandlerFull() as unknown as ProjectRelay["wsHandler"],
 		sseStream: {
-			connect: vi.fn(),
-			disconnect: vi.fn(),
+			connectEffect: vi.fn(),
+			disconnectEffect: vi.fn(),
+			drainEffect: vi.fn(),
+			getHealth: vi.fn(),
+			isConnected: vi.fn(),
+			on: vi.fn(),
 		} as unknown as ProjectRelay["sseStream"],
 		client: createMockClient() as unknown as ProjectRelay["client"],
 		sessionMgr: createMockSessionMgr() as unknown as ProjectRelay["sessionMgr"],

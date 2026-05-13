@@ -30,7 +30,7 @@ import {
 	isPermissionRepliedEvent,
 	isSessionErrorEvent,
 } from "./opencode-events.js";
-import type { SSEStream } from "./sse-stream.js";
+import type { SSEStreamEvents } from "./sse-stream.js";
 
 // ─── Session ID extraction ────────────────────────────────────────────────────
 // OpenCode SSE events store sessionID in different locations by event type:
@@ -479,7 +479,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 
 export function wireSSEConsumer(
 	deps: SSEWiringDeps,
-	consumer: SSEStream,
+	consumer: SSEStreamEvents,
 ): void {
 	const { log } = deps;
 
