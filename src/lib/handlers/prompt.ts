@@ -10,7 +10,6 @@ import {
 	OpenCodeAPITag,
 	OrchestrationEngineTag,
 	ProviderStateServiceTag,
-	ReadQueryTag,
 	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
@@ -26,7 +25,6 @@ import {
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../persistence/events.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
 	createRelayEventSink,
@@ -50,7 +48,6 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 
 type PriorHistoryReaders = {
 	readQueryEffect?: ReadQueryEffect;
-	readQuery?: ReadQueryService;
 };
 
 function loadPriorHistoryForTurn(
@@ -67,18 +64,6 @@ function loadPriorHistoryForTurn(
 					}).messages,
 			),
 		);
-	}
-	if (readers.readQuery) {
-		const readQuery = readers.readQuery;
-		return Effect.try({
-			try: () => {
-				const rows = readQuery.getSessionMessagesWithParts(sessionId);
-				return messageRowsToHistory(rows, {
-					pageSize: Number.MAX_SAFE_INTEGER,
-				}).messages;
-			},
-			catch: (err) => err,
-		});
 	}
 	return sessionManagerService
 		.loadPreRenderedHistory(sessionId)
@@ -205,7 +190,6 @@ export const handleMessage = (
 		const providerStateEffectOption = yield* Effect.serviceOption(
 			ProviderStateEffectTag,
 		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
 
@@ -223,9 +207,6 @@ export const handleMessage = (
 							const historyReaders: PriorHistoryReaders = {
 								...(readQueryEffectOption._tag === "Some"
 									? { readQueryEffect: readQueryEffectOption.value }
-									: {}),
-								...(readQueryOption._tag === "Some"
-									? { readQuery: readQueryOption.value }
 									: {}),
 							};
 							const result = yield* Effect.either(

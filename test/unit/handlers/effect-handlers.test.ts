@@ -103,6 +103,10 @@ import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js"
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
@@ -3444,41 +3448,47 @@ describe("handleMessage", () => {
 				})),
 			} as unknown as OrchestrationEngine;
 			const readQuery = {
-				getSessionMessagesWithParts: vi.fn(() => [
-					{
-						id: "msg-user-1",
-						session_id: "session-1",
-						turn_id: "turn-1",
-						role: "user",
-						text: "Earlier question",
-						cost: null,
-						tokens_in: null,
-						tokens_out: null,
-						tokens_cache_read: null,
-						tokens_cache_write: null,
-						is_streaming: 0,
-						created_at: 1,
-						updated_at: 1,
-						parts: [
-							{
-								id: "part-user-1",
-								message_id: "msg-user-1",
-								type: "text",
-								text: "Earlier question",
-								tool_name: null,
-								call_id: null,
-								input: null,
-								result: null,
-								duration: null,
-								status: null,
-								sort_order: 0,
-								created_at: 1,
-								updated_at: 1,
-							},
-						],
-					},
-				]),
-			} as unknown as ReadQueryService;
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() =>
+					Effect.succeed([
+						{
+							id: "msg-user-1",
+							session_id: "session-1",
+							turn_id: "turn-1",
+							role: "user",
+							text: "Earlier question",
+							cost: null,
+							tokens_in: null,
+							tokens_out: null,
+							tokens_cache_read: null,
+							tokens_cache_write: null,
+							is_streaming: 0,
+							created_at: 1,
+							updated_at: 1,
+							parts: [
+								{
+									id: "part-user-1",
+									message_id: "msg-user-1",
+									type: "text",
+									text: "Earlier question",
+									tool_name: null,
+									call_id: null,
+									input: null,
+									result: null,
+									duration: null,
+									status: null,
+									sort_order: 0,
+									created_at: 1,
+									updated_at: 1,
+								},
+							],
+						},
+					]),
+				),
+			} satisfies ReadQueryEffect;
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
@@ -3489,7 +3499,7 @@ describe("handleMessage", () => {
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(ReadQueryTag, readQuery),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
 			);
 
 			return handleMessage("client-1", { text: "new prompt" }).pipe(
@@ -3523,7 +3533,7 @@ describe("handleMessage", () => {
 	);
 
 	it.effect(
-		"loads prior Claude history through SessionManagerService when SQLite is unavailable",
+		"loads prior Claude history through SessionManagerService when Effect SQLite is unavailable",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -3580,6 +3590,11 @@ describe("handleMessage", () => {
 					providerStateUpdates: [],
 				})),
 			} as unknown as OrchestrationEngine;
+			const legacyReadQuery = {
+				getSessionMessagesWithParts: vi.fn(() => {
+					throw new Error("legacy read query should not be used");
+				}),
+			} as unknown as ReadQueryService;
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
@@ -3591,12 +3606,16 @@ describe("handleMessage", () => {
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(ReadQueryTag, legacyReadQuery),
 			);
 
 			return handleMessage("client-1", { text: "new prompt" }).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
+					expect(
+						legacyReadQuery.getSessionMessagesWithParts,
+					).not.toHaveBeenCalled();
 					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
 					expect(engine.dispatch).toHaveBeenCalledWith(
 						expect.objectContaining({

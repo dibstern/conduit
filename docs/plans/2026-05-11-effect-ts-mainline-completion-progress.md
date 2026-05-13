@@ -2060,6 +2060,70 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.35: Prompt Prior History Effect Read Contract
+
+Plan issues found:
+
+- `prompt.ts` already preferred `ReadQueryEffectTag` for Claude prior-history loading, but still resolved
+  `ReadQueryTag` and carried a legacy synchronous fallback in the handler-local `loadPriorHistoryForTurn(...)` helper.
+- That fallback was no longer needed for production Effect persistence and kept a direct handler dependency on the
+  legacy read service. When Effect SQLite is unavailable, the correct non-SQLite fallback is already
+  `SessionManagerService.loadPreRenderedHistory(...)`.
+- This is intentionally narrower than the tool-content fallback cleanup: `ToolContentServiceLive` still owns a
+  temporary legacy fallback, but no browser handler imports `ReadQueryTag` after this slice.
+
+Changes:
+
+- `src/lib/handlers/prompt.ts`: removed `ReadQueryTag`, `ReadQueryService`, and the synchronous
+  `readQuery.getSessionMessagesWithParts(...)` branch from Claude prior-history loading.
+- `test/unit/handlers/effect-handlers.test.ts`: updated the prior-SQLite-history test to provide
+  `ReadQueryEffectTag`; strengthened the non-SQLite fallback test by providing a throwing legacy `ReadQueryTag` and
+  asserting it is not used.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "Effect SQLite is unavailable"
+Exit: 1
+Expected failure:
+  expected SessionManagerService.loadPreRenderedHistory to be called with "session-1"; Number of calls: 0
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/handlers/agent-prompt-state-effect.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  86 passed (86)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 988 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  371 passed (371)
+Tests  5233 passed | 2 skipped | 12 todo (5247)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.34: View Session Effect History Read Contract
 
 Plan issues found:
