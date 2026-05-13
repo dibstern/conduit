@@ -1228,9 +1228,11 @@ function makeForkSessionLayer(options?: {
 			clearMessageActivity: vi.fn(),
 		}),
 		Layer.succeed(PollerManagerTag, {
+			on: vi.fn(),
 			isPolling: vi.fn(() => true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
+			notifySSEEvent: vi.fn(),
 		}),
 		makeOverridesStateLive(),
 	);
@@ -1270,9 +1272,11 @@ function makeSessionLifecycleLayer(options?: {
 			clearMessageActivity: vi.fn(),
 		}),
 		Layer.succeed(PollerManagerTag, {
+			on: vi.fn(),
 			isPolling: vi.fn(() => true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
+			notifySSEEvent: vi.fn(),
 		}),
 		makeOverridesStateLive(),
 	);

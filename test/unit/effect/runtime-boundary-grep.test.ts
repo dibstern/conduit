@@ -139,6 +139,36 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not construct message poller manager bridge services in relay-stack", () => {
+		const retiredBridgePatterns = [
+			{
+				pattern: /new MessagePollerManager\b/,
+				reason: "MessagePollerManager must be constructed by a scoped Layer",
+			},
+			{
+				pattern: /Layer\.succeed\(PollerManagerTag,/,
+				reason: "PollerManagerTag must not wrap a prebuilt instance",
+			},
+			{
+				pattern: /pollerManager\.drain\(\)/,
+				reason: "Message poller cleanup belongs to the scoped Layer finalizer",
+			},
+		] as const;
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not keep unused monitoring bridge services", () => {
 		const retiredNames =
 			/\b(?:MonitoringStateLive|MonitoringStateTag|SSETrackerLive|SSETrackerTag)\b/;

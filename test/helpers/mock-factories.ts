@@ -298,9 +298,11 @@ export function createMockHandlerDeps(
 			isProcessing: vi.fn().mockReturnValue(false),
 		},
 		pollerManager: {
+			on: vi.fn(),
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
+			notifySSEEvent: vi.fn(),
 		},
 		...overrides,
 	};
@@ -867,9 +869,11 @@ export function makeTestHandlerLayer(
 		getCurrentStatuses: vi.fn(() => ({})),
 	};
 	const pollerManager: PollerManagerShape = opts?.pollerManager ?? {
+		on: vi.fn(),
 		isPolling: vi.fn(() => true),
 		startPolling: vi.fn(),
 		stopPolling: vi.fn(),
+		notifySSEEvent: vi.fn(),
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);

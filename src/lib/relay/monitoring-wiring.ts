@@ -90,9 +90,16 @@ export interface MonitoringWiringDeps {
 	statusLog: Logger;
 	sseLog: Logger;
 	pipelineLog: Logger;
+	state?: MonitoringWiringStateAccess;
 }
 
 // ─── Return type ─────────────────────────────────────────────────────────────
+
+export interface MonitoringWiringStateAccess {
+	sseTracker: ReturnType<typeof createSessionSSETracker>;
+	getMonitoringState: () => MonitoringState;
+	setMonitoringState: (state: MonitoringState) => void;
+}
 
 export interface MonitoringWiringResult {
 	pipelineDeps: PipelineDeps;
@@ -108,6 +115,18 @@ export interface MonitoringWiringResult {
 	 * a duplicate "done" for the same busy→idle cycle.
 	 */
 	recordDoneDelivered: (sessionId: string) => void;
+}
+
+export function createMonitoringWiringState(): MonitoringWiringStateAccess {
+	const sseTracker = createSessionSSETracker();
+	let monitoringState: MonitoringState = initialMonitoringState();
+	return {
+		sseTracker,
+		getMonitoringState: () => monitoringState,
+		setMonitoringState: (state) => {
+			monitoringState = state;
+		},
+	};
 }
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
@@ -128,11 +147,11 @@ export function wireMonitoring(
 		statusLog,
 		sseLog,
 		pipelineLog,
+		state = createMonitoringWiringState(),
 	} = deps;
 
 	// ── Monitoring reducer state ──────────────────────────────────────────────
-	const sseTracker = createSessionSSETracker();
-	let monitoringState: MonitoringState = initialMonitoringState();
+	const { sseTracker, getMonitoringState, setMonitoringState } = state;
 	let monitoringActive = true;
 	const pollerGatingCfg: PollerGatingConfig = {
 		...DEFAULT_POLLER_GATING_CONFIG,
@@ -260,9 +279,9 @@ export function wireMonitoring(
 			);
 		}
 
-		const prevState = monitoringState;
+		const prevState = getMonitoringState();
 		const result = evaluateAll(prevState, contexts, pollerGatingCfg);
-		monitoringState = result.state;
+		setMonitoringState(result.state);
 
 		if (result.effects.length > 0) {
 			executeEffects(result.effects, effectDeps);
@@ -287,10 +306,8 @@ export function wireMonitoring(
 		pipelineDeps,
 		sseTracker,
 		pollerGatingCfg,
-		getMonitoringState: () => monitoringState,
-		setMonitoringState: (state: MonitoringState) => {
-			monitoringState = state;
-		},
+		getMonitoringState,
+		setMonitoringState,
 		stopMonitoring: () => {
 			monitoringActive = false;
 		},

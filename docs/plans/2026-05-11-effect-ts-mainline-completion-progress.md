@@ -2241,6 +2241,97 @@ Exit: 0
 Checked 1000 files. No fixes applied.
 ```
 
+## Phase 9.7: Message Poller Manager Layer Ownership
+
+Plan issues found:
+
+- `MessagePollerManager` was still constructed directly in `relay-stack.ts`, wrapped with
+  `Layer.succeed(PollerManagerTag, pollerManager)`, and drained manually during relay shutdown.
+- Moving only the `Layer.succeed(...)` line would be a fake fix because monitoring and poller wiring still need the
+  real manager instance for seeded REST fallback, SSE duplicate suppression, and event fanout.
+- The ordering was cyclic: lifecycle wiring needs monitoring state before the runtime is built, while monitoring wiring
+  needs the poller manager. The long-term fix is to split monitoring state creation from monitoring event wiring, so
+  the runtime can own the manager and the imperative edge can use the runtime-owned instance.
+
+Changes:
+
+- Added `src/lib/effect/message-poller-manager-layer.ts`.
+  - `makeMessagePollerManagerLive(...)` constructs the real `MessagePollerManager` from `OpenCodeAPITag`,
+    `ConfigTag`, and `LoggerTag`.
+  - The scoped finalizer drains active pollers and logs cleanup failures.
+- `relay-stack.ts` now provides `PollerManagerTag` from the scoped Layer instead of a prebuilt instance.
+- `relay-stack.ts` obtains the manager from `relayManagedRuntime` for the remaining imperative `wireMonitoring(...)`
+  and `wirePollers(...)` edge.
+- `monitoring-wiring.ts` now exposes `createMonitoringWiringState()` so lifecycle wiring and monitoring wiring share
+  state without forcing poller-manager construction before the Effect runtime exists.
+- Strengthened the runtime-boundary grep guard to block `new MessagePollerManager`,
+  `Layer.succeed(PollerManagerTag, ...)`, and `pollerManager.drain()` inside `relay-stack.ts`.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/message-poller-manager-layer.test.ts test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 1
+Expected failures:
+  Cannot find module '../../../src/lib/effect/message-poller-manager-layer.js'
+  src/lib/relay/relay-stack.ts:660 const pollerManager = new MessagePollerManager({
+  src/lib/relay/relay-stack.ts:946 Layer.succeed(PollerManagerTag, pollerManager),
+  src/lib/relay/relay-stack.ts:1247 await pollerManager.drain();
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/relay/monitoring-wiring.test.ts \
+  test/unit/effect/session-lifecycle-wiring.test.ts \
+  test/unit/effect/message-poller-manager-layer.test.ts \
+  test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  101 passed (101)
+```
+
+```text
+$ rg -n "new MessagePollerManager|Layer\.succeed\(PollerManagerTag|pollerManager\.drain\(\)|pollerMgrLog" src/lib/relay/relay-stack.ts src/lib/effect test/unit/effect -g '*.ts'
+Exit: 0
+Remaining hits are the runtime-boundary test's retired-pattern regex, the scoped layer's manager construction, and
+session-lifecycle tests that intentionally provide a mock `PollerManagerTag`.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 1002 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  384 passed (384)
+Tests  5236 passed | 2 skipped | 12 todo (5250)
+```
+
+```text
+$ pnpm test:integration
+Exit: 0
+Test Files  24 passed (24)
+Tests  127 passed | 1 skipped (128)
+```
+
+```text
+$ pnpm test:contract
+Exit: 0
+Test Files  8 passed (8)
+Tests  81 passed (81)
+```
+
 ## Phase 8.1: Frontend Transport Protocol Boundary
 
 Plan issues found:

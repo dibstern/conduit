@@ -89,9 +89,11 @@ function makeSessionMetadataLayer(options: {
 		clearMessageActivity: vi.fn(),
 	};
 	const pollerManager: PollerManagerShape = {
+		on: vi.fn(),
 		isPolling: vi.fn(() => true),
 		startPolling: vi.fn(),
 		stopPolling: vi.fn(),
+		notifySSEEvent: vi.fn(),
 	};
 
 	const logger = options.logger ?? makeMockLogger();

@@ -32,6 +32,7 @@ import { AgentServiceLive, AgentServiceTag } from "../effect/agent-service.js";
 import { makeAuthManagerLive } from "../effect/auth-middleware.js";
 import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
 import { InstanceManagementServiceLive } from "../effect/instance-management-service.js";
+import { makeMessagePollerManagerLive } from "../effect/message-poller-manager-layer.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -159,8 +160,10 @@ interface RelayRuntime {
 }
 
 import { createTranslator } from "./event-translator.js";
-import { MessagePollerManager } from "./message-poller-impl.js";
-import { wireMonitoring } from "./monitoring-wiring.js";
+import {
+	createMonitoringWiringState,
+	wireMonitoring,
+} from "./monitoring-wiring.js";
 import { wirePollers } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { SessionEventBridgeLive } from "./session-event-bridge.js";
@@ -462,7 +465,6 @@ export async function createProjectRelay(
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
-	const pollerMgrLog = log.child("poller-mgr");
 	const pipelineLog = log.child("pipeline");
 
 	// ── Components ──────────────────────────────────────────────────────────
@@ -654,17 +656,6 @@ export async function createProjectRelay(
 
 	// ── Shared session registry (single source of truth for client→session tracking) ──
 	const registry = new SessionRegistry(log.child("session-registry"));
-
-	// ── Message poller manager (REST fallback for CLI sessions without SSE events) ──
-	// Manages multiple pollers concurrently — one per busy session.
-	const pollerManager = new MessagePollerManager({
-		client: api,
-		log: pollerMgrLog,
-		hasViewers: (sid: string) => registry.hasViewers(sid),
-		...(config.messagePollerInterval != null && {
-			interval: config.messagePollerInterval,
-		}),
-	});
 
 	// ── Health check ────────────────────────────────────────────────────────
 
@@ -896,6 +887,11 @@ export async function createProjectRelay(
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const webSocketHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const messagePollerManagerLayer = makeMessagePollerManagerLive({
+		hasViewers: (sid) => registry.hasViewers(sid),
+	}).pipe(
+		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+	);
 	const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -939,11 +935,11 @@ export async function createProjectRelay(
 		toolContentServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		webSocketHandlerLayer,
+		messagePollerManagerLayer,
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
-		Layer.succeed(PollerManagerTag, pollerManager),
 		orchestrationRuntimeLayer,
 	);
 
@@ -1117,46 +1113,16 @@ export async function createProjectRelay(
 		sseStream,
 	);
 
-	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
-	const {
-		pipelineDeps,
-		sseTracker,
-		getMonitoringState,
-		setMonitoringState,
-		stopMonitoring,
-		recordDoneDelivered: bindDoneDelivered,
-	} = wireMonitoring({
-		client: api,
-		wsHandler,
-		sessionMgr,
-		processingTimeouts,
-		statusPoller,
-		pollerManager,
-		registry,
-		sseStream,
-		config: {
-			...(config.pollerGatingConfig != null && {
-				pollerGatingConfig: config.pollerGatingConfig,
-			}),
-			...(config.pushManager != null && { pushManager: config.pushManager }),
-			slug: config.slug,
-		},
-		statusLog,
-		sseLog,
-		pipelineLog,
-	});
-
-	// Bind the late-binding done-dedup callback now that monitoring wiring exists.
-	doneDeliveredRef.fn = bindDoneDelivered;
-
 	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
-	// Deferred until after wireMonitoring() because SessionLifecycleWiringLive
-	// needs sseTracker, getMonitoringState, setMonitoringState from its output.
+	// Monitoring state is created before the runtime so lifecycle wiring and
+	// monitoring wiring share one view, while the poller manager itself remains
+	// runtime-owned by MessagePollerManagerLive.
+	const monitoringStateAccess = createMonitoringWiringState();
 	const sessionLifecycleWiringLayer = makeSessionLifecycleWiringLive({
 		translator,
-		sseTracker,
-		getMonitoringState,
-		setMonitoringState,
+		sseTracker: monitoringStateAccess.sseTracker,
+		getMonitoringState: monitoringStateAccess.getMonitoringState,
+		setMonitoringState: monitoringStateAccess.setMonitoringState,
 	});
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
@@ -1181,6 +1147,42 @@ export async function createProjectRelay(
 	);
 	statusPollerRuntime.attach(relayManagedRuntime);
 
+	const pollerManager = await relayManagedRuntime.runPromise(
+		Effect.gen(function* () {
+			return yield* PollerManagerTag;
+		}),
+	);
+
+	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
+	const {
+		pipelineDeps,
+		stopMonitoring,
+		recordDoneDelivered: bindDoneDelivered,
+	} = wireMonitoring({
+		client: api,
+		wsHandler,
+		sessionMgr,
+		processingTimeouts,
+		statusPoller,
+		pollerManager,
+		registry,
+		sseStream,
+		config: {
+			...(config.pollerGatingConfig != null && {
+				pollerGatingConfig: config.pollerGatingConfig,
+			}),
+			...(config.pushManager != null && { pushManager: config.pushManager }),
+			slug: config.slug,
+		},
+		statusLog,
+		sseLog,
+		pipelineLog,
+		state: monitoringStateAccess,
+	});
+
+	// Bind the late-binding done-dedup callback now that monitoring wiring exists.
+	doneDeliveredRef.fn = bindDoneDelivered;
+
 	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
 	// Resolves the deferred promise in OpenCodeAdapter.sendTurnEffect() when a
 	// session transitions to idle, allowing the engine dispatch to complete.
@@ -1196,7 +1198,7 @@ export async function createProjectRelay(
 		wsHandler,
 		sessionMgr,
 		pipelineDeps,
-		sseTracker,
+		sseTracker: monitoringStateAccess.sseTracker,
 		config: {
 			...(config.pushManager != null && { pushManager: config.pushManager }),
 			slug: config.slug,
@@ -1209,6 +1211,7 @@ export async function createProjectRelay(
 	try {
 		await relayManagedRuntime.runPromise(sseStream.connectEffect());
 	} catch (err) {
+		stopMonitoring();
 		await effectRuntime.dispose();
 		await effectPersistenceRuntime?.dispose();
 		throw err;
@@ -1244,13 +1247,12 @@ export async function createProjectRelay(
 			// 2. Drain event sources (stop + await pending work)
 			await relayManagedRuntime.runPromise(sseStream.drainEffect());
 			await statusPoller.drain();
-			await pollerManager.drain();
 			// 3. Dispose Effect ManagedRuntimes. Scoped finalizers own provider
 			// adapter shutdown and other Effect-managed resources.
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();
 			// 4. Clean up remaining resources
-			// Permission, processing timeout, and PTY resources are managed by scoped Effect layers.
+			// Permission, processing timeout, message poller, and PTY resources are managed by scoped Effect layers.
 			await wsHandler.drain();
 		},
 	};

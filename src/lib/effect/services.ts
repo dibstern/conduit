@@ -49,9 +49,14 @@ export interface StatusPollerShape {
 
 /** Shape for the pollerManager field — isPolling + startPolling capabilities. */
 export interface PollerManagerShape {
+	on(
+		event: "events",
+		callback: (messages: RelayMessage[], sessionId: string) => void,
+	): void;
 	isPolling(sessionId: string): boolean;
 	startPolling(sessionId: string, seedMessages?: Message[]): void;
 	stopPolling(sessionId: string): void;
+	notifySSEEvent(sessionId: string): void;
 }
 
 /** Shape for the connectPtyUpstream function. */
