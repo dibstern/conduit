@@ -3,10 +3,20 @@
 
 import type http from "node:http";
 import type net from "node:net";
-import { Context, Data, Effect, Layer, Ref, Runtime } from "effect";
+import { Context, Data, Duration, Effect, Layer, Ref, Runtime } from "effect";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
+import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import { DaemonEventBusTag } from "./daemon-pubsub.js";
+import {
+	getProject,
+	markError,
+	markReady,
+	ProjectRegistryTag,
+	touchLastUsed as touchProjectLastUsed,
+} from "./project-registry-service.js";
+import { RelayCacheTag } from "./relay-cache.js";
 import { HttpServerRefTag } from "./relay-factory-layer.js";
 
 const PROJECT_WS_PATTERN = /^\/p\/([^/]+)\/ws(?:\?|$)/;
@@ -59,6 +69,85 @@ export interface WebSocketRelayRouter {
 export class WebSocketRelayRouterTag extends Context.Tag(
 	"WebSocketRelayRouter",
 )<WebSocketRelayRouterTag, WebSocketRelayRouter>() {}
+
+const toRelayUnavailable = (slug: string, cause: unknown) =>
+	new WebSocketUpgradeError({
+		reason: "relay_unavailable",
+		slug,
+		cause,
+	});
+
+export const WebSocketRelayRouterLive: Layer.Layer<
+	WebSocketRelayRouterTag,
+	never,
+	RelayCacheTag | ProjectRegistryTag | DaemonEventBusTag | ConfigPersistenceTag
+> = Layer.effect(
+	WebSocketRelayRouterTag,
+	Effect.gen(function* () {
+		const relayCache = yield* RelayCacheTag;
+		const projectRegistry = yield* ProjectRegistryTag;
+		const eventBus = yield* DaemonEventBusTag;
+		const configPersistence = yield* ConfigPersistenceTag;
+
+		const withProjectRegistry = <A, E>(
+			effect: Effect.Effect<
+				A,
+				E,
+				ProjectRegistryTag | DaemonEventBusTag | ConfigPersistenceTag
+			>,
+		) =>
+			effect.pipe(
+				Effect.provideService(ProjectRegistryTag, projectRegistry),
+				Effect.provideService(DaemonEventBusTag, eventBus),
+				Effect.provideService(ConfigPersistenceTag, configPersistence),
+			);
+
+		const failRelayUnavailable = (slug: string, cause: unknown) =>
+			withProjectRegistry(markError(slug, formatCause(cause))).pipe(
+				Effect.catchAll(() => Effect.void),
+				Effect.zipRight(Effect.fail(toRelayUnavailable(slug, cause))),
+			);
+
+		const loadRelay = (slug: string) =>
+			withProjectRegistry(getProject(slug)).pipe(
+				Effect.flatMap(() => relayCache.get(slug)),
+				Effect.tap(() => withProjectRegistry(markReady(slug))),
+				Effect.catchAll((cause) => failRelayUnavailable(slug, cause)),
+				Effect.catchAllDefect((cause) => failRelayUnavailable(slug, cause)),
+			);
+
+		return {
+			ensureRelayStarted: (slug) => loadRelay(slug).pipe(Effect.asVoid),
+			waitForRelay: (slug, timeoutMs) =>
+				loadRelay(slug).pipe(
+					Effect.timeoutFail({
+						duration: Duration.millis(timeoutMs),
+						onTimeout: () =>
+							toRelayUnavailable(
+								slug,
+								new Error("Timed out waiting for relay"),
+							),
+					}),
+					Effect.catchAll((cause) =>
+						Effect.fail(
+							cause instanceof WebSocketUpgradeError
+								? cause
+								: toRelayUnavailable(slug, cause),
+						),
+					),
+					Effect.catchAllDefect((cause) =>
+						Effect.fail(toRelayUnavailable(slug, cause)),
+					),
+				),
+			touchLastUsed: (slug) =>
+				withProjectRegistry(touchProjectLastUsed(slug)).pipe(
+					Effect.catchAll((cause) =>
+						Effect.fail(toRelayUnavailable(slug, cause)),
+					),
+				),
+		} satisfies WebSocketRelayRouter;
+	}),
+);
 
 const destroySocket = (socket: net.Socket) =>
 	Effect.sync(() => {

@@ -31,6 +31,9 @@ import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
+const formatRelayFailure = (cause: unknown): string =>
+	cause instanceof Error ? cause.message : String(cause);
+
 // ─── Project state discriminated union ───────────────────────────────────────
 
 export interface ProjectRegistering {
@@ -466,15 +469,13 @@ export const startRelay = (slug: string) =>
 			}),
 		);
 
-		// Delegate relay creation to RelayCacheTag.
-		// RelayCache.get has `never` error channel — failures surface as defects.
+		// Delegate relay creation to RelayCacheTag and keep the registry state
+		// honest for both typed startup failures and defects.
 		yield* relayCache.get(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
+			Effect.catchAll((cause) => markError(slug, formatRelayFailure(cause))),
 			Effect.catchAllDefect((defect) =>
-				markError(
-					slug,
-					defect instanceof Error ? defect.message : String(defect),
-				),
+				markError(slug, formatRelayFailure(defect)),
 			),
 		);
 	}).pipe(
@@ -587,8 +588,13 @@ export const replaceRelay = (slug: string) =>
 	Effect.gen(function* () {
 		const relayCache = yield* RelayCacheTag;
 		yield* relayCache.invalidate(slug);
-		yield* relayCache.get(slug);
-		yield* markReady(slug);
+		yield* relayCache.get(slug).pipe(
+			Effect.flatMap(() => markReady(slug)),
+			Effect.catchAll((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catchAllDefect((defect) =>
+				markError(slug, formatRelayFailure(defect)),
+			),
+		);
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.replaceRelay"),

@@ -302,8 +302,13 @@ import type { OpenCodeInstance, StoredProject } from "../types.js";
 import { generateSlug } from "../utils.js";
 import { getVersion } from "../version.js";
 import { makeAuthManagerLive } from "./auth-middleware.js";
+import {
+	addWithoutRelay as addEffectProjectWithoutRelay,
+	remove as removeEffectProject,
+	updateProject as updateEffectProject,
+} from "./project-registry-service.js";
+import { RelayCacheTag as EffectRelayCacheTag } from "./relay-cache.js";
 import { StaticDirTag } from "./static-file-handler.js";
-import { WebSocketUpgradeError } from "./ws-routing-layer.js";
 
 /**
  * Default frontend directory resolved relative to this file.
@@ -496,6 +501,46 @@ export async function startDaemonProcess(
 			throw err;
 		}
 	}
+
+	function syncEffectProjectRegistry<R>(
+		operation: string,
+		effect: Effect.Effect<void, unknown, R>,
+	): Promise<void> {
+		const runtime = shuttingDown ? null : daemonRuntime;
+		if (!runtime) return Promise.resolve();
+		return runtime.runPromise(effect).catch((cause: unknown) => {
+			log.warn(
+				{ err: formatErrorDetail(cause) },
+				`Effect project registry sync failed: ${operation}`,
+			);
+			throw cause;
+		});
+	}
+
+	function syncEffectProjectRegistrySoon<R>(
+		operation: string,
+		effect: Effect.Effect<void, unknown, R>,
+	): void {
+		void syncEffectProjectRegistry(operation, effect).catch(() => {});
+	}
+
+	const syncEffectProjectAdd = (project: StoredProject) =>
+		addEffectProjectWithoutRelay(project, { silent: true }).pipe(
+			Effect.catchTag("ProjectAlreadyExists", () =>
+				updateEffectProject(project.slug, {
+					title: project.title,
+					...(project.instanceId !== undefined && {
+						instanceId: project.instanceId,
+					}),
+				}),
+			),
+		);
+
+	const invalidateEffectRelay = (slug: string) =>
+		Effect.gen(function* () {
+			const relayCache = yield* EffectRelayCacheTag;
+			yield* relayCache.invalidate(slug);
+		});
 
 	// ── Core services ─────────────────────────────────────────────────────
 	// AuthManager with reactive pinHash: initially reads from local `pinHash`
@@ -772,6 +817,10 @@ export async function startDaemonProcess(
 				},
 				setProjectTitle: (slug: string, title: string) => {
 					registry.updateProject(slug, { title });
+					syncEffectProjectRegistrySoon(
+						"set project title",
+						updateEffectProject(slug, { title }),
+					);
 					persistConfig();
 				},
 				getInstances: () => instanceManager.getInstances(),
@@ -823,6 +872,12 @@ export async function startDaemonProcess(
 				buildRelayFactory(project, opencodeUrl),
 			);
 		}
+		await syncEffectProjectRegistry(
+			"set project instance",
+			updateEffectProject(slug, { instanceId }).pipe(
+				Effect.zipRight(invalidateEffectRelay(slug)),
+			),
+		);
 	}
 
 	// ── Helper: addProject ────────────────────────────────────────────────
@@ -842,7 +897,13 @@ export async function startDaemonProcess(
 			dismissedPaths: new Set(dismissedPaths),
 		}));
 		const existing = registry.findByDirectory(dir);
-		if (existing) return existing.project;
+		if (existing) {
+			await syncEffectProjectRegistry(
+				"refresh existing project",
+				syncEffectProjectAdd(existing.project),
+			);
+			return existing.project;
+		}
 
 		const existingSlugs = new Set(registry.slugs());
 		const resolvedSlug = slug ?? generateSlug(dir, existingSlugs);
@@ -863,6 +924,10 @@ export async function startDaemonProcess(
 			}),
 		};
 		registry.addWithoutRelay(project);
+		await syncEffectProjectRegistry(
+			"add project",
+			syncEffectProjectAdd(project),
+		);
 		syncRecentProjects(
 			registry.allProjects().map((p) => ({
 				path: p.directory,
@@ -885,6 +950,10 @@ export async function startDaemonProcess(
 			dismissedPaths: new Set(dismissedPaths),
 		}));
 		await registry.remove(slug);
+		await syncEffectProjectRegistry(
+			"remove project",
+			removeEffectProject(slug),
+		);
 		syncRecentProjects(
 			registry.allProjects().map((p) => ({
 				path: p.directory,
@@ -1177,6 +1246,10 @@ export async function startDaemonProcess(
 		},
 		setProjectTitle: (slug: string, title: string) => {
 			registry.updateProject(slug, { title });
+			syncEffectProjectRegistrySoon(
+				"set project title",
+				updateEffectProject(slug, { title }),
+			);
 		},
 		getPinHash: () => readRuntimeConfigSnapshot().pinHash,
 		setPinHash: (hash: string) => {
@@ -1440,53 +1513,28 @@ export async function startDaemonProcess(
 		// PortScanner: deferred to Task 7
 		configPath: join(configDir, "daemon.json"),
 		configSnapshot: buildConfig,
-		wsRelayRouter: {
-			ensureRelayStarted: (slug: string) =>
-				Effect.try({
-					try: () => ensureRelayStarted(slug),
-					catch: (cause) =>
-						new WebSocketUpgradeError({
-							reason: "relay_unavailable",
-							slug,
-							cause,
-						}),
-				}),
-			waitForRelay: (slug: string, timeoutMs: number) =>
-				Effect.tryPromise({
-					try: () => registry.waitForRelay(slug, timeoutMs),
-					catch: (cause) =>
-						new WebSocketUpgradeError({
-							reason: "relay_unavailable",
-							slug,
-							cause,
-						}),
-				}),
-			touchLastUsed: (slug: string) =>
-				Effect.try({
-					try: () => registry.touchLastUsed(slug),
-					catch: (cause) =>
-						new WebSocketUpgradeError({
-							reason: "relay_unavailable",
-							slug,
-							cause,
-						}),
-				}),
-		},
 		relayFactory: (slug: string) =>
-			Effect.tryPromise(() => addProject(slug.replace(/^\/p\//, ""))).pipe(
-				Effect.map((p) => ({
-					slug: p.slug,
-					wsHandler: { handleUpgrade: () => {} },
-					stop: () => {},
-				})),
-				Effect.catchAll(() =>
-					Effect.succeed({
+			Effect.tryPromise({
+				try: async () => {
+					ensureRelayStarted(slug);
+					const relay = await registry.waitForRelay(slug, 10_000);
+					return {
 						slug,
-						wsHandler: { handleUpgrade: () => {} },
+						wsHandler: {
+							handleUpgrade: (
+								...args: Parameters<ProjectRelay["wsHandler"]["handleUpgrade"]>
+							) => {
+								registry.touchLastUsed(slug);
+								relay.wsHandler.handleUpgrade(...args);
+							},
+						},
+						// Relay lifecycle is still owned by the legacy ProjectRegistry in
+						// this hybrid daemon; RelayCache only avoids duplicate WS starts.
 						stop: () => {},
-					}),
-				),
-			),
+					};
+				},
+				catch: (cause) => cause,
+			}),
 	};
 
 	// Create and build the daemon Layer — starts servers, installs signal/error

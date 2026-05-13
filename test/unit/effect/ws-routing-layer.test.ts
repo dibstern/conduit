@@ -1,21 +1,30 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Ref, Scope } from "effect";
+import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/effect/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/effect/daemon-pubsub.js";
+import {
+	getEntry,
+	makeProjectRegistryLive,
+} from "../../../src/lib/effect/project-registry-service.js";
+import { makeRelayCacheLive } from "../../../src/lib/effect/relay-cache.js";
 import { HttpServerRefTag } from "../../../src/lib/effect/relay-factory-layer.js";
 import {
 	type WebSocketRelay,
+	WebSocketRelayRouterLive,
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/effect/ws-routing-layer.js";
+import type { StoredProject } from "../../../src/lib/types.js";
 
 type TestSocket = Socket & {
 	destroyed: boolean;
@@ -102,6 +111,110 @@ const waitForAssertion = (assertion: () => void) =>
 		try: () => vi.waitFor(assertion),
 		catch: (cause) => cause,
 	});
+
+const project: StoredProject = {
+	slug: "test-project",
+	title: "Test Project",
+	directory: "/tmp/test-project",
+	lastUsed: 1,
+};
+
+const makeRouterLayer = (
+	projects: ReadonlyArray<StoredProject>,
+	factory: Parameters<typeof makeRelayCacheLive>[0],
+) =>
+	WebSocketRelayRouterLive.pipe(
+		Layer.provideMerge(
+			Layer.mergeAll(
+				makeProjectRegistryLive(projects),
+				makeRelayCacheLive(factory),
+				DaemonEventBusLive,
+				ConfigPersistenceNoopLive,
+			),
+		),
+	);
+
+describe("WebSocketRelayRouterLive", () => {
+	it.effect("returns a cached relay and does not create duplicates", () => {
+		const relay = {
+			wsHandler: { handleUpgrade: vi.fn() },
+		} satisfies WebSocketRelay;
+		const factory = vi.fn((slug: string) =>
+			Effect.succeed({
+				slug,
+				wsHandler: relay.wsHandler,
+				stop: vi.fn(),
+			}),
+		);
+		const layer = makeRouterLayer([project], factory);
+
+		return Effect.gen(function* () {
+			const router = yield* WebSocketRelayRouterTag;
+			yield* router.ensureRelayStarted("test-project");
+			const first = yield* router.waitForRelay("test-project", 10);
+			yield* router.ensureRelayStarted("test-project");
+			const second = yield* router.waitForRelay("test-project", 10);
+
+			expect(first).toBe(second);
+			expect(first.wsHandler).toBe(relay.wsHandler);
+			expect(factory).toHaveBeenCalledTimes(1);
+			expect(factory).toHaveBeenCalledWith("test-project");
+		}).pipe(Effect.provide(Layer.fresh(layer)));
+	});
+
+	it.effect("fails unknown slugs without invoking the relay factory", () => {
+		const factory = vi.fn((slug: string) =>
+			Effect.succeed({
+				slug,
+				wsHandler: { handleUpgrade: vi.fn() },
+				stop: vi.fn(),
+			}),
+		);
+		const layer = makeRouterLayer([], factory);
+
+		return Effect.gen(function* () {
+			const router = yield* WebSocketRelayRouterTag;
+			const result = yield* Effect.either(
+				router.ensureRelayStarted("missing-project"),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(WebSocketUpgradeError);
+				expect(result.left.reason).toBe("relay_unavailable");
+				expect(result.left.slug).toBe("missing-project");
+			}
+			expect(factory).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(Layer.fresh(layer)));
+	});
+
+	it.effect("marks the project failed when relay creation fails", () => {
+		const factory = vi.fn((slug: string) =>
+			Effect.fail(new Error(`factory failed for ${slug}`)),
+		);
+		const layer = makeRouterLayer([project], factory);
+
+		return Effect.gen(function* () {
+			const router = yield* WebSocketRelayRouterTag;
+			const result = yield* Effect.either(
+				router.ensureRelayStarted("test-project"),
+			);
+			const entry = yield* getEntry("test-project");
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(WebSocketUpgradeError);
+				expect(result.left.reason).toBe("relay_unavailable");
+				expect(result.left.slug).toBe("test-project");
+			}
+			const state = Option.getOrThrow(entry);
+			expect(state._tag).toBe("Error");
+			if (state._tag === "Error") {
+				expect(state.error).toBe("factory failed for test-project");
+			}
+		}).pipe(Effect.provide(Layer.fresh(layer)));
+	});
+});
 
 describe("WebSocketRoutingLive", () => {
 	it.scoped("routes project websocket upgrades through the relay", () =>

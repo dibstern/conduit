@@ -50,7 +50,6 @@ import {
 import { StorageMonitorTag } from "../../../src/lib/effect/storage-monitor-layer.js";
 import { TlsCertTag } from "../../../src/lib/effect/tls-cert-layer.js";
 import { VersionCheckerTag } from "../../../src/lib/effect/version-checker-layer.js";
-import { WebSocketUpgradeError } from "../../../src/lib/effect/ws-routing-layer.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
@@ -137,18 +136,12 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			checkInterval: Duration.hours(24),
 			highWaterMark: 0.9,
 		},
-		wsRelayRouter: {
-			ensureRelayStarted: () => Effect.void,
-			waitForRelay: (slug: string) =>
-				Effect.fail(
-					new WebSocketUpgradeError({
-						reason: "relay_unavailable",
-						slug,
-						cause: new Error("No relay configured in this test"),
-					}),
-				),
-			touchLastUsed: () => Effect.void,
-		},
+		relayFactory: (slug: string) =>
+			Effect.succeed({
+				slug,
+				wsHandler: { handleUpgrade: () => {} },
+				stop: () => {},
+			}),
 	};
 };
 

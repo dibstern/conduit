@@ -169,6 +169,45 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not inject daemon websocket routing bridges from imperative options", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/effect/daemon-layers.ts",
+				pattern: /Layer\.succeed\(\s*WebSocketRelayRouterTag,/,
+				reason:
+					"WebSocketRelayRouterTag must be built from daemon Effect services",
+			},
+			{
+				path: "src/lib/effect/daemon-layers.ts",
+				pattern: /\bwsRelayRouter:\s*WebSocketRelayRouter\b/,
+				reason: "DaemonLiveOptions must not accept a prebuilt WebSocket router",
+			},
+			{
+				path: "src/lib/effect/daemon-main.ts",
+				pattern: /\bwsRelayRouter:\s*\{/,
+				reason:
+					"daemon-main must not bridge legacy project registry callbacks into WebSocket routing",
+			},
+			{
+				path: "src/lib/effect/daemon-main.ts",
+				pattern: /wsHandler:\s*\{\s*handleUpgrade:\s*\(\)\s*=>\s*\{\s*\}\s*\}/,
+				reason: "daemon-main must not install a no-op relay fallback",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			const index = source.search(pattern);
+			if (index < 0) return [];
+			const line = source.slice(0, index).split("\n").length;
+			return [
+				{ path, line, source: source.split("\n")[line - 1]?.trim(), reason },
+			];
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not keep unused monitoring bridge services", () => {
 		const retiredNames =
 			/\b(?:MonitoringStateLive|MonitoringStateTag|SSETrackerLive|SSETrackerTag)\b/;

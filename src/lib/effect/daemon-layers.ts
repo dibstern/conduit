@@ -80,8 +80,7 @@ import {
 	VersionCheckerTag,
 } from "./version-checker-layer.js";
 import {
-	type WebSocketRelayRouter,
-	WebSocketRelayRouterTag,
+	WebSocketRelayRouterLive,
 	WebSocketRoutingLive,
 } from "./ws-routing-layer.js";
 
@@ -447,12 +446,7 @@ export interface DaemonLiveOptions {
 	 */
 	configSnapshot?: () => DaemonConfig;
 	/** Factory for creating relay instances per slug. */
-	relayFactory?: RelayFactory;
-	/**
-	 * Project WebSocket router. The legacy daemon supplies this from its live
-	 * ProjectRegistry until Phase 4 moves relay ownership fully into Effect.
-	 */
-	wsRelayRouter: WebSocketRelayRouter;
+	relayFactory: RelayFactory;
 }
 
 /**
@@ -524,7 +518,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		? makeInstanceManagerStateFromDaemonStateLive()
 		: makeInstanceManagerStateLive();
 
-	let registries = Layer.mergeAll(
+	const registries = Layer.mergeAll(
 		projectRegistryLayer,
 		instanceManagerLayer,
 		RelayFactoryLive(configDir),
@@ -532,19 +526,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(services));
 
-	// RelayCache layer — only include if a factory is provided
-	if (options.relayFactory) {
-		registries = Layer.merge(
-			registries,
-			makeRelayCacheLayer(options.relayFactory),
-		);
-	}
+	const withRelayCache = makeRelayCacheLayer(options.relayFactory).pipe(
+		Layer.provideMerge(registries),
+	);
 
 	const configSnapshotLayer = (
 		options.configSnapshot
 			? makeConfigSnapshotLive(options.configSnapshot)
 			: ConfigSnapshotFromEffectStateLive
-	).pipe(Layer.provideMerge(registries));
+	).pipe(Layer.provideMerge(withRelayCache));
 
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
 	const httpAndIpc = Layer.mergeAll(
@@ -605,10 +595,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		portScannerLayer,
 	).pipe(Layer.provideMerge(withDaemonWiring));
 
-	const withWsRelayRouter = Layer.succeed(
-		WebSocketRelayRouterTag,
-		options.wsRelayRouter,
-	).pipe(Layer.provideMerge(withBackground));
+	const withWsRelayRouter = WebSocketRelayRouterLive.pipe(
+		Layer.provideMerge(withBackground),
+	);
 
 	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.

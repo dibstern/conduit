@@ -2060,6 +2060,116 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 9.8: Daemon WebSocket Router Layer Ownership
+
+Plan issues found:
+
+- The Phase 3 routing boundary still accepted a prebuilt `wsRelayRouter` through `DaemonLiveOptions`, so
+  `makeDaemonLive(...)` was not actually owning daemon WebSocket project routing.
+- Replacing `wsRelayRouter` with a live Layer exposed a real hybrid-state hazard: projects added, removed, renamed, or
+  rebound after daemon startup still mutate the legacy `ProjectRegistry` first, while `WebSocketRelayRouterLive` reads
+  `ProjectRegistryTag`. The slice therefore mirrors those mutations into the Effect registry until the daemon project
+  API is fully Effect-owned.
+- The prior `relayFactory` fallback in `daemon-main.ts` returned a no-op WebSocket handler. That would satisfy the
+  cache type while silently breaking real upgrades, so the production factory now delegates to the legacy relay registry
+  and returns the real relay handler.
+- Full relay factory ownership is still not complete: `RelayCacheTag` now owns cached WebSocket routing entries, but the
+  actual relay construction callbacks still come from `buildRelayFactory(...)` because those callbacks carry real
+  project, instance, model, push, PTY, and persistence behavior. Moving those callbacks into Effect should be a separate
+  slice, not hidden inside the router replacement.
+- `RelayFactory` could not remain `Effect<Relay, never>` because real relay startup can fail. `RelayCache.get(...)` now
+  exposes typed startup failures, and the router maps them to `WebSocketUpgradeError` while marking the project error.
+
+Changes:
+
+- Added `WebSocketRelayRouterLive` in `src/lib/effect/ws-routing-layer.ts`. It is backed by `ProjectRegistryTag` and
+  `RelayCacheTag`, captures its required services at Layer construction, caches relays by slug, marks ready/error state,
+  and maps startup failures to `WebSocketUpgradeError`.
+- `src/lib/effect/daemon-layers.ts` no longer accepts `wsRelayRouter`; it always wires `WebSocketRelayRouterLive` after
+  the relay cache and background services are available.
+- `src/lib/effect/daemon-main.ts` now provides a real `relayFactory` that lazy-starts through the legacy registry and
+  returns the real relay `wsHandler`, preserving current behavior during the hybrid phase.
+- `daemon-main.ts` mirrors add/remove/title/instance mutations into `ProjectRegistryTag`; instance rebinding also
+  invalidates the Effect relay cache so subsequent upgrades cannot keep using the stale cached relay wrapper.
+- `daemon-main.ts` preserves legacy `lastUsed` updates through the production relay handler wrapper while
+  `WebSocketRelayRouterLive.touchLastUsed(...)` updates the Effect registry state.
+- `src/lib/effect/relay-cache.ts` now allows typed relay factory failures and uses real WebSocket handler parameter
+  types instead of `unknown`.
+- `src/lib/effect/project-registry-service.ts` now handles typed relay creation failures as project error state in
+  `startRelay(...)` and `replaceRelay(...)`.
+- Strengthened the runtime-boundary grep guard so `daemon-layers.ts` cannot reintroduce
+  `Layer.succeed(WebSocketRelayRouterTag, ...)`, `DaemonLiveOptions.wsRelayRouter`, the daemon-main `wsRelayRouter`
+  bridge, or the no-op relay handler fallback.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/effect/ws-routing-layer.test.ts \
+  test/unit/effect/layer-wiring.test.ts
+Exit: 1
+Expected failures:
+  WebSocketRelayRouterLive returned methods that still required ProjectRegistryTag at call time.
+  The runtime-boundary guard also identified the retired daemon websocket routing bridge.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/effect/ws-routing-layer.test.ts \
+  test/unit/effect/layer-wiring.test.ts \
+  test/unit/relay/relay-cache.test.ts \
+  test/unit/relay/project-registry-effect.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  84 passed (84)
+```
+
+```text
+$ pnpm vitest run --config vitest.integration.config.ts test/integration/daemon/daemon-server.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  7 passed (7)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 1002 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  384 passed (384)
+Tests  5240 passed | 2 skipped | 12 todo (5254)
+```
+
+```text
+$ pnpm test:integration
+Exit: 0
+Test Files  24 passed (24)
+Tests  127 passed | 1 skipped (128)
+```
+
+```text
+$ pnpm test:contract
+Exit: 0
+Test Files  8 passed (8)
+Tests  81 passed (81)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 9.4: Retire Dead SessionRegistry Bridge
 
 Plan issues found:

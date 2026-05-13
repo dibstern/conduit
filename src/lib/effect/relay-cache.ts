@@ -8,6 +8,8 @@
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
 //   - Layer.scoped ties all ScopedRefs to the layer scope
 
+import type http from "node:http";
+import type { Duplex } from "node:stream";
 import {
 	Context,
 	Data,
@@ -26,7 +28,11 @@ import {
 export interface Relay {
 	slug: string;
 	wsHandler: {
-		handleUpgrade: (req: unknown, socket: unknown, head: unknown) => void;
+		handleUpgrade: (
+			req: http.IncomingMessage,
+			socket: Duplex,
+			head: Buffer,
+		) => void;
 	};
 	stop: () => void | Promise<void>;
 }
@@ -44,14 +50,14 @@ export class RelayStopError extends Data.TaggedError("RelayStopError")<{
 // ─── RelayFactory ───────────────────────────────────────────────────────────
 
 /** Factory function that creates a Relay for the given slug. */
-export type RelayFactory = (slug: string) => Effect.Effect<Relay>;
+export type RelayFactory = (slug: string) => Effect.Effect<Relay, unknown>;
 
 // ─── RelayCache interface ───────────────────────────────────────────────────
 
 /** Cache that stores and manages relay instances per slug. */
 export interface RelayCache {
 	/** Get or create a relay for the given slug. */
-	get: (slug: string) => Effect.Effect<Relay>;
+	get: (slug: string) => Effect.Effect<Relay, unknown>;
 	/** Invalidate (stop and remove) the relay for the given slug. */
 	invalidate: (slug: string) => Effect.Effect<void>;
 }
@@ -101,7 +107,7 @@ export const makeRelayCacheLive = (
 			const cacheRef = yield* Ref.make<CacheMap>(HashMap.empty());
 			const semaphore = yield* Effect.makeSemaphore(1);
 
-			const get = (slug: string): Effect.Effect<Relay> =>
+			const get = (slug: string): Effect.Effect<Relay, unknown> =>
 				semaphore.withPermits(1)(
 					Effect.gen(function* () {
 						const map = yield* Ref.get(cacheRef);
@@ -133,8 +139,13 @@ export const makeRelayCacheLive = (
 						// Store in the HashMap
 						yield* Ref.update(cacheRef, (m) => HashMap.set(m, slug, scopedRef));
 
-						// Return the relay
-						return yield* ScopedRef.get(scopedRef) as Effect.Effect<Relay>;
+						const relay = yield* ScopedRef.get(scopedRef);
+						if (relay === null) {
+							return yield* Effect.die(
+								new Error(`Relay cache returned null for "${slug}"`),
+							);
+						}
+						return relay;
 					}),
 				);
 
