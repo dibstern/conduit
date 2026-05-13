@@ -776,12 +776,18 @@ export function makeMockSessionManagerService(
 
 /** Create a mock Logger for Effect tests. */
 export function makeMockLogger(): Logger {
-	return {
+	const logger = {
 		info: vi.fn(),
 		warn: vi.fn(),
 		error: vi.fn(),
 		debug: vi.fn(),
-	} as unknown as Logger;
+		verbose: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
+	return {
+		...logger,
+	} as Logger;
 }
 
 /** Create a mock PtyManager for Effect tests. */

@@ -104,4 +104,38 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not construct PTY bridge services in relay-stack", () => {
+		const retiredBridgePatterns = [
+			{
+				pattern: /new PtyManager\b/,
+				reason: "PtyManager must be constructed by a scoped Layer",
+			},
+			{
+				pattern: /Layer\.succeed\(PtyManagerTag,/,
+				reason: "PtyManagerTag must not wrap a prebuilt instance",
+			},
+			{
+				pattern: /Layer\.succeed\(ConnectPtyUpstreamTag,/,
+				reason: "ConnectPtyUpstreamTag must be derived by a Layer",
+			},
+			{
+				pattern: /ptyManager\.closeAll\(\)/,
+				reason: "PTY cleanup belongs to the PtyManager scoped finalizer",
+			},
+		] as const;
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

@@ -2116,6 +2116,80 @@ Exit: 0
 Checked 999 files. No fixes applied.
 ```
 
+## Phase 9.5: PTY Runtime Bridge Ownership
+
+Plan issues found:
+
+- The remaining PTY bridge was not just a stale grep hit: relay composition constructed a `PtyManager`, wrapped it
+  with `Layer.succeed(PtyManagerTag, ptyManager)`, derived a separate `connectPtyUpstream` closure, then manually
+  called `ptyManager.closeAll()` during shutdown.
+- The long-term fix is a scoped PTY runtime layer that owns the manager and the upstream connector together. Moving
+  `closeAll()` into a helper would have hidden the bridge instead of deleting it.
+
+Changes:
+
+- Added `src/lib/effect/pty-manager-layer.ts`:
+  - `PtyManagerLive` constructs `PtyManager` in a scoped Layer and closes all PTYs in the finalizer.
+  - `makeConnectPtyUpstreamLive(...)` derives the connector from `PtyManagerTag`, `WebSocketHandlerTag`,
+    `OpenCodeAPITag`, `ConfigTag`, and `LoggerTag`.
+  - `makePtyRuntimeLive(...)` composes both so terminal service and connector share one manager instance.
+- Removed `new PtyManager(...)`, `PtyUpstreamDeps`, the local `connectPtyUpstream` closure,
+  `Layer.succeed(PtyManagerTag, ...)`, and manual `ptyManager.closeAll()` from `relay-stack.ts`.
+- Added a behavior test proving terminal create, replay, input forwarding, and scoped cleanup use the same
+  self-constructed PTY manager.
+- Strengthened the runtime grep guard to block PTY bridge construction inside relay-stack.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 1
+Expected failure:
+  src/lib/relay/relay-stack.ts:688 const ptyManager = new PtyManager({ log: ptyLog });
+  src/lib/relay/relay-stack.ts:933 const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
+  src/lib/relay/relay-stack.ts:1286 ptyManager.closeAll();
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/terminal-service.test.ts \
+  test/unit/effect/pty-manager-layer.test.ts \
+  test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/effect/self-constructing-layers.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  16 passed (16)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/terminal-service-effect.test.ts \
+  test/unit/relay/pty-manager.test.ts \
+  test/unit/server/ws-router-pty.test.ts \
+  test/unit/effect/layer-wiring.test.ts \
+  test/unit/effect/relay-stack-layers.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  54 passed (54)
+```
+
+```text
+$ rg -n "new PtyManager|Layer\.succeed\(PtyManagerTag|Layer\.succeed\(ConnectPtyUpstreamTag|ptyManager\.closeAll\(\)" src/lib/relay/relay-stack.ts
+Exit: 1
+No PTY bridge construction remains in relay-stack.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 1001 files. No fixes applied.
+```
+
 ## Phase 8.1: Frontend Transport Protocol Boundary
 
 Plan issues found:

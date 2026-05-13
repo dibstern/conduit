@@ -14,7 +14,6 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { createRequire } from "node:module";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,12 +37,12 @@ import {
 	PendingInteractionServiceTag,
 } from "../effect/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../effect/project-management-service.js";
+import { makePtyRuntimeLive } from "../effect/pty-manager-layer.js";
 import { RelayStateLive } from "../effect/relay-layer.js";
 import { ScanServiceLive } from "../effect/scan-service.js";
 import {
 	ClaudeEventPersistTag,
 	ConfigTag,
-	ConnectPtyUpstreamTag,
 	InstanceMgmtTag,
 	LoggerTag,
 	OpenCodeAPITag,
@@ -53,7 +52,6 @@ import {
 	OrchestrationEngineTag,
 	PollerManagerTag,
 	ProviderStateServiceTag,
-	PtyManagerTag,
 	ReadQueryTag,
 	type SessionManagerShape,
 	SessionManagerTag,
@@ -164,9 +162,6 @@ import { createTranslator } from "./event-translator.js";
 import { MessagePollerManager } from "./message-poller-impl.js";
 import { wireMonitoring } from "./monitoring-wiring.js";
 import { wirePollers } from "./poller-wiring.js";
-import { PtyManager } from "./pty-manager.js";
-import type { PtyUpstreamDeps } from "./pty-upstream.js";
-import { connectPtyUpstream as connectPtyUpstreamImpl } from "./pty-upstream.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { SessionEventBridgeLive } from "./session-event-bridge.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
@@ -174,11 +169,6 @@ import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 import { handleRelayWsMessage } from "./ws-message-dispatch-effect.js";
-
-// ─── WebSocket library for upstream PTY connections ─────────────────────────
-const requireWs = createRequire(import.meta.url);
-const wsLib = requireWs("ws");
-const WebSocketClass = wsLib.WebSocket as typeof import("ws").WebSocket;
 
 const _staticCandidate = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -473,7 +463,6 @@ export async function createProjectRelay(
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
 	const pollerMgrLog = log.child("poller-mgr");
-	const ptyLog = log.child("pty");
 	const pipelineLog = log.child("pipeline");
 
 	// ── Components ──────────────────────────────────────────────────────────
@@ -677,16 +666,6 @@ export async function createProjectRelay(
 		}),
 	});
 
-	// ── PTY sessions with server-side scrollback (claude-relay architecture) ──
-	// Each active PTY gets one upstream WebSocket to OpenCode's /pty/:id/connect.
-	// Output is buffered server-side (50 KB FIFO per terminal) and broadcast to
-	// ALL browser clients. New clients get scrollback replayed on connect.
-	// Input from any browser client is forwarded to the shared upstream WS.
-	// PTYs persist across browser show/hide toggles — only closed on explicit
-	// pty_close (tab X button) or upstream disconnect.
-
-	const ptyManager = new PtyManager({ log: ptyLog });
-
 	// ── Health check ────────────────────────────────────────────────────────
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
@@ -742,16 +721,6 @@ export async function createProjectRelay(
 			...(config.verifyClient != null && { verifyClient: config.verifyClient }),
 		}),
 	});
-
-	// ── PTY upstream deps (constructed after wsHandler is available) ────────
-	const ptyDeps: PtyUpstreamDeps = {
-		ptyManager,
-		wsHandler,
-		client: api,
-		opencodeUrl: config.opencodeUrl,
-		log: ptyLog,
-		WebSocketClass,
-	};
 
 	// ── Claude event persistence (reuses existing persistence layer) ──────
 	const claudeEventPersist = config.persistence
@@ -886,10 +855,6 @@ export async function createProjectRelay(
 		wsLog.info(`Client disconnected: ${clientId}`);
 	});
 
-	// ── Derived deps for Effect runtime ─────────────────────────────────────
-	const connectPtyUpstream = (ptyId: string, cursor?: number) =>
-		connectPtyUpstreamImpl(ptyDeps, ptyId, cursor);
-
 	const instanceMgmt =
 		config.getInstances != null &&
 		config.addInstance != null &&
@@ -930,11 +895,16 @@ export async function createProjectRelay(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
-	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const webSocketHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
-	const connectPtyUpstreamLayer = Layer.succeed(
-		ConnectPtyUpstreamTag,
-		connectPtyUpstream,
+	const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				webSocketHandlerLayer,
+				loggerLayer,
+				configLayer,
+			),
+		),
 	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
@@ -943,8 +913,7 @@ export async function createProjectRelay(
 				webSocketHandlerLayer,
 				loggerLayer,
 				configLayer,
-				ptyManagerLayer,
-				connectPtyUpstreamLayer,
+				ptyRuntimeLayer,
 			),
 		),
 	);
@@ -970,12 +939,11 @@ export async function createProjectRelay(
 		toolContentServiceLayer,
 		Layer.succeed(SessionManagerTag, sessionMgr),
 		webSocketHandlerLayer,
-		ptyManagerLayer,
+		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
-		connectPtyUpstreamLayer,
 		orchestrationRuntimeLayer,
 	);
 
@@ -1282,8 +1250,7 @@ export async function createProjectRelay(
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();
 			// 4. Clean up remaining resources
-			// Permission and processing timeout timers are managed by scoped Effect layers.
-			ptyManager.closeAll();
+			// Permission, processing timeout, and PTY resources are managed by scoped Effect layers.
 			await wsHandler.drain();
 		},
 	};
