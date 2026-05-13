@@ -31,15 +31,22 @@ Run this when changing browser-visible workflows, WebSocket behavior, mobile flo
 
 ```bash
 pnpm test:e2e                                    # full suite
-pnpm test:e2e -- test/e2e/specs/<spec>.ts         # single spec
-pnpm test:e2e -- --grep "<name>"                  # by test name
+pnpm test:e2e test/e2e/specs/<spec>.ts            # single spec
+pnpm test:e2e --grep "<name>"                     # by test name
 ```
 
 Prefer a single spec or grep filter over the full suite.
 
+If the frontend is already built or you need to avoid package-script argument forwarding, run Playwright directly:
+
+```bash
+pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --grep "<name>"
+pnpm exec playwright test --config test/e2e/playwright-replay.config.ts test/e2e/specs/<spec>.ts --project=desktop
+```
+
 ### Live E2E
 
-Run this for full-pipeline validation against a real, ephemeral OpenCode instance. Requires `opencode` on `$PATH` and valid API credentials.
+Run this for full-pipeline validation against a real, ephemeral OpenCode instance. Requires `opencode` on `$PATH` and valid API credentials. Do not assume the instance uses port `4096`; tests and logs report the active URL.
 
 ```bash
 pnpm test:e2e:live

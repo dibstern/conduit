@@ -2154,6 +2154,104 @@ Test Files  376 passed (376)
 Tests  5211 passed | 2 skipped | 12 todo (5225)
 ```
 
+## Phase 9.0: Final Grep Gate Audit Reopened Earlier Phases
+
+Outcome:
+
+- Phase 9 cannot be marked complete. The live required greps still show production bridge blockers, so the earlier
+  owning phases must be reopened instead of expanding Phase 9's exception table.
+- No app code was changed in this audit slice. Documentation was updated only where the live architecture/testing
+  guidance was stale.
+
+Required grep gate results:
+
+```text
+$ rg -n "startDaemonProcess" src
+Exit: 0
+Hits: production CLI still imports/calls startDaemonProcess and daemon-main still exports the hybrid function.
+```
+
+```text
+$ rg -n "PersistenceLayer\\.open" src
+Exit: 1
+No hits.
+```
+
+```text
+$ rg -n "Effect\\.promise" src
+Exit: 1
+No hits.
+```
+
+```text
+$ rg -n "concurrency: \"unbounded\"" src
+Exit: 1
+No hits.
+```
+
+```text
+$ rg -n "Effect\\.run(Promise|Sync)" src/lib
+Exit: 0
+Hits remain in prompt persistence, relay-stack construction/callbacks, sse-stream cleanup, sdk-factory, daemon
+lifecycle/main, auth-middleware, provider registry/orchestration, and Claude prompt queue.
+```
+
+```text
+$ rg -n "Effect\\.run(Promise|Sync)" src/bin
+Exit: 1
+No hits.
+```
+
+```text
+$ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/effect
+Exit: 0
+Hits remain for prebuilt relay/daemon bridge objects in relay-stack and daemon-main; pure config/no-op layers need a
+narrower classifier than the current grep.
+```
+
+Plan issues found:
+
+- `startDaemonProcess` is still the production daemon entrypoint for both `--daemon` and `foreground`. The existing
+  `startDaemonEffect` cannot replace it yet because `makeDaemonLive(...)` still requires externally assembled
+  `DaemonLiveOptions` such as `ctx`, `ipcContext`, `configSnapshot`, and `wsRelayRouter`.
+- `src/lib/relay/relay-stack.ts` is still the real imperative relay factory. It constructs relay resources and then
+  bridge-injects prebuilt objects into the Effect runtime with `Layer.succeed(Tag, instance)`.
+- `src/lib/effect/relay-layer.ts` should not be deleted as Phase 9 text implies. It now contains real
+  self-constructing relay state composition and should grow into the relay owner when Phase 4 is reopened.
+- The plan's WebSocket callback exception names `src/lib/effect/ws-transport-layer.ts`, but the live callback handoff
+  is in `src/lib/effect/ws-routing-layer.ts`.
+- The `Layer.succeed(...)` grep is too broad for pure configuration values and no-op object services, but it correctly
+  catches prebuilt relay/daemon objects that still violate the bridge-deletion rule.
+- `src/lib/effect/auth-middleware.ts` still hides `Effect.runSync(Ref.get(...))` behind a synchronous `AuthManager`
+  bridge. `src/lib/effect/static-file-handler.ts` also has an unwrapped `decodeURIComponent(...)` path that can defect
+  on malformed URI input.
+- Provider-side Promise wrappers remain around Effect methods (`ProviderRegistry.shutdownAll`,
+  `OrchestrationEngine.dispatch/shutdown`) and `RelayEventSink.persistEvent` is still Promise-shaped, forcing
+  `Effect.runPromise(...)` in `handlePrompt`.
+- The Phase 8/9 E2E command form using `pnpm test:e2e -- --grep ...` is invalid with the current package script
+  argument forwarding. `pnpm test:e2e --grep ...` or direct `pnpm exec playwright ... --grep ...` is the correct form.
+
+Reopened implementation slices:
+
+- Reopen Phase 2 for the daemon composition root. The long-term fix is an Effect-owned process entrypoint and a
+  foreground/test starter that provide a real `DaemonHandleTag`, then delete `startDaemonProcess` rather than
+  documenting it as an exception.
+- Reopen Phase 3 for routing/auth/static residue: replace the injected legacy `wsRelayRouter`, make auth methods
+  Effect-native instead of sync class methods, and normalize malformed static URI decoding through typed route errors.
+- Reopen Phase 4 for relay composition ownership. `RelayStateLive` should grow into a scoped project-relay Layer that
+  constructs and finalizes OpenCode API, session services, WS handler, pollers, PTY, SSE, orchestration, and persistence
+  instead of `createProjectRelay()` constructing them imperatively.
+- Reopen Phase 6 for provider boundary cleanup: make event sink persistence Effect-native, remove Promise wrappers over
+  Effect provider/orchestration methods, fold Claude prompt queue ownership into the adapter lifecycle, and decide the
+  exact SDK fetch bridge policy.
+
+Documentation changes:
+
+- `docs/agent-guide/architecture.md`: updated the runtime shape from the stale `daemon.ts`/OpenCode-only wording to the
+  current extracted daemon modules, provider adapters, and OpenCode/Claude SDK reality.
+- `docs/agent-guide/testing.md`: fixed E2E argument examples and documented that live OpenCode tests use dynamic
+  instance URLs, not an assumed `localhost:4096`.
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:
