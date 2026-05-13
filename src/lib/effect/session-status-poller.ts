@@ -608,7 +608,7 @@ export const startReconciliationLoop = (
 // ─── Imperative facade ──────────────────────────────────────────────────────
 // Thin wrapper that provides the old class API for wiring code that hasn't
 // been fully converted to Effect. The facade delegates to the Effect functions
-// above, running them via Effect.runSync/runPromise with a pre-built runtime.
+// above via a StatusPollerRuntime supplied by relay composition.
 
 export interface SessionStatusPollerService {
 	/** Register a callback for the "changed" broadcast event (via PubSub subscription). */

@@ -693,12 +693,14 @@ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/eff
 |---|---|---|
 | `Effect.runPromise` / `Effect.runSync` | `src/bin/cli-core.ts` only, after the entrypoint switch is complete | Process entrypoint must run an Effect at the top |
 | `Effect.runPromise` | `src/lib/instance/sdk-factory.ts` inside the returned `fetch` callback only | OpenCode SDK and GapEndpoints require a standard Promise-shaped Fetch callback; the callback delegates to the Effect retry transport |
+| `Effect.runPromise` | `src/lib/daemon/daemon-lifecycle.ts` inside tagged IPC dispatch only | Transitional Unix socket callback boundary; decoded IPC requests enter the Effect RPC handler until the IPC socket server is Effect-owned |
+| `Effect.runSync` | `src/lib/relay/relay-stack.ts` and `src/lib/effect/daemon-main.ts` around `NodeHttpServer.makeHandler(...)` only | Transitional Node HTTP callback construction boundary; long-term fix is scoped `NodeHttpServer.layer` / `HttpServer.serve`, not a helper that hides `runSync` |
 | `Effect.runPromise` (frontend) | `src/lib/frontend/transport/runtime.ts` | Browser entrypoint, owned by `ManagedRuntime` |
 | `Effect.promise` | only inside finalizers where the promise is provably non-rejecting, with inline comment | Some Node APIs return `Promise<void>` that cannot reject |
 | `concurrency: "unbounded"` | none (every site must be capped or documented as a fixed-size fanout with inline comment naming the size) | Plan rule |
 | `Layer.succeed(Tag, instance)` for a pre-constructed imperative instance | none in `src/lib/relay`, `src/lib/effect`; allowed in `src/bin/cli-core.ts` only if wrapping a CLI option object | Bridge anti-pattern |
 | AbortController construction | only inside provider adapters (`src/lib/provider/opencode-adapter.ts`, `src/lib/provider/claude/claude-adapter.ts`) | SDK boundary; bridged to fiber interrupt per Phase 6 |
-| `ws` library callback | `src/lib/effect/ws-transport-layer.ts` | Library callback boundary; immediately hands off to Effect |
+| `ws` library callback | `src/lib/effect/ws-routing-layer.ts` | Library callback boundary; immediately hands off to Effect |
 | `NodeRuntime.runMain` | `src/bin/cli-core.ts` | Daemon entrypoint, signal handling |
 
 For any hit not on this list, the PR must either eliminate it or extend this table with justification approved in review.

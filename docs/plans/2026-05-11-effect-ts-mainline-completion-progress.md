@@ -2866,6 +2866,88 @@ Test Files  379 passed (379)
 Tests  5223 passed | 2 skipped | 12 todo (5237)
 ```
 
+## Phase 9.3: Runtime Boundary Grep Allowlist
+
+Plan issues found:
+
+- The final `Effect.run(Promise|Sync)` grep was still text-only. It could not distinguish deleted app-internal bridges
+  from intentionally retained external callback boundaries, and it also counted comments.
+- Replacing `Effect.runSync(NodeHttpServer.makeHandler(...))` with a helper would only hide the bridge. `makeHandler`
+  itself creates the Node callback by capturing a runtime and forking each request; the long-term fix is moving daemon
+  HTTP ownership to scoped `NodeHttpServer.layer` / `HttpServer.serve`, not a local wrapper.
+- The remaining tagged IPC dispatch bridge is likewise a Unix socket callback boundary. The pure decoder bridge was
+  deleted in Phase 9.1; removing dispatch needs the larger IPC socket-server ownership migration.
+
+Changes:
+
+- `test/unit/effect/runtime-boundary-grep.test.ts`: added an explicit allowlist test for remaining
+  `Effect.runPromise` / `Effect.runSync` hits under `src/lib`.
+- `src/lib/effect/session-status-poller.ts`: removed a comment-only false positive that mentioned the forbidden grep
+  text even though the facade uses a `StatusPollerRuntime`, not direct `Effect.run*` calls.
+- `docs/plans/2026-05-11-effect-ts-mainline-completion-plan.md`: documented the SDK fetch callback, tagged IPC
+  dispatch, Node HTTP handler construction, and corrected the WebSocket boundary path to
+  `src/lib/effect/ws-routing-layer.ts`.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 1
+Expected failure:
+  unexpected hit src/lib/effect/session-status-poller.ts comment:
+  // above, running them via Effect.runSync/runPromise with a pre-built runtime.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
+```text
+$ rg -n "Effect\\.run(Promise|Sync)" src/lib
+Exit: 0
+Allowed hits:
+  src/lib/instance/sdk-factory.ts: SDK/GapEndpoints fetch callback
+  src/lib/effect/daemon-main.ts: NodeHttpServer.makeHandler callback construction
+  src/lib/daemon/daemon-lifecycle.ts: tagged IPC dispatch from Unix socket callback
+  src/lib/relay/relay-stack.ts: standalone NodeHttpServer.makeHandler callback construction
+```
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts test/unit/instance/sdk-factory-effect-boundary.test.ts test/unit/daemon/daemon-lifecycle-effect-boundary.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  3 passed (3)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 999 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
+```text
+$ pnpm vitest run --maxWorkers=4 > test-unit-output.log 2>&1
+Exit: 0
+Test Files  382 passed (382)
+Tests  5229 passed | 2 skipped | 12 todo (5243)
+Note: uncapped `pnpm test:unit` was killed twice without a failing test or Vitest summary; capped workers completed.
+```
+
 ## Phase 9.2: SDK Client Construction Boundary
 
 Plan issues found:
