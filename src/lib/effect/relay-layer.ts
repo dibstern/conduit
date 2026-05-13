@@ -43,7 +43,7 @@ const SessionManagerStateAndServiceLive = Layer.provideMerge(
  * All layers here are self-constructing — they create their own Ref, FiberMap,
  * PubSub, etc. No imperative instance is needed.
  *
- * Consumers of remaining bridge Tags (SessionManagerTag, PollerManagerTag,
+ * Consumers of remaining bridge Tags (PollerManagerTag,
  * etc.) still get them from Layer.succeed() in relay-stack.ts. Those bridge
  * layers are merged alongside RelayStateLive when creating the full runtime.
  */

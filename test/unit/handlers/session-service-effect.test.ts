@@ -16,7 +16,6 @@ import {
 	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
-	SessionManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -81,7 +80,7 @@ function makeSessionMetadataLayer(options: {
 			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		} satisfies OpenCodeModelService);
 	const wsHandler = makeMockWebSocketHandler();
-	const sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
+	const _sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
 	const statusPoller: StatusPollerShape = {
@@ -102,7 +101,6 @@ function makeSessionMetadataLayer(options: {
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(OpenCodeModelServiceTag, modelService),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		Layer.succeed(LoggerTag, logger),
 		PendingInteractionServiceLive,

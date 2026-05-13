@@ -388,4 +388,60 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not keep the production SessionManagerTag bridge", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"relay runtime should use SessionManagerServiceTag/SessionManagerStateTag instead of injecting a legacy SessionManager",
+			},
+			{
+				path: "src/lib/effect/session-manager-service.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/effect/services.ts",
+				pattern: /class SessionManagerTag\b/,
+				reason:
+					"SessionManagerTag should stay deleted after session state moves behind SessionManagerService",
+			},
+			{
+				path: "src/lib/relay/sse-wiring.ts",
+				pattern: /\b(?:SessionManagerLike|sessionMgr)\b/,
+				reason:
+					"SSE wiring should use a SessionManagerService-shaped port, not the legacy manager shape",
+			},
+			{
+				path: "src/lib/relay/monitoring-wiring.ts",
+				pattern: /\b(?:SessionManagerLike|sessionMgr)\b/,
+				reason:
+					"monitoring wiring should read session lists and parent maps through the service port",
+			},
+			{
+				path: "src/lib/relay/poller-wiring.ts",
+				pattern: /\b(?:SessionManagerLike|sessionMgr)\b/,
+				reason:
+					"poller wiring should read parent maps through the service port",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const fullPath = join(REPO_ROOT, path);
+			if (!existsSync(fullPath)) return [];
+			const source = readFileSync(fullPath, "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
 });

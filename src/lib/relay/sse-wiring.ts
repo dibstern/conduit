@@ -58,8 +58,8 @@ export function extractSessionId(event: SSEEvent): string | undefined {
 
 // ─── SSE Wiring Dependencies ─────────────────────────────────────────────────
 
-/** Narrowed SessionManager capabilities needed by SSE wiring. */
-interface SessionManagerLike {
+/** Narrowed Effect session service capabilities needed by SSE wiring. */
+interface SessionServiceLike {
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	incrementPendingQuestionCount(sessionId: string): void;
 	addToParentMap(childId: string, parentId: string): void;
@@ -89,7 +89,7 @@ interface PendingPermissionsLike {
 
 export interface SSEWiringDeps {
 	translator: Translator;
-	sessionMgr: SessionManagerLike;
+	sessionService: SessionServiceLike;
 	pendingQuestionCounts: PendingQuestionCountsLike;
 	pendingPermissions: PendingPermissionsLike;
 	processingTimeouts: ProcessingTimeoutsPort;
@@ -205,7 +205,7 @@ export function sendPushForEvent(
 export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	const {
 		translator,
-		sessionMgr,
+		sessionService,
 		processingTimeouts,
 		wsHandler,
 		pushManager,
@@ -225,7 +225,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	// Record the timestamp of any message-related event so sessions are
 	// ordered by actual conversation activity, not metadata updates.
 	if (eventSessionId && event.type.startsWith("message.")) {
-		sessionMgr.recordMessageActivity(eventSessionId, Date.now());
+		sessionService.recordMessageActivity(eventSessionId, Date.now());
 	}
 	// ── Permission / question bridge routing ──────────────────────────────
 
@@ -336,12 +336,12 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 					? ((info as Record<string, unknown>)["parentID"] as string)
 					: undefined;
 			if (childId && parentId) {
-				sessionMgr.addToParentMap(childId, parentId);
+				sessionService.addToParentMap(childId, parentId);
 			}
 		}
 
 		const statuses = deps.getSessionStatuses?.();
-		sessionMgr
+		sessionService
 			.sendDualSessionLists((msg) => wsHandler.broadcast(msg), { statuses })
 			.catch((err) =>
 				log.warn(`Failed to refresh sessions after session.updated: ${err}`),

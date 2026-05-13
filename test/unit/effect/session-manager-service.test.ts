@@ -17,16 +17,18 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
-	SessionManagerTag,
 	StatusPollerTag,
 } from "../../../src/lib/effect/services.js";
 import {
+	addToParentMap,
 	clearPaginationCursor,
 	decrementPendingQuestionCount,
+	getSessionParentMap,
 	incrementPendingQuestionCount,
 	listSessions,
 	loadHistory,
 	loadPreRenderedHistory,
+	recordMessageActivity,
 	renameSession,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
@@ -653,6 +655,44 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
+	it.effect("exposes parent map reads and writes through service state", () => {
+		const layer = Layer.mergeAll(
+			makeSessionManagerStateLive(),
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+			DaemonEventBusLive,
+		);
+
+		return Effect.gen(function* () {
+			yield* addToParentMap("child-1", "root-1");
+			let parentMap = yield* getSessionParentMap();
+			expect(Array.from(parentMap.entries())).toEqual([["child-1", "root-1"]]);
+
+			const service = yield* SessionManagerServiceTag;
+			yield* service.addToParentMap("child-2", "root-2");
+			parentMap = yield* service.getSessionParentMap();
+
+			expect(Array.from(parentMap.entries()).sort()).toEqual([
+				["child-1", "root-1"],
+				["child-2", "root-2"],
+			]);
+		}).pipe(Effect.provide(SessionManagerServiceLive), Effect.provide(layer));
+	});
+
+	it.effect("keeps message activity timestamps monotonic", () => {
+		const layer = makeSessionManagerStateLive();
+
+		return Effect.gen(function* () {
+			const stateRef = yield* SessionManagerStateTag;
+			yield* recordMessageActivity("s1", 200);
+			yield* recordMessageActivity("s1", 100);
+			yield* recordMessageActivity("s1", 300);
+			const state = yield* Ref.get(stateRef);
+
+			expect(HashMap.get(state.lastMessageAt, "s1")).toEqual(Option.some(300));
+		}).pipe(Effect.provide(layer));
+	});
+
 	it.effect(
 		"sends roots immediately and all sessions in the background",
 		() => {
@@ -888,15 +928,14 @@ describe("SessionManagerService", () => {
 				slug: "project",
 				configDir: tmpDir,
 			};
-			const layer = SessionManagerServiceLive.pipe(
-				Layer.provide(
-					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag, api),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(ConfigTag, config),
-						makeSessionManagerStateLive(),
-						DaemonEventBusLive,
-					),
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(ConfigTag, config),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
 				),
 			);
 
@@ -923,11 +962,20 @@ describe("SessionManagerService", () => {
 	);
 
 	it.effect(
-		"live service mirrors fork metadata into the legacy session manager bridge",
+		"live service stores fork metadata in Effect state and disk",
 		() => {
-			const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-bridge-"));
+			const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-live-"));
 			const api = makeMockOpenCodeAPI();
-			const legacySetForkEntry = vi.fn();
+			vi.spyOn(api.session, "list").mockResolvedValue([
+				{
+					id: "forked-1",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Forked",
+					version: "1.0.0",
+					time: { created: 50, updated: 60 },
+				},
+			]);
 			const config: ProjectRelayConfig = {
 				httpServer: createServer(),
 				opencodeUrl: "http://localhost:4096",
@@ -941,9 +989,6 @@ describe("SessionManagerService", () => {
 						Layer.succeed(OpenCodeAPITag, api),
 						Layer.succeed(LoggerTag, makeMockLogger()),
 						Layer.succeed(ConfigTag, config),
-						Layer.succeed(SessionManagerTag, {
-							setForkEntry: legacySetForkEntry,
-						} as never),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 					),
@@ -958,8 +1003,24 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				yield* service.setForkEntry("forked-1", entry);
+				const sessions = yield* service.listSessions();
+				const parentMap = yield* service.getSessionParentMap();
 
-				expect(legacySetForkEntry).toHaveBeenCalledWith("forked-1", entry);
+				expect(sessions).toEqual([
+					{
+						id: "forked-1",
+						title: "Forked",
+						updatedAt: 50,
+						messageCount: 0,
+						parentID: "parent-1",
+						forkMessageId: "msg-1",
+						forkPointTimestamp: 250,
+					},
+				]);
+				expect(Array.from(parentMap.entries())).toEqual([
+					["forked-1", "parent-1"],
+				]);
+				expect(loadForkMetadata(tmpDir).get("forked-1")).toEqual(entry);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),

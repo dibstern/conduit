@@ -28,7 +28,7 @@ function createHarness() {
 			getClientsForSession: () => [],
 			broadcastPerSessionEvent: vi.fn(),
 		},
-		sessionMgr: {
+		sessionService: {
 			sendDualSessionLists: vi.fn(async () => {}),
 			getSessionParentMap: () => new Map(),
 		},

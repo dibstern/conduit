@@ -22,6 +22,7 @@ export type { ForkEntry };
  * - forkMeta: per-session fork-point metadata
  * - pendingQuestionCounts: per-session count of pending questions
  * - paginationCursors: per-session cursor for paginated history loading
+ * - lastKnownSessionCount: most recent unfiltered list/initialize count
  */
 export interface SessionManagerState {
 	cachedParentMap: HashMap.HashMap<string, string>;
@@ -29,6 +30,7 @@ export interface SessionManagerState {
 	forkMeta: HashMap.HashMap<string, ForkEntry>;
 	pendingQuestionCounts: HashMap.HashMap<string, number>;
 	paginationCursors: HashMap.HashMap<string, string>;
+	lastKnownSessionCount: number;
 }
 
 // ─── Factory ────────────────────────────────────────────────────────────────
@@ -40,6 +42,7 @@ export const emptySessionManagerState = (): SessionManagerState => ({
 	forkMeta: HashMap.empty(),
 	pendingQuestionCounts: HashMap.empty(),
 	paginationCursors: HashMap.empty(),
+	lastKnownSessionCount: 0,
 });
 
 // ─── Context Tag ────────────────────────────────────────────────────────────

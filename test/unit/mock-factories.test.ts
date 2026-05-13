@@ -53,7 +53,7 @@ describe("mock-factories", () => {
 			expect(deps.translator.reset).toBeDefined();
 			expect(deps.wsHandler.broadcast).toBeDefined();
 			expect(deps.wsHandler.sendToSession).toBeDefined();
-			expect(deps.sessionMgr).toBeDefined();
+			expect(deps.sessionService).toBeDefined();
 			expect(deps.pendingPermissions.record).toBeDefined();
 			expect(deps.processingTimeouts).toBeDefined();
 			expect(deps.log).toBeDefined();

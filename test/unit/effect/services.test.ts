@@ -17,7 +17,6 @@ import {
 	PollerManagerTag,
 	ProjectMgmtTag,
 	PtyManagerTag,
-	SessionManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -27,7 +26,6 @@ import {
 const ALL_TAGS = [
 	OpenCodeAPITag,
 	OpenCodeSettingsServiceTag,
-	SessionManagerTag,
 	WebSocketHandlerTag,
 	PtyManagerTag,
 	ConfigTag,
@@ -57,7 +55,7 @@ describe("Service Tags", () => {
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
 		// Bridge classes are no longer Effect services; count only active Tags.
-		expect(ALL_TAGS.length).toBe(14);
+		expect(ALL_TAGS.length).toBe(13);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -68,10 +66,6 @@ describe("Service Tags", () => {
 
 	it("OpenCodeSettingsService tag has correct key", () => {
 		expect(OpenCodeSettingsServiceTag.key).toBe("OpenCodeSettingsService");
-	});
-
-	it("SessionManager tag has correct key", () => {
-		expect(SessionManagerTag.key).toBe("SessionManager");
 	});
 
 	it("WebSocketHandler tag has correct key", () => {

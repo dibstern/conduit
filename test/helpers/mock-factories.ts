@@ -47,7 +47,6 @@ import {
 	PollerManagerTag,
 	PtyManagerTag,
 	type SessionManagerShape,
-	SessionManagerTag,
 	type StatusPollerShape,
 	StatusPollerTag,
 	type WebSocketHandlerShape,
@@ -313,8 +312,8 @@ export function createMockSSEWiringDeps(
 ): SSEWiringDeps {
 	return {
 		translator: createMockTranslator(),
-		sessionMgr:
-			createMockSessionMgr() as unknown as SSEWiringDeps["sessionMgr"],
+		sessionService:
+			createMockSessionMgr() as unknown as SSEWiringDeps["sessionService"],
 		pendingQuestionCounts: {
 			increment: vi.fn(),
 			set: vi.fn(),
@@ -434,7 +433,6 @@ export function createMockProjectRelay(
 			on: vi.fn(),
 		} as unknown as ProjectRelay["sseStream"],
 		client: createMockClient() as unknown as ProjectRelay["client"],
-		sessionMgr: createMockSessionMgr() as unknown as ProjectRelay["sessionMgr"],
 		translator: {} as unknown as ProjectRelay["translator"],
 		orchestration: {
 			engine: {
@@ -460,6 +458,8 @@ export function createMockProjectRelay(
 			dispose: vi.fn().mockResolvedValue(undefined),
 		},
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
+		getDefaultSessionId: vi.fn().mockResolvedValue("s1"),
+		getLastKnownSessionCount: vi.fn().mockReturnValue(0),
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,
 	};
@@ -760,7 +760,9 @@ export function makeMockSessionManagerService(
 	overrides?: Partial<SessionManagerService>,
 ): SessionManagerService {
 	return {
+		initialize: vi.fn(() => Effect.succeed("s1")),
 		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
+		getLastKnownSessionCount: vi.fn(() => Effect.succeed(1)),
 		listSessions: vi.fn(() =>
 			Effect.succeed([
 				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
@@ -775,6 +777,8 @@ export function makeMockSessionManagerService(
 			Effect.succeed({ messages: [], hasMore: false }),
 		),
 		recordMessageActivity: vi.fn(() => Effect.void),
+		addToParentMap: vi.fn(() => Effect.void),
+		getSessionParentMap: vi.fn(() => Effect.succeed(new Map())),
 		incrementPendingQuestionCount: vi.fn(() => Effect.void),
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
@@ -792,6 +796,18 @@ export function makeMockSessionManagerService(
 						},
 					],
 					roots: true,
+				});
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "s1",
+							title: "Session 1",
+							updatedAt: 0,
+							messageCount: 0,
+						},
+					],
+					roots: false,
 				});
 			}),
 		),
@@ -882,7 +898,6 @@ export function makeTestHandlerLayer(
 ): Layer.Layer<any> {
 	const api = opts?.api ?? makeMockOpenCodeAPI();
 	const wsHandler = opts?.wsHandler ?? makeMockWebSocketHandler();
-	const sessionMgr = opts?.sessionMgr ?? makeMockSessionManagerShape();
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
 	const config = opts?.config ?? makeMockConfig();
 	const log = opts?.log ?? makeMockLogger();
@@ -985,7 +1000,6 @@ export function makeTestHandlerLayer(
 		PendingInteractionServiceLive,
 		sessionManagerServiceLayer,
 		wsHandlerLayer,
-		Layer.succeed(SessionManagerTag, sessionMgr),
 		overridesStateLayer,
 		ptyManagerLayer,
 		configLayer,

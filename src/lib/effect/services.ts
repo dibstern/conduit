@@ -238,11 +238,6 @@ export const OpenCodeSettingsServiceLive: Layer.Layer<
 	}),
 );
 
-export class SessionManagerTag extends Context.Tag("SessionManager")<
-	SessionManagerTag,
-	SessionManagerShape
->() {}
-
 export class WebSocketHandlerTag extends Context.Tag("WebSocketHandler")<
 	WebSocketHandlerTag,
 	WebSocketHandlerShape

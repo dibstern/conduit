@@ -31,8 +31,8 @@ interface PollerManagerLike {
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
-/** Narrowed SessionManager capabilities needed by poller wiring. */
-interface SessionManagerLike {
+/** Narrowed Effect session service capabilities needed by poller wiring. */
+interface SessionServiceLike {
 	getSessionParentMap(): Map<string, string>;
 }
 
@@ -41,7 +41,7 @@ export interface PollerWiringDeps {
 	sseStream: SSEStreamEvents;
 	statusPoller: SessionStatusPollerService;
 	wsHandler: WebSocketHandlerShape;
-	sessionMgr: SessionManagerLike;
+	sessionService: SessionServiceLike;
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	config: {
@@ -61,7 +61,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		sseStream,
 		statusPoller,
 		wsHandler,
-		sessionMgr,
+		sessionService,
 		pipelineDeps,
 		sseTracker,
 		config,
@@ -108,7 +108,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 			// Notification routing: push + cross-session broadcast
 			const isSubagentPoller =
 				polledSessionId != null &&
-				sessionMgr.getSessionParentMap().has(polledSessionId);
+				sessionService.getSessionParentMap().has(polledSessionId);
 			const pollerNotification = resolveNotifications(
 				msg,
 				pollerResult.route,

@@ -60,8 +60,8 @@ interface MonitoringWsHandlerLike {
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
-/** Narrowed SessionManager capabilities needed by monitoring wiring. */
-interface SessionManagerLike {
+/** Narrowed Effect session service capabilities needed by monitoring wiring. */
+interface SessionServiceLike {
 	sendDualSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: {
@@ -76,7 +76,7 @@ interface SessionManagerLike {
 export interface MonitoringWiringDeps {
 	client: OpenCodeSessionReaderLike;
 	wsHandler: MonitoringWsHandlerLike;
-	sessionMgr: SessionManagerLike;
+	sessionService: SessionServiceLike;
 	processingTimeouts: ProcessingTimeoutsPort;
 	statusPoller: SessionStatusPollerService;
 	pollerManager: PollerManagerLike;
@@ -137,7 +137,7 @@ export function wireMonitoring(
 	const {
 		client,
 		wsHandler,
-		sessionMgr,
+		sessionService,
 		processingTimeouts,
 		statusPoller,
 		pollerManager,
@@ -246,7 +246,7 @@ export function wireMonitoring(
 		// ── Session list broadcast (only when statuses actually changed) ────
 		if (statusesChanged) {
 			try {
-				await sessionMgr.sendDualSessionLists(
+				await sessionService.sendDualSessionLists(
 					(msg) => wsHandler.broadcast(msg),
 					{ statuses },
 				);
@@ -260,7 +260,7 @@ export function wireMonitoring(
 		if (!monitoringActive) return;
 
 		// ── Monitoring reducer: evaluate all sessions ──────────────────────
-		const parentMap = sessionMgr.getSessionParentMap();
+		const parentMap = sessionService.getSessionParentMap();
 		const now = Date.now();
 		const contexts = new Map<string, SessionEvalContext>();
 		for (const [sessionId, status] of Object.entries(statuses)) {

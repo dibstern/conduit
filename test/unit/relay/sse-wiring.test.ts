@@ -473,7 +473,7 @@ describe("handleSSEEvent", () => {
 			"active-session",
 		);
 		expect(
-			deps.sessionMgr.incrementPendingQuestionCount,
+			deps.sessionService.incrementPendingQuestionCount,
 		).not.toHaveBeenCalled();
 	});
 
@@ -1042,7 +1042,7 @@ describe("wireSSEConsumer", () => {
 				]),
 			);
 		});
-		expect(deps.sessionMgr.setPendingQuestionCounts).not.toHaveBeenCalled();
+		expect(deps.sessionService.setPendingQuestionCounts).not.toHaveBeenCalled();
 	});
 
 	it("broadcasts connection_status 'connected' on connected event", () => {

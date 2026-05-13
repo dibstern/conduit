@@ -29,7 +29,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	SessionManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -1209,7 +1208,7 @@ function makeForkSessionLayer(options?: {
 			permission: { list: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI);
 	const ws = options?.ws ?? mockWsHandler();
-	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
+	const _sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
 		options?.sessionManagerService ?? makeMockSessionManagerService();
 	const log = options?.log ?? mockLogger();
@@ -1217,7 +1216,6 @@ function makeForkSessionLayer(options?: {
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
 		Layer.succeed(LoggerTag, log),
@@ -1244,7 +1242,7 @@ function makeSessionLifecycleLayer(options?: {
 	log?: Logger;
 }) {
 	const ws = options?.ws ?? mockWsHandler();
-	const sessionMgr = options?.sessionMgr ?? mockSessionManager();
+	const _sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
 		options?.sessionManagerService ?? makeMockSessionManagerService();
 	const client =
@@ -1261,7 +1259,6 @@ function makeSessionLifecycleLayer(options?: {
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(SessionManagerTag, sessionMgr),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
 		Layer.succeed(LoggerTag, log),
@@ -2746,7 +2743,7 @@ describe("handleRenameSession", () => {
 			const legacyRenameSession = vi.fn(async () => {
 				throw new Error("legacy renameSession should not be used");
 			});
-			const sessionMgr = mockSessionManager({
+			const _sessionMgr = mockSessionManager({
 				renameSession: legacyRenameSession,
 			});
 			const ws = mockWsHandler();
@@ -2780,7 +2777,6 @@ describe("handleRenameSession", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(WebSocketHandlerTag, ws),
 			);
@@ -2815,7 +2811,7 @@ describe("handleRenameSession", () => {
 
 	it.effect("does nothing when id or title is empty", () => {
 		const log = mockLogger();
-		const sessionMgr = mockSessionManager();
+		const _sessionMgr = mockSessionManager();
 		const ws = mockWsHandler();
 		const renameSession = vi.fn(() => Effect.void);
 		const sendDualSessionLists = vi.fn(() => Effect.void);
@@ -2826,7 +2822,6 @@ describe("handleRenameSession", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
@@ -2850,7 +2845,7 @@ describe("handleSearchSessions", () => {
 		const legacySearchSessions = vi.fn(async () => {
 			throw new Error("legacy searchSessions should not be used");
 		});
-		const sessionMgr = mockSessionManager({
+		const _sessionMgr = mockSessionManager({
 			searchSessions: legacySearchSessions,
 		});
 		const listSessions = vi.fn(() =>
@@ -2875,7 +2870,6 @@ describe("handleSearchSessions", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		);
 
@@ -2906,7 +2900,7 @@ describe("handleSearchSessions", () => {
 		const legacySearchSessions = vi.fn(async () => {
 			throw new Error("legacy searchSessions should not be used");
 		});
-		const sessionMgr = mockSessionManager({
+		const _sessionMgr = mockSessionManager({
 			searchSessions: legacySearchSessions,
 		});
 		const listSessions = vi.fn(() =>
@@ -2925,7 +2919,6 @@ describe("handleSearchSessions", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		);
 
@@ -2976,7 +2969,7 @@ describe("handleLoadMoreHistory", () => {
 			const legacyLoadPreRenderedHistory = vi.fn(async () => {
 				throw new Error("legacy loadPreRenderedHistory should not be used");
 			});
-			const sessionMgr = mockSessionManager({
+			const _sessionMgr = mockSessionManager({
 				loadPreRenderedHistory: legacyLoadPreRenderedHistory,
 			});
 			const loadPreRenderedHistory = vi.fn(() => Effect.succeed(page));
@@ -2986,7 +2979,6 @@ describe("handleLoadMoreHistory", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			);
 
@@ -3022,7 +3014,6 @@ describe("handleLoadMoreHistory", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionManagerTag, mockSessionManager()),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			);
 
@@ -3144,7 +3135,7 @@ describe("handleRewind", () => {
 		const legacyClearPaginationCursor = vi.fn(() => {
 			throw new Error("legacy clearPaginationCursor should not be used");
 		});
-		const sessionMgr = mockSessionManager({
+		const _sessionMgr = mockSessionManager({
 			clearPaginationCursor: legacyClearPaginationCursor,
 		});
 		const clearPaginationCursor = vi.fn(() => Effect.void);
@@ -3158,7 +3149,6 @@ describe("handleRewind", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(LoggerTag, log),
 		);
@@ -3471,7 +3461,7 @@ describe("handleMessage", () => {
 			const legacyLoadPreRenderedHistory = vi.fn(async () => {
 				throw new Error("legacy prompt history load should not be used");
 			});
-			const sessionMgr = mockSessionManager({
+			const _sessionMgr = mockSessionManager({
 				loadPreRenderedHistory: legacyLoadPreRenderedHistory,
 			});
 			const loadPreRenderedHistory = vi.fn(() =>
@@ -3511,7 +3501,6 @@ describe("handleMessage", () => {
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
@@ -3562,7 +3551,7 @@ describe("handleMessage", () => {
 			const legacyRenameSession = vi.fn(async () => {
 				throw new Error("legacy auto-rename renameSession should not be used");
 			});
-			const sessionMgr = mockSessionManager({
+			const _sessionMgr = mockSessionManager({
 				listSessions: legacyListSessions,
 				renameSession: legacyRenameSession,
 			});
@@ -3615,7 +3604,6 @@ describe("handleMessage", () => {
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
@@ -3654,7 +3642,7 @@ describe("handleMessage", () => {
 			getClientsForSession: vi.fn(() => ["client-1"]),
 		});
 		const log = mockLogger();
-		const sessionMgr = mockSessionManager();
+		const _sessionMgr = mockSessionManager();
 		const listSessions = vi.fn(() =>
 			Effect.succeed([
 				{
@@ -3689,7 +3677,6 @@ describe("handleMessage", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
@@ -3715,7 +3702,7 @@ describe("handleMessage", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const log = mockLogger();
-			const sessionMgr = mockSessionManager();
+			const _sessionMgr = mockSessionManager();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -3731,7 +3718,6 @@ describe("handleMessage", () => {
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerTag, sessionMgr),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
@@ -3770,7 +3756,7 @@ describe("handleMessage", () => {
 		const legacyRecordMessageActivity = vi.fn(() => {
 			throw new Error("legacy recordMessageActivity should not be used");
 		});
-		const sessionMgr = mockSessionManager({
+		const _sessionMgr = mockSessionManager({
 			recordMessageActivity: legacyRecordMessageActivity,
 		});
 		const recordMessageActivity = vi.fn(() => Effect.void);
@@ -3786,7 +3772,6 @@ describe("handleMessage", () => {
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerTag, sessionMgr),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,

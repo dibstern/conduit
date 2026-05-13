@@ -2313,6 +2313,135 @@ Tests  1 passed (1)
 The integration failure matched the existing isolated media-generation timeout pattern from Phase 9.10. The exact
 failing file passed when rerun alone.
 
+## Phase 9.12: Delete SessionManagerTag Runtime Bridge
+
+Plan issues found:
+
+- Phase 9.11 correctly left `SessionManagerTag` in place because SSE, monitoring, poller, daemon status, and startup
+  initialization still read or wrote session state through the legacy `SessionManager`.
+- Replacing the tag with another adapter would only preserve the bridge shape. The real fix was to move the remaining
+  capabilities into `SessionManagerService` / `SessionManagerState`: initialization, parent-map writes and snapshots,
+  last-known session counts, and monotonic message activity.
+- `recordMessageActivity(...)` in the Effect service was not behavior-equivalent to the legacy manager. It overwrote a
+  newer timestamp with an older one, which would perturb session ordering once SSE moved to the service path.
+- Daemon status surfaces still reached through `relay.sessionMgr.getLastKnownSessionCount()`. Removing the tag without
+  a narrow relay count method would have regressed project/session count reporting.
+- The SQLite read-model path already used fork metadata as a parent-map fallback, but the API-list path did not. Leaving
+  that inconsistency would have made fork metadata visible in session lists but invisible to parent status propagation.
+
+Changes:
+
+- Added `lastKnownSessionCount` to `SessionManagerState`.
+- Added `SessionManagerService.initialize(...)`, `getLastKnownSessionCount()`, `addToParentMap(...)`, and
+  `getSessionParentMap()`.
+- Updated `listSessions(...)`, `initialize(...)`, and `deleteSession(...)` to keep the service-owned session count
+  current.
+- Made Effect `recordMessageActivity(...)` monotonic, matching the legacy `SessionManager` behavior.
+- Removed `SessionManagerTag` and the legacy fork-metadata mirror from `SessionManagerServiceLive`.
+- Removed `new SessionManager(...)` and `Layer.succeed(SessionManagerTag, ...)` from relay-stack. Relay startup now
+  initializes the session through the same Effect runtime used by the rest of the relay.
+- Rewired SSE, monitoring, and poller wiring to use service-shaped session ports for activity, parent maps, and dual
+  session-list broadcasts.
+- Made API-backed parent-map rebuilding use the same fork metadata fallback as the SQLite read-model path, and made
+  `setForkEntry(...)` eagerly update the service-owned parent map.
+- Replaced daemon status/session count reads with `ProjectRelay.getLastKnownSessionCount()`, and exposed
+  `RelayStack.getDefaultSessionId()` for E2E harness cleanup without exposing the legacy manager.
+- Added runtime guards banning production `SessionManagerTag` reintroduction and legacy session-manager wiring
+  contracts in SSE, monitoring, and poller modules.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "parent map reads and writes"
+Exit: 1
+Expected failure:
+  addToParentMap/getSessionParentMap were not Effect service programs yet.
+```
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts -t "SessionManagerTag bridge"
+Exit: 1
+Expected failure:
+  guard found SessionManagerTag import/provision in relay-stack, optional mirror in
+  session-manager-service, and the tag class in services.ts.
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "fork metadata in Effect state"
+Exit: 1
+Expected failure:
+  API-backed service parent-map rebuilding ignored persisted fork metadata:
+  expected [] to deeply equal [ [ 'forked-1', 'parent-1' ] ]
+```
+
+Focused verification:
+
+```text
+$ pnpm vitest run test/unit/effect/session-manager-service.test.ts -t "parent map reads and writes|message activity timestamps|fork metadata in Effect state"
+Exit: 0
+Test Files  1 passed (1)
+Tests  3 passed | 18 skipped (21)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/effect/session-manager-service.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/relay/sse-wiring.test.ts \
+  test/unit/relay/monitoring-wiring.test.ts \
+  test/unit/relay/poller-wiring.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  7 passed (7)
+Tests  117 passed (117)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/session-service-effect.test.ts \
+  test/unit/handlers/session-manager-service-effect.test.ts \
+  test/unit/handlers/prompt-processing-timeout-effect.test.ts \
+  test/unit/handlers/permissions-processing-timeout-effect.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  89 passed (89)
+```
+
+```text
+$ pnpm vitest run test/unit/relay/relay-stack-dual-write-wiring.test.ts \
+  test/unit/relay/relay-stack-default-overrides.test.ts \
+  test/unit/effect/relay-stack-layers.test.ts \
+  test/unit/effect/daemon-main-getstatus.test.ts \
+  test/unit/daemon/project-registry.test.ts \
+  test/unit/daemon/daemon-lifecycle-bind.test.ts
+Exit: 0
+Test Files  6 passed (6)
+Tests  64 passed (64)
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  382 passed (382)
+Tests  5230 passed | 2 skipped | 12 todo (5244)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 998 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 9.8: Daemon WebSocket Router Layer Ownership
 
 Plan issues found:

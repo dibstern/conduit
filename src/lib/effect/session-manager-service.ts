@@ -38,7 +38,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeAPITag,
-	SessionManagerTag,
 	StatusPollerTag,
 } from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
@@ -99,6 +98,25 @@ const sessionRowsParentMap = (
 	return parentMap;
 };
 
+const sessionDetailsParentMap = (
+	sessions: readonly SessionDetail[],
+	forkMeta: HashMap.HashMap<string, ForkEntry>,
+): HashMap.HashMap<string, string> => {
+	let parentMap = HashMap.empty<string, string>();
+	for (const session of sessions) {
+		const rec = session as Record<string, unknown>;
+		const apiParentID = rec["parentID"];
+		const forkEntry = HashMap.get(forkMeta, session.id);
+		const parentID =
+			(typeof apiParentID === "string" ? apiParentID : undefined) ??
+			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
+		if (parentID) {
+			parentMap = HashMap.set(parentMap, session.id, parentID);
+		}
+	}
+	return parentMap;
+};
+
 const sessionRowsToInfo = (
 	rows: readonly SessionRow[],
 	options: ListSessionsOptions | undefined,
@@ -142,6 +160,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 				yield* Ref.update(stateRef, (s) => ({
 					...s,
 					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
+					lastKnownSessionCount: rows.length,
 				}));
 			}
 			return sessionRowsToInfo(rows, options, state);
@@ -167,17 +186,10 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		// Only rebuild from unfiltered fetches. Roots-only responses omit children
 		// and would wipe the parent map used by status propagation.
 		if (!options?.roots) {
-			let parentMap = HashMap.empty<string, string>();
-			for (const session of sessions) {
-				const rec = session as Record<string, unknown>;
-				const parentID = rec["parentID"];
-				if (typeof parentID === "string") {
-					parentMap = HashMap.set(parentMap, session.id, parentID);
-				}
-			}
 			yield* Ref.update(stateRef, (s) => ({
 				...s,
-				cachedParentMap: parentMap,
+				cachedParentMap: sessionDetailsParentMap(sessions, s.forkMeta),
+				lastKnownSessionCount: sessions.length,
 			}));
 		}
 
@@ -192,6 +204,60 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		Effect.annotateLogs("operation", "listSessions"),
 		Effect.withSpan("session.listSessions"),
 	);
+
+/**
+ * Initialize session state from the provider and return the most recent session,
+ * creating one when none exists.
+ */
+export const initialize = (title?: string) =>
+	Effect.gen(function* () {
+		const api = yield* OpenCodeAPITag;
+		const stateRef = yield* SessionManagerStateTag;
+		const existing = yield* Effect.tryPromise(() =>
+			api.session.list({ limit: CURSOR_SCAN_LIMIT }),
+		).pipe(
+			Effect.mapError(
+				(cause) => new SessionManagerError({ operation: "initialize", cause }),
+			),
+		);
+
+		yield* Ref.update(stateRef, (s) => {
+			let lastMessageAt = s.lastMessageAt;
+			for (const session of existing) {
+				const ts = session.time?.updated ?? session.time?.created ?? 0;
+				if (ts > 0) {
+					const current = HashMap.get(lastMessageAt, session.id);
+					if (current._tag === "None" || ts > current.value) {
+						lastMessageAt = HashMap.set(lastMessageAt, session.id, ts);
+					}
+				}
+			}
+			return {
+				...s,
+				cachedParentMap: sessionDetailsParentMap(existing, s.forkMeta),
+				lastMessageAt,
+				lastKnownSessionCount: existing.length,
+			};
+		});
+
+		if (existing.length > 0) {
+			const sorted = [...existing].sort((a, b) => {
+				const aTime = a.time?.updated ?? a.time?.created ?? 0;
+				const bTime = b.time?.updated ?? b.time?.created ?? 0;
+				return bTime - aTime;
+			});
+			return sorted[0]?.id ?? "";
+		}
+
+		const session = yield* createSession(title).pipe(
+			Effect.provideService(OpenCodeAPITag, api),
+		);
+		yield* Ref.update(stateRef, (s) => ({
+			...s,
+			lastKnownSessionCount: 1,
+		}));
+		return session.id;
+	}).pipe(Effect.withSpan("session.initialize"));
 
 /**
  * Create a new session via the API.
@@ -252,6 +318,7 @@ export const deleteSession = (sessionId: string) =>
 				forkMeta,
 				pendingQuestionCounts,
 				paginationCursors,
+				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
 		});
 	}).pipe(
@@ -482,18 +549,48 @@ export const loadPreRenderedHistory = (
 export const recordMessageActivity = (sessionId: string, timestamp?: number) =>
 	Effect.gen(function* () {
 		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => ({
-			...s,
-			lastMessageAt: HashMap.set(
-				s.lastMessageAt,
-				sessionId,
-				timestamp ?? Date.now(),
-			),
-		}));
+		const ts = timestamp ?? Date.now();
+		yield* Ref.update(ref, (s) => {
+			const existing = HashMap.get(s.lastMessageAt, sessionId);
+			if (existing._tag === "Some" && existing.value >= ts) return s;
+			return {
+				...s,
+				lastMessageAt: HashMap.set(s.lastMessageAt, sessionId, ts),
+			};
+		});
 	}).pipe(
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.recordMessageActivity"),
 	);
+
+/** Record an eager child-to-parent session mapping. */
+export const addToParentMap = (childId: string, parentId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		yield* Ref.update(ref, (s) => ({
+			...s,
+			cachedParentMap: HashMap.set(s.cachedParentMap, childId, parentId),
+		}));
+	}).pipe(
+		Effect.annotateLogs("sessionId", childId),
+		Effect.withSpan("session.addToParentMap"),
+	);
+
+/** Snapshot the current child-to-parent session map. */
+export const getSessionParentMap = () =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		const state = yield* Ref.get(ref);
+		return new Map(HashMap.toEntries(state.cachedParentMap));
+	}).pipe(Effect.withSpan("session.getSessionParentMap"));
+
+/** Snapshot the most recently observed unfiltered session count. */
+export const getLastKnownSessionCount = () =>
+	Effect.gen(function* () {
+		const ref = yield* SessionManagerStateTag;
+		const state = yield* Ref.get(ref);
+		return state.lastKnownSessionCount;
+	}).pipe(Effect.withSpan("session.getLastKnownSessionCount"));
 
 /** Increment pending question count for a session. */
 export const incrementPendingQuestionCount = (sessionId: string) =>
@@ -565,6 +662,9 @@ export const setForkEntry = (
 				{
 					...s,
 					forkMeta: nextForkMeta,
+					cachedParentMap: entry.parentID
+						? HashMap.set(s.cachedParentMap, sessionId, entry.parentID)
+						: s.cachedParentMap,
 				},
 			] as const;
 		});
@@ -615,9 +715,11 @@ export const sendDualSessionLists = (
 	);
 
 export interface SessionManagerService {
+	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
 	getDefaultSessionId(
 		title?: string,
 	): Effect.Effect<string, SessionManagerError>;
+	getLastKnownSessionCount(): Effect.Effect<number>;
 	listSessions(
 		options?: ListSessionsOptions,
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
@@ -642,6 +744,8 @@ export interface SessionManagerService {
 		sessionId: string,
 		timestamp?: number,
 	): Effect.Effect<void>;
+	addToParentMap(childId: string, parentId: string): Effect.Effect<void>;
+	getSessionParentMap(): Effect.Effect<Map<string, string>>;
 	incrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
 	decrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
 	setPendingQuestionCounts(
@@ -678,8 +782,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const log = yield* LoggerTag;
 		const eventBus = yield* DaemonEventBusTag;
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
-		const legacySessionManagerOption =
-			yield* Effect.serviceOption(SessionManagerTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
@@ -740,6 +842,15 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 					return session.id;
 				}),
+			initialize: (title) =>
+				initialize(title).pipe(
+					Effect.provideService(OpenCodeAPITag, api),
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			getLastKnownSessionCount: () =>
+				getLastKnownSessionCount().pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
 			listSessions: serviceListSessions,
 			createSession: (title) =>
 				Effect.gen(function* () {
@@ -783,6 +894,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
+			addToParentMap: (childId, parentId) =>
+				addToParentMap(childId, parentId).pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
+			getSessionParentMap: () =>
+				getSessionParentMap().pipe(
+					Effect.provideService(SessionManagerStateTag, stateRef),
+				),
 			incrementPendingQuestionCount: (sessionId) =>
 				incrementPendingQuestionCount(sessionId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
@@ -800,17 +919,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 					yield* setForkEntry(sessionId, entry, configDir).pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
-					if (legacySessionManagerOption._tag === "Some") {
-						yield* Effect.try({
-							try: () =>
-								legacySessionManagerOption.value.setForkEntry(sessionId, entry),
-							catch: (cause) =>
-								new SessionManagerError({
-									operation: "setForkEntry",
-									cause,
-								}),
-						});
-					}
 				}),
 			sendDualSessionLists: (send, options) =>
 				Effect.gen(function* () {

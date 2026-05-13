@@ -576,7 +576,7 @@ export async function startDaemonProcess(
 				const e = registry.get(p.slug);
 				const relay = e?.status === "ready" ? e.relay : undefined;
 				const sessionCount =
-					relay?.sessionMgr.getLastKnownSessionCount() ||
+					relay?.getLastKnownSessionCount() ||
 					cfg.persistedSessionCounts.get(p.slug) ||
 					persistedSessionCounts.get(p.slug) ||
 					0;
@@ -977,7 +977,7 @@ export async function startDaemonProcess(
 			if (!e) continue;
 			const relay = e.status === "ready" ? e.relay : undefined;
 			sessionCount +=
-				relay?.sessionMgr.getLastKnownSessionCount() ||
+				relay?.getLastKnownSessionCount() ||
 				cfg.persistedSessionCounts.get(slug) ||
 				persistedSessionCounts.get(slug) ||
 				0;
@@ -1235,7 +1235,7 @@ export async function startDaemonProcess(
 				return {
 					...project,
 					sessions:
-						relay?.sessionMgr.getLastKnownSessionCount() ||
+						relay?.getLastKnownSessionCount() ||
 						cfg.persistedSessionCounts.get(project.slug) ||
 						persistedSessionCounts.get(project.slug) ||
 						0,
@@ -1386,7 +1386,7 @@ export async function startDaemonProcess(
 				...(entry.status === "error" && { error: entry.error }),
 				clients: relay?.wsHandler.getClientCount() ?? 0,
 				sessions:
-					relay?.sessionMgr.getLastKnownSessionCount() ||
+					relay?.getLastKnownSessionCount() ||
 					cfg.persistedSessionCounts.get(project.slug) ||
 					persistedSessionCounts.get(project.slug) ||
 					0,

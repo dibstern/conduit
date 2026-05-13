@@ -52,8 +52,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	type SessionManagerShape,
-	SessionManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
@@ -131,7 +129,6 @@ import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
-import { SessionManager } from "../session/session-manager.js";
 import { SessionRegistry } from "../session/session-registry.js";
 import { readSessionStatusesFromEffect } from "../session/session-status-effect.js";
 import {
@@ -374,7 +371,6 @@ export interface ProjectRelay {
 	wsHandler: WebSocketHandlerShape;
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
-	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
 	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
 	orchestration: OrchestrationLayer;
@@ -382,6 +378,10 @@ export interface ProjectRelay {
 	effectRuntime: RelayRuntime;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
+	/** Resolve the top-level default session through the Effect session service. */
+	getDefaultSessionId(title?: string): Promise<string>;
+	/** Session count from the most recent unfiltered service read. */
+	getLastKnownSessionCount(): number;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
 	stop(): Promise<void>;
 }
@@ -424,13 +424,14 @@ export interface RelayStack {
 	wsHandler: WebSocketHandlerShape;
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
-	sessionMgr: SessionManagerShape;
 	translator: ReturnType<typeof createTranslator>;
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;
 	/** The base URL of the relay server */
 	getBaseUrl(): string;
+	/** Resolve the top-level default session through the Effect session service. */
+	getDefaultSessionId(title?: string): Promise<string>;
 	/** Stop all components */
 	stop(): Promise<void>;
 }
@@ -452,7 +453,6 @@ export async function createProjectRelay(
 ): Promise<ProjectRelay> {
 	const log = config.log ?? createLogger("relay");
 	const wsLog = log.child("ws");
-	const sessionLog = log.child("session");
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
@@ -493,18 +493,78 @@ export async function createProjectRelay(
 	});
 
 	const translator = createTranslator();
-	const sessionMgr = new SessionManager({
-		client: api,
-		log: sessionLog,
-		directory: config.projectDir,
-		// Lazy getter — statusPoller is created below but the getter is only
-		// called at runtime when listSessions() runs, so ordering is fine.
-		getStatuses: (): Record<
-			string,
-			import("../instance/sdk-types.js").SessionStatus
-		> => statusPoller.getCurrentStatuses(),
-		...(config.configDir != null && { configDir: config.configDir }),
-	});
+	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
+		RelayRuntimeContext,
+		PersistenceEffectError
+	>;
+	const runSessionServiceSync = <A>(
+		run: (
+			service: import("../effect/session-manager-service.js").SessionManagerService,
+		) => Effect.Effect<A, unknown>,
+	): A =>
+		relayManagedRuntime.runSync(
+			Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				return yield* run(service);
+			}),
+		);
+	const runSessionServicePromise = <A>(
+		run: (
+			service: import("../effect/session-manager-service.js").SessionManagerService,
+		) => Effect.Effect<A, unknown>,
+	): Promise<A> =>
+		relayManagedRuntime.runPromise(
+			Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				return yield* run(service);
+			}),
+		);
+	const sessionServiceBridge = {
+		recordMessageActivity: (sessionId: string, timestamp?: number): void => {
+			runSessionServiceSync((service) =>
+				service.recordMessageActivity(sessionId, timestamp),
+			);
+		},
+		incrementPendingQuestionCount: (sessionId: string): void => {
+			runSessionServiceSync((service) =>
+				service.incrementPendingQuestionCount(sessionId),
+			);
+		},
+		addToParentMap: (childId: string, parentId: string): void => {
+			runSessionServiceSync((service) =>
+				service.addToParentMap(childId, parentId),
+			);
+		},
+		sendDualSessionLists: (
+			send: (
+				msg: Extract<
+					import("../shared-types.js").RelayMessage,
+					{ type: "session_list" }
+				>,
+			) => void,
+			options?: {
+				statuses?:
+					| Record<string, import("../instance/sdk-types.js").SessionStatus>
+					| undefined;
+			},
+		): Promise<void> =>
+			runSessionServicePromise((service) =>
+				service.sendDualSessionLists(send, options),
+			),
+		setPendingQuestionCounts: (counts: ReadonlyMap<string, number>): void => {
+			runSessionServiceSync((service) =>
+				service.setPendingQuestionCounts(counts),
+			);
+		},
+		getSessionParentMap: (): Map<string, string> =>
+			runSessionServiceSync((service) => service.getSessionParentMap()),
+		initialize: (title?: string): Promise<string> =>
+			runSessionServicePromise((service) => service.initialize(title)),
+		getLastKnownSessionCount: (): number =>
+			runSessionServiceSync((service) => service.getLastKnownSessionCount()),
+		getDefaultSessionId: (title?: string): Promise<string> =>
+			runSessionServicePromise((service) => service.getDefaultSessionId(title)),
+	};
 
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
@@ -537,7 +597,7 @@ export async function createProjectRelay(
 				? readSessionStatusesFromEffect
 				: Effect.tryPromise(() => api.session.statuses()),
 		getSessionParentMap: (): Map<string, string> =>
-			sessionMgr.getSessionParentMap(),
+			sessionServiceBridge.getSessionParentMap(),
 		resolveParent: (sessionId: string) =>
 			Effect.tryPromise(async () => {
 				const session = await api.session.get(sessionId);
@@ -636,12 +696,6 @@ export async function createProjectRelay(
 		}
 	}
 
-	// ── Session ─────────────────────────────────────────────────────────────
-
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	const sessionId = await sessionMgr.initialize(config.sessionTitle);
-	log.info(`✓ Using session: ${sessionId}`);
-
 	// ── WebSocket handler ───────────────────────────────────────────────────
 
 	// ws-handler-service effects must remain synchronous for bridge read calls
@@ -657,10 +711,6 @@ export async function createProjectRelay(
 
 	// Late-binding runtime: callbacks fire after full relay initialization, but
 	// registering them here keeps the external WebSocket boundary thin.
-	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
-		RelayRuntimeContext,
-		PersistenceEffectError
-	>;
 	const processingTimeouts = {
 		clearProcessingTimeout: (sessionId: string) => {
 			relayManagedRuntime.runFork(clearProcessingTimeout(sessionId));
@@ -939,7 +989,6 @@ export async function createProjectRelay(
 		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,
 		toolContentServiceLayer,
-		Layer.succeed(SessionManagerTag, sessionMgr),
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		ptyRuntimeLayer,
@@ -1029,7 +1078,7 @@ export async function createProjectRelay(
 	wireSSEConsumer(
 		{
 			translator,
-			sessionMgr,
+			sessionService: sessionServiceBridge,
 			pendingQuestionCounts: {
 				increment: (sessionId) => {
 					relayManagedRuntime.runSync(
@@ -1077,7 +1126,7 @@ export async function createProjectRelay(
 			log: sseLog,
 			pipelineLog,
 			getSessionStatuses: () => statusPoller.getCurrentStatuses(),
-			getSessionParentMap: () => sessionMgr.getSessionParentMap(),
+			getSessionParentMap: () => sessionServiceBridge.getSessionParentMap(),
 			listPendingQuestions: () => api.question.list(),
 			listPendingPermissions: () => api.permission.list(),
 			statusPoller,
@@ -1105,6 +1154,9 @@ export async function createProjectRelay(
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	if (config.signal?.aborted) throw new Error("Relay creation aborted");
+	const sessionId = await sessionServiceBridge.initialize(config.sessionTitle);
+	log.info(`✓ Using session: ${sessionId}`);
 	const orchestration = await relayManagedRuntime.runPromise(
 		Effect.gen(function* () {
 			const orchestrationView = yield* getOrchestrationLayer;
@@ -1135,7 +1187,7 @@ export async function createProjectRelay(
 	} = wireMonitoring({
 		client: api,
 		wsHandler,
-		sessionMgr,
+		sessionService: sessionServiceBridge,
 		processingTimeouts,
 		statusPoller,
 		pollerManager,
@@ -1170,7 +1222,7 @@ export async function createProjectRelay(
 		sseStream,
 		statusPoller,
 		wsHandler,
-		sessionMgr,
+		sessionService: sessionServiceBridge,
 		pipelineDeps,
 		sseTracker: monitoringStateAccess.sseTracker,
 		config: {
@@ -1201,7 +1253,6 @@ export async function createProjectRelay(
 		wsHandler,
 		sseStream,
 		client: api,
-		sessionMgr,
 		translator,
 		orchestration,
 		effectRuntime,
@@ -1211,6 +1262,14 @@ export async function createProjectRelay(
 			return Object.values(statuses).some(
 				(s) => s.type === "busy" || s.type === "retry",
 			);
+		},
+
+		getLastKnownSessionCount() {
+			return sessionServiceBridge.getLastKnownSessionCount();
+		},
+
+		getDefaultSessionId(title?: string) {
+			return sessionServiceBridge.getDefaultSessionId(title);
 		},
 
 		async stop() {
@@ -1458,7 +1517,6 @@ export async function createRelayStack(
 		wsHandler: relay.wsHandler,
 		sseStream: relay.sseStream,
 		client: relay.client,
-		sessionMgr: relay.sessionMgr,
 		translator: relay.translator,
 
 		getPort() {
@@ -1472,6 +1530,10 @@ export async function createRelayStack(
 			const port = typeof addr === "object" && addr ? addr.port : config.port;
 			const protocol = config.tls ? "https" : "http";
 			return `${protocol}://127.0.0.1:${port}`;
+		},
+
+		getDefaultSessionId(title?: string) {
+			return relay.getDefaultSessionId(title);
 		},
 
 		async stop() {
