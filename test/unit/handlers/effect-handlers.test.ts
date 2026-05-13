@@ -45,7 +45,10 @@ import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
 } from "../../../src/lib/effect/terminal-service.js";
-import { ToolContentServiceLive } from "../../../src/lib/effect/tool-content-service.js";
+import {
+	ToolContentServiceLive,
+	ToolContentServiceNoop,
+} from "../../../src/lib/effect/tool-content-service.js";
 import {
 	filterAgents,
 	handleGetAgents,
@@ -1337,19 +1340,25 @@ function makeSessionLifecycleLayer(options?: {
 
 describe("handleGetToolContent", () => {
 	it.effect(
-		"returns tool content when readQuery is available and content exists",
+		"returns tool content when Effect read query is available and content exists",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => "full tool output text"),
-			} as unknown as import("../../../src/lib/persistence/read-query-service.js").ReadQueryService;
+				getToolContent: vi.fn(() => Effect.succeed("full tool output text")),
+				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+			} satisfies ReadQueryEffect;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(ReadQueryTag, readQuery),
+			const layer = Layer.provideMerge(
 				ToolContentServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(ReadQueryEffectTag, readQuery),
+				),
 			);
 
 			return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
@@ -1372,10 +1381,10 @@ describe("handleGetToolContent", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 
-		// No ReadQueryTag provided — serviceOption returns None
+		// No persistence-backed tool content service provided.
 		const layer = Layer.merge(
 			Layer.succeed(WebSocketHandlerTag, ws),
-			ToolContentServiceLive,
+			ToolContentServiceNoop,
 		);
 
 		return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(

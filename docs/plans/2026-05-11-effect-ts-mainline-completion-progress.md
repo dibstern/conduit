@@ -2060,6 +2060,73 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.36: Tool Content ReadQuery Bridge Removal
+
+Plan issues found:
+
+- Phase 7.33 moved tool-content reads behind `ToolContentServiceTag`, but the service still silently fell back to
+  legacy `ReadQueryTag` when `ReadQueryEffectTag` was absent.
+- That violated the plan's bridge-deletion rule: once the browser handler consumed the new domain service, the service
+  itself still kept the old synchronous read bridge alive.
+- Production relay wiring already has `persistenceDbPath` for the Effect persistence layer. When no Effect persistence
+  is configured, the long-term behavior is explicit "content unavailable", not a hidden legacy database read.
+
+Changes:
+
+- `src/lib/effect/tool-content-service.ts`: made `ToolContentServiceLive` require `ReadQueryEffectTag` and read only
+  through the Effect read model; added `ToolContentServiceNoop` for relays/tests without Effect persistence.
+- `src/lib/relay/relay-stack.ts`: wires one persistence-backed tool-content layer when `persistenceDbPath` exists, or
+  the no-op service otherwise. This keeps the persistence layer as the single owner of Effect read services.
+- `test/helpers/mock-factories.ts` and handler tests now use `ToolContentServiceNoop` unless they explicitly provide
+  an Effect read query/persistence layer.
+- Added a guard for the risky mixed environment: when both `ReadQueryEffectTag` and legacy `ReadQueryTag` are provided,
+  tool content is served from the Effect read query and the legacy reader is not called.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts -t "legacy read query"
+Exit: 1
+Expected failure:
+  Cannot read properties of undefined (reading '_op_layer')
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/tool-content-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/relay/ws-message-dispatch-effect.test.ts \
+  test/unit/mock-factories.test.ts \
+  test/unit/handlers/session-service-effect.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  99 passed (99)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 988 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  371 passed (371)
+Tests  5235 passed | 2 skipped | 12 todo (5249)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.35: Prompt Prior History Effect Read Contract
 
 Plan issues found:

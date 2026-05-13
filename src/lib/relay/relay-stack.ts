@@ -76,7 +76,10 @@ import {
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
 } from "../effect/terminal-service.js";
-import { ToolContentServiceLive } from "../effect/tool-content-service.js";
+import {
+	ToolContentServiceLive,
+	ToolContentServiceNoop,
+} from "../effect/tool-content-service.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { GapEndpoints } from "../instance/gap-endpoints.js";
@@ -907,7 +910,14 @@ export async function createProjectRelay(
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
-	const toolContentServiceLayer = ToolContentServiceLive;
+	const persistenceEffectLayer =
+		config.persistenceDbPath != null
+			? makePersistenceEffectLayer(config.persistenceDbPath)
+			: undefined;
+	const toolContentServiceLayer =
+		persistenceEffectLayer != null
+			? ToolContentServiceLive.pipe(Layer.provideMerge(persistenceEffectLayer))
+			: ToolContentServiceNoop;
 
 	const coreBridgeLayers = Layer.mergeAll(
 		openCodeApiLayer,
@@ -934,8 +944,9 @@ export async function createProjectRelay(
 	);
 
 	// Optional bridge layers (only included when deps are present)
-	// biome-ignore lint/suspicious/noExplicitAny: Layer generics complex; callers infer correctly
-	let bridgeLayers: Layer.Layer<any, never, never> = coreBridgeLayers;
+	// biome-ignore lint/suspicious/noExplicitAny: Layer output union is broad; callers infer correctly.
+	let bridgeLayers: Layer.Layer<any, PersistenceEffectError, never> =
+		coreBridgeLayers;
 	if (readQuery != null) {
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
@@ -964,11 +975,6 @@ export async function createProjectRelay(
 			Layer.merge(instanceMgmtLayer, instanceManagementServiceLayer),
 		);
 	}
-	const persistenceEffectLayer =
-		config.persistenceDbPath != null
-			? makePersistenceEffectLayer(config.persistenceDbPath)
-			: undefined;
-
 	// Compose: self-constructing state layers + imperative bridge layers.
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionEventBridgeLive, SessionLifecycleWiringLive) are added after
@@ -978,10 +984,7 @@ export async function createProjectRelay(
 		AgentServiceLive,
 		relayStateAndBridges,
 	);
-	const baseLayers =
-		persistenceEffectLayer != null
-			? Layer.merge(relayStateServicesAndBridges, persistenceEffectLayer)
-			: relayStateServicesAndBridges;
+	const baseLayers = relayStateServicesAndBridges;
 
 	const effectRuntime: RelayRuntime = {
 		get runtime() {
