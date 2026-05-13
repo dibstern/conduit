@@ -240,12 +240,12 @@ describe("makeDaemonLive wiring", () => {
 			Effect.gen(function* () {
 				const auth = yield* AuthManagerTag;
 				// Initially no pin (options didn't set one)
-				expect(auth.hasPin()).toBe(false);
+				expect(yield* auth.hasPin()).toBe(false);
 
 				// Update DaemonConfigRef — AuthManager should see it reactively
 				const configRef = yield* DaemonConfigRefTag;
 				yield* Ref.update(configRef, (c) => ({ ...c, pinHash: "test-hash" }));
-				expect(auth.hasPin()).toBe(true);
+				expect(yield* auth.hasPin()).toBe(true);
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
@@ -609,18 +609,18 @@ describe("makeDaemonLive wiring", () => {
 				const configRef = yield* DaemonConfigRefTag;
 
 				// Start: no pin
-				expect(auth.hasPin()).toBe(false);
+				expect(yield* auth.hasPin()).toBe(false);
 
 				// Simulate IPC setPinHash → updates DaemonConfigRef
 				yield* Ref.update(configRef, (c) => ({ ...c, pinHash: "abc123" }));
 
 				// AuthManager reads reactively
-				expect(auth.hasPin()).toBe(true);
-				expect(auth.getPinHash()).toBe("abc123");
+				expect(yield* auth.hasPin()).toBe(true);
+				expect(yield* auth.getPinHash()).toBe("abc123");
 
 				// Clear pin
 				yield* Ref.update(configRef, (c) => ({ ...c, pinHash: null }));
-				expect(auth.hasPin()).toBe(false);
+				expect(yield* auth.hasPin()).toBe(false);
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 

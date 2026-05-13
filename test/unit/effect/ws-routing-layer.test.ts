@@ -4,7 +4,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Ref, Scope } from "effect";
 import { expect, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
@@ -82,8 +82,7 @@ const makeLayer = (
 			}),
 		),
 		Layer.provide(
-			Layer.succeed(
-				AuthManagerTag,
+			makeAuthManagerLive(
 				options?.auth ?? new AuthManager({ getPinHash: () => null }),
 			),
 		),

@@ -138,7 +138,7 @@ export class AuthManager {
 	}
 
 	/** Set a pre-hashed PIN directly (e.g. loaded from config). No re-hashing. */
-	setPinHash(hash: string): void {
+	setPinHash(hash: string | null): void {
 		this.pin = hash;
 	}
 

@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
 import {
 	DaemonConfigRefLive,
@@ -59,8 +59,7 @@ const configRefLayer = DaemonConfigRefLive(
 	makeDaemonConfigFromOptions({ port: 2633 }),
 );
 
-const authLayer = Layer.succeed(
-	AuthManagerTag,
+const authLayer = makeAuthManagerLive(
 	new AuthManager({ getPinHash: () => null }),
 );
 const wsRelayRouterLayer = Layer.succeed(WebSocketRelayRouterTag, {

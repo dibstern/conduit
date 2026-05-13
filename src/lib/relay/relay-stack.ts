@@ -30,7 +30,7 @@ import {
 	handleClientConnected,
 } from "../bridges/client-init.js";
 import { AgentServiceLive, AgentServiceTag } from "../effect/agent-service.js";
-import { AuthManagerTag } from "../effect/auth-middleware.js";
+import { makeAuthManagerLive } from "../effect/auth-middleware.js";
 import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
 import { InstanceManagementServiceLive } from "../effect/instance-management-service.js";
 import {
@@ -291,7 +291,7 @@ export class EffectRelayServer {
 
 		// biome-ignore lint/suspicious/noExplicitAny: optional standalone providers are merged conditionally.
 		let routerLayer: Layer.Layer<any, never, never> = Layer.mergeAll(
-			Layer.succeed(AuthManagerTag, this.auth),
+			makeAuthManagerLive(this.auth),
 			Layer.succeed(StaticDirTag, this.staticDir),
 			Layer.succeed(ProjectsProvider, { getProjects }),
 			Layer.succeed(RemoveProjectProvider, {

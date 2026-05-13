@@ -2302,6 +2302,70 @@ Exit: 0
 Checked 992 files in 366ms. No fixes applied.
 ```
 
+## Phase 3.42: Effect-Native Auth Service Boundary
+
+Plan issues found:
+
+- The Phase 9 audit was correct that `AuthManagerFromConfigLive` hid an `Effect.runSync(Ref.get(...))` bridge behind
+  synchronous `AuthManager` methods. That made auth look reactive while still reading Effect state through a sync
+  escape hatch.
+- While pinning the behavior, the Effect IPC `set_pin` handler was found to hash PINs with raw SHA-256, while
+  `AuthManager`, CLI setup, and the legacy daemon IPC handler use the canonical `hashPin(...)` prefix. A PIN set
+  through the Effect IPC handler would not authenticate against `AuthManager`.
+
+Changes:
+
+- `src/lib/effect/auth-middleware.ts`: changed `AuthManagerTag` to provide an Effect-native auth service. HTTP auth
+  handlers now yield service methods instead of calling synchronous methods over Effect state.
+- `src/lib/effect/ws-routing-layer.ts`: made upgrade authentication yield the Effect auth service before relay startup.
+- `src/lib/effect/ipc-handlers.ts`: uses the canonical `hashPin(...)` implementation for `set_pin`.
+- `src/lib/auth.ts`: lets `setPinHash(null)` clear the internal hash so the Effect service can mirror
+  `DaemonConfigRef.pinHash` without a reactive getter.
+- Updated layer wiring/tests to provide `makeAuthManagerLive(...)` instead of injecting a raw `AuthManager` as an
+  Effect service.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/daemon/ipc-handlers.test.ts --testNamePattern "updates pinHash"
+Exit: 1
+Expected failure:
+  expected raw SHA-256("1234") to be hashPin("1234")
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/daemon/ipc-handlers.test.ts --testNamePattern "updates pinHash"
+Exit: 0
+Tests  1 passed | 21 skipped (22)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/auth-manager-layer.test.ts test/unit/server/auth-middleware.test.ts test/unit/effect/ws-routing-layer.test.ts test/unit/effect/layer-wiring.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  45 passed (45)
+```
+
+```text
+$ pnpm vitest run test/unit/server/effect-http-router.test.ts test/unit/server/effect-http-router-production.test.ts test/unit/server/http-server-layer.test.ts test/unit/effect/scoped-fiber-layers.test.ts test/unit/daemon/ipc-handlers.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  77 passed (77)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 992 files in 221ms. No fixes applied.
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

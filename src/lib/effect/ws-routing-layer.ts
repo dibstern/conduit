@@ -4,9 +4,8 @@
 import type http from "node:http";
 import type net from "node:net";
 import { Context, Data, Effect, Layer, Ref, Runtime } from "effect";
-import type { AuthManager } from "../auth.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
-import { AuthManagerTag } from "./auth-middleware.js";
+import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { HttpServerRefTag } from "./relay-factory-layer.js";
 
@@ -77,19 +76,25 @@ const formatCause = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
 
 const authenticateUpgrade = (
-	auth: AuthManager,
+	auth: AuthManagerService,
 	req: http.IncomingMessage,
-): boolean => {
-	const cookies = parseCookies(req.headers.cookie ?? "");
-	const sessionCookie = cookies["relay_session"] ?? "";
-	const pinHeader = req.headers["x-relay-pin"];
-	return (
-		!auth.hasPin() ||
-		auth.validateCookie(sessionCookie) ||
-		(typeof pinHeader === "string" &&
-			auth.authenticate(pinHeader, getClientIp(req)).ok)
-	);
-};
+): Effect.Effect<boolean> =>
+	Effect.gen(function* () {
+		const hasPin = yield* auth.hasPin();
+		if (!hasPin) return true;
+
+		const cookies = parseCookies(req.headers.cookie ?? "");
+		const sessionCookie = cookies["relay_session"] ?? "";
+		if (sessionCookie && (yield* auth.validateCookie(sessionCookie))) {
+			return true;
+		}
+
+		const pinHeader = req.headers["x-relay-pin"];
+		if (typeof pinHeader !== "string") return false;
+
+		const result = yield* auth.authenticate(pinHeader, getClientIp(req));
+		return result.ok;
+	});
 
 const handleFailure = (error: WebSocketUpgradeError, socket: net.Socket) =>
 	Effect.gen(function* () {
@@ -168,7 +173,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 					});
 				}
 
-				if (!authenticateUpgrade(auth, req)) {
+				if (!(yield* authenticateUpgrade(auth, req))) {
 					return yield* new WebSocketUpgradeError({
 						reason: "auth_failed",
 						slug,

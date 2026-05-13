@@ -6,6 +6,7 @@ import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
+import { hashPin } from "../../../src/lib/auth.js";
 import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
 import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
 import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
@@ -296,9 +297,7 @@ describe("IPC handlers", () => {
 
 				expect(result.ok).toBe(true);
 				const state = yield* Ref.get(ref);
-				expect(state.pinHash).not.toBeNull();
-				expect(state.pinHash).not.toBe("1234"); // Should be hashed
-				expect(state.pinHash?.length).toBe(64); // SHA-256 hex length
+				expect(state.pinHash).toBe(hashPin("1234"));
 
 				// AP-24: Verify DaemonConfigRef was also updated
 				const configRef = yield* DaemonConfigRefTag;

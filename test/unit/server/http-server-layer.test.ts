@@ -28,7 +28,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
 import {
 	HttpServerConfigTag,
 	HttpServerLive,
@@ -114,7 +114,7 @@ beforeAll(async () => {
 
 const baseRouterLayer = () =>
 	Layer.mergeAll(
-		Layer.succeed(AuthManagerTag, new AuthManager()),
+		makeAuthManagerLive(new AuthManager()),
 		Layer.succeed(StaticDirTag, staticDir),
 		NodeFileSystem.layer,
 		NodePath.layer,

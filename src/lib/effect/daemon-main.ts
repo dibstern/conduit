@@ -301,7 +301,7 @@ import { loadThemeFiles } from "../server/theme-loader.js";
 import type { OpenCodeInstance, StoredProject } from "../types.js";
 import { generateSlug } from "../utils.js";
 import { getVersion } from "../version.js";
-import { AuthManagerTag } from "./auth-middleware.js";
+import { makeAuthManagerLive } from "./auth-middleware.js";
 import { StaticDirTag } from "./static-file-handler.js";
 import { WebSocketUpgradeError } from "./ws-routing-layer.js";
 
@@ -1324,7 +1324,7 @@ export async function startDaemonProcess(
 
 	// biome-ignore lint/suspicious/noExplicitAny: optional daemon providers are merged conditionally.
 	let routerLayer: Layer.Layer<any, never, never> = Layer.mergeAll(
-		Layer.succeed(AuthManagerTag, auth),
+		makeAuthManagerLive(auth),
 		Layer.succeed(StaticDirTag, staticDir),
 		Layer.succeed(ProjectsProvider, { getProjects: getRouterProjects }),
 		Layer.succeed(RemoveProjectProvider, {

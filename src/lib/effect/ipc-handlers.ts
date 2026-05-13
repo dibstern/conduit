@@ -5,9 +5,9 @@
 // 3. Returns an IPCResponse-compatible object
 // 4. Error channel is `never` (handlers catch/transform expected errors)
 
-import { createHash } from "node:crypto";
 import type { FileSystem } from "@effect/platform";
 import { Deferred, Effect, Ref, type Schema } from "effect";
+import { hashPin } from "../auth.js";
 import type { IPCCommandSchema } from "../daemon/ipc-protocol.js";
 import type { IPCResponse } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -37,10 +37,6 @@ type CmdOf<C extends string> = Extract<DecodedCommand, { cmd: C }>;
 type PersistDeps = DaemonStateTag | FileSystem.FileSystem | PersistencePathTag;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Hash a PIN using SHA-256 */
-const hashPin = (pin: string): string =>
-	createHash("sha256").update(pin).digest("hex");
 
 const applyRestartConfig = (
 	state: import("./daemon-state.js").DaemonState,
