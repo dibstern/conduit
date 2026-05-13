@@ -2060,6 +2060,100 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 8.1: Frontend Transport Protocol Boundary
+
+Plan issues found:
+
+- The existing frontend boundary treated unknown future message types and malformed known protocol messages the same
+  way: both passed through. That preserved forward compatibility, but it also let bad known daemon payloads enter
+  application dispatch without any debug signal.
+- Reconnect already closed the old socket, but it did not explicitly interrupt the old Effect stream before the new
+  stream was started. Because runtime lookup is async, a stale stream fiber could still register itself after a newer
+  `connect()` call unless registration is generation-guarded.
+- The plan's `pnpm test:e2e -- --grep "websocket"` command is not valid with the current `pnpm` script shape: the
+  extra `--` reaches Playwright as a file matcher and causes `No tests found`. Running Playwright directly with
+  `--grep "websocket"` selects the intended connection overlay test.
+- Send queue drain behavior did not need a transport rewrite. Existing store coverage already pins the current
+  latest-wins chat queue semantics and remained green after the reconnect changes.
+
+Changes:
+
+- `src/lib/shared-types.ts`: added `RELAY_MESSAGE_TYPES` and `KNOWN_RELAY_MESSAGE_TYPES`, with a compile-time
+  exactness check against `RelayMessage["type"]` so the known-message list cannot drift from the existing relay union.
+- `src/lib/frontend/effect-boundary.ts`: added `ProtocolDecodeError`; unknown future message types still pass through,
+  while malformed known message types reject at the schema boundary.
+- `src/lib/frontend/transport/runtime.ts`: changed WebSocket streams to surface `WsProtocolError` callbacks for invalid
+  JSON and invalid known messages, fail socket errors with typed `TransportSocketError`, and clear/interrupt active
+  stream fibers explicitly.
+- `src/lib/frontend/stores/ws.svelte.ts`: added connection generations around reconnect/disconnect, interrupts the old
+  stream before replacing a socket, ignores stale handlers, and records protocol decode failures in the existing debug
+  event log without dispatching them.
+- `test/unit/frontend/effect-boundary.test.ts`, `test/unit/frontend/runtime-validation.test.ts`, and
+  `test/unit/frontend/ws-reconnect-stream.test.ts`: added behavior coverage for malformed known-message rejection,
+  invalid JSON reporting, typed socket errors, reconnect stream interruption, and debug-surfaced protocol failures.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/frontend/effect-boundary.test.ts test/unit/frontend/runtime-validation.test.ts
+Exit: 1
+Expected failures:
+  malformed known protocol messages resolved instead of rejecting
+  invalid JSON was silently dropped without a protocol error
+  malformed known messages were emitted to downstream dispatch
+```
+
+Verification:
+
+```text
+$ pnpm check:frontend
+Exit: 0
+```
+
+```text
+$ pnpm vitest run test/unit/frontend test/unit/stores
+Exit: 0
+Test Files  82 passed (82)
+Tests  1297 passed (1297)
+```
+
+```text
+$ pnpm test:e2e -- --grep "websocket"
+Exit: 1
+Plan command issue:
+  Playwright received the extra "--" as a file matcher and reported "No tests found" after the frontend build.
+```
+
+```text
+$ pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --grep "websocket"
+Exit: 0
+1 passed: Connection Overlay › overlay hides after WebSocket connects
+```
+
+```text
+$ pnpm exec playwright test --config test/e2e/playwright-replay.config.ts test/e2e/specs/debug-panel.spec.ts --project=desktop
+Exit: 0
+11 passed
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 992 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  376 passed (376)
+Tests  5211 passed | 2 skipped | 12 todo (5225)
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

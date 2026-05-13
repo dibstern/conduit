@@ -83,6 +83,16 @@ describe("Frontend Effect boundary", () => {
 		expect(result).toBe(raw);
 	});
 
+	it("rejects malformed known protocol messages", async () => {
+		const { ProtocolDecodeError, validateIncomingMessage } = await import(
+			"../../../src/lib/frontend/effect-boundary.js"
+		);
+
+		await expect(
+			validateIncomingMessage({ type: "delta" }),
+		).rejects.toBeInstanceOf(ProtocolDecodeError);
+	});
+
 	// ── Decoder caching ────────────────────────────────────────────────────
 	it("caches the decoder across calls", async () => {
 		const { validateIncomingMessage } = await import(
@@ -126,5 +136,14 @@ describe("Frontend Effect boundary", () => {
 		await preloadDecoder();
 		const raw = { type: "future_unknown_type", data: 123 };
 		expect(decodeMessage(raw)).toEqual(raw);
+	});
+
+	it("sync decoder rejects malformed known protocol messages", async () => {
+		const { decodeMessage, ProtocolDecodeError, preloadDecoder } = await import(
+			"../../../src/lib/frontend/effect-boundary.js"
+		);
+		await preloadDecoder();
+
+		expect(() => decodeMessage({ type: "delta" })).toThrow(ProtocolDecodeError);
 	});
 });

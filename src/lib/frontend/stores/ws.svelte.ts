@@ -3,10 +3,12 @@
 // Creates WebSocket synchronously in connect(). The transport module preloads
 // the message decoder; server-side waitForRelay() handles relay readiness.
 
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import {
 	getRuntime,
+	interruptStream,
 	setActiveStreamFiber,
+	type WsProtocolError,
 	wsMessageStream,
 } from "../transport/runtime.js";
 import type { ConnectionStatus } from "../types.js";
@@ -72,6 +74,7 @@ let _ws: WebSocket | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _connectTimeout: ReturnType<typeof setTimeout> | null = null;
 let _reconnectDelay = RECONNECT_BASE_MS;
+let _connectionGeneration = 0;
 
 export const wsState = $state({
 	status: "" as ConnectionStatus,
@@ -148,6 +151,7 @@ function fetchRelayStatus(slug: string): void {
  */
 export function connect(slug?: string): void {
 	_currentSlug = slug;
+	const generation = ++_connectionGeneration;
 
 	// Cancel any pending reconnect or connect timeout
 	if (_reconnectTimer) {
@@ -158,6 +162,8 @@ export function connect(slug?: string): void {
 		clearTimeout(_connectTimeout);
 		_connectTimeout = null;
 	}
+
+	void interruptStream();
 
 	// Close existing socket cleanly — null out _ws first so the
 	// old socket's close handler won't trigger reconnect logic.
@@ -177,7 +183,7 @@ export function connect(slug?: string): void {
 		`slug=${slug ?? "standalone"}, attempt=${wsState.attempts}`,
 	);
 
-	doConnect(slug);
+	doConnect(slug, generation);
 
 	// Non-blocking relay status check for UI enrichment (shows
 	// "Starting relay..." or error details in the ConnectOverlay).
@@ -187,7 +193,7 @@ export function connect(slug?: string): void {
 }
 
 /** Inner function: create the WebSocket and wire up event handlers. */
-function doConnect(slug: string | undefined): void {
+function doConnect(slug: string | undefined, generation: number): void {
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 	const path = slug ? `/p/${slug}/ws` : "/ws";
 	let url = `${protocol}//${window.location.host}${path}`;
@@ -216,7 +222,7 @@ function doConnect(slug: string | undefined): void {
 
 	ws.addEventListener("open", () => {
 		// Guard: only act if this is still the current socket
-		if (_ws !== ws) return;
+		if (_ws !== ws || generation !== _connectionGeneration) return;
 		if (_connectTimeout) {
 			clearTimeout(_connectTimeout);
 			_connectTimeout = null;
@@ -236,7 +242,7 @@ function doConnect(slug: string | undefined): void {
 		// Guard: only act if this is still the current socket.
 		// If connect() was called again, _ws points to the new socket
 		// and we must not null it or start a reconnect timer.
-		if (_ws !== ws) return;
+		if (_ws !== ws || generation !== _connectionGeneration) return;
 
 		if (_connectTimeout) {
 			clearTimeout(_connectTimeout);
@@ -260,7 +266,7 @@ function doConnect(slug: string | undefined): void {
 	ws.addEventListener("error", () => {
 		// Don't set error status here — a close event always follows.
 		// The close handler handles reconnect scheduling.
-		if (_ws !== ws) return;
+		if (_ws !== ws || generation !== _connectionGeneration) return;
 		wsDebugLog("ws:error", wsState.status);
 	});
 
@@ -268,40 +274,56 @@ function doConnect(slug: string | undefined): void {
 	// The stream handles JSON parsing and cleanup. Self-healing and dispatch
 	// happen in the runForEach callback synchronously per message.
 	getRuntime().then((runtime) => {
+		if (_ws !== ws || generation !== _connectionGeneration) return;
 		const fiber = runtime.runFork(
-			Stream.runForEach(wsMessageStream(ws), (msg) =>
-				Effect.sync(() => {
-					if (_ws !== ws) return;
+			Stream.runForEach(
+				wsMessageStream(ws, { onProtocolError: handleProtocolError }),
+				(msg) =>
+					Effect.sync(() => {
+						if (_ws !== ws || generation !== _connectionGeneration) return;
 
-					// Self-healing: if messages arrive but status isn't connected, fix it.
-					if (
-						wsState.status !== "connected" &&
-						wsState.status !== "processing"
-					) {
-						wsDebugLog("self-heal", wsState.status);
-						if (_connectTimeout) {
-							clearTimeout(_connectTimeout);
-							_connectTimeout = null;
+						// Self-healing: if messages arrive but status isn't connected, fix it.
+						if (
+							wsState.status !== "connected" &&
+							wsState.status !== "processing"
+						) {
+							wsDebugLog("self-heal", wsState.status);
+							if (_connectTimeout) {
+								clearTimeout(_connectTimeout);
+								_connectTimeout = null;
+							}
+							setStatus("connected", "Connected");
+							wsState.attempts = 0;
+							wsState.relayStatus = undefined;
+							wsState.relayError = undefined;
+							_reconnectDelay = RECONNECT_BASE_MS;
 						}
-						setStatus("connected", "Connected");
-						wsState.attempts = 0;
-						wsState.relayStatus = undefined;
-						wsState.relayError = undefined;
-						_reconnectDelay = RECONNECT_BASE_MS;
-					}
 
-					wsDebugLogMessage(wsState.status, msg.type, msg);
+						wsDebugLogMessage(wsState.status, msg.type, msg);
 
-					try {
-						handleMessage(msg);
-					} catch (err) {
-						log.warn("Handler error for", msg.type, err);
-					}
-				}),
+						try {
+							handleMessage(msg);
+						} catch (err) {
+							log.warn("Handler error for", msg.type, err);
+						}
+					}),
 			),
 		);
+		if (_ws !== ws || generation !== _connectionGeneration) {
+			runtime.runFork(Fiber.interrupt(fiber));
+			return;
+		}
 		setActiveStreamFiber(fiber);
 	});
+}
+
+function handleProtocolError(error: WsProtocolError): void {
+	const detail =
+		error.kind === "invalid_message" && error.messageType
+			? `${error.kind} type=${error.messageType}`
+			: error.kind;
+	wsDebugLog("protocol:error", wsState.status, detail);
+	log.warn("WebSocket protocol error:", error.detail, error);
 }
 
 /** Schedule a reconnect with increasing backoff (1s -> 1.5s -> 2.25s -> ... -> 10s cap). */
@@ -325,8 +347,10 @@ export function disconnect(): void {
 	wsDebugLog("disconnect", wsState.status);
 	// Clear slug first — prevents any in-flight callbacks from interfering.
 	_currentSlug = undefined;
+	_connectionGeneration++;
 	wsState.relayStatus = undefined;
 	wsState.relayError = undefined;
+	void interruptStream();
 	if (_reconnectTimer) {
 		clearTimeout(_reconnectTimer);
 		_reconnectTimer = null;
