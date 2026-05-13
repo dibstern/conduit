@@ -87,6 +87,15 @@ describe("Static file handler", () => {
 			),
 		);
 
+		it.effect("returns bad request for malformed URI encoding", () =>
+			withTempStaticDir(() =>
+				Effect.gen(function* () {
+					const response = yield* serveStaticFile("/%E0%A4%A");
+					expect(response.status).toBe(400);
+				}),
+			),
+		);
+
 		it.effect("serves directory index without recursive self-call", () =>
 			withTempStaticDir(() =>
 				Effect.gen(function* () {

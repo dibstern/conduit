@@ -2252,6 +2252,56 @@ Documentation changes:
 - `docs/agent-guide/testing.md`: fixed E2E argument examples and documented that live OpenCode tests use dynamic
   instance URLs, not an assumed `localhost:4096`.
 
+## Phase 3.41: Static Route Decode Error Boundary
+
+Plan issues found:
+
+- The Phase 9 audit found an unwrapped `decodeURIComponent(...)` in the Effect static file handler. Malformed URI
+  encoding threw a `URIError` inside the Effect route program instead of returning a typed route response.
+- This belongs with reopened Phase 3 routing/static ownership, not Phase 9. It is small enough to fix independently
+  before the larger auth/router bridge work.
+
+Changes:
+
+- `src/lib/effect/static-file-handler.ts`: added `InvalidStaticPathEncoding` as a typed decode boundary and maps it to
+  a normal `400 Bad Request` response.
+- `test/unit/server/static-file-handler.test.ts`: added behavior coverage for malformed URI encoding.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/server/static-file-handler.test.ts --testNamePattern "malformed URI"
+Exit: 1
+Expected failure:
+  URIError: URI malformed
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/server/static-file-handler.test.ts --testNamePattern "malformed URI"
+Exit: 0
+Tests  1 passed | 8 skipped (9)
+```
+
+```text
+$ pnpm vitest run test/unit/server/static-file-handler.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  9 passed (9)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 992 files in 366ms. No fixes applied.
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

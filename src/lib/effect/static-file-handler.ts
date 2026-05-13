@@ -1,5 +1,5 @@
 import { FileSystem, HttpServerResponse, Path } from "@effect/platform";
-import { Context, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 
 export const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -36,6 +36,21 @@ export const makeStaticDirLive = (
 	staticDir: string,
 ): Layer.Layer<StaticDirTag> => Layer.succeed(StaticDirTag, staticDir);
 
+class InvalidStaticPathEncoding extends Data.TaggedError(
+	"InvalidStaticPathEncoding",
+)<{
+	readonly requestPath: string;
+	readonly cause: unknown;
+}> {}
+
+const decodeRequestPath = (requestPath: string) =>
+	requestPath === "/" || requestPath === ""
+		? Effect.succeed("index.html")
+		: Effect.try({
+				try: () => decodeURIComponent(requestPath).replace(/^\/+/, ""),
+				catch: (cause) => new InvalidStaticPathEncoding({ requestPath, cause }),
+			});
+
 const isWithinBase = (
 	pathModule: Path.Path,
 	staticDir: string,
@@ -70,10 +85,7 @@ export const serveStaticFile = (requestPath: string) =>
 		const staticDir = yield* StaticDirTag;
 		const fs = yield* FileSystem.FileSystem;
 		const pathModule = yield* Path.Path;
-		const filePath =
-			requestPath === "/" || requestPath === ""
-				? "index.html"
-				: decodeURIComponent(requestPath).replace(/^\/+/, "");
+		const filePath = yield* decodeRequestPath(requestPath);
 
 		const resolved = pathModule.resolve(staticDir, filePath);
 		if (!isWithinBase(pathModule, staticDir, resolved)) {
@@ -112,6 +124,9 @@ export const serveStaticFile = (requestPath: string) =>
 
 		return yield* HttpServerResponse.text("Not Found", { status: 404 });
 	}).pipe(
+		Effect.catchTag("InvalidStaticPathEncoding", () =>
+			HttpServerResponse.text("Bad Request", { status: 400 }),
+		),
 		Effect.catchTag("SystemError", (err) =>
 			HttpServerResponse.text("Internal Server Error", { status: 500 }).pipe(
 				Effect.tap(Effect.logWarning("Static file error", err)),
