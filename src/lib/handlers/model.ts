@@ -6,15 +6,26 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
+import {
+	getContextWindow,
+	getDefaultContextWindow,
+	getDefaultModel,
+	getDefaultVariant,
+	getModel,
+	getVariant,
+	type ModelOverride,
+	setDefaultModel,
+	setDefaultVariant,
+	setModel,
+	setVariant,
+} from "../effect/session-overrides-state.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
 } from "../relay/relay-settings.js";
-import type { ModelOverride } from "../session/session-overrides.js";
 import type { ContextWindowOption } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 
@@ -60,7 +71,6 @@ export const handleGetModels = (
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 
 		const providerResult = yield* modelService.listProviders();
@@ -161,8 +171,8 @@ export const handleGetModels = (
 		}
 		if (!sentModelInfo) {
 			const fallbackModel = activeId
-				? overrides.getModel(activeId)
-				: overrides.defaultModel;
+				? yield* getModel(activeId)
+				: yield* getDefaultModel();
 			if (fallbackModel) {
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
@@ -174,11 +184,14 @@ export const handleGetModels = (
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant = activeId
-			? overrides.getVariant(activeId)
-			: overrides.defaultVariant;
+			? yield* getVariant(activeId)
+			: yield* getDefaultVariant();
+		const activeModelOverride = activeId
+			? yield* getModel(activeId)
+			: yield* getDefaultModel();
 		const activeModelForVariant = activeId
-			? (overrides.getModel(activeId) ?? sessionModel)
-			: overrides.defaultModel;
+			? (activeModelOverride ?? sessionModel)
+			: activeModelOverride;
 		let variantList: string[] = [];
 		if (activeModelForVariant) {
 			for (const p of providers) {
@@ -199,8 +212,8 @@ export const handleGetModels = (
 		wsHandler.sendTo(clientId, {
 			type: "context_window_info",
 			contextWindow: activeId
-				? overrides.getContextWindow(activeId)
-				: overrides.defaultContextWindow,
+				? yield* getContextWindow(activeId)
+				: yield* getDefaultContextWindow(),
 			options: findContextWindowOptions(
 				providers,
 				activeModelForVariant?.modelID,
@@ -214,7 +227,6 @@ export const handleSwitchModel = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
@@ -222,7 +234,7 @@ export const handleSwitchModel = (
 		if (modelId && providerId) {
 			const clientSession = wsHandler.getClientSession(clientId);
 			if (clientSession) {
-				overrides.setModel(clientSession, {
+				yield* setModel(clientSession, {
 					providerID: providerId,
 					modelID: modelId,
 				});
@@ -304,7 +316,7 @@ export const handleSwitchModel = (
 					: "";
 
 			if (clientSession) {
-				overrides.setVariant(clientSession, validVariant);
+				yield* setVariant(clientSession, validVariant);
 				wsHandler.sendToSession(clientSession, {
 					type: "variant_info",
 					variant: validVariant,
@@ -327,7 +339,6 @@ export const handleSetDefaultModel = (
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
@@ -336,7 +347,7 @@ export const handleSetDefaultModel = (
 
 		const modelSpec = `${provider}/${model}`;
 		const override = { providerID: provider, modelID: model };
-		overrides.setDefaultModel(override);
+		yield* setDefaultModel(override);
 		saveRelaySettings({ defaultModel: modelSpec }, config.configDir);
 
 		// Also persist to OpenCode's project config
@@ -396,7 +407,7 @@ export const handleSetDefaultModel = (
 			persistedVariant && availableVariants.includes(persistedVariant)
 				? persistedVariant
 				: "";
-		overrides.defaultVariant = validVariant;
+		yield* setDefaultVariant(validVariant);
 		wsHandler.broadcast({
 			type: "variant_info",
 			variant: validVariant,
@@ -410,22 +421,21 @@ export const handleSwitchVariant = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
 		const { variant } = payload;
 		const sessionId = yield* resolveSessionFromContext(clientId);
 		if (sessionId) {
-			overrides.setVariant(sessionId, variant);
+			yield* setVariant(sessionId, variant);
 		} else {
-			overrides.defaultVariant = variant;
+			yield* setDefaultVariant(variant);
 		}
 
 		// Resolve active model
 		const activeModel = sessionId
-			? overrides.getModel(sessionId)
-			: overrides.defaultModel;
+			? yield* getModel(sessionId)
+			: yield* getDefaultModel();
 
 		// Persist variant preference
 		if (activeModel) {

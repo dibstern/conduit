@@ -64,6 +64,16 @@ import {
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
 import {
+	getContextWindow,
+	getDefaultContextWindow,
+	getDefaultModel,
+	getDefaultVariant,
+	getModel,
+	getVariant,
+	setDefaultModel,
+	setDefaultVariant,
+} from "../effect/session-overrides-state.js";
+import {
 	createStatusPollerService,
 	makeDeferredStatusPollerRuntime,
 	type PollDeps,
@@ -519,19 +529,18 @@ export async function createProjectRelay(
 
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
-	const defaultModel = parseDefaultModel(relaySettings.defaultModel);
-	if (defaultModel) {
-		overrides.setDefaultModel(defaultModel);
+	let initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
+	let initialDefaultVariant = "";
+	if (initialDefaultModel) {
 		log.info(`✓ Default model from settings: ${relaySettings.defaultModel}`);
 
 		// Load persisted variant for the default model
 		const modelKey = relaySettings.defaultModel;
-		const defaultVariant = modelKey
+		initialDefaultVariant = modelKey
 			? (relaySettings.defaultVariants?.[modelKey] ?? "")
 			: "";
-		if (defaultVariant) {
-			overrides.defaultVariant = defaultVariant;
-			log.info(`✓ Default variant from settings: ${defaultVariant}`);
+		if (initialDefaultVariant) {
+			log.info(`✓ Default variant from settings: ${initialDefaultVariant}`);
 		}
 	}
 
@@ -692,7 +701,7 @@ export async function createProjectRelay(
 	// relay-persisted default was loaded.  This ensures the UI shows the correct
 	// model (e.g. Opus) on first startup rather than falling back to the
 	// provider-level default (e.g. Sonnet).
-	if (!overrides.defaultModel) {
+	if (!initialDefaultModel) {
 		try {
 			if (config.signal?.aborted) throw new Error("Relay creation aborted");
 			const ocConfig = await api.config.get();
@@ -704,10 +713,10 @@ export async function createProjectRelay(
 				const modelId =
 					slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
 				if (provider && modelId) {
-					overrides.setDefaultModel({
+					initialDefaultModel = {
 						providerID: provider,
 						modelID: modelId,
-					});
+					};
 					log.info(`✓ Default model from project config: ${configModel}`);
 				}
 			}
@@ -771,6 +780,21 @@ export async function createProjectRelay(
 		wsHandler,
 		client: api,
 		sessionMgr,
+		overrideState: {
+			getModel: (sessionId) =>
+				relayManagedRuntime.runPromise(getModel(sessionId)),
+			getDefaultModel: () => relayManagedRuntime.runPromise(getDefaultModel()),
+			getVariant: (sessionId) =>
+				relayManagedRuntime.runPromise(getVariant(sessionId)),
+			getDefaultVariant: () =>
+				relayManagedRuntime.runPromise(getDefaultVariant()),
+			getContextWindow: (sessionId) =>
+				relayManagedRuntime.runPromise(getContextWindow(sessionId)),
+			getDefaultContextWindow: () =>
+				relayManagedRuntime.runPromise(getDefaultContextWindow()),
+			setDefaultModel: (model) =>
+				relayManagedRuntime.runPromise(setDefaultModel(model)),
+		},
 		overrides,
 		terminal: {
 			replay: (clientId) =>
@@ -1172,6 +1196,12 @@ export async function createProjectRelay(
 		Effect.gen(function* () {
 			yield* PollerStateTag;
 			yield* PollerPubSubTag;
+			if (initialDefaultModel) {
+				yield* setDefaultModel(initialDefaultModel);
+			}
+			if (initialDefaultVariant) {
+				yield* setDefaultVariant(initialDefaultVariant);
+			}
 		}),
 	);
 	statusPollerRuntime.attach(relayManagedRuntime);

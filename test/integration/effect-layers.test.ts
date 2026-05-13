@@ -189,6 +189,7 @@ const ipcDepsLayer = Layer.mergeAll(
 		persistConfig: () => {},
 	}),
 	Layer.succeed(SessionOverridesTag, new SessionOverrides()),
+	makeOverridesStateLive(),
 	makeMockKeepAwake(),
 	makeMockConfigRef(),
 	makeMockShutdownSignal(),

@@ -17,6 +17,7 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
+import { makeOverridesStateLive } from "../../../src/lib/effect/session-overrides-state.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -102,6 +103,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				makePersistenceEffectLayer(filename),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -191,6 +193,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
 			makePersistenceEffectLayer(filename),
+			makeOverridesStateLive(),
 		);
 
 		return Effect.gen(function* () {
@@ -292,6 +295,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
 			makePersistenceEffectLayer(filename),
+			makeOverridesStateLive(),
 		);
 
 		return Effect.gen(function* () {
@@ -397,6 +401,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				makePersistenceEffectLayer(filename),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {

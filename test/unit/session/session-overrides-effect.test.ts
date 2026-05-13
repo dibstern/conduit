@@ -11,8 +11,10 @@ import {
 	clearSession,
 	getAgent,
 	getContextWindow,
+	getDefaultAgent,
 	getDefaultContextWindow,
 	getDefaultModel,
+	getDefaultVariant,
 	getModel,
 	getVariant,
 	hasActiveProcessingTimeout,
@@ -22,6 +24,7 @@ import {
 	resetProcessingTimeout,
 	setAgent,
 	setContextWindow,
+	setDefaultAgent,
 	setDefaultContextWindow,
 	setDefaultModel,
 	setDefaultVariant,
@@ -147,6 +150,25 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
+	it.effect("getAgent falls back to the default agent", () =>
+		Effect.gen(function* () {
+			yield* setDefaultAgent("plan");
+
+			expect(yield* getDefaultAgent()).toBe("plan");
+			expect(yield* getAgent("sess-1")).toBe("plan");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("per-session agent overrides the default agent", () =>
+		Effect.gen(function* () {
+			yield* setDefaultAgent("plan");
+			yield* setAgent("sess-1", "build");
+
+			expect(yield* getAgent("sess-1")).toBe("build");
+			expect(yield* getAgent("sess-2")).toBe("plan");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
 	it.effect("clearAgent removes agent without clearing other overrides", () =>
 		Effect.gen(function* () {
 			yield* setAgent("sess-1", "plan");
@@ -223,22 +245,27 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.effect("default getters expose global model and context window", () =>
-		Effect.gen(function* () {
-			yield* setDefaultModel({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-7",
-			});
-			yield* setDefaultContextWindow("1m");
+	it.effect(
+		"default getters expose global model, variant, and context window",
+		() =>
+			Effect.gen(function* () {
+				yield* setDefaultModel({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				yield* setDefaultVariant("high");
+				yield* setDefaultContextWindow("1m");
 
-			const defaultModel = yield* getDefaultModel();
-			const defaultContextWindow = yield* getDefaultContextWindow();
-			expect(defaultModel).toEqual({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-7",
-			});
-			expect(defaultContextWindow).toBe("1m");
-		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+				const defaultModel = yield* getDefaultModel();
+				const defaultVariant = yield* getDefaultVariant();
+				const defaultContextWindow = yield* getDefaultContextWindow();
+				expect(defaultModel).toEqual({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				expect(defaultVariant).toBe("high");
+				expect(defaultContextWindow).toBe("1m");
+			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect("setting empty string clears context window", () =>

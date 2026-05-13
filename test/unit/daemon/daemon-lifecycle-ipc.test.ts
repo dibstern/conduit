@@ -149,6 +149,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
 			getInstances: () => Array.from(instances.values()),
 			getInstance: (id) => instances.get(id),
 			addInstance: (id, config) => {
@@ -195,6 +197,122 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		}
 	});
 
+	it("routes tagged SetModel through the project override port", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
+		const ctx = makeContext(join(tmp, "daemon.sock"));
+		const setProjectModel = vi.fn(async () => {});
+
+		const ipcContext: DaemonIPCContext = {
+			addProject: async (directory) => ({
+				slug: "project",
+				directory,
+				title: "Project",
+			}),
+			removeProject: async () => {},
+			getProjects: () => [],
+			setProjectTitle: () => {},
+			getPinHash: () => null,
+			setPinHash: () => {},
+			getKeepAwake: () => false,
+			setKeepAwake: () => ({ supported: true, active: false }),
+			setKeepAwakeCommand: () => {},
+			persistConfig: () => {},
+			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel,
+			getInstances: () => [],
+			getInstance: () => undefined,
+			addInstance: (id, config) => makeInstance(id, config),
+			removeInstance: () => {},
+			startInstance: async () => {},
+			stopInstance: () => {},
+			updateInstance: (id, updates) =>
+				makeInstance(id, {
+					name: updates.name ?? id,
+					port: updates.port ?? 0,
+					managed: true,
+					...(updates.env !== undefined ? { env: updates.env } : {}),
+				}),
+		};
+
+		try {
+			await startIPCServer(ctx, ipcContext, makeStatus);
+			const response = await sendJsonLine(ctx.socketPath, {
+				_tag: "SetModel",
+				slug: "project-a",
+				provider: "anthropic",
+				model: "claude-opus-4-1",
+			});
+
+			expect(response).toEqual({ ok: true });
+			expect(setProjectModel).toHaveBeenCalledWith("project-a", {
+				providerID: "anthropic",
+				modelID: "claude-opus-4-1",
+			});
+		} finally {
+			await closeIPCServer(ctx);
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
+	it("routes legacy set_agent through the project override port", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
+		const ctx = makeContext(join(tmp, "daemon.sock"));
+		const setProjectAgent = vi.fn(async () => {});
+		warnSpy.mockClear();
+
+		const ipcContext: DaemonIPCContext = {
+			addProject: async (directory) => ({
+				slug: "project",
+				directory,
+				title: "Project",
+			}),
+			removeProject: async () => {},
+			getProjects: () => [],
+			setProjectTitle: () => {},
+			getPinHash: () => null,
+			setPinHash: () => {},
+			getKeepAwake: () => false,
+			setKeepAwake: () => ({ supported: true, active: false }),
+			setKeepAwakeCommand: () => {},
+			persistConfig: () => {},
+			scheduleShutdown: () => {},
+			setProjectAgent,
+			setProjectModel: async () => {},
+			getInstances: () => [],
+			getInstance: () => undefined,
+			addInstance: (id, config) => makeInstance(id, config),
+			removeInstance: () => {},
+			startInstance: async () => {},
+			stopInstance: () => {},
+			updateInstance: (id, updates) =>
+				makeInstance(id, {
+					name: updates.name ?? id,
+					port: updates.port ?? 0,
+					managed: true,
+					...(updates.env !== undefined ? { env: updates.env } : {}),
+				}),
+		};
+
+		try {
+			await startIPCServer(ctx, ipcContext, makeStatus);
+			const response = await sendJsonLine(ctx.socketPath, {
+				cmd: "set_agent",
+				slug: "project-a",
+				agent: "plan",
+			});
+
+			expect(response).toEqual({ ok: true });
+			expect(setProjectAgent).toHaveBeenCalledWith("project-a", "plan");
+			expect(warnSpy).toHaveBeenCalledWith(
+				"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
+			);
+		} finally {
+			await closeIPCServer(ctx);
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps legacy cmd fallback with deprecation warning", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
@@ -216,6 +334,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
 			getInstances: () => [],
 			getInstance: () => undefined,
 			addInstance: (id, config) => makeInstance(id, config),
@@ -276,6 +396,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			persistConfig,
 			scheduleShutdown,
 			applyConfig,
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
 			getInstances: () => [],
 			getInstance: () => undefined,
 			addInstance: (id, config) => makeInstance(id, config),
@@ -328,6 +450,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
 			getInstances: () => [],
 			getInstance: () => undefined,
 			addInstance: (id, config) => makeInstance(id, config),
@@ -407,6 +531,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
 			getInstances: () => [],
 			getInstance: () => undefined,
 			addInstance,

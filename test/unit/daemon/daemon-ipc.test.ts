@@ -56,6 +56,8 @@ function makeContext(
 		startInstance: vi.fn(),
 		stopInstance: vi.fn(),
 		updateInstance: vi.fn(),
+		setProjectAgent: vi.fn().mockResolvedValue(undefined),
+		setProjectModel: vi.fn().mockResolvedValue(undefined),
 		...overrides,
 	};
 
@@ -305,6 +307,49 @@ describe("buildIPCHandlers", () => {
 
 			expect(result.ok).toBe(false);
 			expect((result as { error: string }).error).toContain("not found");
+		});
+	});
+
+	describe("project overrides", () => {
+		it("delegates setAgent to the project override port", async () => {
+			const ctx = makeContext();
+			const handlers = makeHandlers(ctx);
+
+			const result = await handlers.setAgent("project-a", "plan");
+
+			expect(result).toEqual({ ok: true });
+			expect(ctx.setProjectAgent).toHaveBeenCalledWith("project-a", "plan");
+		});
+
+		it("delegates setModel to the project override port", async () => {
+			const ctx = makeContext();
+			const handlers = makeHandlers(ctx);
+
+			const result = await handlers.setModel(
+				"project-a",
+				"anthropic",
+				"claude-opus-4-1",
+			);
+
+			expect(result).toEqual({ ok: true });
+			expect(ctx.setProjectModel).toHaveBeenCalledWith("project-a", {
+				providerID: "anthropic",
+				modelID: "claude-opus-4-1",
+			});
+		});
+
+		it("returns ok:false when project override updates fail", async () => {
+			const ctx = makeContext({
+				setProjectModel: vi
+					.fn()
+					.mockRejectedValue(new Error('Project "missing" not ready')),
+			});
+			const handlers = makeHandlers(ctx);
+
+			const result = await handlers.setModel("missing", "anthropic", "sonnet");
+
+			expect(result.ok).toBe(false);
+			expect((result as { error: string }).error).toContain("not ready");
 		});
 	});
 });

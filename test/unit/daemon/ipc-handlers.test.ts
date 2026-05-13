@@ -41,6 +41,11 @@ import {
 	ProjectMgmtTag,
 	SessionOverridesTag,
 } from "../../../src/lib/effect/services.js";
+import {
+	getAgent,
+	getModel,
+	makeOverridesStateLive,
+} from "../../../src/lib/effect/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 
@@ -183,6 +188,7 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 		makeMockProjectMgmt(),
 		makeMockInstanceMgmt(),
 		makeMockSessionOverrides(),
+		makeOverridesStateLive(),
 		makeMockKeepAwake(),
 		makeMockConfigRef(),
 		makeMockShutdownSignal(),
@@ -461,7 +467,7 @@ describe("IPC handlers", () => {
 	// ── handleSetAgent ───────────────────────────────────────────────────
 
 	describe("handleSetAgent", () => {
-		it.effect("sets agent via SessionOverrides using slug", () =>
+		it.effect("sets agent via Effect override state using slug", () =>
 			Effect.gen(function* () {
 				const overrides = yield* SessionOverridesTag;
 
@@ -472,8 +478,9 @@ describe("IPC handlers", () => {
 				});
 
 				expect(result.ok).toBe(true);
-				// SessionOverrides.setAgent uses slug as the session identifier
-				expect(overrides.getAgent("my-project")).toBe("claude-3");
+				// IPC protocol uses slug as the override-state key.
+				expect(yield* getAgent("my-project")).toBe("claude-3");
+				expect(overrides.getAgent("my-project")).toBeUndefined();
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
@@ -481,7 +488,7 @@ describe("IPC handlers", () => {
 	// ── handleSetModel ───────────────────────────────────────────────────
 
 	describe("handleSetModel", () => {
-		it.effect("sets model via SessionOverrides using slug", () =>
+		it.effect("sets model via Effect override state using slug", () =>
 			Effect.gen(function* () {
 				const overrides = yield* SessionOverridesTag;
 
@@ -493,10 +500,11 @@ describe("IPC handlers", () => {
 				});
 
 				expect(result.ok).toBe(true);
-				const model = overrides.getModel("my-project");
+				const model = yield* getModel("my-project");
 				expect(model).toBeDefined();
 				expect(model?.providerID).toBe("anthropic");
 				expect(model?.modelID).toBe("claude-3-opus");
+				expect(overrides.getModel("my-project")).toBeUndefined();
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});

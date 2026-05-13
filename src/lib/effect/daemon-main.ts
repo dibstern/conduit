@@ -60,6 +60,7 @@ import {
 	ProjectMgmtTag,
 	type RelayCacheTag,
 } from "./services.js";
+import { setDefaultAgent } from "./session-overrides-state.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -281,6 +282,7 @@ import { ProjectRegistry } from "../daemon/project-registry.js";
 import { fetchLatestVersion } from "../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
+import { handleSetDefaultModel } from "../handlers/model.js";
 import { InstanceManager } from "../instance/instance-manager.js";
 import { createLogger, setLogFormat, setLogLevel } from "../logger.js";
 import type { ProjectRelay } from "../relay/relay-stack.js";
@@ -1145,6 +1147,13 @@ export async function startDaemonProcess(
 	log.debug(`[startup:${elapsed()}] Instance auto-start done`);
 
 	// ── IPC server ────────────────────────────────────────────────────────
+	const getReadyProjectRelay = (slug: string): ProjectRelay => {
+		const relay = registry.getRelay(slug);
+		if (!relay) {
+			throw new Error(`Project "${slug}" is not ready`);
+		}
+		return relay;
+	};
 	const ipcContext = {
 		addProject: (dir: string) => addProject(dir),
 		removeProject: (slug: string) => removeProject(slug),
@@ -1257,6 +1266,22 @@ export async function startDaemonProcess(
 				port?: number;
 			},
 		) => instanceManager.updateInstance(id, updates),
+		setProjectAgent: async (slug: string, agent: string) => {
+			const relay = getReadyProjectRelay(slug);
+			await relay.effectRuntime.runtime.runPromise(setDefaultAgent(agent));
+		},
+		setProjectModel: async (
+			slug: string,
+			model: { providerID: string; modelID: string },
+		) => {
+			const relay = getReadyProjectRelay(slug);
+			await relay.effectRuntime.runtime.runPromise(
+				handleSetDefaultModel("ipc", {
+					provider: model.providerID,
+					model: model.modelID,
+				}),
+			);
+		},
 	};
 
 	// IPC server is now started by makeIpcServerLive (via makeDaemonLive).

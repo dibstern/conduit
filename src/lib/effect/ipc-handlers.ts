@@ -19,7 +19,12 @@ import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { ShutdownSignalTag } from "./daemon-layers.js";
 import { DaemonStateTag } from "./daemon-state.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
-import { InstanceMgmtTag, SessionOverridesTag } from "./services.js";
+import { InstanceMgmtTag } from "./services.js";
+import {
+	type OverridesStateTag,
+	setAgent,
+	setModel,
+} from "./session-overrides-state.js";
 
 // ─── Type extraction ─────────────────────────────────────────────────────────
 
@@ -417,21 +422,19 @@ export const handleInstanceUpdate = (
 
 export const handleSetAgent = (
 	cmd: CmdOf<"set_agent">,
-): Effect.Effect<IPCResponse, never, SessionOverridesTag> =>
+): Effect.Effect<IPCResponse, never, OverridesStateTag> =>
 	Effect.gen(function* () {
-		const overrides = yield* SessionOverridesTag;
 		// Protocol uses `slug` as the identifier (not sessionId)
-		overrides.setAgent(cmd.slug, cmd.agent);
+		yield* setAgent(cmd.slug, cmd.agent);
 		return { ok: true };
 	});
 
 export const handleSetModel = (
 	cmd: CmdOf<"set_model">,
-): Effect.Effect<IPCResponse, never, SessionOverridesTag> =>
+): Effect.Effect<IPCResponse, never, OverridesStateTag> =>
 	Effect.gen(function* () {
-		const overrides = yield* SessionOverridesTag;
 		// Protocol uses `slug` as the identifier (not sessionId)
-		overrides.setModel(cmd.slug, {
+		yield* setModel(cmd.slug, {
 			providerID: cmd.provider,
 			modelID: cmd.model,
 		});

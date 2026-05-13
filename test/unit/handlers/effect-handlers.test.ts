@@ -43,9 +43,15 @@ import {
 import {
 	getAgent,
 	getContextWindow,
+	getModel,
+	getVariant,
 	makeOverridesStateLive,
+	setAgent,
 	setContextWindow,
+	setDefaultContextWindow,
+	setDefaultModel,
 	setModel,
+	setVariant,
 } from "../../../src/lib/effect/session-overrides-state.js";
 import {
 	type OpenCodeTerminalService,
@@ -548,6 +554,7 @@ describe("handleReloadProviderSession", () => {
 			openCodeModelAndSettingsLayer(client),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
+			makeOverridesStateLive(),
 		);
 
 		return handleReloadProviderSession("client-1", {}).pipe(
@@ -594,6 +601,7 @@ describe("handleReloadProviderSession", () => {
 			openCodeModelAndSettingsLayer(client),
 			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(ConfigTag, config),
+			makeOverridesStateLive(),
 		);
 
 		return handleReloadProviderSession("client-1", {}).pipe(
@@ -640,15 +648,14 @@ describe("handleGetModels", () => {
 			},
 			session: { get: vi.fn() },
 		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides();
 		const log = mockLogger();
 
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
 		return handleGetModels("client-1", {}).pipe(
@@ -695,15 +702,14 @@ describe("handleGetModels", () => {
 			},
 			session: { get: vi.fn() },
 		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides();
 		const log = mockLogger();
 
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
 		const runPromise = Effect.runPromise(
@@ -759,15 +765,14 @@ describe("handleGetModels", () => {
 				},
 				session: { get: vi.fn() },
 			} as unknown as OpenCodeAPI;
-			const overrides = mockOverrides();
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
 			return handleGetModels("client-1", {}).pipe(
@@ -831,33 +836,29 @@ describe("handleGetModels", () => {
 				},
 				session: { get: vi.fn() },
 			} as unknown as OpenCodeAPI;
-			const overrides = mockOverrides({
-				defaultModel: {
-					providerID: "claude",
-					modelID: "claude-opus-4-7",
-				},
-				defaultContextWindow: "1m",
-			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
-			return handleGetModels("client-1", {}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "context_window_info",
-						contextWindow: "1m",
-						options: contextWindowOptions,
-					});
-				}),
-			);
+			return Effect.gen(function* () {
+				yield* setDefaultModel({
+					providerID: "claude",
+					modelID: "claude-opus-4-7",
+				});
+				yield* setDefaultContextWindow("1m");
+				yield* handleGetModels("client-1", {});
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "context_window_info",
+					contextWindow: "1m",
+					options: contextWindowOptions,
+				});
+			}).pipe(Effect.provide(layer));
 		},
 	);
 });
@@ -867,7 +868,6 @@ describe("handleSwitchModel", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
-		const overrides = mockOverrides();
 		const log = mockLogger();
 		const config = mockConfig();
 		const engine = {
@@ -885,32 +885,29 @@ describe("handleSwitchModel", () => {
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
-		return handleSwitchModel("client-1", {
-			modelId: "gpt-4",
-			providerId: "openai",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(overrides.setModel).toHaveBeenCalledWith("session-42", {
-					providerID: "openai",
-					modelID: "gpt-4",
-				});
-				expect(log.info).toHaveBeenCalled();
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* handleSwitchModel("client-1", {
+				modelId: "gpt-4",
+				providerId: "openai",
+			});
+			expect(yield* getModel("session-42")).toEqual({
+				providerID: "openai",
+				modelID: "gpt-4",
+			});
+			expect(log.info).toHaveBeenCalled();
+		}).pipe(Effect.provide(layer));
 	});
 
 	it.effect("returns Claude variants when switching to a Claude model", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
-		const overrides = mockOverrides();
 		const log = mockLogger();
 		const config = mockConfig({
 			configDir: `/tmp/conduit-switch-model-claude-${Date.now()}`,
@@ -940,30 +937,32 @@ describe("handleSwitchModel", () => {
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
-		return handleSwitchModel("client-1", {
-			modelId: "opus",
-			providerId: "claude",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(engine.dispatch).toHaveBeenCalledWith({
-					type: "discover",
-					providerId: "claude",
-				});
-				expect(client.provider.list).not.toHaveBeenCalled();
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-					type: "variant_info",
-					variant: "",
-					variants: ["low", "medium", "high", "max"],
-				});
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* handleSwitchModel("client-1", {
+				modelId: "opus",
+				providerId: "claude",
+			});
+			expect(yield* getModel("session-42")).toEqual({
+				providerID: "claude",
+				modelID: "opus",
+			});
+			expect(engine.dispatch).toHaveBeenCalledWith({
+				type: "discover",
+				providerId: "claude",
+			});
+			expect(client.provider.list).not.toHaveBeenCalled();
+			expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+				type: "variant_info",
+				variant: "",
+				variants: ["low", "medium", "high", "max"],
+			});
+		}).pipe(Effect.provide(layer));
 	});
 });
 
@@ -971,12 +970,6 @@ describe("handleSwitchVariant", () => {
 	it.effect("returns Claude variants when active model is Claude", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
-		});
-		const overrides = mockOverrides({
-			getModel: vi.fn(() => ({
-				providerID: "claude",
-				modelID: "claude-opus-4-7",
-			})),
 		});
 		const engine = {
 			dispatch: vi.fn(async () => ({
@@ -1006,27 +999,30 @@ describe("handleSwitchVariant", () => {
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(SessionOverridesTag, overrides),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
-		return handleSwitchVariant("client-1", { variant: "high" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(engine.dispatch).toHaveBeenCalledWith({
-					type: "discover",
-					providerId: "claude",
-				});
-				expect(client.provider.list).not.toHaveBeenCalled();
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-					type: "variant_info",
-					variant: "high",
-					variants: ["low", "medium", "high", "max"],
-				});
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* setModel("session-42", {
+				providerID: "claude",
+				modelID: "claude-opus-4-7",
+			});
+			yield* handleSwitchVariant("client-1", { variant: "high" });
+			expect(yield* getVariant("session-42")).toBe("high");
+			expect(engine.dispatch).toHaveBeenCalledWith({
+				type: "discover",
+				providerId: "claude",
+			});
+			expect(client.provider.list).not.toHaveBeenCalled();
+			expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+				type: "variant_info",
+				variant: "high",
+				variants: ["low", "medium", "high", "max"],
+			});
+		}).pipe(Effect.provide(layer));
 	});
 
 	it.effect(
@@ -1034,12 +1030,6 @@ describe("handleSwitchVariant", () => {
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
-			});
-			const overrides = mockOverrides({
-				getModel: vi.fn(() => ({
-					providerID: "openai",
-					modelID: "gpt-4",
-				})),
 			});
 			const client = {
 				provider: {
@@ -1063,21 +1053,24 @@ describe("handleSwitchVariant", () => {
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
+				makeOverridesStateLive(),
 			);
 
-			return handleSwitchVariant("client-1", { variant: "v2" }).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-						type: "variant_info",
-						variant: "v2",
-						variants: ["v2", "v3"],
-					});
-				}),
-			);
+			return Effect.gen(function* () {
+				yield* setModel("session-42", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				yield* handleSwitchVariant("client-1", { variant: "v2" });
+				expect(yield* getVariant("session-42")).toBe("v2");
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+					type: "variant_info",
+					variant: "v2",
+					variants: ["v2", "v3"],
+				});
+			}).pipe(Effect.provide(layer));
 		},
 	);
 });
@@ -1275,6 +1268,7 @@ function makeForkSessionLayer(options?: {
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
 		}),
+		makeOverridesStateLive(),
 	);
 }
 
@@ -1392,6 +1386,40 @@ describe("handleGetToolContent", () => {
 });
 
 describe("handleForkSession", () => {
+	it.effect(
+		"clears Effect override state for the forked source session",
+		() => {
+			const legacyClearSession = vi.fn();
+			const layer = makeForkSessionLayer({
+				overrides: mockOverrides({
+					clearSession: legacyClearSession,
+					hasActiveProcessingTimeout: vi.fn(() => false),
+				}),
+			});
+
+			return Effect.gen(function* () {
+				yield* setModel("ses-parent", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				yield* setAgent("ses-parent", "plan");
+				yield* setVariant("ses-parent", "fast");
+				yield* setContextWindow("ses-parent", "1m");
+
+				yield* handleForkSession("client-1", {
+					sessionId: "ses-parent",
+					messageId: "msg-1",
+				});
+
+				expect(yield* getModel("ses-parent")).toBeUndefined();
+				expect(yield* getAgent("ses-parent")).toBeUndefined();
+				expect(yield* getVariant("ses-parent")).toBe("");
+				expect(yield* getContextWindow("ses-parent")).toBe("");
+				expect(legacyClearSession).toHaveBeenCalledWith("ses-parent");
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.effect(
 		"stores explicit fork metadata through SessionManagerService",
 		() => {
@@ -3230,6 +3258,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			makeOverridesStateLive(),
 		);
 
 		return handleMessage("client-1", { text: "hello" }).pipe(
@@ -3264,6 +3293,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			makeOverridesStateLive(),
 		);
 
 		return handleMessage("client-1", { text: "" }).pipe(
@@ -3315,22 +3345,22 @@ describe("handleMessage", () => {
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
-		return handleMessage("client-1", { text: "hello world" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(engine.dispatch).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "send_turn",
-						providerId: "claude",
-						input: expect.objectContaining({
-							contextWindow: "1m",
-						}),
+		return Effect.gen(function* () {
+			yield* setContextWindow("session-1", "1m");
+			yield* handleMessage("client-1", { text: "hello world" });
+			expect(engine.dispatch).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					providerId: "claude",
+					input: expect.objectContaining({
+						contextWindow: "1m",
 					}),
-				);
-			}),
-		);
+				}),
+			);
+		}).pipe(Effect.provide(layer));
 	});
 
 	it.effect(
@@ -3397,6 +3427,7 @@ describe("handleMessage", () => {
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -3499,6 +3530,7 @@ describe("handleMessage", () => {
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
+				makeOverridesStateLive(),
 			);
 
 			return handleMessage("client-1", { text: "new prompt" }).pipe(
@@ -3606,6 +3638,7 @@ describe("handleMessage", () => {
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
 				Layer.succeed(ReadQueryTag, legacyReadQuery),
+				makeOverridesStateLive(),
 			);
 
 			return handleMessage("client-1", { text: "new prompt" }).pipe(
@@ -3724,6 +3757,7 @@ describe("handleMessage", () => {
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -3809,6 +3843,7 @@ describe("handleMessage", () => {
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, engine),
+			makeOverridesStateLive(),
 		);
 
 		return Effect.gen(function* () {
@@ -3863,6 +3898,7 @@ describe("handleMessage", () => {
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -3926,6 +3962,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			makeOverridesStateLive(),
 		);
 
 		return handleMessage("client-1", { text: "hello world" }).pipe(

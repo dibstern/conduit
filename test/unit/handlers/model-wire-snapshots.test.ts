@@ -11,6 +11,7 @@ import {
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 } from "../../../src/lib/effect/services.js";
+import { setModel } from "../../../src/lib/effect/session-overrides-state.js";
 import {
 	handleGetModels,
 	handleSetDefaultModel,
@@ -24,7 +25,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockSessionOverrides,
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
 	type RecordedWebSocketCall,
@@ -252,17 +252,17 @@ describe("model handler wire snapshots", () => {
 		});
 
 		await Effect.runPromise(
-			handleSwitchVariant("client-1", { variant: "v2" }).pipe(
+			Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				yield* handleSwitchVariant("client-1", { variant: "v2" });
+			}).pipe(
 				Effect.provide(
 					makeTestHandlerLayer({
 						api,
 						wsHandler,
-						overrides: makeMockSessionOverrides({
-							getModel: vi.fn(() => ({
-								providerID: "openai",
-								modelID: "gpt-4",
-							})),
-						}),
 						config: makeMockConfig({
 							configDir: mkdtempSync(join(tmpdir(), "conduit-switch-variant-")),
 						}),

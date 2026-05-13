@@ -96,6 +96,8 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			startInstance: () => Promise.resolve(),
 			stopInstance: () => {},
 			updateInstance: () => ({}) as OpenCodeInstance,
+			setProjectAgent: () => Promise.resolve(),
+			setProjectModel: () => Promise.resolve(),
 		},
 		getStatus: () => ({
 			ok: true as const,

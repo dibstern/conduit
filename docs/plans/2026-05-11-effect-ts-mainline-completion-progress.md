@@ -2060,6 +2060,154 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.38: Model And Variant Override State Contract
+
+Plan issues found:
+
+- `model.ts` still read and wrote model, variant, default model, default variant, and context-window display state
+  through the legacy `SessionOverridesTag`.
+- Moving only `switch_variant` or only `switch_model` would split model and variant ownership across two stores, so
+  this slice migrates the model handlers together while leaving processing-timeout behavior for later.
+- The first green model-handler conversion exposed a real follow-on split: prompt dispatch, reconnect bootstrap, and
+  relay startup defaults could still read stale legacy override state after the model/context handlers wrote Effect
+  state.
+- Review found a production-path gap after the first IPC conversion: the live daemon IPC server routes through
+  `buildIPCHandlers(...)`, where `set_agent` and `set_model` still returned success without touching any relay override
+  state. The separate Effect IPC handler tests were not enough to prove live daemon behavior.
+
+Changes:
+
+- `src/lib/handlers/model.ts`: replaced direct `SessionOverridesTag` use with Effect override-state helpers for
+  `get_models`, `switch_model`, `set_default_model`, and `switch_variant`.
+- `src/lib/effect/session-overrides-state.ts`: added `getDefaultVariant()` so handlers do not inspect the state `Ref`
+  directly, and added default-agent state so project-level IPC `set_agent` has a real prompt-time fallback instead of
+  writing an unused slug key.
+- `src/lib/handlers/prompt.ts`: reads model, user-selected model flag, variant, context window, and fallback agent from
+  Effect override state before building both legacy OpenCode prompts and orchestration `send_turn` inputs.
+- `src/lib/bridges/client-init.ts`: added a narrow async `ClientInitOverrideState` port and routed reconnect bootstrap
+  model/variant/context/default-model reads through it instead of the legacy override object.
+- `src/lib/relay/relay-stack.ts`: seeds persisted/default project model and persisted variant into
+  `OverridesStateTag` after the relay runtime is created, and backs the client-init override port with that runtime.
+- `src/lib/effect/ipc-handlers.ts`: migrated IPC `set_agent` and `set_model` commands to the same Effect override
+  state, preserving the existing slug-as-override-key protocol.
+- `src/lib/effect/ipc-dispatch.ts`, `test/unit/daemon/ipc-dispatch.test.ts`,
+  `test/unit/daemon/ipc-rpc-group.test.ts`, and `test/integration/effect-layers.test.ts`: updated the IPC handler
+  dependency contract and test/proof layers so daemon IPC composition provides `OverridesStateTag`.
+- `src/lib/daemon/daemon-ipc.ts` and `src/lib/effect/daemon-main.ts`: routed live daemon IPC `set_agent` /
+  `set_model` through explicit project override ports. The daemon implementation now finds the ready project relay,
+  stores project-level agent state in the relay Effect runtime, and applies model changes through the same
+  `set_default_model` handler used by browser clients.
+- `src/lib/handlers/session.ts`: fork cleanup now clears Effect-owned per-session override state as well as the legacy
+  cleanup path. The legacy path is still needed for processing-timeout/session-switch timer checks until that slice is
+  migrated.
+- `test/unit/handlers/model-overrides-effect.test.ts`: added behavior coverage proving `switch_model` stores the
+  selected session model and restored persisted variant without providing legacy `SessionOverridesTag`, plus a
+  cross-handler regression proving the next prompt dispatch uses the selected model and restored variant.
+- `test/unit/bridges/client-init.test.ts`: updated reconnect/default-model tests to seed/assert the Effect override
+  port rather than stale legacy override mutations.
+- `test/unit/relay/relay-stack-default-overrides.test.ts`: added relay-level coverage that persisted defaults are
+  visible through the relay runtime's Effect override state.
+- Updated model, prompt, provider-state, and snapshot tests to provide real Effect state instead of mock
+  `SessionOverrides` model/variant/context reads.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-overrides-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: SessionOverrides
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/model-overrides-effect.test.ts -t "uses the selected model"
+Exit: 1
+Expected failure:
+  engine dispatch omitted input.model and input.variant after switch_model wrote Effect state
+```
+
+```text
+$ pnpm vitest run test/unit/bridges/client-init.test.ts -t "bootstraps model"
+Exit: 1
+Expected failure:
+  reconnect bootstrap sent empty legacy variant/context state and no Effect-backed model_info
+```
+
+```text
+$ pnpm vitest run test/unit/daemon/ipc-handlers.test.ts -t "handleSetAgent|handleSetModel"
+Exit: 1
+Expected failure:
+  IPC commands wrote only legacy SessionOverrides, leaving Effect override state empty
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/effect-handlers.test.ts -t "clears Effect override state"
+Exit: 1
+Expected failure:
+  fork cleanup left model/agent/variant/context entries in Effect override state
+```
+
+```text
+$ pnpm vitest run test/unit/daemon/daemon-ipc.test.ts -t "project overrides"
+Exit: 1
+Expected failure:
+  production buildIPCHandlers returned ok:true without calling setProjectAgent/setProjectModel
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/model-overrides-effect.test.ts \
+  test/unit/handlers/model-service-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/session/session-overrides-effect.test.ts \
+  test/unit/handlers/context-window-overrides-effect.test.ts \
+  test/unit/handlers/model-wire-snapshots.test.ts \
+  test/unit/bridges/client-init.test.ts \
+  test/unit/relay/relay-stack-default-overrides.test.ts \
+  test/unit/handlers/agent-prompt-state-effect.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/daemon/ipc-handlers.test.ts \
+  test/unit/daemon/ipc-dispatch.test.ts \
+  test/unit/daemon/ipc-rpc-group.test.ts \
+  test/unit/daemon/daemon-ipc.test.ts \
+  test/unit/daemon/daemon-lifecycle-ipc.test.ts \
+  test/unit/effect/layer-wiring.test.ts
+Exit: 0
+Test Files  16 passed (16)
+Tests  271 passed (271)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 991 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && exit 1)
+Exit: 0
+Test Files  374 passed (374)
+Tests  5250 passed | 2 skipped | 12 todo (5264)
+```
+
+```text
+$ pnpm exec vitest run --config vitest.integration.config.ts test/integration/effect-layers.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  5 passed (5)
+```
+
 ## Phase 7.37: Context Window Override State Contract
 
 Plan issues found:

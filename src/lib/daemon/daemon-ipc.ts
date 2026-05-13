@@ -65,6 +65,13 @@ export interface DaemonIPCContext {
 		id: string,
 		updates: { name?: string; env?: Record<string, string>; port?: number },
 	): Readonly<OpenCodeInstance>;
+	/** Set the active/default agent for a registered project relay. */
+	setProjectAgent(slug: string, agent: string): Promise<void>;
+	/** Set the default model for a registered project relay. */
+	setProjectModel(
+		slug: string,
+		model: { providerID: string; modelID: string },
+	): Promise<void>;
 }
 
 // ─── Handler map type ───────────────────────────────────────────────────────
@@ -195,16 +202,29 @@ export function buildIPCHandlers(
 			return { ok: true };
 		},
 
-		setAgent: async (_slug: string, _agent: string): Promise<IPCResponse> => {
-			return { ok: true };
+		setAgent: async (slug: string, agent: string): Promise<IPCResponse> => {
+			try {
+				await ctx.setProjectAgent(slug, agent);
+				return { ok: true };
+			} catch (err) {
+				return { ok: false, error: formatErrorDetail(err) };
+			}
 		},
 
 		setModel: async (
-			_slug: string,
-			_provider: string,
-			_model: string,
+			slug: string,
+			provider: string,
+			model: string,
 		): Promise<IPCResponse> => {
-			return { ok: true };
+			try {
+				await ctx.setProjectModel(slug, {
+					providerID: provider,
+					modelID: model,
+				});
+				return { ok: true };
+			} catch (err) {
+				return { ok: false, error: formatErrorDetail(err) };
+			}
 		},
 
 		restartWithConfig: async (

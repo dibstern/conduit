@@ -39,6 +39,7 @@ import type {
 	ProjectMgmtTag,
 	SessionOverridesTag,
 } from "./services.js";
+import type { OverridesStateTag } from "./session-overrides-state.js";
 
 // ─── Dependency type ─────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ export type IpcHandlerDeps =
 	| InstanceMgmtTag
 	| ProjectMgmtTag
 	| SessionOverridesTag
+	| OverridesStateTag
 	| KeepAwakeTag
 	| ShutdownSignalTag;
 

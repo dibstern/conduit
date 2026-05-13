@@ -32,6 +32,7 @@ export interface SessionState {
 export interface OverridesState {
 	sessions: Map<string, SessionState>;
 	defaultModel: ModelOverride | undefined;
+	defaultAgent: string | undefined;
 	defaultVariant: string;
 	defaultContextWindow: string;
 }
@@ -51,6 +52,7 @@ export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
 		Ref.make<OverridesState>({
 			sessions: new Map(),
 			defaultModel: undefined,
+			defaultAgent: undefined,
 			defaultVariant: "",
 			defaultContextWindow: "",
 		}),
@@ -88,11 +90,34 @@ export const getDefaultModel = () =>
 		return state.defaultModel;
 	});
 
+/** Set the global default agent. */
+export const setDefaultAgent = (agent: string) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		yield* Ref.update(ref, (s) => ({ ...s, defaultAgent: agent }));
+	});
+
+/** Get the global default agent. */
+export const getDefaultAgent = () =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return state.defaultAgent;
+	});
+
 /** Set the global default variant. */
 export const setDefaultVariant = (variant: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		yield* Ref.update(ref, (s) => ({ ...s, defaultVariant: variant }));
+	});
+
+/** Get the global default variant. */
+export const getDefaultVariant = () =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return state.defaultVariant;
 	});
 
 /** Set the global default context window. */
@@ -174,7 +199,7 @@ export const getAgent = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId)?.agent;
+		return state.sessions.get(sessionId)?.agent ?? state.defaultAgent;
 	});
 
 /** Clear the agent override for a session without touching other overrides. */

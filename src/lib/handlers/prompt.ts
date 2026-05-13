@@ -17,6 +17,13 @@ import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../effect/session-manager-service.js";
+import {
+	getAgent,
+	getContextWindow,
+	getModel,
+	getVariant,
+	isModelUserSelected,
+} from "../effect/session-overrides-state.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
@@ -144,14 +151,16 @@ export const handleMessage = (
 		const sessionAgent =
 			agentServiceOption._tag === "Some"
 				? yield* agentServiceOption.value.getActiveAgent(activeId)
-				: overrides.getAgent(activeId);
+				: yield* getAgent(activeId);
 		if (sessionAgent) prompt.agent = sessionAgent;
-		const sessionModel = overrides.getModel(activeId);
-		if (sessionModel && overrides.isModelUserSelected(activeId))
+		const sessionModel = yield* getModel(activeId);
+		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
+		if (sessionModel && sessionModelUserSelected) {
 			prompt.model = sessionModel;
-		const variant = overrides.getVariant(activeId);
+		}
+		const variant = yield* getVariant(activeId);
 		if (variant) prompt.variant = variant;
-		const contextWindow = overrides.getContextWindow(activeId);
+		const contextWindow = yield* getContextWindow(activeId);
 
 		wsHandler.sendToSession(activeId, {
 			type: "status",
@@ -195,7 +204,7 @@ export const handleMessage = (
 
 		if (engineOption._tag === "Some") {
 			const orchestrationEngine = engineOption.value;
-			const model = overrides.getModel(activeId);
+			const model = sessionModel;
 			let providerId = orchestrationEngine.getProviderForSession(activeId);
 			if (!providerId) {
 				providerId =
@@ -375,7 +384,7 @@ export const handleMessage = (
 						: providerStateOption._tag === "Some"
 							? (providerStateOption.value.getState(activeId) ?? {})
 							: {},
-				...(model && overrides.isModelUserSelected(activeId)
+				...(model && sessionModelUserSelected
 					? {
 							model: {
 								providerId: model.providerID,

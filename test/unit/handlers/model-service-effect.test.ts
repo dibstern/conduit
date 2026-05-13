@@ -11,9 +11,15 @@ import {
 	OpenCodeAPITag,
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
+import {
+	getDefaultModel,
+	getDefaultVariant,
+	getVariant,
+	makeOverridesStateLive,
+	setModel,
+} from "../../../src/lib/effect/session-overrides-state.js";
 import {
 	handleGetModels,
 	handleSetDefaultModel,
@@ -24,7 +30,6 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockSessionOverrides,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
@@ -35,7 +40,6 @@ describe("model handlers with Effect-native model service", () => {
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
 			});
-			const overrides = makeMockSessionOverrides();
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -75,8 +79,8 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, logger),
+				makeOverridesStateLive(),
 			);
 
 			return handleGetModels("client-1", {}).pipe(
@@ -105,12 +109,6 @@ describe("model handlers with Effect-native model service", () => {
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
 			});
-			const overrides = makeMockSessionOverrides({
-				getModel: vi.fn(() => ({
-					providerID: "openai",
-					modelID: "gpt-4",
-				})),
-			});
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -139,7 +137,6 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, logger),
 				Layer.succeed(
 					ConfigTag,
@@ -147,19 +144,23 @@ describe("model handlers with Effect-native model service", () => {
 						configDir: mkdtempSync(join(tmpdir(), "conduit-switch-variant-")),
 					}),
 				),
+				makeOverridesStateLive(),
 			);
 
-			return handleSwitchVariant("client-1", { variant: "fast" }).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(modelService.listProviders).toHaveBeenCalledOnce();
-					expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-						type: "variant_info",
-						variant: "fast",
-						variants: ["standard", "fast"],
-					});
-				}),
-			);
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				yield* handleSwitchVariant("client-1", { variant: "fast" });
+				expect(yield* getVariant("session-1")).toBe("fast");
+				expect(modelService.listProviders).toHaveBeenCalledOnce();
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "variant_info",
+					variant: "fast",
+					variants: ["standard", "fast"],
+				});
+			}).pipe(Effect.provide(layer));
 		},
 	);
 
@@ -169,7 +170,6 @@ describe("model handlers with Effect-native model service", () => {
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const overrides = makeMockSessionOverrides();
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -198,7 +198,6 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, logger),
 				Layer.succeed(
 					ConfigTag,
@@ -206,6 +205,7 @@ describe("model handlers with Effect-native model service", () => {
 						configDir: mkdtempSync(join(tmpdir(), "conduit-switch-model-")),
 					}),
 				),
+				makeOverridesStateLive(),
 			);
 
 			return handleSwitchModel("client-1", {
@@ -234,7 +234,6 @@ describe("model handlers with Effect-native model service", () => {
 		"sets the OpenCode default model using the model service without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler();
-			const overrides = makeMockSessionOverrides();
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -263,7 +262,6 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, logger),
 				Layer.succeed(
 					ConfigTag,
@@ -272,26 +270,30 @@ describe("model handlers with Effect-native model service", () => {
 						projectDir: mkdtempSync(join(tmpdir(), "conduit-project-")),
 					}),
 				),
+				makeOverridesStateLive(),
 			);
 
-			return handleSetDefaultModel("client-1", {
-				model: "gpt-4",
-				provider: "openai",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(modelService.persistDefaultModel).toHaveBeenCalledWith(
-						"openai",
-						"gpt-4",
-					);
-					expect(modelService.listProviders).toHaveBeenCalledOnce();
-					expect(wsHandler.broadcast).toHaveBeenCalledWith({
-						type: "variant_info",
-						variant: "",
-						variants: ["standard", "fast"],
-					});
-				}),
-			);
+			return Effect.gen(function* () {
+				yield* handleSetDefaultModel("client-1", {
+					model: "gpt-4",
+					provider: "openai",
+				});
+				expect(yield* getDefaultModel()).toEqual({
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				expect(yield* getDefaultVariant()).toBe("");
+				expect(modelService.persistDefaultModel).toHaveBeenCalledWith(
+					"openai",
+					"gpt-4",
+				);
+				expect(modelService.listProviders).toHaveBeenCalledOnce();
+				expect(wsHandler.broadcast).toHaveBeenCalledWith({
+					type: "variant_info",
+					variant: "",
+					variants: ["standard", "fast"],
+				});
+			}).pipe(Effect.provide(layer));
 		},
 	);
 

@@ -271,6 +271,18 @@ function createMockOverrides(): HandlerDeps["overrides"] {
 	} as unknown as HandlerDeps["overrides"];
 }
 
+function createMockClientInitOverrideState(): ClientInitDeps["overrideState"] {
+	return {
+		getModel: vi.fn().mockResolvedValue(undefined),
+		getDefaultModel: vi.fn().mockResolvedValue(undefined),
+		getVariant: vi.fn().mockResolvedValue(""),
+		getDefaultVariant: vi.fn().mockResolvedValue(""),
+		getContextWindow: vi.fn().mockResolvedValue(""),
+		getDefaultContextWindow: vi.fn().mockResolvedValue(""),
+		setDefaultModel: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
 function createMockPtyManager(): HandlerDeps["ptyManager"] {
 	return {
 		sendInput: vi.fn(),
@@ -400,6 +412,7 @@ export function createMockClientInitDeps(
 		client: createMockClient() as unknown as ClientInitDeps["client"],
 		sessionMgr:
 			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
+		overrideState: createMockClientInitOverrideState(),
 		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
 		terminal: {
 			replay: vi.fn(async () => undefined),

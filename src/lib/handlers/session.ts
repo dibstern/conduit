@@ -13,6 +13,7 @@ import {
 	WebSocketHandlerTag,
 } from "../effect/services.js";
 import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+import { clearSession as clearEffectOverrideSession } from "../effect/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	buildSessionSwitchedMessage,
@@ -515,6 +516,7 @@ export const handleForkSession = (
 			}),
 		);
 
+		yield* clearEffectOverrideSession(sessionId);
 		overrides.clearSession(sessionId);
 		yield* sessionManagerService.clearPaginationCursor(sessionId);
 

@@ -49,6 +49,8 @@ function makeIPCContext(manager: InstanceManager, _configDir: string) {
 		setKeepAwakeCommand: () => {},
 		persistConfig: () => {},
 		scheduleShutdown: () => {},
+		setProjectAgent: async () => {},
+		setProjectModel: async () => {},
 	};
 }
 

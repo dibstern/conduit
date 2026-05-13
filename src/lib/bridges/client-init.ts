@@ -12,6 +12,7 @@ import type {
 	PendingPermissionRecoveryInput,
 	PendingQuestion,
 } from "../effect/pending-interaction-service.js";
+import type { ModelOverride } from "../effect/session-overrides-state.js";
 import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
@@ -19,10 +20,7 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type {
-	ModelOverride,
-	SessionOverrides,
-} from "../session/session-overrides.js";
+import type { SessionOverrides } from "../session/session-overrides.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
@@ -60,6 +58,16 @@ interface SessionManagerLike {
 	getLastMessageAtMap?(): ReadonlyMap<string, number>;
 }
 
+export interface ClientInitOverrideState {
+	getModel(sessionId: string): Promise<ModelOverride | undefined>;
+	getDefaultModel(): Promise<ModelOverride | undefined>;
+	getVariant(sessionId: string): Promise<string>;
+	getDefaultVariant(): Promise<string>;
+	getContextWindow(sessionId: string): Promise<string>;
+	getDefaultContextWindow(): Promise<string>;
+	setDefaultModel(model: ModelOverride): Promise<void>;
+}
+
 function findContextWindowOptions(
 	providers: ReadonlyArray<{
 		models: ReadonlyArray<{
@@ -91,6 +99,7 @@ export interface ClientInitDeps {
 	};
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerLike;
+	overrideState: ClientInitOverrideState;
 	overrides: SessionOverrides;
 	terminal: {
 		replay(clientId: string): Promise<void>;
@@ -145,6 +154,7 @@ export async function handleClientConnected(
 ): Promise<void> {
 	const { wsHandler, client, sessionMgr, overrides, pendingInteractions } =
 		deps;
+	const { overrideState } = deps;
 
 	const sendInitError = (err: unknown, prefix: string) => {
 		deps.log.warn(`${prefix}: ${formatErrorDetail(err)}`);
@@ -195,7 +205,7 @@ export async function handleClientConnected(
 				});
 			} else {
 				// Session has no model set — fall back to per-session override or default
-				const fallbackModel = overrides.getModel(activeId);
+				const fallbackModel = await overrideState.getModel(activeId);
 				if (fallbackModel) {
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
@@ -206,7 +216,7 @@ export async function handleClientConnected(
 			}
 		} catch (err) {
 			sendInitError(err, "Failed to load session info");
-			const fallbackModel = overrides.getModel(activeId);
+			const fallbackModel = await overrideState.getModel(activeId);
 			if (fallbackModel) {
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
@@ -441,11 +451,14 @@ export async function handleClientConnected(
 		// Send variant info — current thinking level and available variants
 		// for the active model (per-session when available, global fallback)
 		const currentVariant = activeId
-			? overrides.getVariant(activeId)
-			: overrides.defaultVariant;
+			? await overrideState.getVariant(activeId)
+			: await overrideState.getDefaultVariant();
+		const activeModelOverride = activeId
+			? await overrideState.getModel(activeId)
+			: await overrideState.getDefaultModel();
 		const activeModel = activeId
-			? (overrides.getModel(activeId) ?? activeSessionModel)
-			: overrides.defaultModel;
+			? (activeModelOverride ?? activeSessionModel)
+			: activeModelOverride;
 		const activeModelId = activeModel?.modelID;
 		let availableVariants: string[] = [];
 		if (activeModelId) {
@@ -467,28 +480,29 @@ export async function handleClientConnected(
 		wsHandler.sendTo(clientId, {
 			type: "context_window_info",
 			contextWindow: activeId
-				? overrides.getContextWindow(activeId)
-				: overrides.defaultContextWindow,
+				? await overrideState.getContextWindow(activeId)
+				: await overrideState.getDefaultContextWindow(),
 			options: findContextWindowOptions(providers, activeModelId),
 		});
 
 		// Send default model info to new client
-		if (overrides.defaultModel) {
+		const defaultModel = await overrideState.getDefaultModel();
+		if (defaultModel) {
 			wsHandler.sendTo(clientId, {
 				type: "default_model_info",
-				model: overrides.defaultModel.modelID,
-				provider: overrides.defaultModel.providerID,
+				model: defaultModel.modelID,
+				provider: defaultModel.providerID,
 			});
 		}
 
 		// Auto-select default model if none set.
 		// Priority: defaultModel (seeded from config or user-set) > provider-level default.
-		if (!overrides.defaultModel) {
+		if (!defaultModel) {
 			// Fallback: first connected provider's default model
 			for (const providerId of providerResult.connected) {
 				const defaultModelId = providerResult.defaults[providerId];
 				if (defaultModelId) {
-					overrides.setDefaultModel({
+					await overrideState.setDefaultModel({
 						providerID: providerId,
 						modelID: defaultModelId,
 					});
@@ -503,15 +517,15 @@ export async function handleClientConnected(
 					break;
 				}
 			}
-		} else if (connectedSet.has(overrides.defaultModel.providerID)) {
+		} else if (connectedSet.has(defaultModel.providerID)) {
 			// Broadcast existing default to new client
 			wsHandler.sendTo(clientId, {
 				type: "model_info",
-				model: overrides.defaultModel.modelID,
-				provider: overrides.defaultModel.providerID,
+				model: defaultModel.modelID,
+				provider: defaultModel.providerID,
 			});
 			deps.log.info(
-				`Default: ${overrides.defaultModel.modelID} (${overrides.defaultModel.providerID})`,
+				`Default: ${defaultModel.modelID} (${defaultModel.providerID})`,
 			);
 		}
 	} catch (err) {

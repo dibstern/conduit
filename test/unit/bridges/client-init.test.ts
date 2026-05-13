@@ -147,13 +147,13 @@ describe("handleClientConnected — model info", () => {
 		});
 	});
 
-	it("sends model_info from overrides when session has no model", async () => {
+	it("sends model_info from Effect override state when session has no model", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.client.session.get).mockResolvedValue({
 			id: "s1",
 			modelID: "",
 		} as Awaited<ReturnType<typeof deps.client.session.get>>);
-		vi.mocked(deps.overrides.getModel).mockReturnValue({
+		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
 			providerID: "anthropic",
 			modelID: "claude-3",
 		});
@@ -167,12 +167,12 @@ describe("handleClientConnected — model info", () => {
 		});
 	});
 
-	it("sends overrides model_info as fallback when getSession fails", async () => {
+	it("sends Effect override model_info as fallback when getSession fails", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.client.session.get).mockRejectedValue(
 			new Error("session fail"),
 		);
-		vi.mocked(deps.overrides.getModel).mockReturnValue({
+		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
 			providerID: "anthropic",
 			modelID: "claude-3",
 		});
@@ -184,7 +184,7 @@ describe("handleClientConnected — model info", () => {
 			"client-1",
 			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
 		);
-		// And still send model_info from overrides
+		// And still send model_info from Effect override state
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
 			model: "claude-3",
@@ -192,7 +192,7 @@ describe("handleClientConnected — model info", () => {
 		});
 	});
 
-	it("does not send model_info when neither session nor overrides have model", async () => {
+	it("does not send model_info when neither session nor override state have model", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.client.session.get).mockResolvedValue({
 			id: "s1",
@@ -474,14 +474,92 @@ describe("handleClientConnected — model list", () => {
 				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
 			}),
 		);
-		vi.mocked(deps.overrides.getModel).mockReturnValue({
+		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
 			providerID: "claude",
 			modelID: "claude-sonnet-4-7",
 		});
-		vi.mocked(deps.overrides.getContextWindow).mockReturnValue("1m");
+		vi.mocked(deps.overrideState.getContextWindow).mockResolvedValue("1m");
 
 		await handleClientConnected(deps, "client-1");
 
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "context_window_info",
+			contextWindow: "1m",
+			options: contextWindowOptions,
+		});
+	});
+
+	it("bootstraps model, variant, and context window from Effect override state", async () => {
+		const contextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+			{ value: "1m", label: "1M (beta)" },
+		];
+		const overrideState = {
+			getModel: vi.fn(async () => ({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			})),
+			getDefaultModel: vi.fn(async () => undefined),
+			getVariant: vi.fn(async () => "thinking"),
+			getDefaultVariant: vi.fn(async () => ""),
+			getContextWindow: vi.fn(async () => "1m"),
+			getDefaultContextWindow: vi.fn(async () => ""),
+			setDefaultModel: vi.fn(async () => undefined),
+		};
+		const deps = createMockClientInitDeps({
+			orchestrationEngine: {
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							providerId: "claude",
+							variants: { standard: {}, thinking: {} },
+							contextWindowOptions,
+						},
+					],
+				})),
+			} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+			overrideState,
+		} as unknown as Partial<ClientInitDeps>);
+		vi.mocked(deps.client.session.get).mockResolvedValue({
+			id: "session-1",
+			projectID: "project-1",
+			directory: "/tmp/project",
+			title: "Session 1",
+			version: "1.0.0",
+			time: { created: 0, updated: 0 },
+		});
+		vi.mocked(deps.client.provider.list).mockResolvedValue({
+			connected: ["openai"],
+			defaults: {},
+			providers: [
+				{
+					id: "openai",
+					name: "OpenAI",
+					models: [
+						{
+							id: "gpt-4",
+							name: "GPT-4",
+							variants: { standard: {}, fast: {} },
+						},
+					],
+				},
+			],
+		});
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "model_info",
+			model: "claude-sonnet-4-7",
+			provider: "claude",
+		});
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "variant_info",
+			variant: "thinking",
+			variants: ["standard", "thinking"],
+		});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "context_window_info",
 			contextWindow: "1m",
@@ -494,7 +572,7 @@ describe("handleClientConnected — model list", () => {
 
 		await handleClientConnected(deps, "client-1");
 
-		expect(deps.overrides.setDefaultModel).toHaveBeenCalledWith({
+		expect(deps.overrideState.setDefaultModel).toHaveBeenCalledWith({
 			providerID: "openai",
 			modelID: "gpt-4",
 		});
@@ -507,18 +585,14 @@ describe("handleClientConnected — model list", () => {
 
 	it("does not auto-select when defaultModel is already set", async () => {
 		const deps = createMockClientInitDeps();
-		(
-			deps.overrides as {
-				defaultModel: { providerID: string; modelID: string } | undefined;
-			}
-		).defaultModel = {
+		vi.mocked(deps.overrideState.getDefaultModel).mockResolvedValue({
 			providerID: "anthropic",
 			modelID: "claude-3",
-		};
+		});
 
 		await handleClientConnected(deps, "client-1");
 
-		expect(deps.overrides.setDefaultModel).not.toHaveBeenCalled();
+		expect(deps.overrideState.setDefaultModel).not.toHaveBeenCalled();
 	});
 
 	it("sends INIT_FAILED when listProviders throws", async () => {
@@ -542,27 +616,21 @@ describe("handleClientConnected — defaultModel priority", () => {
 	it("prefers defaultModel over provider-level default", async () => {
 		const deps = applyTestDefaults(
 			createMockClientInitDeps({
-				overrides: {
-					defaultModel: {
+				overrideState: {
+					...createMockClientInitDeps().overrideState,
+					getDefaultModel: vi.fn().mockResolvedValue({
 						providerID: "openai",
 						modelID: "gpt-4-turbo",
-					},
-					setDefaultModel: vi.fn(),
-					setModelDefault: vi.fn(),
-					getVariant: vi.fn().mockReturnValue(""),
-					getContextWindow: vi.fn().mockReturnValue(""),
-					getModel: vi.fn().mockReturnValue(undefined),
-					defaultVariant: "",
-					defaultContextWindow: "",
-					hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
-				} as unknown as ClientInitDeps["overrides"],
+					}),
+					setDefaultModel: vi.fn().mockResolvedValue(undefined),
+				},
 			}),
 		);
 
 		await handleClientConnected(deps, "client-1");
 
 		// Should NOT call setDefaultModel since defaultModel is already set
-		expect(deps.overrides.setDefaultModel).not.toHaveBeenCalled();
+		expect(deps.overrideState.setDefaultModel).not.toHaveBeenCalled();
 		// Should send model_info to the client (not broadcast)
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "default_model_info",
@@ -574,20 +642,14 @@ describe("handleClientConnected — defaultModel priority", () => {
 	it("falls back to provider default when defaultModel provider is not connected", async () => {
 		const deps = applyTestDefaults(
 			createMockClientInitDeps({
-				overrides: {
-					defaultModel: {
+				overrideState: {
+					...createMockClientInitDeps().overrideState,
+					getDefaultModel: vi.fn().mockResolvedValue({
 						providerID: "google",
 						modelID: "gemini-pro",
-					},
-					setDefaultModel: vi.fn(),
-					setModelDefault: vi.fn(),
-					getVariant: vi.fn().mockReturnValue(""),
-					getContextWindow: vi.fn().mockReturnValue(""),
-					getModel: vi.fn().mockReturnValue(undefined),
-					defaultVariant: "",
-					defaultContextWindow: "",
-					hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
-				} as unknown as ClientInitDeps["overrides"],
+					}),
+					setDefaultModel: vi.fn().mockResolvedValue(undefined),
+				},
 			}),
 		);
 
@@ -596,7 +658,7 @@ describe("handleClientConnected — defaultModel priority", () => {
 		// google is not connected — defaultModel exists but its provider isn't available.
 		// The relay should NOT override the user's persisted default just because the
 		// provider is temporarily offline. No auto-select should happen.
-		expect(deps.overrides.setDefaultModel).not.toHaveBeenCalled();
+		expect(deps.overrideState.setDefaultModel).not.toHaveBeenCalled();
 	});
 
 	it("falls back to provider default when defaultModel is undefined", async () => {
@@ -605,7 +667,7 @@ describe("handleClientConnected — defaultModel priority", () => {
 		await handleClientConnected(deps, "client-1");
 
 		// Should use provider default since no defaultModel
-		expect(deps.overrides.setDefaultModel).toHaveBeenCalledWith({
+		expect(deps.overrideState.setDefaultModel).toHaveBeenCalledWith({
 			providerID: "openai",
 			modelID: "gpt-4",
 		});
