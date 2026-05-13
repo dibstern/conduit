@@ -4,9 +4,16 @@ import { Effect } from "effect";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
+import {
+	getContextWindow,
+	getDefaultContextWindow,
+	getDefaultModel,
+	getModel,
+	setContextWindow,
+	setDefaultContextWindow,
+} from "../effect/session-overrides-state.js";
 import type { ContextWindowOption } from "../shared-types.js";
 import { isClaudeProvider } from "./model.js";
 import type { PayloadMap } from "./payloads.js";
@@ -52,16 +59,15 @@ export const handleSwitchContextWindow = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 
 		const sessionId = yield* resolveSessionFromContext(clientId);
 		const activeModel = sessionId
-			? overrides.getModel(sessionId)
-			: overrides.defaultModel;
+			? yield* getModel(sessionId)
+			: yield* getDefaultModel();
 		const currentContextWindow = sessionId
-			? overrides.getContextWindow(sessionId)
-			: overrides.defaultContextWindow;
+			? yield* getContextWindow(sessionId)
+			: yield* getDefaultContextWindow();
 
 		const options =
 			activeModel && isClaudeProvider(activeModel.providerID)
@@ -75,9 +81,9 @@ export const handleSwitchContextWindow = (
 
 		if (supported) {
 			if (sessionId) {
-				overrides.setContextWindow(sessionId, requested);
+				yield* setContextWindow(sessionId, requested);
 			} else {
-				overrides.defaultContextWindow = requested;
+				yield* setDefaultContextWindow(requested);
 			}
 		} else {
 			log.warn(

@@ -2060,6 +2060,80 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 7.37: Context Window Override State Contract
+
+Plan issues found:
+
+- `handleSwitchContextWindow` still read and mutated the legacy `SessionOverridesTag` class even though the relay
+  already provides Effect-native `OverridesStateTag` and agent selection had moved to it.
+- This kept model/context UI state split across two owners. The small safe slice is context-window state only; model,
+  prompt, session, permission, and processing-timeout paths still need separate migrations because they share more
+  behavior.
+
+Changes:
+
+- `src/lib/handlers/context-window.ts`: replaced `SessionOverridesTag` with Effect override-state helpers for
+  session/default model reads and context-window reads/writes.
+- `test/unit/handlers/context-window-overrides-effect.test.ts`: added behavior coverage proving supported context
+  windows persist through `OverridesStateTag` without providing the legacy `SessionOverridesTag`, for both active-session
+  and default/no-session paths.
+- `test/unit/handlers/effect-handlers.test.ts`: converted context-window handler tests to assert real Effect state
+  changes instead of legacy mock method calls.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/handlers/context-window-overrides-effect.test.ts
+Exit: 1
+Expected failure:
+  Service not found: SessionOverrides
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/handlers/context-window-overrides-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  -t "handleSwitchContextWindow|Effect override state|default context window"
+Exit: 0
+Test Files  2 passed (2)
+Tests  4 passed | 73 skipped (77)
+```
+
+```text
+$ pnpm vitest run test/unit/handlers/context-window-overrides-effect.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/handlers/model-service-effect.test.ts \
+  test/unit/handlers/prompt-provider-state-effect.test.ts \
+  test/unit/session/session-overrides-effect.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  117 passed (117)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 989 files. No fixes applied.
+```
+
+```text
+$ pnpm test:unit > test-output.log 2>&1
+Exit: 0
+Test Files  372 passed (372)
+Tests  5237 passed | 2 skipped | 12 todo (5251)
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.36: Tool Content ReadQuery Bridge Removal
 
 Plan issues found:

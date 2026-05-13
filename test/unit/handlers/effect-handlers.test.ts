@@ -40,7 +40,13 @@ import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/effect/session-manager-service.js";
-import { getAgent } from "../../../src/lib/effect/session-overrides-state.js";
+import {
+	getAgent,
+	getContextWindow,
+	makeOverridesStateLive,
+	setContextWindow,
+	setModel,
+} from "../../../src/lib/effect/session-overrides-state.js";
 import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
@@ -1087,13 +1093,6 @@ describe("handleSwitchContextWindow", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
 			});
-			const overrides = mockOverrides({
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-7",
-				})),
-				getContextWindow: vi.fn(() => ""),
-			});
 			const engine = {
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -1106,37 +1105,34 @@ describe("handleSwitchContextWindow", () => {
 					],
 				})),
 			} as unknown as OrchestrationEngine;
-			const client = { provider: { list: vi.fn() } } as unknown as OpenCodeAPI;
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
-			return handleSwitchContextWindow("client-1", {
-				contextWindow: "1m",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(overrides.setContextWindow).toHaveBeenCalledWith(
-						"session-42",
-						"1m",
-					);
-					expect(engine.dispatch).toHaveBeenCalledWith({
-						type: "discover",
-						providerId: "claude",
-					});
-					expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-						type: "context_window_info",
-						contextWindow: "1m",
-						options: contextWindowOptions,
-					});
-				}),
-			);
+			return Effect.gen(function* () {
+				yield* setModel("session-42", {
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				yield* handleSwitchContextWindow("client-1", {
+					contextWindow: "1m",
+				});
+				expect(yield* getContextWindow("session-42")).toBe("1m");
+				expect(engine.dispatch).toHaveBeenCalledWith({
+					type: "discover",
+					providerId: "claude",
+				});
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+					type: "context_window_info",
+					contextWindow: "1m",
+					options: contextWindowOptions,
+				});
+			}).pipe(Effect.provide(layer));
 		},
 	);
 
@@ -1145,13 +1141,6 @@ describe("handleSwitchContextWindow", () => {
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
-			});
-			const overrides = mockOverrides({
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-haiku-4-7",
-				})),
-				getContextWindow: vi.fn(() => ""),
 			});
 			const engine = {
 				dispatch: vi.fn(async () => ({
@@ -1164,30 +1153,31 @@ describe("handleSwitchContextWindow", () => {
 					],
 				})),
 			} as unknown as OrchestrationEngine;
-			const client = { provider: { list: vi.fn() } } as unknown as OpenCodeAPI;
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(SessionOverridesTag, overrides),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
 			);
 
-			return handleSwitchContextWindow("client-1", {
-				contextWindow: "1m",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(overrides.setContextWindow).not.toHaveBeenCalled();
-					expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-						type: "context_window_info",
-						contextWindow: "",
-						options: [],
-					});
-				}),
-			);
+			return Effect.gen(function* () {
+				yield* setModel("session-42", {
+					providerID: "claude",
+					modelID: "claude-haiku-4-7",
+				});
+				yield* setContextWindow("session-42", "200k");
+				yield* handleSwitchContextWindow("client-1", {
+					contextWindow: "1m",
+				});
+				expect(yield* getContextWindow("session-42")).toBe("200k");
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
+					type: "context_window_info",
+					contextWindow: "200k",
+					options: [],
+				});
+			}).pipe(Effect.provide(layer));
 		},
 	);
 });
