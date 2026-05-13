@@ -27,4 +27,16 @@ describe("EventSink Effect boundary", () => {
 		expect(relayEventSink).not.toMatch(/Effect\.run(?:Promise|Sync)/);
 		expect(relayEventSink).not.toMatch(/runEffect/);
 	});
+
+	it("keeps missing pending interaction failures typed", () => {
+		const relayEventSink = source("src/lib/provider/relay-event-sink.ts");
+
+		expect(relayEventSink).toContain("MissingPendingInteractions");
+		expect(relayEventSink).not.toMatch(
+			/throw new Error\([^)]*pendingInteractions/,
+		);
+		expect(relayEventSink).not.toContain(
+			"RelayEventSink requires pendingInteractions for permission/question requests",
+		);
+	});
 });

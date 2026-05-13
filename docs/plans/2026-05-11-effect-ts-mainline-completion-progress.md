@@ -3500,6 +3500,84 @@ Test Files  3 passed (3)
 Tests  16 passed (16)
 ```
 
+## Phase 6.46: Relay Event Sink Missing Pending Port Error
+
+Plan issues found:
+
+- `RelayEventSink.requestPermission(...)` and `requestQuestion(...)` still used a local helper that threw a generic
+  `Error` when the pending-interaction port was absent. That kept a stringly provider boundary in the Claude SDK
+  permission/question path after the surrounding provider contract had moved to typed errors.
+- This is not a substitute for the larger relay/daemon bridge cleanup. Parallel audits found that `startDaemonProcess`,
+  `DaemonLiveOptions.relayFactory`, `SessionManagerTag`, `StatusPollerTag`, and `WebSocketHandlerTag` still have real
+  ownership blockers. The correct follow-up remains relay factory/session-state ownership, not moving these bridges into
+  thinner wrappers.
+
+Changes:
+
+- `src/lib/provider/errors.ts`: added `MissingPendingInteractions`, a tagged provider error carrying the operation and
+  session id.
+- `src/lib/provider/relay-event-sink.ts`: replaced the throwing pending-interaction helper with typed rejections for
+  permission and question requests, before any relay message is sent.
+- `test/unit/provider/relay-event-sink.test.ts`: added behavior coverage for both missing permission and question
+  pending ports.
+- `test/unit/provider/event-sink-effect-boundary.test.ts`: added a source guard so the relay event sink cannot drift
+  back to the old generic pending-interaction throw.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/relay-event-sink.test.ts -t "pending interaction port is missing"
+Exit: 1
+Expected failure:
+  expected Error: RelayEventSink requires pendingInteractions... to match
+  { _tag: "MissingPendingInteractions", operation: "requestPermission", sessionId: "ses-1" }
+```
+
+Focused verification:
+
+```text
+$ pnpm vitest run test/unit/provider/relay-event-sink.test.ts -t "pending interaction port is missing"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 15 skipped (16)
+```
+
+```text
+$ pnpm vitest run test/unit/provider/relay-event-sink.test.ts \
+  test/unit/provider/event-sink-effect-boundary.test.ts \
+  test/unit/provider/relay-event-sink-persistence.test.ts \
+  test/unit/provider/claude/claude-permission-bridge.test.ts \
+  test/unit/provider/types.test.ts
+Exit: 0
+Test Files  5 passed (5)
+Tests  38 passed (38)
+Note: run emitted the existing SQLite experimental warning from relay-event-sink-persistence.
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  35 passed (35)
+Tests  394 passed (394)
+Note: run emitted an existing OpenCodeAdapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 997 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
 ## Phase 7.40: SSE Stream Effect Lifecycle Boundary
 
 Plan issues found:

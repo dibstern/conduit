@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 
@@ -337,6 +338,45 @@ describe("createRelayEventSink — persistence", () => {
 });
 
 describe("createRelayEventSink — permission/question", () => {
+	it("rejects permission and question requests with a typed error when the pending interaction port is missing", async () => {
+		const send = vi.fn();
+		const sink = createRelayEventSink({ sessionId: "ses-1", send });
+
+		await expect(
+			sink.requestPermission({
+				requestId: "req_1",
+				toolName: "Bash",
+				toolInput: { command: "whoami" },
+				sessionId: "ses-1",
+				turnId: "turn_1",
+				providerItemId: "toolu_1",
+			}),
+		).rejects.toMatchObject({
+			_tag: "MissingPendingInteractions",
+			operation: "requestPermission",
+			sessionId: "ses-1",
+		} satisfies Partial<MissingPendingInteractions>);
+
+		await expect(
+			sink.requestQuestion({
+				requestId: "que_1",
+				questions: [
+					{
+						question: "Continue?",
+						header: "Confirm",
+						options: [{ label: "Yes", description: "Continue" }],
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			_tag: "MissingPendingInteractions",
+			operation: "requestQuestion",
+			sessionId: "ses-1",
+		} satisfies Partial<MissingPendingInteractions>);
+
+		expect(send).not.toHaveBeenCalled();
+	});
+
 	it("emits permission_request and resolves when resolvePermission is called", async () => {
 		const send = vi.fn();
 		let resolvePermission:

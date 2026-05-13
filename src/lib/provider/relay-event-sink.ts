@@ -11,6 +11,7 @@ import type { CanonicalEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
+import { MissingPendingInteractions } from "./errors.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -105,13 +106,13 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		if (clearTimeout) clearTimeout();
 	}
 
-	function pendingInteractions() {
-		if (!deps.pendingInteractions) {
-			throw new Error(
-				"RelayEventSink requires pendingInteractions for permission/question requests",
-			);
-		}
-		return deps.pendingInteractions;
+	function missingPendingInteractions(
+		operation: "requestPermission" | "requestQuestion",
+	): MissingPendingInteractions {
+		return new MissingPendingInteractions({
+			operation,
+			sessionId,
+		});
 	}
 
 	return {
@@ -153,7 +154,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			request: PermissionRequest,
 		): Promise<PermissionResponse> {
 			reset();
-			const pendingResponse = pendingInteractions().beginPermissionRequest({
+			if (!deps.pendingInteractions) {
+				return Promise.reject(missingPendingInteractions("requestPermission"));
+			}
+			const pendingResponse = deps.pendingInteractions.beginPermissionRequest({
 				requestId: request.requestId as PermissionId,
 				sessionId,
 				toolName: request.toolName,
@@ -175,13 +179,16 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			request: QuestionRequest,
 		): Promise<Record<string, unknown>> {
 			reset();
+			if (!deps.pendingInteractions) {
+				return Promise.reject(missingPendingInteractions("requestQuestion"));
+			}
 			const questions = request.questions.map((q) => ({
 				question: q.question,
 				header: q.header,
 				options: q.options,
 				multiSelect: q.multiSelect ?? false,
 			}));
-			const pendingAnswers = pendingInteractions().beginQuestionRequest({
+			const pendingAnswers = deps.pendingInteractions.beginQuestionRequest({
 				requestId: request.requestId,
 				sessionId,
 				questions,

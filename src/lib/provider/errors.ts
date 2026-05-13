@@ -42,6 +42,17 @@ export class ProviderAdapterFailure extends Data.TaggedError(
 	}
 }
 
+export class MissingPendingInteractions extends Data.TaggedError(
+	"MissingPendingInteractions",
+)<{
+	readonly operation: "requestPermission" | "requestQuestion";
+	readonly sessionId: string;
+}> {
+	get message(): string {
+		return `RelayEventSink requires pendingInteractions for ${this.operation} in session ${this.sessionId}`;
+	}
+}
+
 export type OrchestrationError =
 	| ProviderNotRegistered
 	| SessionProviderNotBound
