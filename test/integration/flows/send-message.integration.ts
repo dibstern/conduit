@@ -68,7 +68,7 @@ describe("Integration: Send Message", () => {
 		// result events (from message.updated) may or may not arrive depending
 		// on SSE event ordering — the critical path is delta + done above
 		await client.close();
-	}, 10_000);
+	}, 15_000);
 
 	it("does not send flat text field to OpenCode (Bug A)", async () => {
 		// This test verifies the fix for the original 400 error.

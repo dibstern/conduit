@@ -9,7 +9,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import {
+	createMockRelayProtocolContext,
+	mockRelayWebSocket,
+	normalizeMockRelayMessage,
+} from "../helpers/ws-mock.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -278,6 +282,12 @@ test.describe("Subagent navigation", () => {
 		const clientMessages: unknown[] = [];
 
 		await page.routeWebSocket(/\/ws/, (ws) => {
+			const protocolContext = createMockRelayProtocolContext();
+			const sendMockMessage = (msg: MockMessage) => {
+				ws.send(
+					JSON.stringify(normalizeMockRelayMessage(msg, protocolContext)),
+				);
+			};
 			const url = ws.url();
 			const sessionParam = new URL(url).searchParams.get("session");
 
@@ -287,7 +297,7 @@ test.describe("Subagent navigation", () => {
 					? childInitMessages
 					: initMessages;
 			for (const msg of msgs) {
-				ws.send(JSON.stringify(msg));
+				sendMockMessage(msg);
 			}
 
 			ws.onMessage((data) => {
@@ -300,27 +310,25 @@ test.describe("Subagent navigation", () => {
 						parsed.sessionId === snapshot.childSession.id
 					) {
 						for (const msg of childSwitchMessages) {
-							ws.send(JSON.stringify(msg));
+							sendMockMessage(msg);
 						}
 					}
 
 					if (parsed.type === "get_models") {
 						const ml = initMessages.find((m) => m.type === "model_list");
-						if (ml) ws.send(JSON.stringify(ml));
+						if (ml) sendMockMessage(ml);
 					}
 					if (parsed.type === "get_agents") {
 						const al = initMessages.find((m) => m.type === "agent_list");
-						if (al) ws.send(JSON.stringify(al));
+						if (al) sendMockMessage(al);
 					}
 					if (parsed.type === "load_more_history") {
-						ws.send(
-							JSON.stringify({
-								type: "history_page",
-								sessionId: parsed.sessionId ?? "",
-								messages: [],
-								hasMore: false,
-							}),
-						);
+						sendMockMessage({
+							type: "history_page",
+							sessionId: parsed.sessionId ?? "",
+							messages: [],
+							hasMore: false,
+						});
 					}
 				} catch {
 					// ignore
