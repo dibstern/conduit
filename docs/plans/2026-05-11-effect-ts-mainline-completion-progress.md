@@ -2189,6 +2189,130 @@ Test Files  24 passed (24)
 Tests  127 passed | 1 skipped (128)
 ```
 
+## Phase 9.11: Delete SessionManager EventEmitter Lifecycle Bridge
+
+Plan issues found:
+
+- `SessionEventBridgeLive` and the deprecated `wireSessionLifecycle()` function were still production bridge code after
+  lifecycle publication had moved into `SessionManagerServiceLive`. Keeping both made the relay lifecycle path look
+  more Effect-native than it was.
+- `SessionManagerTag` is not safe to delete in this slice. `SessionManagerServiceLive.setForkEntry()` still mirrors
+  fork metadata into the legacy `SessionManager` while legacy status/list paths remain. Deleting the whole tag here
+  would break that bridge before the remaining consumers move.
+- The old imperative bridge had a real create/delete interleaving guard. The existing Effect test expected
+  "start then stop" for rapid create/delete, which would briefly start message polling for a deleted session. The
+  long-term fix is keyed scoped create fibers plus generation invalidation, not accepting weaker sequential behavior.
+- The remaining `SessionManagerLike` interfaces in monitoring, SSE, and poller wiring are narrowed capability ports,
+  not EventEmitter lifecycle bridges. They belong to later relay callback ownership slices.
+
+Changes:
+
+- Deleted `src/lib/relay/session-event-bridge.ts` and removed `SessionEventBridgeLive` from relay-stack wiring.
+- Deleted the deprecated `wireSessionLifecycle()` EventEmitter adapter, `SessionLifecycleWiringDeps`, and lifecycle
+  `SessionManagerLike` from `src/lib/relay/session-lifecycle-wiring.ts`.
+- Removed `broadcast` / `session_lifecycle` `on()` / `off()` methods from `SessionManagerShape`.
+- Kept `SessionLifecycleWiringLive` on `DaemonEventBus`, but changed create handling to keyed scoped fibers tracked by
+  `FiberMap` and a per-session generation `Ref`. Deletes invalidate in-flight creates before those creates can call
+  `startPolling()`, and recreated session IDs get a fresh generation.
+- Deleted bridge-only tests for `SessionEventBridgeLive` and the deprecated imperative race adapter.
+- Added behavior tests proving `SessionManagerServiceLive` publishes into the real `SessionLifecycleWiringLive`
+  consumer through the shared `DaemonEventBusLive`.
+- Added Effect-bus race tests for delete-during-create-rebuild and create/delete/recreate generation invalidation.
+- Added a runtime boundary guard that blocks reintroducing production SessionManager EventEmitter lifecycle bridges.
+
+TDD red checks:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts -t "SessionManager EventEmitter bridges"
+Exit: 1
+Expected failure:
+  production guard found SessionEventBridgeLive in relay-stack, the session-event-bridge module,
+  wireSessionLifecycle / SessionLifecycleWiringDeps / SessionManagerLike in session-lifecycle-wiring,
+  and EventEmitter lifecycle methods on SessionManagerShape.
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-lifecycle-wiring.test.ts -t "delete arrives during create history rebuild"
+Exit: 1
+Expected failure:
+  startPolling("s1", ...) was still called after SessionDeleted arrived while history rebuild was awaiting.
+```
+
+Focused verification:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts -t "SessionManager EventEmitter bridges"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 8 skipped (9)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/session-lifecycle-wiring.test.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  10 passed (10)
+```
+
+```text
+$ pnpm vitest run test/unit/effect/services.test.ts test/unit/effect/session-manager-service.test.ts test/unit/handlers/effect-handlers.test.ts test/unit/handlers/session-service-effect.test.ts
+Exit: 0
+Test Files  4 passed (4)
+Tests  122 passed (122)
+```
+
+```text
+$ rg -n "SessionEventBridgeLive|session-event-bridge|wireSessionLifecycle|SessionLifecycleWiringDeps|sessionMgr\\.on\\(" src/lib test/unit
+Exit: 0
+Only test names and the static guard contain the retired names. No production bridge references remain.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 997 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
+Broader verification:
+
+```text
+$ pnpm test:unit
+Exit: 0
+Test Files  381 passed (381)
+Tests  5225 passed | 2 skipped | 12 todo (5239)
+```
+
+```text
+$ pnpm test:integration
+Exit: 1
+Failure:
+  test/integration/media-generation.integration.ts > media generation > setup scene generates GIF without errors
+  Error: spawnSync /bin/sh ETIMEDOUT
+Result:
+  Test Files  1 failed | 23 passed (24)
+  Tests  1 failed | 126 passed | 1 skipped (128)
+```
+
+```text
+$ pnpm vitest run --config vitest.integration.config.ts test/integration/media-generation.integration.ts
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed (1)
+```
+
+The integration failure matched the existing isolated media-generation timeout pattern from Phase 9.10. The exact
+failing file passed when rerun alone.
+
 ## Phase 9.8: Daemon WebSocket Router Layer Ownership
 
 Plan issues found:

@@ -342,4 +342,50 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not keep production SessionManager EventEmitter bridges", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern: /\bSessionEventBridgeLive\b/,
+				reason:
+					"relay runtime should subscribe directly to DaemonEventBus, not bridge SessionManager EventEmitter events",
+			},
+			{
+				path: "src/lib/relay/session-event-bridge.ts",
+				pattern: /./,
+				reason:
+					"SessionEventBridgeLive should stay deleted after lifecycle publication moved into SessionManagerServiceLive",
+				optional: true,
+			},
+			{
+				path: "src/lib/relay/session-lifecycle-wiring.ts",
+				pattern:
+					/\b(?:wireSessionLifecycle|SessionLifecycleWiringDeps|SessionManagerLike|sessionMgr\.on)\b/,
+				reason:
+					"session lifecycle wiring should consume DaemonEventBus, not legacy SessionManager EventEmitter callbacks",
+			},
+			{
+				path: "src/lib/effect/services.ts",
+				pattern: /\b(?:on|off)\(event: "(?:broadcast|session_lifecycle)"/,
+				reason:
+					"SessionManagerShape should not expose EventEmitter bridge methods",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const fullPath = join(REPO_ROOT, path);
+			if (!existsSync(fullPath)) return [];
+			const source = readFileSync(fullPath, "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
 });

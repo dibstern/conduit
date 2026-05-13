@@ -119,26 +119,6 @@ export interface SessionManagerShape {
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
 	): Promise<void>;
-
-	// ── EventEmitter (used by session-lifecycle-wiring) ────────────────
-	on(event: "broadcast", handler: (msg: RelayMessage) => void): this;
-	on(
-		event: "session_lifecycle",
-		handler: (
-			ev:
-				| { type: "created"; sessionId: string }
-				| { type: "deleted"; sessionId: string },
-		) => void,
-	): this;
-	off(event: "broadcast", handler: (msg: RelayMessage) => void): this;
-	off(
-		event: "session_lifecycle",
-		handler: (
-			ev:
-				| { type: "created"; sessionId: string }
-				| { type: "deleted"; sessionId: string },
-		) => void,
-	): this;
 }
 
 // ─── Core Tags (always present) ────────────────────────────────────────────

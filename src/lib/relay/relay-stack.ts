@@ -160,7 +160,6 @@ import {
 } from "./monitoring-wiring.js";
 import { wirePollers } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
-import { SessionEventBridgeLive } from "./session-event-bridge.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
@@ -966,8 +965,8 @@ export async function createProjectRelay(
 	}
 	// Compose: self-constructing state layers + imperative bridge layers.
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
-	// SessionEventBridgeLive, SessionLifecycleWiringLive) are added after
-	// wireMonitoring() returns (provides sseTracker, getMonitoringState).
+	// SessionLifecycleWiringLive) are added after wireMonitoring() returns
+	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(RelayStateLive, bridgeLayers);
 	const relayStateServicesAndBridges = Layer.provideMerge(
 		AgentServiceLive,
@@ -1102,7 +1101,6 @@ export async function createProjectRelay(
 	});
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
-		SessionEventBridgeLive,
 		sessionLifecycleWiringLayer,
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);

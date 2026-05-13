@@ -16,6 +16,11 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
+import {
+	SessionManagerServiceLive,
+	SessionManagerServiceTag,
+} from "../../../src/lib/effect/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/effect/session-manager-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
@@ -23,6 +28,7 @@ import {
 	makeSessionLifecycleWiringLive,
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
+import { makeMockOpenCodeAPI } from "../../helpers/mock-factories.js";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -98,6 +104,33 @@ function makeTestLayer(
 	return Layer.provideMerge(wiringLayer, bridgeLayers);
 }
 
+function makeServiceLifecycleTestLayer(
+	services: ReturnType<typeof makeMockServices>,
+	deps: ReturnType<typeof makeMockDeps>,
+	api = makeMockOpenCodeAPI(),
+) {
+	const wiringLayer = makeSessionLifecycleWiringLive({
+		translator: deps.translator as any,
+		sseTracker: deps.sseTracker as any,
+		getMonitoringState: deps.getMonitoringState,
+		setMonitoringState: deps.setMonitoringState,
+	});
+
+	const baseLayer = Layer.mergeAll(
+		Layer.succeed(WebSocketHandlerTag, services.wsHandler as any),
+		Layer.succeed(OpenCodeAPITag, api),
+		Layer.succeed(PollerManagerTag, services.pollerManager as any),
+		Layer.succeed(StatusPollerTag, services.statusPoller),
+		Layer.succeed(LoggerTag, services.log),
+		makeSessionManagerStateLive(),
+		DaemonEventBusLive,
+	);
+
+	return Layer.mergeAll(wiringLayer, SessionManagerServiceLive).pipe(
+		Layer.provide(baseLayer),
+	);
+}
+
 function makePinoSpies() {
 	return {
 		debug: vi.fn(),
@@ -171,6 +204,96 @@ describe("SessionLifecycleWiringLive", () => {
 			Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
 		);
 	});
+
+	it.live(
+		"SessionManagerServiceLive createSession drives lifecycle wiring without SessionEventBridgeLive",
+		() => {
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const api = makeMockOpenCodeAPI();
+			const createdSession = {
+				id: "service-created",
+				projectID: "project-1",
+				directory: "/tmp/project-1",
+				title: "Service Created",
+				version: "v1",
+				time: { created: 1, updated: 1 },
+			} satisfies Awaited<ReturnType<typeof api.session.create>>;
+			const seedMessages = [
+				{
+					id: "m1",
+					role: "assistant",
+					sessionID: "service-created",
+					parts: [{ id: "p1", type: "text" }],
+				},
+			] satisfies Awaited<ReturnType<typeof api.session.messages>>;
+			vi.mocked(api.session.create).mockResolvedValue(createdSession);
+			vi.mocked(api.session.messages).mockResolvedValue(seedMessages);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* Effect.sleep("10 millis");
+				yield* service.createSession("Service Created");
+				yield* Effect.sleep("50 millis");
+
+				expect(api.session.create).toHaveBeenCalledWith({
+					title: "Service Created",
+				});
+				expect(api.session.messages).toHaveBeenCalledWith("service-created");
+				expect(deps.translator.reset).toHaveBeenCalledWith("service-created");
+				expect(deps.translator.rebuildStateFromHistory).toHaveBeenCalledWith(
+					"service-created",
+					expect.any(Array),
+				);
+				expect(services.pollerManager.startPolling).toHaveBeenCalledWith(
+					"service-created",
+					expect.any(Array),
+				);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.fresh(makeServiceLifecycleTestLayer(services, deps, api)),
+				),
+			);
+		},
+	);
+
+	it.live(
+		"SessionManagerServiceLive deleteSession drives lifecycle cleanup without SessionEventBridgeLive",
+		() => {
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const api = makeMockOpenCodeAPI();
+			deps.monitoringState.current = {
+				sessions: new Map([["service-deleted", { phase: "idle" as const }]]),
+			};
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* Effect.sleep("10 millis");
+				yield* service.deleteSession("service-deleted");
+				yield* Effect.sleep("50 millis");
+
+				expect(api.session.delete).toHaveBeenCalledWith("service-deleted");
+				expect(deps.translator.reset).toHaveBeenCalledWith("service-deleted");
+				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith(
+					"service-deleted",
+				);
+				expect(services.statusPoller.clearMessageActivity).toHaveBeenCalledWith(
+					"service-deleted",
+				);
+				expect(deps.sseTracker.remove).toHaveBeenCalledWith("service-deleted");
+				expect(
+					deps.monitoringState.current.sessions.has("service-deleted"),
+				).toBe(false);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.fresh(makeServiceLifecycleTestLayer(services, deps, api)),
+				),
+			);
+		},
+	);
 
 	it.live("resets translator and starts poller on SessionCreated", () => {
 		const services = makeMockServices();
@@ -287,7 +410,7 @@ describe("SessionLifecycleWiringLive", () => {
 	);
 
 	it.live(
-		"create→delete in rapid succession: poller starts then stops (sequential processing)",
+		"does not start polling when delete arrives during create history rebuild",
 		() => {
 			const services = makeMockServices();
 			const deps = makeMockDeps();
@@ -311,17 +434,57 @@ describe("SessionLifecycleWiringLive", () => {
 				);
 				yield* Effect.sleep("300 millis");
 
-				expect(services.pollerManager.startPolling).toHaveBeenCalledWith(
-					"s1",
-					expect.any(Array),
-				);
 				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith("s1");
-				const startOrder =
-					services.pollerManager.startPolling.mock.invocationCallOrder[0];
-				const stopOrder =
-					services.pollerManager.stopPolling.mock.invocationCallOrder[0];
-				// biome-ignore lint/style/noNonNullAssertion: call count verified above
-				expect(stopOrder).toBeGreaterThan(startOrder!);
+				expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
+			);
+		},
+	);
+
+	it.live(
+		"starts polling for a recreated session after invalidating a stale create",
+		() => {
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const resolvers: Array<(value: unknown[]) => void> = [];
+			services.client.session.messages.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolvers.push(resolve);
+					}),
+			);
+
+			return Effect.gen(function* () {
+				const bus = yield* DaemonEventBusTag;
+				yield* Effect.sleep("10 millis");
+				yield* PubSub.publish(
+					bus,
+					DaemonEvent.SessionCreated({ sessionId: "s1" }),
+				);
+				yield* PubSub.publish(
+					bus,
+					DaemonEvent.SessionDeleted({ sessionId: "s1" }),
+				);
+				yield* PubSub.publish(
+					bus,
+					DaemonEvent.SessionCreated({ sessionId: "s1" }),
+				);
+				yield* Effect.sleep("50 millis");
+
+				resolvers[0]?.([
+					{ id: "old-message", role: "assistant", sessionID: "s1", parts: [] },
+				]);
+				resolvers[1]?.([
+					{ id: "new-message", role: "assistant", sessionID: "s1", parts: [] },
+				]);
+				yield* Effect.sleep("50 millis");
+
+				expect(services.pollerManager.startPolling).toHaveBeenCalledTimes(1);
+				expect(services.pollerManager.startPolling).toHaveBeenCalledWith("s1", [
+					expect.objectContaining({ id: "new-message" }),
+				]);
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
