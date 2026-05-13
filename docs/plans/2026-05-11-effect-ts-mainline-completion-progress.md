@@ -2866,6 +2866,73 @@ Test Files  379 passed (379)
 Tests  5223 passed | 2 skipped | 12 todo (5237)
 ```
 
+## Phase 9.1: Tagged IPC Decode Boundary
+
+Plan issues found:
+
+- The tagged IPC request decoder was pure JSON parsing plus `Schema.decodeUnknown(...)`, but the live daemon socket
+  path ran it through `Effect.runPromise(...)`. That made a synchronous decode boundary look like an Effect runtime
+  ownership boundary.
+- The adjacent tagged IPC dispatch still belongs at the Node `net.Socket` callback edge for now. Removing that
+  `Effect.runPromise(...)` would require the larger socket-server ownership migration, not a local decode cleanup.
+
+Changes:
+
+- `src/lib/daemon/daemon-lifecycle.ts`: converted `decodeTaggedRequest(...)` to return `Either` synchronously via
+  `Schema.decodeUnknownEither(...)`, preserving the existing invalid JSON/schema failure response.
+- `src/lib/daemon/daemon-lifecycle.ts`: the live IPC data handler now calls the decoder directly and only awaits the
+  actual Effect RPC dispatch when the decoded tagged request is valid.
+- `test/unit/daemon/daemon-lifecycle-effect-boundary.test.ts`: added a guard so pure tagged IPC request decoding cannot
+  regain a local `Effect.runPromise(decodeTaggedRequest(...))` bridge.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/daemon/daemon-lifecycle-effect-boundary.test.ts
+Exit: 1
+Expected failure:
+  expected source not to match /Effect\s*\.\s*run(?:Promise|Sync)\s*\(\s*decodeTaggedRequest\s*\(/
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/daemon/daemon-lifecycle-effect-boundary.test.ts test/unit/daemon/daemon-lifecycle-ipc.test.ts test/unit/daemon/ipc-rpc-group.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  20 passed (20)
+```
+
+```text
+$ pnpm vitest run test/unit/daemon
+Exit: 0
+Test Files  37 passed (37)
+Tests  468 passed (468)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 997 files. No fixes applied.
+```
+
+```text
+$ git diff --check
+Exit: 0
+```
+
+```text
+$ pnpm test:unit > test-unit-output.log 2>&1
+Exit: 0
+Test Files  380 passed (380)
+Tests  5224 passed | 2 skipped | 12 todo (5238)
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

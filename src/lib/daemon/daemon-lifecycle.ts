@@ -326,14 +326,15 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 	});
 }
 
-const decodeTaggedRequest = (line: string) =>
-	Effect.try({
-		try: () => JSON.parse(line) as unknown,
-		catch: () => new Error("Invalid JSON"),
-	}).pipe(
-		Effect.flatMap(Schema.decodeUnknown(IpcTaggedRequestSchema)),
-		Effect.either,
-	);
+function decodeTaggedRequest(line: string) {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch {
+		return Either.left(new Error("Invalid JSON"));
+	}
+	return Schema.decodeUnknownEither(IpcTaggedRequestSchema)(parsed);
+}
 
 function isTaggedPayload(value: unknown): value is { _tag: string } {
 	return (
@@ -772,14 +773,14 @@ export function startIPCServer(
 
 					let parsedLine: unknown;
 					try {
-						parsedLine = JSON.parse(line) as unknown;
+						parsedLine = JSON.parse(line);
 					} catch {
 						parsedLine = null;
 					}
 
 					if (isTaggedPayload(parsedLine)) {
 						const ipcT0 = Date.now();
-						const decoded = await Effect.runPromise(decodeTaggedRequest(line));
+						const decoded = decodeTaggedRequest(line);
 						const response = Either.isRight(decoded)
 							? await dispatchTaggedRequest(decoded.right, rpcLayer)
 							: {
