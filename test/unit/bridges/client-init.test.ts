@@ -3,6 +3,7 @@ import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../../../src/lib/bridges/client-init.js";
+import type { AdapterCapabilities } from "../../../src/lib/provider/types.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import { createMockClientInitDeps } from "../../helpers/mock-factories.js";
 
@@ -42,6 +43,21 @@ const TEST_HISTORY = {
 } as Awaited<
 	ReturnType<ClientInitDeps["sessionMgr"]["loadPreRenderedHistory"]>
 >;
+
+const makeClaudeCapabilities = (
+	overrides: Partial<AdapterCapabilities> = {},
+): AdapterCapabilities => ({
+	models: [],
+	supportsTools: true,
+	supportsThinking: true,
+	supportsPermissions: true,
+	supportsQuestions: true,
+	supportsAttachments: true,
+	supportsFork: false,
+	supportsRevert: false,
+	commands: [],
+	...overrides,
+});
 
 /** Apply test-specific mock return values on top of shared factory defaults. */
 function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
@@ -257,29 +273,7 @@ describe("handleClientConnected — agent list", () => {
 	});
 
 	it("sends Claude agents for a Claude-bound active session", async () => {
-		const deps = applyTestDefaults(
-			createMockClientInitDeps({
-				orchestrationEngine: {
-					getProviderForSession: vi.fn(() => "claude"),
-					dispatch: vi.fn(async () => ({
-						models: [],
-						supportsTools: true,
-						supportsThinking: true,
-						supportsPermissions: true,
-						supportsQuestions: true,
-						supportsAttachments: true,
-						supportsFork: false,
-						supportsRevert: false,
-						commands: [],
-						agents: [
-							{ id: "Explore", name: "Explore", description: "Explorer" },
-							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-							{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
-						],
-					})),
-				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
-			}),
-		);
+		const deps = applyTestDefaults(createMockClientInitDeps());
 		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
 			agents: [
 				{ id: "Explore", name: "Explore", description: "Explorer" },
@@ -305,25 +299,7 @@ describe("handleClientConnected — agent list", () => {
 	});
 
 	it("clears stale agent during Claude-bound client init", async () => {
-		const deps = applyTestDefaults(
-			createMockClientInitDeps({
-				orchestrationEngine: {
-					getProviderForSession: vi.fn(() => "claude"),
-					dispatch: vi.fn(async () => ({
-						models: [],
-						supportsTools: true,
-						supportsThinking: true,
-						supportsPermissions: true,
-						supportsQuestions: true,
-						supportsAttachments: true,
-						supportsFork: false,
-						supportsRevert: false,
-						commands: [],
-						agents: [{ id: "Explore", name: "Explore" }],
-					})),
-				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
-			}),
-		);
+		const deps = applyTestDefaults(createMockClientInitDeps());
 		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
 			agents: [{ id: "Explore", name: "Explore" }],
 		});
@@ -374,17 +350,15 @@ describe("handleClientConnected — model list", () => {
 	});
 
 	it("sends OpenCode model_list before slow Claude discovery finishes", async () => {
-		let resolveDiscovery: (value: { models: [] }) => void = () => {};
+		let resolveDiscovery: (value: AdapterCapabilities) => void = () => {};
 		const deps = applyTestDefaults(
 			createMockClientInitDeps({
-				orchestrationEngine: {
-					dispatch: vi.fn(
-						() =>
-							new Promise((resolve) => {
-								resolveDiscovery = resolve as (value: { models: [] }) => void;
-							}),
-					),
-				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+				discoverClaudeCapabilities: vi.fn<() => Promise<AdapterCapabilities>>(
+					() =>
+						new Promise((resolve) => {
+							resolveDiscovery = resolve;
+						}),
+				),
 			}),
 		);
 
@@ -403,7 +377,7 @@ describe("handleClientConnected — model list", () => {
 			],
 		});
 
-		resolveDiscovery({ models: [] });
+		resolveDiscovery(makeClaudeCapabilities());
 		await initPromise;
 	});
 
@@ -414,8 +388,8 @@ describe("handleClientConnected — model list", () => {
 		];
 		const deps = applyTestDefaults(
 			createMockClientInitDeps({
-				orchestrationEngine: {
-					dispatch: vi.fn(async () => ({
+				discoverClaudeCapabilities: vi.fn(async () =>
+					makeClaudeCapabilities({
 						models: [
 							{
 								id: "claude-sonnet-4-7",
@@ -424,8 +398,8 @@ describe("handleClientConnected — model list", () => {
 								contextWindowOptions,
 							},
 						],
-					})),
-				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+					}),
+				),
 			}),
 		);
 
@@ -460,8 +434,8 @@ describe("handleClientConnected — model list", () => {
 		];
 		const deps = applyTestDefaults(
 			createMockClientInitDeps({
-				orchestrationEngine: {
-					dispatch: vi.fn(async () => ({
+				discoverClaudeCapabilities: vi.fn(async () =>
+					makeClaudeCapabilities({
 						models: [
 							{
 								id: "claude-sonnet-4-7",
@@ -470,8 +444,8 @@ describe("handleClientConnected — model list", () => {
 								contextWindowOptions,
 							},
 						],
-					})),
-				} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+					}),
+				),
 			}),
 		);
 		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
@@ -508,8 +482,8 @@ describe("handleClientConnected — model list", () => {
 			hasActiveProcessingTimeout: vi.fn(async () => false),
 		};
 		const deps = createMockClientInitDeps({
-			orchestrationEngine: {
-				dispatch: vi.fn(async () => ({
+			discoverClaudeCapabilities: vi.fn(async () =>
+				makeClaudeCapabilities({
 					models: [
 						{
 							id: "claude-sonnet-4-7",
@@ -519,8 +493,8 @@ describe("handleClientConnected — model list", () => {
 							contextWindowOptions,
 						},
 					],
-				})),
-			} as unknown as NonNullable<ClientInitDeps["orchestrationEngine"]>,
+				}),
+			),
 			overrideState,
 		} as unknown as Partial<ClientInitDeps>);
 		vi.mocked(deps.client.session.get).mockResolvedValue({

@@ -82,10 +82,12 @@ describe("Orchestration wiring", () => {
 		const client = makeStubClient();
 		const layer = createOrchestrationLayer({ client });
 
-		const caps = await layer.engine.dispatch({
-			type: "discover",
-			providerId: "opencode",
-		});
+		const caps = await Effect.runPromise(
+			layer.engine.dispatchEffect({
+				type: "discover",
+				providerId: "opencode",
+			}),
+		);
 
 		expect(caps).toMatchObject({ supportsTools: true });
 	});

@@ -104,20 +104,6 @@ export class OrchestrationEngine {
 		this.processedCommands = Ref.unsafeMake(new Set<string>());
 	}
 
-	/**
-	 * Dispatch a command to the appropriate provider adapter.
-	 * Overloaded for typed results.
-	 */
-	async dispatch(command: SendTurnCommand): Promise<TurnResult>;
-	async dispatch(command: DiscoverCommand): Promise<AdapterCapabilities>;
-	async dispatch(command: InterruptTurnCommand): Promise<void>;
-	async dispatch(command: ResolvePermissionCommand): Promise<void>;
-	async dispatch(command: ResolveQuestionCommand): Promise<void>;
-	async dispatch(command: EndSessionCommand): Promise<void>;
-	async dispatch(command: OrchestrationCommand): Promise<OrchestrationResult> {
-		return Effect.runPromise(this.dispatchEffect(command));
-	}
-
 	dispatchEffect(
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError>;

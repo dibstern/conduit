@@ -123,7 +123,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					() => new Promise((resolve) => setImmediate(resolve)),
 				);
 
-				expect(engine.dispatch).toHaveBeenCalledWith(
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",
 						providerId: "claude",
@@ -220,7 +220,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				() => new Promise((resolve) => setImmediate(resolve)),
 			);
 
-			expect(engine.dispatch).toHaveBeenCalledWith(
+			expect(engine.dispatchEffect).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "send_turn",
 					providerId: "claude",

@@ -2416,6 +2416,65 @@ Exit: 0
 Checked 994 files in 344ms. No fixes applied.
 ```
 
+## Phase 6.42: Orchestration Promise Facade Deletion
+
+Plan issues found:
+
+- `client-init.ts` still discovered Claude models through `OrchestrationEngine.dispatch(...)` after handlers had moved
+  to `dispatchEffect(...)`. That was a missed Phase 6 consumer, not a valid external-boundary exception.
+- Passing the full orchestration engine into client init was wider than the bootstrap code needed. The relay already
+  owns the `ManagedRuntime` boundary for other client-init Effect services, so the long-term shape is a narrow Claude
+  discovery function supplied from that runtime.
+- `ProviderRegistry.shutdownAll(...)` had no production consumers. `OrchestrationEngine.shutdownEffect(...)` already
+  calls `shutdownAllEffect(...)`, so the Promise facade was test inertia.
+- `OrchestrationEngine.shutdown()` remains intentionally Promise-shaped for the current imperative relay `stop()`
+  cleanup path. Removing that belongs with the larger relay ownership conversion, not this provider facade slice.
+
+Changes:
+
+- `src/lib/bridges/client-init.ts`: replaced the optional full `orchestrationEngine` dependency with
+  `discoverClaudeCapabilities(...)`.
+- `src/lib/relay/relay-stack.ts`: supplies `discoverClaudeCapabilities(...)` by running
+  `orchestration.engine.dispatchEffect({ type: "discover", providerId: "claude" })` at the existing relay
+  `ManagedRuntime` boundary.
+- `src/lib/provider/orchestration-engine.ts`: deleted the `dispatch(...)` Promise facade; callers use
+  `dispatchEffect(...)`.
+- `src/lib/provider/provider-registry.ts`: deleted `shutdownAll(...)`; tests and orchestration use
+  `shutdownAllEffect(...)`.
+- `test/unit/provider/orchestration-dispatch-boundary.test.ts`: expanded the static guard to cover `client-init.ts`
+  and the provider-registry Promise shutdown facade.
+- Provider, client-init, and handler tests now assert or run the Effect APIs directly.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts
+Exit: 1
+Expected failures:
+  expected [ 'src/lib/bridges/client-init.ts' ] to deeply equal []
+  expected provider-registry.ts not to contain 'shutdownAll(): Promise'
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts test/unit/bridges/client-init.test.ts test/unit/handlers/effect-handlers.test.ts test/unit/handlers/get-commands-active-provider.test.ts test/unit/handlers/model-overrides-effect.test.ts test/unit/handlers/prompt-provider-state-effect.test.ts test/unit/provider/provider-registry.test.ts test/unit/provider/claude/provider-wiring.test.ts test/unit/provider/orchestration-engine.test.ts test/unit/provider/orchestration-wiring.test.ts test/unit/provider/orchestration-engine-effect.test.ts
+Exit: 0
+Test Files  11 passed (11)
+Tests  215 passed (215)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 994 files in 294ms. No fixes applied.
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

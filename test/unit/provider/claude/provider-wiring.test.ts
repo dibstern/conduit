@@ -78,10 +78,12 @@ describe("Provider wiring with Claude adapter", () => {
 		registry.registerAdapter(adapter);
 
 		const engine = new OrchestrationEngine({ registry });
-		const caps = await engine.dispatch({
-			type: "discover",
-			providerId: "claude",
-		});
+		const caps = await Effect.runPromise(
+			engine.dispatchEffect({
+				type: "discover",
+				providerId: "claude",
+			}),
+		);
 
 		expect(caps.models.length).toBeGreaterThan(0);
 		expect(caps.supportsTools).toBe(true);
@@ -93,17 +95,19 @@ describe("Provider wiring with Claude adapter", () => {
 		const engine = new OrchestrationEngine({ registry });
 
 		await expect(
-			engine.dispatch({ type: "discover", providerId: "nonexistent" }),
+			Effect.runPromise(
+				engine.dispatchEffect({ type: "discover", providerId: "nonexistent" }),
+			),
 		).rejects.toThrow("No adapter registered");
 	});
 
-	it("shutdownAll shuts down Claude adapter", async () => {
+	it("shutdownAllEffect shuts down Claude adapter", async () => {
 		const registry = new ProviderRegistry();
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 		registry.registerAdapter(adapter);
 
 		// Should not throw
-		await registry.shutdownAll();
+		await Effect.runPromise(registry.shutdownAllEffect());
 	});
 
 	it("session binding tracks provider for session", () => {
@@ -164,17 +168,19 @@ describe("Provider wiring with Claude adapter", () => {
 		const engine = new OrchestrationEngine({ registry });
 
 		const sink = createMockEventSink();
-		const result = await engine.dispatch({
-			type: "send_turn",
-			providerId: "claude",
-			input: makeBaseSendTurnInput({
-				sessionId: "e2e-session-1",
-				turnId: "e2e-turn-1",
-				prompt: "End-to-end wiring test",
-				workspaceRoot: workspace,
-				eventSink: sink,
+		const result = await Effect.runPromise(
+			engine.dispatchEffect({
+				type: "send_turn",
+				providerId: "claude",
+				input: makeBaseSendTurnInput({
+					sessionId: "e2e-session-1",
+					turnId: "e2e-turn-1",
+					prompt: "End-to-end wiring test",
+					workspaceRoot: workspace,
+					eventSink: sink,
+				}),
 			}),
-		});
+		);
 
 		// Result flows back through the full stack
 		expect(result.status).toBe("completed");

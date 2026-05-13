@@ -580,7 +580,7 @@ describe("handleReloadProviderSession", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				// Should have dispatched end_session
-				expect(engine.dispatch).toHaveBeenCalledWith(
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "end_session",
 						sessionId: "session-42",
@@ -924,7 +924,7 @@ describe("handleSwitchModel", () => {
 				providerID: "claude",
 				modelID: "opus",
 			});
-			expect(engine.dispatch).toHaveBeenCalledWith({
+			expect(engine.dispatchEffect).toHaveBeenCalledWith({
 				type: "discover",
 				providerId: "claude",
 			});
@@ -984,7 +984,7 @@ describe("handleSwitchVariant", () => {
 			});
 			yield* handleSwitchVariant("client-1", { variant: "high" });
 			expect(yield* getVariant("session-42")).toBe("high");
-			expect(engine.dispatch).toHaveBeenCalledWith({
+			expect(engine.dispatchEffect).toHaveBeenCalledWith({
 				type: "discover",
 				providerId: "claude",
 			});
@@ -1088,7 +1088,7 @@ describe("handleSwitchContextWindow", () => {
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("1m");
-				expect(engine.dispatch).toHaveBeenCalledWith({
+				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
 				});
@@ -3270,7 +3270,7 @@ describe("handleMessage", () => {
 			yield* setContextWindow("session-1", "1m");
 			yield* handleMessage("client-1", { text: "hello world" });
 			yield* flushDispatchContinuation();
-			expect(engine.dispatch).toHaveBeenCalledWith(
+			expect(engine.dispatchEffect).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "send_turn",
 					providerId: "claude",
@@ -3434,7 +3434,7 @@ describe("handleMessage", () => {
 					expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
 						"session-1",
 					);
-					expect(engine.dispatch).toHaveBeenCalledWith(
+					expect(engine.dispatchEffect).toHaveBeenCalledWith(
 						expect.objectContaining({
 							type: "send_turn",
 							providerId: "claude",
@@ -3532,7 +3532,7 @@ describe("handleMessage", () => {
 						legacyReadQuery.getSessionMessagesWithParts,
 					).not.toHaveBeenCalled();
 					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
-					expect(engine.dispatch).toHaveBeenCalledWith(
+					expect(engine.dispatchEffect).toHaveBeenCalledWith(
 						expect.objectContaining({
 							type: "send_turn",
 							providerId: "claude",

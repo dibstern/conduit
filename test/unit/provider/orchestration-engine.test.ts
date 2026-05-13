@@ -57,17 +57,64 @@ vi.mock("../../../src/lib/logger.js", () => ({
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
 import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
 import {
+	type DiscoverCommand,
+	type EndSessionCommand,
+	type InterruptTurnCommand,
 	OrchestrationEngine,
+	type OrchestrationResult,
+	type ResolvePermissionCommand,
+	type ResolveQuestionCommand,
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
+import type {
+	AdapterCapabilities,
+	ProviderAdapter,
+	TurnResult,
+} from "../../../src/lib/provider/types.js";
 import {
 	createMockEventSink,
 	createMockQuery,
 	makeBaseSendTurnInput,
 	makeSuccessResult,
 } from "../../helpers/mock-sdk.js";
+
+function dispatch(
+	engine: OrchestrationEngine,
+	command: SendTurnCommand,
+): Promise<TurnResult>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command: DiscoverCommand,
+): Promise<AdapterCapabilities>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command: InterruptTurnCommand,
+): Promise<void>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command: ResolvePermissionCommand,
+): Promise<void>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command: ResolveQuestionCommand,
+): Promise<void>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command: EndSessionCommand,
+): Promise<void>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command:
+		| SendTurnCommand
+		| DiscoverCommand
+		| InterruptTurnCommand
+		| ResolvePermissionCommand
+		| ResolveQuestionCommand
+		| EndSessionCommand,
+): Promise<OrchestrationResult> {
+	return Effect.runPromise(engine.dispatchEffect(command));
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -129,7 +176,7 @@ describe("OrchestrationEngine", () => {
 
 	describe("dispatch: send_turn", () => {
 		it("routes sendTurn to the correct adapter", async () => {
-			const result = await engine.dispatch({
+			const result = await dispatch(engine, {
 				type: "send_turn",
 				providerId: "opencode",
 				input: {
@@ -154,7 +201,7 @@ describe("OrchestrationEngine", () => {
 
 		it("throws for unknown provider", async () => {
 			await expect(
-				engine.dispatch({
+				dispatch(engine, {
 					type: "send_turn",
 					providerId: "unknown",
 					input: {
@@ -173,7 +220,7 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("records session-to-provider binding", async () => {
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "send_turn",
 				providerId: "opencode",
 				input: {
@@ -201,7 +248,7 @@ describe("OrchestrationEngine", () => {
 			// Establish binding first
 			engine.bindSession("s1", "opencode");
 
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "interrupt_turn",
 				sessionId: "s1",
 			});
@@ -211,7 +258,7 @@ describe("OrchestrationEngine", () => {
 
 		it("throws when session has no provider binding", async () => {
 			await expect(
-				engine.dispatch({
+				dispatch(engine, {
 					type: "interrupt_turn",
 					sessionId: "unknown-session",
 				}),
@@ -223,7 +270,7 @@ describe("OrchestrationEngine", () => {
 		it("routes permission resolution to the correct adapter", async () => {
 			engine.bindSession("s1", "opencode");
 
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "resolve_permission",
 				sessionId: "s1",
 				requestId: "perm-1",
@@ -242,7 +289,7 @@ describe("OrchestrationEngine", () => {
 		it("routes question resolution to the correct adapter", async () => {
 			engine.bindSession("s1", "opencode");
 
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "resolve_question",
 				sessionId: "s1",
 				requestId: "q1",
@@ -257,7 +304,7 @@ describe("OrchestrationEngine", () => {
 
 	describe("dispatch: discover", () => {
 		it("calls discover on the specified adapter", async () => {
-			const result = await engine.dispatch({
+			const result = await dispatch(engine, {
 				type: "discover",
 				providerId: "opencode",
 			});
@@ -271,7 +318,7 @@ describe("OrchestrationEngine", () => {
 		it("routes endSession to the bound provider", async () => {
 			engine.bindSession("s-end-1", "opencode");
 
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "end_session",
 				sessionId: "s-end-1",
 			});
@@ -280,7 +327,7 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("is a no-op when session has no binding", async () => {
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "end_session",
 				sessionId: "unbound",
 			});
@@ -291,7 +338,7 @@ describe("OrchestrationEngine", () => {
 		it("preserves the binding when unbind is omitted", async () => {
 			engine.bindSession("s-keep", "opencode");
 
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "end_session",
 				sessionId: "s-keep",
 			});
@@ -302,7 +349,7 @@ describe("OrchestrationEngine", () => {
 		it("removes the binding when unbind: true is set", async () => {
 			engine.bindSession("s-drop", "opencode");
 
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "end_session",
 				sessionId: "s-drop",
 				unbind: true,
@@ -324,7 +371,7 @@ describe("OrchestrationEngine", () => {
 			engine.bindSession("s-err", "opencode");
 
 			await expect(
-				engine.dispatch({
+				dispatch(engine, {
 					type: "end_session",
 					sessionId: "s-err",
 				}),
@@ -396,10 +443,10 @@ describe("OrchestrationEngine", () => {
 				},
 			};
 
-			await engine.dispatch(command);
+			await dispatch(engine, command);
 
 			// Second dispatch with same commandId should be rejected
-			await expect(engine.dispatch(command)).rejects.toThrow(
+			await expect(dispatch(engine, command)).rejects.toThrow(
 				"Duplicate command: cmd-1",
 			);
 		});
@@ -424,8 +471,8 @@ describe("OrchestrationEngine", () => {
 				},
 			});
 
-			await engine.dispatch(makeCommand());
-			await engine.dispatch(makeCommand()); // Should not throw
+			await dispatch(engine, makeCommand());
+			await dispatch(engine, makeCommand()); // Should not throw
 
 			expect(opencode.sendTurnEffect).toHaveBeenCalledTimes(2);
 		});
@@ -448,7 +495,7 @@ describe("OrchestrationEngine", () => {
 			Effect.runSync(Ref.set(commandsRef, bigSet));
 
 			// Dispatch one more command to trigger pruning
-			await engine.dispatch({
+			await dispatch(engine, {
 				type: "send_turn",
 				commandId: "trigger-prune",
 				providerId: "opencode",
@@ -498,7 +545,7 @@ describe("OrchestrationEngine", () => {
 	// ─── Claude adapter integration ─────────────────────────────────────────
 	// These tests use a real ClaudeAdapter with an injected queryFactory
 	// to verify the full dispatch path:
-	// OrchestrationEngine.dispatch(SendTurnCommand) → ClaudeAdapter.sendTurnEffect()
+	// OrchestrationEngine.dispatchEffect(SendTurnCommand) → ClaudeAdapter.sendTurnEffect()
 	// → SDK query() → stream consumer → canonical events via EventSink.
 
 	describe("Claude adapter integration", () => {
@@ -530,7 +577,7 @@ describe("OrchestrationEngine", () => {
 			});
 
 			const sink = createMockEventSink();
-			const result = await claudeEngine.dispatch({
+			const result = await dispatch(claudeEngine, {
 				type: "send_turn",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
@@ -566,7 +613,7 @@ describe("OrchestrationEngine", () => {
 			});
 
 			const sink = createMockEventSink();
-			await claudeEngine.dispatch({
+			await dispatch(claudeEngine, {
 				type: "send_turn",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
@@ -629,7 +676,7 @@ describe("OrchestrationEngine", () => {
 			});
 
 			const sink = createMockEventSink();
-			const result = await claudeEngine.dispatch({
+			const result = await dispatch(claudeEngine, {
 				type: "send_turn",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
@@ -666,7 +713,7 @@ describe("OrchestrationEngine", () => {
 			});
 
 			await expect(
-				throwingEngine.dispatch({
+				dispatch(throwingEngine, {
 					type: "send_turn",
 					providerId: "thrower",
 					input: {
@@ -735,7 +782,7 @@ describe("OrchestrationEngine", () => {
 			});
 
 			const sink = createMockEventSink();
-			const result = await claudeEngine.dispatch({
+			const result = await dispatch(claudeEngine, {
 				type: "send_turn",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
@@ -777,7 +824,7 @@ describe("OrchestrationEngine", () => {
 			eng.bindSession("s-err", "opencode");
 
 			await expect(
-				eng.dispatch({
+				dispatch(eng, {
 					type: "interrupt_turn",
 					sessionId: "s-err",
 				}),
@@ -809,7 +856,7 @@ describe("OrchestrationEngine", () => {
 			eng.bindSession("s-perm", "opencode");
 
 			await expect(
-				eng.dispatch({
+				dispatch(eng, {
 					type: "resolve_permission",
 					sessionId: "s-perm",
 					requestId: "req-1",
@@ -842,7 +889,7 @@ describe("OrchestrationEngine", () => {
 			const eng = new OrchestrationEngine({ registry: reg });
 
 			await expect(
-				eng.dispatch({
+				dispatch(eng, {
 					type: "discover",
 					providerId: "opencode",
 				}),

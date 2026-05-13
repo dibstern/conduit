@@ -181,7 +181,7 @@ describe("model handlers with Effect override state", () => {
 				yield* handleMessage("client-1", { text: "ship it" });
 				yield* flushDispatchContinuation();
 
-				expect(engine.dispatch).toHaveBeenCalledWith(
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",
 						input: expect.objectContaining({

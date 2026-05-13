@@ -19,7 +19,7 @@ import { getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import type { ReadQueryService } from "../persistence/read-query-service.js";
-import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
+import type { AdapterCapabilities } from "../provider/types.js";
 import {
 	type SessionSwitchDeps,
 	switchClientToSession,
@@ -122,8 +122,8 @@ export interface ClientInitDeps {
 	getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Optional supplier of cached update version (for replaying to new clients) */
 	getCachedUpdate?: () => string | null;
-	/** Optional orchestration engine for Claude SDK model discovery */
-	orchestrationEngine?: OrchestrationEngine;
+	/** Optional Claude SDK capability discovery, provided by the relay Effect runtime. */
+	discoverClaudeCapabilities?: () => Promise<AdapterCapabilities>;
 	/** SQLite read query service (optional — absent when persistence is not configured) */
 	readQuery?: ReadQueryService;
 	log: Logger;
@@ -412,12 +412,9 @@ export async function handleClientConnected(
 		// overwrite the merged list the client later receives from get_models.
 		//   "Anthropic - opencode" → routes via OpenCode REST API
 		//   "Anthropic - claude"  → routes via in-process Claude Agent SDK
-		if (deps.orchestrationEngine) {
+		if (deps.discoverClaudeCapabilities) {
 			try {
-				const claudeCaps = await deps.orchestrationEngine.dispatch({
-					type: "discover",
-					providerId: "claude",
-				});
+				const claudeCaps = await deps.discoverClaudeCapabilities();
 				if (claudeCaps.models.length > 0) {
 					for (const p of providers) {
 						if (p.id === "anthropic") {

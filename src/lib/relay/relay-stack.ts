@@ -853,7 +853,13 @@ export async function createProjectRelay(
 			getCachedUpdate: config.getCachedUpdate,
 		}),
 		...(orchestration != null && {
-			orchestrationEngine: orchestration.engine,
+			discoverClaudeCapabilities: () =>
+				relayManagedRuntime.runPromise(
+					orchestration.engine.dispatchEffect({
+						type: "discover",
+						providerId: "claude",
+					}),
+				),
 		}),
 		...(readQuery != null && { readQuery }),
 		log: wsLog,

@@ -108,19 +108,19 @@ describe("ProviderRegistry", () => {
 		expect(registry.getAdapterOrThrow("opencode")).toBe(adapter);
 	});
 
-	it("shutdownAll calls shutdownEffect on all adapters", async () => {
+	it("shutdownAllEffect calls shutdownEffect on all adapters", async () => {
 		const a1 = makeStubAdapter("opencode");
 		const a2 = makeStubAdapter("claude");
 		registry.registerAdapter(a1);
 		registry.registerAdapter(a2);
 
-		await registry.shutdownAll();
+		await Effect.runPromise(registry.shutdownAllEffect());
 
 		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
 		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 
-	it("shutdownAll uses the adapter Effect boundary", async () => {
+	it("shutdownAllEffect uses the adapter Effect boundary", async () => {
 		const shutdown = vi.fn(() => {
 			throw new Error("legacy Promise shutdown should not be called");
 		});
@@ -134,13 +134,13 @@ describe("ProviderRegistry", () => {
 			shutdownEffect: typeof shutdownEffect;
 		});
 
-		await registry.shutdownAll();
+		await Effect.runPromise(registry.shutdownAllEffect());
 
 		expect(shutdown).not.toHaveBeenCalled();
 		expect(shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 
-	it("shutdownAll continues even if one adapter fails", async () => {
+	it("shutdownAllEffect continues even if one adapter fails", async () => {
 		const a1 = makeStubAdapter("opencode");
 		const a2 = makeStubAdapter("claude");
 		(a1.shutdownEffect as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -156,7 +156,7 @@ describe("ProviderRegistry", () => {
 		registry.registerAdapter(a2);
 
 		// Should not throw
-		await registry.shutdownAll();
+		await Effect.runPromise(registry.shutdownAllEffect());
 
 		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
 		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);

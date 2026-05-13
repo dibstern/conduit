@@ -95,7 +95,7 @@ describe("handleGetCommands active provider", () => {
 		return handleGetCommands("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(engine.dispatch).toHaveBeenCalledWith({
+				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
 				});
@@ -134,7 +134,7 @@ describe("handleGetCommands active provider", () => {
 			return handleGetCommands("client-1", {}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(engine.dispatch).not.toHaveBeenCalled();
+					expect(engine.dispatchEffect).not.toHaveBeenCalled();
 					expect(client.app.commands).toHaveBeenCalledOnce();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "command_list",

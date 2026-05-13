@@ -96,8 +96,4 @@ export class ProviderRegistry {
 			{ concurrency: 4, discard: true },
 		);
 	}
-
-	async shutdownAll(): Promise<void> {
-		await Effect.runPromise(this.shutdownAllEffect());
-	}
 }
