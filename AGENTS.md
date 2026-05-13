@@ -15,7 +15,7 @@ NEVER stash changes, you are interrupting other sessions and work.
 - The CLI either runs a relay in-process with `foreground` or manages a long-lived `Daemon` over Unix socket IPC.
 - `src/lib/daemon/daemon.ts` owns process lifecycle, persisted config, the shared HTTP and IPC servers, project registration, and provider runtime coordination.
 - One daemon can host many projects. Each project gets its own relay stack mounted under `/p/<slug>`.
-- `src/lib/relay/relay-stack.ts` builds the per-project relay around provider adapters, `SessionManager`, `WebSocketHandler`, pollers, and PTY wiring.
+- `src/lib/relay/relay-stack.ts` builds the per-project relay around provider adapters, `SessionManagerService`, `WebSocketHandler`, pollers, and PTY wiring.
 - `src/lib/server/*` handles the shared HTTP and WebSocket edge; `src/lib/handlers/*` dispatch browser messages into focused domain handlers.
 - The SQLite event store is the source of truth for sessions and messages. Provider adapters are stateless execution engines that stream events into the store.
 
