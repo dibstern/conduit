@@ -518,29 +518,18 @@ export const handleMessage = (
 					}
 				});
 
-			const dispatchPromise = yield* Effect.try({
-				try: () =>
-					orchestrationEngine.dispatch({
+			yield* Effect.forkDaemon(
+				orchestrationEngine
+					.dispatchEffect({
 						type: "send_turn",
 						providerId,
 						input: sendTurnInput,
-					}),
-				catch: (err) => err,
-			}).pipe(Effect.either);
-
-			if (dispatchPromise._tag === "Left") {
-				yield* handleDispatchFailure(dispatchPromise.left);
-			} else {
-				yield* Effect.forkDaemon(
-					Effect.tryPromise({
-						try: () => dispatchPromise.right,
-						catch: (err) => err,
-					}).pipe(
+					})
+					.pipe(
 						Effect.flatMap(handleDispatchResult),
 						Effect.catchAll(handleDispatchFailure),
 					),
-				);
-			}
+			);
 		} else {
 			// Legacy path: direct REST call
 			const sendResult = yield* Effect.either(
@@ -591,12 +580,10 @@ export const handleCancel = (
 				const providerId = engine.getProviderForSession(activeId);
 				if (providerId === "claude") {
 					const interruptResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engine.dispatch({
-								type: "interrupt_turn",
-								sessionId: activeId,
-							}),
-						),
+						engine.dispatchEffect({
+							type: "interrupt_turn",
+							sessionId: activeId,
+						}),
 					);
 					if (interruptResult._tag === "Left") {
 						log.warn(

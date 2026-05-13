@@ -25,6 +25,7 @@ import {
 	makeTestHandlerLayer,
 	type RecordedWebSocketCall,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const snapshotPath = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -116,7 +117,7 @@ describe("settings handler wire snapshots", () => {
 				Effect.provide(
 					Layer.merge(
 						makeTestHandlerLayer({ api, wsHandler }),
-						Layer.succeed(OrchestrationEngineTag, engine),
+						Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					),
 				),
 			),

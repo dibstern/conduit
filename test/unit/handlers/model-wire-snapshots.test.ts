@@ -29,6 +29,7 @@ import {
 	makeTestHandlerLayer,
 	type RecordedWebSocketCall,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const snapshotPath = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -85,10 +86,10 @@ const makeDispatchLayer = (
 	);
 
 const makeNoopEngine = (): OrchestrationEngine =>
-	({
+	withDispatchEffect({
 		bindSession: vi.fn(),
 		dispatch: vi.fn(async () => ({ models: [] })),
-	}) as unknown as OrchestrationEngine;
+	});
 
 describe("model handler wire snapshots", () => {
 	it("keeps the OpenCode-only get_models envelope stable", async () => {

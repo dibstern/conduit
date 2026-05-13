@@ -131,6 +131,7 @@ import {
 	makeMockSessionManagerService,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -524,7 +525,7 @@ describe("handleReloadProviderSession", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			openCodeModelAndSettingsLayer(client),
 			Layer.succeed(ConfigTag, config),
 			makeOverridesStateLive(),
@@ -569,7 +570,7 @@ describe("handleReloadProviderSession", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			openCodeModelAndSettingsLayer(client),
 			Layer.succeed(ConfigTag, config),
 			makeOverridesStateLive(),
@@ -625,7 +626,7 @@ describe("handleGetModels", () => {
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -679,7 +680,7 @@ describe("handleGetModels", () => {
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -742,7 +743,7 @@ describe("handleGetModels", () => {
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -813,7 +814,7 @@ describe("handleGetModels", () => {
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -858,7 +859,7 @@ describe("handleSwitchModel", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -910,7 +911,7 @@ describe("handleSwitchModel", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -972,7 +973,7 @@ describe("handleSwitchVariant", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -1074,7 +1075,7 @@ describe("handleSwitchContextWindow", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -1122,7 +1123,7 @@ describe("handleSwitchContextWindow", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -2133,7 +2134,7 @@ describe("handleQuestionReject", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -2245,7 +2246,7 @@ describe("handleAskUserResponse", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -3261,13 +3262,14 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
 		return Effect.gen(function* () {
 			yield* setContextWindow("session-1", "1m");
 			yield* handleMessage("client-1", { text: "hello world" });
+			yield* flushDispatchContinuation();
 			expect(engine.dispatch).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "send_turn",
@@ -3330,12 +3332,13 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
 				yield* handleMessage("client-1", { text: "hello world" });
+				yield* flushDispatchContinuation();
 				const pendingInteractions = yield* PendingInteractionServiceTag;
 				const pendingQuestions =
 					yield* pendingInteractions.listPendingQuestions("session-1");
@@ -3420,7 +3423,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				makeOverridesStateLive(),
 			);
@@ -3516,7 +3519,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				Layer.succeed(ReadQueryTag, legacyReadQuery),
 				makeOverridesStateLive(),
 			);
@@ -3624,7 +3627,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -3698,7 +3701,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -3740,7 +3743,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 

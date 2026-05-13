@@ -28,6 +28,7 @@ import {
 	makeMockSessionManagerService,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -55,6 +56,9 @@ function mockWsHandler(
 function mockLogger(): Logger {
 	return makeMockLogger() as Logger;
 }
+
+const flushDispatchContinuation = () =>
+	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 describe("model handlers with Effect override state", () => {
 	it.effect(
@@ -175,6 +179,7 @@ describe("model handlers with Effect override state", () => {
 					modelId: "gpt-4",
 				});
 				yield* handleMessage("client-1", { text: "ship it" });
+				yield* flushDispatchContinuation();
 
 				expect(engine.dispatch).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -192,7 +197,7 @@ describe("model handlers with Effect override state", () => {
 							api,
 							wsHandler: ws,
 							sessionManagerService,
-							orchestrationEngine: engine,
+							orchestrationEngine: withDispatchEffect(engine),
 							config: makeMockConfig({ configDir }),
 						}),
 					),

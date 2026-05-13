@@ -50,12 +50,10 @@ export const handleGetCommands = (
 
 		if (activeProviderId === "claude" && engineOption._tag === "Some") {
 			const result = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engineOption.value.dispatch({
-						type: "discover",
-						providerId: "claude",
-					}),
-				),
+				engineOption.value.dispatchEffect({
+					type: "discover",
+					providerId: "claude",
+				}),
 			);
 			if (result._tag === "Left") {
 				const logOption = yield* Effect.serviceOption(LoggerTag);

@@ -17,6 +17,7 @@ import {
 import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -76,7 +77,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, mockLogger()),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -125,7 +126,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, mockLogger()),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 

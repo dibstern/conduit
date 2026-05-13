@@ -13,6 +13,7 @@ import { handleGetCommands } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -87,7 +88,7 @@ describe("handleGetCommands active provider", () => {
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			Layer.succeed(LoggerTag, mockLogger()),
 		);
 
@@ -127,7 +128,7 @@ describe("handleGetCommands active provider", () => {
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			);
 
 			return handleGetCommands("client-1", {}).pipe(
@@ -188,7 +189,7 @@ describe("handleGetCommands active provider", () => {
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			Layer.succeed(LoggerTag, log),
 		);
 

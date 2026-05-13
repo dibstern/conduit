@@ -33,6 +33,7 @@ import type {
 } from "../../../src/lib/provider/orchestration-engine.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
 	sessionId = "session-provider-state",
@@ -102,7 +103,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					slug: "provider-state-test",
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makePersistenceEffectLayer(filename),
 				makeOverridesStateLive(),
 			);
@@ -186,7 +187,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				slug: "history-test",
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makePersistenceEffectLayer(filename),
 			makeOverridesStateLive(),
 		);
@@ -282,7 +283,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				slug: "claude-user-effect-test",
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makePersistenceEffectLayer(filename),
 			makeOverridesStateLive(),
 		);
@@ -382,7 +383,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					slug: "claude-sink-effect-test",
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makePersistenceEffectLayer(filename),
 				makeOverridesStateLive(),
 			);

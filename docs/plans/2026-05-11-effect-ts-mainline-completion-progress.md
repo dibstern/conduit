@@ -2366,6 +2366,56 @@ Exit: 0
 Checked 992 files in 221ms. No fixes applied.
 ```
 
+## Phase 6.41: Handler Orchestration Dispatch Boundary
+
+Plan issues found:
+
+- The Phase 9 grep bucket mixed two different provider-boundary shapes. Handler calls to
+  `OrchestrationEngine.dispatch(...)` were unnecessary Promise facades over an existing Effect API and should be
+  removed now.
+- The remaining `handlers/prompt.ts` EventSink persistence bridge sits at the Promise-shaped Claude SDK/EventSink
+  boundary. Removing that without hiding it elsewhere requires a separate EventSink design slice, not a mechanical
+  swap in the prompt handler.
+
+Changes:
+
+- `src/lib/handlers/context-window.ts`, `model.ts`, `settings.ts`, `reload.ts`, and `prompt.ts` now call
+  `dispatchEffect(...)` directly.
+- `handleMessage(...)` forks the `send_turn` Effect directly instead of creating a Promise via
+  `OrchestrationEngine.dispatch(...)` and wrapping it back into Effect.
+- `test/unit/provider/orchestration-dispatch-boundary.test.ts` guards handler code from reintroducing the Promise
+  facade.
+- Handler tests now provide test doubles with `dispatchEffect(...)` so tests model the production service contract.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts
+Exit: 1
+Expected failure:
+  offenders included context-window.ts, model.ts, prompt.ts, reload.ts, and settings.ts
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts test/unit/handlers/effect-handlers.test.ts test/unit/handlers/model-wire-snapshots.test.ts test/unit/handlers/settings-wire-snapshots.test.ts test/unit/handlers/context-window-overrides-effect.test.ts test/unit/handlers/get-commands-active-provider.test.ts test/unit/handlers/model-overrides-effect.test.ts test/unit/handlers/prompt-provider-state-effect.test.ts test/unit/provider/orchestration-engine-effect.test.ts test/unit/provider/orchestration-engine.test.ts
+Exit: 0
+Test Files  10 passed (10)
+Tests  139 passed (139)
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 994 files in 344ms. No fixes applied.
+```
+
 ## Phase 7.39: Processing Timeout State Contract And Bridge Deletion
 
 Plan issues found:

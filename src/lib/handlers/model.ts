@@ -99,12 +99,10 @@ export const handleGetModels = (
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (engineOption._tag === "Some") {
 			const engineResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engineOption.value.dispatch({
-						type: "discover",
-						providerId: "claude",
-					}),
-				),
+				engineOption.value.dispatchEffect({
+					type: "discover",
+					providerId: "claude",
+				}),
 			);
 			if (
 				engineResult._tag === "Right" &&
@@ -274,12 +272,10 @@ export const handleSwitchModel = (
 				);
 				if (engineOption._tag === "Some") {
 					const capsResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engineOption.value.dispatch({
-								type: "discover",
-								providerId: "claude",
-							}),
-						),
+						engineOption.value.dispatchEffect({
+							type: "discover",
+							providerId: "claude",
+						}),
 					);
 					if (capsResult._tag === "Right") {
 						const model = capsResult.right.models.find((m) => m.id === modelId);
@@ -368,12 +364,10 @@ export const handleSetDefaultModel = (
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 			if (engineOption._tag === "Some") {
 				const capsResult = yield* Effect.either(
-					Effect.tryPromise(() =>
-						engineOption.value.dispatch({
-							type: "discover",
-							providerId: "claude",
-						}),
-					),
+					engineOption.value.dispatchEffect({
+						type: "discover",
+						providerId: "claude",
+					}),
 				);
 				if (capsResult._tag === "Right") {
 					const selectedModel = capsResult.right.models.find(
@@ -455,12 +449,10 @@ export const handleSwitchVariant = (
 				);
 				if (engineOption._tag === "Some") {
 					const capsResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engineOption.value.dispatch({
-								type: "discover",
-								providerId: "claude",
-							}),
-						),
+						engineOption.value.dispatchEffect({
+							type: "discover",
+							providerId: "claude",
+						}),
 					);
 					if (capsResult._tag === "Right") {
 						const model = capsResult.right.models.find(

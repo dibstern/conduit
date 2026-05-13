@@ -33,12 +33,10 @@ const loadContextWindowOptions = (modelId: string) =>
 		}
 
 		const capsResult = yield* Effect.either(
-			Effect.tryPromise(() =>
-				engineOption.value.dispatch({
-					type: "discover",
-					providerId: "claude",
-				}),
-			),
+			engineOption.value.dispatchEffect({
+				type: "discover",
+				providerId: "claude",
+			}),
 		);
 		if (capsResult._tag === "Left") {
 			log.warn(

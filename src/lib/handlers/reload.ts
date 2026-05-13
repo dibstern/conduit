@@ -41,9 +41,10 @@ export const handleReloadProviderSession = (
 		const engineResult = yield* Effect.either(
 			Effect.gen(function* () {
 				const engine = yield* OrchestrationEngineTag;
-				yield* Effect.tryPromise(() =>
-					engine.dispatch({ type: "end_session", sessionId: activeId }),
-				);
+				yield* engine.dispatchEffect({
+					type: "end_session",
+					sessionId: activeId,
+				});
 			}),
 		);
 		if (engineResult._tag === "Left") {
