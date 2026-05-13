@@ -22,7 +22,6 @@ import {
 	// Persistence extension Tags
 	ReadQueryTag,
 	SessionManagerTag,
-	SessionRegistryTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/effect/services.js";
@@ -38,7 +37,6 @@ const ALL_TAGS = [
 	ConfigTag,
 	LoggerTag,
 	StatusPollerTag,
-	SessionRegistryTag,
 	PollerManagerTag,
 	ConnectPtyUpstreamTag,
 	OrchestrationEngineTag,
@@ -66,7 +64,7 @@ describe("Service Tags", () => {
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
 		// Bridge classes are no longer Effect services; count only active Tags.
-		expect(ALL_TAGS.length).toBe(18);
+		expect(ALL_TAGS.length).toBe(17);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -101,10 +99,6 @@ describe("Service Tags", () => {
 
 	it("StatusPoller tag has correct key", () => {
 		expect(StatusPollerTag.key).toBe("StatusPoller");
-	});
-
-	it("SessionRegistry tag has correct key", () => {
-		expect(SessionRegistryTag.key).toBe("SessionRegistry");
 	});
 
 	it("PollerManager tag has correct key", () => {

@@ -57,7 +57,6 @@ import {
 	ReadQueryTag,
 	type SessionManagerShape,
 	SessionManagerTag,
-	SessionRegistryTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../effect/services.js";
@@ -975,7 +974,6 @@ export async function createProjectRelay(
 		configLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
-		Layer.succeed(SessionRegistryTag, registry),
 		Layer.succeed(PollerManagerTag, pollerManager),
 		connectPtyUpstreamLayer,
 		orchestrationRuntimeLayer,

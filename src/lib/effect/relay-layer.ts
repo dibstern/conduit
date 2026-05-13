@@ -4,7 +4,7 @@
 //
 // Bridge Tags (for old imperative consumers) are still provided via
 // Layer.succeed(Tag, instance) in relay-stack.ts during the transition.
-// They will be deleted in Task 8 when consumers are fully converted.
+// They are deleted incrementally as consumers move to Effect-owned services.
 //
 // External deps provided by caller: OpenCodeAPITag, ConfigTag, LoggerTag,
 // and all bridge Tags.
@@ -43,9 +43,9 @@ const SessionManagerStateAndServiceLive = Layer.provideMerge(
  * All layers here are self-constructing — they create their own Ref, FiberMap,
  * PubSub, etc. No imperative instance is needed.
  *
- * Consumers of bridge Tags (SessionManagerTag, SessionRegistryTag, etc.) still
- * get them from Layer.succeed() in relay-stack.ts. Those bridge layers are
- * merged alongside RelayStateLive when creating the full runtime.
+ * Consumers of remaining bridge Tags (SessionManagerTag, PollerManagerTag,
+ * etc.) still get them from Layer.succeed() in relay-stack.ts. Those bridge
+ * layers are merged alongside RelayStateLive when creating the full runtime.
  */
 export const RelayStateLive = Layer.mergeAll(
 	// Session state

@@ -29,7 +29,6 @@ import type { LegacyRelayEventSinkPersist } from "../provider/relay-event-sink.j
 import type { Translator } from "../relay/event-translator.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
-import type { SessionRegistry } from "../session/session-registry.js";
 import type { HistoryMessage } from "../shared-types.js";
 import type {
 	ProjectRelayConfig,
@@ -284,11 +283,6 @@ export class StatusPollerTag extends Context.Tag("StatusPoller")<
 	StatusPollerShape
 >() {}
 
-export class SessionRegistryTag extends Context.Tag("SessionRegistry")<
-	SessionRegistryTag,
-	SessionRegistry
->() {}
-
 export class PollerManagerTag extends Context.Tag("PollerManager")<
 	PollerManagerTag,
 	PollerManagerShape
@@ -378,25 +372,23 @@ type _AssertCoverage = {
 							? Logger
 							: K extends "statusPoller"
 								? StatusPollerShape
-								: K extends "registry"
-									? SessionRegistry
-									: K extends "pollerManager"
-										? PollerManagerShape
-										: K extends "connectPtyUpstream"
-											? ConnectPtyUpstreamShape
-											: K extends "instanceMgmt"
-												? InstanceManagementDeps
-												: K extends "projectMgmt"
-													? ProjectManagementDeps
-													: K extends "readQuery"
-														? ReadQueryService
-														: K extends "orchestrationEngine"
-															? OrchestrationEngine
-															: K extends "claudeEventPersist"
-																? LegacyRelayEventSinkPersist
-																: K extends "providerStateService"
-																	? ProviderStateService
-																	: never;
+								: K extends "pollerManager"
+									? PollerManagerShape
+									: K extends "connectPtyUpstream"
+										? ConnectPtyUpstreamShape
+										: K extends "instanceMgmt"
+											? InstanceManagementDeps
+											: K extends "projectMgmt"
+												? ProjectManagementDeps
+												: K extends "readQuery"
+													? ReadQueryService
+													: K extends "orchestrationEngine"
+														? OrchestrationEngine
+														: K extends "claudeEventPersist"
+															? LegacyRelayEventSinkPersist
+															: K extends "providerStateService"
+																? ProviderStateService
+																: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.

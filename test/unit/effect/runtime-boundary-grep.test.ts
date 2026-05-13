@@ -74,4 +74,34 @@ describe("Effect runtime boundary grep", () => {
 		expect(unexpected).toEqual([]);
 		expect(hits).toHaveLength(allowedRuntimeBoundaries.length);
 	});
+
+	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern: /Layer\.succeed\(SessionRegistryTag,/,
+			},
+			{
+				path: "src/lib/effect/services.ts",
+				pattern: /class SessionRegistryTag\b/,
+			},
+			{
+				path: "src/lib/handlers/types.ts",
+				pattern: /registry:\s*SessionRegistry\b/,
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim() }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
 });

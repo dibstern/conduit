@@ -14,7 +14,6 @@ import type { ReadQueryService } from "../persistence/read-query-service.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { RelayEventSinkPersist } from "../provider/relay-event-sink.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { SessionRegistry } from "../session/session-registry.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../types.js";
 
@@ -63,8 +62,6 @@ export interface HandlerDeps {
 	log: Logger;
 	/** Session status poller for processing state */
 	statusPoller: Pick<SessionStatusPollerService, "isProcessing">;
-	/** Shared session registry for client→session viewer tracking */
-	registry: SessionRegistry;
 	/** Message poller manager — used to start REST polling when viewing sessions */
 	pollerManager: PollerManagerShape;
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;

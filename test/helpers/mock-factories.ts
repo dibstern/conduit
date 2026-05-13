@@ -297,11 +297,6 @@ export function createMockHandlerDeps(
 		statusPoller: {
 			isProcessing: vi.fn().mockReturnValue(false),
 		},
-		registry: {
-			hasViewers: vi.fn().mockReturnValue(false),
-			addViewer: vi.fn(),
-			removeClient: vi.fn(),
-		} as unknown as HandlerDeps["registry"],
 		pollerManager: {
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),

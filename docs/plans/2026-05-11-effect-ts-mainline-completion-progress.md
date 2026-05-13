@@ -2060,6 +2060,62 @@ Exit: 0
 Checked 960 files. No fixes applied.
 ```
 
+## Phase 9.4: Retire Dead SessionRegistry Bridge
+
+Plan issues found:
+
+- `SessionRegistryTag` was still listed as a handler/runtime bridge, but no production Effect handler consumed it.
+- The real `SessionRegistry` instance still belongs at the WebSocket/monitoring edge. Keeping an unused
+  `Layer.succeed(SessionRegistryTag, registry)` inside relay runtime composition only preserved a fake Effect
+  dependency and widened `HandlerDeps` for no behavior.
+
+Changes:
+
+- Removed `SessionRegistryTag` from `src/lib/effect/services.ts`.
+- Removed `registry: SessionRegistry` from `HandlerDeps` and test helper defaults.
+- Removed `Layer.succeed(SessionRegistryTag, registry)` from relay runtime composition.
+- Updated relay-layer comments so bridge deletion is described as incremental, not deferred to a stale task number.
+- Added a static regression guard that blocks reintroducing the retired registry bridge.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts
+Exit: 1
+Expected failure:
+  src/lib/relay/relay-stack.ts:978 Layer.succeed(SessionRegistryTag, registry),
+  src/lib/effect/services.ts:287 export class SessionRegistryTag ...
+  src/lib/handlers/types.ts:67 registry: SessionRegistry;
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/effect/services.test.ts \
+  test/unit/mock-factories.test.ts
+Exit: 0
+Test Files  3 passed (3)
+Tests  31 passed (31)
+```
+
+```text
+$ rg -n "SessionRegistryTag|registry:\s*SessionRegistry|Layer\.succeed\(SessionRegistryTag|HandlerDeps\[\"registry\"\]" src test test/helpers -g '*.ts'
+Exit: 0
+Remaining hits are the runtime-boundary test's retired-pattern regex and monitoring edge's local registry type.
+```
+
+```text
+$ pnpm check
+Exit: 0
+```
+
+```text
+$ pnpm lint
+Exit: 0
+Checked 999 files. No fixes applied.
+```
+
 ## Phase 8.1: Frontend Transport Protocol Boundary
 
 Plan issues found:
