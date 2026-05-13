@@ -3285,6 +3285,7 @@ describe("handleMessage", () => {
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
+			let questionPromise: Promise<Record<string, unknown>> | undefined;
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
 				dispatch: vi.fn(async (command) => {
@@ -3294,18 +3295,20 @@ describe("handleMessage", () => {
 						"type" in command &&
 						command.type === "send_turn"
 					) {
-						void command.input.eventSink.requestQuestion({
-							requestId: "que-service-1",
-							questions: [
-								{
-									question: "Continue?",
-									header: "Confirm",
-									options: [{ label: "Yes", description: "Continue" }],
-									multiSelect: false,
-									custom: true,
-								},
-							],
-						});
+						questionPromise = Effect.runPromise(
+							command.input.eventSink.requestQuestion({
+								requestId: "que-service-1",
+								questions: [
+									{
+										question: "Continue?",
+										header: "Confirm",
+										options: [{ label: "Yes", description: "Continue" }],
+										multiSelect: false,
+										custom: true,
+									},
+								],
+							}),
+						);
 					}
 					return {
 						status: "completed",
@@ -3340,6 +3343,10 @@ describe("handleMessage", () => {
 						sessionId: "session-1",
 					}),
 				]);
+				yield* pendingInteractions.resolveQuestionRequest("que-service-1", {
+					"0": "Yes",
+				});
+				yield* Effect.tryPromise(() => questionPromise ?? Promise.resolve({}));
 			}).pipe(Effect.provide(layer));
 		},
 	);

@@ -221,53 +221,78 @@ describe("RelayEventSink lifecycle", () => {
 			pendingInteractions: {
 				beginPermissionRequest(entry) {
 					trackedId = entry.requestId;
-					return new Promise((resolve) => {
+					const promise = new Promise<{
+						decision: "once" | "always" | "reject";
+					}>((resolve) => {
 						resolvePermission = resolve;
+					});
+					return Effect.succeed({
+						awaitResponse: Effect.tryPromise({
+							try: () => promise,
+							catch: (cause) => cause,
+						}),
 					});
 				},
 				resolvePermissionRequest(requestId, response) {
-					repliedId = requestId;
-					resolvePermission?.(response);
-					return true;
+					return Effect.sync(() => {
+						repliedId = requestId;
+						resolvePermission?.(response);
+						return true;
+					});
 				},
-				beginQuestionRequest: async () => ({}),
-				resolveQuestionRequest: () => true,
+				beginQuestionRequest: () =>
+					Effect.succeed({
+						awaitAnswers: Effect.succeed({}),
+					}),
+				resolveQuestionRequest: () => Effect.succeed(true),
 			},
 		});
 
 		// Request permission — creates pending service entry
-		const permissionPromise = sink.requestPermission({
-			requestId: "perm-1",
-			sessionId: SESSION_ID,
-			toolName: "bash",
-			toolInput: { command: "echo test" },
-			turnId: "turn-1",
-			providerItemId: "item-1",
-			always: [],
-		});
+		const permissionPromise = Effect.runPromise(
+			sink.requestPermission({
+				requestId: "perm-1",
+				sessionId: SESSION_ID,
+				toolName: "bash",
+				toolInput: { command: "echo test" },
+				turnId: "turn-1",
+				providerItemId: "item-1",
+				always: [],
+			}),
+		);
 
 		expect(trackedId).toBe("perm-1");
 
-		sink.resolvePermission("perm-1", { decision: "reject" });
+		await Effect.runPromise(
+			sink.resolvePermission("perm-1", { decision: "reject" }),
+		);
 
 		const result = await permissionPromise;
 		expect(result.decision).toBe("reject");
 		expect(repliedId).toBe("perm-1");
 	});
 
-	it("cancels service-owned pending interactions through the port", () => {
-		const cancelSessionInteractions = vi.fn();
+	it("cancels service-owned pending interactions through the port", async () => {
+		const cancelSessionInteractions = vi.fn(() => Effect.void);
 		const { sink } = createCaptureSink({
 			pendingInteractions: {
-				beginPermissionRequest: async () => ({ decision: "reject" }),
-				resolvePermissionRequest: () => true,
-				beginQuestionRequest: async () => ({}),
-				resolveQuestionRequest: () => true,
+				beginPermissionRequest: () =>
+					Effect.succeed({
+						awaitResponse: Effect.succeed({ decision: "reject" }),
+					}),
+				resolvePermissionRequest: () => Effect.succeed(true),
+				beginQuestionRequest: () =>
+					Effect.succeed({
+						awaitAnswers: Effect.succeed({}),
+					}),
+				resolveQuestionRequest: () => Effect.succeed(true),
 				cancelSessionInteractions,
 			},
 		});
 
-		sink.cancelSessionInteractions?.("session ended");
+		await Effect.runPromise(
+			sink.cancelSessionInteractions?.("session ended") ?? Effect.void,
+		);
 
 		expect(cancelSessionInteractions).toHaveBeenCalledWith("session ended");
 	});

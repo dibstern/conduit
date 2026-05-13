@@ -3202,6 +3202,106 @@ Exit: 0
 Checked 992 files in 221ms. No fixes applied.
 ```
 
+## Phase 6.45: EventSink Permission And Question Effect Boundary
+
+Plan issues found:
+
+- After `EventSink.push(...)` became Effect-returning, the next live provider boundary was
+  `EventSink.requestPermission(...)` / `requestQuestion(...)`. Leaving those Promise-shaped forced
+  `src/lib/handlers/prompt.ts` to run `PendingInteractionService` programs with `Runtime.runPromise(...)` before
+  constructing the Claude sink.
+- Moving that Promise conversion into `RelayEventSink` would only hide the bridge. The long-term boundary is for the
+  EventSink wait APIs and pending-interaction port to stay Effect-returning, with the only Promise conversion at the
+  Claude SDK `canUseTool` callback.
+- Effects are lazy. Every production and test call that previously constructed `sink.requestPermission(...)` or
+  `sink.requestQuestion(...)` had to be audited so request registration still happens by running, yielding, or forking
+  the Effect.
+
+Changes:
+
+- `src/lib/provider/types.ts`: changed `EventSink.requestPermission(...)`, `requestQuestion(...)`,
+  `resolvePermission(...)`, `resolveQuestion(...)`, and `cancelSessionInteractions(...)` to return Effects.
+- `src/lib/provider/relay-event-sink.ts`: made the pending-interaction port Effect-native. Permission/question
+  requests now register with `PendingInteractionService`, send the UI message, and await the response inside one
+  Effect program.
+- `src/lib/handlers/prompt.ts`: removed the local `Runtime.runPromise(...)` pending-interaction bridge and passes
+  service Effects directly into `createRelayEventSink(...)`.
+- `src/lib/provider/event-sink.ts`: made the store-backed EventSink permission/question waits and resolution methods
+  Effect-returning while preserving the existing deferred behavior.
+- `src/lib/provider/claude/claude-permission-bridge.ts`: kept the required `Effect.runPromise(...)` boundary at the
+  Claude SDK `canUseTool` callback only.
+- `src/lib/provider/claude/claude-adapter.ts` and Claude pending interaction types now resolve/reject pending
+  approvals and questions through Effect-returning callbacks.
+- Updated shared provider fixtures, Claude adapter tests, relay-event-sink tests, handler tests, pipeline snapshots,
+  and the runtime-boundary grep allowlist.
+
+TDD red check:
+
+```text
+$ pnpm vitest run test/unit/provider/event-sink-effect-boundary.test.ts -t "permission and question waits"
+Exit: 1
+Expected failure:
+  EventSink.requestPermission/requestQuestion were still Promise-returning and prompt.ts still contained
+  Runtime.runPromise.
+```
+
+Verification:
+
+```text
+$ pnpm vitest run test/unit/provider/event-sink-effect-boundary.test.ts \
+  test/unit/effect/runtime-boundary-grep.test.ts \
+  test/unit/provider/event-sink.test.ts \
+  test/unit/provider/relay-event-sink.test.ts \
+  test/unit/provider/claude/claude-permission-bridge.test.ts \
+  test/unit/provider/claude/claude-adapter-lifecycle.test.ts \
+  test/unit/provider/claude/claude-adapter-send-turn.test.ts \
+  test/unit/provider/opencode-adapter-send-turn.test.ts \
+  test/unit/provider/types.test.ts \
+  test/unit/handlers/effect-handlers.test.ts \
+  test/unit/pipeline/event-translation-snapshots.test.ts
+Exit: 0
+Test Files  11 passed (11)
+Tests  212 passed (212)
+```
+
+```text
+$ pnpm vitest run test/unit/provider
+Exit: 0
+Test Files  35 passed (35)
+Tests  395 passed (395)
+Note: run emitted an existing opencode-adapter HTTP 500 log from a negative-path test and existing SQLite warnings.
+```
+
+```text
+$ pnpm check
+Exit: 0
+
+$ pnpm lint
+Exit: 0
+Checked 998 files in 210ms. No fixes applied.
+
+$ pnpm test:unit
+Exit: 0
+Test Files  382 passed (382)
+Tests  5231 passed | 2 skipped | 12 todo (5245)
+Note: run emitted existing SQLite experimental warnings and existing listener warnings.
+```
+
+```text
+$ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log" && exit 1)
+Exit: 1
+Failures recorded in test-output.log:
+  - Unit step: test/unit/server/http-server-layer.test.ts themes endpoint returned 302 instead of 200.
+  - E2E replay step: 9 scroll-stability failures in test/e2e/specs/scroll-stability.spec.ts.
+  - E2E subagent step: 3 missing `.subagent-link` / SubagentBackBar visibility failures.
+  - Storybook visual step: 4 desktop page.goto timeouts while loading Storybook iframe URLs.
+
+$ pnpm vitest run test/unit/server/http-server-layer.test.ts -t "themes endpoint responds via real HTTP server"
+Exit: 0
+Test Files  1 passed (1)
+Tests  1 passed | 15 skipped (16)
+```
+
 ## Phase 6.41: Handler Orchestration Dispatch Boundary
 
 Plan issues found:

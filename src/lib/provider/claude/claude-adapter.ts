@@ -897,28 +897,24 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 			// 2. Resolve pending approvals with deny.
 			for (const pending of ctx.pendingApprovals.values()) {
-				yield* Effect.try({
-					try: () => pending.resolve("reject"),
-					catch: (cause) => cause,
-				}).pipe(Effect.ignore);
+				yield* pending.resolve("reject").pipe(Effect.ignore);
 			}
 			ctx.pendingApprovals.clear();
 
 			// 3. Reject pending questions.
 			for (const pending of ctx.pendingQuestions.values()) {
-				yield* Effect.try({
-					try: () => pending.reject(new Error(reason)),
-					catch: (cause) => cause,
-				}).pipe(Effect.ignore);
+				yield* pending.reject(new Error(reason)).pipe(Effect.ignore);
 			}
 			ctx.pendingQuestions.clear();
 
 			if (ctx.eventSink?.cancelSessionInteractions) {
-				yield* Effect.tryPromise({
-					try: () =>
-						Promise.resolve(ctx.eventSink?.cancelSessionInteractions?.(reason)),
+				yield* Effect.try({
+					try: () => ctx.eventSink?.cancelSessionInteractions?.(reason),
 					catch: (cause) => cause,
-				}).pipe(Effect.ignore);
+				}).pipe(
+					Effect.flatMap((cancelEffect) => cancelEffect ?? Effect.void),
+					Effect.ignore,
+				);
 			}
 
 			// 4. Close prompt queue.
@@ -947,11 +943,11 @@ export class ClaudeAdapter implements ProviderAdapter {
 				const ctx = this.sessions.get(sessionId);
 				if (!ctx) return;
 
-				yield* Effect.tryPromise({
-					try: () =>
-						this.permissionBridge.resolvePermission(ctx, requestId, decision),
-					catch: (cause) => cause,
-				});
+				yield* this.permissionBridge.resolvePermission(
+					ctx,
+					requestId,
+					decision,
+				);
 			}),
 		);
 	}
@@ -971,10 +967,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 				const pending = ctx.pendingQuestions.get(requestId);
 				if (pending) {
-					yield* Effect.try({
-						try: () => pending.resolve(answers),
-						catch: (cause) => cause,
-					});
+					yield* pending.resolve(answers);
 					ctx.pendingQuestions.delete(requestId);
 				}
 			}),

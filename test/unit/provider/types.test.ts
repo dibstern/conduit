@@ -66,10 +66,10 @@ describe("ProviderAdapter types", () => {
 	it("SendTurnInput includes all required fields", () => {
 		const mockSink: EventSink = {
 			push: () => Effect.void,
-			requestPermission: async () => ({ decision: "once" }),
-			requestQuestion: async () => ({}),
-			resolvePermission: () => {},
-			resolveQuestion: () => {},
+			requestPermission: () => Effect.succeed({ decision: "once" }),
+			requestQuestion: () => Effect.succeed({}),
+			resolvePermission: () => Effect.void,
+			resolveQuestion: () => Effect.void,
 		};
 
 		const input: SendTurnInput = {
@@ -95,10 +95,10 @@ describe("ProviderAdapter types", () => {
 	it("SendTurnInput supports optional fields", () => {
 		const mockSink: EventSink = {
 			push: () => Effect.void,
-			requestPermission: async () => ({ decision: "once" }),
-			requestQuestion: async () => ({}),
-			resolvePermission: () => {},
-			resolveQuestion: () => {},
+			requestPermission: () => Effect.succeed({ decision: "once" }),
+			requestQuestion: () => Effect.succeed({}),
+			resolvePermission: () => Effect.void,
+			resolveQuestion: () => Effect.void,
 		};
 
 		const input: SendTurnInput = {

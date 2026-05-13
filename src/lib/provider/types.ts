@@ -43,20 +43,30 @@ export interface QuestionRequest {
  * EventSink is the adapter's write interface to conduit's event store.
  *
  * - `push(event)`: append a canonical event to the store and project eagerly.
- * - `requestPermission(request)`: emit permission.asked, block until
- *   permission.resolved arrives, return the decision.
- * - `requestQuestion(request)`: emit question.asked, block until
- *   question.resolved arrives, return the answers.
+ * - `requestPermission(request)`: Effect that emits permission.asked, waits
+ *   until permission.resolved arrives, then returns the decision.
+ * - `requestQuestion(request)`: Effect that emits question.asked, waits until
+ *   question.resolved arrives, then returns the answers.
  * - `resolvePermission(...)` / `resolveQuestion(...)`: complete the matching
  *   pending request when the UI returns an answer.
  */
 export interface EventSink {
 	push(event: CanonicalEvent): Effect.Effect<void, unknown>;
-	requestPermission(request: PermissionRequest): Promise<PermissionResponse>;
-	requestQuestion(request: QuestionRequest): Promise<Record<string, unknown>>;
-	resolvePermission(requestId: string, response: PermissionResponse): void;
-	resolveQuestion(requestId: string, answers: Record<string, unknown>): void;
-	cancelSessionInteractions?(reason: string): void | Promise<void>;
+	requestPermission(
+		request: PermissionRequest,
+	): Effect.Effect<PermissionResponse, unknown>;
+	requestQuestion(
+		request: QuestionRequest,
+	): Effect.Effect<Record<string, unknown>, unknown>;
+	resolvePermission(
+		requestId: string,
+		response: PermissionResponse,
+	): Effect.Effect<void, unknown>;
+	resolveQuestion(
+		requestId: string,
+		answers: Record<string, unknown>,
+	): Effect.Effect<void, unknown>;
+	cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
 }
 
 // ─── Turn Types ─────────────────────────────────────────────────────────────

@@ -101,7 +101,7 @@ describe("EventSinkImpl", () => {
 			};
 
 			// Start the permission request (it will block)
-			const resultPromise = sink.requestPermission(request);
+			const resultPromise = Effect.runPromise(sink.requestPermission(request));
 
 			// Verify the permission.asked event was pushed
 			expect(eventStore.append).toHaveBeenCalledTimes(1);
@@ -113,7 +113,9 @@ describe("EventSinkImpl", () => {
 			});
 
 			// Resolve it
-			sink.resolvePermission("perm-1", { decision: "once" });
+			await Effect.runPromise(
+				sink.resolvePermission("perm-1", { decision: "once" }),
+			);
 
 			const result = await resultPromise;
 			expect(result.decision).toBe("once");
@@ -129,8 +131,10 @@ describe("EventSinkImpl", () => {
 				providerItemId: "item-2",
 			};
 
-			const resultPromise = sink.requestPermission(request);
-			sink.resolvePermission("perm-2", { decision: "always" });
+			const resultPromise = Effect.runPromise(sink.requestPermission(request));
+			await Effect.runPromise(
+				sink.resolvePermission("perm-2", { decision: "always" }),
+			);
 
 			const result = await resultPromise;
 			expect(result.decision).toBe("always");
@@ -146,33 +150,43 @@ describe("EventSinkImpl", () => {
 				providerItemId: "item-3",
 			};
 
-			const resultPromise = sink.requestPermission(request);
-			sink.resolvePermission("perm-3", { decision: "reject" });
+			const resultPromise = Effect.runPromise(sink.requestPermission(request));
+			await Effect.runPromise(
+				sink.resolvePermission("perm-3", { decision: "reject" }),
+			);
 
 			const result = await resultPromise;
 			expect(result.decision).toBe("reject");
 		});
 
 		it("handles multiple concurrent permission requests", async () => {
-			const p1 = sink.requestPermission({
-				requestId: "r1",
-				toolName: "bash",
-				toolInput: { patterns: [], metadata: {} },
-				sessionId: "s1",
-				turnId: "t1",
-				providerItemId: "item-r1",
-			});
-			const p2 = sink.requestPermission({
-				requestId: "r2",
-				toolName: "write",
-				toolInput: { patterns: [], metadata: {} },
-				sessionId: "s1",
-				turnId: "t1",
-				providerItemId: "item-r2",
-			});
+			const p1 = Effect.runPromise(
+				sink.requestPermission({
+					requestId: "r1",
+					toolName: "bash",
+					toolInput: { patterns: [], metadata: {} },
+					sessionId: "s1",
+					turnId: "t1",
+					providerItemId: "item-r1",
+				}),
+			);
+			const p2 = Effect.runPromise(
+				sink.requestPermission({
+					requestId: "r2",
+					toolName: "write",
+					toolInput: { patterns: [], metadata: {} },
+					sessionId: "s1",
+					turnId: "t1",
+					providerItemId: "item-r2",
+				}),
+			);
 
-			sink.resolvePermission("r2", { decision: "always" });
-			sink.resolvePermission("r1", { decision: "once" });
+			await Effect.runPromise(
+				sink.resolvePermission("r2", { decision: "always" }),
+			);
+			await Effect.runPromise(
+				sink.resolvePermission("r1", { decision: "once" }),
+			);
 
 			const [res1, res2] = await Promise.all([p1, p2]);
 			expect(res1.decision).toBe("once");
@@ -180,16 +194,20 @@ describe("EventSinkImpl", () => {
 		});
 
 		it("emits permission.resolved event on resolution", async () => {
-			const resultPromise = sink.requestPermission({
-				requestId: "perm-4",
-				toolName: "bash",
-				toolInput: { patterns: [], metadata: {} },
-				sessionId: "s1",
-				turnId: "t1",
-				providerItemId: "item-4",
-			});
+			const resultPromise = Effect.runPromise(
+				sink.requestPermission({
+					requestId: "perm-4",
+					toolName: "bash",
+					toolInput: { patterns: [], metadata: {} },
+					sessionId: "s1",
+					turnId: "t1",
+					providerItemId: "item-4",
+				}),
+			);
 
-			sink.resolvePermission("perm-4", { decision: "once" });
+			await Effect.runPromise(
+				sink.resolvePermission("perm-4", { decision: "once" }),
+			);
 			await resultPromise;
 
 			// Two events: permission.asked + permission.resolved
@@ -220,31 +238,33 @@ describe("EventSinkImpl", () => {
 				],
 			};
 
-			const resultPromise = sink.requestQuestion(request);
+			const resultPromise = Effect.runPromise(sink.requestQuestion(request));
 
 			expect(eventStore.append).toHaveBeenCalledTimes(1);
 			const pushed = eventStore.append.mock.calls[0]?.[0] as CanonicalEvent;
 			expect(pushed.type).toBe("question.asked");
 
-			sink.resolveQuestion("q1", { answer: "Yes" });
+			await Effect.runPromise(sink.resolveQuestion("q1", { answer: "Yes" }));
 
 			const result = await resultPromise;
 			expect(result).toEqual({ answer: "Yes" });
 		});
 
 		it("emits question.resolved event on resolution", async () => {
-			const resultPromise = sink.requestQuestion({
-				requestId: "q2",
-				questions: [
-					{
-						question: "Pick one",
-						header: "Choose",
-						options: [{ label: "A", description: "Option A" }],
-					},
-				],
-			});
+			const resultPromise = Effect.runPromise(
+				sink.requestQuestion({
+					requestId: "q2",
+					questions: [
+						{
+							question: "Pick one",
+							header: "Choose",
+							options: [{ label: "A", description: "Option A" }],
+						},
+					],
+				}),
+			);
 
-			sink.resolveQuestion("q2", { choice: "A" });
+			await Effect.runPromise(sink.resolveQuestion("q2", { choice: "A" }));
 			await resultPromise;
 
 			expect(eventStore.append).toHaveBeenCalledTimes(2);
@@ -256,14 +276,16 @@ describe("EventSinkImpl", () => {
 
 	describe("abort handling", () => {
 		it("rejects pending permissions when aborted", async () => {
-			const resultPromise = sink.requestPermission({
-				requestId: "perm-abort",
-				toolName: "bash",
-				toolInput: { patterns: [], metadata: {} },
-				sessionId: "s1",
-				turnId: "t1",
-				providerItemId: "item-abort",
-			});
+			const resultPromise = Effect.runPromise(
+				sink.requestPermission({
+					requestId: "perm-abort",
+					toolName: "bash",
+					toolInput: { patterns: [], metadata: {} },
+					sessionId: "s1",
+					turnId: "t1",
+					providerItemId: "item-abort",
+				}),
+			);
 
 			sink.abort();
 
@@ -271,16 +293,18 @@ describe("EventSinkImpl", () => {
 		});
 
 		it("rejects pending questions when aborted", async () => {
-			const resultPromise = sink.requestQuestion({
-				requestId: "q-abort",
-				questions: [
-					{
-						question: "Continue?",
-						header: "Test",
-						options: [],
-					},
-				],
-			});
+			const resultPromise = Effect.runPromise(
+				sink.requestQuestion({
+					requestId: "q-abort",
+					questions: [
+						{
+							question: "Continue?",
+							header: "Test",
+							options: [],
+						},
+					],
+				}),
+			);
 
 			sink.abort();
 
@@ -288,16 +312,16 @@ describe("EventSinkImpl", () => {
 		});
 
 		it("has no pending requests after abort", () => {
-			sink
-				.requestPermission({
+			void Effect.runPromise(
+				sink.requestPermission({
 					requestId: "perm-x",
 					toolName: "bash",
 					toolInput: { patterns: [], metadata: {} },
 					sessionId: "s1",
 					turnId: "t1",
 					providerItemId: "item-x",
-				})
-				.catch(() => {}); // Swallow rejection
+				}),
+			).catch(() => {}); // Swallow rejection
 
 			sink.abort();
 

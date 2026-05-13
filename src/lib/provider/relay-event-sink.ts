@@ -67,11 +67,14 @@ export interface RelayEventSinkDeps {
 			toolName: string;
 			toolInput: Record<string, unknown>;
 			always: string[];
-		}): Promise<PermissionResponse>;
+		}): Effect.Effect<
+			{ readonly awaitResponse: Effect.Effect<PermissionResponse, unknown> },
+			unknown
+		>;
 		resolvePermissionRequest(
 			requestId: string,
 			response: PermissionResponse,
-		): boolean | undefined | Promise<boolean>;
+		): Effect.Effect<boolean | undefined, unknown>;
 		beginQuestionRequest(entry: {
 			requestId: string;
 			sessionId: string;
@@ -82,12 +85,17 @@ export interface RelayEventSinkDeps {
 				multiSelect?: boolean;
 			}>;
 			toolCallId?: string;
-		}): Promise<Record<string, unknown>>;
+		}): Effect.Effect<
+			{
+				readonly awaitAnswers: Effect.Effect<Record<string, unknown>, unknown>;
+			},
+			unknown
+		>;
 		resolveQuestionRequest(
 			requestId: string,
 			answers: Record<string, unknown>,
-		): boolean | undefined | Promise<boolean>;
-		cancelSessionInteractions?(reason: string): void | Promise<void>;
+		): Effect.Effect<boolean | undefined, unknown>;
+		cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
 	};
 }
 
@@ -150,91 +158,123 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			});
 		},
 
-		async requestPermission(
+		requestPermission(
 			request: PermissionRequest,
-		): Promise<PermissionResponse> {
-			reset();
-			if (!deps.pendingInteractions) {
-				return Promise.reject(missingPendingInteractions("requestPermission"));
-			}
-			const pendingResponse = deps.pendingInteractions.beginPermissionRequest({
-				requestId: request.requestId as PermissionId,
-				sessionId,
-				toolName: request.toolName,
-				toolInput: request.toolInput as Record<string, unknown>,
-				always: request.always ?? [],
+		): Effect.Effect<PermissionResponse, unknown> {
+			return Effect.gen(function* () {
+				yield* Effect.sync(reset);
+				const pendingInteractions = deps.pendingInteractions;
+				if (!pendingInteractions) {
+					return yield* Effect.fail(
+						missingPendingInteractions("requestPermission"),
+					);
+				}
+				const pending = yield* pendingInteractions.beginPermissionRequest({
+					requestId: request.requestId as PermissionId,
+					sessionId,
+					toolName: request.toolName,
+					toolInput: request.toolInput as Record<string, unknown>,
+					always: request.always ?? [],
+				});
+				yield* Effect.sync(() => {
+					send({
+						type: "permission_request",
+						sessionId,
+						requestId: request.requestId as PermissionId,
+						toolName: request.toolName,
+						toolInput: request.toolInput,
+						always: request.always ?? [],
+					});
+				});
+				return yield* pending.awaitResponse;
 			});
-			send({
-				type: "permission_request",
-				sessionId,
-				requestId: request.requestId as PermissionId,
-				toolName: request.toolName,
-				toolInput: request.toolInput,
-				always: request.always ?? [],
-			});
-			return pendingResponse;
 		},
 
-		async requestQuestion(
+		requestQuestion(
 			request: QuestionRequest,
-		): Promise<Record<string, unknown>> {
-			reset();
-			if (!deps.pendingInteractions) {
-				return Promise.reject(missingPendingInteractions("requestQuestion"));
-			}
-			const questions = request.questions.map((q) => ({
-				question: q.question,
-				header: q.header,
-				options: q.options,
-				multiSelect: q.multiSelect ?? false,
-			}));
-			const pendingAnswers = deps.pendingInteractions.beginQuestionRequest({
-				requestId: request.requestId,
-				sessionId,
-				questions,
-			});
-			send({
-				type: "ask_user",
-				sessionId,
-				toolId: request.requestId,
-				questions: request.questions.map((q) => ({
+		): Effect.Effect<Record<string, unknown>, unknown> {
+			return Effect.gen(function* () {
+				yield* Effect.sync(reset);
+				const pendingInteractions = deps.pendingInteractions;
+				if (!pendingInteractions) {
+					return yield* Effect.fail(
+						missingPendingInteractions("requestQuestion"),
+					);
+				}
+				const questions = request.questions.map((q) => ({
 					question: q.question,
 					header: q.header,
 					options: q.options,
 					multiSelect: q.multiSelect ?? false,
-					custom: q.custom ?? true,
-				})),
+				}));
+				const pending = yield* pendingInteractions.beginQuestionRequest({
+					requestId: request.requestId,
+					sessionId,
+					questions,
+				});
+				yield* Effect.sync(() => {
+					send({
+						type: "ask_user",
+						sessionId,
+						toolId: request.requestId,
+						questions: request.questions.map((q) => ({
+							question: q.question,
+							header: q.header,
+							options: q.options,
+							multiSelect: q.multiSelect ?? false,
+							custom: q.custom ?? true,
+						})),
+					});
+				});
+				return yield* pending.awaitAnswers;
 			});
-			return pendingAnswers;
 		},
 
-		resolvePermission(requestId: string, response: PermissionResponse): void {
-			if (!deps.pendingInteractions) {
-				log.warn(
-					`resolvePermission: no pending interaction port for ${requestId} (session=${sessionId})`,
+		resolvePermission(
+			requestId: string,
+			response: PermissionResponse,
+		): Effect.Effect<void, unknown> {
+			return Effect.gen(function* () {
+				if (!deps.pendingInteractions) {
+					yield* Effect.sync(() => {
+						log.warn(
+							`resolvePermission: no pending interaction port for ${requestId} (session=${sessionId})`,
+						);
+					});
+					return;
+				}
+				yield* deps.pendingInteractions.resolvePermissionRequest(
+					requestId,
+					response,
 				);
-				return;
-			}
-			void deps.pendingInteractions.resolvePermissionRequest(
-				requestId,
-				response,
-			);
+			});
 		},
 
-		resolveQuestion(requestId: string, answers: Record<string, unknown>): void {
-			if (!deps.pendingInteractions) {
-				log.warn(
-					`resolveQuestion: no pending interaction port for ${requestId} (session=${sessionId})`,
+		resolveQuestion(
+			requestId: string,
+			answers: Record<string, unknown>,
+		): Effect.Effect<void, unknown> {
+			return Effect.gen(function* () {
+				if (!deps.pendingInteractions) {
+					yield* Effect.sync(() => {
+						log.warn(
+							`resolveQuestion: no pending interaction port for ${requestId} (session=${sessionId})`,
+						);
+					});
+					return;
+				}
+				yield* deps.pendingInteractions.resolveQuestionRequest(
+					requestId,
+					answers,
 				);
-				return;
-			}
-			void deps.pendingInteractions.resolveQuestionRequest(requestId, answers);
+			});
 		},
 
-		cancelSessionInteractions(reason: string): void {
+		cancelSessionInteractions(reason: string): Effect.Effect<void, unknown> {
 			if (deps.pendingInteractions?.cancelSessionInteractions) {
-				void deps.pendingInteractions.cancelSessionInteractions(reason);
+				return deps.pendingInteractions.cancelSessionInteractions(reason);
 			}
+			return Effect.void;
 		},
 	};
 }

@@ -68,119 +68,129 @@ export class EventSinkImpl implements EventSink {
 		});
 	}
 
-	/**
-	 * Emit a permission.asked event and block until the user resolves it.
-	 * Returns the user's decision (once | always | reject).
-	 */
-	async requestPermission(
+	/** Emit permission.asked and wait until the user resolves it. */
+	requestPermission(
 		request: PermissionRequest,
-	): Promise<PermissionResponse> {
-		// Emit the permission.asked event
-		const event = canonicalEvent(
-			"permission.asked",
-			this.sessionId,
-			{
-				id: request.requestId,
-				sessionId: this.sessionId,
-				toolName: request.toolName,
-				input: request.toolInput,
-			},
-			{ provider: this.provider },
-		);
-		const stored = this.eventStore.append(event);
-		this.projectionRunner.projectEvent(stored);
+	): Effect.Effect<PermissionResponse, unknown> {
+		return Effect.gen(this, function* () {
+			const deferred = createDeferred<PermissionResponse>();
+			this.pendingPermissions.set(request.requestId, deferred);
 
-		// Block until resolved
-		const deferred = createDeferred<PermissionResponse>();
-		this.pendingPermissions.set(request.requestId, deferred);
-		return deferred.promise;
+			const event = canonicalEvent(
+				"permission.asked",
+				this.sessionId,
+				{
+					id: request.requestId,
+					sessionId: this.sessionId,
+					toolName: request.toolName,
+					input: request.toolInput,
+				},
+				{ provider: this.provider },
+			);
+			yield* this.push(event);
+
+			return yield* Effect.tryPromise({
+				try: () => deferred.promise,
+				catch: (cause) => cause,
+			});
+		});
 	}
 
-	/**
-	 * Emit a question.asked event and block until the user answers.
-	 * Returns the user's answers as a key-value map.
-	 */
-	async requestQuestion(
+	/** Emit question.asked and wait until the user answers. */
+	requestQuestion(
 		request: QuestionRequest,
-	): Promise<Record<string, unknown>> {
-		// Emit the question.asked event
-		const event = canonicalEvent(
-			"question.asked",
-			this.sessionId,
-			{
-				id: request.requestId,
-				sessionId: this.sessionId,
-				questions: request.questions,
-			},
-			{ provider: this.provider },
-		);
-		const stored = this.eventStore.append(event);
-		this.projectionRunner.projectEvent(stored);
+	): Effect.Effect<Record<string, unknown>, unknown> {
+		return Effect.gen(this, function* () {
+			const deferred = createDeferred<Record<string, unknown>>();
+			this.pendingQuestions.set(request.requestId, deferred);
 
-		// Block until resolved
-		const deferred = createDeferred<Record<string, unknown>>();
-		this.pendingQuestions.set(request.requestId, deferred);
-		return deferred.promise;
+			const event = canonicalEvent(
+				"question.asked",
+				this.sessionId,
+				{
+					id: request.requestId,
+					sessionId: this.sessionId,
+					questions: request.questions,
+				},
+				{ provider: this.provider },
+			);
+			yield* this.push(event);
+
+			return yield* Effect.tryPromise({
+				try: () => deferred.promise,
+				catch: (cause) => cause,
+			});
+		});
 	}
 
 	/**
 	 * Resolve a pending permission request. Called by the orchestration layer
 	 * when the user makes a decision.
 	 */
-	resolvePermission(requestId: string, response: PermissionResponse): void {
-		// Emit the permission.resolved event
-		const event = canonicalEvent(
-			"permission.resolved",
-			this.sessionId,
-			{
-				id: requestId,
-				decision: response.decision,
-			},
-			{ provider: this.provider },
-		);
-		const stored = this.eventStore.append(event);
-		this.projectionRunner.projectEvent(stored);
-
-		// Unblock the waiting adapter
-		const deferred = this.pendingPermissions.get(requestId);
-		if (deferred) {
-			this.pendingPermissions.delete(requestId);
-			deferred.resolve(response);
-		} else {
-			log.warn(
-				`resolvePermission: no pending request for ${requestId} (session=${this.sessionId}) — already resolved or expired`,
+	resolvePermission(
+		requestId: string,
+		response: PermissionResponse,
+	): Effect.Effect<void, unknown> {
+		return Effect.sync(() => {
+			// Emit the permission.resolved event
+			const event = canonicalEvent(
+				"permission.resolved",
+				this.sessionId,
+				{
+					id: requestId,
+					decision: response.decision,
+				},
+				{ provider: this.provider },
 			);
-		}
+			const stored = this.eventStore.append(event);
+			this.projectionRunner.projectEvent(stored);
+
+			// Unblock the waiting adapter
+			const deferred = this.pendingPermissions.get(requestId);
+			if (deferred) {
+				this.pendingPermissions.delete(requestId);
+				deferred.resolve(response);
+			} else {
+				log.warn(
+					`resolvePermission: no pending request for ${requestId} (session=${this.sessionId}) — already resolved or expired`,
+				);
+			}
+		});
 	}
 
 	/**
 	 * Resolve a pending question request. Called by the orchestration layer
 	 * when the user answers.
 	 */
-	resolveQuestion(requestId: string, answers: Record<string, unknown>): void {
-		// Emit the question.resolved event
-		const event = canonicalEvent(
-			"question.resolved",
-			this.sessionId,
-			{
-				id: requestId,
-				answers,
-			},
-			{ provider: this.provider },
-		);
-		const stored = this.eventStore.append(event);
-		this.projectionRunner.projectEvent(stored);
-
-		// Unblock the waiting adapter
-		const deferred = this.pendingQuestions.get(requestId);
-		if (deferred) {
-			this.pendingQuestions.delete(requestId);
-			deferred.resolve(answers);
-		} else {
-			log.warn(
-				`resolveQuestion: no pending request for ${requestId} (session=${this.sessionId}) — already resolved or expired`,
+	resolveQuestion(
+		requestId: string,
+		answers: Record<string, unknown>,
+	): Effect.Effect<void, unknown> {
+		return Effect.sync(() => {
+			// Emit the question.resolved event
+			const event = canonicalEvent(
+				"question.resolved",
+				this.sessionId,
+				{
+					id: requestId,
+					answers,
+				},
+				{ provider: this.provider },
 			);
-		}
+			const stored = this.eventStore.append(event);
+			this.projectionRunner.projectEvent(stored);
+
+			// Unblock the waiting adapter
+			const deferred = this.pendingQuestions.get(requestId);
+			if (deferred) {
+				this.pendingQuestions.delete(requestId);
+				deferred.resolve(answers);
+			} else {
+				log.warn(
+					`resolveQuestion: no pending request for ${requestId} (session=${this.sessionId}) — already resolved or expired`,
+				);
+			}
+		});
 	}
 
 	/** Abort all pending requests (e.g. when the turn is interrupted). */

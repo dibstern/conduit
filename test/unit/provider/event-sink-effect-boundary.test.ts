@@ -18,6 +18,25 @@ describe("EventSink Effect boundary", () => {
 		);
 	});
 
+	it("keeps EventSink permission and question waits Effect-returning", () => {
+		const providerTypes = source("src/lib/provider/types.ts");
+		const prompt = source("src/lib/handlers/prompt.ts");
+
+		expect(providerTypes).toMatch(
+			/requestPermission\(\s*request: PermissionRequest,\s*\): Effect\.Effect<PermissionResponse, unknown>;/,
+		);
+		expect(providerTypes).toMatch(
+			/requestQuestion\(\s*request: QuestionRequest,\s*\): Effect\.Effect<Record<string, unknown>, unknown>;/,
+		);
+		expect(providerTypes).not.toMatch(
+			/requestPermission\(request: PermissionRequest\): Promise</,
+		);
+		expect(providerTypes).not.toMatch(
+			/requestQuestion\(request: QuestionRequest\): Promise</,
+		);
+		expect(prompt).not.toContain("Runtime.runPromise");
+	});
+
 	it("does not reintroduce runtime bridges for Claude EventSink persistence", () => {
 		const prompt = source("src/lib/handlers/prompt.ts");
 		const relayEventSink = source("src/lib/provider/relay-event-sink.ts");

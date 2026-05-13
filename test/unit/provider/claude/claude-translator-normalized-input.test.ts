@@ -47,10 +47,12 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 					Effect.sync(() => {
 						events.push(e);
 					}),
-				requestPermission: vi.fn(),
-				requestQuestion: vi.fn(),
-				resolvePermission: vi.fn(),
-				resolveQuestion: vi.fn(),
+				requestPermission: vi.fn(() =>
+					Effect.succeed({ decision: "once" as const }),
+				),
+				requestQuestion: vi.fn(() => Effect.succeed({})),
+				resolvePermission: vi.fn(() => Effect.void),
+				resolveQuestion: vi.fn(() => Effect.void),
 			},
 			runEffect: Effect.runPromise,
 		});

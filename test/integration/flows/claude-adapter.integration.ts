@@ -14,7 +14,6 @@ import type {
 	Query,
 	SDKMessage,
 } from "../../../src/lib/provider/claude/types.js";
-import type { PermissionResponse } from "../../../src/lib/provider/types.js";
 import {
 	createMockEventSink,
 	createMockQuery,
@@ -418,9 +417,7 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 		const sink = createMockEventSink();
 		// Override requestPermission to resolve asynchronously
 		(sink.requestPermission as ReturnType<typeof vi.fn>).mockImplementation(
-			async (): Promise<PermissionResponse> => {
-				return { decision: "once" };
-			},
+			() => Effect.succeed({ decision: "once" as const }),
 		);
 
 		const input = makeBaseSendTurnInput({

@@ -51,12 +51,14 @@ function makeStubEventSink(): EventSink & {
 				pushedEvents.push(event);
 			}),
 		),
-		requestPermission: vi.fn(async () => ({
-			decision: "once" as const,
-		})),
-		requestQuestion: vi.fn(async () => ({})),
-		resolvePermission: vi.fn(),
-		resolveQuestion: vi.fn(),
+		requestPermission: vi.fn(() =>
+			Effect.succeed({
+				decision: "once" as const,
+			}),
+		),
+		requestQuestion: vi.fn(() => Effect.succeed({})),
+		resolvePermission: vi.fn(() => Effect.void),
+		resolveQuestion: vi.fn(() => Effect.void),
 	};
 }
 

@@ -105,10 +105,11 @@ describe("ClaudeAdapter lifecycle", () => {
 				toolName: "Bash",
 				toolInput: { command: "ls" },
 				createdAt: new Date().toISOString(),
-				resolve: (decision) => {
-					resolvedWith.push(decision);
-				},
-				reject: vi.fn(),
+				resolve: (decision) =>
+					Effect.sync(() => {
+						resolvedWith.push(decision);
+					}),
+				reject: vi.fn(() => Effect.void),
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingApprovals.set("perm-1", pending);
@@ -127,10 +128,11 @@ describe("ClaudeAdapter lifecycle", () => {
 			const pending: PendingQuestion = {
 				requestId: "q-1",
 				createdAt: new Date().toISOString(),
-				resolve: vi.fn(),
-				reject: (err) => {
-					rejected.push(err);
-				},
+				resolve: vi.fn(() => Effect.void),
+				reject: (err) =>
+					Effect.sync(() => {
+						rejected.push(err);
+					}),
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingQuestions.set("q-1", pending);
@@ -185,10 +187,11 @@ describe("ClaudeAdapter lifecycle", () => {
 				toolName: "Bash",
 				toolInput: {},
 				createdAt: new Date().toISOString(),
-				resolve: (decision) => {
-					resolvedWith.push(decision);
-				},
-				reject: vi.fn(),
+				resolve: (decision) =>
+					Effect.sync(() => {
+						resolvedWith.push(decision);
+					}),
+				reject: vi.fn(() => Effect.void),
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingApprovals.set("perm-1", pending);
@@ -245,10 +248,11 @@ describe("ClaudeAdapter lifecycle", () => {
 			const pending: PendingQuestion = {
 				requestId: "q-1",
 				createdAt: new Date().toISOString(),
-				resolve: vi.fn(),
-				reject: (err) => {
-					rejected.push(err);
-				},
+				resolve: vi.fn(() => Effect.void),
+				reject: (err) =>
+					Effect.sync(() => {
+						rejected.push(err);
+					}),
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingQuestions.set("q-1", pending);
@@ -393,10 +397,11 @@ describe("ClaudeAdapter lifecycle", () => {
 				toolName: "Bash",
 				toolInput: {},
 				createdAt: new Date().toISOString(),
-				resolve: (decision) => {
-					resolvedWith.push(decision);
-				},
-				reject: vi.fn(),
+				resolve: (decision) =>
+					Effect.sync(() => {
+						resolvedWith.push(decision);
+					}),
+				reject: vi.fn(() => Effect.void),
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingApprovals.set("perm-1", pending);
@@ -561,10 +566,11 @@ describe("ClaudeAdapter lifecycle", () => {
 			const pending: PendingQuestion = {
 				requestId: "q-1",
 				createdAt: new Date().toISOString(),
-				resolve: (answers) => {
-					resolvedAnswers = answers;
-				},
-				reject: vi.fn(),
+				resolve: (answers) =>
+					Effect.sync(() => {
+						resolvedAnswers = answers;
+					}),
+				reject: vi.fn(() => Effect.void),
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingQuestions.set("q-1", pending);

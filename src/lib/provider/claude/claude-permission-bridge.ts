@@ -7,18 +7,18 @@
  * Flow:
  *   1. SDK calls canUseTool(toolName, input, { signal, toolUseID })
  *   2. Bridge creates a PendingApproval and stores it on ctx
- *   3. Bridge calls eventSink.requestPermission() -- this emits permission.asked
- *      and returns a promise that the EventSink will resolve when the UI
- *      delivers the decision (via resolvePermission() on the adapter)
+ *   3. Bridge runs eventSink.requestPermission() -- this emits permission.asked
+ *      and waits until the UI delivers the decision via resolvePermission()
  *   4. Bridge awaits either the sink promise or the abort signal
  *   5. Bridge returns the SDK PermissionResult
  *
  * The bridge exposes `resolvePermission()` so the adapter can route the
  * UI's decision back to the bridge. Internally this just completes the
  * pending entry -- the actual SDK callback is unblocked by the EventSink's
- * requestPermission() promise resolution.
+ * requestPermission() Effect resolution.
  */
 import { randomUUID } from "node:crypto";
+import { Effect } from "effect";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type {
 	CanUseTool,
@@ -91,31 +91,29 @@ export class ClaudePermissionBridge {
 
 		// Track the pending approval on the session context for interrupt
 		// cleanup. The resolver completes the same EventSink.requestPermission()
-		// deferred that the SDK callback is awaiting.
+		// wait that the SDK callback is awaiting.
 		const pending: PendingApproval = {
 			requestId,
 			toolName,
 			toolInput: toolInput ?? {},
 			createdAt,
-			resolve: (decision) => {
-				sink.resolvePermission(requestId, { decision });
-			},
-			reject: () => {
-				sink.resolvePermission(requestId, { decision: "reject" });
-			},
+			resolve: (decision) => sink.resolvePermission(requestId, { decision }),
+			reject: () => sink.resolvePermission(requestId, { decision: "reject" }),
 		};
 		ctx.pendingApprovals.set(requestId, pending);
 
 		try {
-			// Fire the permission.asked event and await the sink promise.
-			const sinkPromise = sink.requestPermission({
-				requestId,
-				sessionId: ctx.sessionId,
-				turnId: ctx.currentTurnId ?? "",
-				toolName,
-				toolInput: toolInput ?? {},
-				providerItemId: options.toolUseID,
-			});
+			// Fire permission.asked at the SDK callback boundary.
+			const sinkPromise = Effect.runPromise(
+				sink.requestPermission({
+					requestId,
+					sessionId: ctx.sessionId,
+					turnId: ctx.currentTurnId ?? "",
+					toolName,
+					toolInput: toolInput ?? {},
+					providerItemId: options.toolUseID,
+				}),
+			);
 
 			// Race: sink resolution vs abort signal.
 			let decision: PermissionDecision;
@@ -174,13 +172,13 @@ export class ClaudePermissionBridge {
 	 * into the pending canUseTool callback. This resolves the PendingApproval's
 	 * deferred, but the primary resolution path is through the EventSink.
 	 */
-	async resolvePermission(
+	resolvePermission(
 		ctx: ClaudeSessionContext,
 		requestId: string,
 		decision: PermissionDecision,
-	): Promise<void> {
+	): Effect.Effect<void, unknown> {
 		const pending = ctx.pendingApprovals.get(requestId);
-		if (!pending) return;
-		pending.resolve(decision);
+		if (!pending) return Effect.void;
+		return pending.resolve(decision);
 	}
 }

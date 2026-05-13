@@ -48,10 +48,10 @@ import type { PromptOptions } from "./types.js";
 // required by the SendTurnInput interface but unused on the OpenCode path.
 const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	push: () => Effect.void,
-	requestPermission: () => Promise.resolve({ decision: "once" as const }),
-	requestQuestion: () => Promise.resolve({}),
-	resolvePermission: () => {},
-	resolveQuestion: () => {},
+	requestPermission: () => Effect.succeed({ decision: "once" as const }),
+	requestQuestion: () => Effect.succeed({}),
+	resolvePermission: () => Effect.void,
+	resolveQuestion: () => Effect.void,
 };
 
 type PriorHistoryReaders = {
@@ -106,7 +106,6 @@ export const handleMessage = (
 		const config = yield* ConfigTag;
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
 		const runtime = yield* Effect.runtime<OverridesStateTag>();
-		const runPending = Runtime.runPromise(runtime);
 		const runTimeout = Runtime.runFork(runtime);
 
 		const { text, images } = payload;
@@ -273,37 +272,23 @@ export const handleMessage = (
 							...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
 							pendingInteractions: {
 								beginPermissionRequest: (input) =>
-									runPending(
-										pendingInteractionService
-											.beginPermissionRequest(input)
-											.pipe(Effect.flatMap((pending) => pending.awaitResponse)),
-									),
+									pendingInteractionService.beginPermissionRequest(input),
 								resolvePermissionRequest: (requestId, response) =>
-									runPending(
-										pendingInteractionService.resolvePermissionRequest(
-											requestId,
-											response,
-										),
+									pendingInteractionService.resolvePermissionRequest(
+										requestId,
+										response,
 									),
 								beginQuestionRequest: (input) =>
-									runPending(
-										pendingInteractionService
-											.beginQuestionRequest(input)
-											.pipe(Effect.flatMap((pending) => pending.awaitAnswers)),
-									),
+									pendingInteractionService.beginQuestionRequest(input),
 								resolveQuestionRequest: (requestId, answers) =>
-									runPending(
-										pendingInteractionService.resolveQuestionRequest(
-											requestId,
-											answers,
-										),
+									pendingInteractionService.resolveQuestionRequest(
+										requestId,
+										answers,
 									),
 								cancelSessionInteractions: (reason) =>
-									runPending(
-										pendingInteractionService.cancelSessionInteractions(
-											activeId,
-											reason,
-										),
+									pendingInteractionService.cancelSessionInteractions(
+										activeId,
+										reason,
 									),
 							},
 						})

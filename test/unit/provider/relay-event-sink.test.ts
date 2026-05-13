@@ -342,37 +342,49 @@ describe("createRelayEventSink — permission/question", () => {
 		const send = vi.fn();
 		const sink = createRelayEventSink({ sessionId: "ses-1", send });
 
-		await expect(
-			sink.requestPermission({
-				requestId: "req_1",
-				toolName: "Bash",
-				toolInput: { command: "whoami" },
+		const permissionResult = await Effect.runPromise(
+			Effect.either(
+				sink.requestPermission({
+					requestId: "req_1",
+					toolName: "Bash",
+					toolInput: { command: "whoami" },
+					sessionId: "ses-1",
+					turnId: "turn_1",
+					providerItemId: "toolu_1",
+				}),
+			),
+		);
+		expect(permissionResult).toMatchObject({
+			_tag: "Left",
+			left: {
+				_tag: "MissingPendingInteractions",
+				operation: "requestPermission",
 				sessionId: "ses-1",
-				turnId: "turn_1",
-				providerItemId: "toolu_1",
-			}),
-		).rejects.toMatchObject({
-			_tag: "MissingPendingInteractions",
-			operation: "requestPermission",
-			sessionId: "ses-1",
-		} satisfies Partial<MissingPendingInteractions>);
+			} satisfies Partial<MissingPendingInteractions>,
+		});
 
-		await expect(
-			sink.requestQuestion({
-				requestId: "que_1",
-				questions: [
-					{
-						question: "Continue?",
-						header: "Confirm",
-						options: [{ label: "Yes", description: "Continue" }],
-					},
-				],
-			}),
-		).rejects.toMatchObject({
-			_tag: "MissingPendingInteractions",
-			operation: "requestQuestion",
-			sessionId: "ses-1",
-		} satisfies Partial<MissingPendingInteractions>);
+		const questionResult = await Effect.runPromise(
+			Effect.either(
+				sink.requestQuestion({
+					requestId: "que_1",
+					questions: [
+						{
+							question: "Continue?",
+							header: "Confirm",
+							options: [{ label: "Yes", description: "Continue" }],
+						},
+					],
+				}),
+			),
+		);
+		expect(questionResult).toMatchObject({
+			_tag: "Left",
+			left: {
+				_tag: "MissingPendingInteractions",
+				operation: "requestQuestion",
+				sessionId: "ses-1",
+			} satisfies Partial<MissingPendingInteractions>,
+		});
 
 		expect(send).not.toHaveBeenCalled();
 	});
@@ -383,32 +395,49 @@ describe("createRelayEventSink — permission/question", () => {
 			| ((response: { decision: "once" | "always" | "reject" }) => void)
 			| undefined;
 		const pendingInteractions = {
-			beginPermissionRequest: vi.fn(
-				() =>
-					new Promise<{ decision: "once" | "always" | "reject" }>((resolve) => {
+			beginPermissionRequest: vi.fn(() =>
+				Effect.sync(() => {
+					const promise = new Promise<{
+						decision: "once" | "always" | "reject";
+					}>((resolve) => {
 						resolvePermission = resolve;
-					}),
+					});
+					return {
+						awaitResponse: Effect.tryPromise({
+							try: () => promise,
+							catch: (cause) => cause,
+						}),
+					};
+				}),
 			),
-			resolvePermissionRequest: vi.fn((_requestId, response) => {
-				resolvePermission?.(response);
-				return true;
-			}),
-			beginQuestionRequest: vi.fn(),
-			resolveQuestionRequest: vi.fn(),
+			resolvePermissionRequest: vi.fn((_requestId, response) =>
+				Effect.sync(() => {
+					resolvePermission?.(response);
+					return true;
+				}),
+			),
+			beginQuestionRequest: vi.fn(() =>
+				Effect.succeed({
+					awaitAnswers: Effect.succeed({}),
+				}),
+			),
+			resolveQuestionRequest: vi.fn(() => Effect.succeed(true)),
 		};
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send,
 			pendingInteractions,
 		});
-		const pending = sink.requestPermission({
-			requestId: "req_1",
-			toolName: "Bash",
-			toolInput: { command: "rm -rf /" },
-			sessionId: "ses-1",
-			turnId: "turn_1",
-			providerItemId: "item_1",
-		});
+		const pending = Effect.runPromise(
+			sink.requestPermission({
+				requestId: "req_1",
+				toolName: "Bash",
+				toolInput: { command: "rm -rf /" },
+				sessionId: "ses-1",
+				turnId: "turn_1",
+				providerItemId: "item_1",
+			}),
+		);
 
 		// The UI-facing message is queued
 		expect(send).toHaveBeenCalledWith(
@@ -420,7 +449,9 @@ describe("createRelayEventSink — permission/question", () => {
 		);
 
 		// Resolving unblocks the awaiting adapter
-		sink.resolvePermission("req_1", { decision: "once" });
+		await Effect.runPromise(
+			sink.resolvePermission("req_1", { decision: "once" }),
+		);
 		const response = await pending;
 		expect(response.decision).toBe("once");
 		expect(pendingInteractions.resolvePermissionRequest).toHaveBeenCalledWith(
@@ -438,26 +469,46 @@ describe("createRelayEventSink — permission/question", () => {
 			| ((answers: Record<string, unknown>) => void)
 			| undefined;
 		const pendingInteractions = {
-			beginPermissionRequest: vi.fn(
-				() =>
-					new Promise<{ decision: "once" | "always" | "reject" }>((resolve) => {
+			beginPermissionRequest: vi.fn(() =>
+				Effect.sync(() => {
+					const promise = new Promise<{
+						decision: "once" | "always" | "reject";
+					}>((resolve) => {
 						resolvePermission = resolve;
-					}),
+					});
+					return {
+						awaitResponse: Effect.tryPromise({
+							try: () => promise,
+							catch: (cause) => cause,
+						}),
+					};
+				}),
 			),
-			resolvePermissionRequest: vi.fn((_requestId, response) => {
-				resolvePermission?.(response);
-				return true;
-			}),
-			beginQuestionRequest: vi.fn(
-				() =>
-					new Promise<Record<string, unknown>>((resolve) => {
+			resolvePermissionRequest: vi.fn((_requestId, response) =>
+				Effect.sync(() => {
+					resolvePermission?.(response);
+					return true;
+				}),
+			),
+			beginQuestionRequest: vi.fn(() =>
+				Effect.sync(() => {
+					const promise = new Promise<Record<string, unknown>>((resolve) => {
 						resolveQuestion = resolve;
-					}),
+					});
+					return {
+						awaitAnswers: Effect.tryPromise({
+							try: () => promise,
+							catch: (cause) => cause,
+						}),
+					};
+				}),
 			),
-			resolveQuestionRequest: vi.fn((_requestId, answers) => {
-				resolveQuestion?.(answers);
-				return true;
-			}),
+			resolveQuestionRequest: vi.fn((_requestId, answers) =>
+				Effect.sync(() => {
+					resolveQuestion?.(answers);
+					return true;
+				}),
+			),
 		};
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
@@ -465,15 +516,17 @@ describe("createRelayEventSink — permission/question", () => {
 			pendingInteractions,
 		});
 
-		const permission = sink.requestPermission({
-			requestId: "req_1",
-			toolName: "Bash",
-			toolInput: { command: "whoami" },
-			sessionId: "ses-1",
-			turnId: "turn_1",
-			providerItemId: "toolu_1",
-			always: ["Bash"],
-		});
+		const permission = Effect.runPromise(
+			sink.requestPermission({
+				requestId: "req_1",
+				toolName: "Bash",
+				toolInput: { command: "whoami" },
+				sessionId: "ses-1",
+				turnId: "turn_1",
+				providerItemId: "toolu_1",
+				always: ["Bash"],
+			}),
+		);
 		expect(pendingInteractions.beginPermissionRequest).toHaveBeenCalledWith({
 			requestId: "req_1",
 			sessionId: "ses-1",
@@ -481,25 +534,29 @@ describe("createRelayEventSink — permission/question", () => {
 			toolInput: { command: "whoami" },
 			always: ["Bash"],
 		});
-		sink.resolvePermission("req_1", { decision: "once" });
+		await Effect.runPromise(
+			sink.resolvePermission("req_1", { decision: "once" }),
+		);
 		await expect(permission).resolves.toEqual({ decision: "once" });
 		expect(pendingInteractions.resolvePermissionRequest).toHaveBeenCalledWith(
 			"req_1",
 			{ decision: "once" },
 		);
 
-		const question = sink.requestQuestion({
-			requestId: "que_1",
-			questions: [
-				{
-					question: "Continue?",
-					header: "Confirm",
-					options: [{ label: "Yes", description: "Continue" }],
-					multiSelect: false,
-					custom: true,
-				},
-			],
-		});
+		const question = Effect.runPromise(
+			sink.requestQuestion({
+				requestId: "que_1",
+				questions: [
+					{
+						question: "Continue?",
+						header: "Confirm",
+						options: [{ label: "Yes", description: "Continue" }],
+						multiSelect: false,
+						custom: true,
+					},
+				],
+			}),
+		);
 		expect(pendingInteractions.beginQuestionRequest).toHaveBeenCalledWith({
 			requestId: "que_1",
 			sessionId: "ses-1",
@@ -512,7 +569,7 @@ describe("createRelayEventSink — permission/question", () => {
 				},
 			],
 		});
-		sink.resolveQuestion("que_1", { "0": "Yes" });
+		await Effect.runPromise(sink.resolveQuestion("que_1", { "0": "Yes" }));
 		await expect(question).resolves.toEqual({ "0": "Yes" });
 		expect(pendingInteractions.resolveQuestionRequest).toHaveBeenCalledWith(
 			"que_1",

@@ -233,11 +233,13 @@ describe("OpenCodeAdapter action methods", () => {
 					model: { providerId: "anthropic", modelId: "claude-sonnet" },
 					workspaceRoot: "/tmp",
 					eventSink: {
-						push: vi.fn(),
-						requestPermission: vi.fn(),
-						requestQuestion: vi.fn(),
-						resolvePermission: vi.fn(),
-						resolveQuestion: vi.fn(),
+						push: vi.fn(() => Effect.void),
+						requestPermission: vi.fn(() =>
+							Effect.succeed({ decision: "once" as const }),
+						),
+						requestQuestion: vi.fn(() => Effect.succeed({})),
+						resolvePermission: vi.fn(() => Effect.void),
+						resolveQuestion: vi.fn(() => Effect.void),
 					},
 					abortSignal: new AbortController().signal,
 				}),

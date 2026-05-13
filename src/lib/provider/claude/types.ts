@@ -78,22 +78,22 @@ export interface ClaudeResumeCursor {
 /**
  * An in-flight `canUseTool` callback waiting for a user decision. The
  * permission bridge creates one, emits permission.asked via EventSink, and
- * blocks by awaiting the deferred until the UI calls resolvePermission().
+ * blocks by awaiting the EventSink Effect until the UI calls resolvePermission().
  */
 export interface PendingApproval {
 	readonly requestId: string;
 	readonly toolName: string;
 	readonly toolInput: Record<string, unknown>;
 	readonly createdAt: string;
-	resolve(decision: PermissionDecision): void;
-	reject(error: Error): void;
+	resolve(decision: PermissionDecision): Effect.Effect<void, unknown>;
+	reject(error: Error): Effect.Effect<void, unknown>;
 }
 
 export interface PendingQuestion {
 	readonly requestId: string;
 	readonly createdAt: string;
-	resolve(answers: Record<string, unknown>): void;
-	reject(error: Error): void;
+	resolve(answers: Record<string, unknown>): Effect.Effect<void, unknown>;
+	reject(error: Error): Effect.Effect<void, unknown>;
 }
 
 // ─── Tool In Flight ────────────────────────────────────────────────────────

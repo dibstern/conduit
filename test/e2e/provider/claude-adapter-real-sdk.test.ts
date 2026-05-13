@@ -12,12 +12,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
-import type {
-	EventSink,
-	PermissionRequest,
-	PermissionResponse,
-	QuestionRequest,
-} from "../../../src/lib/provider/types.js";
+import type { EventSink } from "../../../src/lib/provider/types.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 
@@ -33,18 +28,10 @@ function createCollectingEventSink(): EventSink & {
 			Effect.sync(() => {
 				events.push(event);
 			}),
-		async requestPermission(
-			_request: PermissionRequest,
-		): Promise<PermissionResponse> {
-			return { decision: "once" };
-		},
-		async requestQuestion(
-			_request: QuestionRequest,
-		): Promise<Record<string, unknown>> {
-			return {};
-		},
-		resolvePermission() {},
-		resolveQuestion() {},
+		requestPermission: () => Effect.succeed({ decision: "once" }),
+		requestQuestion: () => Effect.succeed({}),
+		resolvePermission: () => Effect.void,
+		resolveQuestion: () => Effect.void,
 	};
 }
 

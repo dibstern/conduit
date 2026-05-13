@@ -693,6 +693,7 @@ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/eff
 |---|---|---|
 | `Effect.runPromise` / `Effect.runSync` | `src/bin/cli-core.ts` only, after the entrypoint switch is complete | Process entrypoint must run an Effect at the top |
 | `Effect.runPromise` | `src/lib/instance/sdk-factory.ts` inside the returned `fetch` callback only | OpenCode SDK and GapEndpoints require a standard Promise-shaped Fetch callback; the callback delegates to the Effect retry transport |
+| `Effect.runPromise` | `src/lib/provider/claude/claude-permission-bridge.ts` inside the SDK `canUseTool` callback only | Claude Agent SDK requires a Promise-returning permission callback; the EventSink wait remains Effect-returning internally |
 | `Effect.runPromise` | `src/lib/daemon/daemon-lifecycle.ts` inside tagged IPC dispatch only | Transitional Unix socket callback boundary; decoded IPC requests enter the Effect RPC handler until the IPC socket server is Effect-owned |
 | `Effect.runSync` | `src/lib/relay/relay-stack.ts` and `src/lib/effect/daemon-main.ts` around `NodeHttpServer.makeHandler(...)` only | Transitional Node HTTP callback construction boundary; long-term fix is scoped `NodeHttpServer.layer` / `HttpServer.serve`, not a helper that hides `runSync` |
 | `Effect.runPromise` (frontend) | `src/lib/frontend/transport/runtime.ts` | Browser entrypoint, owned by `ManagedRuntime` |
