@@ -508,6 +508,34 @@ describe("Effect runtime boundary grep", () => {
 		expect([...daemonMainHits, ...routerHits]).toEqual([]);
 	});
 
+	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const stopStart = source.indexOf("async function stop(): Promise<void> {");
+		const lifecycleContextStart = source.indexOf(
+			"// ── Lifecycle context",
+			stopStart,
+		);
+		expect(stopStart).toBeGreaterThanOrEqual(0);
+		expect(lifecycleContextStart).toBeGreaterThan(stopStart);
+		const stopSource = source.slice(stopStart, lifecycleContextStart);
+		const hits = stopSource.split("\n").flatMap((line, index) =>
+			/readRuntimeConfigSnapshot\(\);/.test(line)
+				? [
+						{
+							path,
+							line: source.slice(0, stopStart).split("\n").length + index,
+							source: line.trim(),
+							reason:
+								"updateRuntimeConfigSync reads and returns the latest runtime config ref before applying shutdown state",
+						},
+					]
+				: [],
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{
