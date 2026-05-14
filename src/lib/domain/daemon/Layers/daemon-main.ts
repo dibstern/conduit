@@ -1268,12 +1268,6 @@ export async function startDaemonProcess(
 	// directly from TlsCertTag.
 
 	// ── Layer-managed daemon lifecycle ────────────────────────────────────
-	const onboardingDeps = {
-		caRootPath: null as string | null,
-		caCertDer: null as Buffer | null,
-		staticDir,
-	};
-
 	const initialRuntimeConfig = runtimeConfigSnapshot;
 	const firstProject = registry.allProjects()[0];
 	const scheduleLegacyPostResponseShutdown = () => {
@@ -1366,7 +1360,7 @@ export async function startDaemonProcess(
 		ipcPostResponseActions: {
 			scheduleShutdown: scheduleLegacyPostResponseShutdown,
 		},
-		onboarding: onboardingDeps,
+		staticDir,
 		httpRouter: {
 			staticDir,
 			getProjects: getRouterProjects,

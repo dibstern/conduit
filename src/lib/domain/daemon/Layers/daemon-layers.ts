@@ -430,7 +430,7 @@ function makeTaggedIpcDispatcher(
  */
 export const makeOnboardingServerLive = (
 	ctx: DaemonLifecycleContext,
-	deps: OnboardingServerDeps,
+	staticDir: string,
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
@@ -446,7 +446,7 @@ export const makeOnboardingServerLive = (
 				host: config.host,
 			};
 			const effectiveDeps: OnboardingServerDeps = {
-				staticDir: deps.staticDir,
+				staticDir,
 				caRootPath: tls.caRootPath,
 				caCertDer: tls.caCertDer,
 			};
@@ -511,7 +511,7 @@ export interface DaemonLiveOptions {
 	ctx: DaemonLifecycleContext;
 	ipcContext: DaemonIPCContext;
 	ipcPostResponseActions?: IpcPostResponseActions;
-	onboarding: OnboardingServerDeps;
+	staticDir: string;
 	httpRouter: DaemonHttpRouterOptions;
 
 	/** Full runtime config snapshot used to seed DaemonConfigRef. */
@@ -664,10 +664,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		),
 	).pipe(Layer.provideMerge(httpRequestHandler));
 
-	const servers = makeOnboardingServerLive(
-		options.ctx,
-		options.onboarding,
-	).pipe(Layer.provideMerge(httpAndIpc), Layer.provideMerge(withDaemonControl));
+	const servers = makeOnboardingServerLive(options.ctx, options.staticDir).pipe(
+		Layer.provideMerge(httpAndIpc),
+		Layer.provideMerge(withDaemonControl),
+	);
 
 	const withDaemonWiring = DaemonWiringLive.pipe(Layer.provideMerge(servers));
 

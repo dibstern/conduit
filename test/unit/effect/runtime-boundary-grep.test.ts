@@ -1367,6 +1367,53 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not pass placeholder onboarding deps through DaemonLiveOptions", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
+				pattern: /\bonboarding:\s*OnboardingServerDeps\b/,
+				reason:
+					"DaemonLiveOptions should carry staticDir and let the Layer derive onboarding deps from TlsCertTag",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bconst onboardingDeps = \{/,
+				reason: "daemon-main should not build placeholder CA onboarding deps",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bcaRootPath:\s*null as string \| null\b/,
+				reason:
+					"CA root path belongs to TlsCertTag inside the onboarding layer",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bcaCertDer:\s*null as Buffer \| null\b/,
+				reason:
+					"CA cert bytes belong to TlsCertTag inside the onboarding layer",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bonboarding:\s*onboardingDeps\b/,
+				reason:
+					"DaemonLiveOptions should not receive a prebuilt onboarding deps object",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not dispatch daemon IPC requests through Runtime.runPromise", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
