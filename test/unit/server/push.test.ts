@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	PushNotificationManager,
+	PushNotificationManagerNotInitializedError,
 	type PushSubscriptionData,
 	type VapidDetails,
 	type WebPushModule,
@@ -585,9 +586,16 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			});
 			mgr.addSubscription("client-1", makeSub());
 
-			await expect(
-				mgr.sendToAll({ title: "Test", body: "Not init" }),
-			).rejects.toThrow(/not initialized/i);
+			const rejected = mgr.sendToAll({ title: "Test", body: "Not init" });
+
+			await expect(rejected).rejects.toBeInstanceOf(
+				PushNotificationManagerNotInitializedError,
+			);
+			await expect(rejected).rejects.toMatchObject({
+				_tag: "PushNotificationManagerNotInitializedError",
+				operation: "sendToAll",
+			});
+			await expect(rejected).rejects.toThrow(/not initialized/i);
 		});
 
 		it("throws if sendTo called before init", async () => {
@@ -598,9 +606,19 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			});
 			mgr.addSubscription("client-1", makeSub());
 
-			await expect(
-				mgr.sendTo("client-1", { title: "Test", body: "Not init" }),
-			).rejects.toThrow(/not initialized/i);
+			const rejected = mgr.sendTo("client-1", {
+				title: "Test",
+				body: "Not init",
+			});
+
+			await expect(rejected).rejects.toBeInstanceOf(
+				PushNotificationManagerNotInitializedError,
+			);
+			await expect(rejected).rejects.toMatchObject({
+				_tag: "PushNotificationManagerNotInitializedError",
+				operation: "sendTo",
+			});
+			await expect(rejected).rejects.toThrow(/not initialized/i);
 		});
 	});
 
