@@ -651,6 +651,64 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not read daemon runtime config through a sync runtime bridge", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /daemonRuntime\.runSync\(/,
+				reason:
+					"daemon-main should read its local config snapshot; Effect config writes must mirror into that snapshot",
+			},
+			{
+				pattern:
+					/readRuntimeConfigSnapshot[\s\S]*?DaemonConfigRefTag[\s\S]*?Ref\.get/,
+				reason:
+					"readRuntimeConfigSnapshot should not synchronously fetch DaemonConfigRefTag from the runtime",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("routes daemon config ref mutations through the commit helper", () => {
+		const roots = [
+			join(REPO_ROOT, "src/lib/domain/daemon"),
+			join(REPO_ROOT, "src/lib/domain/server"),
+		];
+		const hits = roots.flatMap((root) =>
+			tsFiles(root).flatMap((file) => {
+				const relPath = relative(REPO_ROOT, file);
+				return readFileSync(file, "utf8")
+					.split("\n")
+					.flatMap((line, index) =>
+						/Ref\.(?:update|set)\(configRef/.test(line)
+							? [
+									{
+										path: relPath,
+										line: index + 1,
+										source: line.trim(),
+										reason:
+											"DaemonConfigRefTag writes must go through commitDaemonRuntimeConfig so daemon-main's legacy sync read model stays current",
+									},
+								]
+							: [],
+					);
+			}),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{

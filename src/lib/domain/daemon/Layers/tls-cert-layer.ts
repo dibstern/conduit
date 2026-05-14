@@ -9,7 +9,10 @@
 import { Context, Data, Effect, Layer, Ref } from "effect";
 import type { TlsCerts } from "../../../cli/tls.js";
 import { ensureCerts } from "../../../cli/tls.js";
-import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import {
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "../Services/daemon-config-ref.js";
 
 // ─── Service interface ─────────────────────────────────────────────────────
 
@@ -84,7 +87,7 @@ export const TlsCertLive = (configDir: string) =>
 				Effect.catchTag("TlsCertLoadError", (_e) =>
 					Effect.gen(function* () {
 						yield* Effect.logWarning("TLS unavailable — falling back to HTTP");
-						yield* Ref.update(configRef, (c) => ({
+						yield* commitDaemonRuntimeConfig((c) => ({
 							...c,
 							tlsEnabled: false,
 						}));
@@ -98,13 +101,16 @@ export const TlsCertLive = (configDir: string) =>
 				yield* Effect.logWarning(
 					"TLS unavailable — mkcert not found, falling back to HTTP",
 				);
-				yield* Ref.update(configRef, (c) => ({ ...c, tlsEnabled: false }));
+				yield* commitDaemonRuntimeConfig((c) => ({
+					...c,
+					tlsEnabled: false,
+				}));
 				return nullResult;
 			}
 
 			// AP-12: Only change host when not explicitly set
 			if (!config.hostExplicit) {
-				yield* Ref.update(configRef, (c) => ({ ...c, host: "0.0.0.0" }));
+				yield* commitDaemonRuntimeConfig((c) => ({ ...c, host: "0.0.0.0" }));
 			}
 
 			return {

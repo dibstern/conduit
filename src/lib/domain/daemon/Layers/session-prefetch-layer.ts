@@ -19,7 +19,10 @@
 // (AP-33)
 
 import { Effect, HashMap, Layer, Ref } from "effect";
-import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import {
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "../Services/daemon-config-ref.js";
 import {
 	getInstance,
 	getInstanceUrl,
@@ -103,7 +106,7 @@ export const prefetchSessionCounts: Effect.Effect<
 		}).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
 		if (count !== null && count > 0) {
-			yield* Ref.update(configRef, (c) => ({
+			yield* commitDaemonRuntimeConfig((c) => ({
 				...c,
 				persistedSessionCounts: new Map([
 					...c.persistedSessionCounts,

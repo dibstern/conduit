@@ -7,7 +7,7 @@
 //   DaemonConfigRefTag → Ref.Ref<DaemonRuntimeConfig>
 //   DaemonConfigRefLive(initial) → Layer providing the Tag
 
-import { Context, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Ref } from "effect";
 
 // ─── Interface ──────────────────────────────────────────────────────────────
 
@@ -33,10 +33,35 @@ export class DaemonConfigRefTag extends Context.Tag("DaemonConfigRef")<
 	Ref.Ref<DaemonRuntimeConfig>
 >() {}
 
+export interface DaemonConfigMirror {
+	readonly set: (config: DaemonRuntimeConfig) => Effect.Effect<void>;
+}
+
+export class DaemonConfigMirrorTag extends Context.Tag("DaemonConfigMirror")<
+	DaemonConfigMirrorTag,
+	DaemonConfigMirror
+>() {}
+
+export const DaemonConfigMirrorLive = (mirror: DaemonConfigMirror) =>
+	Layer.succeed(DaemonConfigMirrorTag, mirror);
+
 // ─── Layer factory ──────────────────────────────────────────────────────────
 
 export const DaemonConfigRefLive = (initial: DaemonRuntimeConfig) =>
 	Layer.effect(DaemonConfigRefTag, Ref.make(initial));
+
+export const commitDaemonRuntimeConfig = (
+	update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+) =>
+	Effect.gen(function* () {
+		const ref = yield* DaemonConfigRefTag;
+		const next = yield* Ref.updateAndGet(ref, update);
+		const mirror = yield* Effect.serviceOption(DaemonConfigMirrorTag);
+		if (mirror._tag === "Some") {
+			yield* mirror.value.set(next);
+		}
+		return next;
+	});
 
 // ─── Convenience builder ────────────────────────────────────────────────────
 

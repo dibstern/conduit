@@ -51,6 +51,9 @@ import {
 	PersistencePathTag,
 } from "../Services/daemon-config-persistence.js";
 import {
+	commitDaemonRuntimeConfig,
+	type DaemonConfigMirror,
+	DaemonConfigMirrorLive,
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
@@ -336,7 +339,7 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 				),
 			);
 			yield* Ref.set(httpServerRef, ctx.upgradeServer ?? ctx.httpServer);
-			yield* Ref.update(configRef, (c) => ({ ...c, port: actualPort }));
+			yield* commitDaemonRuntimeConfig((c) => ({ ...c, port: actualPort }));
 			yield* Effect.addFinalizer(() =>
 				closeLifecycleServer("closeHttpServer", () =>
 					closeHttpServer(ctx),
@@ -478,6 +481,8 @@ export interface DaemonLiveOptions {
 
 	/** Full runtime config snapshot used to seed DaemonConfigRef. */
 	initialConfig: DaemonRuntimeConfig;
+	/** Optional mirror for sync legacy DaemonHandle reads during migration. */
+	configMirror?: DaemonConfigMirror;
 
 	// Background services — Effect-native config types (all optional for phased migration)
 	keepAwake?: Parameters<typeof KeepAwakeLive>[0];
@@ -528,6 +533,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		DaemonEventBusLive,
 		PinoLoggerLive,
 		DaemonConfigRefLive(options.initialConfig),
+		options.configMirror
+			? DaemonConfigMirrorLive(options.configMirror)
+			: Layer.empty,
 		SignalHandlerLayer,
 		ProcessErrorHandlerLayer,
 		makePidFileLive(configDir, pidPath, socketPath),

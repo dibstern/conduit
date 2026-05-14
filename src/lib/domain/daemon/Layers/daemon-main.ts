@@ -27,7 +27,6 @@ import {
 	Effect,
 	Layer,
 	ManagedRuntime,
-	Ref,
 	RuntimeFlags,
 	RuntimeFlagsPatch,
 	Schedule,
@@ -35,7 +34,7 @@ import {
 } from "effect";
 import type { DaemonOptions } from "../../../daemon/daemon-types.js";
 import {
-	DaemonConfigRefTag,
+	commitDaemonRuntimeConfig,
 	type DaemonRuntimeConfig,
 	makeDaemonConfigFromOptions,
 } from "../Services/daemon-config-ref.js";
@@ -433,18 +432,6 @@ export async function startDaemonProcess(
 	}
 
 	function readRuntimeConfigSnapshot(): DaemonRuntimeConfig {
-		if (!daemonRuntime || shuttingDown) return runtimeConfigSnapshot;
-		try {
-			runtimeConfigSnapshot = daemonRuntime.runSync(
-				Effect.gen(function* () {
-					const ref = yield* DaemonConfigRefTag;
-					return yield* Ref.get(ref);
-				}),
-			);
-			syncLegacyConfigLocals(runtimeConfigSnapshot);
-		} catch {
-			// During startup/shutdown, keep the last known snapshot.
-		}
 		return runtimeConfigSnapshot;
 	}
 
@@ -490,11 +477,7 @@ export async function startDaemonProcess(
 
 	const updateEffectRuntimeConfig = (
 		update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
-	) =>
-		Effect.gen(function* () {
-			const ref = yield* DaemonConfigRefTag;
-			yield* Ref.update(ref, update);
-		});
+	) => commitDaemonRuntimeConfig(update);
 
 	// ── Core services ─────────────────────────────────────────────────────
 	const instanceManager = new InstanceManager();
@@ -1292,6 +1275,13 @@ export async function startDaemonProcess(
 			pushManager,
 		},
 		initialConfig: initialRuntimeConfig,
+		configMirror: {
+			set: (config) =>
+				Effect.sync(() => {
+					runtimeConfigSnapshot = config;
+					syncLegacyConfigLocals(config);
+				}),
+		},
 		// KeepAwake config — pure Effect Layer replaces imperative KeepAwake class.
 		// Always provide config (even empty) so the Layer is created; platform
 		// detection in KeepAwakeLive handles the default command.

@@ -23,7 +23,10 @@ import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
-import { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import {
+	commitDaemonRuntimeConfig,
+	type DaemonConfigRefTag,
+} from "./daemon-config-ref.js";
 import { DaemonStateTag } from "./daemon-state.js";
 
 // ─── Type extraction ─────────────────────────────────────────────────────────
@@ -185,8 +188,7 @@ export const handleSetPin = (
 
 		// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash reactively.
 		// AuthManager reads pinHash from DaemonConfigRef, not DaemonState.
-		const configRef = yield* DaemonConfigRefTag;
-		yield* Ref.update(configRef, (c) => ({ ...c, pinHash: hashed }));
+		yield* commitDaemonRuntimeConfig((c) => ({ ...c, pinHash: hashed }));
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
@@ -206,7 +208,6 @@ export const handleSetKeepAwake = (
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
-		const configRef = yield* DaemonConfigRefTag;
 		const keepAwake = yield* KeepAwakeTag;
 
 		// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling,
@@ -225,7 +226,7 @@ export const handleSetKeepAwake = (
 			...s,
 			keepAwake: cmd.enabled,
 		}));
-		yield* Ref.update(configRef, (c) => ({
+		yield* commitDaemonRuntimeConfig((c) => ({
 			...c,
 			keepAwake: cmd.enabled,
 		}));
@@ -243,14 +244,12 @@ export const handleSetKeepAwakeCommand = (
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
-		const configRef = yield* DaemonConfigRefTag;
-
 		yield* Ref.update(ref, (s) => ({
 			...s,
 			keepAwakeCommand: cmd.command,
 			keepAwakeArgs: [...cmd.args],
 		}));
-		yield* Ref.update(configRef, (c) => ({
+		yield* commitDaemonRuntimeConfig((c) => ({
 			...c,
 			keepAwakeCommand: cmd.command,
 			keepAwakeArgs: [...cmd.args],
@@ -269,13 +268,11 @@ export const handleShutdown = (
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
-		const configRef = yield* DaemonConfigRefTag;
-
 		yield* Ref.update(ref, (s) => ({
 			...s,
 			shuttingDown: true,
 		}));
-		yield* Ref.update(configRef, (c) => ({
+		yield* commitDaemonRuntimeConfig((c) => ({
 			...c,
 			shuttingDown: true,
 		}));
@@ -499,13 +496,11 @@ export const handleRestartWithConfig = (
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
-		const configRef = yield* DaemonConfigRefTag;
-
 		yield* Ref.update(ref, (s) => ({
 			...applyRestartConfig(s, cmd.config),
 			shuttingDown: true,
 		}));
-		yield* Ref.update(configRef, (c) => ({
+		yield* commitDaemonRuntimeConfig((c) => ({
 			...applyRestartRuntimeConfig(c, cmd.config),
 			shuttingDown: true,
 		}));
