@@ -437,6 +437,14 @@ export async function startDaemonProcess(
 		}
 	}
 
+	function updateLocalRuntimeConfigSnapshot(
+		update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+	): DaemonRuntimeConfig {
+		runtimeConfigSnapshot = update(runtimeConfigSnapshot);
+		syncLegacyConfigLocals(runtimeConfigSnapshot);
+		return runtimeConfigSnapshot;
+	}
+
 	function readRuntimeConfigSnapshot(): DaemonRuntimeConfig {
 		if (!daemonRuntime || shuttingDown) return runtimeConfigSnapshot;
 		try {
@@ -1062,7 +1070,7 @@ export async function startDaemonProcess(
 	if (savedConfig?.keepAwakeArgs) {
 		keepAwakeArgs = savedConfig.keepAwakeArgs;
 	}
-	updateRuntimeConfigSync((c) => ({
+	updateLocalRuntimeConfigSnapshot((c) => ({
 		...c,
 		keepAwakeCommand,
 		keepAwakeArgs,

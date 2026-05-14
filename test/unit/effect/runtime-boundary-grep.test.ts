@@ -560,6 +560,35 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not rehydrate saved daemon config through the runtime update helper before startup", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const rehydrateStart = source.indexOf("// ── Rehydrate dismissed paths");
+		const probeStart = source.indexOf(
+			"// ── Probe-and-convert default instance",
+			rehydrateStart,
+		);
+		expect(rehydrateStart).toBeGreaterThanOrEqual(0);
+		expect(probeStart).toBeGreaterThan(rehydrateStart);
+
+		const rehydrateSource = source.slice(rehydrateStart, probeStart);
+		const hits = rehydrateSource.split("\n").flatMap((line, index) =>
+			/updateRuntimeConfigSync\(/.test(line)
+				? [
+						{
+							path,
+							line: source.slice(0, rehydrateStart).split("\n").length + index,
+							source: line.trim(),
+							reason:
+								"saved config rehydration happens before the daemon runtime exists and should update the local startup snapshot directly",
+						},
+					]
+				: [],
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{
