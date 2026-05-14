@@ -477,7 +477,14 @@ export const makePidFileLive = (
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			yield* Effect.sync(() => writePidFile(configDir, pidPath));
+			yield* Effect.try({
+				try: () => writePidFile(configDir, pidPath),
+				catch: (cause) =>
+					new DaemonLifecycleLayerError({
+						operation: "writePidFile",
+						cause,
+					}),
+			});
 			yield* Effect.addFinalizer(() =>
 				Effect.sync(() => {
 					removePidFile(pidPath);

@@ -1,8 +1,12 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Layer, Scope } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
 import { expect } from "vitest";
 import {
 	DaemonLifecycleLayerError,
+	makePidFileLive,
 	ProcessErrorHandlerLayer,
 	ShutdownAwaiterLive,
 	ShutdownSignalTag,
@@ -55,6 +59,43 @@ describe("DaemonLifecycleLayerError", () => {
 				cause: 42,
 			});
 			expect(err.message).toBe("startIPCServer failed: 42");
+		}),
+	);
+});
+
+describe("makePidFileLive", () => {
+	it.scoped("maps PID write failures to DaemonLifecycleLayerError", () =>
+		Effect.gen(function* () {
+			const tempRoot = mkdtempSync(join(tmpdir(), "conduit-pid-"));
+			const configDir = join(tempRoot, "not-a-directory");
+			writeFileSync(configDir, "x");
+			const scope = yield* Scope.make();
+
+			try {
+				const exit = yield* Effect.exit(
+					Layer.buildWithScope(
+						makePidFileLive(
+							configDir,
+							join(configDir, "daemon.pid"),
+							join(tempRoot, "relay.sock"),
+						),
+						scope,
+					),
+				);
+
+				expect(Exit.isFailure(exit)).toBe(true);
+				if (Exit.isFailure(exit)) {
+					const failure = Cause.failureOption(exit.cause);
+					expect(Option.isSome(failure)).toBe(true);
+					if (Option.isSome(failure)) {
+						expect(failure.value).toBeInstanceOf(DaemonLifecycleLayerError);
+						expect(failure.value.operation).toBe("writePidFile");
+					}
+				}
+			} finally {
+				yield* Scope.close(scope, Exit.void);
+				rmSync(tempRoot, { recursive: true, force: true });
+			}
 		}),
 	);
 });
