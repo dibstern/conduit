@@ -1274,7 +1274,7 @@ export async function startDaemonProcess(
 		staticDir,
 	};
 
-	const initialRuntimeConfig = readRuntimeConfigSnapshot();
+	const initialRuntimeConfig = runtimeConfigSnapshot;
 	const firstProject = registry.allProjects()[0];
 	const scheduleLegacyPostResponseShutdown = () => {
 		shutdownTimer = setTimeout(() => {
