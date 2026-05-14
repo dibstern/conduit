@@ -425,3 +425,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Left only explicit runtime calls for the still-synchronous public `ProjectRelay.getLastKnownSessionCount()` and Promise-returning `ProjectRelay.getDefaultSessionId()` compatibility methods.
 - Added a runtime-boundary guard so broad relay-stack session service bridge objects cannot return.
 - Verified locally with focused runtime-boundary and SSE Effect tests, typecheck, lint, and diff hygiene.
+
+2026-05-14, relay WebSocket callback wiring cleanup:
+
+- Added `websocket-callback-wiring.ts` so client connect/disconnect and browser message callbacks are registered from the relay setup Effect and fork against the relay runtime there.
+- Removed direct `relayManagedRuntime.runFork(...)` calls from `relay-stack.ts`; the `ws` callback remains the external boundary.
+- Added a runtime-boundary guard so relay-stack cannot directly fork WebSocket callback programs again.
+- Verified locally with focused runtime-boundary, client-init, relay-stack, per-tab routing tests, typecheck, lint, diff hygiene, and `test/integration/flows/initial-state.integration.ts`.

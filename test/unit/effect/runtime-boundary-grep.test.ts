@@ -977,4 +977,27 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not fork WebSocket callback programs directly from relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /relayManagedRuntime\.runFork\(/,
+				reason:
+					"WebSocket callback registration should be owned by the relay WebSocket callback wiring effect",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

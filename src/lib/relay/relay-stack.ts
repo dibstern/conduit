@@ -18,9 +18,8 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Cause, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
-import { handleClientConnectedEffect } from "../bridges/client-init.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -32,7 +31,6 @@ import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
-import { ClientMessageSerializationTag } from "../domain/relay/Services/client-message-serialization.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
 	hasInstanceManagementConfig,
@@ -121,7 +119,7 @@ import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
 import { wireSSEConsumerEffect } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
-import { handleRelayWsMessageThroughGate } from "./ws-message-dispatch-effect.js";
+import { wireRelayWebSocketCallbacksEffect } from "./websocket-callback-wiring.js";
 
 const _staticCandidate = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -633,54 +631,6 @@ export async function createProjectRelay(
 		api,
 		log: sseLog,
 	});
-	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
-		wsLog.info(
-			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
-		);
-		relayManagedRuntime.runFork(
-			handleClientConnectedEffect(clientId, requestedSessionId, {
-				...(config.getInstances != null && {
-					getInstances: config.getInstances,
-				}),
-				...(config.getCachedUpdate != null && {
-					getCachedUpdate: config.getCachedUpdate,
-				}),
-			}).pipe(
-				Effect.catchAllCause((cause) =>
-					Effect.sync(() =>
-						wsLog.error(
-							`Client init failed for ${clientId}: ${Cause.pretty(cause)}`,
-						),
-					),
-				),
-			),
-		);
-	});
-	wsHandler.on("client_disconnected", ({ clientId }) => {
-		relayManagedRuntime.runFork(
-			Effect.gen(function* () {
-				const serialization = yield* ClientMessageSerializationTag;
-				yield* serialization.removeClient(clientId);
-			}),
-		);
-		wsLog.info(`Client disconnected: ${clientId}`);
-	});
-
-	let relayCommandSequence = 0;
-	wsHandler.on("message", ({ clientId, handler, payload }) => {
-		const commandId = `${clientId}:${++relayCommandSequence}`;
-		relayManagedRuntime.runFork(
-			handleRelayWsMessageThroughGate({
-				commandId,
-				clientId,
-				handler,
-				payload,
-				sendTo: (targetClientId, message) =>
-					wsHandler.sendTo(targetClientId, message),
-				log: wsLog,
-			}),
-		);
-	});
 	const rpcWsHandler = new WsRpcWebSocketHandler({
 		runtime: relayManagedRuntime,
 	});
@@ -737,6 +687,18 @@ export async function createProjectRelay(
 	try {
 		await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				yield* wireRelayWebSocketCallbacksEffect({
+					wsHandler,
+					log: wsLog,
+					clientInitOptions: {
+						...(config.getInstances != null && {
+							getInstances: config.getInstances,
+						}),
+						...(config.getCachedUpdate != null && {
+							getCachedUpdate: config.getCachedUpdate,
+						}),
+					},
+				});
 				const monitoring = yield* wireMonitoringEffect({
 					client: api,
 					wsHandler,
