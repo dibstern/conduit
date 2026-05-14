@@ -4,7 +4,7 @@
 // or layer shutdown) and HashMap for structural sharing inside the Ref.
 //
 // Replaces the old ProjectRegistry bridge with Effect-native primitives:
-//   - Ref<HashMap<string, ScopedRef<Relay | null>>> for the cache store
+//   - Ref<HashMap<string, CacheEntry>> for ready/in-flight relays
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
 //   - Layer.scoped ties all ScopedRefs to the layer scope
 
@@ -13,7 +13,10 @@ import type { Duplex } from "node:stream";
 import {
 	Context,
 	Data,
+	Deferred,
 	Effect,
+	Exit,
+	Fiber,
 	HashMap,
 	Layer,
 	Option,
@@ -61,6 +64,16 @@ export class RelayStopError extends Data.TaggedError("RelayStopError")<{
 	}
 }
 
+export class RelayCreationInvalidatedError extends Data.TaggedError(
+	"RelayCreationInvalidatedError",
+)<{
+	slug: string;
+}> {
+	get message(): string {
+		return `Relay creation invalidated for "${this.slug}"`;
+	}
+}
+
 // ─── RelayFactory ───────────────────────────────────────────────────────────
 
 /** Factory function that creates a Relay for the given slug. */
@@ -87,7 +100,12 @@ export class RelayCacheTag extends Context.Tag("RelayCache")<
 
 // ─── Layer factory ──────────────────────────────────────────────────────────
 
-type CacheEntry = ScopedRef.ScopedRef<Relay | null>;
+interface CacheEntry {
+	readonly scopedRef: ScopedRef.ScopedRef<Relay | null>;
+	readonly ready: Deferred.Deferred<Relay, unknown>;
+	readonly creationFiber: Deferred.Deferred<Fiber.RuntimeFiber<void, never>>;
+}
+
 type CacheMap = HashMap.HashMap<string, CacheEntry>;
 
 const stopRelayFinalizer = (relay: Relay) =>
@@ -105,8 +123,8 @@ const stopRelayFinalizer = (relay: Relay) =>
 /**
  * Create a Layer providing RelayCacheTag backed by ScopedRef + HashMap.
  *
- * - Each slug maps to a ScopedRef<Relay | null>
- * - ScopedRef.set runs the factory in a new inner scope, registering
+ * - Each slug maps to a CacheEntry for either a ready or in-flight relay
+ * - Relay creation runs in a cancellable fiber, then ScopedRef.set installs
  *   relay.stop() as a finalizer so it runs on invalidation or shutdown
  * - A Semaphore(1) serializes get operations to prevent duplicate creation
  * - Layer.scoped ties all ScopedRefs to the layer scope
@@ -126,47 +144,81 @@ export const makeRelayCacheService = (
 		const cacheRef = yield* Ref.make<CacheMap>(HashMap.empty());
 		const semaphore = yield* Effect.makeSemaphore(1);
 
-		const get = (slug: string): Effect.Effect<Relay, unknown> =>
-			semaphore.withPermits(1)(
-				Effect.gen(function* () {
-					const map = yield* Ref.get(cacheRef);
-					const existing = HashMap.get(map, slug);
+		const removeEntryIfCurrent = (slug: string, entry: CacheEntry) =>
+			Ref.update(cacheRef, (map) => {
+				const current = HashMap.get(map, slug);
+				return Option.isSome(current) && current.value === entry
+					? HashMap.remove(map, slug)
+					: map;
+			});
 
-					if (Option.isSome(existing)) {
-						const value = yield* ScopedRef.get(existing.value);
-						if (value !== null) {
-							return value;
-						}
-					}
-
-					// Create a new ScopedRef for this slug, providing the
-					// layer scope so it's tied to the layer lifecycle.
-					const scopedRef = yield* ScopedRef.fromAcquire(
-						Effect.succeed<Relay | null>(null),
-					).pipe(Effect.provideService(Scope.Scope, layerScope));
-
-					// Set the ScopedRef with the factory + finalizer
-					yield* ScopedRef.set(
-						scopedRef,
-						Effect.gen(function* () {
-							const relay = yield* factory(slug);
-							yield* Effect.addFinalizer(() => stopRelayFinalizer(relay));
-							return relay;
-						}),
-					);
-
-					// Store in the HashMap
-					yield* Ref.update(cacheRef, (m) => HashMap.set(m, slug, scopedRef));
-
-					const relay = yield* ScopedRef.get(scopedRef);
-					if (relay === null) {
-						return yield* Effect.die(
-							new Error(`Relay cache returned null for "${slug}"`),
+		const runRelayCreation = (
+			slug: string,
+			entry: CacheEntry,
+		): Effect.Effect<void> =>
+			Effect.exit(
+				Effect.uninterruptibleMask((restore) =>
+					Effect.gen(function* () {
+						const relay = yield* restore(factory(slug));
+						yield* ScopedRef.set(
+							entry.scopedRef,
+							Effect.gen(function* () {
+								yield* Effect.addFinalizer(() => stopRelayFinalizer(relay));
+								return relay;
+							}),
 						);
-					}
-					return relay;
-				}),
+						return relay;
+					}),
+				),
+			).pipe(
+				Effect.flatMap((exit) =>
+					Exit.isSuccess(exit)
+						? Deferred.succeed(entry.ready, exit.value).pipe(Effect.asVoid)
+						: removeEntryIfCurrent(slug, entry).pipe(
+								Effect.zipRight(Deferred.failCause(entry.ready, exit.cause)),
+								Effect.asVoid,
+							),
+				),
 			);
+
+		const get = (slug: string): Effect.Effect<Relay, unknown> =>
+			Effect.gen(function* () {
+				const entry = yield* semaphore.withPermits(1)(
+					Effect.uninterruptible(
+						Effect.gen(function* () {
+							const map = yield* Ref.get(cacheRef);
+							const existing = HashMap.get(map, slug);
+							if (Option.isSome(existing)) {
+								return existing.value;
+							}
+
+							// Create a new ScopedRef for this slug, providing the
+							// layer scope so it's tied to the layer lifecycle.
+							const scopedRef = yield* ScopedRef.fromAcquire(
+								Effect.succeed<Relay | null>(null),
+							).pipe(Effect.provideService(Scope.Scope, layerScope));
+							const ready = yield* Deferred.make<Relay, unknown>();
+							const creationFiber =
+								yield* Deferred.make<Fiber.RuntimeFiber<void, never>>();
+							const newEntry: CacheEntry = {
+								scopedRef,
+								ready,
+								creationFiber,
+							};
+
+							yield* Ref.update(cacheRef, (m) =>
+								HashMap.set(m, slug, newEntry),
+							);
+							const fiber = yield* Effect.fork(
+								Effect.interruptible(runRelayCreation(slug, newEntry)),
+							);
+							yield* Deferred.succeed(creationFiber, fiber);
+							return newEntry;
+						}),
+					),
+				);
+				return yield* Deferred.await(entry.ready);
+			});
 
 		const peek = (slug: string): Effect.Effect<Option.Option<Relay>> =>
 			Effect.gen(function* () {
@@ -175,26 +227,36 @@ export const makeRelayCacheService = (
 				if (Option.isNone(existing)) {
 					return Option.none<Relay>();
 				}
-				const relay = yield* ScopedRef.get(existing.value);
+				const relay = yield* ScopedRef.get(existing.value.scopedRef);
 				return relay === null ? Option.none<Relay>() : Option.some(relay);
 			});
 
 		const invalidate = (slug: string): Effect.Effect<void> =>
-			semaphore.withPermits(1)(
-				Effect.gen(function* () {
-					const map = yield* Ref.get(cacheRef);
-					const existing = HashMap.get(map, slug);
+			Effect.gen(function* () {
+				const existing = yield* semaphore.withPermits(1)(
+					Ref.modify(cacheRef, (map) => {
+						const entry = HashMap.get(map, slug);
+						return [
+							entry,
+							Option.isSome(entry) ? HashMap.remove(map, slug) : map,
+						] as const;
+					}),
+				);
 
-					if (Option.isSome(existing)) {
-						// Remove from HashMap first
-						yield* Ref.update(cacheRef, (m) => HashMap.remove(m, slug));
+				if (Option.isSome(existing)) {
+					const entry = existing.value;
+					const fiber = yield* Deferred.await(entry.creationFiber);
+					yield* Fiber.interrupt(fiber);
+					yield* Deferred.fail(
+						entry.ready,
+						new RelayCreationInvalidatedError({ slug }),
+					);
 
-						// Set ScopedRef to null — triggers previous scope close,
-						// which runs relay.stop() via the registered finalizer
-						yield* ScopedRef.set(existing.value, Effect.succeed(null));
-					}
-				}),
-			);
+					// Set ScopedRef to null — triggers previous scope close,
+					// which runs relay.stop() via the registered finalizer
+					yield* ScopedRef.set(entry.scopedRef, Effect.succeed(null));
+				}
+			});
 
 		return { get, peek, invalidate } satisfies RelayCache;
 	});

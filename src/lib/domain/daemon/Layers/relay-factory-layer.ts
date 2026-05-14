@@ -309,10 +309,10 @@ export const RelayFactoryLive = (
 
 						// Create the relay using the imperative createProjectRelay while
 						// threading Effect-owned daemon read models and instance callbacks.
+						const ac = new AbortController();
 						const relay = yield* Effect.tryPromise({
-							try: () => {
-								const ac = new AbortController();
-								return createProjectRelay({
+							try: () =>
+								createProjectRelay({
 									httpServer,
 									opencodeUrl,
 									projectDir: project.directory,
@@ -340,14 +340,19 @@ export const RelayFactoryLive = (
 										setProjectTitle: projectControls.setProjectTitle,
 										setProjectInstance: projectControls.setProjectInstance,
 									}),
-								});
-							},
+								}),
 							catch: (cause) =>
 								new RelayFactoryError({
 									reason: `Failed to create relay for project "${project.slug}"`,
 									cause,
 								}),
-						});
+						}).pipe(
+							Effect.onInterrupt(() =>
+								Effect.sync(() => {
+									ac.abort();
+								}),
+							),
+						);
 
 						return relay;
 					}).pipe(

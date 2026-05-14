@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Ref } from "effect";
+import { Effect, Fiber, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { makeRelayCacheLayer } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
@@ -426,6 +426,72 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				catch: (cause) => cause,
 			});
 			expect(cachedUpdate).toBe("9.9.9");
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(
+				Effect.sync(() => {
+					server.close();
+					rmSync(dir, { recursive: true, force: true });
+					createProjectRelayMock.mockReset();
+				}),
+			),
+		);
+	});
+
+	it.effect("aborts in-flight relay creation when interrupted", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-abort-"));
+		const projectDir = join(dir, "project");
+		const server = createServer();
+		let signal: AbortSignal | undefined;
+		let markStarted: (() => void) | undefined;
+		const started = new Promise<void>((resolve) => {
+			markStarted = resolve;
+		});
+		createProjectRelayMock.mockImplementation((config) => {
+			signal = config.signal;
+			markStarted?.();
+			return new Promise(() => undefined);
+		});
+
+		const layer = RelayFactoryLive(join(dir, "config")).pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+					ConfigPersistenceNoopLive,
+					DaemonEventBusLive,
+					makeProjectRegistryLive([
+						{
+							slug: "effect-project",
+							title: "Effect Project",
+							directory: projectDir,
+						},
+					]),
+					makeInstanceManagerStateLive(),
+					NoopAuxiliaryDaemonServices,
+				),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const httpServerRef = yield* HttpServerRefTag;
+			yield* Ref.set(httpServerRef, server);
+
+			const factory = yield* RelayFactoryTag;
+			const fiber = yield* Effect.fork(
+				factory.create(
+					{
+						slug: "effect-project",
+						title: "Effect Project",
+						directory: projectDir,
+					},
+					"http://localhost:4096",
+				),
+			);
+			yield* Effect.promise(() => started);
+			expect(signal?.aborted).toBe(false);
+
+			yield* Fiber.interrupt(fiber);
+			expect(signal?.aborted).toBe(true);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
 			Effect.ensuring(

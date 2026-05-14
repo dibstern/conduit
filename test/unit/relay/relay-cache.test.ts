@@ -2,6 +2,7 @@ import { describe, it } from "@effect/vitest";
 import {
 	Context,
 	Deferred,
+	Duration,
 	Effect,
 	Exit,
 	Fiber,
@@ -9,6 +10,7 @@ import {
 	Logger,
 	Option,
 	Scope,
+	TestClock,
 } from "effect";
 import { expect, vi } from "vitest";
 
@@ -29,6 +31,18 @@ const makeTestRelay = (slug: string): Relay => ({
 	} as unknown as Relay["rpcWsHandler"],
 	stop: vi.fn(),
 });
+
+const completeOrTimeout = <A, E>(effect: Effect.Effect<A, E>) =>
+	Effect.gen(function* () {
+		const fiber = yield* Effect.fork(
+			Effect.race(
+				effect.pipe(Effect.as("completed" as const)),
+				Effect.sleep(Duration.millis(1)).pipe(Effect.as("timeout" as const)),
+			),
+		);
+		yield* TestClock.adjust(Duration.millis(1));
+		return yield* Fiber.join(fiber);
+	});
 
 describe("RelayCache", () => {
 	it.scoped("creates relay on first get", () =>
@@ -130,6 +144,47 @@ describe("RelayCache", () => {
 
 			yield* Deferred.succeed(releaseFactory, undefined);
 			yield* Fiber.join(getFiber);
+		}),
+	);
+
+	it.scoped("invalidate interrupts in-flight relay creation", () =>
+		Effect.gen(function* () {
+			const factoryStarted = yield* Deferred.make<void>();
+			const releaseFactory = yield* Deferred.make<void>();
+			const factoryInterrupted = yield* Deferred.make<void>();
+			const factory: RelayFactory = () =>
+				Effect.gen(function* () {
+					yield* Deferred.succeed(factoryStarted, undefined);
+					yield* Deferred.await(releaseFactory).pipe(
+						Effect.onInterrupt(() =>
+							Deferred.succeed(factoryInterrupted, undefined).pipe(
+								Effect.asVoid,
+							),
+						),
+					);
+					return makeTestRelay("my-project");
+				});
+
+			const layer = makeRelayCacheLive(factory);
+			const cache = yield* Effect.provide(RelayCacheTag, layer);
+
+			const getFiber = yield* Effect.fork(cache.get("my-project"));
+			yield* Effect.gen(function* () {
+				yield* Deferred.await(factoryStarted);
+
+				const invalidateResult = yield* completeOrTimeout(
+					cache.invalidate("my-project"),
+				);
+				const interruptedResult = yield* completeOrTimeout(
+					Deferred.await(factoryInterrupted),
+				);
+
+				yield* Deferred.succeed(releaseFactory, undefined);
+				yield* Fiber.await(getFiber);
+
+				expect(invalidateResult).toBe("completed");
+				expect(interruptedResult).toBe("completed");
+			}).pipe(Effect.ensuring(Fiber.interrupt(getFiber)));
 		}),
 	);
 
