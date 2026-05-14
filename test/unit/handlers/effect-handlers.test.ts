@@ -1067,8 +1067,8 @@ function makeForkSessionLayer(options?: {
 		Layer.succeed(
 			StatusPollerTag,
 			makeMockStatusPoller({
-				isProcessing: vi.fn(() => false),
-				clearMessageActivity: vi.fn(),
+				isProcessing: vi.fn(() => Effect.succeed(false)),
+				clearMessageActivity: vi.fn(() => Effect.void),
 			}),
 		),
 		Layer.succeed(PollerManagerTag, {
@@ -1113,8 +1113,8 @@ function makeSessionLifecycleLayer(options?: {
 		Layer.succeed(
 			StatusPollerTag,
 			makeMockStatusPoller({
-				isProcessing: vi.fn(() => false),
-				clearMessageActivity: vi.fn(),
+				isProcessing: vi.fn(() => Effect.succeed(false)),
+				clearMessageActivity: vi.fn(() => Effect.void),
 			}),
 		),
 		Layer.succeed(PollerManagerTag, {

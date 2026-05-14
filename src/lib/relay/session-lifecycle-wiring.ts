@@ -254,10 +254,10 @@ const handleSessionDeleted = (
 		setMonitoringState: (state: MonitoringState) => void;
 	},
 ) =>
-	Effect.sync(() => {
+	Effect.gen(function* () {
 		deps.translator.reset(sessionId);
 		deps.pollerManager.stopPolling(sessionId);
-		deps.statusPoller.clearMessageActivity(sessionId);
+		yield* deps.statusPoller.clearMessageActivity(sessionId);
 		deps.sseTracker.remove(sessionId);
 
 		const sessions = new Map(deps.getMonitoringState().sessions);

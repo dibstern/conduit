@@ -833,15 +833,15 @@ export const SessionManagerServiceLive: Layer.Layer<
 		}
 		const currentStatuses = (
 			explicit?: Record<string, SessionStatus> | undefined,
-		): Record<string, SessionStatus> | undefined => {
-			if (explicit !== undefined) return explicit;
+		): Effect.Effect<Record<string, SessionStatus> | undefined> => {
+			if (explicit !== undefined) return Effect.succeed(explicit);
 			return statusPollerOption._tag === "Some"
-				? statusPollerOption.value.getCurrentStatuses?.()
-				: undefined;
+				? statusPollerOption.value.getCurrentStatuses()
+				: Effect.succeed(undefined);
 		};
 		const serviceListSessions = (options?: ListSessionsOptions) =>
 			Effect.gen(function* () {
-				const statuses = currentStatuses(options?.statuses);
+				const statuses = yield* currentStatuses(options?.statuses);
 				const base = listSessions({
 					...options,
 					statuses,

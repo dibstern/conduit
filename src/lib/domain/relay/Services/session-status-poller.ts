@@ -10,7 +10,6 @@
 // - HashMap for immutable-friendly maps
 
 import {
-	Cause,
 	Context,
 	Data,
 	Duration,
@@ -27,7 +26,7 @@ import { computeAugmentedStatuses } from "../../../session/status-augmentation.j
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
+export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
 const STATUS_CORRECTION_CONCURRENCY = 8;
 
@@ -510,21 +509,12 @@ export interface ReconciliationDeps {
 			status: string;
 			updated_at: number;
 		}>,
-		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
-		any,
-		// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs with the relay runtime context
-		any
+		unknown
 	>;
 	readonly injectCorrectiveEvent: (
 		sessionId: string,
 		status: string,
-	) => Effect.Effect<
-		void,
-		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
-		any,
-		// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs with the relay runtime context
-		any
-	>;
+	) => Effect.Effect<void, unknown>;
 }
 
 const runReconciliation = (deps: ReconciliationDeps) =>
@@ -613,10 +603,10 @@ export const startReconciliationLoop = (
 		Effect.forkScoped,
 	);
 
-// ─── Imperative facade ──────────────────────────────────────────────────────
-// Thin wrapper that provides the old class API for wiring code that hasn't
-// been fully converted to Effect. The facade delegates to the Effect functions
-// above via a StatusPollerRuntime supplied by relay composition.
+// ─── Service Surface ────────────────────────────────────────────────────────
+// The production status poller exposes Effect programs. Synchronous reads at
+// process boundaries should use an explicit relay read model/snapshot, not a
+// runtime bridge into the poller Ref.
 
 export interface SessionStatusPollerService {
 	/** Register a callback for the "changed" broadcast event (via PubSub subscription). */
@@ -626,178 +616,23 @@ export interface SessionStatusPollerService {
 			statuses: Record<string, SessionStatus>,
 			statusesChanged: boolean,
 		) => void | Promise<void>,
-	): void;
+	): Effect.Effect<void>;
 	/** Start polling. Safe to call multiple times (idempotent). */
-	start(): void;
+	start(): Effect.Effect<void>;
 	/** Stop polling and clear the timer. */
-	stop(): void;
+	stop(): Effect.Effect<void>;
 	/** Cancel all work and wait for in-flight operations to settle. */
-	drain(): Promise<void>;
+	drain(): Effect.Effect<void>;
 	/** Get the most recently polled statuses. */
-	getCurrentStatuses(): Record<string, SessionStatus>;
+	getCurrentStatuses(): Effect.Effect<Record<string, SessionStatus>>;
 	/** Check if a specific session is currently processing (busy or retry). */
-	isProcessing(sessionId: string): boolean;
+	isProcessing(sessionId: string): Effect.Effect<boolean>;
 	/** Mark a session as busy due to message-poller activity. */
-	markMessageActivity(sessionId: string): void;
+	markMessageActivity(sessionId: string): Effect.Effect<void>;
 	/** Clear the message-activity busy flag for a session. */
-	clearMessageActivity(sessionId: string): void;
+	clearMessageActivity(sessionId: string): Effect.Effect<void>;
 	/** Notify that SSE delivered a session.status:idle event. */
-	notifySSEIdle(sessionId: string): void;
+	notifySSEIdle(sessionId: string): Effect.Effect<void>;
 	/** One-shot reconciliation on SSE reconnect. */
-	reconcileNow(): Promise<void>;
-}
-
-export interface StatusPollerRuntime {
-	// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs effects with several context shapes
-	runSync: <A, E>(effect: Effect.Effect<A, E, any>) => A;
-	// biome-ignore lint/suspicious/noExplicitAny: status-poller facade runs effects with several context shapes
-	runPromise: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>;
-}
-
-/**
- * Create an imperative facade around the Effect-native poller.
- *
- * This bridges the gap: wiring code (relay-stack.ts, monitoring-wiring.ts)
- * uses the familiar class-like API, but all state lives in the Effect Ref
- * and events flow through PubSub.
- */
-export function createStatusPollerService(config: {
-	pollDeps: PollDeps;
-	reconciliationDeps?: ReconciliationDeps;
-	interval?: number;
-	runtime: StatusPollerRuntime;
-	onSubscriptionFailure?: (error: unknown) => void;
-}): SessionStatusPollerService {
-	const { pollDeps, reconciliationDeps, runtime } = config;
-	const intervalMs = config.interval ?? DEFAULT_RECONCILIATION_INTERVAL_MS;
-	let timer: ReturnType<typeof setInterval> | null = null;
-	let startRequested = false;
-	const pendingPromises = new Set<Promise<unknown>>();
-
-	const trackPromise = <T>(promise: Promise<T>): Promise<T> => {
-		pendingPromises.add(promise);
-		promise.finally(() => pendingPromises.delete(promise)).catch(() => {});
-		return promise;
-	};
-
-	const doPoll = () => {
-		return runtime.runPromise(poll(pollDeps));
-	};
-
-	const startTimer = () => {
-		if (!startRequested || timer) return;
-		void trackPromise(doPoll());
-		timer = setInterval(() => {
-			void trackPromise(doPoll());
-		}, intervalMs);
-	};
-
-	const reportSubscriptionFailure = (cause: Cause.Cause<unknown>) =>
-		Cause.isInterruptedOnly(cause)
-			? Effect.interrupt
-			: Effect.sync(() => {
-					try {
-						config.onSubscriptionFailure?.(Cause.squash(cause));
-					} catch {
-						// The subscription is a lifecycle task; reporting failures must not
-						// create another unhandled failure path.
-					}
-				});
-
-	return {
-		on(
-			_event: "changed",
-			callback: (
-				statuses: Record<string, SessionStatus>,
-				statusesChanged: boolean,
-			) => void | Promise<void>,
-		) {
-			// Subscribe to the PubSub and forward to callback.
-			// We run a background fiber that reads from the subscription.
-			const subscription = Effect.gen(function* () {
-				const pubsub = yield* PollerPubSubTag;
-				// Use PubSub.subscribe to get a Dequeue, then read in a loop
-				return yield* Effect.scoped(
-					Effect.gen(function* () {
-						const subscription = yield* PubSub.subscribe(pubsub);
-						// Read loop in background
-						yield* Effect.forever(
-							Effect.gen(function* () {
-								const event = yield* subscription.take;
-								yield* Effect.try(() => {
-									const result = callback(
-										event.statuses,
-										event.statusesChanged,
-									);
-									return result;
-								}).pipe(
-									Effect.flatMap((result) =>
-										result instanceof Promise
-											? Effect.tryPromise(() => result).pipe(
-													Effect.catchAll(() => Effect.void),
-												)
-											: Effect.void,
-									),
-									Effect.catchAll(() => Effect.void),
-								);
-							}),
-						);
-					}),
-				);
-			}).pipe(Effect.catchAllCause(reportSubscriptionFailure));
-			const fiber = runtime.runPromise(subscription);
-			// The promise never resolves (infinite loop) — that's intentional.
-			// It will be interrupted when the runtime is disposed.
-			fiber.catch(() => {});
-		},
-
-		start() {
-			if (startRequested) return;
-			startRequested = true;
-			startTimer();
-		},
-
-		stop() {
-			startRequested = false;
-			if (timer) {
-				clearInterval(timer);
-				timer = null;
-			}
-		},
-
-		async drain() {
-			this.stop();
-			await Promise.allSettled([...pendingPromises]);
-			pendingPromises.clear();
-		},
-
-		getCurrentStatuses(): Record<string, SessionStatus> {
-			return runtime.runSync(getCurrentStatuses);
-		},
-
-		isProcessing(sessionId: string): boolean {
-			return runtime.runSync(isProcessing(sessionId));
-		},
-
-		markMessageActivity(sessionId: string): void {
-			runtime.runSync(markMessageActivity(sessionId));
-			// Trigger immediate re-poll so spinner shows up right away
-			void trackPromise(doPoll());
-		},
-
-		clearMessageActivity(sessionId: string): void {
-			runtime.runSync(clearMessageActivity(sessionId));
-		},
-
-		notifySSEIdle(sessionId: string): void {
-			runtime.runSync(notifySSEIdle(sessionId));
-			// Trigger immediate re-poll
-			void trackPromise(doPoll());
-		},
-
-		async reconcileNow(): Promise<void> {
-			if (!reconciliationDeps) return;
-			await runtime.runPromise(reconcileNow(reconciliationDeps));
-		},
-	};
+	reconcileNow(): Effect.Effect<void>;
 }

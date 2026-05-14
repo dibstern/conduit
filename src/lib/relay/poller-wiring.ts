@@ -7,7 +7,6 @@ import { Cause, Effect, Runtime } from "effect";
 import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
-import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -41,10 +40,14 @@ interface SessionServiceLike {
 	getSessionParentMap(): Map<string, string>;
 }
 
+interface LegacyStatusPollerPort {
+	markMessageActivity(sessionId: string): void;
+}
+
 export interface PollerWiringDeps {
 	pollerManager: PollerManagerLike;
 	sseStream: SSEStreamEvents;
-	statusPoller: SessionStatusPollerService;
+	statusPoller: LegacyStatusPollerPort;
 	wsHandler: WebSocketHandlerShape;
 	sessionService: SessionServiceLike;
 	pipelineDeps: PipelineDeps;
@@ -77,9 +80,7 @@ const handlePollerEventsEffect = (
 
 		if (events.length > 0 && polledSessionId) {
 			if (classifyPollerBatch(events).hasContentActivity) {
-				yield* Effect.sync(() =>
-					statusPoller.markMessageActivity(polledSessionId),
-				);
+				yield* statusPoller.markMessageActivity(polledSessionId);
 			}
 		}
 

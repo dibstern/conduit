@@ -931,11 +931,13 @@ describe("SessionManagerService", () => {
 					Layer.succeed(
 						StatusPollerTag,
 						makeMockStatusPoller({
-							isProcessing: vi.fn(() => true),
-							clearMessageActivity: vi.fn(),
-							getCurrentStatuses: vi.fn(() => ({
-								"session-1": { type: "busy" } as SessionStatus,
-							})),
+							isProcessing: vi.fn(() => Effect.succeed(true)),
+							clearMessageActivity: vi.fn(() => Effect.void),
+							getCurrentStatuses: vi.fn(() =>
+								Effect.succeed({
+									"session-1": { type: "busy" } as SessionStatus,
+								}),
+							),
 						}),
 					),
 					makeSessionManagerStateLive(),

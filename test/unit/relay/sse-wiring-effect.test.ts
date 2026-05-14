@@ -23,6 +23,8 @@ describe("handleSSEEventEffect", () => {
 			sessionService: _sessionService,
 			getSessionParentMap: _getSessionParentMap,
 			dualWriteHook: _dualWriteHook,
+			getSessionStatuses: _getSessionStatuses,
+			statusPoller: _statusPoller,
 			...effectDeps
 		} = deps;
 		effectDeps satisfies EffectSSEWiringDeps;
@@ -83,6 +85,8 @@ describe("handleSSEEventEffect", () => {
 			sessionService: _sessionService,
 			getSessionParentMap: _getSessionParentMap,
 			dualWriteHook: _dualWriteHook,
+			getSessionStatuses: _getSessionStatuses,
+			statusPoller: _statusPoller,
 			...effectDeps
 		} = deps;
 		effectDeps satisfies EffectSSEWiringDeps;

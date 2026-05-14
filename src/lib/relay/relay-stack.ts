@@ -742,7 +742,6 @@ export async function createProjectRelay(
 		sseStream: SSEStreamPort;
 		sessionId: string;
 		orchestration: OrchestrationLayer;
-		statusPoller: import("../domain/relay/Services/services.js").StatusPollerShape;
 		statusSnapshot: RelayStatusSnapshotService;
 	};
 	try {
@@ -900,7 +899,6 @@ export async function createProjectRelay(
 					sseStream,
 					sessionId,
 					orchestration,
-					statusPoller,
 					statusSnapshot,
 				};
 			}),
@@ -913,8 +911,7 @@ export async function createProjectRelay(
 	}
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
-	const { sessionId, orchestration, statusPoller, sseStream, statusSnapshot } =
-		startup;
+	const { sessionId, orchestration, sseStream, statusSnapshot } = startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
@@ -923,14 +920,9 @@ export async function createProjectRelay(
 
 	// ── Return project relay ────────────────────────────────────────────────
 	const getProjectRelayStatusSnapshot = (): ProjectRelayStatusSnapshot => {
-		const statuses = statusPoller.getCurrentStatuses();
-		const isProcessing = Object.values(statuses).some(
-			(status) => status.type === "busy" || status.type === "retry",
-		);
 		return {
 			...statusSnapshot.getSnapshot(),
 			clients: wsHandler.getClientCount(),
-			isProcessing,
 		};
 	};
 

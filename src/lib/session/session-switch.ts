@@ -169,10 +169,24 @@ export function patchMissingDone(
 		hasActiveProcessingTimeout(sessionId: string): boolean;
 	},
 ): SessionHistorySource {
+	const sessionIsProcessing =
+		statusPoller?.isProcessing(sessionId) ||
+		processingTimeouts?.hasActiveProcessingTimeout(sessionId) ||
+		false;
+	return patchMissingDoneForProcessingState(
+		source,
+		sessionId,
+		sessionIsProcessing,
+	);
+}
+
+export function patchMissingDoneForProcessingState(
+	source: SessionHistorySource,
+	sessionId: string,
+	isProcessing: boolean,
+): SessionHistorySource {
 	if (source.kind !== "cached-events") return source;
-	// F3 fix: widen guard to check both poller and processing timeout
-	if (statusPoller?.isProcessing(sessionId)) return source;
-	if (processingTimeouts?.hasActiveProcessingTimeout(sessionId)) return source;
+	if (isProcessing) return source;
 
 	if (!isLastTurnActive(source.events)) return source;
 

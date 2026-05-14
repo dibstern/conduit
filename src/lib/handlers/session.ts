@@ -20,7 +20,7 @@ import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
-	patchMissingDone,
+	patchMissingDoneForProcessingState,
 	resolveSessionHistoryFromRows,
 	type SessionHistorySource,
 	type SwitchClientOptions,
@@ -279,9 +279,12 @@ const switchClientToSession = (
 		const source: SessionHistorySource = options?.skipHistory
 			? { kind: "empty" }
 			: yield* resolveSessionHistory(sessionId);
-		const patchedSource = patchMissingDone(source, statusPoller, sessionId, {
-			hasActiveProcessingTimeout: () => hasActiveTimeout,
-		});
+		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
+		const patchedSource = patchMissingDoneForProcessingState(
+			source,
+			sessionId,
+			pollerIsProcessing || hasActiveTimeout,
+		);
 
 		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
 
@@ -294,8 +297,7 @@ const switchClientToSession = (
 			}),
 		);
 
-		const isProcessing =
-			statusPoller.isProcessing(sessionId) || hasActiveTimeout;
+		const isProcessing = pollerIsProcessing || hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,

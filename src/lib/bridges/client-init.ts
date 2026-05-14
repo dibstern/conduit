@@ -39,7 +39,6 @@ import {
 	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
-import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
@@ -50,7 +49,7 @@ import type { ProviderCapabilities } from "../provider/types.js";
 import {
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
-	patchMissingDone,
+	patchMissingDoneForProcessingState,
 	resolveSessionHistoryFromRows,
 	type SessionHistorySource,
 	type SessionSwitchDeps,
@@ -152,11 +151,14 @@ export interface ClientInitDeps {
 		): Promise<PendingPermission[]>;
 		listPendingQuestions(sessionId?: string): Promise<PendingQuestion[]>;
 	};
-	/** Optional poller for session processing state */
-	statusPoller?: Pick<
-		SessionStatusPollerService,
-		"isProcessing" | "getCurrentStatuses"
-	>;
+	/** Optional legacy sync snapshot for Promise-shaped unit callers. */
+	statusPoller?: {
+		isProcessing(sessionId: string): boolean;
+		getCurrentStatuses(): Record<
+			string,
+			import("../instance/sdk-types.js").SessionStatus
+		>;
+	};
 	/** Optional supplier of the current OpenCode instance list */
 	getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Optional supplier of cached update version (for replaying to new clients) */
@@ -258,9 +260,12 @@ const switchClientToSessionForInitEffect = (
 			);
 		}
 
-		const patchedSource = patchMissingDone(source, statusPoller, sessionId, {
-			hasActiveProcessingTimeout: () => hasActiveTimeout,
-		});
+		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
+		const patchedSource = patchMissingDoneForProcessingState(
+			source,
+			sessionId,
+			pollerIsProcessing || hasActiveTimeout,
+		);
 		yield* seedPaginationCursorFromHistoryEffect(sessionId, patchedSource);
 
 		const draft = getSessionInputDraft(sessionId);
@@ -273,10 +278,7 @@ const switchClientToSessionForInitEffect = (
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
-			status:
-				statusPoller.isProcessing(sessionId) || hasActiveTimeout
-					? "processing"
-					: "idle",
+			status: pollerIsProcessing || hasActiveTimeout ? "processing" : "idle",
 		});
 	});
 
@@ -366,7 +368,7 @@ export const handleClientConnectedEffect = (
 
 		yield* sessionService
 			.sendDualSessionLists((msg) => wsHandler.sendTo(clientId, msg), {
-				statuses: statusPoller.getCurrentStatuses(),
+				statuses: yield* statusPoller.getCurrentStatuses(),
 			})
 			.pipe(
 				Effect.catchAll((err) =>

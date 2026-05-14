@@ -84,8 +84,8 @@ function makeSessionMetadataLayer(options: {
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
 	const statusPoller = makeMockStatusPoller({
-		isProcessing: vi.fn(() => false),
-		clearMessageActivity: vi.fn(),
+		isProcessing: vi.fn(() => Effect.succeed(false)),
+		clearMessageActivity: vi.fn(() => Effect.void),
 	});
 	const pollerManager: PollerManagerShape = {
 		on: vi.fn(),

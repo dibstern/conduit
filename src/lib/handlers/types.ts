@@ -5,7 +5,6 @@ import type {
 	PollerManagerShape,
 	SessionManagerShape,
 } from "../domain/relay/Services/services.js";
-import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
@@ -58,7 +57,7 @@ export interface HandlerDeps {
 	config: ProjectRelayConfig;
 	log: Logger;
 	/** Session status poller for processing state */
-	statusPoller: Pick<SessionStatusPollerService, "isProcessing">;
+	statusPoller: { isProcessing(sessionId: string): boolean };
 	/** Message poller manager — used to start REST polling when viewing sessions */
 	pollerManager: PollerManagerShape;
 	connectPtyUpstream: (ptyId: string, cursor?: number) => Promise<void>;

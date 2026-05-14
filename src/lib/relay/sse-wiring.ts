@@ -146,8 +146,19 @@ export type EffectSSEWiringDeps = Omit<
 	| "processingTimeouts"
 	| "sessionService"
 	| "getSessionParentMap"
+	| "getSessionStatuses"
+	| "statusPoller"
 	| "dualWriteHook"
 > & {
+	/** Optional: current session statuses for processing flags. */
+	getSessionStatuses?: () => Effect.Effect<
+		Record<string, import("../instance/sdk-types.js").SessionStatus>
+	>;
+	/** Optional: notify status poller of SSE status events and reconnects. */
+	statusPoller?: {
+		notifySSEIdle(sessionId: string): Effect.Effect<void>;
+		reconcileNow?(): Effect.Effect<void>;
+	};
 	/** Effect-native dual-write hook owned by the relay runtime. */
 	dualWriteHook?: {
 		onSSEEventEffect(
@@ -643,7 +654,9 @@ const handleSSEEventAfterPendingEffect = (
 				}
 			}
 
-			const statuses = deps.getSessionStatuses?.();
+			const statuses = deps.getSessionStatuses
+				? yield* deps.getSessionStatuses()
+				: undefined;
 			yield* refreshSessionListAfterUpdateEffect(deps, statuses);
 		}
 
@@ -661,9 +674,7 @@ const handleSSEEventAfterPendingEffect = (
 				event.properties?.["status"] as { type?: string } | undefined
 			)?.type;
 			if (statusType === "idle" && eventSessionId && deps.statusPoller) {
-				yield* Effect.sync(() =>
-					deps.statusPoller?.notifySSEIdle(eventSessionId),
-				);
+				yield* deps.statusPoller.notifySSEIdle(eventSessionId);
 			}
 		}
 
@@ -829,6 +840,7 @@ export const handleSSEEventEffect = (
 
 interface SSEConsumerCallbacks {
 	handleEvent(event: SSEEvent): void;
+	reconcileOnConnected(): void;
 	recoverPendingPermissions(
 		pendingPermissions: Array<{
 			id: string;
@@ -935,17 +947,7 @@ function wireSSEConsumerWithCallbacks(
 			status: "connected",
 		});
 
-		// SSE reconnect reconciliation: immediately compare REST vs projected
-		// statuses and inject corrective events for any mismatches. This catches
-		// the most common case: SSE dropped during a turn, reconnected after
-		// completion — the "idle" event was never received.
-		if (deps.statusPoller?.reconcileNow) {
-			deps.statusPoller
-				.reconcileNow()
-				.catch((err: unknown) =>
-					log.warn(`SSE reconnect reconciliation failed: ${err}`),
-				);
-		}
+		callbacks.reconcileOnConnected();
 
 		// Rehydrate pending permissions from OpenCode API on (re)connect.
 		// Broadcast each recovered permission to all connected clients.
@@ -1021,6 +1023,15 @@ export function wireSSEConsumer(
 ): void {
 	wireSSEConsumerWithCallbacks(deps, consumer, {
 		handleEvent: (event) => handleSSEEvent(deps, event),
+		reconcileOnConnected: () => {
+			if (deps.statusPoller?.reconcileNow) {
+				deps.statusPoller
+					.reconcileNow()
+					.catch((err: unknown) =>
+						deps.log.warn(`SSE reconnect reconciliation failed: ${err}`),
+					);
+			}
+		},
 		recoverPendingPermissions: (pendingPermissions) => {
 			const recovered = deps.pendingInteractions.recoverPendingPermissions(
 				permissionRecoveryInputs(pendingPermissions),
@@ -1061,6 +1072,23 @@ export const wireSSEConsumerEffect = (
 							),
 						),
 					);
+				},
+				reconcileOnConnected: () => {
+					if (deps.statusPoller?.reconcileNow) {
+						runFork(
+							deps.statusPoller
+								.reconcileNow()
+								.pipe(
+									Effect.catchAllCause((cause) =>
+										Effect.sync(() =>
+											deps.log.warn(
+												`SSE reconnect reconciliation failed: ${Cause.pretty(cause)}`,
+											),
+										),
+									),
+								),
+						);
+					}
 				},
 				recoverPendingPermissions: (pendingPermissions) => {
 					runFork(

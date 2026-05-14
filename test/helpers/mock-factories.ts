@@ -862,16 +862,16 @@ export function makeMockStatusPoller(
 	overrides?: Partial<StatusPollerShape>,
 ): StatusPollerShape {
 	return {
-		on: vi.fn(),
-		start: vi.fn(),
-		stop: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		getCurrentStatuses: vi.fn(() => ({})),
-		isProcessing: vi.fn(() => false),
-		markMessageActivity: vi.fn(),
-		clearMessageActivity: vi.fn(),
-		notifySSEIdle: vi.fn(),
-		reconcileNow: vi.fn(async () => undefined),
+		on: vi.fn(() => Effect.void),
+		start: vi.fn(() => Effect.void),
+		stop: vi.fn(() => Effect.void),
+		drain: vi.fn(() => Effect.void),
+		getCurrentStatuses: vi.fn(() => Effect.succeed({})),
+		isProcessing: vi.fn(() => Effect.succeed(false)),
+		markMessageActivity: vi.fn(() => Effect.void),
+		clearMessageActivity: vi.fn(() => Effect.void),
+		notifySSEIdle: vi.fn(() => Effect.void),
+		reconcileNow: vi.fn(() => Effect.void),
 		...overrides,
 	};
 }

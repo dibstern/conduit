@@ -135,10 +135,12 @@ describe("wireMonitoring shutdown", () => {
 		);
 		const startPolling = vi.fn();
 		const statusPoller = {
-			on: vi.fn((_event, callback) => {
-				changed = callback;
-			}),
-			start: vi.fn(),
+			on: vi.fn((_event, callback) =>
+				Effect.sync(() => {
+					changed = callback;
+				}),
+			),
+			start: vi.fn(() => Effect.void),
 		};
 		const layer = Layer.mergeAll(
 			Layer.succeed(SessionManagerServiceTag, {

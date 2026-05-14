@@ -75,8 +75,8 @@ function makeMockServices() {
 			stopPolling: vi.fn(),
 		},
 		statusPoller: makeMockStatusPoller({
-			isProcessing: vi.fn().mockReturnValue(false),
-			clearMessageActivity: vi.fn(),
+			isProcessing: vi.fn(() => Effect.succeed(false)),
+			clearMessageActivity: vi.fn(() => Effect.void),
 		}),
 		log: createSilentLogger(),
 	};

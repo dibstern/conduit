@@ -14,7 +14,6 @@ import {
 import {
 	clearMessageActivity,
 	type PollerStateTag,
-	type SessionStatusPollerService,
 } from "../domain/relay/Services/session-status-poller.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
@@ -82,12 +81,37 @@ interface SessionServiceLike {
 	getSessionParentMap(): Map<string, string>;
 }
 
+interface LegacyStatusPollerPort {
+	on(
+		event: "changed",
+		callback: (
+			statuses: Record<
+				string,
+				import("../instance/sdk-types.js").SessionStatus
+			>,
+			statusesChanged: boolean,
+		) => void | Promise<void>,
+	): void;
+	start(): void;
+	stop?(): void;
+	drain?(): Promise<void>;
+	getCurrentStatuses?(): Record<
+		string,
+		import("../instance/sdk-types.js").SessionStatus
+	>;
+	isProcessing?(sessionId: string): boolean;
+	markMessageActivity?(sessionId: string): void;
+	clearMessageActivity(sessionId: string): void;
+	notifySSEIdle?(sessionId: string): void;
+	reconcileNow?(): Promise<void>;
+}
+
 export interface MonitoringWiringDeps {
 	client: OpenCodeSessionReaderLike;
 	wsHandler: MonitoringWsHandlerLike;
 	sessionService: SessionServiceLike;
 	processingTimeouts: ProcessingTimeoutsPort;
-	statusPoller: SessionStatusPollerService;
+	statusPoller: LegacyStatusPollerPort;
 	pollerManager: PollerManagerLike;
 	sseStream: SSEConnectionHealthLike;
 	config: {
@@ -500,89 +524,86 @@ export const wireMonitoringEffect = (
 			log: pipelineLog,
 		};
 
-		yield* Effect.sync(() => {
-			const runFork = Runtime.runFork(runtime);
-			statusPoller.on("changed", (statuses, statusesChanged) => {
-				runFork(
-					Effect.gen(function* () {
-						if (!monitoringActive) return;
-						const sessionService = yield* SessionManagerServiceTag;
+		const runFork = Runtime.runFork(runtime);
+		yield* statusPoller.on("changed", (statuses, statusesChanged) => {
+			runFork(
+				Effect.gen(function* () {
+					if (!monitoringActive) return;
+					const sessionService = yield* SessionManagerServiceTag;
 
-						if (statusesChanged) {
-							yield* sessionService
-								.sendDualSessionLists((msg) => wsHandler.broadcast(msg), {
-									statuses,
-								})
-								.pipe(
-									Effect.catchAll((err) =>
-										Effect.sync(() =>
-											statusLog.warn(
-												`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
-											),
+					if (statusesChanged) {
+						yield* sessionService
+							.sendDualSessionLists((msg) => wsHandler.broadcast(msg), {
+								statuses,
+							})
+							.pipe(
+								Effect.catchAll((err) =>
+									Effect.sync(() =>
+										statusLog.warn(
+											`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
 										),
 									),
-								);
-						}
+								),
+							);
+					}
 
-						if (!monitoringActive) return;
+					if (!monitoringActive) return;
 
-						const parentMap = yield* sessionService.getSessionParentMap();
-						const now = Date.now();
-						const contexts = new Map<string, SessionEvalContext>();
-						for (const [sessionId, status] of Object.entries(statuses)) {
-							if (status == null) continue;
-							contexts.set(
+					const parentMap = yield* sessionService.getSessionParentMap();
+					const now = Date.now();
+					const contexts = new Map<string, SessionEvalContext>();
+					for (const [sessionId, status] of Object.entries(statuses)) {
+						if (status == null) continue;
+						contexts.set(
+							sessionId,
+							assembleContext(
 								sessionId,
-								assembleContext(
-									sessionId,
-									status,
-									{ connected: sseStream.isConnected() },
-									sseTracker,
-									parentMap,
-									(sid) => wsHandler.getClientsForSession(sid).length > 0,
-									now,
-								),
+								status,
+								{ connected: sseStream.isConnected() },
+								sseTracker,
+								parentMap,
+								(sid) => wsHandler.getClientsForSession(sid).length > 0,
+								now,
+							),
+						);
+					}
+
+					const prevState = getMonitoringState();
+					const result = evaluateAll(prevState, contexts, pollerGatingCfg);
+					setMonitoringState(result.state);
+
+					if (result.effects.length > 0) {
+						yield* executeMonitoringEffectsEffect(
+							result.effects,
+							deps,
+							pipelineDeps,
+							doneDeliveredByPrimary,
+							() => monitoringActive,
+						);
+					}
+
+					for (const [sessionId, phase] of result.state.sessions) {
+						if (
+							phase.phase === "busy-capped" &&
+							prevState.sessions.get(sessionId)?.phase !== "busy-capped"
+						) {
+							statusLog.warn(
+								`Session ${sessionId.slice(0, 12)} capped — max ${DEFAULT_POLLER_GATING_CONFIG.maxPollers} concurrent pollers reached`,
 							);
 						}
-
-						const prevState = getMonitoringState();
-						const result = evaluateAll(prevState, contexts, pollerGatingCfg);
-						setMonitoringState(result.state);
-
-						if (result.effects.length > 0) {
-							yield* executeMonitoringEffectsEffect(
-								result.effects,
-								deps,
-								pipelineDeps,
-								doneDeliveredByPrimary,
-								() => monitoringActive,
-							);
-						}
-
-						for (const [sessionId, phase] of result.state.sessions) {
-							if (
-								phase.phase === "busy-capped" &&
-								prevState.sessions.get(sessionId)?.phase !== "busy-capped"
-							) {
-								statusLog.warn(
-									`Session ${sessionId.slice(0, 12)} capped — max ${DEFAULT_POLLER_GATING_CONFIG.maxPollers} concurrent pollers reached`,
-								);
-							}
-						}
-					}).pipe(
-						Effect.catchAllCause((cause) =>
-							Effect.sync(() =>
-								statusLog.warn(
-									`Status poller changed handler failed: ${Cause.pretty(cause)}`,
-								),
+					}
+				}).pipe(
+					Effect.catchAllCause((cause) =>
+						Effect.sync(() =>
+							statusLog.warn(
+								`Status poller changed handler failed: ${Cause.pretty(cause)}`,
 							),
 						),
 					),
-				);
-			});
-
-			statusPoller.start();
+				),
+			);
 		});
+		yield* statusPoller.start();
 
 		return {
 			pipelineDeps,

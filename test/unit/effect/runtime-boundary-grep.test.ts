@@ -1176,6 +1176,11 @@ describe("Effect runtime boundary grep", () => {
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
+				pattern: /\bStatusPollerRuntime\b/,
+				reason:
+					"status poller should expose Effect programs instead of accepting a runtime runner",
+			},
+			{
 				pattern: /\bDeferredStatusPollerRuntime\b/,
 				reason: "status poller runtime is provided by its scoped Layer",
 			},
@@ -1191,6 +1196,39 @@ describe("Effect runtime boundary grep", () => {
 				pattern: /\bonAttached\b/,
 				reason:
 					"status poller callbacks should not wait for runtime attachment",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not build a status poller runtime bridge in the status poller layer", () => {
+		const path = "src/lib/domain/relay/Layers/status-poller-layer.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bruntimeBridge\b/,
+				reason:
+					"StatusPollerLive should own scoped fibers directly, not manufacture a runner object",
+			},
+			{
+				pattern: /\bEffect\.runtime<StatusPollerRuntimeContext>/,
+				reason:
+					"StatusPollerLive should not acquire a runtime solely to run its own service methods",
+			},
+			{
+				pattern: /\bRuntime\.run(?:Sync|Promise)\(/,
+				reason: "status poller methods should remain inside Effect programs",
 			},
 		] as const;
 
