@@ -39,7 +39,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 | `PersistenceLayer.open(...)` in daemon or relay production paths | Done | Recheck before final guardrail close. |
 | `Effect.promise(` on rejectable operations | Done | Recheck before final guardrail close. |
 | `concurrency: "unbounded"` on dynamic collections | Done | Recheck before final guardrail close. Fixed-size fanouts need inline justification. |
-| Throwing helpers called from Effect programs | Open | Broad grep triage started. Instance add/remove/start/stop/update IPC handlers now convert legacy instance-manager throws/rejections to typed `InstanceMgmtOperationFailed` before folding to `{ ok:false }`. Startup instance rehydration now classifies expected legacy instance-manager throws as typed rehydration failures and continues. PID write failures now map to `DaemonLifecycleLayerError`. Expected project-registry lifecycle failures and daemon ready-relay/not-found helper failures now use tagged registry domain errors. Remaining expected instance helper throws outside IPC need slice-by-slice conversion or reclassification. |
+| Throwing helpers called from Effect programs | Open | Broad grep triage started. Legacy `InstanceManager` expected add/remove/update/url/start/stop failures now throw shared tagged instance domain errors, and startup rehydration classifies by tag instead of message text. Instance IPC handlers convert legacy throws/rejections to typed `InstanceMgmtOperationFailed` before folding to `{ ok:false }`. PID write failures now map to `DaemonLifecycleLayerError`. Expected project-registry lifecycle failures and daemon ready-relay/not-found helper failures now use tagged registry domain errors. Remaining non-domain throw hits need reclassification or conversion. |
 | App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged and legacy-format IPC dispatch now use the daemon layer runtime callback boundary at the socket edge, daemon WebSocket upgrade routing uses the runtime callback boundary, and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. `daemon-main` no longer waits on project-registry sync or startup acquisition through `ManagedRuntime.runPromise`. Client-init, default-session startup state, relay session-count status, and SSE shutdown no longer build Promise/sync session-service bridges in `relay-stack.ts`; the sole relay-stack `runPromise` is explicitly reclassified as the public `createProjectRelay()` startup boundary. Remaining blockers are final grep hits outside accepted external boundaries. |
 
 ## Current Blockers
@@ -85,6 +85,14 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 ## Latest Update
 
 Detailed completed-slice notes moved to `docs/plans/2026-05-14-effect-ts-mainline-live-progress-archive.md`. Keep only live state and the last few current updates here.
+
+2026-05-14, shared instance domain errors:
+
+- Added shared tagged instance error types for already-exists, max-limit, invalid URL, not-found, and external-start failures.
+- Replaced legacy `InstanceManager` expected plain `Error` throws with those shared tagged errors.
+- Re-exported the shared errors from the Effect instance-manager service so existing catchTag call sites keep working.
+- Updated daemon startup rehydration to classify expected instance-manager failures by tag instead of message text.
+- Added behavior coverage and static guards for typed legacy instance errors and startup classification.
 
 2026-05-14, instance lifecycle IPC throw-helper cleanup:
 

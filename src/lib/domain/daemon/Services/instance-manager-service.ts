@@ -10,7 +10,6 @@
 import {
 	Clock,
 	Context,
-	Data,
 	Duration,
 	Effect,
 	FiberMap,
@@ -20,40 +19,30 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
+import {
+	instanceAlreadyExists,
+	instanceLimitExceeded,
+	instanceNotFound,
+	invalidInstanceUrl,
+} from "../../../instance/instance-errors.js";
 import type {
 	InstanceConfig,
 	OpenCodeInstance,
 } from "../../../shared-types.js";
+
+export {
+	InstanceAlreadyExists,
+	InstanceLimitExceeded,
+	InstanceNotFound,
+	InvalidInstanceUrl,
+} from "../../../instance/instance-errors.js";
+
 import { requestConfigSave } from "./config-persistence-service.js";
 import {
 	publishInstanceError,
 	publishInstanceStatusChanged,
 } from "./daemon-pubsub.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
-
-// ─── Error types ──────────────────────────────────────────────────────────
-
-export class InstanceLimitExceeded extends Data.TaggedError(
-	"InstanceLimitExceeded",
-)<{
-	max: number;
-}> {}
-
-export class InstanceNotFound extends Data.TaggedError("InstanceNotFound")<{
-	id: string;
-}> {}
-
-export class InstanceAlreadyExists extends Data.TaggedError(
-	"InstanceAlreadyExists",
-)<{
-	id: string;
-}> {}
-
-export class InvalidInstanceUrl extends Data.TaggedError("InvalidInstanceUrl")<{
-	id: string;
-	url: string;
-	cause: unknown;
-}> {}
 
 // ─── Input type ───────────────────────────────────────────────────────────
 
@@ -203,12 +192,7 @@ export const addInstance = (input: AddInstanceInput) =>
 		if (inputExternalUrl !== undefined) {
 			yield* Effect.try({
 				try: () => new URL(inputExternalUrl),
-				catch: (cause) =>
-					new InvalidInstanceUrl({
-						id: input.id,
-						url: inputExternalUrl,
-						cause,
-					}),
+				catch: (cause) => invalidInstanceUrl(input.id, inputExternalUrl, cause),
 			});
 		}
 
@@ -260,9 +244,9 @@ export const addInstance = (input: AddInstanceInput) =>
 
 		if (reservationFailure !== undefined) {
 			if (reservationFailure._tag === "duplicate") {
-				return yield* new InstanceAlreadyExists({ id: reservationFailure.id });
+				return yield* instanceAlreadyExists(reservationFailure.id);
 			}
-			return yield* new InstanceLimitExceeded({ max: reservationFailure.max });
+			return yield* instanceLimitExceeded(reservationFailure.max);
 		}
 
 		// Start health poll fiber — FiberMap auto-interrupts if one already exists for this key
@@ -315,7 +299,7 @@ export const getInstance = (instanceId: string) =>
 		const instance = HashMap.get(state.instances, instanceId);
 
 		if (instance._tag === "None") {
-			return yield* new InstanceNotFound({ id: instanceId });
+			return yield* instanceNotFound(instanceId);
 		}
 		return instance.value;
 	}).pipe(
@@ -646,7 +630,7 @@ export const getInstanceUrl = (instanceId: string) =>
 		const state = yield* Ref.get(ref);
 		const inst = HashMap.get(state.instances, instanceId);
 		if (Option.isNone(inst)) {
-			return yield* new InstanceNotFound({ id: instanceId });
+			return yield* instanceNotFound(instanceId);
 		}
 		const externalUrl = HashMap.get(state.externalUrls, instanceId);
 		if (Option.isSome(externalUrl)) {

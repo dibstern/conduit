@@ -66,6 +66,24 @@ function createMockHealthChecker(healthy = true) {
 	return vi.fn().mockResolvedValue(healthy);
 }
 
+function captureThrown(fn: () => void): unknown {
+	try {
+		fn();
+	} catch (error) {
+		return error;
+	}
+	return undefined;
+}
+
+async function captureRejected(promise: Promise<unknown>): Promise<unknown> {
+	try {
+		await promise;
+	} catch (error) {
+		return error;
+	}
+	return undefined;
+}
+
 const LIVE_OPENCODE_URL =
 	process.env["OPENCODE_URL"] ?? process.env["OPENCODE_BASE_URL"];
 
@@ -150,6 +168,21 @@ describe("InstanceManager", () => {
 			);
 		});
 
+		it("classifies duplicate IDs as an expected domain error", () => {
+			const mgr = new InstanceManager();
+			mgr.addInstance("dev", managedConfig());
+
+			const error = captureThrown(() =>
+				mgr.addInstance("dev", managedConfig()),
+			);
+
+			expect(error).toMatchObject({
+				_tag: "InstanceAlreadyExists",
+				id: "dev",
+				message: 'Instance "dev" already exists',
+			});
+		});
+
 		it("rejects when max instances reached", () => {
 			const mgr = new InstanceManager({
 				maxInstances: 1,
@@ -160,11 +193,43 @@ describe("InstanceManager", () => {
 			);
 		});
 
+		it("classifies max instance rejection as an expected domain error", () => {
+			const mgr = new InstanceManager({
+				maxInstances: 1,
+			});
+			mgr.addInstance("a", managedConfig());
+
+			const error = captureThrown(() =>
+				mgr.addInstance("b", managedConfig({ port: 4097 })),
+			);
+
+			expect(error).toMatchObject({
+				_tag: "InstanceLimitExceeded",
+				max: 1,
+				message: "Max instances reached (1). Remove an instance first.",
+			});
+		});
+
 		it("throws for invalid url", () => {
 			const mgr = new InstanceManager();
 			expect(() =>
 				mgr.addInstance("bad-url", externalConfig({ url: "not-a-valid-url" })),
 			).toThrow(/invalid url/i);
+		});
+
+		it("classifies invalid URLs as an expected domain error", () => {
+			const mgr = new InstanceManager();
+
+			const error = captureThrown(() =>
+				mgr.addInstance("bad-url", externalConfig({ url: "not-a-valid-url" })),
+			);
+
+			expect(error).toMatchObject({
+				_tag: "InvalidInstanceUrl",
+				id: "bad-url",
+				url: "not-a-valid-url",
+				message: 'Invalid URL for instance "bad-url": not-a-valid-url',
+			});
 		});
 
 		it("stores env from config", () => {
@@ -233,6 +298,18 @@ describe("InstanceManager", () => {
 			expect(() => mgr.removeInstance("nope")).toThrow(/not found/i);
 		});
 
+		it("classifies unknown remove IDs as an expected domain error", () => {
+			const mgr = new InstanceManager();
+
+			const error = captureThrown(() => mgr.removeInstance("nope"));
+
+			expect(error).toMatchObject({
+				_tag: "InstanceNotFound",
+				id: "nope",
+				message: 'Instance "nope" not found',
+			});
+		});
+
 		it("allows re-adding after removal", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
@@ -273,6 +350,20 @@ describe("InstanceManager", () => {
 			expect(() => mgr.updateInstance("nope", { name: "X" })).toThrow(
 				/not found/i,
 			);
+		});
+
+		it("classifies unknown update IDs as an expected domain error", () => {
+			const mgr = new InstanceManager();
+
+			const error = captureThrown(() =>
+				mgr.updateInstance("nope", { name: "X" }),
+			);
+
+			expect(error).toMatchObject({
+				_tag: "InstanceNotFound",
+				id: "nope",
+				message: 'Instance "nope" not found',
+			});
 		});
 
 		it("sets needsRestart when env changes on running instance", () => {
@@ -379,6 +470,18 @@ describe("InstanceManager", () => {
 			const mgr = new InstanceManager();
 			expect(() => mgr.getInstanceUrl("nope")).toThrow(/not found/i);
 		});
+
+		it("classifies unknown URL lookup IDs as an expected domain error", () => {
+			const mgr = new InstanceManager();
+
+			const error = captureThrown(() => mgr.getInstanceUrl("nope"));
+
+			expect(error).toMatchObject({
+				_tag: "InstanceNotFound",
+				id: "nope",
+				message: 'Instance "nope" not found',
+			});
+		});
 	});
 
 	// ─── stopInstance ───────────────────────────────────────────────────────
@@ -403,6 +506,18 @@ describe("InstanceManager", () => {
 		it("throws for unknown ID", () => {
 			const mgr = new InstanceManager();
 			expect(() => mgr.stopInstance("nope")).toThrow(/not found/i);
+		});
+
+		it("classifies unknown stop IDs as an expected domain error", () => {
+			const mgr = new InstanceManager();
+
+			const error = captureThrown(() => mgr.stopInstance("nope"));
+
+			expect(error).toMatchObject({
+				_tag: "InstanceNotFound",
+				id: "nope",
+				message: 'Instance "nope" not found',
+			});
 		});
 
 		it("is idempotent for already-stopped instances", () => {
@@ -550,10 +665,35 @@ describe("InstanceManager", () => {
 			);
 		});
 
+		it("classifies external start as an expected domain error", async () => {
+			const mgr = new InstanceManager();
+			mgr.addInstance("ext", externalConfig());
+
+			const error = await captureRejected(mgr.startInstance("ext"));
+
+			expect(error).toMatchObject({
+				_tag: "CannotStartExternalInstance",
+				id: "ext",
+				message: "Cannot start external instance",
+			});
+		});
+
 		it("throws for unknown instance", async () => {
 			const mgr = new InstanceManager();
 
 			await expect(mgr.startInstance("nope")).rejects.toThrow(/not found/i);
+		});
+
+		it("classifies unknown start IDs as an expected domain error", async () => {
+			const mgr = new InstanceManager();
+
+			const error = await captureRejected(mgr.startInstance("nope"));
+
+			expect(error).toMatchObject({
+				_tag: "InstanceNotFound",
+				id: "nope",
+				message: 'Instance "nope" not found',
+			});
 		});
 
 		it("is idempotent for healthy instance", async () => {

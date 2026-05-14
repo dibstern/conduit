@@ -40,15 +40,25 @@ const isTaggedInstanceLimitExceeded = (cause: unknown): boolean =>
 	"_tag" in cause &&
 	(cause as { _tag: string })._tag === "InstanceLimitExceeded";
 
+const expectedInstanceManagerErrorTags = new Set([
+	"CannotStartExternalInstance",
+	"InstanceAlreadyExists",
+	"InstanceLimitExceeded",
+	"InstanceNotFound",
+	"InvalidInstanceUrl",
+]);
+
+const isTaggedExpectedInstanceManagerError = (cause: unknown): boolean =>
+	typeof cause === "object" &&
+	cause !== null &&
+	"_tag" in cause &&
+	typeof (cause as { _tag: unknown })._tag === "string" &&
+	expectedInstanceManagerErrorTags.has((cause as { _tag: string })._tag);
+
 const isExpectedLegacyInstanceManagerError = (cause: unknown): boolean => {
 	if (cause instanceof OpenCodeConnectionError) return true;
 	if (isTaggedInstanceLimitExceeded(cause)) return true;
-	if (!(cause instanceof Error)) return false;
-	return (
-		cause.message.includes("already exists") ||
-		cause.message.includes("Max instances reached") ||
-		cause.message.startsWith("Invalid URL for instance")
-	);
+	return isTaggedExpectedInstanceManagerError(cause);
 };
 
 const formatRehydrationCause = (cause: unknown): string =>

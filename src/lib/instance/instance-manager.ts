@@ -6,6 +6,13 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
+import {
+	cannotStartExternalInstance,
+	instanceAlreadyExists,
+	instanceLimitExceeded,
+	instanceNotFound,
+	invalidInstanceUrl,
+} from "./instance-errors.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -129,12 +136,10 @@ export class InstanceManager {
 	 */
 	addInstance(id: string, config: InstanceConfig): OpenCodeInstance {
 		if (this.instances.has(id)) {
-			throw new Error(`Instance "${id}" already exists`);
+			throw instanceAlreadyExists(id);
 		}
 		if (this.instances.size >= this.maxInstances) {
-			throw new Error(
-				`Max instances reached (${this.maxInstances}). Remove an instance first.`,
-			);
+			throw instanceLimitExceeded(this.maxInstances);
 		}
 
 		// Validate URL if provided (defense-in-depth: IPC layer already validates,
@@ -142,8 +147,8 @@ export class InstanceManager {
 		if (config.url) {
 			try {
 				new URL(config.url);
-			} catch {
-				throw new Error(`Invalid URL for instance "${id}": ${config.url}`);
+			} catch (cause) {
+				throw invalidInstanceUrl(id, config.url, cause);
 			}
 		}
 
@@ -180,7 +185,7 @@ export class InstanceManager {
 	 */
 	removeInstance(id: string): void {
 		if (!this.instances.has(id)) {
-			throw new Error(`Instance "${id}" not found`);
+			throw instanceNotFound(id);
 		}
 		// Stop process and health polling if running
 		this.stopInstance(id);
@@ -218,7 +223,7 @@ export class InstanceManager {
 		updates: { name?: string; env?: Record<string, string>; port?: number },
 	): OpenCodeInstance {
 		const instance = this.instances.get(id);
-		if (!instance) throw new Error(`Instance "${id}" not found`);
+		if (!instance) throw instanceNotFound(id);
 
 		const isRunning =
 			instance.status === "healthy" || instance.status === "starting";
@@ -261,7 +266,7 @@ export class InstanceManager {
 	getInstanceUrl(id: string): string {
 		const instance = this.instances.get(id);
 		if (!instance) {
-			throw new Error(`Instance "${id}" not found`);
+			throw instanceNotFound(id);
 		}
 
 		const externalUrl = this.externalUrls.get(id);
@@ -282,11 +287,11 @@ export class InstanceManager {
 	async startInstance(id: string): Promise<void> {
 		const instance = this.instances.get(id);
 		if (!instance) {
-			throw new Error(`Instance "${id}" not found`);
+			throw instanceNotFound(id);
 		}
 
 		if (!instance.managed) {
-			throw new Error("Cannot start external instance");
+			throw cannotStartExternalInstance(id);
 		}
 
 		// Idempotent: don't re-spawn if already healthy or starting
@@ -389,7 +394,7 @@ export class InstanceManager {
 	stopInstance(id: string): void {
 		const instance = this.instances.get(id);
 		if (!instance) {
-			throw new Error(`Instance "${id}" not found`);
+			throw instanceNotFound(id);
 		}
 
 		if (instance.status === "stopped") {
