@@ -3,11 +3,10 @@
 // Wraps the existing OpenCodeClient REST API behind the ProviderInstance
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
-import { Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
-import { createDeferred, type Deferred } from "./deferred.js";
 import { ProviderInstanceFailure } from "./errors.js";
 import type {
 	CommandInfo,
@@ -21,6 +20,27 @@ import type {
 } from "./types.js";
 
 const log = createLogger("opencode-provider-instance");
+
+function interruptedTurnResult(): TurnResult {
+	return {
+		status: "interrupted",
+		cost: 0,
+		tokens: { input: 0, output: 0 },
+		durationMs: 0,
+		providerStateUpdates: [],
+	};
+}
+
+function sendFailedTurnResult(message: string): TurnResult {
+	return {
+		status: "error",
+		cost: 0,
+		tokens: { input: 0, output: 0 },
+		durationMs: 0,
+		error: { code: "send_failed", message },
+		providerStateUpdates: [],
+	};
+}
 
 // ─── Options ────────────────────────────────────────────────────────────────
 
@@ -36,11 +56,25 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;
-	private readonly pendingTurns = new Map<string, Deferred<TurnResult>>();
+	private readonly pendingTurns = new Map<
+		string,
+		Deferred.Deferred<TurnResult, Error>
+	>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
+	}
+
+	private providerFailure(
+		operation: string,
+		cause: unknown,
+	): ProviderInstanceFailure {
+		return new ProviderInstanceFailure({
+			providerId: this.providerId,
+			operation,
+			cause,
+		});
 	}
 
 	// ─── discover ─────────────────────────────────────────────────────────
@@ -51,12 +85,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	> {
 		return Effect.tryPromise({
 			try: () => this.discoverCapabilities(),
-			catch: (cause) =>
-				new ProviderInstanceFailure({
-					providerId: this.providerId,
-					operation: "discover",
-					cause,
-				}),
+			catch: (cause) => this.providerFailure("discover", cause),
 		});
 	}
 
@@ -67,7 +96,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			this.client.app.skills(this.workspaceRoot),
 		]);
 
-		// Map providers -> models
 		const models: ModelInfo[] = providerResult.providers.flatMap((provider) =>
 			(provider.models ?? []).map((model) => ({
 				id: model.id,
@@ -78,14 +106,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			})),
 		);
 
-		// Map commands (builtin)
 		const commands: CommandInfo[] = commandsRaw.map((cmd) => ({
 			name: cmd.name,
 			...(cmd.description != null ? { description: cmd.description } : {}),
 			source: "builtin" as const,
 		}));
 
-		// Map skills (project-skill)
 		const skills: CommandInfo[] = skillsRaw.map((skill) => ({
 			name: skill.name,
 			...(skill.description != null ? { description: skill.description } : {}),
@@ -110,25 +136,19 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.tryPromise({
-			try: () => this.sendTurnLocal(input),
-			catch: (cause) =>
-				new ProviderInstanceFailure({
-					providerId: this.providerId,
-					operation: "sendTurn",
-					cause,
-				}),
-		});
+		return this.sendTurnLocalEffect(input).pipe(
+			Effect.mapError((cause) => this.providerFailure("sendTurn", cause)),
+		);
 	}
 
-	private async sendTurnLocal(input: SendTurnInput): Promise<TurnResult> {
+	private sendTurnLocalEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, unknown> {
 		const { sessionId, prompt, model, images, agent, variant, abortSignal } =
 			input;
 
-		// Build the prompt options for OpenCode REST
 		const promptOptions: PromptOptions = {
 			text: prompt,
-			// Only include model if explicitly selected (both ids must be non-empty)
 			...(model?.providerId && model?.modelId
 				? { model: { providerID: model.providerId, modelID: model.modelId } }
 				: {}),
@@ -137,64 +157,49 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			...(variant ? { variant } : {}),
 		};
 
-		// Create a deferred that will be resolved when the turn completes
-		// (via notifyTurnCompleted, called by the SSE event pipeline)
-		const deferred = createDeferred<TurnResult>();
-		this.pendingTurns.set(sessionId, deferred);
+		return Effect.gen(this, function* () {
+			const deferred = yield* Deferred.make<TurnResult, Error>();
+			this.pendingTurns.set(sessionId, deferred);
 
-		// Handle abort signal
-		const onAbort = () => {
-			log.info(`Turn aborted for session ${sessionId}`);
-			this.client.session.abort(sessionId).catch((err) => {
-				log.warn(`Failed to abort session ${sessionId}: ${err}`);
+			const onAbort = () => {
+				log.info(`Turn aborted for session ${sessionId}`);
+				this.client.session.abort(sessionId).catch((err) => {
+					log.warn(`Failed to abort session ${sessionId}: ${err}`);
+				});
+			};
+			abortSignal.addEventListener("abort", onAbort, { once: true });
+
+			const cleanup = Effect.sync(() => {
+				abortSignal.removeEventListener("abort", onAbort);
+				this.pendingTurns.delete(sessionId);
 			});
-		};
 
-		if (abortSignal.aborted) {
-			this.pendingTurns.delete(sessionId);
-			return {
-				status: "interrupted",
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			};
-		}
+			return yield* Effect.gen(this, function* () {
+				if (abortSignal.aborted) return interruptedTurnResult();
 
-		abortSignal.addEventListener("abort", onAbort, { once: true });
+				const promptResult = yield* Effect.either(
+					Effect.tryPromise({
+						try: () => this.client.session.prompt(sessionId, promptOptions),
+						catch: (cause) => cause,
+					}),
+				);
+				if (promptResult._tag === "Left") {
+					const message =
+						promptResult.left instanceof Error
+							? promptResult.left.message
+							: String(promptResult.left);
+					log.error(`sendTurn failed for session ${sessionId}: ${message}`);
+					return sendFailedTurnResult(message);
+				}
 
-		try {
-			// Send the message -- response comes via SSE, not this call
-			await this.client.session.prompt(sessionId, promptOptions);
-		} catch (err) {
-			// Clean up on send failure
-			this.pendingTurns.delete(sessionId);
-			abortSignal.removeEventListener("abort", onAbort);
-
-			const message = err instanceof Error ? err.message : String(err);
-			log.error(`sendTurn failed for session ${sessionId}: ${message}`);
-			return {
-				status: "error",
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				error: { code: "send_failed", message },
-				providerStateUpdates: [],
-			};
-		}
-
-		try {
-			// Wait for the turn to complete (resolved by notifyTurnCompleted)
-			return await deferred.promise;
-		} finally {
-			abortSignal.removeEventListener("abort", onAbort);
-			this.pendingTurns.delete(sessionId);
-		}
+				return yield* Deferred.await(deferred);
+			}).pipe(Effect.ensuring(cleanup));
+		});
 	}
 
 	/**
 	 * Called by the SSE event pipeline when a turn completes, errors, or
-	 * is interrupted. Resolves the pending sendTurnEffect() promise.
+	 * is interrupted. Resolves the pending sendTurnEffect() wait.
 	 *
 	 * This is the bridge between the existing SSE-based event flow and the
 	 * ProviderInstance interface. The SSE pipeline continues to own the
@@ -204,10 +209,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		const deferred = this.pendingTurns.get(sessionId);
 		if (deferred) {
 			this.pendingTurns.delete(sessionId);
-			deferred.resolve(result);
+			// SSE callbacks are synchronous; complete the Effect Deferred directly
+			// instead of adding an app-internal runtime bridge.
+			Deferred.unsafeDone(deferred, Effect.succeed(result));
 		} else {
 			log.debug(
-				`notifyTurnCompleted: no pending turn for session ${sessionId} — may have already completed`,
+				`notifyTurnCompleted: no pending turn for session ${sessionId} -- may have already completed`,
 			);
 		}
 	}
@@ -219,12 +226,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.client.session.abort(sessionId),
-			catch: (cause) =>
-				new ProviderInstanceFailure({
-					providerId: this.providerId,
-					operation: "interruptTurn",
-					cause,
-				}),
+			catch: (cause) => this.providerFailure("interruptTurn", cause),
 		});
 	}
 
@@ -237,12 +239,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.resolvePermissionLocal(sessionId, requestId, decision),
-			catch: (cause) =>
-				new ProviderInstanceFailure({
-					providerId: this.providerId,
-					operation: "resolvePermission",
-					cause,
-				}),
+			catch: (cause) => this.providerFailure("resolvePermission", cause),
 		});
 	}
 
@@ -263,12 +260,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.resolveQuestionLocal(requestId, answers),
-			catch: (cause) =>
-				new ProviderInstanceFailure({
-					providerId: this.providerId,
-					operation: "resolveQuestion",
-					cause,
-				}),
+			catch: (cause) => this.providerFailure("resolveQuestion", cause),
 		});
 	}
 
@@ -276,7 +268,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Promise<void> {
-		// Convert answers to the format OpenCode expects: string[][]
 		const answerArrays = Object.values(answers).map((v) =>
 			Array.isArray(v) ? v.map(String) : [String(v)],
 		);
@@ -293,14 +284,16 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	private endLocalSession(sessionId: string): void {
 		// OpenCode owns session state server-side. The provider instance's only
-		// per-session state is the pending turn deferred; reject it so the
-		// caller unblocks. We do NOT call client.session.abort -- reload is
-		// a provider-instance state reset, not a turn cancellation (that's what
-		// interruptTurn / "cancel" is for).
+		// per-session state is the pending turn Deferred; fail it so the caller
+		// unblocks. We do not call client.session.abort: reload is a provider
+		// instance reset, while interruptTurn/cancel is a provider cancellation.
 		const deferred = this.pendingTurns.get(sessionId);
 		if (deferred) {
 			this.pendingTurns.delete(sessionId);
-			deferred.reject(new Error("Session ended (reload)"));
+			Deferred.unsafeDone(
+				deferred,
+				Effect.fail(new Error("Session ended (reload)")),
+			);
 		}
 	}
 
@@ -310,11 +303,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		return Effect.sync(() => {
 			log.info("OpenCodeProviderInstance shutting down");
 
-			// Reject all pending turns
 			for (const [sessionId, deferred] of this.pendingTurns) {
-				deferred.reject(
-					new Error(
-						`Provider instance shutdown -- turn for session ${sessionId} cancelled`,
+				Deferred.unsafeDone(
+					deferred,
+					Effect.fail(
+						new Error(
+							`Provider instance shutdown -- turn for session ${sessionId} cancelled`,
+						),
 					),
 				);
 			}

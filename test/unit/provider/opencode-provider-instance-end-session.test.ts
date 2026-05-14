@@ -2,9 +2,8 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { createDeferred } from "../../../src/lib/provider/deferred.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
-import type { TurnResult } from "../../../src/lib/provider/types.js";
+import type { SendTurnInput } from "../../../src/lib/provider/types.js";
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
@@ -38,6 +37,28 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
+function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
+	return {
+		sessionId: "sess-1",
+		turnId: "turn-1",
+		prompt: "continue",
+		history: [],
+		providerState: {},
+		workspaceRoot: "/tmp/project",
+		eventSink: {
+			push: vi.fn(() => Effect.void),
+			requestPermission: vi.fn(() =>
+				Effect.succeed({ decision: "once" as const }),
+			),
+			requestQuestion: vi.fn(() => Effect.succeed({})),
+			resolvePermission: vi.fn(() => Effect.void),
+			resolveQuestion: vi.fn(() => Effect.void),
+		},
+		abortSignal: new AbortController().signal,
+		...overrides,
+	};
+}
+
 describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 	let client: OpenCodeAPI;
 	let instance: OpenCodeProviderInstance;
@@ -54,41 +75,40 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
 
-	it("rejects the pending deferred for the session", async () => {
-		const deferred = createDeferred<TurnResult>();
-		// Inject a pending deferred via the private map
-		(
-			instance as unknown as { pendingTurns: Map<string, typeof deferred> }
-		).pendingTurns.set("sess-1", deferred);
-
-		// Attach catch BEFORE awaiting endSession so the rejection is handled
-		let rejected: Error | undefined;
-		const caught = deferred.promise.catch((err) => {
-			rejected = err;
+	it("fails the in-flight send turn for the session", async () => {
+		const resultPromise = Effect.runPromise(
+			Effect.either(instance.sendTurnEffect(makeSendTurnInput())),
+		);
+		await vi.waitFor(() => {
+			expect(client.session.prompt).toHaveBeenCalled();
 		});
 
 		await Effect.runPromise(instance.endSessionEffect("sess-1"));
-		await caught;
 
-		expect(rejected).toBeInstanceOf(Error);
-		expect(rejected?.message).toContain("reload");
-		expect(
-			(
-				instance as unknown as { pendingTurns: Map<string, unknown> }
-			).pendingTurns.has("sess-1"),
-		).toBe(false);
+		const result = await resultPromise;
+
+		expect(result._tag).toBe("Left");
+		if (result._tag !== "Left") return;
+		expect(result.left).toMatchObject({
+			_tag: "ProviderInstanceFailure",
+			operation: "sendTurn",
+			providerId: "opencode",
+		});
+		expect(result.left.message).toContain("reload");
 	});
 
 	it("does NOT call client.session.abort (reload is not a turn cancel)", async () => {
-		const deferred = createDeferred<TurnResult>();
-		(
-			instance as unknown as { pendingTurns: Map<string, typeof deferred> }
-		).pendingTurns.set("sess-2", deferred);
-		deferred.promise.catch(() => {
-			/* swallow */
+		const resultPromise = Effect.runPromise(
+			Effect.either(
+				instance.sendTurnEffect(makeSendTurnInput({ sessionId: "sess-2" })),
+			),
+		);
+		await vi.waitFor(() => {
+			expect(client.session.prompt).toHaveBeenCalled();
 		});
 
 		await Effect.runPromise(instance.endSessionEffect("sess-2"));
+		await resultPromise;
 
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
