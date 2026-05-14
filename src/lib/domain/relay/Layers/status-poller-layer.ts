@@ -105,8 +105,7 @@ export const StatusPollerLive: Layer.Layer<
 			get pollDeps() {
 				return {
 					getRawStatuses: readProjectedStatuses,
-					getSessionParentMap: () =>
-						Runtime.runSync(runtime)(getSessionParentMapFromState),
+					getSessionParentMap: () => getSessionParentMapFromState,
 					resolveParent: (sessionId: string) =>
 						Effect.tryPromise(async () => {
 							const session = await api.session.get(sessionId);

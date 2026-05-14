@@ -169,7 +169,7 @@ describe("SessionStatusPoller Effect", () => {
 
 				yield* poll({
 					getRawStatuses: () => readSessionStatusesFromEffect,
-					getSessionParentMap: () => new Map(),
+					getSessionParentMap: () => Effect.succeed(new Map()),
 					resolveParent: () => Effect.succeed(undefined),
 				});
 

@@ -1353,6 +1353,30 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not read status-poller parent maps through a runtime sync bridge", () => {
+		const path = "src/lib/domain/relay/Layers/status-poller-layer.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /Runtime\.runSync\(runtime\)\(getSessionParentMapFromState\)/,
+				reason:
+					"status poller parent map reads should stay inside the Effect poll program",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("keeps Effect dual-write persistence inside the relay runtime", () => {
 		const hookPath = "src/lib/persistence/effect/dual-write-hook-effect.ts";
 		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");

@@ -312,7 +312,13 @@ export interface PollDeps {
 		any
 	>;
 	/** Session parent map for subagent propagation. */
-	readonly getSessionParentMap: () => Map<string, string>;
+	readonly getSessionParentMap: () => Effect.Effect<
+		Map<string, string>,
+		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; poll() handles all errors internally
+		any,
+		// biome-ignore lint/suspicious/noExplicitAny: parent-map readers may require services from the attached runtime
+		any
+	>;
 	/** Resolve unknown parent for a busy session. */
 	readonly resolveParent: (sessionId: string) => Effect.Effect<
 		string | undefined,
@@ -343,7 +349,9 @@ export const poll = (deps: PollDeps) =>
 			const raw = yield* deps.getRawStatuses();
 
 			// Resolve unknown parents for busy sessions
-			const parentMap = deps.getSessionParentMap();
+			const parentMap = yield* deps
+				.getSessionParentMap()
+				.pipe(Effect.catchAll(() => Effect.succeed(new Map<string, string>())));
 			const busyIds = Object.entries(raw)
 				.filter(([, s]) => s.type === "busy" || s.type === "retry")
 				.map(([id]) => id);
