@@ -228,6 +228,35 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not re-enter the daemon runtime to discover the bound HTTP port", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /const postStartupConfig = readRuntimeConfigSnapshot\(\);/,
+				reason:
+					"the daemon layer owns server binding; daemon-main should read the bound port from the server handle",
+			},
+			{
+				pattern: /return readRuntimeConfigSnapshot\(\)\.port;/,
+				reason:
+					"DaemonHandle.port should use the locally synchronized bound port snapshot",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not route keep-awake IPC through daemon-main runtime callbacks", () => {
 		const retiredBridgePatterns = [
 			{

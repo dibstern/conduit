@@ -982,6 +982,22 @@ export async function startDaemonProcess(
 		router: null,
 	};
 
+	function readBoundHttpPort(): number | null {
+		const server = ctx.upgradeServer ?? ctx.httpServer;
+		const addr = server?.address();
+		return typeof addr === "object" && addr ? addr.port : null;
+	}
+
+	function syncBoundHttpPortSnapshot(): DaemonRuntimeConfig {
+		const boundPort = readBoundHttpPort();
+		if (boundPort == null || boundPort === runtimeConfigSnapshot.port) {
+			return runtimeConfigSnapshot;
+		}
+		runtimeConfigSnapshot = { ...runtimeConfigSnapshot, port: boundPort };
+		syncLegacyConfigLocals(runtimeConfigSnapshot);
+		return runtimeConfigSnapshot;
+	}
+
 	// ── Rehydrate instances from config ───────────────────────────────────
 	const savedConfig = loadDaemonConfig(configDir);
 	if (savedConfig?.instances) {
@@ -1396,7 +1412,7 @@ export async function startDaemonProcess(
 		throw err;
 	}
 
-	const postStartupConfig = readRuntimeConfigSnapshot();
+	const postStartupConfig = syncBoundHttpPortSnapshot();
 	log.debug(`[startup:${elapsed()}] Servers started via Layer`);
 	log.info(
 		`[startup:${elapsed()}] TLS certs ${postStartupConfig.tlsEnabled ? "loaded" : "skipped"}`,
@@ -1562,7 +1578,7 @@ export async function startDaemonProcess(
 	// ── Return DaemonHandle ───────────────────────────────────────────────
 	return {
 		get port() {
-			return readRuntimeConfigSnapshot().port;
+			return runtimeConfigSnapshot.port;
 		},
 		get onboardingPort() {
 			const server = ctx.onboardingServer;
