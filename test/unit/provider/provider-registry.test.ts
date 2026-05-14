@@ -8,9 +8,12 @@ import {
 	ProviderRegistryLive,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import type { ProviderAdapter } from "../../../src/lib/provider/types.js";
+import type {
+	ProviderAdapter,
+	ProviderInstance,
+} from "../../../src/lib/provider/types.js";
 
-function makeStubAdapter(providerId: string): ProviderAdapter {
+function makeStubInstance(providerId: string): ProviderInstance {
 	return {
 		providerId,
 		discoverEffect: vi.fn(() =>
@@ -42,77 +45,72 @@ describe("ProviderRegistry", () => {
 		registry = new ProviderRegistry();
 	});
 
-	it("registers and retrieves an adapter", () => {
-		const adapter = makeStubAdapter("opencode");
-		registry.registerAdapter(adapter);
+	it("registers and retrieves a provider instance", () => {
+		const instance = makeStubInstance("opencode");
+		registry.registerInstance(instance);
 
-		const retrieved = registry.getAdapter("opencode");
-		expect(retrieved).toBe(adapter);
+		const retrieved = registry.getInstance("opencode");
+		expect(retrieved).toBe(instance);
+		expect(registry.hasInstance("opencode")).toBe(true);
 	});
 
 	it("returns undefined for unknown provider", () => {
-		expect(registry.getAdapter("unknown")).toBeUndefined();
+		expect(registry.getInstance("unknown")).toBeUndefined();
 	});
 
 	it("lists all registered providers", () => {
-		registry.registerAdapter(makeStubAdapter("opencode"));
-		registry.registerAdapter(makeStubAdapter("claude"));
+		registry.registerInstance(makeStubInstance("opencode"));
+		registry.registerInstance(makeStubInstance("claude"));
 
 		const providers = registry.listProviders();
 		expect(providers).toEqual(["opencode", "claude"]);
 	});
 
-	it("returns empty list when no adapters registered", () => {
+	it("returns empty list when no provider instances are registered", () => {
 		expect(registry.listProviders()).toEqual([]);
 	});
 
-	it("overwrites adapter with same providerId", () => {
-		const first = makeStubAdapter("opencode");
-		const second = makeStubAdapter("opencode");
+	it("overwrites provider instance with same providerId", () => {
+		const first = makeStubInstance("opencode");
+		const second = makeStubInstance("opencode");
 
-		registry.registerAdapter(first);
-		registry.registerAdapter(second);
+		registry.registerInstance(first);
+		registry.registerInstance(second);
 
-		expect(registry.getAdapter("opencode")).toBe(second);
+		expect(registry.getInstance("opencode")).toBe(second);
 		expect(registry.listProviders()).toEqual(["opencode"]);
 	});
 
-	it("hasAdapter returns true for registered adapter", () => {
-		registry.registerAdapter(makeStubAdapter("opencode"));
-		expect(registry.hasAdapter("opencode")).toBe(true);
-		expect(registry.hasAdapter("claude")).toBe(false);
-	});
+	it("removeInstance removes a registered provider instance", () => {
+		registry.registerInstance(makeStubInstance("opencode"));
+		registry.removeInstance("opencode");
 
-	it("removeAdapter removes a registered adapter", () => {
-		registry.registerAdapter(makeStubAdapter("opencode"));
-		registry.removeAdapter("opencode");
-
-		expect(registry.getAdapter("opencode")).toBeUndefined();
+		expect(registry.getInstance("opencode")).toBeUndefined();
 		expect(registry.listProviders()).toEqual([]);
 	});
 
-	it("removeAdapter is a no-op for unknown provider", () => {
-		registry.removeAdapter("unknown"); // Should not throw
+	it("removeInstance is a no-op for unknown provider", () => {
+		registry.removeInstance("unknown");
 		expect(registry.listProviders()).toEqual([]);
 	});
 
-	it("getAdapterOrThrow throws for unknown provider", () => {
-		expect(() => registry.getAdapterOrThrow("unknown")).toThrow(
+	it("getInstanceOrThrow throws for unknown provider", () => {
+		expect(() => registry.getInstanceOrThrow("unknown")).toThrow(
 			"No adapter registered for provider: unknown",
 		);
 	});
 
-	it("getAdapterOrThrow returns adapter for known provider", () => {
-		const adapter = makeStubAdapter("opencode");
-		registry.registerAdapter(adapter);
-		expect(registry.getAdapterOrThrow("opencode")).toBe(adapter);
+	it("getInstanceOrThrow returns instance for known provider", () => {
+		const instance = makeStubInstance("opencode");
+		registry.registerInstance(instance);
+		expect(registry.getInstanceOrThrow("opencode")).toBe(instance);
 	});
 
-	it("shutdownAllEffect calls shutdownEffect on all adapters", async () => {
-		const a1 = makeStubAdapter("opencode");
-		const a2 = makeStubAdapter("claude");
-		registry.registerAdapter(a1);
-		registry.registerAdapter(a2);
+	it("shutdownAllEffect calls shutdownEffect on all provider instances", async () => {
+		const a1 = makeStubInstance("opencode");
+		const a2 = makeStubInstance("claude");
+		registry.registerInstance(a1);
+		registry.registerInstance(a2);
 
 		await Effect.runPromise(registry.shutdownAllEffect());
 
@@ -120,16 +118,16 @@ describe("ProviderRegistry", () => {
 		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 
-	it("shutdownAllEffect uses the adapter Effect boundary", async () => {
+	it("shutdownAllEffect uses the provider instance Effect boundary", async () => {
 		const shutdown = vi.fn(() => {
 			throw new Error("legacy Promise shutdown should not be called");
 		});
 		const shutdownEffect = vi.fn(() => Effect.void);
-		registry.registerAdapter({
-			...makeStubAdapter("claude"),
+		registry.registerInstance({
+			...makeStubInstance("claude"),
 			shutdown,
 			shutdownEffect,
-		} as ProviderAdapter & {
+		} as ProviderInstance & {
 			shutdown: typeof shutdown;
 			shutdownEffect: typeof shutdownEffect;
 		});
@@ -140,9 +138,9 @@ describe("ProviderRegistry", () => {
 		expect(shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 
-	it("shutdownAllEffect continues even if one adapter fails", async () => {
-		const a1 = makeStubAdapter("opencode");
-		const a2 = makeStubAdapter("claude");
+	it("shutdownAllEffect continues even if one provider instance fails", async () => {
+		const a1 = makeStubInstance("opencode");
+		const a2 = makeStubInstance("claude");
 		(a1.shutdownEffect as ReturnType<typeof vi.fn>).mockReturnValue(
 			Effect.fail(
 				new ProviderAdapterFailure({
@@ -152,8 +150,8 @@ describe("ProviderRegistry", () => {
 				}),
 			),
 		);
-		registry.registerAdapter(a1);
-		registry.registerAdapter(a2);
+		registry.registerInstance(a1);
+		registry.registerInstance(a2);
 
 		// Should not throw
 		await Effect.runPromise(registry.shutdownAllEffect());
@@ -162,24 +160,24 @@ describe("ProviderRegistry", () => {
 		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
 	});
 
-	it("provides registered adapters through the Effect service layer", async () => {
-		const adapter = makeStubAdapter("claude");
+	it("provides registered provider instances through the Effect service layer", async () => {
+		const instance = makeStubInstance("claude");
 
 		const resolved = await Effect.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ProviderRegistryTag;
-				return yield* service.getAdapterEffect("claude");
-			}).pipe(Effect.provide(ProviderRegistryLive([adapter]))),
+				return yield* service.getInstanceEffect("claude");
+			}).pipe(Effect.provide(ProviderRegistryLive([instance]))),
 		);
 
-		expect(resolved).toBe(adapter);
+		expect(resolved).toBe(instance);
 	});
 
-	it("fails typed Effect lookup when the layer-backed service lacks the adapter", async () => {
+	it("fails typed Effect lookup when the layer-backed service lacks the instance", async () => {
 		const exit = await Effect.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ProviderRegistryTag;
-				return yield* Effect.exit(service.getAdapterEffect("missing"));
+				return yield* Effect.exit(service.getInstanceEffect("missing"));
 			}).pipe(Effect.provide(ProviderRegistryLive([]))),
 		);
 
@@ -191,25 +189,40 @@ describe("ProviderRegistry", () => {
 	});
 
 	it("creates fresh registry state for fresh Layer acquisitions", async () => {
-		const adapter = makeStubAdapter("claude");
+		const instance = makeStubInstance("claude");
 		const layer = ProviderRegistryLive([]);
 
 		const first = await Effect.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ProviderRegistryTag;
-				service.registerAdapter(adapter);
-				return service.hasAdapter("claude");
+				service.registerInstance(instance);
+				return service.hasInstance("claude");
 			}).pipe(Effect.provide(Layer.fresh(layer))),
 		);
 
 		const second = await Effect.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ProviderRegistryTag;
-				return service.hasAdapter("claude");
+				return service.hasInstance("claude");
 			}).pipe(Effect.provide(Layer.fresh(layer))),
 		);
 
 		expect(first).toBe(true);
 		expect(second).toBe(false);
+	});
+
+	it("keeps adapter-named methods as compatibility shims", () => {
+		const instance = makeStubInstance("opencode");
+
+		registry.registerAdapter(instance as ProviderAdapter);
+
+		expect(registry.getAdapter("opencode")).toBe(instance);
+		expect(registry.getAdapterOrThrow("opencode")).toBe(instance);
+		expect(registry.hasAdapter("opencode")).toBe(true);
+
+		registry.removeAdapter("opencode");
+
+		expect(registry.getAdapter("opencode")).toBeUndefined();
+		expect(registry.hasAdapter("opencode")).toBe(false);
 	});
 });

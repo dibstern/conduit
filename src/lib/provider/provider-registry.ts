@@ -1,12 +1,12 @@
 // src/lib/provider/provider-registry.ts
 // ─── Provider Registry ─────────────────────────────────────────────────────
-// Maps provider IDs to adapter instances. The OrchestrationEngine uses this
-// to route commands to the correct adapter.
+// Maps provider IDs to scoped provider instances. The OrchestrationEngine uses
+// this to route commands to the correct provider instance.
 
 import { Context, Effect, Layer } from "effect";
 import { createLogger } from "../logger.js";
 import { ProviderNotRegistered } from "./errors.js";
-import type { ProviderAdapter, ProviderInstance } from "./types.js";
+import type { ProviderInstance } from "./types.js";
 
 const log = createLogger("provider-registry");
 
@@ -16,85 +16,114 @@ export class ProviderRegistryTag extends Context.Tag("ProviderRegistry")<
 >() {}
 
 export const ProviderRegistryLive = (
-	adapters: Iterable<ProviderInstance> = [],
+	instances: Iterable<ProviderInstance> = [],
 ): Layer.Layer<ProviderRegistryTag> =>
 	Layer.effect(
 		ProviderRegistryTag,
-		Effect.sync(() => new ProviderRegistry(adapters)),
+		Effect.sync(() => new ProviderRegistry(instances)),
 	);
 
 export class ProviderRegistry {
-	private readonly adapters = new Map<string, ProviderInstance>();
+	private readonly instances = new Map<string, ProviderInstance>();
 
-	constructor(adapters: Iterable<ProviderInstance> = []) {
-		for (const adapter of adapters) {
-			this.registerInstance(adapter);
+	constructor(instances: Iterable<ProviderInstance> = []) {
+		for (const instance of instances) {
+			this.registerInstance(instance);
 		}
 	}
 
 	registerInstance(instance: ProviderInstance): void {
-		this.adapters.set(instance.providerId, instance);
+		this.instances.set(instance.providerId, instance);
 		log.info(`Registered provider instance: ${instance.providerId}`);
 	}
 
-	/** Register an adapter. Overwrites any existing adapter with the same providerId. */
-	registerAdapter(adapter: ProviderAdapter): void {
-		this.registerInstance(adapter);
+	/** Compatibility shim while callers move to registerInstance(). */
+	registerAdapter(instance: ProviderInstance): void {
+		this.registerInstance(instance);
 	}
 
-	/** Get an adapter by provider ID, or undefined if not registered. */
+	/** Get a provider instance by provider ID, or undefined if not registered. */
+	getInstance(providerId: string): ProviderInstance | undefined {
+		return this.instances.get(providerId);
+	}
+
+	/** Compatibility shim while callers move to getInstance(). */
 	getAdapter(providerId: string): ProviderInstance | undefined {
-		return this.adapters.get(providerId);
+		return this.getInstance(providerId);
 	}
 
-	/** Get an adapter by provider ID, failing with a typed Effect error if absent. */
-	getAdapterEffect(
+	/** Get a provider instance by provider ID, failing with a typed Effect error if absent. */
+	getInstanceEffect(
 		providerId: string,
 	): Effect.Effect<ProviderInstance, ProviderNotRegistered> {
-		const adapter = this.adapters.get(providerId);
-		return adapter
-			? Effect.succeed(adapter)
+		const instance = this.instances.get(providerId);
+		return instance
+			? Effect.succeed(instance)
 			: Effect.fail(new ProviderNotRegistered({ providerId }));
 	}
 
-	/** Get an adapter by provider ID, throwing if not registered. */
-	getAdapterOrThrow(providerId: string): ProviderInstance {
-		const adapter = this.adapters.get(providerId);
-		if (!adapter) {
+	/** Compatibility shim while callers move to getInstanceEffect(). */
+	getAdapterEffect(
+		providerId: string,
+	): Effect.Effect<ProviderInstance, ProviderNotRegistered> {
+		return this.getInstanceEffect(providerId);
+	}
+
+	/** Get a provider instance by provider ID, throwing if not registered. */
+	getInstanceOrThrow(providerId: string): ProviderInstance {
+		const instance = this.instances.get(providerId);
+		if (!instance) {
 			throw new ProviderNotRegistered({ providerId });
 		}
-		return adapter;
+		return instance;
 	}
 
-	/** Check if an adapter is registered for the given provider ID. */
+	/** Compatibility shim while callers move to getInstanceOrThrow(). */
+	getAdapterOrThrow(providerId: string): ProviderInstance {
+		return this.getInstanceOrThrow(providerId);
+	}
+
+	/** Check if an instance is registered for the given provider ID. */
+	hasInstance(providerId: string): boolean {
+		return this.instances.has(providerId);
+	}
+
+	/** Compatibility shim while callers move to hasInstance(). */
 	hasAdapter(providerId: string): boolean {
-		return this.adapters.has(providerId);
+		return this.hasInstance(providerId);
 	}
 
-	/** Remove an adapter by provider ID. No-op if not registered. */
+	/** Remove a provider instance by provider ID. No-op if not registered. */
+	removeInstance(providerId: string): void {
+		this.instances.delete(providerId);
+	}
+
+	/** Compatibility shim while callers move to removeInstance(). */
 	removeAdapter(providerId: string): void {
-		this.adapters.delete(providerId);
+		this.removeInstance(providerId);
 	}
 
 	/** List all registered provider IDs. */
 	listProviders(): string[] {
-		return [...this.adapters.keys()];
+		return [...this.instances.keys()];
 	}
 
 	/**
-	 * Shutdown all registered adapters. Continues on individual failures so
+	 * Shutdown all registered provider instances. Continues on individual failures so
 	 * cleanup behaves like finalizers: best-effort, logged, never masking caller
 	 * shutdown.
 	 */
 	shutdownAllEffect(): Effect.Effect<void> {
 		return Effect.forEach(
-			[...this.adapters.values()],
-			(adapter) =>
-				adapter
+			[...this.instances.values()],
+			(instance) =>
+				instance
 					.shutdownEffect()
 					.pipe(
 						Effect.catchAll((error) =>
-							Effect.sync(() => log.warn(`Adapter shutdown failed: ${error}`)),
+							Effect.sync(() =>
+								log.warn(`Provider instance shutdown failed: ${error}`),
+							),
 						),
 					),
 			{ concurrency: 4, discard: true },

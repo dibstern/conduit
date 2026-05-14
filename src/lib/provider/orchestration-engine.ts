@@ -1,7 +1,7 @@
 // src/lib/provider/orchestration-engine.ts
 // ─── Orchestration Engine ───────────────────────────────────────────────────
-// Central command processor for the provider adapter layer (CQRS core loop).
-// Routes commands to the correct adapter via ProviderRegistry.
+// Central command processor for the provider instance layer (CQRS core loop).
+// Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
 import { Effect, Ref } from "effect";
@@ -205,7 +205,9 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const adapter = yield* this.registry.getAdapterEffect(command.providerId);
+			const instance = yield* this.registry.getInstanceEffect(
+				command.providerId,
+			);
 
 			yield* Effect.sync(() =>
 				log.info(
@@ -216,7 +218,7 @@ export class OrchestrationEngine {
 			// Bind AFTER sendTurn succeeds — if it throws, the session is not
 			// viable at the provider and should not be bound. Error TurnResults
 			// (non-throwing) still bind because the session exists at the provider.
-			const result = yield* adapter.sendTurnEffect(command.input);
+			const result = yield* instance.sendTurnEffect(command.input);
 			yield* Effect.sync(() =>
 				this.sessionBindings.set(command.input.sessionId, command.providerId),
 			);
@@ -231,13 +233,13 @@ export class OrchestrationEngine {
 			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
 			);
-			const adapter = yield* this.registry.getAdapterEffect(providerId);
+			const instance = yield* this.registry.getInstanceEffect(providerId);
 
 			yield* Effect.sync(() =>
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
 			);
 
-			return yield* adapter
+			return yield* instance
 				.interruptTurnEffect(command.sessionId)
 				.pipe(
 					Effect.tapError((error) =>
@@ -258,9 +260,9 @@ export class OrchestrationEngine {
 			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
 			);
-			const adapter = yield* this.registry.getAdapterEffect(providerId);
+			const instance = yield* this.registry.getInstanceEffect(providerId);
 
-			return yield* adapter
+			return yield* instance
 				.resolvePermissionEffect(
 					command.sessionId,
 					command.requestId,
@@ -285,9 +287,9 @@ export class OrchestrationEngine {
 			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
 			);
-			const adapter = yield* this.registry.getAdapterEffect(providerId);
+			const instance = yield* this.registry.getInstanceEffect(providerId);
 
-			return yield* adapter
+			return yield* instance
 				.resolveQuestionEffect(
 					command.sessionId,
 					command.requestId,
@@ -309,8 +311,10 @@ export class OrchestrationEngine {
 		command: DiscoverCommand,
 	): Effect.Effect<AdapterCapabilities, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const adapter = yield* this.registry.getAdapterEffect(command.providerId);
-			return yield* adapter
+			const instance = yield* this.registry.getInstanceEffect(
+				command.providerId,
+			);
+			return yield* instance
 				.discoverEffect()
 				.pipe(
 					Effect.tapError((error) =>
@@ -337,13 +341,13 @@ export class OrchestrationEngine {
 				);
 				return;
 			}
-			const adapter = yield* this.registry.getAdapterEffect(providerId);
+			const instance = yield* this.registry.getInstanceEffect(providerId);
 			yield* Effect.sync(() =>
 				log.info(
 					`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
 				),
 			);
-			yield* adapter
+			yield* instance
 				.endSessionEffect(command.sessionId)
 				.pipe(
 					Effect.tapError((error) =>
@@ -386,7 +390,7 @@ export class OrchestrationEngine {
 		);
 	}
 
-	/** Shutdown the engine and all adapters. */
+	/** Shutdown the engine and all provider instances. */
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.gen(this, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));

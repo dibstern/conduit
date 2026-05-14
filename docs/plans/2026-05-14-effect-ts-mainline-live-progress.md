@@ -45,7 +45,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 ## Current Blockers
 
 1. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
-2. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
+2. Provider architecture now has instance-first registry APIs in production orchestration; remaining cleanup is class/error/test naming that still says adapter where it no longer reflects ownership.
 3. CLI still imports/calls `startDaemonProcess`.
 
 ## Remaining Order
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
-9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist and production orchestration runtime creates OpenCode/Claude instances through plain driver values.
+9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.
 12. Single-owner daemon cutover.
@@ -330,3 +330,9 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Switched the debug panel verbose toggle to typed RPC and deleted the legacy incoming `set_log_level` raw WS command from router/schema/relay dispatch.
 - Reclassified the sole remaining raw production browser WS command, `pty_input`, as the terminal data-plane path pending a persistent RPC stream/client design.
 - Verified locally with `pnpm check`, `pnpm lint`, targeted RPC/router/schema/relay/store unit tests, `pnpm build:frontend`, `git diff --check`, and the pre-commit build/lint/full-unit/typecheck hook.
+
+2026-05-14, provider registry instance API:
+
+- Added `ProviderRegistry` instance-first APIs (`registerInstance`, `getInstance*`, `hasInstance`, `removeInstance`) and moved production orchestration dispatch/wiring to them.
+- Left adapter-named registry methods as compatibility shims only; remaining provider cleanup is naming debt in adapter class/error/test surfaces.
+- Verified locally with targeted provider registry, orchestration engine, orchestration wiring, scoped-layer, and Claude provider wiring tests.

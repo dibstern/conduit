@@ -1,8 +1,8 @@
 // src/lib/provider/orchestration-wiring.ts
 // ─── Orchestration Wiring ───────────────────────────────────────────────────
-// Factory function to create the full orchestration layer (registry, adapter,
-// engine) from an OpenCodeClient. Used by relay-stack.ts to instantiate the
-// provider layer alongside the existing relay pipeline.
+// Factory function to create the full orchestration layer (registry, provider
+// instances, engine) from an OpenCodeClient. Used by relay-stack.ts to
+// instantiate the provider layer alongside the existing relay pipeline.
 
 import { Context, Effect, Layer, type Scope } from "effect";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -76,12 +76,12 @@ function createOrchestrationComponents(
 			: {}),
 	});
 
-	registry.registerAdapter(adapter);
+	registry.registerInstance(adapter);
 
 	const claudeAdapter = new ClaudeAdapter({
 		workspaceRoot: options.workspaceRoot ?? process.cwd(),
 	});
-	registry.registerAdapter(claudeAdapter);
+	registry.registerInstance(claudeAdapter);
 
 	const engine = new OrchestrationEngine({ registry });
 
@@ -147,8 +147,8 @@ function createOrchestrationView(
  * Create an imperative view over orchestration components.
  *
  * Kept for narrow unit tests and compatibility surfaces. Production relay
- * wiring uses makeOrchestrationRuntimeLayer() so adapter shutdown is owned by
- * the relay runtime Scope.
+ * wiring uses makeOrchestrationRuntimeLayer() so provider instance shutdown is
+ * owned by the relay runtime Scope.
  */
 export function createOrchestrationLayer(
 	options: OrchestrationLayerOptions,
@@ -194,7 +194,7 @@ export const makeOrchestrationRuntimeLayer = (
 export const getOrchestrationLayer = Effect.gen(function* () {
 	const engine = yield* OrchestrationEngineTag;
 	const registry = yield* ProviderRegistryTag;
-	const adapter = yield* registry.getAdapterEffect("opencode");
+	const adapter = yield* registry.getInstanceEffect("opencode");
 	if (!(adapter instanceof OpenCodeAdapter)) {
 		return yield* Effect.dieMessage(
 			"opencode provider is not an OpenCodeAdapter",
