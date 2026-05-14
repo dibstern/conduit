@@ -536,6 +536,34 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not re-enter the daemon runtime when direct stop marks shutdown state", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const stopStart = source.indexOf("async function stop(): Promise<void> {");
+		const lifecycleContextStart = source.indexOf(
+			"// ── Lifecycle context",
+			stopStart,
+		);
+		expect(stopStart).toBeGreaterThanOrEqual(0);
+		expect(lifecycleContextStart).toBeGreaterThan(stopStart);
+		const stopSource = source.slice(stopStart, lifecycleContextStart);
+		const hits = stopSource.split("\n").flatMap((line, index) =>
+			/updateRuntimeConfigSync\(/.test(line)
+				? [
+						{
+							path,
+							line: source.slice(0, stopStart).split("\n").length + index,
+							source: line.trim(),
+							reason:
+								"direct stop should update the local shutdown snapshot before disposing the runtime instead of re-entering it",
+						},
+					]
+				: [],
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not seed DaemonLive with a runtime config read before the runtime exists", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

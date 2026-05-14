@@ -945,8 +945,11 @@ export async function startDaemonProcess(
 	// ── Helper: stop ──────────────────────────────────────────────────────
 	async function stop(): Promise<void> {
 		if (shuttingDown) return;
-		updateRuntimeConfigSync((config) => ({ ...config, shuttingDown: true }));
 		shuttingDown = true;
+		updateLocalRuntimeConfigSnapshot((config) => ({
+			...config,
+			shuttingDown: true,
+		}));
 		if (shutdownTimer) {
 			clearTimeout(shutdownTimer);
 			shutdownTimer = null;
