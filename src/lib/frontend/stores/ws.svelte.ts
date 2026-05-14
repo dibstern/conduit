@@ -14,6 +14,7 @@ import {
 import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { phaseToIdle } from "./chat.svelte.js";
+import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
 import { getCurrentSessionId } from "./router.svelte.js";
 import {
@@ -201,14 +202,18 @@ export function connect(slug?: string): void {
 function doConnect(slug: string | undefined, generation: number): void {
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 	const path = slug ? `/p/${slug}/ws` : "/ws";
+	const params = new URLSearchParams({
+		client: getBrowserClientId(),
+	});
 	let url = `${protocol}//${window.location.host}${path}`;
 
 	// If the URL has a session ID, pass it as a query param so the server
 	// sends the correct session_switched on init (no flash of wrong session).
 	const sessionId = getCurrentSessionId();
 	if (sessionId) {
-		url += `?session=${encodeURIComponent(sessionId)}`;
+		params.set("session", sessionId);
 	}
+	url += `?${params.toString()}`;
 
 	const ws = new WebSocket(url);
 	_ws = ws;

@@ -126,4 +126,19 @@ describe("Effect WS handler bridge", () => {
 		expect(handler.getClientSession(clientId)).toBe("sess-1");
 		expect(handler.getClientsForSession("sess-1")).toEqual([clientId]);
 	});
+
+	it("uses the browser-provided client id when present", async () => {
+		const handler = new EffectWsHandler({ heartbeatInterval: 300_000 });
+		cleanup.push(() => handler.drain());
+		const { url } = await startServer(handler);
+		const connected = onceConnected(handler);
+		const client = new WebSocket(`${url}?client=browser-tab-1`);
+		cleanup.push(() => client.close());
+
+		await waitOpen(client);
+		const connectedInfo = await connected;
+
+		expect(connectedInfo.clientId).toBe("browser-tab-1");
+		expect(handler.getClientIds()).toEqual(["browser-tab-1"]);
+	});
 });

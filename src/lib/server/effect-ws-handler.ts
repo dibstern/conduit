@@ -204,7 +204,8 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	}
 
 	private onConnection(ws: WebSocket, req: IncomingMessage): void {
-		const clientId = randomBytes(8).toString("hex");
+		const clientId =
+			extractRequestedClientId(req.url) ?? randomBytes(8).toString("hex");
 		const requestedSessionId = extractRequestedSessionId(req.url);
 
 		ws.on("message", (data: RawData) => this.onMessage(clientId, data));
@@ -334,6 +335,19 @@ function extractRequestedSessionId(
 	try {
 		const parsed = new URL(url, "http://localhost");
 		return parsed.searchParams.get("session") ?? undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function extractRequestedClientId(url: string | undefined): string | undefined {
+	if (!url) return undefined;
+	try {
+		const parsed = new URL(url, "http://localhost");
+		const clientId = parsed.searchParams.get("client") ?? undefined;
+		if (!clientId) return undefined;
+		if (!/^[A-Za-z0-9._:-]{1,128}$/.test(clientId)) return undefined;
+		return clientId;
 	} catch {
 		return undefined;
 	}

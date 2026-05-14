@@ -235,3 +235,9 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Moved the rewind implementation into the shared `rewindSessionToMessage()` Effect helper so RPC and handler tests exercise the same OpenCode revert and pagination-cursor cleanup behavior.
 - Deleted the legacy incoming `rewind` WS command from payload schemas, router types, dispatch tables, and incoming-message schema coverage. The UI rewind selection state remains tab-local Svelte state.
 - Verified locally with targeted RPC/contract/component/handler/router unit tests.
+
+2026-05-14, browser tab client-id prerequisite:
+
+- Added a browser tab id to the legacy event WebSocket handshake (`/ws?client=...`) and taught `EffectWsHandler` to use the validated id as its server-side client id.
+- This makes RPC `originId` and legacy event-socket client ids converge, which is required before session navigation RPCs can bind per-tab session state and target direct `sendTo` responses without a parallel client registry.
+- Verified locally with `test/unit/server/effect-ws-handler.test.ts`.
