@@ -651,7 +651,15 @@ export async function createProjectRelay(
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	try {
-		api = relayManagedRuntime.runSync(OpenCodeAPITag);
+		const startupHandles = await relayManagedRuntime.runPromise(
+			Effect.gen(function* () {
+				const api = yield* OpenCodeAPITag;
+				const wsHandler = yield* WebSocketHandlerTag;
+				return { api, wsHandler };
+			}),
+		);
+		api = startupHandles.api;
+		wsHandler = startupHandles.wsHandler;
 		if (config.signal?.aborted) throw new Error("Relay creation aborted");
 		await api.app.path();
 		log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`);
@@ -689,7 +697,6 @@ export async function createProjectRelay(
 		api,
 		log: sseLog,
 	});
-	wsHandler = relayManagedRuntime.runSync(WebSocketHandlerTag);
 	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
 		wsLog.info(
 			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,

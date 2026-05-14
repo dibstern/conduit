@@ -58,7 +58,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 4. Contracts and RPC boundary. Started locally: shared `WsRpcGroup`, import guard, and server/frontend re-export wrappers are in place.
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
-7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition is consolidated into one Effect program, SSE connect/command-gate readiness now share one Effect program, and SSE pending question/permission writes use owned service surfaces; runtime bridge cleanup remains for the other relay wiring clusters.
+7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition is consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness now share one Effect program, and SSE pending question/permission writes use owned service surfaces; runtime bridge cleanup remains for the other relay wiring clusters.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
@@ -370,3 +370,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Updated relay-stack wiring and tests so permission state is no longer described as a separate permission-only bridge.
 - Added a runtime-boundary guard against reintroducing `pendingPermissions` as an SSE wiring dependency.
 - Verified locally with focused SSE wiring, reconnect-race, runtime-boundary, mock-factory, typecheck, lint, and diff hygiene checks.
+
+2026-05-14, relay startup handle acquisition cleanup:
+
+- Moved `OpenCodeAPITag` and `WebSocketHandlerTag` acquisition into one startup Effect instead of separate `relayManagedRuntime.runSync(...)` calls.
+- Kept OpenCode reachability/config probing after acquisition and before SSE connection.
+- Extended the startup runtime-boundary guard so API and WebSocket handler acquisition cannot drift back to piecemeal `runSync`.
+- Verified locally with focused runtime-boundary, relay-stack layer/default override, typecheck, lint, and diff hygiene checks.
