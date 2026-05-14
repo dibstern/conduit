@@ -74,11 +74,6 @@ interface SessionServiceLike {
 	setPendingQuestionCounts(counts: Map<string, number>): void;
 }
 
-interface PendingQuestionCountsLike {
-	increment(sessionId: string): void;
-	set(counts: ReadonlyMap<string, number>): void;
-}
-
 interface PendingPermissionsLike {
 	record(input: PendingPermissionRequestInput): PendingPermission;
 	markReplied(requestId: string): boolean;
@@ -90,7 +85,6 @@ interface PendingPermissionsLike {
 export interface SSEWiringDeps {
 	translator: Translator;
 	sessionService: SessionServiceLike;
-	pendingQuestionCounts: PendingQuestionCountsLike;
 	pendingPermissions: PendingPermissionsLike;
 	processingTimeouts: ProcessingTimeoutsPort;
 	wsHandler: {
@@ -301,7 +295,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		// directly.
 		log.debug(`question.asked: event received`);
 		if (eventSessionId) {
-			deps.pendingQuestionCounts.increment(eventSessionId);
+			sessionService.incrementPendingQuestionCount(eventSessionId);
 		}
 		if (pushManager) {
 			sendPushForEvent(
@@ -590,7 +584,7 @@ export function wireSSEConsumer(
 							questionCounts.set(sid, (questionCounts.get(sid) ?? 0) + 1);
 						}
 					}
-					deps.pendingQuestionCounts.set(questionCounts);
+					deps.sessionService.setPendingQuestionCounts(questionCounts);
 
 					if (pendingQuestions.length === 0) return;
 					log.info(

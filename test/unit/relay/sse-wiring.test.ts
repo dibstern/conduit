@@ -439,13 +439,7 @@ describe("handleSSEEvent", () => {
 	});
 
 	it("translates and routes question.asked events to the question's session", () => {
-		const pendingQuestionCounts = {
-			increment: vi.fn(),
-			set: vi.fn(),
-		};
-		const deps = createMockSSEWiringDeps({
-			pendingQuestionCounts,
-		} as unknown as Partial<SSEWiringDeps>);
+		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user",
 			sessionId: "s1",
@@ -469,12 +463,12 @@ describe("handleSSEEvent", () => {
 			translated,
 		);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
-		expect(pendingQuestionCounts.increment).toHaveBeenCalledWith(
-			"active-session",
-		);
 		expect(
 			deps.sessionService.incrementPendingQuestionCount,
-		).not.toHaveBeenCalled();
+		).toHaveBeenCalledWith("active-session");
+		expect(
+			deps.sessionService.incrementPendingQuestionCount,
+		).toHaveBeenCalledTimes(1);
 	});
 
 	it("routes permission.replied events to pending permission state", () => {
@@ -1015,14 +1009,9 @@ describe("wireSSEConsumer", () => {
 			{ id: "que-2", sessionID: "sess-a", questions: [] },
 			{ id: "que-3", sessionID: "sess-b", questions: [] },
 		]);
-		const pendingQuestionCounts = {
-			increment: vi.fn(),
-			set: vi.fn(),
-		};
 		const deps = createMockSSEWiringDeps({
 			listPendingQuestions,
-			pendingQuestionCounts,
-		} as unknown as Partial<SSEWiringDeps>);
+		});
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
@@ -1035,14 +1024,13 @@ describe("wireSSEConsumer", () => {
 		listeners.get("connected")!();
 
 		await vi.waitFor(() => {
-			expect(pendingQuestionCounts.set).toHaveBeenCalledWith(
+			expect(deps.sessionService.setPendingQuestionCounts).toHaveBeenCalledWith(
 				new Map([
 					["sess-a", 2],
 					["sess-b", 1],
 				]),
 			);
 		});
-		expect(deps.sessionService.setPendingQuestionCounts).not.toHaveBeenCalled();
 	});
 
 	it("broadcasts connection_status 'connected' on connected event", () => {

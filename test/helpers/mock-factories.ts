@@ -315,10 +315,6 @@ export function createMockSSEWiringDeps(
 		translator: createMockTranslator(),
 		sessionService:
 			createMockSessionMgr() as unknown as SSEWiringDeps["sessionService"],
-		pendingQuestionCounts: {
-			increment: vi.fn(),
-			set: vi.fn(),
-		},
 		pendingPermissions: {
 			record: vi.fn((input) => ({
 				requestId: input.requestId,

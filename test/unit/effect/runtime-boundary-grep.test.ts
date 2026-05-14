@@ -687,4 +687,34 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not keep a duplicate pending-question bridge for SSE wiring", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern: /\bpendingQuestionCounts:\s*\{/,
+				reason:
+					"SSE wiring should update pending question counts through the session service",
+			},
+			{
+				path: "src/lib/relay/sse-wiring.ts",
+				pattern: /\bpendingQuestionCounts\b/,
+				reason:
+					"SSEWiringDeps should expose one session service surface for question counts",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
 });

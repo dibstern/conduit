@@ -770,24 +770,6 @@ export async function createProjectRelay(
 		{
 			translator,
 			sessionService: sessionServiceBridge,
-			pendingQuestionCounts: {
-				increment: (sessionId) => {
-					relayManagedRuntime.runSync(
-						Effect.gen(function* () {
-							const service = yield* SessionManagerServiceTag;
-							yield* service.incrementPendingQuestionCount(sessionId);
-						}),
-					);
-				},
-				set: (counts) => {
-					relayManagedRuntime.runSync(
-						Effect.gen(function* () {
-							const service = yield* SessionManagerServiceTag;
-							yield* service.setPendingQuestionCounts(counts);
-						}),
-					);
-				},
-			},
 			pendingPermissions: {
 				record: (input) =>
 					relayManagedRuntime.runSync(
