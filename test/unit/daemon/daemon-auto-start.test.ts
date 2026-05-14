@@ -26,7 +26,10 @@ import {
 	probeOpenCode,
 } from "../../../src/lib/daemon/daemon-utils.js";
 import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import {
+	OpenCodeUnavailableError,
+	startDaemonProcess,
+} from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);
@@ -99,13 +102,19 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		await expect(
-			startDaemonProcess({
-				...daemonOpts(tmpDir),
-				opencodeUrl: "http://localhost:4096",
-				smartDefault: true,
-			}),
-		).rejects.toThrow(/opencode.*not found/i);
+		const rejected = startDaemonProcess({
+			...daemonOpts(tmpDir),
+			opencodeUrl: "http://localhost:4096",
+			smartDefault: true,
+		});
+
+		await expect(rejected).rejects.toBeInstanceOf(OpenCodeUnavailableError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "OpenCodeUnavailableError",
+			url: "http://localhost:4096",
+			port: 4096,
+		});
+		await expect(rejected).rejects.toThrow(/opencode.*not found/i);
 	});
 
 	it("skips probe-and-convert when smartDefault is false", async () => {
@@ -130,13 +139,19 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		await expect(
-			startDaemonProcess({
-				...daemonOpts(tmpDir),
-				// No opencodeUrl — triggers the smart default path
-				smartDefault: true,
-			}),
-		).rejects.toThrow(/opencode.*not found/i);
+		const rejected = startDaemonProcess({
+			...daemonOpts(tmpDir),
+			// No opencodeUrl — triggers the smart default path
+			smartDefault: true,
+		});
+
+		await expect(rejected).rejects.toBeInstanceOf(OpenCodeUnavailableError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "OpenCodeUnavailableError",
+			url: "http://localhost:4096",
+			port: 4096,
+		});
+		await expect(rejected).rejects.toThrow(/opencode.*not found/i);
 	});
 
 	it("preserves instance name during conversion", async () => {

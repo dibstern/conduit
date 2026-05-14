@@ -24,6 +24,7 @@ import type { Fiber } from "effect";
 import {
 	Cause,
 	Context,
+	Data,
 	Duration,
 	Effect,
 	Exit,
@@ -226,6 +227,22 @@ export const startDaemonEffect = (daemonLiveOptions: DaemonLiveOptions) => {
 		disablePrettyLogger: true,
 	});
 };
+
+export class OpenCodeUnavailableError extends Data.TaggedError(
+	"OpenCodeUnavailableError",
+)<{
+	readonly url: string;
+	readonly port: number;
+}> {
+	override get message(): string {
+		return (
+			`OpenCode is not running at ${this.url} and the "opencode" ` +
+			"binary was not found on PATH.\n" +
+			"Install OpenCode first: https://opencode.ai\n" +
+			`Or start it manually: opencode serve --port ${this.port}`
+		);
+	}
+}
 
 // ─── Imperative bridge: startDaemonProcess ───────────────────────────────
 // Standalone startup function that replaces `new Daemon(options).start()`.
@@ -1085,13 +1102,10 @@ export async function startDaemonProcess(
 		const reachable = await probeOpenCode(url);
 		if (!reachable) {
 			if (!(await isOpencodeInstalled())) {
-				throw new Error(
-					`OpenCode is not running at ${url} and the "opencode" binary ` +
-						"was not found on PATH.\n" +
-						"Install OpenCode first: https://opencode.ai\n" +
-						"Or start it manually: opencode serve --port " +
-						`${existingDefault.port}`,
-				);
+				throw new OpenCodeUnavailableError({
+					url,
+					port: existingDefault.port,
+				});
 			}
 			const { name, port: originalPort } = existingDefault;
 			instanceManager.removeInstance("default");
@@ -1125,12 +1139,10 @@ export async function startDaemonProcess(
 			);
 		} else {
 			if (!(await isOpencodeInstalled())) {
-				throw new Error(
-					`OpenCode is not running at ${probeUrl} and the "opencode" ` +
-						"binary was not found on PATH.\n" +
-						"Install OpenCode first: https://opencode.ai\n" +
-						`Or start it manually: opencode serve --port ${DEFAULT_OPENCODE_PORT}`,
-				);
+				throw new OpenCodeUnavailableError({
+					url: probeUrl,
+					port: DEFAULT_OPENCODE_PORT,
+				});
 			}
 			const freePort = await findFreePort(DEFAULT_OPENCODE_PORT);
 			instanceManager.addInstance("default", {
