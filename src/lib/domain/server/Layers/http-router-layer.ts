@@ -102,9 +102,7 @@ interface HttpRouterRequestHandlerOptions {
 	readonly caCertDer?: Buffer | undefined;
 }
 
-const buildHttpRouterRequestHandler = (
-	options: HttpRouterRequestHandlerOptions,
-): DaemonHttpRequestHandler => {
+const makeHttpRouterLayer = (options: HttpRouterRequestHandlerOptions) => {
 	let routerLayer = Layer.mergeAll(
 		options.authLayer,
 		Layer.succeed(StaticDirTag, options.staticDir),
@@ -168,18 +166,22 @@ const buildHttpRouterRequestHandler = (
 		);
 	}
 
-	const effectHandler = Effect.runSync(
-		NodeHttpServer.makeHandler(
-			effectRouterWithCors.pipe(Effect.provide(routerLayer)),
-		),
-	);
-
-	return {
-		handleRequest: async (req, res) => {
-			effectHandler(req, res);
-		},
-	};
+	return routerLayer;
 };
+
+const buildHttpRouterRequestHandlerEffect = (
+	options: HttpRouterRequestHandlerOptions,
+) =>
+	Effect.map(
+		NodeHttpServer.makeHandler(
+			effectRouterWithCors.pipe(Effect.provide(makeHttpRouterLayer(options))),
+		),
+		(effectHandler): DaemonHttpRequestHandler => ({
+			handleRequest: async (req, res) => {
+				effectHandler(req, res);
+			},
+		}),
+	);
 
 const routerStatusForProjectState = (
 	entry: ProjectState,
@@ -236,30 +238,32 @@ const makeDaemonProjectsReader = (deps: {
 export const makeStandaloneHttpRouterRequestHandler = (
 	options: StandaloneHttpRouterOptions,
 ): DaemonHttpRequestHandler =>
-	buildHttpRouterRequestHandler({
-		authLayer: makeAuthManagerLive(options.auth),
-		setupInfoLayer: Layer.succeed(SetupInfoProvider, {
-			getPort: () => Effect.sync(options.getPort),
-			getIsTls: () => Effect.sync(options.getIsTls),
-		}),
-		staticDir: options.staticDir,
-		getProjects: () => Effect.sync(options.getProjects),
-		removeProject: (slug) =>
-			options.removeProject(slug)
-				? Effect.void
-				: Effect.fail(new Error("Project not found")),
-		delegateApiRequest:
-			options.delegateApiRequest ??
-			(() => Effect.fail(new Error("Project API route not found"))),
-		loadThemes: () =>
-			Effect.tryPromise({
-				try: options.loadThemes,
-				catch: (cause) => cause,
+	Effect.runSync(
+		buildHttpRouterRequestHandlerEffect({
+			authLayer: makeAuthManagerLive(options.auth),
+			setupInfoLayer: Layer.succeed(SetupInfoProvider, {
+				getPort: () => Effect.sync(options.getPort),
+				getIsTls: () => Effect.sync(options.getIsTls),
 			}),
-		pushManager: options.pushManager,
-		caRootPath: options.caRootPath,
-		caCertDer: options.caCertDer,
-	});
+			staticDir: options.staticDir,
+			getProjects: () => Effect.sync(options.getProjects),
+			removeProject: (slug) =>
+				options.removeProject(slug)
+					? Effect.void
+					: Effect.fail(new Error("Project not found")),
+			delegateApiRequest:
+				options.delegateApiRequest ??
+				(() => Effect.fail(new Error("Project API route not found"))),
+			loadThemes: () =>
+				Effect.tryPromise({
+					try: options.loadThemes,
+					catch: (cause) => cause,
+				}),
+			pushManager: options.pushManager,
+			caRootPath: options.caRootPath,
+			caCertDer: options.caCertDer,
+		}),
+	);
 
 export const makeDaemonHttpRouterLive = (staticDir: string) =>
 	Layer.effect(
@@ -273,7 +277,7 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 			const relayCache = yield* RelayCacheTag;
 			const pushManager = yield* PushManagerTag;
 			const legacyPushManager = yield* pushManager.getLegacyManager;
-			return buildHttpRouterRequestHandler({
+			return yield* buildHttpRouterRequestHandlerEffect({
 				authLayer: Layer.succeed(AuthManagerTag, auth),
 				setupInfoLayer: Layer.succeed(SetupInfoProvider, {
 					getPort: () =>

@@ -21,7 +21,8 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	{
 		path: "src/lib/domain/server/Layers/http-router-layer.ts",
 		linePattern: /Effect\.runSync\($/,
-		reason: "server-owned Node HTTP callback from NodeHttpServer.makeHandler",
+		reason:
+			"standalone HTTP compatibility adapter from NodeHttpServer.makeHandler",
 	},
 	{
 		path: "src/lib/provider/claude/claude-permission-bridge.ts",
@@ -177,6 +178,24 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(unexpected).toEqual([]);
 		expect(hits).toHaveLength(allowedRuntimeBoundaries.length);
+	});
+
+	it("constructs the daemon HTTP router handler inside the Layer effect", () => {
+		const path = "src/lib/domain/server/Layers/http-router-layer.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const daemonLiveStart = source.indexOf(
+			"export const makeDaemonHttpRouterLive",
+		);
+		expect(daemonLiveStart).toBeGreaterThanOrEqual(0);
+		const daemonLiveSource = source.slice(daemonLiveStart);
+
+		expect(daemonLiveSource).toContain(
+			"yield* buildHttpRouterRequestHandlerEffect",
+		);
+		expect(daemonLiveSource).not.toMatch(/Effect\.runSync/);
+		expect(daemonLiveSource).not.toContain(
+			"return buildHttpRouterRequestHandler({",
+		);
 	});
 
 	it("keeps remaining production plain Error throws explicitly reclassified", () => {
