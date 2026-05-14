@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
+import { makeRelayCacheLayer } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	HttpServerRefTag,
@@ -20,8 +21,12 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
-import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
+import type {
+	OpenCodeInstance,
+	ProjectInfo,
+} from "../../../src/lib/shared-types.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 
@@ -432,4 +437,168 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			),
 		);
 	});
+
+	it.effect(
+		"threads relay-cache-owned project mutators into relay config",
+		() => {
+			const dir = mkdtempSync(
+				join(tmpdir(), "conduit-relay-project-mutators-"),
+			);
+			const projectDir = join(dir, "project");
+			const server = createServer();
+			const firstStop = vi.fn(async () => undefined);
+			const secondStop = vi.fn(async () => undefined);
+			createProjectRelayMock
+				.mockResolvedValueOnce({
+					stop: firstStop,
+				})
+				.mockResolvedValueOnce({
+					stop: secondStop,
+				});
+
+			const baseLayer = Layer.mergeAll(
+				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+				ConfigPersistenceNoopLive,
+				DaemonEventBusLive,
+				makeProjectRegistryLive([
+					{
+						slug: "effect-project",
+						title: "Effect Project",
+						directory: projectDir,
+						instanceId: "default",
+					},
+				]),
+				makeInstanceManagerStateLive(
+					undefined,
+					[
+						{
+							id: "default",
+							name: "Default",
+							port: 4096,
+							managed: false,
+							url: "http://localhost:4096",
+						},
+						{
+							id: "remote",
+							name: "Remote",
+							port: 4321,
+							managed: false,
+							url: "http://localhost:4321",
+						},
+					],
+					{ defaultOpencodeUrl: "http://localhost:4096" },
+				),
+				NoopAuxiliaryDaemonServices,
+			);
+			const layer = makeRelayCacheLayer.pipe(
+				Layer.provideMerge(RelayFactoryLive(join(dir, "config"))),
+				Layer.provide(baseLayer),
+			);
+
+			return Effect.gen(function* () {
+				const httpServerRef = yield* HttpServerRefTag;
+				yield* Ref.set(httpServerRef, server);
+
+				const cache = yield* RelayCacheTag;
+				yield* cache.get("effect-project");
+
+				const config = createProjectRelayMock.mock.calls[0]?.[0];
+				expect(config?.addProject).toBeTypeOf("function");
+				expect(config?.removeProject).toBeTypeOf("function");
+				expect(config?.setProjectTitle).toBeTypeOf("function");
+				expect(config?.setProjectInstance).toBeTypeOf("function");
+				const addProject = config?.addProject;
+				const removeProject = config?.removeProject;
+				const setProjectTitle = config?.setProjectTitle;
+				const setProjectInstance = config?.setProjectInstance;
+				const getProjects = config?.getProjects;
+				if (
+					addProject == null ||
+					removeProject == null ||
+					setProjectTitle == null ||
+					setProjectInstance == null ||
+					getProjects == null
+				) {
+					expect.fail("expected project mutation callbacks");
+				}
+
+				const added = yield* Effect.tryPromise<ProjectInfo, unknown>({
+					try: () => addProject(join(dir, "added"), "remote"),
+					catch: (cause) => cause,
+				});
+				expect(added).toEqual(
+					expect.objectContaining({
+						title: "added",
+						directory: join(dir, "added"),
+						instanceId: "remote",
+					}),
+				);
+
+				yield* Effect.tryPromise({
+					try: () =>
+						Promise.resolve(setProjectTitle(added.slug, "Added Project")),
+					catch: (cause) => cause,
+				});
+				let projects = yield* Effect.tryPromise<
+					ReadonlyArray<ProjectInfo>,
+					unknown
+				>({
+					try: () => Promise.resolve(getProjects()),
+					catch: (cause) => cause,
+				});
+				expect(projects).toContainEqual(
+					expect.objectContaining({
+						slug: added.slug,
+						title: "Added Project",
+						instanceId: "remote",
+					}),
+				);
+
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(removeProject(added.slug)),
+					catch: (cause) => cause,
+				});
+				projects = yield* Effect.tryPromise<
+					ReadonlyArray<ProjectInfo>,
+					unknown
+				>({
+					try: () => Promise.resolve(getProjects()),
+					catch: (cause) => cause,
+				});
+				expect(projects.some((project) => project.slug === added.slug)).toBe(
+					false,
+				);
+
+				yield* Effect.tryPromise({
+					try: () =>
+						Promise.resolve(setProjectInstance("effect-project", "remote")),
+					catch: (cause) => cause,
+				});
+				projects = yield* Effect.tryPromise<
+					ReadonlyArray<ProjectInfo>,
+					unknown
+				>({
+					try: () => Promise.resolve(getProjects()),
+					catch: (cause) => cause,
+				});
+				expect(projects).toContainEqual(
+					expect.objectContaining({
+						slug: "effect-project",
+						instanceId: "remote",
+					}),
+				);
+				expect(firstStop).toHaveBeenCalledOnce();
+				expect(createProjectRelayMock).toHaveBeenCalledTimes(2);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						server.close();
+						rmSync(dir, { recursive: true, force: true });
+						createProjectRelayMock.mockReset();
+					}),
+				),
+			);
+		},
+	);
 });

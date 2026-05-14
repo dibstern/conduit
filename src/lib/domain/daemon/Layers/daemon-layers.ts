@@ -3,6 +3,8 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
+import { homedir } from "node:os";
+import { basename, resolve } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import {
 	Cause,
@@ -12,6 +14,7 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Option,
 	PubSub,
 	Ref,
 	Runtime,
@@ -38,6 +41,8 @@ import {
 	removeSocketFile,
 	writePidFile,
 } from "../../../daemon/pid-manager.js";
+import type { StoredProject } from "../../../types.js";
+import { generateSlug } from "../../../utils.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -79,13 +84,20 @@ import {
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
 import {
+	addWithoutRelay as addEffectProjectWithoutRelay,
+	findByDirectory,
+	allProjects as getAllEffectProjects,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
+	remove as removeEffectProject,
+	replaceRelay as replaceEffectRelay,
+	updateProject as updateEffectProject,
 } from "../Services/project-registry-service.js";
 import {
 	makeRelayCacheService,
+	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
 import {
@@ -334,18 +346,109 @@ const resolveProjectOpencodeUrl = (project: {
 		return yield* getInstanceUrl(first.id);
 	});
 
+const normalizeProjectDirectory = (directory: string): string => {
+	const expanded =
+		directory === "~" || directory.startsWith("~/")
+			? directory.replace(/^~/, homedir())
+			: directory;
+	return resolve(expanded);
+};
+
+const titleForDirectory = (directory: string): string =>
+	basename(directory) || "project";
+
+const addProjectToEffectRegistry = (
+	directory: string,
+	instanceId?: string | undefined,
+) =>
+	Effect.gen(function* () {
+		const normalizedDirectory = normalizeProjectDirectory(directory);
+		yield* commitDaemonRuntimeConfig((config) => {
+			if (!config.dismissedPaths.has(normalizedDirectory)) return config;
+			const dismissedPaths = new Set(config.dismissedPaths);
+			dismissedPaths.delete(normalizedDirectory);
+			return {
+				...config,
+				dismissedPaths,
+			};
+		});
+
+		const existing = yield* findByDirectory(normalizedDirectory);
+		if (Option.isSome(existing)) {
+			return existing.value.project;
+		}
+
+		const projects = yield* getAllEffectProjects;
+		const existingSlugs = new Set(projects.map((project) => project.slug));
+		const project: StoredProject = {
+			slug: generateSlug(normalizedDirectory, existingSlugs),
+			directory: normalizedDirectory,
+			title: titleForDirectory(normalizedDirectory),
+			lastUsed: Date.now(),
+			...(instanceId !== undefined && { instanceId }),
+		};
+		yield* addEffectProjectWithoutRelay(project);
+		return project;
+	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));
+
 export const makeRelayCacheLayer: Layer.Layer<
 	RelayCacheTag,
 	never,
-	RelayFactoryTag | ProjectRegistryTag | InstanceManagerStateTag
+	| RelayFactoryTag
+	| ProjectRegistryTag
+	| InstanceManagerStateTag
+	| DaemonConfigRefTag
+	| DaemonEventBusTag
+	| ConfigPersistenceTag
 > = Layer.scoped(
 	RelayCacheTag,
 	Effect.gen(function* () {
 		const relayFactory = yield* RelayFactoryTag;
 		const projectRegistry = yield* ProjectRegistryTag;
 		const instanceState = yield* InstanceManagerStateTag;
+		const configRef = yield* DaemonConfigRefTag;
+		const eventBus = yield* DaemonEventBusTag;
+		const configPersistence = yield* ConfigPersistenceTag;
+		const runtime = yield* Effect.runtime<never>();
+		let relayCache: RelayCache | undefined;
 
-		return yield* makeRelayCacheService((slug) =>
+		const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
+			new Promise<A>((resolve, reject) => {
+				Runtime.runCallback(runtime)(effect, {
+					onExit: (exit) => {
+						if (Exit.isSuccess(exit)) {
+							resolve(exit.value);
+							return;
+						}
+						reject(Cause.squash(exit.cause));
+					},
+				});
+			});
+
+		const provideProjectMutationDeps = <A, E>(
+			effect: Effect.Effect<
+				A,
+				E,
+				| ProjectRegistryTag
+				| DaemonConfigRefTag
+				| DaemonEventBusTag
+				| ConfigPersistenceTag
+				| RelayCacheTag
+			>,
+		) => {
+			if (relayCache === undefined) {
+				return Effect.dieMessage("Relay cache not initialized");
+			}
+			return effect.pipe(
+				Effect.provideService(ProjectRegistryTag, projectRegistry),
+				Effect.provideService(DaemonConfigRefTag, configRef),
+				Effect.provideService(DaemonEventBusTag, eventBus),
+				Effect.provideService(ConfigPersistenceTag, configPersistence),
+				Effect.provideService(RelayCacheTag, relayCache),
+			);
+		};
+
+		const relayCacheService = yield* makeRelayCacheService((slug) =>
 			Effect.gen(function* () {
 				const project = yield* getProject(slug).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRegistry),
@@ -358,7 +461,37 @@ export const makeRelayCacheLayer: Layer.Layer<
 						reason: `No OpenCode instance URL available for project "${slug}"`,
 					});
 				}
-				const relay = yield* relayFactory.create(project, opencodeUrl);
+				const projectControls = {
+					addProject: (directory: string, instanceId?: string) =>
+						runCallback(
+							provideProjectMutationDeps(
+								addProjectToEffectRegistry(directory, instanceId),
+							),
+						),
+					removeProject: (projectSlug: string) =>
+						runCallback(
+							provideProjectMutationDeps(removeEffectProject(projectSlug)),
+						),
+					setProjectTitle: (projectSlug: string, title: string) =>
+						runCallback(
+							provideProjectMutationDeps(
+								updateEffectProject(projectSlug, { title }),
+							),
+						),
+					setProjectInstance: (projectSlug: string, instanceId: string) =>
+						runCallback(
+							provideProjectMutationDeps(
+								updateEffectProject(projectSlug, { instanceId }).pipe(
+									Effect.zipRight(replaceEffectRelay(projectSlug)),
+								),
+							),
+						),
+				};
+				const relay = yield* relayFactory.create(
+					project,
+					opencodeUrl,
+					projectControls,
+				);
 				return {
 					slug,
 					wsHandler: relay.wsHandler,
@@ -368,6 +501,8 @@ export const makeRelayCacheLayer: Layer.Layer<
 				};
 			}),
 		);
+		relayCache = relayCacheService;
+		return relayCacheService;
 	}),
 );
 

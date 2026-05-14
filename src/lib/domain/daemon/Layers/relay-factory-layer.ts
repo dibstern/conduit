@@ -29,7 +29,7 @@ import type {
 	InstanceConfig,
 	OpenCodeInstance,
 } from "../../../shared-types.js";
-import type { StoredProject } from "../../../types.js";
+import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -100,7 +100,17 @@ export interface RelayFactory {
 	readonly create: (
 		project: StoredProject,
 		opencodeUrl: string,
+		projectControls?: RelayFactoryProjectControls,
 	) => Effect.Effect<ProjectRelay, RelayFactoryError>;
+}
+
+export interface RelayFactoryProjectControls {
+	readonly addProject: NonNullable<ProjectRelayConfig["addProject"]>;
+	readonly removeProject: NonNullable<ProjectRelayConfig["removeProject"]>;
+	readonly setProjectTitle: NonNullable<ProjectRelayConfig["setProjectTitle"]>;
+	readonly setProjectInstance: NonNullable<
+		ProjectRelayConfig["setProjectInstance"]
+	>;
 }
 
 // ─── RelayFactoryTag ────────────────────────────────────────────────────────
@@ -257,6 +267,7 @@ export const RelayFactoryLive = (
 				create: (
 					project: StoredProject,
 					opencodeUrl: string,
+					projectControls?: RelayFactoryProjectControls,
 				): Effect.Effect<ProjectRelay, RelayFactoryError> =>
 					Effect.gen(function* () {
 						// Read current HTTP server from Ref
@@ -322,6 +333,12 @@ export const RelayFactoryLive = (
 									getCachedUpdate,
 									...(relayPushSender != null && {
 										pushManager: relayPushSender,
+									}),
+									...(projectControls != null && {
+										addProject: projectControls.addProject,
+										removeProject: projectControls.removeProject,
+										setProjectTitle: projectControls.setProjectTitle,
+										setProjectInstance: projectControls.setProjectInstance,
 									}),
 								});
 							},
