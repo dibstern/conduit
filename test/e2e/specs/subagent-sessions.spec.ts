@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
 import {
 	createMockRelayProtocolContext,
 	mockRelayWebSocket,
@@ -279,11 +280,23 @@ test.describe("Subagent navigation", () => {
 			agentListMsg,
 		];
 
-		const clientMessages: unknown[] = [];
+		let sendMockRelayMessage: ((msg: MockMessage) => void) | undefined;
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				ViewSession: (params) => {
+					if (params["sessionId"] === snapshot.childSession.id) {
+						for (const msg of childSwitchMessages) {
+							sendMockRelayMessage?.(msg);
+						}
+					}
+					return { ok: true };
+				},
+			},
+		});
 
 		await page.routeWebSocket(/\/ws/, (ws) => {
 			const protocolContext = createMockRelayProtocolContext();
-			const sendMockMessage = (msg: MockMessage) => {
+			sendMockRelayMessage = (msg: MockMessage) => {
 				ws.send(
 					JSON.stringify(normalizeMockRelayMessage(msg, protocolContext)),
 				);
@@ -297,26 +310,16 @@ test.describe("Subagent navigation", () => {
 					? childInitMessages
 					: initMessages;
 			for (const msg of msgs) {
-				sendMockMessage(msg);
+				sendMockRelayMessage(msg);
 			}
 
 			ws.onMessage((data) => {
 				try {
 					const parsed = JSON.parse(String(data));
-					clientMessages.push(parsed);
-
-					if (
-						parsed.type === "switch_session" &&
-						parsed.sessionId === snapshot.childSession.id
-					) {
-						for (const msg of childSwitchMessages) {
-							sendMockMessage(msg);
-						}
-					}
 
 					if (parsed.type === "get_agents") {
 						const al = initMessages.find((m) => m.type === "agent_list");
-						if (al) sendMockMessage(al);
+						if (al) sendMockRelayMessage?.(al);
 					}
 				} catch {
 					// ignore
@@ -334,18 +337,15 @@ test.describe("Subagent navigation", () => {
 		await expect(subagentLink).toBeVisible({ timeout: 5_000 });
 		await subagentLink.click();
 
-		// Verify switch_session was sent
-		const start = Date.now();
-		while (Date.now() - start < 5_000) {
-			const found = clientMessages.find(
-				(m) =>
-					(m as Record<string, unknown>)["type"] === "switch_session" &&
-					(m as Record<string, unknown>)["sessionId"] ===
-						snapshot.childSession.id,
-			);
-			if (found) break;
-			await page.waitForTimeout(50);
-		}
+		const viewRequest = await rpc.waitForRequest(
+			(request) =>
+				request.tag === "ViewSession" &&
+				request.payload["sessionId"] === snapshot.childSession.id,
+		);
+		expect(viewRequest).toMatchObject({
+			tag: "ViewSession",
+			payload: { sessionId: snapshot.childSession.id },
+		});
 
 		// SubagentBackBar should appear
 		await expect(chat.subagentBackBar).toBeVisible({ timeout: 5_000 });
@@ -411,17 +411,20 @@ test.describe("Subagent navigation", () => {
 			agentListMsg,
 		];
 
-		const control = await mockRelayWebSocket(page, {
+		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				ViewSession: (params) => {
+					if (params["sessionId"] === snapshot.parentSession.id) {
+						void control.sendMessages(parentSwitchMessages);
+					}
+					return { ok: true };
+				},
+			},
+		});
+		control = await mockRelayWebSocket(page, {
 			initMessages: childInitMessages,
 			responses: new Map(),
-			onClientMessage(msg, ctrl) {
-				if (
-					msg["type"] === "switch_session" &&
-					msg["sessionId"] === snapshot.parentSession.id
-				) {
-					void ctrl.sendMessages(parentSwitchMessages);
-				}
-			},
 		});
 		await page.goto(`${baseURL}/p/myapp/`);
 		await waitForChatReady(page);
@@ -432,14 +435,15 @@ test.describe("Subagent navigation", () => {
 		await expect(chat.subagentBackBar).toBeVisible({ timeout: 5_000 });
 		await chat.subagentBackBtn.click();
 
-		// Verify switch_session was sent for parent
-		const switchMsg = await control.waitForClientMessage(
-			(m) =>
-				(m as Record<string, unknown>)["type"] === "switch_session" &&
-				(m as Record<string, unknown>)["sessionId"] ===
-					snapshot.parentSession.id,
+		const viewRequest = await rpc.waitForRequest(
+			(request) =>
+				request.tag === "ViewSession" &&
+				request.payload["sessionId"] === snapshot.parentSession.id,
 		);
-		expect(switchMsg).toBeDefined();
+		expect(viewRequest).toMatchObject({
+			tag: "ViewSession",
+			payload: { sessionId: snapshot.parentSession.id },
+		});
 
 		// SubagentBackBar should disappear (parent has no parentID)
 		await expect(chat.subagentBackBar).not.toBeVisible({ timeout: 5_000 });

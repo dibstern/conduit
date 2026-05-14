@@ -191,6 +191,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
 		slug: "test-status-poller",
+		noServer: true,
 		log: createSilentLogger(),
 		statusPollerInterval: 100,
 		messagePollerInterval: 150,
@@ -198,6 +199,18 @@ async function createTestHarness(): Promise<TestHarness> {
 			sseGracePeriodMs: 300,
 			sseActiveThresholdMs: 500,
 		},
+	});
+
+	relayServer.on("upgrade", (req, socket, head) => {
+		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
+			relay.wsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
+			relay.rpcWsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		socket.destroy();
 	});
 
 	// Wait for SSE + status poller to initialize
@@ -208,7 +221,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		mock,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}`;
+			let url = `ws://127.0.0.1:${relayPort}/ws`;
 			if (opts?.session) {
 				url += `?session=${encodeURIComponent(opts.session)}`;
 			}
@@ -242,11 +255,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		await client.waitForInitialState();
 
 		// View session A
-		client.send({ type: "view_session", sessionId: "sess-A" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
+		await client.viewSession("sess-A");
 		client.clearReceived();
 
 		// Simulate session A becoming busy (e.g., TUI started processing)
@@ -271,11 +280,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
 
-		client.send({ type: "view_session", sessionId: "sess-B" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await client.viewSession("sess-B");
 		client.clearReceived();
 
 		// First make session B busy
@@ -302,16 +307,8 @@ describe("Status poller → browser processing/done transitions", () => {
 		await clientB.waitForInitialState();
 
 		// Client A views session A, Client B views session B
-		clientA.send({ type: "view_session", sessionId: "sess-A" });
-		clientB.send({ type: "view_session", sessionId: "sess-B" });
-		await clientA.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
-		await clientB.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await clientA.viewSession("sess-A");
+		await clientB.viewSession("sess-B");
 		clientA.clearReceived();
 		clientB.clearReceived();
 

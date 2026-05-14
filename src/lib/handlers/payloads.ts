@@ -1,5 +1,3 @@
-import type { RequestId } from "../shared-types.js";
-
 // ─── Payload Type Map ────────────────────────────────────────────────────────
 
 /**
@@ -11,10 +9,5 @@ import type { RequestId } from "../shared-types.js";
  * Phase 2 (Valibot) will add runtime validation.
  */
 export interface PayloadMap {
-	new_session: { title?: string; requestId?: RequestId };
-	switch_session: { sessionId: string };
-	view_session: { sessionId: string };
-	delete_session: { sessionId: string };
-	fork_session: { sessionId?: string; messageId?: string };
 	pty_input: { ptyId: string; data: string };
 }

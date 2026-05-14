@@ -25,7 +25,7 @@ export interface WsMockOptions {
 
 	/**
 	 * Optional callback invoked for every client message.
-	 * Use this to respond to messages like switch_session, view_session, etc.
+	 * Use this to respond to remaining raw WS commands or test-only probes.
 	 * The control object can be used to send responses back to the client.
 	 */
 	onClientMessage?: (

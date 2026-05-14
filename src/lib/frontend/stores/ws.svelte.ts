@@ -55,7 +55,6 @@ export {
 	_resetRateLimit,
 	rateLimitChatSend,
 	wsSend,
-	wsSendTyped,
 } from "./ws-send.svelte.js";
 
 import { handleMessage } from "./ws-dispatch.js";

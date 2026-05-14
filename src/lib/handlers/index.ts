@@ -28,11 +28,6 @@ export {
 } from "./prompt.js";
 export { reloadProviderSessionForClient } from "./reload.js";
 export {
-	handleDeleteSession,
-	handleForkSession,
-	handleNewSession,
-	handleSwitchSession,
-	handleViewSession,
 	loadMoreHistoryForSession,
 	renameSessionForClient,
 } from "./session.js";
@@ -50,13 +45,6 @@ import { Effect, Schema } from "effect";
 import { WebSocketError } from "../errors.js";
 import { PayloadSchemas } from "./payload-schemas.js";
 import type { PayloadMap } from "./payloads.js";
-import {
-	handleDeleteSession as handleDeleteSessionImpl,
-	handleForkSession as handleForkSessionImpl,
-	handleNewSession as handleNewSessionImpl,
-	handleSwitchSession as handleSwitchSessionImpl,
-	handleViewSession as handleViewSessionImpl,
-} from "./session.js";
 import { handlePtyInput as handlePtyInputImpl } from "./terminal.js";
 
 type AnyEffectHandler = (
@@ -75,12 +63,6 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	keyof PayloadMap,
 	AnyEffectHandler
 > = {
-	// Sessions
-	new_session: handleNewSessionImpl,
-	switch_session: handleSwitchSessionImpl,
-	view_session: handleViewSessionImpl,
-	delete_session: handleDeleteSessionImpl,
-	fork_session: handleForkSessionImpl,
 	// Terminal
 	pty_input: handlePtyInputImpl,
 };

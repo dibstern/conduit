@@ -142,7 +142,7 @@ export interface PipelineDeps {
 	processingTimeouts: ProcessingTimeoutsPort;
 	/**
 	 * Phase 0b: per-session events are broadcast to every client on the
-	 * project's `/p/<slug>` regardless of `view_session` state. The
+	 * project's `/p/<slug>` regardless of per-tab viewed-session state. The
 	 * handler buffers events for clients still in bootstrap so that
 	 * `session_list` always arrives first — see
 	 * {@link WebSocketHandler.broadcastPerSessionEvent} and
@@ -159,8 +159,8 @@ export interface PipelineDeps {
  * This is the single place where pipeline decisions become actions.
  *
  * Under Phase 0b the {@link PipelineResult.route} field still reflects
- * viewer presence (`action: "send"` when at least one client called
- * `view_session` on the target session, `action: "drop"` otherwise).
+ * viewer presence (`action: "send"` when at least one client has bound to
+ * the target session, `action: "drop"` otherwise).
  * That signal drives downstream notification logic (cross-session
  * `notification_event` broadcasts fire only when no client is actively
  * viewing), but it no longer gates delivery: every per-session event is

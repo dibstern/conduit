@@ -570,7 +570,7 @@ describe("sendNewSession", () => {
 		resetSessionCreation();
 	});
 
-	it("sends new_session with requestId and returns requestId", () => {
+	it("sends CreateSession input with requestId and returns requestId", () => {
 		const requestId = sendNewSession(mockStart);
 		expect(requestId).not.toBeNull();
 		expect(sent).toHaveLength(1);

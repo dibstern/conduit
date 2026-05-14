@@ -80,12 +80,14 @@ describe("Effect WS handler bridge", () => {
 		expect(connectedInfo.clientCount).toBe(1);
 
 		const message = onceMessage(handler);
-		client.send(JSON.stringify({ type: "view_session", sessionId: "s1" }));
+		client.send(
+			JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "x" }),
+		);
 		const routed = await message;
 
 		expect(routed.clientId).toBe(connectedInfo.clientId);
-		expect(routed.handler).toBe("view_session");
-		expect(routed.payload).toEqual({ sessionId: "s1" });
+		expect(routed.handler).toBe("pty_input");
+		expect(routed.payload).toEqual({ ptyId: "pty-1", data: "x" });
 	});
 
 	it("sends system_error for invalid JSON without disconnecting", async () => {

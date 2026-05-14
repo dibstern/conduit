@@ -2036,7 +2036,7 @@ describe("handleNewSession", () => {
 				expect(legacySendDualSessionLists).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining(
-						"Failed to broadcast session list after new_session",
+						"Failed to broadcast session list after CreateSession",
 					),
 				);
 				expect(log.info).toHaveBeenCalledWith(

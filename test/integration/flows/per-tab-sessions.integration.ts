@@ -1,7 +1,7 @@
 // ─── Integration: Per-Tab Sessions ────────────────────────────────────────────
 // Verifies that each WebSocket client (browser tab) can independently view
 // different sessions. Tests the per-tab session routing introduced by the
-// view_session / setClientSession / sendToSession system.
+// ViewSession / setClientSession / sendToSession system.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -63,7 +63,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	it("view_session sends status to the requesting client", async () => {
+	it("ViewSession RPC sends status to the requesting client", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 

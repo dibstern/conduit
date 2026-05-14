@@ -7,24 +7,9 @@ import type { RelayMessage } from "../types.js";
 
 // ─── Message types from browser ──────────────────────────────────────────────
 
-export type IncomingMessageType =
-	| "new_session"
-	| "switch_session"
-	| "delete_session"
-	| "fork_session"
-	| "pty_input"
-	| "view_session"
-	| "set_log_level";
+export type IncomingMessageType = "pty_input" | "set_log_level";
 
-const VALID_MESSAGE_TYPES = new Set<string>([
-	"new_session",
-	"switch_session",
-	"delete_session",
-	"fork_session",
-	"pty_input",
-	"view_session",
-	"set_log_level",
-]);
+const VALID_MESSAGE_TYPES = new Set<string>(["pty_input", "set_log_level"]);
 
 export interface IncomingMessage {
 	type: string;

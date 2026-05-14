@@ -317,3 +317,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Converted the accelerated `sse-aware-poller-gating` relay integration harness from raw `view_session` sends to the shared `TestWsClient.viewSession()` RPC helper.
 - Fixed the harness to use explicit production-like upgrade routing with `noServer: true`, `/ws` for relay events, and `/rpc` for Effect RPC; the previous bare server let the raw WS handler swallow RPC upgrades.
 - Verified locally with `pnpm vitest run --config vitest.integration.config.ts test/integration/relay/sse-aware-poller-gating.test.ts`.
+
+2026-05-14, legacy session lifecycle WS cleanup:
+
+- Deleted the legacy incoming `new_session`, `view_session`, `switch_session`, `delete_session`, and `fork_session` browser WS commands from the production router, incoming-message schemas, payload schemas, dispatch table, frontend raw-send helpers, and stale raw-send unit tests.
+- Kept the shared Effect session lifecycle helpers for the typed `CreateSession`, `ViewSession`, `DeleteSession`, and `ForkSession` RPC server handlers.
+- Updated notification, scroll, subagent, fork, and snapshot-recorder E2E harnesses to drive session lifecycle through Effect RPC while keeping `/ws` as the server-push event channel.
+- Verified locally with `pnpm check`, `pnpm lint`, `git diff --check`, targeted router/session unit tests, `pnpm build:frontend`, notification-nav Playwright, notification-reducer Playwright, subagent Playwright, targeted replay Playwright for notification/fork/scroll, and a serial fork replay rerun. The targeted replay run exited 0 with four Playwright retries under high parallelism; the serial fork rerun passed cleanly.

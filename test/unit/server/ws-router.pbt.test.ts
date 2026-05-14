@@ -34,14 +34,7 @@ const NUM_RUNS = 300;
 
 // ─── Generators ─────────────────────────────────────────────────────────────
 
-const validMessageTypes: IncomingMessageType[] = [
-	"new_session",
-	"switch_session",
-	"view_session",
-	"delete_session",
-	"fork_session",
-	"pty_input",
-];
+const validMessageTypes: IncomingMessageType[] = ["pty_input", "set_log_level"];
 
 const arbValidMessageType: fc.Arbitrary<IncomingMessageType> = fc.constantFrom(
 	...validMessageTypes,
@@ -388,19 +381,19 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(isRouteError(invalidResult)).toBe(true);
 
 			// Verify our test list has exactly the right number of routed types.
-			expect(validMessageTypes).toHaveLength(6);
+			expect(validMessageTypes).toHaveLength(2);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);
 			expect(uniqueTypes.size).toBe(validMessageTypes.length);
 		});
 
-		it("every handler in EFFECT_MESSAGE_HANDLERS is in our test list", () => {
+		it("every dispatch-table handler is routeable", () => {
 			// This catches the case where a new handler is added to production
-			// but the test list is not updated — the actual drift we want to detect.
-			const handlerKeys = Object.keys(EFFECT_MESSAGE_HANDLERS).sort();
-			const testKeys = [...validMessageTypes].sort();
-			expect(testKeys).toEqual(handlerKeys);
+			// but the routeable message list is not updated.
+			for (const handler of Object.keys(EFFECT_MESSAGE_HANDLERS)) {
+				expect(validMessageTypes).toContain(handler as IncomingMessageType);
+			}
 		});
 
 		it("every type that routes successfully is in our test list", () => {

@@ -76,7 +76,7 @@ describe("Integration: Multi-Client", () => {
 		expect(newSessionId).toBeTruthy();
 
 		// The other client receives session_list broadcast (not session_switched)
-		// since new_session only switches the requesting client's tab.
+		// since CreateSession only switches the requesting client's tab.
 		// sendDualSessionLists sends roots then all — use a predicate to wait
 		// for the list that actually contains the new session ID.
 		const list2 = await client2.waitFor("session_list", {

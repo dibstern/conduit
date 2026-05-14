@@ -1,13 +1,7 @@
 // ─── WebSocket Send Logic ────────────────────────────────────────────────────
-// Extracted from ws.svelte.ts — rate limiting, offline queue, and send helpers.
+// Extracted from ws.svelte.ts — rate limiting and send helpers.
 // The parent module provides the WebSocket reference via setWsGetter().
 
-import { Either, Schema } from "effect";
-import {
-	type OutboundMessage,
-	OutboundMessage as OutboundMessageSchema,
-} from "../transport/schemas.js";
-import type { PayloadMap } from "../types.js";
 import { showToast } from "./ui.svelte.js";
 
 // ─── WebSocket reference ────────────────────────────────────────────────────
@@ -105,18 +99,6 @@ function scheduleDrain(): void {
  * sliding window (MAX_MESSAGES per WINDOW_MS). Non-chat control messages
  * are sent immediately.
  */
-/**
- * Type-safe WebSocket send. Ensures the payload matches the expected shape
- * for the given message type at compile time.
- * Delegates to wsSend for rate limiting and offline queuing.
- */
-export function wsSendTyped<T extends keyof PayloadMap>(
-	type: T,
-	payload: PayloadMap[T],
-): void {
-	wsSend({ type, ...(payload as Record<string, unknown>) });
-}
-
 export function rateLimitChatSend(send: () => void): void {
 	pruneTimestamps();
 
@@ -141,23 +123,4 @@ export function wsSend(data: Record<string, unknown>): void {
 	}
 
 	rateLimitChatSend(() => rawSend(data));
-}
-
-/**
- * Schema-validated WebSocket send. Validates the message against
- * OutboundMessage schema before sending. Falls back to raw send
- * if validation fails (so the user's message isn't silently lost).
- *
- * Callers opt in as schemas are added to OutboundMessage.
- */
-export function wsSendValidated(msg: OutboundMessage): void {
-	const result = Either.getOrUndefined(
-		Schema.encodeEither(OutboundMessageSchema)(msg),
-	);
-	if (result === undefined) {
-		// Encode failed — fall back to raw send
-		rawSend(msg as unknown as Record<string, unknown>);
-		return;
-	}
-	wsSend(result as Record<string, unknown>);
 }

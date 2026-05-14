@@ -394,13 +394,7 @@ const arbClientId = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant("viewer") },
 );
 
-const validMessageTypes: IncomingMessageType[] = [
-	"new_session",
-	"switch_session",
-	"delete_session",
-	"fork_session",
-	"pty_input",
-];
+const validMessageTypes: IncomingMessageType[] = ["pty_input", "set_log_level"];
 
 const arbInvalidType = fc
 	.oneof(

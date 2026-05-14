@@ -65,7 +65,7 @@ describe("Integration: WS Handler Coverage", () => {
 
 	// ── Session management ──────────────────────────────────────────────────
 
-	it("new_session creates and switches to new session", async () => {
+	it("CreateSession RPC creates and switches to new session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();

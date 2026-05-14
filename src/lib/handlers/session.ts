@@ -26,10 +26,27 @@ import {
 	type SwitchClientOptions,
 } from "../session/session-switch.js";
 import type { PermissionId, RelayMessage, RequestId } from "../shared-types.js";
-import type { PayloadMap } from "./payloads.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 const SESSION_METADATA_FANOUT = 4;
+
+interface ViewSessionPayload {
+	readonly sessionId: string;
+}
+
+interface NewSessionPayload {
+	readonly title?: string;
+	readonly requestId?: RequestId;
+}
+
+interface DeleteSessionPayload {
+	readonly sessionId: string;
+}
+
+interface ForkSessionPayload {
+	readonly sessionId?: string;
+	readonly messageId?: string;
+}
 
 /**
  * Send metadata (model info, permissions, questions, session list) to a client.
@@ -326,7 +343,7 @@ export const viewSessionForClient = ({
 
 export const handleViewSession = (
 	clientId: string,
-	payload: PayloadMap["view_session"],
+	payload: ViewSessionPayload,
 	skipMetadata?: boolean,
 ) =>
 	viewSessionForClient({
@@ -366,7 +383,7 @@ export const createSessionForClient = ({
 			Effect.tap((result) => {
 				if (result._tag === "Left") {
 					log.warn(
-						`Failed to broadcast session list after new_session: ${result.left}`,
+						`Failed to broadcast session list after CreateSession: ${result.left}`,
 					);
 				}
 				return Effect.void;
@@ -379,7 +396,7 @@ export const createSessionForClient = ({
 
 export const handleNewSession = (
 	clientId: string,
-	payload: PayloadMap["new_session"],
+	payload: NewSessionPayload,
 ) =>
 	createSessionForClient({
 		clientId,
@@ -389,7 +406,7 @@ export const handleNewSession = (
 
 export const handleSwitchSession = (
 	clientId: string,
-	payload: PayloadMap["switch_session"],
+	payload: ViewSessionPayload,
 ) => handleViewSession(clientId, payload);
 
 export const deleteSessionForClient = ({
@@ -442,7 +459,7 @@ export const deleteSessionForClient = ({
 
 export const handleDeleteSession = (
 	clientId: string,
-	payload: PayloadMap["delete_session"],
+	payload: DeleteSessionPayload,
 ) =>
 	deleteSessionForClient({
 		clientId,
@@ -601,7 +618,7 @@ export const forkSessionForClient = ({
 /** Fork a session at a specific message point (ticket 5.3). */
 export const handleForkSession = (
 	clientId: string,
-	payload: PayloadMap["fork_session"],
+	payload: ForkSessionPayload,
 ) =>
 	forkSessionForClient({
 		clientId,

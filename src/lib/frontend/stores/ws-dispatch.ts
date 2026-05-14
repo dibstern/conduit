@@ -687,7 +687,7 @@ export function handleMessage(msg: RelayMessage): void {
 		case "session_switched": {
 			// Use the ID captured by switchToSession() before it changed currentId.
 			// Falls back to sessionState.currentId for server-initiated switches
-			// (e.g. new_session flow) where switchToSession() wasn't called.
+			// (e.g. CreateSession flow) where switchToSession() wasn't called.
 			// consumeSwitchingFromId() reads and clears the value in one call to
 			// prevent stale IDs from leaking into future server-initiated switches.
 			const previousSessionId =

@@ -208,7 +208,7 @@ export const sendTo = (clientId: string, message: RelayMessage) =>
 	}).pipe(Effect.annotateLogs("clientId", clientId));
 
 /**
- * Associate a client with a session (called on session switch / view_session).
+ * Associate a client with a session (called on session switch / ViewSession).
  */
 export const bindClientSession = (clientId: string, sessionId: string) =>
 	Effect.gen(function* () {

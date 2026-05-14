@@ -100,7 +100,7 @@ export interface SSEWiringDeps {
 		/**
 		 * Phase 0b: project-scoped per-session event firehose. Pipeline
 		 * routing uses this (via `applyPipelineResult`) so per-session chat
-		 * events reach every client on `/p/<slug>` regardless of `view_session`.
+		 * events reach every client on `/p/<slug>` regardless of viewed session.
 		 */
 		broadcastPerSessionEvent: (sessionId: string, msg: RelayMessage) => void;
 	};

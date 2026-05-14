@@ -8,8 +8,12 @@
 
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
-import type { WsMockControl } from "../helpers/ws-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import {
+	mockRelayWebSocket,
+	type WsMockControl,
+	type WsMockOptions,
+} from "../helpers/ws-mock.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -121,26 +125,31 @@ function attentionBanner(page: Page) {
 	return page.locator("[role='status']");
 }
 
-/** Standard onClientMessage handler that responds to view_session. */
-function viewSessionHandler(
-	parsed: Record<string, unknown>,
-	ctrl: WsMockControl,
-) {
-	if (
-		parsed["type"] === "view_session" &&
-		typeof parsed["sessionId"] === "string"
-	) {
-		ctrl.sendMessage({
-			type: "session_switched",
-			id: parsed["sessionId"],
-		});
-		ctrl.sendMessage({
-			type: "history_page",
-			sessionId: parsed["sessionId"],
-			messages: [],
-			hasMore: false,
-		});
-	}
+async function mockRelayWithViewSessionRpc(
+	page: Page,
+	options: Omit<WsMockOptions, "onClientMessage">,
+): Promise<WsMockControl> {
+	let control!: WsMockControl;
+	await mockWsRpc(page, {
+		handlers: {
+			ViewSession: (params) => {
+				const sessionId = String(params["sessionId"] ?? "");
+				control.sendMessage({
+					type: "session_switched",
+					id: sessionId,
+				});
+				control.sendMessage({
+					type: "history_page",
+					sessionId,
+					messages: [],
+					hasMore: false,
+				});
+				return { ok: true };
+			},
+		},
+	});
+	control = await mockRelayWebSocket(page, options);
+	return control;
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -150,12 +159,11 @@ test.describe("notification reducer indicators", () => {
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWebSocket(page, {
+		const control = await mockRelayWithViewSessionRpc(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: viewSessionHandler,
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
@@ -182,12 +190,11 @@ test.describe("notification reducer indicators", () => {
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWebSocket(page, {
+		const control = await mockRelayWithViewSessionRpc(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: viewSessionHandler,
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
@@ -222,12 +229,11 @@ test.describe("notification reducer indicators", () => {
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWebSocket(page, {
+		const control = await mockRelayWithViewSessionRpc(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: viewSessionHandler,
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
@@ -252,12 +258,11 @@ test.describe("notification reducer indicators", () => {
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWebSocket(page, {
+		const control = await mockRelayWithViewSessionRpc(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: viewSessionHandler,
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
@@ -291,12 +296,11 @@ test.describe("notification reducer indicators", () => {
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWebSocket(page, {
+		const control = await mockRelayWithViewSessionRpc(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: viewSessionHandler,
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);

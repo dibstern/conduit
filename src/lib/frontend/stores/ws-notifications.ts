@@ -83,7 +83,7 @@ export function initSWNavigationListener(): void {
 
 			// If the notification is for a different project than the one
 			// currently viewed, navigate via URL instead of switchToSession
-			// (which would send view_session on the wrong WS connection).
+			// (which would send ViewSession on the wrong project RPC route).
 			const currentSlug = getCurrentSlug();
 			if (slug && currentSlug && slug !== currentSlug) {
 				if (url) navigate(url);

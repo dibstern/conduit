@@ -14,39 +14,9 @@
 // Source of truth for payload shapes: handlers/payloads.ts PayloadMap.
 
 import { Effect, Schema } from "effect";
-import { RequestId } from "../shared-types.js";
 
 // ─── Individual message schemas ─────────────────────────────────────────────
 // Each schema includes `type: Schema.Literal(...)` as the discriminant.
-
-// ── Session lifecycle ────────────────────────────────────────────────────────
-
-const NewSessionMsg = Schema.Struct({
-	type: Schema.Literal("new_session"),
-	title: Schema.optional(Schema.String),
-	requestId: Schema.optional(RequestId),
-});
-
-const SwitchSessionMsg = Schema.Struct({
-	type: Schema.Literal("switch_session"),
-	sessionId: Schema.String,
-});
-
-const ViewSessionMsg = Schema.Struct({
-	type: Schema.Literal("view_session"),
-	sessionId: Schema.String,
-});
-
-const DeleteSessionMsg = Schema.Struct({
-	type: Schema.Literal("delete_session"),
-	sessionId: Schema.String,
-});
-
-const ForkSessionMsg = Schema.Struct({
-	type: Schema.Literal("fork_session"),
-	sessionId: Schema.optional(Schema.String),
-	messageId: Schema.optional(Schema.String),
-});
 
 // ── Terminal / PTY ───────────────────────────────────────────────────────────
 
@@ -67,12 +37,6 @@ const SetLogLevelMsg = Schema.Struct({
 // Covers all remaining legacy IncomingMessageType values from ws-router.ts.
 
 export const IncomingWsMessage = Schema.Union(
-	// Session lifecycle
-	NewSessionMsg,
-	SwitchSessionMsg,
-	ViewSessionMsg,
-	DeleteSessionMsg,
-	ForkSessionMsg,
 	// Terminal / PTY
 	PtyInputMsg,
 	// Daemon operations

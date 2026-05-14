@@ -27,7 +27,7 @@ describe("Integration: Session Switch History", () => {
 
 	// ── Core regression: switching back to a session with messages ────────
 
-	it("switch_session broadcasts history_page with session messages", async () => {
+	it("ViewSession RPC sends history_page with session messages", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -351,7 +351,7 @@ describe("Integration: Session Switch History", () => {
 		const switchedC = await client.waitFor("session_switched");
 		const sessionC = switchedC["id"] as string;
 
-		// Fire 3 rapid switch_session commands without awaiting between sends
+		// Fire 3 rapid ViewSession commands without awaiting between sends
 		client.clearReceived();
 		await client.switchSession(sessionB);
 		await client.switchSession(sessionA);

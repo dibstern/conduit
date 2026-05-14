@@ -7,52 +7,27 @@
 
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { expect, vi } from "vitest";
-import type { WebSocketHandlerShape } from "../../../src/lib/domain/relay/Services/services.js";
+import { expect } from "vitest";
 import { WebSocketError } from "../../../src/lib/errors.js";
 import { dispatchMessageEffect } from "../../../src/lib/handlers/index.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
-
-// ─── Mock factories ────────────────────────────────────────────────────────
-
-function mockWsHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): WebSocketHandlerShape {
-	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => undefined),
-		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
-		...overrides,
-	};
-}
+import {
+	makeMockPtyManager,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 // ─── Dispatch routing ───────────────────────────────────────────────────────
 
 describe("dispatchMessageEffect", () => {
-	it.effect("dispatches switch_session with validated payload", () => {
-		const ws = mockWsHandler();
-		const layer = makeTestHandlerLayer({ wsHandler: ws });
+	it.effect("dispatches pty_input with validated payload", () => {
+		const ptyManager = makeMockPtyManager();
+		const layer = makeTestHandlerLayer({ ptyManager });
 
 		return Effect.gen(function* () {
-			yield* dispatchMessageEffect("client-1", "switch_session", {
-				sessionId: "session-42",
+			yield* dispatchMessageEffect("client-1", "pty_input", {
+				ptyId: "pty-1",
+				data: "ls\n",
 			}) as Effect.Effect<void, never>;
-			expect(ws.setClientSession).toHaveBeenCalledWith(
-				"client-1",
-				"session-42",
-			);
+			expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -83,9 +58,10 @@ describe("dispatchMessageEffect", () => {
 	// ─── Schema validation ─────────────────────────────────────────────────
 
 	it.effect("fails with ParseError when payload is malformed", () => {
-		// switch_session requires { sessionId: string } — passing a number should fail
-		const effect = dispatchMessageEffect("client-1", "switch_session", {
-			sessionId: 42,
+		// pty_input requires { ptyId: string; data: string }.
+		const effect = dispatchMessageEffect("client-1", "pty_input", {
+			ptyId: 42,
+			data: "ls\n",
 		}).pipe(Effect.either) as Effect.Effect<
 			import("effect").Either.Either<void, unknown>
 		>;
@@ -98,8 +74,9 @@ describe("dispatchMessageEffect", () => {
 	});
 
 	it.effect("fails with ParseError when required fields are missing", () => {
-		const effect = dispatchMessageEffect("client-1", "switch_session", {
-			// missing sessionId
+		const effect = dispatchMessageEffect("client-1", "pty_input", {
+			// missing data
+			ptyId: "pty-1",
 		}).pipe(Effect.either) as Effect.Effect<
 			import("effect").Either.Either<void, unknown>
 		>;
@@ -112,16 +89,17 @@ describe("dispatchMessageEffect", () => {
 	});
 
 	it.effect("accepts payloads with extra unknown fields (open schema)", () => {
-		const ws = mockWsHandler();
-		const layer = makeTestHandlerLayer({ wsHandler: ws });
+		const ptyManager = makeMockPtyManager();
+		const layer = makeTestHandlerLayer({ ptyManager });
 
 		// Schema.Struct allows extra keys by default
 		return Effect.gen(function* () {
-			yield* dispatchMessageEffect("client-1", "switch_session", {
-				sessionId: "session-1",
+			yield* dispatchMessageEffect("client-1", "pty_input", {
+				ptyId: "pty-1",
+				data: "pwd\n",
 				extraField: "should be ignored",
 			}) as Effect.Effect<void, never>;
-			expect(ws.setClientSession).toHaveBeenCalledWith("client-1", "session-1");
+			expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "pwd\n");
 		}).pipe(Effect.provide(layer));
 	});
 });

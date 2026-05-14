@@ -1207,7 +1207,7 @@ export type RelayMessage =
 			type: "session_switched";
 			id: string;
 			sessionId: string;
-			/** Correlation ID echoed from new_session request. */
+			/** Correlation ID echoed from CreateSession request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */
 			events?: RelayMessage[];

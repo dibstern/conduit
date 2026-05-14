@@ -146,7 +146,7 @@ describe("Integration: Model Selection", () => {
 		await client.close();
 	}, 30_000);
 
-	it("new_session resets model selection without breaking messages", async () => {
+	it("CreateSession RPC resets model selection without breaking messages", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 

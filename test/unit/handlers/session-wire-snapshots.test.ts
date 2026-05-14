@@ -31,7 +31,7 @@ const readSnapshots = (): Record<string, RecordedWebSocketCall[]> =>
 	>;
 
 describe("session handler wire snapshots", () => {
-	it("keeps the view_session model metadata envelope stable", async () => {
+	it("keeps the ViewSession model metadata envelope stable", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const api = makeMockOpenCodeAPI();
 		vi.spyOn(api.session, "get").mockResolvedValue({
@@ -69,7 +69,7 @@ describe("session handler wire snapshots", () => {
 		);
 	});
 
-	it("keeps the new_session switch and broadcast envelopes stable", async () => {
+	it("keeps the CreateSession switch and broadcast envelopes stable", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const requestId = Schema.decodeUnknownSync(RequestId)("req-1");
 		const sessionManagerService = makeMockSessionManagerService({
@@ -117,7 +117,7 @@ describe("session handler wire snapshots", () => {
 		expect(calls).toEqual(readSnapshots()["new_session_success"]);
 	});
 
-	it("keeps the delete_session deleted and broadcast envelopes stable", async () => {
+	it("keeps the DeleteSession deleted and broadcast envelopes stable", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});

@@ -6,7 +6,6 @@ import {
 	makeRelayCommandGateLive,
 	RelayCommandGateTag,
 } from "../../../src/lib/domain/relay/Services/relay-command-gate.js";
-import type { WebSocketHandlerShape } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getLogLevel,
 	type Logger,
@@ -18,7 +17,10 @@ import {
 	handleRelayWsMessageThroughGate,
 } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+import {
+	makeMockPtyManager,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 function mockLogger(): Logger {
 	const logger: Logger = {
@@ -40,29 +42,6 @@ function makeGatedLayer() {
 	return Layer.merge(makeBaseLayer(), makeRelayCommandGateLive("test"));
 }
 
-function mockWsHandler(
-	overrides: Partial<WebSocketHandlerShape> = {},
-): WebSocketHandlerShape {
-	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => undefined),
-		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
-		...overrides,
-	};
-}
-
 describe("handleRelayWsMessage", () => {
 	it.effect("queues gated dispatch until the relay command gate is ready", () =>
 		Effect.gen(function* () {
@@ -78,8 +57,8 @@ describe("handleRelayWsMessage", () => {
 				commandId: "cmd-a",
 				receivedAt: 1000,
 				clientId: "client-1",
-				handler: "switch_session",
-				payload: { sessionId: "session-1" },
+				handler: "pty_input",
+				payload: { ptyId: "pty-1", data: "ls\n" },
 				sendTo,
 				log: mockLogger(),
 				dispatch,
@@ -234,26 +213,23 @@ describe("handleRelayWsMessage", () => {
 	);
 
 	it.effect("uses dispatchMessageEffect by default", () => {
-		const wsHandler = mockWsHandler();
+		const ptyManager = makeMockPtyManager();
 		const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
 		const layer = Layer.mergeAll(
 			makeBaseLayer(),
-			makeTestHandlerLayer({ wsHandler }),
+			makeTestHandlerLayer({ ptyManager }),
 		);
 
 		return handleRelayWsMessage({
 			clientId: "client-1",
-			handler: "switch_session",
-			payload: { sessionId: "session-1" },
+			handler: "pty_input",
+			payload: { ptyId: "pty-1", data: "pwd\n" },
 			sendTo,
 			log: mockLogger(),
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(wsHandler.setClientSession).toHaveBeenCalledWith(
-					"client-1",
-					"session-1",
-				);
+				expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "pwd\n");
 				expect(sendTo).not.toHaveBeenCalled();
 			}),
 		);

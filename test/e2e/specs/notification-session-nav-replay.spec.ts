@@ -3,7 +3,7 @@
 //
 // Proves the complete path:
 //   SSE event → relay event pipeline → notification_event WS broadcast →
-//   frontend receives it → SW message → switchToSession → view_session WS.
+//   frontend receives it → SW message → switchToSession → ViewSession RPC.
 //
 // Uses the `chat-simple` recording with `injectSSEEvents()` to inject
 // events that trigger notification broadcasts for unwatched sessions.
@@ -106,14 +106,18 @@ test.describe("Notification → session navigation (replay)", () => {
 			{ sessionId: TARGET, slug: "e2e-replay" },
 		);
 
-		// Wait for view_session to be sent via WS.
+		// Wait for ViewSession to be sent over the RPC WebSocket.
 		await expect
 			.poll(
 				() => {
 					return sentFrames.some((f) => {
 						try {
 							const msg = JSON.parse(f);
-							return msg.type === "view_session" && msg.sessionId === TARGET;
+							return (
+								msg._tag === "Request" &&
+								msg.tag === "ViewSession" &&
+								msg.payload?.sessionId === TARGET
+							);
 						} catch {
 							return false;
 						}
@@ -121,7 +125,7 @@ test.describe("Notification → session navigation (replay)", () => {
 				},
 				{
 					timeout: 5000,
-					message: "view_session not sent for target session",
+					message: "ViewSession RPC not sent for target session",
 				},
 			)
 			.toBe(true);

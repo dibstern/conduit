@@ -16,36 +16,6 @@ import {
 // ─── Decode helper (Effect-based) ──────────────────────────────────────────
 
 describe("decodeWsMessage", () => {
-	it.effect("decodes switch_session with sessionId", () =>
-		Effect.gen(function* () {
-			const raw = { type: "switch_session", sessionId: "sess-123" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("switch_session");
-			expect((decoded as any).sessionId).toBe("sess-123");
-		}),
-	);
-
-	it.effect("decodes fork_session with optional fields", () =>
-		Effect.gen(function* () {
-			const raw = { type: "fork_session" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("fork_session");
-		}),
-	);
-
-	it.effect("decodes fork_session with all fields", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "fork_session",
-				sessionId: "s1",
-				messageId: "m1",
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect((decoded as any).sessionId).toBe("s1");
-			expect((decoded as any).messageId).toBe("m1");
-		}),
-	);
-
 	it.effect("decodes pty_input with ptyId and data", () =>
 		Effect.gen(function* () {
 			const raw = { type: "pty_input", ptyId: "pty-1", data: "ls\n" };
@@ -86,12 +56,6 @@ describe("IncomingWsMessage schema rejections", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("rejects switch_session missing sessionId", () => {
-		const raw = { type: "switch_session" };
-		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
-		expect(Either.isLeft(result)).toBe(true);
-	});
-
 	it("rejects pty_input missing ptyId", () => {
 		const raw = { type: "pty_input", data: "ls\n" };
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
@@ -99,6 +63,11 @@ describe("IncomingWsMessage schema rejections", () => {
 	});
 
 	it.each([
+		"new_session",
+		"switch_session",
+		"delete_session",
+		"fork_session",
+		"view_session",
 		"terminal_command",
 		"pty_create",
 		"pty_resize",
@@ -129,25 +98,12 @@ describe("IncomingWsMessage schema rejections", () => {
 describe("IncomingWsMessage coverage", () => {
 	// Incoming message types from ws-router.ts (the source of truth).
 	// This test ensures IncomingWsMessage covers every one.
-	const ALL_INCOMING_TYPES = [
-		"new_session",
-		"switch_session",
-		"delete_session",
-		"fork_session",
-		"pty_input",
-		"view_session",
-		"set_log_level",
-	] as const;
+	const ALL_INCOMING_TYPES = ["pty_input", "set_log_level"] as const;
 
 	// For each type, construct a minimal valid payload and verify it decodes.
 	// This catches missing union members at test time.
 	const MINIMAL_PAYLOADS: Record<string, Record<string, unknown>> = {
-		new_session: {},
-		switch_session: { sessionId: "s1" },
-		delete_session: { sessionId: "s1" },
-		fork_session: {},
 		pty_input: { ptyId: "p1", data: "x" },
-		view_session: { sessionId: "s1" },
 		set_log_level: { level: "debug" },
 	};
 

@@ -375,7 +375,7 @@ export function handleSessionSwitched(
 		}
 	}
 	// Co-located: complete the creation state machine if this session_switched
-	// is the response to our new_session request. This is inside
+	// is the response to our CreateSession RPC request. This is inside
 	// handleSessionSwitched (not in the dispatch switch) so it can't be
 	// accidentally separated from the state update.
 	if (requestId) {
@@ -426,7 +426,7 @@ export function consumeSwitchingFromId(): string | null {
 
 /**
  * Switch this tab to a different session.
- * Updates local state, navigates the URL, and sends `view_session` to the server.
+ * Updates local state, navigates the URL, and sends `ViewSession` to the server.
  *
  * The two-tier per-session store retains session state across switches
  * (Tier 1 is unbounded, Tier 2 is LRU-capped).
