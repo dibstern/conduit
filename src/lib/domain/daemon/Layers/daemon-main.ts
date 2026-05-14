@@ -259,7 +259,11 @@ import {
 	probeOpenCode,
 	probeOpenCodePort,
 } from "../../../daemon/daemon-utils.js";
-import { ProjectRegistry } from "../../../daemon/project-registry.js";
+import {
+	ProjectRegistry,
+	projectRegistryProjectNotFound,
+	projectRelayNotReady,
+} from "../../../daemon/project-registry.js";
 import { fetchLatestVersion } from "../../../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
@@ -862,7 +866,7 @@ export async function startDaemonProcess(
 	// ── Helper: removeProject ─────────────────────────────────────────────
 	async function removeProject(slug: string): Promise<void> {
 		const entry = registry.get(slug);
-		if (!entry) throw new Error(`Project "${slug}" not found`);
+		if (!entry) throw projectRegistryProjectNotFound(slug);
 		dismissedPaths.add(entry.project.directory);
 		updateLocalRuntimeConfigSnapshot((c) => ({
 			...c,
@@ -1160,7 +1164,7 @@ export async function startDaemonProcess(
 	const getReadyProjectRelay = (slug: string): ProjectRelay => {
 		const relay = registry.getRelay(slug);
 		if (!relay) {
-			throw new Error(`Project "${slug}" is not ready`);
+			throw projectRelayNotReady(slug);
 		}
 		return relay;
 	};

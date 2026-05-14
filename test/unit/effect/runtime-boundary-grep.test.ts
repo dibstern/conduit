@@ -709,6 +709,40 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not throw plain Error for expected project registry failures", () => {
+		const checks = [
+			{
+				path: "src/lib/daemon/project-registry.ts",
+				patterns: [
+					/throw new Error\(`Project "\$\{slug\}"/,
+					/reject\(new Error\(`Project "\$\{slug\}"/,
+					/reject\(new Error\(`Wait for relay "\$\{slug\}"/,
+					/reject\(\s*new Error\(`Timed out waiting for relay/,
+				],
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				patterns: [
+					/throw new Error\(`Project "\$\{slug\}" not found`/,
+					/throw new Error\(`Project "\$\{slug\}" is not ready`/,
+				],
+			},
+		] as const;
+
+		const hits = checks.flatMap(({ path, patterns }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return patterns.flatMap((pattern) =>
+				Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+					path,
+					line: source.slice(0, match.index).split("\n").length,
+					source: match[0],
+				})),
+			);
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("routes daemon config ref mutations through the commit helper", () => {
 		const roots = [
 			join(REPO_ROOT, "src/lib/domain/daemon"),

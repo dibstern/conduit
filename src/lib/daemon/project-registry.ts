@@ -3,6 +3,7 @@
 // three independent data structures (projects, projectRelays, pendingRelaySlugs)
 // with a typed discriminated union.
 
+import { Data } from "effect";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import type { RelayMessage, StoredProject } from "../types.js";
 // ─── Discriminated union ────────────────────────────────────────────────────
@@ -25,6 +26,116 @@ export interface ProjectError {
 }
 
 export type ProjectEntry = ProjectRegistering | ProjectReady | ProjectError;
+
+// ─── Typed domain errors ───────────────────────────────────────────────────
+
+export class ProjectRegistryAlreadyRegistered extends Data.TaggedError(
+	"ProjectRegistryAlreadyRegistered",
+)<{
+	readonly slug: string;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryProjectNotFound extends Data.TaggedError(
+	"ProjectRegistryProjectNotFound",
+)<{
+	readonly slug: string;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryAlreadyReady extends Data.TaggedError(
+	"ProjectRegistryAlreadyReady",
+)<{
+	readonly slug: string;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryRelayFailed extends Data.TaggedError(
+	"ProjectRegistryRelayFailed",
+)<{
+	readonly slug: string;
+	readonly error: string;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryRelayRemoved extends Data.TaggedError(
+	"ProjectRegistryRelayRemoved",
+)<{
+	readonly slug: string;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryRelayWaitAborted extends Data.TaggedError(
+	"ProjectRegistryRelayWaitAborted",
+)<{
+	readonly slug: string;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryRelayWaitTimedOut extends Data.TaggedError(
+	"ProjectRegistryRelayWaitTimedOut",
+)<{
+	readonly slug: string;
+	readonly timeoutMs: number;
+	readonly message: string;
+}> {}
+
+export class ProjectRegistryRelayNotReady extends Data.TaggedError(
+	"ProjectRegistryRelayNotReady",
+)<{
+	readonly slug: string;
+	readonly message: string;
+}> {}
+
+const projectAlreadyRegistered = (slug: string) =>
+	new ProjectRegistryAlreadyRegistered({
+		slug,
+		message: `Project "${slug}" is already registered`,
+	});
+
+export const projectRegistryProjectNotFound = (slug: string) =>
+	new ProjectRegistryProjectNotFound({
+		slug,
+		message: `Project "${slug}" not found`,
+	});
+
+const projectAlreadyReady = (slug: string) =>
+	new ProjectRegistryAlreadyReady({
+		slug,
+		message: `Project "${slug}" already has a relay`,
+	});
+
+const relayFailed = (slug: string, error: string) =>
+	new ProjectRegistryRelayFailed({
+		slug,
+		error,
+		message: `Project "${slug}" relay failed: ${error}`,
+	});
+
+const relayRemoved = (slug: string) =>
+	new ProjectRegistryRelayRemoved({
+		slug,
+		message: `Project "${slug}" was removed`,
+	});
+
+const relayWaitAborted = (slug: string) =>
+	new ProjectRegistryRelayWaitAborted({
+		slug,
+		message: `Wait for relay "${slug}" was aborted`,
+	});
+
+const relayWaitTimedOut = (slug: string, timeoutMs: number) =>
+	new ProjectRegistryRelayWaitTimedOut({
+		slug,
+		timeoutMs,
+		message: `Timed out waiting for relay "${slug}" (${timeoutMs}ms)`,
+	});
+
+export const projectRelayNotReady = (slug: string) =>
+	new ProjectRegistryRelayNotReady({
+		slug,
+		message: `Project "${slug}" is not ready`,
+	});
 
 // ─── Callbacks ──────────────────────────────────────────────────────────────
 
@@ -172,7 +283,7 @@ export class ProjectRegistry {
 	): void {
 		const { slug } = project;
 		if (this.entries.has(slug)) {
-			throw new Error(`Project "${slug}" is already registered`);
+			throw projectAlreadyRegistered(slug);
 		}
 
 		this.entries.set(slug, { status: "registering", project });
@@ -214,7 +325,7 @@ export class ProjectRegistry {
 	): void {
 		const { slug } = project;
 		if (this.entries.has(slug)) {
-			throw new Error(`Project "${slug}" is already registered`);
+			throw projectAlreadyRegistered(slug);
 		}
 		this.entries.set(slug, { status: "registering", project });
 		if (!options?.silent) {
@@ -228,10 +339,10 @@ export class ProjectRegistry {
 	): void {
 		const entry = this.entries.get(slug);
 		if (!entry) {
-			throw new Error(`Project "${slug}" not found`);
+			throw projectRegistryProjectNotFound(slug);
 		}
 		if (entry.status === "ready") {
-			throw new Error(`Project "${slug}" already has a relay`);
+			throw projectAlreadyReady(slug);
 		}
 
 		// Reset to registering (from error state or existing registering)
@@ -301,7 +412,7 @@ export class ProjectRegistry {
 	): Promise<void> {
 		const entry = this.entries.get(slug);
 		if (!entry) {
-			throw new Error(`Project "${slug}" not found`);
+			throw projectRegistryProjectNotFound(slug);
 		}
 
 		// Abort any in-flight creation
@@ -359,7 +470,7 @@ export class ProjectRegistry {
 	): void {
 		const entry = this.entries.get(slug);
 		if (!entry) {
-			throw new Error(`Project "${slug}" not found`);
+			throw projectRegistryProjectNotFound(slug);
 		}
 
 		const updatedProject = { ...entry.project, ...updates };
@@ -398,7 +509,7 @@ export class ProjectRegistry {
 			const entry = this.entries.get(slug);
 
 			if (!entry) {
-				reject(new Error(`Project "${slug}" not found`));
+				reject(projectRegistryProjectNotFound(slug));
 				return;
 			}
 			if (entry.status === "ready") {
@@ -406,11 +517,11 @@ export class ProjectRegistry {
 				return;
 			}
 			if (entry.status === "error") {
-				reject(new Error(`Project "${slug}" relay failed: ${entry.error}`));
+				reject(relayFailed(slug, entry.error));
 				return;
 			}
 			if (signal?.aborted) {
-				reject(new Error(`Wait for relay "${slug}" was aborted`));
+				reject(relayWaitAborted(slug));
 				return;
 			}
 
@@ -431,16 +542,16 @@ export class ProjectRegistry {
 			const onError = (errorSlug: string, error: string) => {
 				if (errorSlug !== slug) return;
 				cleanup();
-				reject(new Error(`Project "${slug}" relay failed: ${error}`));
+				reject(relayFailed(slug, error));
 			};
 			const onRemoved = (removedSlug: string) => {
 				if (removedSlug !== slug) return;
 				cleanup();
-				reject(new Error(`Project "${slug}" was removed`));
+				reject(relayRemoved(slug));
 			};
 			const onAbort = () => {
 				cleanup();
-				reject(new Error(`Wait for relay "${slug}" was aborted`));
+				reject(relayWaitAborted(slug));
 			};
 
 			this.on("project_ready", onReady);
@@ -450,9 +561,7 @@ export class ProjectRegistry {
 
 			const timer = setTimeout(() => {
 				cleanup();
-				reject(
-					new Error(`Timed out waiting for relay "${slug}" (${timeoutMs}ms)`),
-				);
+				reject(relayWaitTimedOut(slug, timeoutMs));
 			}, timeoutMs);
 		});
 		this.trackPromise(promise);
