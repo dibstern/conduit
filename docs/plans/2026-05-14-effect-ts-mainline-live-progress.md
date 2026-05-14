@@ -311,3 +311,9 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Moved the main relay integration flows off raw `new_session`, `switch_session`, `view_session`, and `delete_session` browser WS sends while preserving event-WS assertions for pushed `session_switched`, status, history, and session-list messages.
 - Left `test/integration/relay/sse-aware-poller-gating.test.ts` on raw `view_session` for now; its custom accelerated relay harness timed out when moved to the generic RPC helper and needs a separate harness-specific RPC pass.
 - Verified locally with `pnpm check`, `pnpm lint`, `git diff --check`, and the targeted 7-file relay integration subset. The attempted `sse-aware-poller-gating` RPC conversion failed by timeout and was reverted.
+
+2026-05-14, SSE-aware relay harness RPC routing:
+
+- Converted the accelerated `sse-aware-poller-gating` relay integration harness from raw `view_session` sends to the shared `TestWsClient.viewSession()` RPC helper.
+- Fixed the harness to use explicit production-like upgrade routing with `noServer: true`, `/ws` for relay events, and `/rpc` for Effect RPC; the previous bare server let the raw WS handler swallow RPC upgrades.
+- Verified locally with `pnpm vitest run --config vitest.integration.config.ts test/integration/relay/sse-aware-poller-gating.test.ts`.

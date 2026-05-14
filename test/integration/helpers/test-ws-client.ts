@@ -43,7 +43,10 @@ export class TestWsClient {
 	constructor(url: string) {
 		const wsUrl = new URL(url);
 		wsUrl.searchParams.set("client", this.clientId);
-		this.rpcUrl = `${wsUrl.protocol}//${wsUrl.host}${wsUrl.pathname.replace(/\/ws$/, "/rpc")}`;
+		const rpcPath = wsUrl.pathname.endsWith("/ws")
+			? wsUrl.pathname.replace(/\/ws$/, "/rpc")
+			: `${wsUrl.pathname.replace(/\/$/, "")}/rpc`;
+		this.rpcUrl = `${wsUrl.protocol}//${wsUrl.host}${rpcPath}`;
 		this.ws = new WebSocket(wsUrl);
 
 		this.openPromise = new Promise<void>((resolve, reject) => {
