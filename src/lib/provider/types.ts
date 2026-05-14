@@ -1,12 +1,12 @@
 // src/lib/provider/types.ts
-// ─── Provider Adapter Types ─────────────────────────────────────────────────
-// Core interface and supporting types for the provider adapter layer.
-// Adapters are execution-only — they don't own sessions, messages, or history.
-// Conduit owns all state. Adapters turn prompts into event streams.
+// ─── Provider Instance Types ────────────────────────────────────────────────
+// Core interface and supporting types for provider execution instances.
+// Instances are execution-only — they don't own sessions, messages, or history.
+// Conduit owns all state. Instances turn prompts into event streams.
 
 import type { Effect, Scope } from "effect";
 import type { CanonicalEvent } from "../persistence/events.js";
-import type { ProviderAdapterFailure } from "./errors.js";
+import type { ProviderInstanceFailure } from "./errors.js";
 
 // ─── Permission / Question Decisions ────────────────────────────────────────
 
@@ -40,7 +40,7 @@ export interface QuestionRequest {
 // ─── Event Sink ─────────────────────────────────────────────────────────────
 
 /**
- * EventSink is the adapter's write interface to conduit's event store.
+ * EventSink is the provider instance's write interface to conduit's event store.
  *
  * - `push(event)`: append a canonical event to the store and project eagerly.
  * - `requestPermission(request)`: Effect that emits permission.asked, waits
@@ -196,9 +196,9 @@ export interface ProviderAgentInfo {
 	readonly model?: string;
 }
 
-// ─── Adapter Capabilities ───────────────────────────────────────────────────
+// ─── Provider Capabilities ──────────────────────────────────────────────────
 
-export interface AdapterCapabilities {
+export interface ProviderCapabilities {
 	readonly models: readonly ModelInfo[];
 	readonly supportsTools: boolean;
 	readonly supportsThinking: boolean;
@@ -211,53 +211,56 @@ export interface AdapterCapabilities {
 	readonly agents?: readonly ProviderAgentInfo[];
 }
 
-// ─── Provider Adapter Interface ─────────────────────────────────────────────
+// ─── Provider Instance Interface ────────────────────────────────────────────
 
 /**
- * ProviderAdapter -- the 7-method contract for provider execution.
+ * ProviderInstance -- the 7-method contract for provider execution.
  *
  * Implementations wrap a provider's REST/SDK surface and translate provider
- * events into canonical events via the EventSink. Adapters do not own session
+ * events into canonical events via the EventSink. Instances do not own session
  * state, message history, or projections -- conduit does.
  *
- * Compared to t3code's ProviderAdapterShape (~12 methods with Effect):
+ * Compared to t3code's provider instance shape (~12 methods with Effect):
  * - No startSession/stopSession/listSessions -- conduit owns session lifecycle
  * - No readThread/rollbackThread -- conduit reads from its own projections
- * - No streamEvents -- adapter pushes via EventSink, no output stream needed
+ * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
-export interface ProviderAdapter {
+export interface ProviderInstance {
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 
 	/** Query the provider for available models, commands, and capabilities */
-	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure>;
+	discoverEffect(): Effect.Effect<
+		ProviderCapabilities,
+		ProviderInstanceFailure
+	>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurnEffect(
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, ProviderAdapterFailure>;
+	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
 
 	/** Interrupt an in-progress turn */
 	interruptTurnEffect(
 		sessionId: string,
-	): Effect.Effect<void, ProviderAdapterFailure>;
+	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending permission request (from EventSink.requestPermission) */
 	resolvePermissionEffect(
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
-	): Effect.Effect<void, ProviderAdapterFailure>;
+	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */
 	resolveQuestionEffect(
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
-	): Effect.Effect<void, ProviderAdapterFailure>;
+	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Graceful shutdown -- clean up connections, abort pending turns */
-	shutdownEffect(): Effect.Effect<void, ProviderAdapterFailure>;
+	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/**
 	 * Terminate the provider's session-level state (SDK query, pending turns,
@@ -267,10 +270,8 @@ export interface ProviderAdapter {
 	 */
 	endSessionEffect(
 		sessionId: string,
-	): Effect.Effect<void, ProviderAdapterFailure>;
+	): Effect.Effect<void, ProviderInstanceFailure>;
 }
-
-export type ProviderInstance = ProviderAdapter;
 
 export interface ProviderDriver<Input, R = never, E = never> {
 	readonly providerId: string;

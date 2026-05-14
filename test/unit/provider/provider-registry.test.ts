@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryLive,
@@ -144,7 +144,7 @@ describe("ProviderRegistry", () => {
 		const a2 = makeStubInstance("claude");
 		(a1.shutdownEffect as ReturnType<typeof vi.fn>).mockReturnValue(
 			Effect.fail(
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: "opencode",
 					operation: "shutdown",
 					cause: new Error("boom"),

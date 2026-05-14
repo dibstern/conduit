@@ -1444,7 +1444,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		expect(turn2Result._tag).toBe("Left");
 		if (turn2Result._tag === "Left") {
 			expect(turn2Result.left).toMatchObject({
-				_tag: "ProviderAdapterFailure",
+				_tag: "ProviderInstanceFailure",
 				providerId: "claude",
 				operation: "sendTurn",
 			});

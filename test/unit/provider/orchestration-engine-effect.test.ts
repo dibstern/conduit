@@ -7,12 +7,12 @@ import {
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
-	AdapterCapabilities,
-	ProviderAdapter,
+	ProviderCapabilities,
+	ProviderInstance,
 } from "../../../src/lib/provider/types.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
 
-function makeStubAdapter(providerId: string): ProviderAdapter & {
+function makeStubAdapter(providerId: string): ProviderInstance & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
 	resolvePermissionEffect: ReturnType<typeof vi.fn>;
 	resolveQuestionEffect: ReturnType<typeof vi.fn>;
@@ -49,7 +49,7 @@ function makeStubAdapter(providerId: string): ProviderAdapter & {
 	};
 }
 
-function capabilities(): AdapterCapabilities {
+function capabilities(): ProviderCapabilities {
 	return {
 		models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }],
 		supportsTools: true,
@@ -131,7 +131,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				...makeStubAdapter("opencode"),
 				sendTurn,
 				sendTurnEffect,
-			} as ProviderAdapter & {
+			} as ProviderInstance & {
 				sendTurn: typeof sendTurn;
 				sendTurnEffect: typeof sendTurnEffect;
 			});
@@ -158,7 +158,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				...makeStubAdapter("claude"),
 				discover,
 				discoverEffect,
-			} as ProviderAdapter & { discover: typeof discover });
+			} as ProviderInstance & { discover: typeof discover });
 
 			const result = yield* engine.dispatchEffect({
 				type: "discover",
@@ -186,7 +186,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				...makeStubAdapter("claude"),
 				interruptTurn,
 				interruptTurnEffect,
-			} as ProviderAdapter & {
+			} as ProviderInstance & {
 				interruptTurn: typeof interruptTurn;
 				interruptTurnEffect: typeof interruptTurnEffect;
 			});
@@ -219,7 +219,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					...makeStubAdapter("claude"),
 					resolvePermission,
 					resolvePermissionEffect,
-				} as ProviderAdapter & {
+				} as ProviderInstance & {
 					resolvePermission: typeof resolvePermission;
 					resolvePermissionEffect: typeof resolvePermissionEffect;
 				});
@@ -259,7 +259,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					...makeStubAdapter("claude"),
 					resolveQuestion,
 					resolveQuestionEffect,
-				} as ProviderAdapter & {
+				} as ProviderInstance & {
 					resolveQuestion: typeof resolveQuestion;
 					resolveQuestionEffect: typeof resolveQuestionEffect;
 				});
@@ -294,7 +294,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				...makeStubAdapter("claude"),
 				endSession,
 				endSessionEffect,
-			} as ProviderAdapter & {
+			} as ProviderInstance & {
 				endSession: typeof endSession;
 				endSessionEffect: typeof endSessionEffect;
 			});

@@ -1,22 +1,42 @@
 // test/unit/provider/types.test.ts
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type {
-	AdapterCapabilities,
 	CommandInfo,
 	CommandSource,
 	EventSink,
 	PermissionDecision,
-	ProviderAdapter,
+	ProviderCapabilities,
+	ProviderInstance,
 	SendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 
-describe("ProviderAdapter types", () => {
-	it("ProviderAdapter has exactly the 8-method interface", () => {
+const REPO_ROOT = process.cwd();
+
+describe("ProviderInstance types", () => {
+	it("does not expose adapter-named provider type exports", () => {
+		const providerTypes = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/types.ts"),
+			"utf8",
+		);
+		const providerErrors = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/errors.ts"),
+			"utf8",
+		);
+
+		expect(providerTypes).not.toMatch(
+			/\b(?:ProviderAdapter|AdapterCapabilities)\b/,
+		);
+		expect(providerErrors).not.toMatch(/\bProviderAdapterFailure\b/);
+	});
+
+	it("ProviderInstance has exactly the 8-method interface", () => {
 		// Compile-time check: if the interface changes shape, this won't compile.
-		const adapter: ProviderAdapter = {
+		const adapter: ProviderInstance = {
 			providerId: "test",
 			discoverEffect: () =>
 				Effect.succeed({
@@ -148,8 +168,8 @@ describe("ProviderAdapter types", () => {
 		expect(result.error?.code).toBe("provider_error");
 	});
 
-	it("AdapterCapabilities describes provider features", () => {
-		const caps: AdapterCapabilities = {
+	it("ProviderCapabilities describes provider features", () => {
+		const caps: ProviderCapabilities = {
 			models: [
 				{
 					id: "claude-sonnet",

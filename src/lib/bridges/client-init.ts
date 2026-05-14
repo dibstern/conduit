@@ -46,7 +46,7 @@ import { getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import type { AdapterCapabilities } from "../provider/types.js";
+import type { ProviderCapabilities } from "../provider/types.js";
 import {
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
@@ -162,7 +162,7 @@ export interface ClientInitDeps {
 	/** Optional supplier of cached update version (for replaying to new clients) */
 	getCachedUpdate?: () => string | null;
 	/** Optional Claude SDK capability discovery, provided by the relay Effect runtime. */
-	discoverClaudeCapabilities?: () => Promise<AdapterCapabilities>;
+	discoverClaudeCapabilities?: () => Promise<ProviderCapabilities>;
 	log: Logger;
 }
 

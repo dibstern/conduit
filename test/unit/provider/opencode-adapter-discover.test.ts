@@ -167,7 +167,7 @@ describe("OpenCodeAdapter.discoverEffect()", () => {
 		expect(result._tag).toBe("Left");
 		if (result._tag === "Left") {
 			expect(result.left).toMatchObject({
-				_tag: "ProviderAdapterFailure",
+				_tag: "ProviderInstanceFailure",
 				providerId: "opencode",
 				operation: "discover",
 			});

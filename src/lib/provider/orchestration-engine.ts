@@ -14,8 +14,8 @@ import {
 } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import type {
-	AdapterCapabilities,
 	PermissionDecision,
+	ProviderCapabilities,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -76,7 +76,7 @@ export type OrchestrationCommand =
 	| EndSessionCommand;
 
 // biome-ignore lint/suspicious/noConfusingVoidType: void is needed in the command result union.
-export type OrchestrationResult = TurnResult | AdapterCapabilities | void;
+export type OrchestrationResult = TurnResult | ProviderCapabilities | void;
 
 // ─── Session Binding ────────────────────────────────────────────────────────
 
@@ -109,7 +109,7 @@ export class OrchestrationEngine {
 	): Effect.Effect<TurnResult, OrchestrationError>;
 	dispatchEffect(
 		command: DiscoverCommand,
-	): Effect.Effect<AdapterCapabilities, OrchestrationError>;
+	): Effect.Effect<ProviderCapabilities, OrchestrationError>;
 	dispatchEffect(
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError>;
@@ -309,7 +309,7 @@ export class OrchestrationEngine {
 
 	private handleDiscoverEffect(
 		command: DiscoverCommand,
-	): Effect.Effect<AdapterCapabilities, OrchestrationError> {
+	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
 		return Effect.gen(this, function* () {
 			const instance = yield* this.registry.getInstanceEffect(
 				command.providerId,

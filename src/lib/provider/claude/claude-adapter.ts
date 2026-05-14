@@ -1,6 +1,6 @@
 // src/lib/provider/claude/claude-adapter.ts
 /**
- * ClaudeAdapter -- ProviderAdapter implementation wrapping the Claude
+ * ClaudeAdapter -- ProviderInstance implementation wrapping the Claude
  * Agent SDK (`@anthropic-ai/claude-agent-sdk`).
  *
  * Architectural notes:
@@ -24,15 +24,15 @@ import { Effect, Runtime } from "effect";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
 import { createDeferred, type Deferred } from "../deferred.js";
-import { ProviderAdapterFailure } from "../errors.js";
+import { ProviderInstanceFailure } from "../errors.js";
 import type {
-	AdapterCapabilities,
 	CommandInfo,
 	ModelInfo,
 	PermissionDecision,
-	ProviderAdapter,
 	ProviderAgentInfo,
+	ProviderCapabilities,
 	ProviderDriver,
+	ProviderInstance,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -211,7 +211,7 @@ export interface ClaudeAdapterDeps {
 
 // ─── ClaudeAdapter ─────────────────────────────────────────────────────────
 
-export class ClaudeAdapter implements ProviderAdapter {
+export class ClaudeAdapter implements ProviderInstance {
 	readonly providerId = "claude";
 
 	/** Active SDK sessions, keyed by conduit sessionId. */
@@ -249,11 +249,11 @@ export class ClaudeAdapter implements ProviderAdapter {
 	private mapProviderFailure<A>(
 		operation: string,
 		effect: Effect.Effect<A, unknown>,
-	): Effect.Effect<A, ProviderAdapterFailure> {
+	): Effect.Effect<A, ProviderInstanceFailure> {
 		return effect.pipe(
 			Effect.mapError(
 				(cause) =>
-					new ProviderAdapterFailure({
+					new ProviderInstanceFailure({
 						providerId: this.providerId,
 						operation,
 						cause,
@@ -264,11 +264,14 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	// ─── discover ─────────────────────────────────────────────────────────
 
-	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure> {
+	discoverEffect(): Effect.Effect<
+		ProviderCapabilities,
+		ProviderInstanceFailure
+	> {
 		return Effect.tryPromise({
 			try: () => this.discoverCapabilities(),
 			catch: (cause) =>
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: this.providerId,
 					operation: "discover",
 					cause,
@@ -276,7 +279,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		});
 	}
 
-	private async discoverCapabilities(): Promise<AdapterCapabilities> {
+	private async discoverCapabilities(): Promise<ProviderCapabilities> {
 		const userBase = join(homedir(), ".claude");
 		const projectBase = join(this.deps.workspaceRoot, ".claude");
 
@@ -330,7 +333,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	sendTurnEffect(
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, ProviderAdapterFailure> {
+	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return this.mapProviderFailure("sendTurn", this.sendTurnLocalEffect(input));
 	}
 
@@ -839,7 +842,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	interruptTurnEffect(
 		sessionId: string,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"interruptTurn",
 			this.interruptSessionEffect(sessionId),
@@ -937,7 +940,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"resolvePermission",
 			Effect.gen(this, function* () {
@@ -959,7 +962,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"resolveQuestion",
 			Effect.gen(this, function* () {
@@ -1022,7 +1025,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
 	endSessionEffect(
 		sessionId: string,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"endSession",
 			this.endSessionLocalEffect(sessionId),
@@ -1040,7 +1043,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 		});
 	}
 
-	shutdownEffect(): Effect.Effect<void, ProviderAdapterFailure> {
+	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure("shutdown", this.shutdownLocalEffect());
 	}
 

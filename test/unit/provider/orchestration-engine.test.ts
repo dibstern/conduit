@@ -55,7 +55,7 @@ vi.mock("../../../src/lib/logger.js", () => ({
 }));
 
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
-import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	type DiscoverCommand,
 	type EndSessionCommand,
@@ -68,8 +68,8 @@ import {
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
-	AdapterCapabilities,
-	ProviderAdapter,
+	ProviderCapabilities,
+	ProviderInstance,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 import {
@@ -86,7 +86,7 @@ function dispatch(
 function dispatch(
 	engine: OrchestrationEngine,
 	command: DiscoverCommand,
-): Promise<AdapterCapabilities>;
+): Promise<ProviderCapabilities>;
 function dispatch(
 	engine: OrchestrationEngine,
 	command: InterruptTurnCommand,
@@ -118,7 +118,7 @@ function dispatch(
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeStubAdapter(providerId: string): ProviderAdapter & {
+function makeStubAdapter(providerId: string): ProviderInstance & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
 	interruptTurnEffect: ReturnType<typeof vi.fn>;
 	resolvePermissionEffect: ReturnType<typeof vi.fn>;
@@ -363,7 +363,7 @@ describe("OrchestrationEngine", () => {
 		it("propagates adapter errors and preserves binding", async () => {
 			opencode.endSessionEffect.mockReturnValueOnce(
 				Effect.fail(
-					new ProviderAdapterFailure({
+					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "endSession",
 						cause: new Error("adapter boom"),
@@ -700,7 +700,7 @@ describe("OrchestrationEngine", () => {
 			const throwingAdapter = makeStubAdapter("thrower");
 			throwingAdapter.sendTurnEffect.mockReturnValue(
 				Effect.fail(
-					new ProviderAdapterFailure({
+					new ProviderInstanceFailure({
 						providerId: "thrower",
 						operation: "sendTurn",
 						cause: new Error("Adapter crash"),
@@ -812,7 +812,7 @@ describe("OrchestrationEngine", () => {
 			const failing = makeStubAdapter("opencode");
 			failing.interruptTurnEffect.mockReturnValue(
 				Effect.fail(
-					new ProviderAdapterFailure({
+					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "interruptTurn",
 						cause: new Error("Adapter interrupt failed"),
@@ -844,7 +844,7 @@ describe("OrchestrationEngine", () => {
 			const failing = makeStubAdapter("opencode");
 			failing.resolvePermissionEffect.mockReturnValue(
 				Effect.fail(
-					new ProviderAdapterFailure({
+					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "resolvePermission",
 						cause: new Error("Adapter permission failed"),
@@ -878,7 +878,7 @@ describe("OrchestrationEngine", () => {
 			const failing = makeStubAdapter("opencode");
 			failing.discoverEffect.mockReturnValue(
 				Effect.fail(
-					new ProviderAdapterFailure({
+					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "discover",
 						cause: new Error("Adapter discover failed"),

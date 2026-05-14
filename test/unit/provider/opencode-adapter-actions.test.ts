@@ -72,7 +72,7 @@ describe("OpenCodeAdapter action methods", () => {
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Left") {
 				expect(result.left).toMatchObject({
-					_tag: "ProviderAdapterFailure",
+					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "interruptTurn",
 				});
@@ -138,7 +138,7 @@ describe("OpenCodeAdapter action methods", () => {
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Left") {
 				expect(result.left).toMatchObject({
-					_tag: "ProviderAdapterFailure",
+					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "resolvePermission",
 				});
@@ -205,7 +205,7 @@ describe("OpenCodeAdapter action methods", () => {
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Left") {
 				expect(result.left).toMatchObject({
-					_tag: "ProviderAdapterFailure",
+					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "resolveQuestion",
 				});

@@ -1,6 +1,6 @@
 // src/lib/provider/opencode-adapter.ts
 // ─── OpenCode Provider Adapter ──────────────────────────────────────────────
-// Wraps the existing OpenCodeClient REST API behind the ProviderAdapter
+// Wraps the existing OpenCodeClient REST API behind the ProviderInstance
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
 import { Effect } from "effect";
@@ -8,14 +8,14 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
 import { createDeferred, type Deferred } from "./deferred.js";
-import { ProviderAdapterFailure } from "./errors.js";
+import { ProviderInstanceFailure } from "./errors.js";
 import type {
-	AdapterCapabilities,
 	CommandInfo,
 	ModelInfo,
 	PermissionDecision,
-	ProviderAdapter,
+	ProviderCapabilities,
 	ProviderDriver,
+	ProviderInstance,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -31,7 +31,7 @@ export interface OpenCodeAdapterOptions {
 
 // ─── OpenCodeAdapter ────────────────────────────────────────────────────────
 
-export class OpenCodeAdapter implements ProviderAdapter {
+export class OpenCodeAdapter implements ProviderInstance {
 	readonly providerId = "opencode";
 
 	private readonly client: OpenCodeAPI;
@@ -45,11 +45,14 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	// ─── discover ─────────────────────────────────────────────────────────
 
-	discoverEffect(): Effect.Effect<AdapterCapabilities, ProviderAdapterFailure> {
+	discoverEffect(): Effect.Effect<
+		ProviderCapabilities,
+		ProviderInstanceFailure
+	> {
 		return Effect.tryPromise({
 			try: () => this.discoverCapabilities(),
 			catch: (cause) =>
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: this.providerId,
 					operation: "discover",
 					cause,
@@ -57,7 +60,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
 		});
 	}
 
-	private async discoverCapabilities(): Promise<AdapterCapabilities> {
+	private async discoverCapabilities(): Promise<ProviderCapabilities> {
 		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
 			this.client.provider.list(),
 			this.client.app.commands(),
@@ -106,11 +109,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	sendTurnEffect(
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, ProviderAdapterFailure> {
+	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.sendTurnLocal(input),
 			catch: (cause) =>
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: this.providerId,
 					operation: "sendTurn",
 					cause,
@@ -213,11 +216,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	interruptTurnEffect(
 		sessionId: string,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.client.session.abort(sessionId),
 			catch: (cause) =>
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: this.providerId,
 					operation: "interruptTurn",
 					cause,
@@ -231,11 +234,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.resolvePermissionLocal(sessionId, requestId, decision),
 			catch: (cause) =>
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: this.providerId,
 					operation: "resolvePermission",
 					cause,
@@ -257,11 +260,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
 		_sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.tryPromise({
 			try: () => this.resolveQuestionLocal(requestId, answers),
 			catch: (cause) =>
-				new ProviderAdapterFailure({
+				new ProviderInstanceFailure({
 					providerId: this.providerId,
 					operation: "resolveQuestion",
 					cause,
@@ -284,7 +287,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
 	endSessionEffect(
 		sessionId: string,
-	): Effect.Effect<void, ProviderAdapterFailure> {
+	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.sync(() => this.endLocalSession(sessionId));
 	}
 

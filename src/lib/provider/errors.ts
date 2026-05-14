@@ -28,8 +28,8 @@ export class DuplicateCommand extends Data.TaggedError("DuplicateCommand")<{
 	}
 }
 
-export class ProviderAdapterFailure extends Data.TaggedError(
-	"ProviderAdapterFailure",
+export class ProviderInstanceFailure extends Data.TaggedError(
+	"ProviderInstanceFailure",
 )<{
 	readonly providerId: string;
 	readonly operation: string;
@@ -38,7 +38,7 @@ export class ProviderAdapterFailure extends Data.TaggedError(
 	get message(): string {
 		const inner =
 			this.cause instanceof Error ? this.cause.message : String(this.cause);
-		return `Provider adapter ${this.operation} failed for provider ${this.providerId}: ${inner}`;
+		return `Provider instance ${this.operation} failed for provider ${this.providerId}: ${inner}`;
 	}
 }
 
@@ -57,4 +57,4 @@ export type OrchestrationError =
 	| ProviderNotRegistered
 	| SessionProviderNotBound
 	| DuplicateCommand
-	| ProviderAdapterFailure;
+	| ProviderInstanceFailure;

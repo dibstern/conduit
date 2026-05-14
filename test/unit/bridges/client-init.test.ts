@@ -3,7 +3,7 @@ import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../../../src/lib/bridges/client-init.js";
-import type { AdapterCapabilities } from "../../../src/lib/provider/types.js";
+import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import { createMockClientInitDeps } from "../../helpers/mock-factories.js";
 
@@ -40,8 +40,8 @@ const TEST_HISTORY = {
 >;
 
 const makeClaudeCapabilities = (
-	overrides: Partial<AdapterCapabilities> = {},
-): AdapterCapabilities => ({
+	overrides: Partial<ProviderCapabilities> = {},
+): ProviderCapabilities => ({
 	models: [],
 	supportsTools: true,
 	supportsThinking: true,
@@ -471,10 +471,10 @@ describe("handleClientConnected — model list", () => {
 	});
 
 	it("sends OpenCode model_list before slow Claude discovery finishes", async () => {
-		let resolveDiscovery: (value: AdapterCapabilities) => void = () => {};
+		let resolveDiscovery: (value: ProviderCapabilities) => void = () => {};
 		const deps = applyTestDefaults(
 			createMockClientInitDeps({
-				discoverClaudeCapabilities: vi.fn<() => Promise<AdapterCapabilities>>(
+				discoverClaudeCapabilities: vi.fn<() => Promise<ProviderCapabilities>>(
 					() =>
 						new Promise((resolve) => {
 							resolveDiscovery = resolve;
