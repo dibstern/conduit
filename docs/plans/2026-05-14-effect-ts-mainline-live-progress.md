@@ -432,3 +432,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Removed direct `relayManagedRuntime.runFork(...)` calls from `relay-stack.ts`; the `ws` callback remains the external boundary.
 - Added a runtime-boundary guard so relay-stack cannot directly fork WebSocket callback programs again.
 - Verified locally with focused runtime-boundary, client-init, relay-stack, per-tab routing tests, typecheck, lint, diff hygiene, and `test/integration/flows/initial-state.integration.ts`.
+
+2026-05-14, relay startup acquisition cleanup:
+
+- Collapsed the API/WebSocket handler acquisition bridge and the session/orchestration/poller startup bridge into one relay startup Effect program.
+- Moved OpenCode reachability probing and project-config default-model discovery into that startup Effect while preserving the existing warning-and-continue behavior for config API failures.
+- Added a runtime-boundary guard so API/WebSocket acquisition cannot split back into a separate `startupHandles` runtime bridge.
+- Verified locally with focused runtime-boundary and relay-stack default override tests, typecheck, lint, diff hygiene, and `test/integration/flows/initial-state.integration.ts`.

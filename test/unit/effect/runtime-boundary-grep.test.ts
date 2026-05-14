@@ -653,6 +653,11 @@ describe("Effect runtime boundary grep", () => {
 				reason:
 					"relay startup should acquire WebSocketHandlerTag inside the startup Effect acquisition",
 			},
+			{
+				pattern: /const startupHandles = await relayManagedRuntime\.runPromise/,
+				reason:
+					"relay startup should not split API/WebSocket acquisition into a separate runtime bridge",
+			},
 		] as const;
 
 		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>

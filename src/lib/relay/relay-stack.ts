@@ -410,7 +410,7 @@ export async function createProjectRelay(
 		);
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
-	let initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
+	const initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
 	let initialDefaultVariant = "";
 	if (initialDefaultModel) {
 		log.info(`✓ Default model from settings: ${relaySettings.defaultModel}`);
@@ -584,49 +584,93 @@ export async function createProjectRelay(
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	if (config.signal?.aborted) throw new Error("Relay creation aborted");
+	let startup: {
+		api: OpenCodeAPI;
+		wsHandler: WebSocketHandlerShape;
+		sessionId: string;
+		orchestration: OrchestrationLayer;
+		statusPoller: import("../domain/relay/Services/services.js").StatusPollerShape;
+		pollerManager: import("../domain/relay/Services/services.js").PollerManagerShape;
+	};
 	try {
-		const startupHandles = await relayManagedRuntime.runPromise(
+		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const api = yield* OpenCodeAPITag;
 				const wsHandler = yield* WebSocketHandlerTag;
-				return { api, wsHandler };
-			}),
-		);
-		api = startupHandles.api;
-		wsHandler = startupHandles.wsHandler;
-		if (config.signal?.aborted) throw new Error("Relay creation aborted");
-		await api.app.path();
-		log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`);
+				yield* Effect.tryPromise(() => api.app.path());
+				yield* Effect.sync(() =>
+					log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
+				);
 
-		if (!initialDefaultModel) {
-			try {
-				if (config.signal?.aborted) throw new Error("Relay creation aborted");
-				const ocConfig = await api.config.get();
-				const configModel =
-					typeof ocConfig?.["model"] === "string" ? ocConfig["model"] : "";
-				if (configModel) {
-					const slashIdx = configModel.indexOf("/");
-					const provider = slashIdx > 0 ? configModel.slice(0, slashIdx) : "";
-					const modelId =
-						slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
-					if (provider && modelId) {
-						initialDefaultModel = {
-							providerID: provider,
-							modelID: modelId,
-						};
-						log.info(`✓ Default model from project config: ${configModel}`);
+				let defaultModel = initialDefaultModel;
+				if (!defaultModel) {
+					const configResult = yield* Effect.either(
+						Effect.tryPromise(() => api.config.get()),
+					);
+					if (configResult._tag === "Right") {
+						const configModel =
+							typeof configResult.right?.["model"] === "string"
+								? configResult.right["model"]
+								: "";
+						if (configModel) {
+							const slashIdx = configModel.indexOf("/");
+							const provider =
+								slashIdx > 0 ? configModel.slice(0, slashIdx) : "";
+							const modelId =
+								slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
+							if (provider && modelId) {
+								defaultModel = {
+									providerID: provider,
+									modelID: modelId,
+								};
+								yield* Effect.sync(() =>
+									log.info(
+										`✓ Default model from project config: ${configModel}`,
+									),
+								);
+							}
+						}
+					} else {
+						yield* Effect.sync(() =>
+							log.warn(
+								`Config API unavailable: ${formatErrorDetail(configResult.left)}`,
+							),
+						);
 					}
 				}
-			} catch (err) {
-				log.warn(
-					`Config API unavailable: ${err instanceof Error ? err.message : err}`,
+
+				const sessionManagerService = yield* SessionManagerServiceTag;
+				const sessionId = yield* sessionManagerService.initialize(
+					config.sessionTitle,
 				);
-			}
-		}
+				const orchestration = yield* getOrchestrationLayer;
+				yield* PollerStateTag;
+				yield* PollerPubSubTag;
+				if (defaultModel) {
+					yield* setDefaultModel(defaultModel);
+				}
+				if (initialDefaultVariant) {
+					yield* setDefaultVariant(initialDefaultVariant);
+				}
+				const statusPoller = yield* StatusPollerTag;
+				const pollerManager = yield* PollerManagerTag;
+				return {
+					api,
+					wsHandler,
+					sessionId,
+					orchestration,
+					statusPoller,
+					pollerManager,
+				};
+			}),
+		);
 	} catch (err) {
 		await relayManagedRuntime.dispose();
 		throw err;
 	}
+	api = startup.api;
+	wsHandler = startup.wsHandler;
 	const sseStream = new SSEStream({
 		api,
 		log: sseLog,
@@ -635,26 +679,6 @@ export async function createProjectRelay(
 		runtime: relayManagedRuntime,
 	});
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	const startup = await relayManagedRuntime.runPromise(
-		Effect.gen(function* () {
-			const sessionManagerService = yield* SessionManagerServiceTag;
-			const sessionId = yield* sessionManagerService.initialize(
-				config.sessionTitle,
-			);
-			const orchestration = yield* getOrchestrationLayer;
-			yield* PollerStateTag;
-			yield* PollerPubSubTag;
-			if (initialDefaultModel) {
-				yield* setDefaultModel(initialDefaultModel);
-			}
-			if (initialDefaultVariant) {
-				yield* setDefaultVariant(initialDefaultVariant);
-			}
-			const statusPoller = yield* StatusPollerTag;
-			const pollerManager = yield* PollerManagerTag;
-			return { sessionId, orchestration, statusPoller, pollerManager };
-		}),
-	);
 	const { sessionId, orchestration, statusPoller, pollerManager } = startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
