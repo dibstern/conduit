@@ -3,6 +3,10 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import { Cause, Effect, Runtime } from "effect";
+import { StatusPollerTag } from "../domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
@@ -10,6 +14,7 @@ import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
+	applyPipelineResultEffect,
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
@@ -52,6 +57,84 @@ export interface PollerWiringDeps {
 	/** Optional: record that a "done" was delivered via poller (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
 }
+
+export type EffectPollerWiringDeps = Omit<
+	PollerWiringDeps,
+	"sessionService" | "pipelineDeps" | "statusPoller"
+> & {
+	pipelineDeps: Omit<PipelineDeps, "processingTimeouts">;
+};
+
+const handlePollerEventsEffect = (
+	deps: EffectPollerWiringDeps,
+	events: RelayMessage[],
+	polledSessionId: string,
+) =>
+	Effect.gen(function* () {
+		const statusPoller = yield* StatusPollerTag;
+		const sessionService = yield* SessionManagerServiceTag;
+		const { wsHandler, pipelineDeps, config, pollerLog } = deps;
+
+		if (events.length > 0 && polledSessionId) {
+			if (classifyPollerBatch(events).hasContentActivity) {
+				yield* Effect.sync(() =>
+					statusPoller.markMessageActivity(polledSessionId),
+				);
+			}
+		}
+
+		const parentMap = yield* sessionService.getSessionParentMap();
+		for (const msg of events) {
+			const pollerViewers = polledSessionId
+				? wsHandler.getClientsForSession(polledSessionId)
+				: [];
+			const pollerResult = processEvent(
+				msg,
+				polledSessionId,
+				pollerViewers,
+				"message-poller",
+			);
+			yield* applyPipelineResultEffect(
+				pollerResult,
+				polledSessionId,
+				pipelineDeps,
+			);
+
+			// Record done delivery for dedup with status-poller synthetic done
+			if (msg.type === "done" && polledSessionId) {
+				yield* Effect.sync(() => deps.onDoneProcessed?.(polledSessionId));
+			}
+
+			// Notification routing: push + cross-session broadcast
+			const isSubagentPoller =
+				polledSessionId != null && parentMap.has(polledSessionId);
+			const pollerNotification = resolveNotifications(
+				msg,
+				pollerResult.route,
+				isSubagentPoller,
+				polledSessionId ?? undefined,
+			);
+			const pushManager = config.pushManager;
+			if (pollerNotification.sendPush && pushManager) {
+				yield* Effect.sync(() =>
+					sendPushForEvent(pushManager, msg, pollerLog, {
+						slug: config.slug,
+						sessionId: polledSessionId ?? undefined,
+					}),
+				);
+			}
+			if (
+				pollerNotification.broadcastCrossSession &&
+				pollerNotification.crossSessionPayload
+			) {
+				yield* Effect.sync(() =>
+					wsHandler.broadcast(
+						pollerNotification.crossSessionPayload as RelayMessage,
+					),
+				);
+			}
+		}
+	});
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
 
@@ -141,3 +224,34 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		}
 	});
 }
+
+export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
+	Effect.gen(function* () {
+		const runtime = yield* Effect.runtime<
+			SessionManagerServiceTag | StatusPollerTag | OverridesStateTag
+		>();
+		yield* Effect.sync(() => {
+			const runFork = Runtime.runFork(runtime);
+			deps.pollerManager.on("events", (events, polledSessionId) => {
+				runFork(
+					handlePollerEventsEffect(deps, events, polledSessionId).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.sync(() =>
+								deps.pollerLog.warn(
+									`Message poller event handling failed: ${Cause.pretty(cause)}`,
+								),
+							),
+						),
+					),
+				);
+			});
+
+			deps.sseStream.on("event", (event: unknown) => {
+				const sid = extractSessionId(event as SSEEvent);
+				if (sid) {
+					deps.sseTracker.recordEvent(sid, Date.now());
+					deps.pollerManager.notifySSEEvent(sid);
+				}
+			});
+		});
+	});

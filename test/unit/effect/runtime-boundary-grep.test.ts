@@ -827,4 +827,37 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not wire production message pollers through relay-stack bridge deps", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /import \{ wirePollers \}/,
+				reason:
+					"production poller wiring should use the Effect-owned poller callback handler",
+			},
+			{
+				pattern: /wirePollers\(\{/,
+				reason:
+					"production poller wiring should not consume sessionServiceBridge or processingTimeouts directly",
+			},
+			{
+				pattern: /wirePollersEffect\([\s\S]*processingTimeouts/,
+				reason:
+					"message-poller timeout side effects should run through applyPipelineResultEffect",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

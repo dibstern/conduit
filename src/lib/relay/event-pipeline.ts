@@ -2,6 +2,12 @@
 // Pure functions for event processing. Each function does one thing and returns
 // data — no side effects. The caller composes them and executes side effects.
 
+import { Effect } from "effect";
+import {
+	clearProcessingTimeout,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
+} from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../shared-types.js";
 import { truncateToolResult as truncateToolResultImpl } from "./truncate-content.js";
@@ -186,6 +192,32 @@ export function applyPipelineResult(
 			`${result.route.reason} — ${result.msg.type} (${result.source})`,
 		);
 	}
+}
+
+export function applyPipelineResultEffect(
+	result: PipelineResult,
+	sessionId: string | undefined,
+	deps: Omit<PipelineDeps, "processingTimeouts">,
+) {
+	return Effect.gen(function* () {
+		if (result.timeout === "clear" && sessionId) {
+			yield* clearProcessingTimeout(sessionId);
+		} else if (result.timeout === "reset" && sessionId) {
+			yield* resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION);
+		}
+		yield* Effect.sync(() => {
+			// Phase 0b: always firehose to the project. The route field is retained
+			// as a "had-viewers?" signal for cross-session notification decisions.
+			if (sessionId) {
+				deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
+			}
+			if (result.route.action === "drop") {
+				deps.log.info(
+					`${result.route.reason} — ${result.msg.type} (${result.source})`,
+				);
+			}
+		});
+	});
 }
 
 // ─── Composed pipeline (convenience, still side-effect free) ─────────────────

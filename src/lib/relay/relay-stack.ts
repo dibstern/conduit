@@ -118,7 +118,7 @@ import {
 	createMonitoringWiringState,
 	wireMonitoring,
 } from "./monitoring-wiring.js";
-import { wirePollers } from "./poller-wiring.js";
+import { wirePollersEffect } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
@@ -824,27 +824,28 @@ export async function createProjectRelay(
 		sseStream.on(event, handler);
 	});
 
-	// ── Poller wiring (G3: message poller events + SSE→poller bridge) ────────
-	wirePollers({
-		pollerManager,
-		sseStream,
-		statusPoller,
-		wsHandler,
-		sessionService: sessionServiceBridge,
-		pipelineDeps,
-		sseTracker: monitoringStateAccess.sseTracker,
-		config: {
-			...(config.pushManager != null && { pushManager: config.pushManager }),
-			slug: config.slug,
-		},
-		pollerLog,
-		onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
-	});
-
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	try {
 		await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				yield* wirePollersEffect({
+					pollerManager,
+					sseStream,
+					wsHandler,
+					pipelineDeps: {
+						wsHandler: pipelineDeps.wsHandler,
+						log: pipelineDeps.log,
+					},
+					sseTracker: monitoringStateAccess.sseTracker,
+					config: {
+						...(config.pushManager != null && {
+							pushManager: config.pushManager,
+						}),
+						slug: config.slug,
+					},
+					pollerLog,
+					onDoneProcessed: (sid: string) => doneDeliveredRef.fn(sid),
+				});
 				yield* wireSSEConsumerEffect(sseWiringDeps, sseStream);
 				yield* sseStream.connectEffect();
 				const gate = yield* RelayCommandGateTag;
