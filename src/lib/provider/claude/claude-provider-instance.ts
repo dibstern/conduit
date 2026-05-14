@@ -20,7 +20,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Deferred, Effect, Runtime } from "effect";
+import { Cause, Deferred, Effect, Exit, Runtime } from "effect";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
 import { ProviderInstanceFailure } from "../errors.js";
@@ -72,6 +72,23 @@ function claudeApiModelId(
 
 function asError(cause: unknown): Error {
 	return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+function makeRuntimeEffectRunner(
+	runtime: Runtime.Runtime<never>,
+): (effect: Effect.Effect<void, unknown>) => Promise<void> {
+	return (effect) =>
+		new Promise((resolve, reject) => {
+			Runtime.runCallback(runtime)(effect, {
+				onExit: (exit) => {
+					if (Exit.isSuccess(exit)) {
+						resolve();
+						return;
+					}
+					reject(Cause.squash(exit.cause));
+				},
+			});
+		});
 }
 
 // ─── Built-in command catalog ──────────────────────────────────────────────
@@ -494,7 +511,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				const runtime = yield* Effect.runtime<never>();
 				const translator = new ClaudeEventTranslator({
 					sink: input.eventSink,
-					runEffect: Runtime.runPromise(runtime),
+					runEffect: makeRuntimeEffectRunner(runtime),
 				});
 				ctx.streamConsumer = this.runStreamConsumer(ctx, translator);
 			});

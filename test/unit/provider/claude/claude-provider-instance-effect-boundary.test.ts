@@ -33,4 +33,10 @@ describe("ClaudeProviderInstance Effect boundary", () => {
 		expect(providerInstance).not.toContain("deferred.promise");
 		expect(providerInstance).not.toMatch(/Effect\.tryPromise\([^)]*deferred/);
 	});
+
+	it("does not pass translator writes through Runtime.runPromise", () => {
+		const providerInstance = providerInstanceSource();
+
+		expect(providerInstance).not.toContain("Runtime.runPromise");
+	});
 });
