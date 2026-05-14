@@ -126,6 +126,29 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 	}
 }
 
+export class DaemonLifecycleContextTag extends Context.Tag(
+	"DaemonLifecycleContext",
+)<DaemonLifecycleContextTag, DaemonLifecycleContext>() {}
+
+export const makeDaemonLifecycleContext = (
+	socketPath: string,
+): DaemonLifecycleContext => ({
+	httpServer: null,
+	upgradeServer: null,
+	onboardingServer: null,
+	ipcServer: null,
+	ipcClients: new Set(),
+	clientCount: 0,
+	socketPath,
+	router: null,
+});
+
+export const DaemonLifecycleContextLive = (socketPath: string) =>
+	Layer.effect(
+		DaemonLifecycleContextTag,
+		Effect.sync(() => makeDaemonLifecycleContext(socketPath)),
+	);
+
 const startLifecycleServer = (operation: string, start: () => Promise<void>) =>
 	Effect.tryPromise({
 		try: start,
@@ -301,62 +324,65 @@ export const makeRelayCacheLayer = (factory: RelayFactory) =>
  * HTTP(S) server layer — starts the HTTP (or TLS protocol-detection) server
  * and tears it down gracefully on scope close.
  */
-export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
-	Layer.scopedDiscard(
-		Effect.gen(function* () {
-			const configRef = yield* DaemonConfigRefTag;
-			const httpServerRef = yield* HttpServerRefTag;
-			const requestHandler = yield* DaemonHttpRequestHandlerTag;
-			const tls = yield* TlsCertTag;
-			const config = yield* Ref.get(configRef);
+export const HttpServerLive = Layer.scopedDiscard(
+	Effect.gen(function* () {
+		const ctx = yield* DaemonLifecycleContextTag;
+		const configRef = yield* DaemonConfigRefTag;
+		const httpServerRef = yield* HttpServerRefTag;
+		const requestHandler = yield* DaemonHttpRequestHandlerTag;
+		const tls = yield* TlsCertTag;
+		const config = yield* Ref.get(configRef);
 
-			const startConfig: HttpServerStartConfig = {
-				port: config.port,
-				host: config.host,
+		const startConfig: HttpServerStartConfig = {
+			port: config.port,
+			host: config.host,
+		};
+		if (tls.certs) {
+			startConfig.tls = {
+				key: tls.certs.key,
+				cert: tls.certs.caCertPem
+					? Buffer.concat([
+							tls.certs.cert,
+							Buffer.from("\n"),
+							tls.certs.caCertPem,
+						])
+					: tls.certs.cert,
 			};
-			if (tls.certs) {
-				startConfig.tls = {
-					key: tls.certs.key,
-					cert: tls.certs.caCertPem
-						? Buffer.concat([
-								tls.certs.cert,
-								Buffer.from("\n"),
-								tls.certs.caCertPem,
-							])
-						: tls.certs.cert,
-				};
-			}
+		}
 
-			ctx.router = requestHandler;
-			const actualPort = yield* Effect.tryPromise({
-				try: () => startHttpServer(ctx, startConfig),
-				catch: (cause) =>
-					new DaemonLifecycleLayerError({
-						operation: "startHttpServer",
-						cause,
-					}),
-			}).pipe(
-				Effect.catchAll((error) =>
+		ctx.router = requestHandler;
+		const actualPort = yield* Effect.tryPromise({
+			try: () => startHttpServer(ctx, startConfig),
+			catch: (cause) =>
+				new DaemonLifecycleLayerError({
+					operation: "startHttpServer",
+					cause,
+				}),
+		}).pipe(
+			Effect.catchAll((error) =>
+				Effect.sync(() => {
+					ctx.router = null;
+				}).pipe(Effect.zipRight(Effect.fail(error))),
+			),
+		);
+		yield* Ref.set(httpServerRef, ctx.upgradeServer ?? ctx.httpServer);
+		yield* commitDaemonRuntimeConfig((c) => ({ ...c, port: actualPort }));
+		yield* Effect.addFinalizer(() =>
+			closeLifecycleServer("closeHttpServer", () => closeHttpServer(ctx)).pipe(
+				Effect.zipRight(Ref.set(httpServerRef, null)),
+				Effect.zipRight(
 					Effect.sync(() => {
 						ctx.router = null;
-					}).pipe(Effect.zipRight(Effect.fail(error))),
+					}),
 				),
-			);
-			yield* Ref.set(httpServerRef, ctx.upgradeServer ?? ctx.httpServer);
-			yield* commitDaemonRuntimeConfig((c) => ({ ...c, port: actualPort }));
-			yield* Effect.addFinalizer(() =>
-				closeLifecycleServer("closeHttpServer", () =>
-					closeHttpServer(ctx),
-				).pipe(
-					Effect.zipRight(Ref.set(httpServerRef, null)),
-					Effect.zipRight(
-						Effect.sync(() => {
-							ctx.router = null;
-						}),
-					),
-				),
-			);
-		}),
+			),
+		);
+	}),
+);
+
+export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
+	HttpServerLive.pipe(
+		Layer.provide(Layer.succeed(DaemonLifecycleContextTag, ctx)),
 	);
 
 /**
@@ -364,12 +390,12 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
  * and closes it on scope close.
  */
 export const makeIpcServerLive = (
-	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
 	postResponseActions?: IpcPostResponseActions,
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
+			const ctx = yield* DaemonLifecycleContextTag;
 			const runtime = yield* Effect.runtime<
 				| ConfigPersistenceTag
 				| DaemonConfigRefTag
@@ -428,12 +454,10 @@ function makeTaggedIpcDispatcher(
  * Onboarding server layer — starts an HTTP-only onboarding server when TLS is
  * active and tears it down gracefully on scope close.
  */
-export const makeOnboardingServerLive = (
-	ctx: DaemonLifecycleContext,
-	staticDir: string,
-) =>
+export const OnboardingServerLive = (staticDir: string) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
+			const ctx = yield* DaemonLifecycleContextTag;
 			const configRef = yield* DaemonConfigRefTag;
 			const tls = yield* TlsCertTag;
 			const config = yield* Ref.get(configRef);
@@ -465,6 +489,14 @@ export const makeOnboardingServerLive = (
 				),
 			);
 		}),
+	);
+
+export const makeOnboardingServerLive = (
+	ctx: DaemonLifecycleContext,
+	staticDir: string,
+) =>
+	OnboardingServerLive(staticDir).pipe(
+		Layer.provide(Layer.succeed(DaemonLifecycleContextTag, ctx)),
 	);
 
 /**
@@ -507,8 +539,7 @@ export const makePidFileLive = (
  * and optional background service configs remain.
  */
 export interface DaemonLiveOptions {
-	// Server lifecycle (still imperative — AP-38 deferred)
-	ctx: DaemonLifecycleContext;
+	// Server lifecycle (still partially imperative — AP-38 deferred)
 	ipcContext: DaemonIPCContext;
 	ipcPostResponseActions?: IpcPostResponseActions;
 	staticDir: string;
@@ -571,6 +602,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		options.configMirror
 			? DaemonConfigMirrorLive(options.configMirror)
 			: Layer.empty,
+		DaemonLifecycleContextLive(socketPath),
 		SignalHandlerLayer,
 		ProcessErrorHandlerLayer,
 		makePidFileLive(configDir, pidPath, socketPath),
@@ -656,15 +688,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.httpRouter);
 	const httpAndIpc = Layer.mergeAll(
-		makeHttpServerLive(options.ctx),
-		makeIpcServerLive(
-			options.ctx,
-			options.ipcContext,
-			options.ipcPostResponseActions,
-		),
+		HttpServerLive,
+		makeIpcServerLive(options.ipcContext, options.ipcPostResponseActions),
 	).pipe(Layer.provideMerge(httpRequestHandler));
 
-	const servers = makeOnboardingServerLive(options.ctx, options.staticDir).pipe(
+	const servers = OnboardingServerLive(options.staticDir).pipe(
 		Layer.provideMerge(httpAndIpc),
 		Layer.provideMerge(withDaemonControl),
 	);

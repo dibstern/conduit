@@ -8,8 +8,6 @@
 // that the service is accessible and functional.
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import { createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -56,25 +54,10 @@ import type { StoredProject } from "../../../src/lib/types.js";
 // ─── Mock DaemonLiveOptions ─────────────────────────────────────────────────
 
 const makeMockOptions = (): DaemonLiveOptions => {
-	const httpServer = createServer();
-	const ipcServer = createNetServer();
-
 	return {
 		configDir: "/tmp/test-daemon-wiring",
 		pidPath: "/tmp/test-daemon-wiring/daemon.pid",
 		socketPath: "/tmp/test-daemon-wiring/relay.sock",
-		ctx: {
-			// Use an ephemeral port so wiring tests can run while the local
-			// development daemon owns the default conduit port.
-			httpServer,
-			upgradeServer: null,
-			onboardingServer: null,
-			ipcServer,
-			ipcClients: new Set<Socket>(),
-			clientCount: 0,
-			socketPath: "/tmp/test-daemon-wiring/relay.sock",
-			router: null,
-		},
 		ipcContext: {
 			addProject: () => Promise.resolve({}) as Promise<StoredProject>,
 			removeProject: () => Promise.resolve(),
@@ -302,6 +285,16 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
+	it.scoped("creates daemon lifecycle context when options omit ctx", () => {
+		const options = makeMockOptions();
+		return Effect.gen(function* () {
+			const serverRef = yield* HttpServerRefTag;
+			const server = yield* Ref.get(serverRef);
+			expect(server).not.toBeNull();
+			expect(server?.listening).toBe(true);
+		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+	});
+
 	it.scoped("provides DaemonStateTag (Tier 2)", () =>
 		Effect.gen(function* () {
 			const stateRef = yield* DaemonStateTag;
@@ -373,10 +366,6 @@ describe("makeDaemonLive wiring", () => {
 				configDir,
 				pidPath: join(configDir, "daemon.pid"),
 				socketPath,
-				ctx: {
-					...base.ctx,
-					socketPath,
-				},
 				initialConfig: makeDaemonConfigFromOptions({
 					port: 53124,
 					host: "127.0.0.1",
@@ -456,10 +445,6 @@ describe("makeDaemonLive wiring", () => {
 					configDir,
 					pidPath: join(configDir, "daemon.pid"),
 					socketPath,
-					ctx: {
-						...base.ctx,
-						socketPath,
-					},
 					initialConfig: makeDaemonConfigFromOptions({
 						port: 53125,
 						host: "127.0.0.1",
@@ -562,10 +547,6 @@ describe("makeDaemonLive wiring", () => {
 					configDir,
 					pidPath: join(configDir, "daemon.pid"),
 					socketPath,
-					ctx: {
-						...base.ctx,
-						socketPath,
-					},
 					configPath,
 					initialConfig: makeDaemonConfigFromOptions({
 						port: 0,

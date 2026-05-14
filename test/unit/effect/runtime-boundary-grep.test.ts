@@ -1414,6 +1414,34 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not require callers to assemble daemon lifecycle context", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-layers.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const optionsStart = source.indexOf("export interface DaemonLiveOptions");
+		const makeDaemonStart = source.indexOf(
+			"export const makeDaemonLive",
+			optionsStart,
+		);
+		expect(optionsStart).toBeGreaterThanOrEqual(0);
+		expect(makeDaemonStart).toBeGreaterThan(optionsStart);
+		const optionsSource = source.slice(optionsStart, makeDaemonStart);
+		const hits = optionsSource.split("\n").flatMap((line, index) =>
+			/\bctx:\s*DaemonLifecycleContext\b/.test(line)
+				? [
+						{
+							path,
+							line: source.slice(0, optionsStart).split("\n").length + index,
+							source: line.trim(),
+							reason:
+								"DaemonLiveOptions should create/provide DaemonLifecycleContext through the daemon Layer",
+						},
+					]
+				: [],
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not dispatch daemon IPC requests through Runtime.runPromise", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

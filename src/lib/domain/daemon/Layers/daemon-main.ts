@@ -47,7 +47,11 @@ import {
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
-import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
+import {
+	DaemonLifecycleContextTag,
+	makeDaemonLive,
+	ShutdownAwaiterLive,
+} from "./daemon-layers.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
@@ -223,6 +227,16 @@ export class OpenCodeUnavailableError extends Data.TaggedError(
 			"Install OpenCode first: https://opencode.ai\n" +
 			`Or start it manually: opencode serve --port ${this.port}`
 		);
+	}
+}
+
+export class DaemonLifecycleContextUnavailableError extends Data.TaggedError(
+	"DaemonLifecycleContextUnavailableError",
+)<{
+	readonly operation: string;
+}> {
+	override get message(): string {
+		return "Daemon lifecycle context is not available before the daemon Layer has started";
 	}
 }
 
@@ -713,7 +727,7 @@ export async function startDaemonProcess(
 			);
 			return createProjectRelay({
 				// biome-ignore lint/style/noNonNullAssertion: relay factory is only invoked after the HTTP server has been started
-				httpServer: ctx.httpServer!,
+				httpServer: getLifecycleContext().httpServer!,
 				opencodeUrl,
 				projectDir: project.directory,
 				slug: project.slug,
@@ -918,7 +932,7 @@ export async function startDaemonProcess(
 			...(lanIP != null && { lanIP }),
 			projectCount: registry.size,
 			sessionCount,
-			clientCount: ctx.clientCount,
+			clientCount: lifecycleContext?.clientCount ?? 0,
 			pinEnabled: cfg.pinHash !== null,
 			tlsEnabled: cfg.tlsEnabled,
 			keepAwake: cfg.keepAwake,
@@ -966,18 +980,20 @@ export async function startDaemonProcess(
 	}
 
 	// ── Lifecycle context ─────────────────────────────────────────────────
-	const ctx: DaemonLifecycleContext = {
-		httpServer: null,
-		upgradeServer: null,
-		onboardingServer: null,
-		ipcServer: null,
-		ipcClients: new Set(),
-		clientCount: 0,
-		socketPath,
-		router: null,
-	};
+	let lifecycleContext: DaemonLifecycleContext | null = null;
+
+	function getLifecycleContext(): DaemonLifecycleContext {
+		if (lifecycleContext == null) {
+			throw new DaemonLifecycleContextUnavailableError({
+				operation: "getLifecycleContext",
+			});
+		}
+		return lifecycleContext;
+	}
 
 	function readBoundHttpPort(): number | null {
+		const ctx = lifecycleContext;
+		if (ctx == null) return null;
 		const server = ctx.upgradeServer ?? ctx.httpServer;
 		const addr = server?.address();
 		return typeof addr === "object" && addr ? addr.port : null;
@@ -1355,7 +1371,6 @@ export async function startDaemonProcess(
 		configDir,
 		pidPath,
 		socketPath,
-		ctx,
 		ipcContext,
 		ipcPostResponseActions: {
 			scheduleShutdown: scheduleLegacyPostResponseShutdown,
@@ -1467,10 +1482,11 @@ export async function startDaemonProcess(
 	// CrashCounter, AuthManager (reactive pinHash from DaemonConfigRef).
 	try {
 		daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
-		await waitForDaemonRuntimeEffect(
+		lifecycleContext = await waitForDaemonRuntimeEffect(
 			daemonRuntime,
 			Effect.gen(function* () {
 				yield* DaemonConfigRefTag;
+				return yield* DaemonLifecycleContextTag;
 			}),
 		);
 	} catch (err) {
@@ -1584,7 +1600,7 @@ export async function startDaemonProcess(
 			return runtimeConfigSnapshot.port;
 		},
 		get onboardingPort() {
-			const server = ctx.onboardingServer;
+			const server = lifecycleContext?.onboardingServer;
 			if (!server) return null;
 			const addr = server.address();
 			return typeof addr === "object" && addr ? addr.port : null;
