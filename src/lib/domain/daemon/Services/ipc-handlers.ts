@@ -49,6 +49,30 @@ class InstanceMgmtOperationFailed extends Data.TaggedError(
 const formatInstanceMgmtFailure = (failure: InstanceMgmtOperationFailed) =>
 	String(failure.cause);
 
+const failInstanceMgmtOperation = (operation: string, cause: unknown) =>
+	new InstanceMgmtOperationFailed({
+		operation,
+		cause,
+	});
+
+const tryInstanceMgmtOperation = <A>(
+	operation: string,
+	tryOperation: () => A,
+) =>
+	Effect.try({
+		try: tryOperation,
+		catch: (cause) => failInstanceMgmtOperation(operation, cause),
+	});
+
+const tryInstanceMgmtPromise = <A>(
+	operation: string,
+	tryOperation: () => PromiseLike<A>,
+) =>
+	Effect.tryPromise({
+		try: tryOperation,
+		catch: (cause) => failInstanceMgmtOperation(operation, cause),
+	});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const applyRestartConfig = (
@@ -366,17 +390,10 @@ export const handleInstanceAdd = (
 		};
 		if (cmd.env !== undefined) config.env = cmd.env as Record<string, string>;
 		if (cmd.url !== undefined) config.url = cmd.url;
-		return yield* Effect.try({
-			try: () => {
-				const instance = mgmt.addInstance(id, config);
-				mgmt.persistConfig();
-				return { ok: true, instance };
-			},
-			catch: (cause) =>
-				new InstanceMgmtOperationFailed({
-					operation: "addInstance",
-					cause,
-				}),
+		return yield* tryInstanceMgmtOperation("addInstance", () => {
+			const instance = mgmt.addInstance(id, config);
+			mgmt.persistConfig();
+			return { ok: true, instance };
 		}).pipe(
 			Effect.catchAll((failure) =>
 				Effect.succeed({
@@ -393,16 +410,16 @@ export const handleInstanceRemove = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.try({
-			try: () => {
-				mgmt.removeInstance(cmd.id);
-				mgmt.persistConfig();
-				return { ok: true } as IPCResponse;
-			},
-			catch: (e) => e,
+		return yield* tryInstanceMgmtOperation("removeInstance", () => {
+			mgmt.removeInstance(cmd.id);
+			mgmt.persistConfig();
+			return { ok: true } as IPCResponse;
 		}).pipe(
-			Effect.catchAll((e) =>
-				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			Effect.catchAll((failure) =>
+				Effect.succeed({
+					ok: false,
+					error: formatInstanceMgmtFailure(failure),
+				} as IPCResponse),
 			),
 		);
 	});
@@ -413,13 +430,15 @@ export const handleInstanceStart = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.tryPromise({
-			try: () => mgmt.startInstance(cmd.id),
-			catch: (e) => e,
-		}).pipe(
+		return yield* tryInstanceMgmtPromise("startInstance", () =>
+			mgmt.startInstance(cmd.id),
+		).pipe(
 			Effect.map(() => ({ ok: true }) as IPCResponse),
-			Effect.catchAll((e) =>
-				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			Effect.catchAll((failure) =>
+				Effect.succeed({
+					ok: false,
+					error: formatInstanceMgmtFailure(failure),
+				} as IPCResponse),
 			),
 		);
 	});
@@ -430,15 +449,15 @@ export const handleInstanceStop = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.try({
-			try: () => {
-				mgmt.stopInstance(cmd.id);
-				return { ok: true } as IPCResponse;
-			},
-			catch: (e) => e,
+		return yield* tryInstanceMgmtOperation("stopInstance", () => {
+			mgmt.stopInstance(cmd.id);
+			return { ok: true } as IPCResponse;
 		}).pipe(
-			Effect.catchAll((e) =>
-				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			Effect.catchAll((failure) =>
+				Effect.succeed({
+					ok: false,
+					error: formatInstanceMgmtFailure(failure),
+				} as IPCResponse),
 			),
 		);
 	});
@@ -464,25 +483,25 @@ export const handleInstanceUpdate = (
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
-		return yield* Effect.try({
-			try: () => {
-				const updates: {
-					name?: string;
-					env?: Record<string, string>;
-					port?: number;
-				} = {};
-				if (cmd.name !== undefined) updates.name = cmd.name;
-				if (cmd.env !== undefined)
-					updates.env = cmd.env as Record<string, string>;
-				if (cmd.port !== undefined) updates.port = cmd.port;
-				const instance = mgmt.updateInstance(cmd.id, updates);
-				mgmt.persistConfig();
-				return { ok: true, instance } as IPCResponse;
-			},
-			catch: (e) => e,
+		return yield* tryInstanceMgmtOperation("updateInstance", () => {
+			const updates: {
+				name?: string;
+				env?: Record<string, string>;
+				port?: number;
+			} = {};
+			if (cmd.name !== undefined) updates.name = cmd.name;
+			if (cmd.env !== undefined)
+				updates.env = cmd.env as Record<string, string>;
+			if (cmd.port !== undefined) updates.port = cmd.port;
+			const instance = mgmt.updateInstance(cmd.id, updates);
+			mgmt.persistConfig();
+			return { ok: true, instance } as IPCResponse;
 		}).pipe(
-			Effect.catchAll((e) =>
-				Effect.succeed({ ok: false, error: String(e) } as IPCResponse),
+			Effect.catchAll((failure) =>
+				Effect.succeed({
+					ok: false,
+					error: formatInstanceMgmtFailure(failure),
+				} as IPCResponse),
 			),
 		);
 	});

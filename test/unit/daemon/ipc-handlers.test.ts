@@ -148,6 +148,23 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 	);
 };
 
+const makeTestLayersWithInstanceMgmt = (
+	overrides?: Partial<InstanceManagementDeps>,
+) =>
+	Layer.mergeAll(
+		makeDaemonStateLive(),
+		makeMockProjectMgmt(),
+		makeMockInstanceMgmt(overrides),
+		makeOverridesStateLive(),
+		makeMockKeepAwake(),
+		makeMockConfigRef(),
+		makeMockShutdownSignal(),
+		Layer.succeed(ConfigPersistenceTag, {
+			requestSave: Effect.void,
+			flush: Effect.void,
+		}),
+	);
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("IPC handlers", () => {
@@ -591,6 +608,36 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
+
+		it.effect("returns an IPC error when remove rejects", () =>
+			Effect.gen(function* () {
+				const persistConfig = vi.fn();
+				const exit = yield* Effect.exit(
+					handleInstanceRemove({
+						cmd: "instance_remove",
+						id: "missing",
+					}).pipe(
+						Effect.provide(
+							makeTestLayersWithInstanceMgmt({
+								removeInstance: () => {
+									throw new Error('Instance "missing" not found');
+								},
+								persistConfig,
+							}),
+						),
+					),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: 'Error: Instance "missing" not found',
+					});
+				}
+				expect(persistConfig).not.toHaveBeenCalled();
+			}),
+		);
 	});
 
 	describe("handleInstanceStart", () => {
@@ -604,6 +651,62 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
+
+		it.effect(
+			"returns an IPC error when start rejects for a missing instance",
+			() =>
+				Effect.gen(function* () {
+					const exit = yield* Effect.exit(
+						handleInstanceStart({
+							cmd: "instance_start",
+							id: "missing",
+						}).pipe(
+							Effect.provide(
+								makeTestLayersWithInstanceMgmt({
+									startInstance: () =>
+										Promise.reject(new Error('Instance "missing" not found')),
+								}),
+							),
+						),
+					);
+
+					expect(Exit.isSuccess(exit)).toBe(true);
+					if (Exit.isSuccess(exit)) {
+						expect(exit.value).toEqual({
+							ok: false,
+							error: 'Error: Instance "missing" not found',
+						});
+					}
+				}),
+		);
+
+		it.effect(
+			"returns an IPC error when start rejects for an external instance",
+			() =>
+				Effect.gen(function* () {
+					const exit = yield* Effect.exit(
+						handleInstanceStart({
+							cmd: "instance_start",
+							id: "external",
+						}).pipe(
+							Effect.provide(
+								makeTestLayersWithInstanceMgmt({
+									startInstance: () =>
+										Promise.reject(new Error("Cannot start external instance")),
+								}),
+							),
+						),
+					);
+
+					expect(Exit.isSuccess(exit)).toBe(true);
+					if (Exit.isSuccess(exit)) {
+						expect(exit.value).toEqual({
+							ok: false,
+							error: "Error: Cannot start external instance",
+						});
+					}
+				}),
+		);
 	});
 
 	describe("handleInstanceStop", () => {
@@ -616,6 +719,33 @@ describe("IPC handlers", () => {
 
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns an IPC error when stop rejects", () =>
+			Effect.gen(function* () {
+				const exit = yield* Effect.exit(
+					handleInstanceStop({
+						cmd: "instance_stop",
+						id: "missing",
+					}).pipe(
+						Effect.provide(
+							makeTestLayersWithInstanceMgmt({
+								stopInstance: () => {
+									throw new Error('Instance "missing" not found');
+								},
+							}),
+						),
+					),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: 'Error: Instance "missing" not found',
+					});
+				}
+			}),
 		);
 	});
 
@@ -646,6 +776,37 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 				expect(result.instance).toBeDefined();
 			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns an IPC error when update rejects", () =>
+			Effect.gen(function* () {
+				const persistConfig = vi.fn();
+				const exit = yield* Effect.exit(
+					handleInstanceUpdate({
+						cmd: "instance_update",
+						id: "missing",
+						name: "Renamed",
+					}).pipe(
+						Effect.provide(
+							makeTestLayersWithInstanceMgmt({
+								updateInstance: () => {
+									throw new Error('Instance "missing" not found');
+								},
+								persistConfig,
+							}),
+						),
+					),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: 'Error: Instance "missing" not found',
+					});
+				}
+				expect(persistConfig).not.toHaveBeenCalled();
+			}),
 		);
 	});
 });

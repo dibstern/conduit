@@ -743,6 +743,21 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not pass unknown instance IPC operation failures through untyped", () => {
+		const path = "src/lib/domain/daemon/Services/ipc-handlers.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = Array.from(
+			source.matchAll(/catch:\s*\((\w+)\)\s*=>\s*\1/g),
+			(match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0],
+			}),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("routes daemon config ref mutations through the commit helper", () => {
 		const roots = [
 			join(REPO_ROOT, "src/lib/domain/daemon"),
