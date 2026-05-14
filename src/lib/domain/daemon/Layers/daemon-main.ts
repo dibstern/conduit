@@ -22,9 +22,11 @@ import {
 import { NodeRuntime } from "@effect/platform-node";
 import type { Fiber } from "effect";
 import {
+	Cause,
 	Context,
 	Duration,
 	Effect,
+	Exit,
 	Layer,
 	ManagedRuntime,
 	RuntimeFlags,
@@ -35,6 +37,7 @@ import {
 import type { DaemonOptions } from "../../../daemon/daemon-types.js";
 import {
 	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
 	makeDaemonConfigFromOptions,
 } from "../Services/daemon-config-ref.js";
@@ -441,12 +444,31 @@ export async function startDaemonProcess(
 	): Promise<void> {
 		const runtime = shuttingDown ? null : daemonRuntime;
 		if (!runtime) return Promise.resolve();
-		return runtime.runPromise(effect).catch((cause: unknown) => {
-			log.warn(
-				{ err: formatErrorDetail(cause) },
-				`Effect project registry sync failed: ${operation}`,
-			);
-			throw cause;
+		return waitForDaemonRuntimeEffect(runtime, effect).catch(
+			(cause: unknown) => {
+				log.warn(
+					{ err: formatErrorDetail(cause) },
+					`Effect project registry sync failed: ${operation}`,
+				);
+				throw cause;
+			},
+		);
+	}
+
+	function waitForDaemonRuntimeEffect<A, E, R>(
+		runtime: ManagedRuntime.ManagedRuntime<R, unknown>,
+		effect: Effect.Effect<A, E, R>,
+	): Promise<A> {
+		return new Promise((resolve, reject) => {
+			runtime.runCallback(effect, {
+				onExit: (exit) => {
+					if (Exit.isSuccess(exit)) {
+						resolve(exit.value);
+						return;
+					}
+					reject(Cause.squash(exit.cause));
+				},
+			});
 		});
 	}
 
@@ -1370,7 +1392,12 @@ export async function startDaemonProcess(
 	// CrashCounter, AuthManager (reactive pinHash from DaemonConfigRef).
 	try {
 		daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
-		await daemonRuntime.runPromise(Effect.void);
+		await waitForDaemonRuntimeEffect(
+			daemonRuntime,
+			Effect.gen(function* () {
+				yield* DaemonConfigRefTag;
+			}),
+		);
 	} catch (err) {
 		log.error({ err: formatErrorDetail(err) }, "Daemon startup failed");
 		throw err;

@@ -680,6 +680,35 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not await daemon-main effects through ManagedRuntime.runPromise", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bruntime\.runPromise\(effect\)/,
+				reason:
+					"daemon-main compatibility callbacks should fork into the daemon runtime instead of re-entering it through runPromise",
+			},
+			{
+				pattern: /\bdaemonRuntime\.runPromise\(/,
+				reason:
+					"daemon startup should acquire the layer with an explicit forked effect, not a no-op runPromise bridge",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("routes daemon config ref mutations through the commit helper", () => {
 		const roots = [
 			join(REPO_ROOT, "src/lib/domain/daemon"),
