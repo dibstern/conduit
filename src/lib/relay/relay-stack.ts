@@ -67,7 +67,6 @@ import {
 import {
 	PollerPubSubTag,
 	PollerStateTag,
-	type SessionStatusPollerService,
 } from "../domain/relay/Services/session-status-poller.js";
 import { OpenCodeTerminalServiceLive } from "../domain/relay/Services/terminal-service.js";
 import {
@@ -456,8 +455,6 @@ export async function createProjectRelay(
 		},
 		getSessionParentMap: (): Map<string, string> =>
 			runSessionServiceSync((service) => service.getSessionParentMap()),
-		initialize: (title?: string): Promise<string> =>
-			runSessionServicePromise((service) => service.initialize(title)),
 		getLastKnownSessionCount: (): number =>
 			runSessionServiceSync((service) => service.getLastKnownSessionCount()),
 		getDefaultSessionId: (title?: string): Promise<string> =>
@@ -745,11 +742,13 @@ export async function createProjectRelay(
 		runtime: relayManagedRuntime,
 	});
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	const sessionId = await sessionServiceBridge.initialize(config.sessionTitle);
-	log.info(`✓ Using session: ${sessionId}`);
-	const orchestration = await relayManagedRuntime.runPromise(
+	const startup = await relayManagedRuntime.runPromise(
 		Effect.gen(function* () {
-			const orchestrationView = yield* getOrchestrationLayer;
+			const sessionManagerService = yield* SessionManagerServiceTag;
+			const sessionId = yield* sessionManagerService.initialize(
+				config.sessionTitle,
+			);
+			const orchestration = yield* getOrchestrationLayer;
 			yield* PollerStateTag;
 			yield* PollerPubSubTag;
 			if (initialDefaultModel) {
@@ -758,17 +757,13 @@ export async function createProjectRelay(
 			if (initialDefaultVariant) {
 				yield* setDefaultVariant(initialDefaultVariant);
 			}
-			return orchestrationView;
+			const statusPoller = yield* StatusPollerTag;
+			const pollerManager = yield* PollerManagerTag;
+			return { sessionId, orchestration, statusPoller, pollerManager };
 		}),
 	);
-	const statusPoller: SessionStatusPollerService =
-		relayManagedRuntime.runSync(StatusPollerTag);
-
-	const pollerManager = await relayManagedRuntime.runPromise(
-		Effect.gen(function* () {
-			return yield* PollerManagerTag;
-		}),
-	);
+	const { sessionId, orchestration, statusPoller, pollerManager } = startup;
+	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
 	wireSSEConsumer(

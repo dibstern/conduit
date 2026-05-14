@@ -623,4 +623,38 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not acquire startup relay services through piecemeal runtime calls", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bsessionServiceBridge\.initialize\b/,
+				reason:
+					"relay startup should initialize the session inside the startup Effect acquisition",
+			},
+			{
+				pattern: /relayManagedRuntime\.runSync\(StatusPollerTag\)/,
+				reason:
+					"relay startup should acquire StatusPollerTag inside the startup Effect acquisition",
+			},
+			{
+				pattern: /const pollerManager = await relayManagedRuntime\.runPromise/,
+				reason:
+					"relay startup should acquire PollerManagerTag inside the startup Effect acquisition",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

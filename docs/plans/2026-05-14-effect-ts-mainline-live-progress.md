@@ -58,7 +58,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 4. Contracts and RPC boundary. Started locally: shared `WsRpcGroup`, import guard, and server/frontend re-export wrappers are in place.
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
-7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, and client init now forks one Effect-owned bootstrap at the WebSocket callback boundary; runtime bridge cleanup remains for the other relay wiring clusters.
+7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, and startup service acquisition is consolidated into one Effect program; runtime bridge cleanup remains for the other relay wiring clusters.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
@@ -343,3 +343,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Removed the `ClientInitDeps` / `clientInitDeps` Promise-shaped bridge and `resolveClientInitHistory` adapter from `relay-stack.ts`; the `client_connected` WebSocket callback now forks one Effect program.
 - Added a runtime-boundary guard so the client-init bridge cannot return to `relay-stack.ts`, and tightened bootstrap ordering coverage around `session_list` before `markClientBootstrapped`.
 - Verified locally with `pnpm check`, `pnpm lint`, focused client-init/runtime-boundary/relay-stack tests, and `test/integration/flows/initial-state.integration.ts`.
+
+2026-05-14, relay startup acquisition cleanup:
+
+- Consolidated session initialization, orchestration view acquisition, poller state/pubsub touch, default override seeding, status poller acquisition, and poller manager acquisition into one startup Effect.
+- Removed `sessionServiceBridge.initialize()` and piecemeal startup `runSync(StatusPollerTag)` / `runPromise(PollerManagerTag)` calls from `relay-stack.ts`.
+- Added a runtime-boundary guard so startup service acquisition cannot drift back to multiple relay-stack runtime calls.
+- Verified locally with `pnpm check`, `pnpm lint`, focused relay-stack/runtime-boundary tests, and `test/integration/flows/initial-state.integration.ts`.
