@@ -1,4 +1,4 @@
-// test/unit/provider/opencode-adapter-end-session.test.ts
+// test/unit/provider/opencode-provider-instance-end-session.test.ts
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -40,16 +40,16 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 
 describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeProviderInstance;
+	let instance: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 	});
 
 	it("is a no-op when there is no pending turn", async () => {
 		await expect(
-			Effect.runPromise(adapter.endSessionEffect("missing-session")),
+			Effect.runPromise(instance.endSessionEffect("missing-session")),
 		).resolves.toBeUndefined();
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
@@ -58,7 +58,7 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 		const deferred = createDeferred<TurnResult>();
 		// Inject a pending deferred via the private map
 		(
-			adapter as unknown as { pendingTurns: Map<string, typeof deferred> }
+			instance as unknown as { pendingTurns: Map<string, typeof deferred> }
 		).pendingTurns.set("sess-1", deferred);
 
 		// Attach catch BEFORE awaiting endSession so the rejection is handled
@@ -67,14 +67,14 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 			rejected = err;
 		});
 
-		await Effect.runPromise(adapter.endSessionEffect("sess-1"));
+		await Effect.runPromise(instance.endSessionEffect("sess-1"));
 		await caught;
 
 		expect(rejected).toBeInstanceOf(Error);
 		expect(rejected?.message).toContain("reload");
 		expect(
 			(
-				adapter as unknown as { pendingTurns: Map<string, unknown> }
+				instance as unknown as { pendingTurns: Map<string, unknown> }
 			).pendingTurns.has("sess-1"),
 		).toBe(false);
 	});
@@ -82,20 +82,20 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 	it("does NOT call client.session.abort (reload is not a turn cancel)", async () => {
 		const deferred = createDeferred<TurnResult>();
 		(
-			adapter as unknown as { pendingTurns: Map<string, typeof deferred> }
+			instance as unknown as { pendingTurns: Map<string, typeof deferred> }
 		).pendingTurns.set("sess-2", deferred);
 		deferred.promise.catch(() => {
 			/* swallow */
 		});
 
-		await Effect.runPromise(adapter.endSessionEffect("sess-2"));
+		await Effect.runPromise(instance.endSessionEffect("sess-2"));
 
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
 
 	it("is idempotent across repeated calls", async () => {
-		await Effect.runPromise(adapter.endSessionEffect("sess-idempotent"));
-		await Effect.runPromise(adapter.endSessionEffect("sess-idempotent"));
+		await Effect.runPromise(instance.endSessionEffect("sess-idempotent"));
+		await Effect.runPromise(instance.endSessionEffect("sess-idempotent"));
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
 });

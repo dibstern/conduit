@@ -23,4 +23,20 @@ describe("provider naming guard", () => {
 			/\b(?:OpenCodeAdapter|OpenCodeAdapterOptions|ClaudeAdapter|ClaudeAdapterDeps|wireSSEToAdapter)\b/,
 		);
 	});
+
+	it("does not keep adapter-named provider implementation test files", () => {
+		const testFiles = [
+			...listSourceFiles(join(REPO_ROOT, "test/unit/provider")),
+			...listSourceFiles(join(REPO_ROOT, "test/integration/flows")),
+			...listSourceFiles(join(REPO_ROOT, "test/e2e/provider")),
+		];
+
+		expect(
+			testFiles.map((path) => path.replace(REPO_ROOT, "")).sort(),
+		).not.toEqual(
+			expect.arrayContaining([
+				expect.stringMatching(/(?:opencode|claude)-adapter/),
+			]),
+		);
+	});
 });

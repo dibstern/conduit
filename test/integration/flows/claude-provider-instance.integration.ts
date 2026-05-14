@@ -1,6 +1,6 @@
-// ─── Integration: Claude Adapter Full Lifecycle ──────────────────────────────
+// ─── Integration: Claude Provider Instance Full Lifecycle ──────────────────────────────
 // End-to-end lifecycle tests that exercise the full ClaudeProviderInstance flow with a
-// mock SDK query factory. These verify that the adapter, event translator,
+// mock SDK query factory. These verify that the provider instance, event translator,
 // and permission bridge work together correctly.
 
 import { mkdirSync, rmSync } from "node:fs";
@@ -160,7 +160,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		const mockQuery = createMockQuery(messages);
 		const queryFactory = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 		});
@@ -174,7 +174,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			workspaceRoot: workspace,
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		// ── Verify TurnResult ──────────────────────────────────────────
 		expect(result.status).toBe("completed");
@@ -250,7 +250,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 	// ── Test 2: Permission flow round-trip ──────────────────────────────────
 
 	it("permission flow: tool_use → canUseTool → requestPermission → allow → tool_result → result", async () => {
-		// This test exercises the permission bridge integration. The adapter's
+		// This test exercises the permission bridge integration. The provider instance's
 		// canUseTool callback is invoked by the SDK when a tool needs approval.
 		// We simulate this by having the queryFactory capture the canUseTool
 		// callback from options, then invoking it manually during the query
@@ -405,7 +405,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			},
 		);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactory as unknown as NonNullable<
 				ConstructorParameters<typeof ClaudeProviderInstance>[0]["queryFactory"]
@@ -429,13 +429,13 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		});
 
 		// Start the turn (non-blocking; the query will pause at permission phase)
-		const turnPromise = Effect.runPromise(adapter.sendTurnEffect(input));
+		const turnPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
 		// Wait for the permission phase to be ready
 		await permissionPhaseReady;
 
 		// Now invoke canUseTool as the SDK would, simulating the permission check.
-		// The adapter should have wired canUseTool through the permission bridge.
+		// The provider instance should have wired canUseTool through the permission bridge.
 		expect(capturedCanUseTool).toBeDefined();
 		if (!capturedCanUseTool) throw new Error("canUseTool not captured");
 

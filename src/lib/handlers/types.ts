@@ -67,7 +67,7 @@ export interface HandlerDeps {
 	/** Project management capability group (optional — only available in daemon mode) */
 	projectMgmt?: ProjectManagementDeps;
 	/**
-	 * Phase 5: OrchestrationEngine for routing prompts through provider adapters.
+	 * Phase 5: OrchestrationEngine for routing prompts through provider instances.
 	 * When set, handleMessage() dispatches through the engine instead of calling
 	 * client.session.prompt() directly. Optional — tests may omit it; production
 	 * always provides it via relay-stack.ts.

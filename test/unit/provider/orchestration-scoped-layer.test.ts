@@ -30,7 +30,7 @@ describe("orchestration scoped layer", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("shuts down registered adapters when the runtime is disposed", async () => {
+	it("shuts down registered instances when the runtime is disposed", async () => {
 		const opencodeShutdown = vi
 			.spyOn(OpenCodeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);

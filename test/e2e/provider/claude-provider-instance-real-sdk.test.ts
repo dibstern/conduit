@@ -1,4 +1,4 @@
-// test/e2e/provider/claude-adapter-real-sdk.test.ts
+// test/e2e/provider/claude-provider-instance-real-sdk.test.ts
 /**
  * E2E test for ClaudeProviderInstance.sendTurnEffect() against the real Claude Agent SDK.
  *
@@ -41,7 +41,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 	it(
 		"full turn: sendTurnEffect() resolves with completed TurnResult and emits canonical events",
 		async () => {
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: process.cwd(),
 				// No queryFactory override — uses the real SDK
 			});
@@ -50,7 +50,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			const abortController = new AbortController();
 
 			const result = await Effect.runPromise(
-				adapter.sendTurnEffect({
+				instance.sendTurnEffect({
 					sessionId: `e2e-real-sdk-test-${Date.now()}`,
 					turnId: "turn-1",
 					prompt: "Reply with exactly: hello world",
@@ -75,8 +75,8 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			// Must include a turn.completed event
 			expect(eventTypes).toContain("turn.completed");
 
-			// Clean up the adapter
-			await Effect.runPromise(adapter.shutdownEffect());
+			// Clean up the provider instance
+			await Effect.runPromise(instance.shutdownEffect());
 		},
 		{ timeout: 120_000 },
 	);

@@ -1,4 +1,4 @@
-// test/unit/provider/opencode-adapter-actions.test.ts
+// test/unit/provider/opencode-provider-instance-actions.test.ts
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -40,16 +40,16 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 
 describe("OpenCodeProviderInstance action methods", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeProviderInstance;
+	let instance: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 	});
 
 	describe("interruptTurnEffect", () => {
 		it("calls client.session.abort with the session ID", async () => {
-			await Effect.runPromise(adapter.interruptTurnEffect("session-123"));
+			await Effect.runPromise(instance.interruptTurnEffect("session-123"));
 
 			expect(client.session.abort).toHaveBeenCalledWith("session-123");
 		});
@@ -63,10 +63,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 					prompt: vi.fn(async () => {}),
 				},
 			});
-			adapter = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
-				Effect.either(adapter.interruptTurnEffect("bad-session")),
+				Effect.either(instance.interruptTurnEffect("bad-session")),
 			);
 
 			expect(result._tag).toBe("Left");
@@ -84,7 +84,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 	describe("resolvePermission", () => {
 		it("calls client.permission.reply with sessionId, id and decision", async () => {
 			await Effect.runPromise(
-				adapter.resolvePermissionEffect("s1", "perm-1", "once"),
+				instance.resolvePermissionEffect("s1", "perm-1", "once"),
 			);
 
 			expect(client.permission.reply).toHaveBeenCalledWith(
@@ -96,7 +96,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 		it("handles 'always' decision", async () => {
 			await Effect.runPromise(
-				adapter.resolvePermissionEffect("s1", "perm-2", "always"),
+				instance.resolvePermissionEffect("s1", "perm-2", "always"),
 			);
 
 			expect(client.permission.reply).toHaveBeenCalledWith(
@@ -108,7 +108,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 		it("handles 'reject' decision", async () => {
 			await Effect.runPromise(
-				adapter.resolvePermissionEffect("s1", "perm-3", "reject"),
+				instance.resolvePermissionEffect("s1", "perm-3", "reject"),
 			);
 
 			expect(client.permission.reply).toHaveBeenCalledWith(
@@ -127,10 +127,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 					list: vi.fn(async () => []),
 				},
 			});
-			adapter = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
-				adapter
+				instance
 					.resolvePermissionEffect("s1", "bad-perm", "once")
 					.pipe(Effect.either),
 			);
@@ -150,7 +150,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 	describe("resolveQuestion", () => {
 		it("calls client.question.reply with id and converted answers", async () => {
 			await Effect.runPromise(
-				adapter.resolveQuestionEffect("s1", "q1", {
+				instance.resolveQuestionEffect("s1", "q1", {
 					choice: "yes",
 				}),
 			);
@@ -160,7 +160,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 		it("converts array answers to string arrays", async () => {
 			await Effect.runPromise(
-				adapter.resolveQuestionEffect("s1", "q2", {
+				instance.resolveQuestionEffect("s1", "q2", {
 					multi: ["a", "b", "c"],
 				}),
 			);
@@ -172,7 +172,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 		it("handles multiple answer fields", async () => {
 			await Effect.runPromise(
-				adapter.resolveQuestionEffect("s1", "q3", {
+				instance.resolveQuestionEffect("s1", "q3", {
 					field1: "value1",
 					field2: ["x", "y"],
 				}),
@@ -194,10 +194,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 					list: vi.fn(async () => []),
 				},
 			});
-			adapter = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
-				adapter
+				instance
 					.resolveQuestionEffect("s1", "bad-q", { answer: "yes" })
 					.pipe(Effect.either),
 			);
@@ -217,14 +217,14 @@ describe("OpenCodeProviderInstance action methods", () => {
 	describe("shutdown", () => {
 		it("resolves cleanly when no pending turns", async () => {
 			await expect(
-				Effect.runPromise(adapter.shutdownEffect()),
+				Effect.runPromise(instance.shutdownEffect()),
 			).resolves.not.toThrow();
 		});
 
 		it("rejects pending turns on shutdown", async () => {
 			// Start a turn that won't be completed
 			const turnPromise = Effect.runPromise(
-				adapter.sendTurnEffect({
+				instance.sendTurnEffect({
 					sessionId: "s1",
 					turnId: "t1",
 					prompt: "hello",
@@ -246,7 +246,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 			);
 
 			// Shutdown while turn is pending
-			await Effect.runPromise(adapter.shutdownEffect());
+			await Effect.runPromise(instance.shutdownEffect());
 
 			await expect(turnPromise).rejects.toThrow("shutdown");
 		});

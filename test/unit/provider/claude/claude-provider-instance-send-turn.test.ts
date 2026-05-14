@@ -1,4 +1,4 @@
-// test/unit/provider/claude/claude-adapter-send-turn.test.ts
+// test/unit/provider/claude/claude-provider-instance-send-turn.test.ts
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,13 +53,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
 		const input = makeBaseSendTurnInput({ sessionId: "session-new" });
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		// queryFactory was called exactly once
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
@@ -101,7 +101,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(firstQuery)
 			.mockReturnValueOnce(secondQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -109,7 +109,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const sink1 = createMockEventSink();
 		const sink2 = createMockEventSink();
 		await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-one",
 					turnId: "turn-1",
@@ -118,7 +118,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 		await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-two",
 					turnId: "turn-2",
@@ -203,7 +203,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -217,7 +217,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		// First turn
-		const turn1Promise = Effect.runPromise(adapter.sendTurnEffect(input1));
+		const turn1Promise = Effect.runPromise(instance.sendTurnEffect(input1));
 		const turn1Result = await turn1Promise;
 
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
@@ -231,7 +231,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const turn2Promise = Effect.runPromise(adapter.sendTurnEffect(input2));
+		const turn2Promise = Effect.runPromise(instance.sendTurnEffect(input2));
 		// Unblock the second message
 		resolveSecond?.();
 		const turn2Result = await turn2Promise;
@@ -300,14 +300,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(oldQuery)
 			.mockReturnValueOnce(newQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
 
 		const firstResult = await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent",
 					turnId: "turn-1",
@@ -319,7 +319,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(firstResult.status).toBe("completed");
 
 		const secondPromise = Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent",
 					turnId: "turn-2",
@@ -350,7 +350,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				secondPromise.catch(() => undefined),
 				new Promise((resolve) => setTimeout(resolve, 25)),
 			]);
-			await Effect.runPromise(adapter.shutdownEffect());
+			await Effect.runPromise(instance.shutdownEffect());
 		}
 	});
 
@@ -372,14 +372,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(oldQuery)
 			.mockReturnValueOnce(newQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
 
 		await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-history",
 					turnId: "turn-1",
@@ -390,7 +390,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 
 		const secondResult = await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-history",
 					turnId: "turn-2",
@@ -453,7 +453,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			promptText.endsWith("\n\nApply the same fix to the other file."),
 		).toBe(true);
 
-		await Effect.runPromise(adapter.shutdownEffect());
+		await Effect.runPromise(instance.shutdownEffect());
 	});
 
 	it("does not rewrite the restarted agent query when history is empty", async () => {
@@ -474,14 +474,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(oldQuery)
 			.mockReturnValueOnce(newQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
 
 		await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-no-history",
 					turnId: "turn-1",
@@ -491,7 +491,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 		await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-no-history",
 					turnId: "turn-2",
@@ -508,7 +508,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 		expect(promptText).toBe("Fresh agent prompt.");
 
-		await Effect.runPromise(adapter.shutdownEffect());
+		await Effect.runPromise(instance.shutdownEffect());
 	});
 
 	it("rejects a Claude agent change while the current turn is active", async () => {
@@ -553,13 +553,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 		queryFactorySpy = vi.fn(() => query);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
 		const firstPromise = Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-active-agent",
 					turnId: "turn-1",
@@ -571,7 +571,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		const secondResult = await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-active-agent",
 					turnId: "turn-2",
@@ -589,7 +589,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		releaseResult?.();
 		await firstPromise;
-		await Effect.runPromise(adapter.shutdownEffect());
+		await Effect.runPromise(instance.shutdownEffect());
 	});
 
 	// ── Test 3: Resume uses SDK resume option ─────────────────────────────
@@ -599,7 +599,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -609,7 +609,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			providerState: { resumeSessionId: "prev-sdk-session-123" },
 		});
 
-		await Effect.runPromise(adapter.sendTurnEffect(input));
+		await Effect.runPromise(instance.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -627,7 +627,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -638,7 +638,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			abortSignal: abortController.signal,
 		});
 
-		await Effect.runPromise(adapter.sendTurnEffect(input));
+		await Effect.runPromise(instance.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -657,7 +657,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -667,7 +667,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			variant: "high",
 		});
 
-		await Effect.runPromise(adapter.sendTurnEffect(input));
+		await Effect.runPromise(instance.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -683,7 +683,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -692,7 +692,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			sessionId: "session-default-effort",
 		});
 
-		await Effect.runPromise(adapter.sendTurnEffect(input));
+		await Effect.runPromise(instance.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -708,13 +708,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
 		await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-sonnet-1m",
 					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
@@ -741,13 +741,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			const mockQuery = createMockQuery([resultMsg]);
 			queryFactorySpy = vi.fn(() => mockQuery);
 
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
 
 			await Effect.runPromise(
-				adapter.sendTurnEffect(
+				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId,
 						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
@@ -772,13 +772,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			const mockQuery = createMockQuery([resultMsg]);
 			queryFactorySpy = vi.fn(() => mockQuery);
 
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
 
 			await Effect.runPromise(
-				adapter.sendTurnEffect(
+				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: `session-${modelId}`,
 						model: { providerId: "claude", modelId },
@@ -857,14 +857,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
 
 		const turn1 = await Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-context-switch",
 					turnId: "turn-1",
@@ -878,7 +878,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(setModel).not.toHaveBeenCalled();
 
 		const turn2Promise = Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-context-switch",
 					turnId: "turn-2",
@@ -893,7 +893,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(turn2.status).toBe("completed");
 
 		const turn3Promise = Effect.runPromise(
-			adapter.sendTurnEffect(
+			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-context-switch",
 					turnId: "turn-3",
@@ -933,7 +933,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([systemMsg, assistantMsg, resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -944,7 +944,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		await Effect.runPromise(adapter.sendTurnEffect(input));
+		await Effect.runPromise(instance.sendTurnEffect(input));
 
 		// The sink should have received events for the translated messages.
 		// System init -> session.status, result -> turn.completed
@@ -993,7 +993,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1004,7 +1004,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 		// translateError should have fired a turn.error event
@@ -1023,7 +1023,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([errorResult]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1034,7 +1034,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
@@ -1096,7 +1096,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1116,8 +1116,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		// Fire both concurrently
-		const p1 = Effect.runPromise(adapter.sendTurnEffect(input1));
-		const p2 = Effect.runPromise(adapter.sendTurnEffect(input2));
+		const p1 = Effect.runPromise(instance.sendTurnEffect(input1));
+		const p2 = Effect.runPromise(instance.sendTurnEffect(input2));
 
 		// First turn resolves immediately (result1 is yielded right away)
 		const r1 = await p1;
@@ -1133,7 +1133,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	});
 
 	it("does not leave concurrent callers blocked when session setup fails", async () => {
-		let adapter!: ClaudeProviderInstance;
+		let instance!: ClaudeProviderInstance;
 		let secondPromise: Promise<unknown> | undefined;
 
 		const input1 = makeBaseSendTurnInput({
@@ -1149,17 +1149,17 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => {
 			secondPromise ??= Effect.runPromise(
-				adapter.sendTurnEffect(input2).pipe(Effect.either),
+				instance.sendTurnEffect(input2).pipe(Effect.either),
 			);
 			throw new Error("query setup failed");
 		});
-		adapter = new ClaudeProviderInstance({
+		instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
 		const first = await Effect.runPromise(
-			adapter.sendTurnEffect(input1).pipe(Effect.either),
+			instance.sendTurnEffect(input1).pipe(Effect.either),
 		);
 		expect(first._tag).toBe("Left");
 
@@ -1180,7 +1180,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1191,7 +1191,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("completed");
 		expect(result.providerStateUpdates).toBeDefined();
@@ -1212,7 +1212,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([systemMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1222,7 +1222,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		await expect(
-			Effect.runPromise(adapter.sendTurnEffect(input)),
+			Effect.runPromise(instance.sendTurnEffect(input)),
 		).rejects.toThrow("SDK stream ended without result");
 	});
 
@@ -1233,7 +1233,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1244,7 +1244,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		await Effect.runPromise(adapter.sendTurnEffect(input));
+		await Effect.runPromise(instance.sendTurnEffect(input));
 
 		const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
 			string,
@@ -1317,7 +1317,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1331,7 +1331,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sink,
 		});
-		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
+		const r1 = await Effect.runPromise(instance.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 		expect(r1.cost).toBe(0.05);
 		expect(r1.tokens.input).toBe(100);
@@ -1344,7 +1344,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sink,
 		});
-		const turn2Promise = Effect.runPromise(adapter.sendTurnEffect(input2));
+		const turn2Promise = Effect.runPromise(instance.sendTurnEffect(input2));
 		resolveSecond?.();
 		const r2 = await turn2Promise;
 
@@ -1402,7 +1402,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1416,7 +1416,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sink,
 		});
-		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
+		const r1 = await Effect.runPromise(instance.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 
 		// Second turn - enqueue, then interrupt
@@ -1427,12 +1427,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 		const turn2Promise = Effect.runPromise(
-			adapter.sendTurnEffect(input2).pipe(Effect.either),
+			instance.sendTurnEffect(input2).pipe(Effect.either),
 		);
 
 		// Interrupt the second turn
 		await Effect.runPromise(
-			adapter.interruptTurnEffect("session-interrupt-2nd"),
+			instance.interruptTurnEffect("session-interrupt-2nd"),
 		);
 
 		// After interrupt, the stream consumer ends without a result for the
@@ -1500,7 +1500,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1515,7 +1515,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sinkA,
 		});
-		await Effect.runPromise(adapter.sendTurnEffect(input1));
+		await Effect.runPromise(instance.sendTurnEffect(input1));
 
 		// Second turn with sinkB
 		const input2 = makeBaseSendTurnInput({
@@ -1524,7 +1524,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sinkB,
 		});
-		const turn2Promise = Effect.runPromise(adapter.sendTurnEffect(input2));
+		const turn2Promise = Effect.runPromise(instance.sendTurnEffect(input2));
 		resolveSecond?.();
 		await turn2Promise;
 
@@ -1537,7 +1537,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		// After second turn completes, the event translator was constructed with
 		// the first sink, but the important thing is the context's eventSink was
-		// updated. We verify enqueueTurn changed the sink by confirming the adapter
+		// updated. We verify enqueueTurn changed the sink by confirming the provider instance
 		// created only one query (meaning it went through enqueueTurn path).
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 	});
@@ -1561,7 +1561,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			return callCount === 1 ? mockQueryA : mockQueryB;
 		});
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1584,8 +1584,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		// Fire both concurrently for different sessions
 		const [rA, rB] = await Promise.all([
-			Effect.runPromise(adapter.sendTurnEffect(inputA)),
-			Effect.runPromise(adapter.sendTurnEffect(inputB)),
+			Effect.runPromise(instance.sendTurnEffect(inputA)),
+			Effect.runPromise(instance.sendTurnEffect(inputB)),
 		]);
 
 		expect(rA.status).toBe("completed");
@@ -1632,7 +1632,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1651,7 +1651,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		// Despite translateError's internal push failing, the turn should still
 		// resolve with error status via resolveErrorTurn.
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 		expect(result.status).toBe("error");
 		expect(result.error).toBeDefined();
 		expect(result.error?.message).toBe("SDK kaboom");
@@ -1714,7 +1714,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1725,7 +1725,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		// Turn should resolve with error status
 		expect(result.status).toBe("error");
@@ -1760,7 +1760,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			return callCount === 1 ? queryA : queryB;
 		});
 
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1774,12 +1774,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "First",
 			eventSink: sink,
 		});
-		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
+		const r1 = await Effect.runPromise(instance.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 
 		// Manually mark the session as stopped (simulating interruptTurn, etc.)
 		const ctx = (
-			adapter as unknown as { sessions: Map<string, { stopped: boolean }> }
+			instance as unknown as { sessions: Map<string, { stopped: boolean }> }
 		).sessions.get("session-evict");
 		expect(ctx).toBeDefined();
 		(ctx as { stopped: boolean }).stopped = true;
@@ -1791,7 +1791,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sink,
 		});
-		const r2 = await Effect.runPromise(adapter.sendTurnEffect(input2));
+		const r2 = await Effect.runPromise(instance.sendTurnEffect(input2));
 
 		expect(r2.status).toBe("completed");
 		expect(r2.cost).toBe(0.09);
@@ -1836,7 +1836,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1848,13 +1848,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			providerState: { resumeSessionId: "stale-sdk-session-xyz" },
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
 		// Verify the resume cursor was cleared on the session context
 		const ctx = (
-			adapter as unknown as {
+			instance as unknown as {
 				sessions: Map<string, { resumeSessionId: string | undefined }>;
 			}
 		).sessions.get("session-stale-resume");
@@ -1897,7 +1897,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1909,12 +1909,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			providerState: { resumeSessionId: "dead-sdk-session-abc" },
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
 		const ctx = (
-			adapter as unknown as {
+			instance as unknown as {
 				sessions: Map<string, { resumeSessionId: string | undefined }>;
 			}
 		).sessions.get("session-not-found-resume");
@@ -1957,7 +1957,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1969,13 +1969,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			providerState: { resumeSessionId: "valid-sdk-session-123" },
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
 		// The resume cursor should still be set — this error is not a stale session
 		const ctx = (
-			adapter as unknown as {
+			instance as unknown as {
 				sessions: Map<string, { resumeSessionId: string | undefined }>;
 			}
 		).sessions.get("session-unrelated-err");
@@ -2018,7 +2018,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -2030,13 +2030,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sink,
 		});
 
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
 		// ctx.resumeSessionId was never set, so it should still be undefined
 		const ctx = (
-			adapter as unknown as {
+			instance as unknown as {
 				sessions: Map<string, { resumeSessionId: string | undefined }>;
 			}
 		).sessions.get("session-no-cursor");
@@ -2083,7 +2083,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeProviderInstance({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -2097,7 +2097,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		// First turn should resolve successfully (result1 is yielded)
-		const r1 = await Effect.runPromise(adapter.sendTurnEffect(input1));
+		const r1 = await Effect.runPromise(instance.sendTurnEffect(input1));
 		expect(r1.status).toBe("completed");
 		expect(r1.cost).toBe(0.05);
 
@@ -2106,7 +2106,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// will be resolved with error status by resolveErrorTurn, OR the stream
 		// may have already finished (error caught before enqueue). In that case,
 		// the session may no longer be "live" and a new query could be created.
-		// Either way, the adapter should not hang or throw unhandled.
+		// Either way, the provider instance should not hang or throw unhandled.
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-crash-between",
 			turnId: "turn-2",
@@ -2118,7 +2118,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// error path picks it up) or might reject (if the session was already
 		// cleaned up). We just ensure it doesn't hang.
 		try {
-			const r2 = await Effect.runPromise(adapter.sendTurnEffect(input2));
+			const r2 = await Effect.runPromise(instance.sendTurnEffect(input2));
 			// If it resolves, it should indicate an error status
 			expect(["error", "completed"]).toContain(r2.status);
 		} catch (err) {

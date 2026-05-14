@@ -448,7 +448,7 @@ describe("createRelayEventSink — permission/question", () => {
 			}),
 		);
 
-		// Resolving unblocks the awaiting adapter
+		// Resolving unblocks the awaiting provider instance
 		await Effect.runPromise(
 			sink.resolvePermission("req_1", { decision: "once" }),
 		);

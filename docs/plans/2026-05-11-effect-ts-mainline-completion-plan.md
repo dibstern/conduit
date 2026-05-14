@@ -4,7 +4,7 @@
 
 **Goal:** Migrate the remaining high-value conduit runtime surfaces on `main` to idiomatic Effect.ts, and remove bridge code that gives false confidence that a path is Effect-native.
 
-**Architecture:** Move ownership to one scoped Effect composition root, while preserving the per-project relay as the deployment unit. Inside each relay, adopt the command/event/projector/read-model shape: pure deciders decide commands into durable events, pure projectors rebuild read models from events, and the Effect shell owns SQL, PubSub/event fanout, provider calls, scoped fibers, and WebSocket transport. Keep imperative code only at external callback boundaries such as Node process entry, `ws`, browser events, and third-party SDK adapters.
+**Architecture:** Move ownership to one scoped Effect composition root, while preserving the per-project relay as the deployment unit. Inside each relay, adopt the command/event/projector/read-model shape: pure deciders decide commands into durable events, pure projectors rebuild read models from events, and the Effect shell owns SQL, PubSub/event fanout, provider calls, scoped fibers, and WebSocket transport. Keep imperative code only at external callback boundaries such as Node process entry, `ws`, browser events, and third-party SDK callbacks.
 
 **Tech Stack:** `effect 3.21.x`, `@effect/platform`, `@effect/platform-node`, `@effect/rpc@0.75.1`, `@effect/sql`, `@effect/sql-sqlite-node`, `@effect/vitest`, Vitest, Svelte 5, Node.js, SQLite.
 
@@ -28,7 +28,7 @@ This plan intentionally avoids prescribing every line of implementation. The imp
 - One long-lived daemon runtime. `NodeRuntime.runMain(...)` owns process lifetime and signal handling.
 - One scoped Layer graph for daemon services. Do not scatter `Effect.runPromise` / `Effect.runSync` through app-internal code.
 - Service methods return `Effect.Effect<A, E, R>`, not `Promise<A>`, once their owning service is migrated.
-- External APIs may remain Promise/callback based only at the adapter edge; normalize them immediately with `Effect.tryPromise`, `Effect.async`, `Stream.async`, or `Effect.acquireRelease`.
+- External APIs may remain Promise/callback based only at the external boundary; normalize them immediately with `Effect.tryPromise`, `Effect.async`, `Stream.async`, or `Effect.acquireRelease`.
 - Expected failures are typed errors. Throwing, `Effect.die`, and plain `Error` are for defects or last-resort foreign errors.
 - No `Effect.promise` for rejectable promises.
 - No unbounded concurrency for collections whose size can grow with sessions, projects, instances, clients, or messages.
@@ -42,7 +42,7 @@ This plan intentionally avoids prescribing every line of implementation. The imp
 - WebSocket remains the real-time transport. The migration may replace the hand-rolled JSON message protocol with typed Effect RPC over WebSocket, but it must not degrade the product to polling.
 - Per-browser-tab UI state stays browser/route-local. The daemon stores durable project/session state, not "which tab is looking at which session" state.
 - Any relay event bus must declare its backpressure and replay story. Do not add unbounded in-memory PubSub as the default; prefer persisted events plus bounded signals or explicit replay cursors unless the design records why unbounded fanout is safe.
-- Provider adapters should avoid a Context tag per driver or per provider instance. A provider registry can be a service, but individual provider drivers should be plain values that create scoped provider instances with captured closures.
+- Provider drivers should avoid a Context tag per driver or per provider instance. A provider registry can be a service, but individual provider drivers should be plain values that create scoped provider instances with captured closures.
 - Organize by domain before large semantic rewrites. A move-only domain layout PR is preferred over continuing to grow the flat `src/lib/domain/*` bucket.
 
 ## Non-Goals
@@ -229,7 +229,7 @@ The exact folder names can be adjusted to match local naming, but the end state 
 - Replace `Effect.promise(() => rebuildTranslatorFromHistory(...))` with `Effect.tryPromise`.
 - Map rejection to a typed relay/session lifecycle error.
 - For finalizers, do not just swap to `Effect.tryPromise` — finalizers cannot propagate failure to callers. Wrap the typed error in `Effect.catchAll(Effect.logError(...))` so a failing `close()` / `drain()` is logged at shutdown instead of silently swallowed.
-- Keep any `Effect.promise` uses only where the promise is genuinely non-rejecting (e.g., adapters that only ever `resolve`), and add an inline comment explaining why.
+- Keep any `Effect.promise` uses only where the promise is genuinely non-rejecting (e.g., deferred wrappers that only ever `resolve`), and add an inline comment explaining why.
 
 **High-risk pattern (regular call site):**
 
@@ -617,13 +617,13 @@ pnpm test:contract
 
 ## Phase 6: Convert Provider Drivers And Orchestration
 
-**Goal:** Make provider execution Effect-native while keeping OpenCode and Claude SDK quirks at the adapter edge.
+**Goal:** Make provider execution Effect-native while keeping OpenCode and Claude SDK quirks at the provider instance edge.
 
 **Files:**
 - Modify: `src/lib/provider/types.ts`
 - Modify: `src/lib/provider/provider-registry.ts`
-- Modify: `src/lib/provider/opencode-adapter.ts`
-- Modify: `src/lib/provider/claude/claude-adapter.ts`
+- Modify: `src/lib/provider/opencode-provider-instance.ts`
+- Modify: `src/lib/provider/claude/claude-provider-instance.ts`
 - Modify: `src/lib/provider/event-sink.ts`
 - Modify: `src/lib/provider/relay-event-sink.ts`
 - Modify: `src/lib/provider/orchestration-engine.ts`
@@ -632,7 +632,7 @@ pnpm test:contract
 
 **Approach:**
 
-1. Replace singleton-style provider adapter services with a plain-value driver model:
+1. Replace singleton-style provider instance services with a plain-value driver model:
    - `ProviderDriver` is a value registered with `ProviderInstanceRegistry`.
    - `ProviderDriver.create(input)` returns a scoped `ProviderInstance`.
    - `ProviderInstance` methods return Effects and close over instance-local SDK clients, prompt queues, event sinks, and cancellation state.
@@ -641,7 +641,7 @@ pnpm test:contract
 3. Replace `AbortSignal` as the internal cancellation model with fiber interruption. Only create `AbortController` at OpenCode/Claude HTTP/SDK boundaries. **The interrupt → abort translation must be explicit** (see high-risk pattern below) — otherwise interrupted fibers leak in-flight HTTP/SDK calls.
 4. Replace ad hoc deferred maps with Effect `Deferred`, `Queue`, `FiberMap`, or scoped `Ref<HashMap<...>>`.
 5. Convert `ProviderInstanceRegistry` into the Layer-backed service with typed lookup failures. It owns registered driver values and live instances; the drivers themselves remain plain values.
-6. Keep Claude SDK AsyncIterable and permission bridges as external boundaries, but ensure all errors are normalized before entering app logic. For the SDK's AsyncIterable, the canonical adapter is `Stream.fromAsyncIterable(iter, (cause) => new ProviderError({ cause }))` — do **not** hand-roll a `Stream.async` wrapper with manual push/close, as it duplicates what `fromAsyncIterable` already handles correctly.
+6. Keep Claude SDK AsyncIterable and permission bridges as external boundaries, but ensure all errors are normalized before entering app logic. For the SDK's AsyncIterable, the canonical bridge is `Stream.fromAsyncIterable(iter, (cause) => new ProviderError({ cause }))` — do **not** hand-roll a `Stream.async` wrapper with manual push/close, as it duplicates what `fromAsyncIterable` already handles correctly.
 7. Remove `as unknown` / `as any` assertions unless a third-party SDK type forces one; document the reason inline.
 
 **High-risk pattern (fiber interrupt → AbortController bridge — write code):**
@@ -703,8 +703,8 @@ The exact types can differ, but expected provider failures must be in `E`, and a
 
 **Tests:**
 
-- OpenCode adapter success, API failure, cancellation, and pending-turn cleanup.
-- Claude adapter success, permission question, denial, cancellation, and SDK failure normalization.
+- OpenCode provider instance success, API failure, cancellation, and pending-turn cleanup.
+- Claude provider instance success, permission question, denial, cancellation, and SDK failure normalization.
 - Event sink resolves/rejects deferred requests on completion and interruption.
 - Orchestration idempotency still prevents duplicate command processing.
 
@@ -859,7 +859,7 @@ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/dom
 | `Effect.promise` | only inside finalizers where the promise is provably non-rejecting, with inline comment | Some Node APIs return `Promise<void>` that cannot reject |
 | `concurrency: "unbounded"` | none (every site must be capped or documented as a fixed-size fanout with inline comment naming the size) | Plan rule |
 | `Layer.succeed(Tag, instance)` for a pre-constructed imperative instance | none in `src/lib/relay`, `src/lib/domain`; allowed in `src/bin/cli-core.ts` only if wrapping a CLI option object | Bridge anti-pattern |
-| AbortController construction | only inside provider adapters (`src/lib/provider/opencode-adapter.ts`, `src/lib/provider/claude/claude-adapter.ts`) | SDK boundary; bridged to fiber interrupt per Phase 6 |
+| AbortController construction | only inside provider instances (`src/lib/provider/opencode-provider-instance.ts`, `src/lib/provider/claude/claude-provider-instance.ts`) | SDK boundary; bridged to fiber interrupt per Phase 6 |
 
 **Known non-exceptions:**
 
@@ -951,9 +951,9 @@ they conflict.
    - Preserve per-browser-tab route/client state; do not move active-tab focus into daemon state.
 
 9. Provider driver and instance ownership.
-   - Move provider adapters to the plain `ProviderDriver -> scoped ProviderInstance` shape.
+   - Move provider execution to the plain `ProviderDriver -> scoped ProviderInstance` shape.
    - Keep only the provider instance registry as a Context service.
-   - Normalize OpenCode/Claude SDK errors and cancellation at the adapter edge.
+   - Normalize OpenCode/Claude SDK errors and cancellation at the provider boundary.
 
 10. IPC socket ownership.
    - Move Unix socket request dispatch out of the callback-local `Effect.runPromise(...)` path in

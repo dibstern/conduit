@@ -118,7 +118,7 @@ function dispatch(
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeStubAdapter(providerId: string): ProviderInstance & {
+function makeStubInstance(providerId: string): ProviderInstance & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
 	interruptTurnEffect: ReturnType<typeof vi.fn>;
 	resolvePermissionEffect: ReturnType<typeof vi.fn>;
@@ -165,17 +165,17 @@ const makeStubEventSink = createMockEventSink;
 describe("OrchestrationEngine", () => {
 	let registry: ProviderRegistry;
 	let engine: OrchestrationEngine;
-	let opencode: ReturnType<typeof makeStubAdapter>;
+	let opencode: ReturnType<typeof makeStubInstance>;
 
 	beforeEach(() => {
 		registry = new ProviderRegistry();
-		opencode = makeStubAdapter("opencode");
+		opencode = makeStubInstance("opencode");
 		registry.registerInstance(opencode);
 		engine = new OrchestrationEngine({ registry });
 	});
 
 	describe("dispatch: send_turn", () => {
-		it("routes sendTurn to the correct adapter", async () => {
+		it("routes sendTurn to the correct instance", async () => {
 			const result = await dispatch(engine, {
 				type: "send_turn",
 				providerId: "opencode",
@@ -246,7 +246,7 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("dispatch: interrupt_turn", () => {
-		it("routes interrupt to the correct adapter", async () => {
+		it("routes interrupt to the correct instance", async () => {
 			// Establish binding first
 			engine.bindSession("s1", "opencode");
 
@@ -269,7 +269,7 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("dispatch: resolve_permission", () => {
-		it("routes permission resolution to the correct adapter", async () => {
+		it("routes permission resolution to the correct instance", async () => {
 			engine.bindSession("s1", "opencode");
 
 			await dispatch(engine, {
@@ -288,7 +288,7 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("dispatch: resolve_question", () => {
-		it("routes question resolution to the correct adapter", async () => {
+		it("routes question resolution to the correct instance", async () => {
 			engine.bindSession("s1", "opencode");
 
 			await dispatch(engine, {
@@ -305,7 +305,7 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("dispatch: discover", () => {
-		it("calls discover on the specified adapter", async () => {
+		it("calls discover on the specified instance", async () => {
 			const result = await dispatch(engine, {
 				type: "discover",
 				providerId: "opencode",
@@ -360,13 +360,13 @@ describe("OrchestrationEngine", () => {
 			expect(engine.getProviderForSession("s-drop")).toBeUndefined();
 		});
 
-		it("propagates adapter errors and preserves binding", async () => {
+		it("propagates provider instance errors and preserves binding", async () => {
 			opencode.endSessionEffect.mockReturnValueOnce(
 				Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "endSession",
-						cause: new Error("adapter boom"),
+						cause: new Error("provider instance boom"),
 					}),
 				),
 			);
@@ -377,7 +377,7 @@ describe("OrchestrationEngine", () => {
 					type: "end_session",
 					sessionId: "s-err",
 				}),
-			).rejects.toThrow("adapter boom");
+			).rejects.toThrow("provider instance boom");
 
 			// Binding should be preserved when endSession throws
 			expect(engine.getProviderForSession("s-err")).toBe("opencode");
@@ -401,7 +401,7 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("rebinding a session to a different provider updates the mapping", () => {
-			const claude = makeStubAdapter("claude");
+			const claude = makeStubInstance("claude");
 			registry.registerInstance(claude);
 
 			engine.bindSession("s1", "opencode");
@@ -544,13 +544,13 @@ describe("OrchestrationEngine", () => {
 		});
 	});
 
-	// ─── Claude adapter integration ─────────────────────────────────────────
+	// ─── Claude provider instance integration ─────────────────────────────────────────
 	// These tests use a real ClaudeProviderInstance with an injected queryFactory
 	// to verify the full dispatch path:
 	// OrchestrationEngine.dispatchEffect(SendTurnCommand) → ClaudeProviderInstance.sendTurnEffect()
 	// → SDK query() → stream consumer → canonical events via EventSink.
 
-	describe("Claude adapter integration", () => {
+	describe("Claude provider instance integration", () => {
 		let claudeWorkspace: string;
 
 		beforeEach(() => {
@@ -568,11 +568,11 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => mockQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerInstance(adapter);
+			claudeRegistry.registerInstance(instance);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -604,11 +604,11 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => mockQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerInstance(adapter);
+			claudeRegistry.registerInstance(instance);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -667,11 +667,11 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => throwingQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerInstance(adapter);
+			claudeRegistry.registerInstance(instance);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -697,19 +697,19 @@ describe("OrchestrationEngine", () => {
 		it("sendTurn that throws does NOT leave stale session binding", async () => {
 			// A throwing sendTurn should not create a binding — the session is
 			// not viable at the provider. This tests the fix for C3 (stale binding).
-			const throwingAdapter = makeStubAdapter("thrower");
-			throwingAdapter.sendTurnEffect.mockReturnValue(
+			const throwingInstance = makeStubInstance("thrower");
+			throwingInstance.sendTurnEffect.mockReturnValue(
 				Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: "thrower",
 						operation: "sendTurn",
-						cause: new Error("Adapter crash"),
+						cause: new Error("Provider instance crash"),
 					}),
 				),
 			);
 
 			const throwingRegistry = new ProviderRegistry();
-			throwingRegistry.registerInstance(throwingAdapter);
+			throwingRegistry.registerInstance(throwingInstance);
 			const throwingEngine = new OrchestrationEngine({
 				registry: throwingRegistry,
 			});
@@ -729,7 +729,7 @@ describe("OrchestrationEngine", () => {
 						abortSignal: new AbortController().signal,
 					},
 				}),
-			).rejects.toThrow("Adapter crash");
+			).rejects.toThrow("Provider instance crash");
 
 			// Binding should NOT exist after a thrown error
 			expect(throwingEngine.getProviderForSession("s-crash")).toBeUndefined();
@@ -773,11 +773,11 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => throwingQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeProviderInstance({
+			const instance = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerInstance(adapter);
+			claudeRegistry.registerInstance(instance);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -809,13 +809,13 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("dispatch logs error context before re-throwing for interruptTurn", async () => {
-			const failing = makeStubAdapter("opencode");
+			const failing = makeStubInstance("opencode");
 			failing.interruptTurnEffect.mockReturnValue(
 				Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "interruptTurn",
-						cause: new Error("Adapter interrupt failed"),
+						cause: new Error("Provider instance interrupt failed"),
 					}),
 				),
 			);
@@ -830,7 +830,7 @@ describe("OrchestrationEngine", () => {
 					type: "interrupt_turn",
 					sessionId: "s-err",
 				}),
-			).rejects.toThrow("Adapter interrupt failed");
+			).rejects.toThrow("Provider instance interrupt failed");
 
 			expect(mockLogError).toHaveBeenCalledTimes(1);
 			const call0 = mockLogError.mock.calls[0];
@@ -841,13 +841,13 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("dispatch logs error context before re-throwing for resolvePermission", async () => {
-			const failing = makeStubAdapter("opencode");
+			const failing = makeStubInstance("opencode");
 			failing.resolvePermissionEffect.mockReturnValue(
 				Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "resolvePermission",
-						cause: new Error("Adapter permission failed"),
+						cause: new Error("Provider instance permission failed"),
 					}),
 				),
 			);
@@ -864,7 +864,7 @@ describe("OrchestrationEngine", () => {
 					requestId: "req-1",
 					decision: "always",
 				}),
-			).rejects.toThrow("Adapter permission failed");
+			).rejects.toThrow("Provider instance permission failed");
 
 			expect(mockLogError).toHaveBeenCalledTimes(1);
 			const call1 = mockLogError.mock.calls[0];
@@ -875,13 +875,13 @@ describe("OrchestrationEngine", () => {
 		});
 
 		it("dispatch logs error context before re-throwing for discover", async () => {
-			const failing = makeStubAdapter("opencode");
+			const failing = makeStubInstance("opencode");
 			failing.discoverEffect.mockReturnValue(
 				Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: "opencode",
 						operation: "discover",
-						cause: new Error("Adapter discover failed"),
+						cause: new Error("Provider instance discover failed"),
 					}),
 				),
 			);
@@ -895,7 +895,7 @@ describe("OrchestrationEngine", () => {
 					type: "discover",
 					providerId: "opencode",
 				}),
-			).rejects.toThrow("Adapter discover failed");
+			).rejects.toThrow("Provider instance discover failed");
 
 			expect(mockLogError).toHaveBeenCalledTimes(1);
 			const call2 = mockLogError.mock.calls[0];

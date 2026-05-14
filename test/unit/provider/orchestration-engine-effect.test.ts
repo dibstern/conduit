@@ -12,7 +12,7 @@ import type {
 } from "../../../src/lib/provider/types.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
 
-function makeStubAdapter(providerId: string): ProviderInstance & {
+function makeStubInstance(providerId: string): ProviderInstance & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
 	resolvePermissionEffect: ReturnType<typeof vi.fn>;
 	resolveQuestionEffect: ReturnType<typeof vi.fn>;
@@ -99,111 +99,117 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					});
 				}
 
-				const adapter = makeStubAdapter("opencode");
-				registry.registerInstance(adapter);
+				const instance = makeStubInstance("opencode");
+				registry.registerInstance(instance);
 				const result = yield* engine.dispatchEffect(command);
 
 				expect(result).toMatchObject({ status: "completed" });
-				expect(adapter.sendTurnEffect).toHaveBeenCalledTimes(1);
+				expect(instance.sendTurnEffect).toHaveBeenCalledTimes(1);
 				expect(engine.getProviderForSession("session-1")).toBe("opencode");
 			}),
 	);
 
-	it.effect("dispatches sendTurn through the adapter Effect boundary", () =>
-		Effect.gen(function* () {
-			const registry = new ProviderRegistry();
-			const engine = new OrchestrationEngine({ registry });
-			const command = sendTurnCommand();
-			const sendTurn = vi.fn(() => {
-				throw new Error("legacy Promise sendTurn should not be called");
-			});
-			const sendTurnEffect = vi.fn(() =>
-				Effect.succeed({
-					status: "completed" as const,
-					cost: 0,
-					tokens: { input: 1, output: 1 },
-					durationMs: 1,
-					providerStateUpdates: [],
-				}),
-			);
+	it.effect(
+		"dispatches sendTurn through the provider instance Effect boundary",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const command = sendTurnCommand();
+				const sendTurn = vi.fn(() => {
+					throw new Error("legacy Promise sendTurn should not be called");
+				});
+				const sendTurnEffect = vi.fn(() =>
+					Effect.succeed({
+						status: "completed" as const,
+						cost: 0,
+						tokens: { input: 1, output: 1 },
+						durationMs: 1,
+						providerStateUpdates: [],
+					}),
+				);
 
-			registry.registerInstance({
-				...makeStubAdapter("opencode"),
-				sendTurn,
-				sendTurnEffect,
-			} as ProviderInstance & {
-				sendTurn: typeof sendTurn;
-				sendTurnEffect: typeof sendTurnEffect;
-			});
+				registry.registerInstance({
+					...makeStubInstance("opencode"),
+					sendTurn,
+					sendTurnEffect,
+				} as ProviderInstance & {
+					sendTurn: typeof sendTurn;
+					sendTurnEffect: typeof sendTurnEffect;
+				});
 
-			const result = yield* engine.dispatchEffect(command);
+				const result = yield* engine.dispatchEffect(command);
 
-			expect(result).toMatchObject({ status: "completed" });
-			expect(sendTurn).not.toHaveBeenCalled();
-			expect(sendTurnEffect).toHaveBeenCalledWith(command.input);
-			expect(engine.getProviderForSession("session-1")).toBe("opencode");
-		}),
-	);
-
-	it.effect("dispatches discovery through the adapter Effect boundary", () =>
-		Effect.gen(function* () {
-			const registry = new ProviderRegistry();
-			const engine = new OrchestrationEngine({ registry });
-			const discover = vi.fn(() => {
-				throw new Error("legacy Promise discover should not be called");
-			});
-			const discoverEffect = vi.fn(() => Effect.succeed(capabilities()));
-
-			registry.registerInstance({
-				...makeStubAdapter("claude"),
-				discover,
-				discoverEffect,
-			} as ProviderInstance & { discover: typeof discover });
-
-			const result = yield* engine.dispatchEffect({
-				type: "discover",
-				providerId: "claude",
-			});
-
-			expect(result.models).toEqual([
-				{ id: "sonnet", name: "Sonnet", providerId: "claude" },
-			]);
-			expect(discover).not.toHaveBeenCalled();
-			expect(discoverEffect).toHaveBeenCalledTimes(1);
-		}),
-	);
-
-	it.effect("dispatches interrupt through the adapter Effect boundary", () =>
-		Effect.gen(function* () {
-			const registry = new ProviderRegistry();
-			const engine = new OrchestrationEngine({ registry });
-			const interruptTurn = vi.fn(() => {
-				throw new Error("legacy Promise interrupt should not be called");
-			});
-			const interruptTurnEffect = vi.fn(() => Effect.void);
-
-			registry.registerInstance({
-				...makeStubAdapter("claude"),
-				interruptTurn,
-				interruptTurnEffect,
-			} as ProviderInstance & {
-				interruptTurn: typeof interruptTurn;
-				interruptTurnEffect: typeof interruptTurnEffect;
-			});
-			engine.bindSession("session-1", "claude");
-
-			yield* engine.dispatchEffect({
-				type: "interrupt_turn",
-				sessionId: "session-1",
-			});
-
-			expect(interruptTurn).not.toHaveBeenCalled();
-			expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
-		}),
+				expect(result).toMatchObject({ status: "completed" });
+				expect(sendTurn).not.toHaveBeenCalled();
+				expect(sendTurnEffect).toHaveBeenCalledWith(command.input);
+				expect(engine.getProviderForSession("session-1")).toBe("opencode");
+			}),
 	);
 
 	it.effect(
-		"dispatches permission resolution through the adapter Effect boundary",
+		"dispatches discovery through the provider instance Effect boundary",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const discover = vi.fn(() => {
+					throw new Error("legacy Promise discover should not be called");
+				});
+				const discoverEffect = vi.fn(() => Effect.succeed(capabilities()));
+
+				registry.registerInstance({
+					...makeStubInstance("claude"),
+					discover,
+					discoverEffect,
+				} as ProviderInstance & { discover: typeof discover });
+
+				const result = yield* engine.dispatchEffect({
+					type: "discover",
+					providerId: "claude",
+				});
+
+				expect(result.models).toEqual([
+					{ id: "sonnet", name: "Sonnet", providerId: "claude" },
+				]);
+				expect(discover).not.toHaveBeenCalled();
+				expect(discoverEffect).toHaveBeenCalledTimes(1);
+			}),
+	);
+
+	it.effect(
+		"dispatches interrupt through the provider instance Effect boundary",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const interruptTurn = vi.fn(() => {
+					throw new Error("legacy Promise interrupt should not be called");
+				});
+				const interruptTurnEffect = vi.fn(() => Effect.void);
+
+				registry.registerInstance({
+					...makeStubInstance("claude"),
+					interruptTurn,
+					interruptTurnEffect,
+				} as ProviderInstance & {
+					interruptTurn: typeof interruptTurn;
+					interruptTurnEffect: typeof interruptTurnEffect;
+				});
+				engine.bindSession("session-1", "claude");
+
+				yield* engine.dispatchEffect({
+					type: "interrupt_turn",
+					sessionId: "session-1",
+				});
+
+				expect(interruptTurn).not.toHaveBeenCalled();
+				expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
+			}),
+	);
+
+	it.effect(
+		"dispatches permission resolution through the provider instance Effect boundary",
 		() =>
 			Effect.gen(function* () {
 				const registry = new ProviderRegistry();
@@ -216,7 +222,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const resolvePermissionEffect = vi.fn(() => Effect.void);
 
 				registry.registerInstance({
-					...makeStubAdapter("claude"),
+					...makeStubInstance("claude"),
 					resolvePermission,
 					resolvePermissionEffect,
 				} as ProviderInstance & {
@@ -242,7 +248,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 	);
 
 	it.effect(
-		"dispatches question resolution through the adapter Effect boundary",
+		"dispatches question resolution through the provider instance Effect boundary",
 		() =>
 			Effect.gen(function* () {
 				const registry = new ProviderRegistry();
@@ -256,7 +262,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const answers = { choice: "A" };
 
 				registry.registerInstance({
-					...makeStubAdapter("claude"),
+					...makeStubInstance("claude"),
 					resolveQuestion,
 					resolveQuestionEffect,
 				} as ProviderInstance & {
@@ -281,34 +287,36 @@ describe("OrchestrationEngine dispatchEffect", () => {
 			}),
 	);
 
-	it.effect("dispatches endSession through the adapter Effect boundary", () =>
-		Effect.gen(function* () {
-			const registry = new ProviderRegistry();
-			const engine = new OrchestrationEngine({ registry });
-			const endSession = vi.fn(() => {
-				throw new Error("legacy Promise endSession should not be called");
-			});
-			const endSessionEffect = vi.fn(() => Effect.void);
+	it.effect(
+		"dispatches endSession through the provider instance Effect boundary",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const endSession = vi.fn(() => {
+					throw new Error("legacy Promise endSession should not be called");
+				});
+				const endSessionEffect = vi.fn(() => Effect.void);
 
-			registry.registerInstance({
-				...makeStubAdapter("claude"),
-				endSession,
-				endSessionEffect,
-			} as ProviderInstance & {
-				endSession: typeof endSession;
-				endSessionEffect: typeof endSessionEffect;
-			});
-			engine.bindSession("session-1", "claude");
+				registry.registerInstance({
+					...makeStubInstance("claude"),
+					endSession,
+					endSessionEffect,
+				} as ProviderInstance & {
+					endSession: typeof endSession;
+					endSessionEffect: typeof endSessionEffect;
+				});
+				engine.bindSession("session-1", "claude");
 
-			yield* engine.dispatchEffect({
-				type: "end_session",
-				sessionId: "session-1",
-				unbind: true,
-			});
+				yield* engine.dispatchEffect({
+					type: "end_session",
+					sessionId: "session-1",
+					unbind: true,
+				});
 
-			expect(endSession).not.toHaveBeenCalled();
-			expect(endSessionEffect).toHaveBeenCalledWith("session-1");
-			expect(engine.getProviderForSession("session-1")).toBeUndefined();
-		}),
+				expect(endSession).not.toHaveBeenCalled();
+				expect(endSessionEffect).toHaveBeenCalledWith("session-1");
+				expect(engine.getProviderForSession("session-1")).toBeUndefined();
+			}),
 	);
 });

@@ -36,7 +36,7 @@ describe("ProviderInstance types", () => {
 
 	it("ProviderInstance has exactly the 8-method interface", () => {
 		// Compile-time check: if the interface changes shape, this won't compile.
-		const adapter: ProviderInstance = {
+		const instance: ProviderInstance = {
 			providerId: "test",
 			discoverEffect: () =>
 				Effect.succeed({
@@ -73,14 +73,14 @@ describe("ProviderInstance types", () => {
 			endSessionEffect: (_sessionId: string) => Effect.void,
 		};
 
-		expect(adapter.providerId).toBe("test");
-		expect(typeof adapter.discoverEffect).toBe("function");
-		expect(typeof adapter.sendTurnEffect).toBe("function");
-		expect(typeof adapter.interruptTurnEffect).toBe("function");
-		expect(typeof adapter.resolvePermissionEffect).toBe("function");
-		expect(typeof adapter.resolveQuestionEffect).toBe("function");
-		expect(typeof adapter.shutdownEffect).toBe("function");
-		expect(typeof adapter.endSessionEffect).toBe("function");
+		expect(instance.providerId).toBe("test");
+		expect(typeof instance.discoverEffect).toBe("function");
+		expect(typeof instance.sendTurnEffect).toBe("function");
+		expect(typeof instance.interruptTurnEffect).toBe("function");
+		expect(typeof instance.resolvePermissionEffect).toBe("function");
+		expect(typeof instance.resolveQuestionEffect).toBe("function");
+		expect(typeof instance.shutdownEffect).toBe("function");
+		expect(typeof instance.endSessionEffect).toBe("function");
 	});
 
 	it("SendTurnInput includes all required fields", () => {

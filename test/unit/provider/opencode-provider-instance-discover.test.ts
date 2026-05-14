@@ -1,4 +1,4 @@
-// test/unit/provider/opencode-adapter-discover.test.ts
+// test/unit/provider/opencode-provider-instance-discover.test.ts
 
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,19 +65,19 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 
 describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeProviderInstance;
+	let instance: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 	});
 
 	it("returns providerId = 'opencode'", () => {
-		expect(adapter.providerId).toBe("opencode");
+		expect(instance.providerId).toBe("opencode");
 	});
 
 	it("discovers models from all providers", async () => {
-		const caps = await Effect.runPromise(adapter.discoverEffect());
+		const caps = await Effect.runPromise(instance.discoverEffect());
 
 		expect(caps.models).toHaveLength(2);
 		expect(caps.models[0]).toMatchObject({
@@ -92,7 +92,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("discovers commands", async () => {
-		const caps = await Effect.runPromise(adapter.discoverEffect());
+		const caps = await Effect.runPromise(instance.discoverEffect());
 
 		const commands = caps.commands.filter((c) => c.source === "builtin");
 		expect(commands.length).toBeGreaterThanOrEqual(2);
@@ -101,7 +101,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("discovers skills as project-skill commands", async () => {
-		const caps = await Effect.runPromise(adapter.discoverEffect());
+		const caps = await Effect.runPromise(instance.discoverEffect());
 
 		const skills = caps.commands.filter((c) => c.source === "project-skill");
 		expect(skills).toHaveLength(1);
@@ -109,7 +109,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("sets capability flags for OpenCode", async () => {
-		const caps = await Effect.runPromise(adapter.discoverEffect());
+		const caps = await Effect.runPromise(instance.discoverEffect());
 
 		expect(caps.supportsTools).toBe(true);
 		expect(caps.supportsThinking).toBe(true);
@@ -130,9 +130,9 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 				})),
 			},
 		});
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 
-		const caps = await Effect.runPromise(adapter.discoverEffect());
+		const caps = await Effect.runPromise(instance.discoverEffect());
 		expect(caps.models).toEqual([]);
 	});
 
@@ -144,9 +144,9 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 				skills: vi.fn(async () => []),
 			},
 		});
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 
-		const caps = await Effect.runPromise(adapter.discoverEffect());
+		const caps = await Effect.runPromise(instance.discoverEffect());
 		expect(caps.commands).toEqual([]);
 	});
 
@@ -158,10 +158,10 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 				}),
 			},
 		});
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 
 		const result = await Effect.runPromise(
-			Effect.either(adapter.discoverEffect()),
+			Effect.either(instance.discoverEffect()),
 		);
 
 		expect(result._tag).toBe("Left");
@@ -176,21 +176,21 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("passes workspace directory for command/skill discovery", async () => {
-		adapter = new OpenCodeProviderInstance({
+		instance = new OpenCodeProviderInstance({
 			client,
 			workspaceRoot: "/my/project",
 		});
 
-		await Effect.runPromise(adapter.discoverEffect());
+		await Effect.runPromise(instance.discoverEffect());
 
 		expect(client.app.commands).toHaveBeenCalled();
 		expect(client.app.skills).toHaveBeenCalledWith("/my/project");
 	});
 
 	it("omits directory for commands when no workspace", async () => {
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 
-		await Effect.runPromise(adapter.discoverEffect());
+		await Effect.runPromise(instance.discoverEffect());
 
 		expect(client.app.commands).toHaveBeenCalled();
 		expect(client.app.skills).toHaveBeenCalledWith(undefined);

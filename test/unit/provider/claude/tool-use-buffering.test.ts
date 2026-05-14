@@ -183,7 +183,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const tool = ctx.inFlightTools.get(0);
 		expect(tool?.pendingStart).toBe(true);
 
-		// Simulate adapter cleanup: flush pendingStart tools
+		// Simulate provider instance cleanup: flush pendingStart tools
 		await translator.flushPendingTools(ctx);
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");

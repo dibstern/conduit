@@ -1,4 +1,4 @@
-// test/unit/provider/opencode-adapter-send-turn.test.ts
+// test/unit/provider/opencode-provider-instance-send-turn.test.ts
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -79,19 +79,19 @@ function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 
 describe("OpenCodeProviderInstance.sendTurn()", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeProviderInstance;
+	let instance: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 	});
 
 	it("calls sendMessageAsync on the client", async () => {
 		const input = makeSendTurnInput();
-		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
+		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
-		// Simulate turn completion via the adapter's internal callback
-		adapter.notifyTurnCompleted("s1", {
+		// Simulate turn completion via the provider instance's internal callback
+		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0.02,
 			tokens: { input: 500, output: 200 },
@@ -113,8 +113,8 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			agent: "coder",
 		});
 
-		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
-		adapter.notifyTurnCompleted("s1", {
+		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
+		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
 			tokens: { input: 0, output: 0 },
@@ -135,8 +135,8 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 	it("passes variant to sendMessageAsync", async () => {
 		const input = makeSendTurnInput({ variant: "thinking" });
 
-		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
-		adapter.notifyTurnCompleted("s1", {
+		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
+		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
 			tokens: { input: 0, output: 0 },
@@ -163,10 +163,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 				abort: vi.fn(async () => {}),
 			},
 		});
-		adapter = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({ client });
 
 		const input = makeSendTurnInput();
-		const result = await Effect.runPromise(adapter.sendTurnEffect(input));
+		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 		expect(result.error?.message).toContain("HTTP 500");
@@ -178,13 +178,13 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			abortSignal: abortController.signal,
 		});
 
-		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
+		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
 		// Simulate abort
 		abortController.abort();
 
 		// Notify via the standard completion path
-		adapter.notifyTurnCompleted("s1", {
+		instance.notifyTurnCompleted("s1", {
 			status: "interrupted",
 			cost: 0,
 			tokens: { input: 100, output: 50 },
@@ -198,12 +198,12 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 	it("records start time for duration calculation", async () => {
 		const input = makeSendTurnInput();
-		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
+		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
 		// Small delay to ensure non-zero duration
 		await new Promise((r) => setTimeout(r, 10));
 
-		adapter.notifyTurnCompleted("s1", {
+		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0.01,
 			tokens: { input: 100, output: 50 },
@@ -217,10 +217,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 	it("only resolves for the matching session", async () => {
 		const input = makeSendTurnInput({ sessionId: "s1" });
-		const resultPromise = Effect.runPromise(adapter.sendTurnEffect(input));
+		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
 		// Notify a different session -- should not resolve s1
-		adapter.notifyTurnCompleted("s2", {
+		instance.notifyTurnCompleted("s2", {
 			status: "completed",
 			cost: 0,
 			tokens: { input: 0, output: 0 },
@@ -236,7 +236,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(raceResult).toBe("timeout");
 
 		// Now resolve the correct session
-		adapter.notifyTurnCompleted("s1", {
+		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
 			tokens: { input: 0, output: 0 },

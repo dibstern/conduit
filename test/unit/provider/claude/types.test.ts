@@ -14,7 +14,7 @@ import type {
 	ToolInFlight,
 } from "../../../../src/lib/provider/claude/types.js";
 
-describe("Claude adapter types", () => {
+describe("Claude provider instance types", () => {
 	it("Query extends AsyncGenerator<SDKMessage, void>", () => {
 		expectTypeOf<Query>().toMatchTypeOf<AsyncGenerator<SDKMessage, void>>();
 		expectTypeOf<Query["interrupt"]>().toEqualTypeOf<() => Promise<void>>();

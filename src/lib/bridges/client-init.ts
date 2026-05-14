@@ -1002,7 +1002,7 @@ export async function handleClientConnected(
 					wsHandler.sendTo(clientId, { type: "model_list", providers });
 				}
 			} catch {
-				// Claude adapter may not be available — skip silently
+				// Claude provider instance may not be available — skip silently
 			}
 		}
 
