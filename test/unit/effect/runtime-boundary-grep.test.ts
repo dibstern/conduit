@@ -633,6 +633,36 @@ describe("Effect runtime boundary grep", () => {
 		expect([...daemonMainHits, ...routerHits]).toEqual([]);
 	});
 
+	it("does not pass daemon health as a router options callback", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/domain/server/Layers/http-router-layer.ts",
+				pattern: /\bgetHealthResponse:\s*\(\)\s*=>\s*object\b/,
+				reason:
+					"DaemonHttpRouterOptions should get daemon health from DaemonHandleTag",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bgetHealthResponse:\s*\(\)\s*=>\s*getStatus\(\)/,
+				reason:
+					"daemon-main should not pass getStatus through HTTP router options",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

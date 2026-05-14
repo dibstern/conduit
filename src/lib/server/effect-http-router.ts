@@ -68,7 +68,7 @@ export class ProjectsProvider extends Context.Tag("ProjectsProvider")<
 /** Health response provider — optionally overridden by daemon mode. */
 export class HealthProvider extends Context.Tag("HealthProvider")<
 	HealthProvider,
-	{ readonly getHealthResponse: () => object }
+	{ readonly getHealthResponse: () => Effect.Effect<object> }
 >() {}
 
 /** Push notification manager — may not be available. */
@@ -184,7 +184,7 @@ const healthHandler = Effect.gen(function* () {
 	const maybeHealth = yield* Effect.serviceOption(HealthProvider);
 
 	const body = Option.isSome(maybeHealth)
-		? maybeHealth.value.getHealthResponse()
+		? yield* maybeHealth.value.getHealthResponse()
 		: ({
 				ok: true,
 				projects: getProjects().length,

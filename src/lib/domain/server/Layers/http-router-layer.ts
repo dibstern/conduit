@@ -22,6 +22,7 @@ import {
 import type { PushSubscriptionData } from "../../../server/push.js";
 import type { ThemesResponse } from "../../../shared-types.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
+import { DaemonHandleTag } from "../../daemon/Services/daemon-handle.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import {
 	type AuthManagerService,
@@ -55,7 +56,6 @@ export interface DaemonHttpRouterOptions {
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly removeProject: (slug: string) => Promise<unknown>;
-	readonly getHealthResponse: () => object;
 	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 }
@@ -89,7 +89,7 @@ interface HttpRouterRequestHandlerOptions {
 		subPath: string,
 		req: HttpServerRequest.HttpServerRequest,
 	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
-	readonly getHealthResponse?: () => object;
+	readonly getHealthResponse?: () => Effect.Effect<object>;
 	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 	readonly caRootPath?: string | undefined;
@@ -205,6 +205,7 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 		Effect.gen(function* () {
 			const auth: AuthManagerService = yield* AuthManagerTag;
 			const configRef = yield* DaemonConfigRefTag;
+			const daemonHandle = yield* DaemonHandleTag;
 			return buildHttpRouterRequestHandler({
 				authLayer: Layer.succeed(AuthManagerTag, auth),
 				setupInfoLayer: Layer.succeed(SetupInfoProvider, {
@@ -219,7 +220,7 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 					Effect.tryPromise(() => options.removeProject(slug)).pipe(
 						Effect.asVoid,
 					),
-				getHealthResponse: options.getHealthResponse,
+				getHealthResponse: () => daemonHandle.getStatus(),
 				loadThemes: options.loadThemes,
 				pushManager: options.pushManager,
 			});

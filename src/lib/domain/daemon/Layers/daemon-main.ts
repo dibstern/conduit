@@ -1380,7 +1380,6 @@ export async function startDaemonProcess(
 			staticDir,
 			getProjects: getRouterProjects,
 			removeProject,
-			getHealthResponse: () => getStatus(),
 			loadThemes: loadThemeFiles,
 			pushManager,
 		},

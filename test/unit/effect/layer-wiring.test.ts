@@ -96,7 +96,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			staticDir: process.cwd(),
 			getProjects: () => [],
 			removeProject: () => Promise.resolve(),
-			getHealthResponse: () => ({ ok: true }),
 			loadThemes: () => Promise.resolve({ bundled: {}, custom: {} }),
 			pushManager: null,
 		},

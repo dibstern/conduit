@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpApp } from "@effect/platform";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -42,7 +42,8 @@ const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
 });
 
 const TestHealthLayer = Layer.succeed(HealthProvider, {
-	getHealthResponse: () => ({ ok: true, custom: "daemon-health" }),
+	getHealthResponse: () =>
+		Effect.succeed({ ok: true, custom: "daemon-health" }),
 });
 
 const TestPushLayer = Layer.succeed(PushProvider, {
