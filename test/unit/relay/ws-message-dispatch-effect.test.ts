@@ -6,11 +6,7 @@ import {
 	makeRelayCommandGateLive,
 	RelayCommandGateTag,
 } from "../../../src/lib/domain/relay/Services/relay-command-gate.js";
-import {
-	getLogLevel,
-	type Logger,
-	setLogLevel,
-} from "../../../src/lib/logger.js";
+import type { Logger } from "../../../src/lib/logger.js";
 import type { RelayWsDispatch } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import {
 	handleRelayWsMessage,
@@ -74,36 +70,6 @@ describe("handleRelayWsMessage", () => {
 			expect(order).toEqual(["dispatched"]);
 			expect(sendTo).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(makeGatedLayer()), Effect.scoped),
-	);
-
-	it.effect(
-		"handles log-level changes without entering normal dispatch",
-		() => {
-			const originalLevel = getLogLevel();
-			const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
-			const dispatch: RelayWsDispatch<never> = vi.fn(() => Effect.void);
-			const log = mockLogger();
-
-			return handleRelayWsMessage({
-				clientId: "client-1",
-				handler: "set_log_level",
-				payload: { level: "debug" },
-				sendTo,
-				log,
-				dispatch,
-			}).pipe(
-				Effect.provide(makeBaseLayer()),
-				Effect.tap(() => {
-					expect(dispatch).not.toHaveBeenCalled();
-					expect(sendTo).not.toHaveBeenCalled();
-					expect(getLogLevel()).toBe("debug");
-					expect(log.info).toHaveBeenCalledWith(
-						"Log level changed to debug by client client-1",
-					);
-				}),
-				Effect.ensuring(Effect.sync(() => setLogLevel(originalLevel))),
-			);
-		},
 	);
 
 	it.effect("serializes normal dispatch for the same client", () =>

@@ -38,6 +38,7 @@ import {
 	ScanNow,
 	SendMessage,
 	SetDefaultModel,
+	SetLogLevel,
 	SetProjectInstance,
 	StartInstance,
 	StopInstance,
@@ -346,6 +347,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SendMessage: () => Effect.succeed({ ok: true as const }),
 				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
+				SetLogLevel: () => Effect.succeed({ ok: true as const }),
 			}),
 		),
 	);
@@ -398,6 +400,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("SendMessage")).toBe(true);
 		expect(WsRpcGroup.requests.has("SyncInputDraft")).toBe(true);
 		expect(WsRpcGroup.requests.has("CancelSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetLogLevel")).toBe(true);
 		expect(typeof RpcClient.make).toBe("function");
 	});
 
@@ -797,6 +800,13 @@ describe("browser WebSocket RPC contract", () => {
 						originId: "browser-tab-a",
 					}),
 				).toEqual({ ok: true });
+
+				expect(
+					yield* client.SetLogLevel({
+						projectSlug: "demo",
+						level: "debug",
+					}),
+				).toEqual({ ok: true });
 			}),
 		),
 	);
@@ -1027,6 +1037,9 @@ describe("browser WebSocket RPC contract", () => {
 		expect(
 			new CancelSession({ projectSlug: "demo", sessionId: "session-1" })._tag,
 		).toBe("CancelSession");
+		expect(new SetLogLevel({ projectSlug: "demo", level: "debug" })._tag).toBe(
+			"SetLogLevel",
+		);
 		expect(new WsRpcError({ message: "bad" })._tag).toBe("WsRpcError");
 	});
 

@@ -34,7 +34,7 @@ const NUM_RUNS = 300;
 
 // ─── Generators ─────────────────────────────────────────────────────────────
 
-const validMessageTypes: IncomingMessageType[] = ["pty_input", "set_log_level"];
+const validMessageTypes: IncomingMessageType[] = ["pty_input"];
 
 const arbValidMessageType: fc.Arbitrary<IncomingMessageType> = fc.constantFrom(
 	...validMessageTypes,
@@ -381,7 +381,7 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(isRouteError(invalidResult)).toBe(true);
 
 			// Verify our test list has exactly the right number of routed types.
-			expect(validMessageTypes).toHaveLength(2);
+			expect(validMessageTypes).toHaveLength(1);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

@@ -26,21 +26,12 @@ const PtyInputMsg = Schema.Struct({
 	data: Schema.String,
 });
 
-// ── Daemon operations ────────────────────────────────────────────────────────
-
-const SetLogLevelMsg = Schema.Struct({
-	type: Schema.Literal("set_log_level"),
-	level: Schema.String,
-});
-
 // ─── Combined union schema ──────────────────────────────────────────────────
 // Covers all remaining legacy IncomingMessageType values from ws-router.ts.
 
 export const IncomingWsMessage = Schema.Union(
 	// Terminal / PTY
 	PtyInputMsg,
-	// Daemon operations
-	SetLogLevelMsg,
 );
 
 /** Decoded type for an incoming WS message. */

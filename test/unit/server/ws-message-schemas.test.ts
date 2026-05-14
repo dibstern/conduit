@@ -24,15 +24,6 @@ describe("decodeWsMessage", () => {
 			expect((decoded as any).data).toBe("ls\n");
 		}),
 	);
-
-	it.effect("decodes set_log_level with level", () =>
-		Effect.gen(function* () {
-			const raw = { type: "set_log_level", level: "debug" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("set_log_level");
-			expect((decoded as any).level).toBe("debug");
-		}),
-	);
 });
 
 // ─── Schema rejection tests (synchronous Either-based) ──────────────────────
@@ -87,6 +78,7 @@ describe("IncomingWsMessage schema rejections", () => {
 		"permission_response",
 		"ask_user_response",
 		"question_reject",
+		"set_log_level",
 	])("rejects retired incoming message %s", (type) => {
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)({ type });
 		expect(Either.isLeft(result)).toBe(true);
@@ -98,13 +90,12 @@ describe("IncomingWsMessage schema rejections", () => {
 describe("IncomingWsMessage coverage", () => {
 	// Incoming message types from ws-router.ts (the source of truth).
 	// This test ensures IncomingWsMessage covers every one.
-	const ALL_INCOMING_TYPES = ["pty_input", "set_log_level"] as const;
+	const ALL_INCOMING_TYPES = ["pty_input"] as const;
 
 	// For each type, construct a minimal valid payload and verify it decodes.
 	// This catches missing union members at test time.
 	const MINIMAL_PAYLOADS: Record<string, Record<string, unknown>> = {
 		pty_input: { ptyId: "p1", data: "x" },
-		set_log_level: { level: "debug" },
 	};
 
 	for (const msgType of ALL_INCOMING_TYPES) {

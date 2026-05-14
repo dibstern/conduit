@@ -199,6 +199,13 @@ export const PermissionDecisionSchema = Schema.Literal(
 );
 
 export const PermissionPersistScopeSchema = Schema.Literal("tool", "pattern");
+export const RpcLogLevelSchema = Schema.Literal(
+	"debug",
+	"verbose",
+	"info",
+	"warn",
+	"error",
+);
 
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -359,6 +366,7 @@ export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
 export type PermissionPersistScope = typeof PermissionPersistScopeSchema.Type;
+export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
@@ -905,6 +913,18 @@ export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 	},
 ) {}
 
+export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
+	"SetLogLevel",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			level: RpcLogLevelSchema,
+		},
+	},
+) {}
+
 export const WsRpcRequest = Schema.Union(
 	GetAgents,
 	GetCommands,
@@ -950,6 +970,7 @@ export const WsRpcRequest = Schema.Union(
 	SendMessage,
 	SyncInputDraft,
 	CancelSession,
+	SetLogLevel,
 );
 
 export type WsRpcRequest = typeof WsRpcRequest.Type;
@@ -999,6 +1020,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SendMessage),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
+	Rpc.fromTaggedRequest(SetLogLevel),
 );
 
 export type WsRpcGroup = typeof WsRpcGroup;

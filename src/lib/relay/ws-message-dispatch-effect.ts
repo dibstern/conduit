@@ -3,8 +3,7 @@ import { ClientMessageSerializationTag } from "../domain/relay/Services/client-m
 import { RelayCommandGateTag } from "../domain/relay/Services/relay-command-gate.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { dispatchMessageEffect } from "../handlers/index.js";
-import type { Logger, LogLevel } from "../logger.js";
-import { setLogLevel } from "../logger.js";
+import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
 
 export type RelayWsDispatch<R> = (
@@ -26,24 +25,6 @@ export interface RelayWsMessageGateOptions<R = never>
 	extends RelayWsMessageDispatchOptions<R> {
 	readonly commandId: string;
 	readonly receivedAt?: number;
-}
-
-const validLogLevels = new Set<LogLevel>([
-	"debug",
-	"verbose",
-	"info",
-	"warn",
-	"error",
-]);
-
-function getPayloadLevel(payload: unknown): unknown {
-	if (typeof payload !== "object" || payload === null) return undefined;
-	if (!("level" in payload)) return undefined;
-	return Reflect.get(payload, "level");
-}
-
-function isLogLevel(value: unknown): value is LogLevel {
-	return typeof value === "string" && validLogLevels.has(value as LogLevel);
 }
 
 const renderDispatchError = (
@@ -80,17 +61,6 @@ export const handleRelayWsMessage = <R = never>({
 	ClientMessageSerializationTag | R
 > =>
 	Effect.gen(function* () {
-		if (handler === "set_log_level") {
-			const level = getPayloadLevel(payload);
-			if (isLogLevel(level)) {
-				yield* Effect.sync(() => {
-					setLogLevel(level);
-					log.info(`Log level changed to ${level} by client ${clientId}`);
-				});
-			}
-			return;
-		}
-
 		const serialization = yield* ClientMessageSerializationTag;
 		yield* serialization
 			.withClient(clientId, dispatch(clientId, handler, payload))

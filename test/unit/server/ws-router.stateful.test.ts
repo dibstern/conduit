@@ -394,7 +394,7 @@ const arbClientId = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant("viewer") },
 );
 
-const validMessageTypes: IncomingMessageType[] = ["pty_input", "set_log_level"];
+const validMessageTypes: IncomingMessageType[] = ["pty_input"];
 
 const arbInvalidType = fc
 	.oneof(

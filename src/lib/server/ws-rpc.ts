@@ -103,6 +103,7 @@ export {
 	type SessionInfo,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
+	SetLogLevel,
 	SetProjectInstance,
 	StartInstance,
 	StopInstance,
@@ -127,6 +128,7 @@ import {
 	getFileTreeEntries,
 } from "../handlers/files.js";
 import { getToolContentValue } from "../handlers/tool-content.js";
+import { setLogLevel } from "../logger.js";
 
 const CCS_DEFAULT_PORT = 8317;
 
@@ -920,4 +922,9 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		cancelSessionById("rpc", request.sessionId).pipe(
 			Effect.as({ ok: true as const }),
 		),
+	SetLogLevel: (request) =>
+		Effect.sync(() => {
+			setLogLevel(request.level);
+			return { ok: true as const };
+		}),
 });

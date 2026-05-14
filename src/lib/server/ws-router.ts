@@ -7,9 +7,9 @@ import type { RelayMessage } from "../types.js";
 
 // ─── Message types from browser ──────────────────────────────────────────────
 
-export type IncomingMessageType = "pty_input" | "set_log_level";
+export type IncomingMessageType = "pty_input";
 
-const VALID_MESSAGE_TYPES = new Set<string>(["pty_input", "set_log_level"]);
+const VALID_MESSAGE_TYPES = new Set<string>(["pty_input"]);
 
 export interface IncomingMessage {
 	type: string;

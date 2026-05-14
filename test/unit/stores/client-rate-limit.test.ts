@@ -138,8 +138,8 @@ describe("wsSend client-side rate limiting", () => {
 			expect(showToastMock).not.toHaveBeenCalled();
 		});
 
-		it("sends non-chat debug controls immediately", () => {
-			wsSend({ type: "set_log_level", level: "verbose" });
+		it("sends terminal input controls immediately", () => {
+			wsSend({ type: "pty_input", ptyId: "pty-1", data: "x" });
 			expect(sentMessages).toHaveLength(1);
 		});
 	});

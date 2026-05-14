@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. RPC-over-WS is partly started: all ordinary browser operations have moved through Effect RPC. Remaining production raw WS commands are `set_log_level` and `pty_input`; `pty_input` intentionally stays on the high-throughput terminal data plane until the frontend has a persistent RPC stream/client.
+1. RPC-over-WS is partly started: all ordinary browser operations, including debug log-level changes, have moved through Effect RPC. The only remaining production raw WS command is `pty_input`; it intentionally stays on the high-throughput terminal data plane until the frontend has a persistent RPC stream/client.
 2. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
 3. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
 4. CLI still imports/calls `startDaemonProcess`.
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
-8. RPC-over-WS vertical migration. Started locally with all ordinary browser operations moved to typed RPC; only `set_log_level` and `pty_input` remain raw WS. Reclassify or migrate `set_log_level`; keep or replace `pty_input` only with a persistent RPC stream/client design.
+8. RPC-over-WS vertical migration. Started locally with all ordinary browser operations moved to typed RPC; only `pty_input` remains raw WS. Keep or replace `pty_input` only with a persistent RPC stream/client design.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist and production orchestration runtime creates OpenCode/Claude instances through plain driver values.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.

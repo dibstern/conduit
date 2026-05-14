@@ -24,6 +24,7 @@ import {
 	type ProjectMutationResponse,
 	type PtyListResponse,
 	type ReloadProviderSessionResponse,
+	type RpcLogLevel,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
 	type SwitchContextWindowResponse,
@@ -277,6 +278,11 @@ export interface SyncInputDraftRpcInput {
 	readonly sessionId: string;
 	readonly text: string;
 	readonly originId?: string;
+}
+
+export interface SetLogLevelRpcInput {
+	readonly projectSlug: string;
+	readonly level: RpcLogLevel;
 }
 
 export interface WsRpcLocation {
@@ -950,6 +956,19 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSetLogLevel = (input: SetLogLevelRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.SetLogLevel(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
 ): Promise<void> {
@@ -1250,4 +1269,11 @@ export async function syncInputDraftRpc(
 ): Promise<void> {
 	const runtime = await getRuntime();
 	await runtime.runPromise(callSyncInputDraft(input));
+}
+
+export async function setLogLevelRpc(
+	input: SetLogLevelRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callSetLogLevel(input));
 }
