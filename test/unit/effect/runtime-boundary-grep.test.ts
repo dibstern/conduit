@@ -588,6 +588,42 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not keep the deferred status poller runtime facade", () => {
+		const path = "src/lib/domain/relay/Services/session-status-poller.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bDeferredStatusPollerRuntime\b/,
+				reason: "status poller runtime is provided by its scoped Layer",
+			},
+			{
+				pattern: /\bStatusPollerRuntimeNotAttachedError\b/,
+				reason: "status poller runtime should not have a late-attach state",
+			},
+			{
+				pattern: /\bmakeDeferredStatusPollerRuntime\b/,
+				reason: "status poller runtime late attachment is retired",
+			},
+			{
+				pattern: /\bonAttached\b/,
+				reason:
+					"status poller callbacks should not wait for runtime attachment",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not construct websocket handler bridge services in relay-stack", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

@@ -646,76 +646,6 @@ export interface StatusPollerRuntime {
 	runPromise: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>;
 }
 
-export interface DeferredStatusPollerRuntime extends StatusPollerRuntime {
-	attach(runtime: StatusPollerRuntime): void;
-	isAttached(): boolean;
-	onAttached(callback: () => void): void;
-}
-
-export class StatusPollerRuntimeNotAttachedError extends Error {
-	constructor() {
-		super("SessionStatusPoller runtime is not attached");
-		this.name = "StatusPollerRuntimeNotAttachedError";
-	}
-}
-
-const isDeferredRuntime = (
-	runtime: StatusPollerRuntime,
-): runtime is DeferredStatusPollerRuntime =>
-	"attach" in runtime && "onAttached" in runtime && "isAttached" in runtime;
-
-export function makeDeferredStatusPollerRuntime(): DeferredStatusPollerRuntime {
-	let attachedRuntime: StatusPollerRuntime | null = null;
-	const attachCallbacks: Array<() => void> = [];
-
-	const getRuntime = () => {
-		if (attachedRuntime === null) {
-			throw new StatusPollerRuntimeNotAttachedError();
-		}
-		return attachedRuntime;
-	};
-
-	return {
-		runSync: <A, E>(
-			// biome-ignore lint/suspicious/noExplicitAny: runtime provides the service context after attach
-			effect: Effect.Effect<A, E, any>,
-		): A => getRuntime().runSync(effect),
-		runPromise: <A, E>(
-			// biome-ignore lint/suspicious/noExplicitAny: runtime provides the service context after attach
-			effect: Effect.Effect<A, E, any>,
-		): Promise<A> => {
-			if (attachedRuntime === null) {
-				return Promise.reject(new StatusPollerRuntimeNotAttachedError());
-			}
-			return attachedRuntime.runPromise(effect);
-		},
-		attach(runtime: StatusPollerRuntime): void {
-			if (attachedRuntime !== null) {
-				throw new Error("SessionStatusPoller runtime is already attached");
-			}
-			attachedRuntime = runtime;
-			const callbacks = attachCallbacks.splice(0);
-			let firstError: unknown;
-			for (const callback of callbacks) {
-				try {
-					callback();
-				} catch (error) {
-					firstError ??= error;
-				}
-			}
-			if (firstError) throw firstError;
-		},
-		isAttached: () => attachedRuntime !== null,
-		onAttached(callback: () => void): void {
-			if (attachedRuntime !== null) {
-				callback();
-				return;
-			}
-			attachCallbacks.push(callback);
-		},
-	};
-}
-
 /**
  * Create an imperative facade around the Effect-native poller.
  *
@@ -744,14 +674,6 @@ export function createStatusPollerService(config: {
 
 	const doPoll = () => {
 		return runtime.runPromise(poll(pollDeps));
-	};
-
-	const whenRuntimeAttached = (callback: () => void): void => {
-		if (isDeferredRuntime(runtime)) {
-			runtime.onAttached(callback);
-			return;
-		}
-		callback();
 	};
 
 	const startTimer = () => {
@@ -784,49 +706,47 @@ export function createStatusPollerService(config: {
 		) {
 			// Subscribe to the PubSub and forward to callback.
 			// We run a background fiber that reads from the subscription.
-			whenRuntimeAttached(() => {
-				const subscription = Effect.gen(function* () {
-					const pubsub = yield* PollerPubSubTag;
-					// Use PubSub.subscribe to get a Dequeue, then read in a loop
-					return yield* Effect.scoped(
-						Effect.gen(function* () {
-							const subscription = yield* PubSub.subscribe(pubsub);
-							// Read loop in background
-							yield* Effect.forever(
-								Effect.gen(function* () {
-									const event = yield* subscription.take;
-									yield* Effect.try(() => {
-										const result = callback(
-											event.statuses,
-											event.statusesChanged,
-										);
-										return result;
-									}).pipe(
-										Effect.flatMap((result) =>
-											result instanceof Promise
-												? Effect.tryPromise(() => result).pipe(
-														Effect.catchAll(() => Effect.void),
-													)
-												: Effect.void,
-										),
-										Effect.catchAll(() => Effect.void),
+			const subscription = Effect.gen(function* () {
+				const pubsub = yield* PollerPubSubTag;
+				// Use PubSub.subscribe to get a Dequeue, then read in a loop
+				return yield* Effect.scoped(
+					Effect.gen(function* () {
+						const subscription = yield* PubSub.subscribe(pubsub);
+						// Read loop in background
+						yield* Effect.forever(
+							Effect.gen(function* () {
+								const event = yield* subscription.take;
+								yield* Effect.try(() => {
+									const result = callback(
+										event.statuses,
+										event.statusesChanged,
 									);
-								}),
-							);
-						}),
-					);
-				}).pipe(Effect.catchAllCause(reportSubscriptionFailure));
-				const fiber = runtime.runPromise(subscription);
-				// The promise never resolves (infinite loop) — that's intentional.
-				// It will be interrupted when the runtime is disposed.
-				fiber.catch(() => {});
-			});
+									return result;
+								}).pipe(
+									Effect.flatMap((result) =>
+										result instanceof Promise
+											? Effect.tryPromise(() => result).pipe(
+													Effect.catchAll(() => Effect.void),
+												)
+											: Effect.void,
+									),
+									Effect.catchAll(() => Effect.void),
+								);
+							}),
+						);
+					}),
+				);
+			}).pipe(Effect.catchAllCause(reportSubscriptionFailure));
+			const fiber = runtime.runPromise(subscription);
+			// The promise never resolves (infinite loop) — that's intentional.
+			// It will be interrupted when the runtime is disposed.
+			fiber.catch(() => {});
 		},
 
 		start() {
 			if (startRequested) return;
 			startRequested = true;
-			whenRuntimeAttached(startTimer);
+			startTimer();
 		},
 
 		stop() {
