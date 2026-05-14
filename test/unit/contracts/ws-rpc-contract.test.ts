@@ -3,6 +3,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Schema, type Scope } from "effect";
 import { expect } from "vitest";
 import {
+	AnswerQuestion,
 	CancelSession,
 	CreateSession,
 	DeleteSession,
@@ -19,8 +20,10 @@ import {
 	ListDirectories,
 	ListSessions,
 	LoadMoreHistory,
+	RejectQuestion,
 	ReloadProviderSession,
 	RenameSession,
+	RespondPermission,
 	RewindSession,
 	SendMessage,
 	SetDefaultModel,
@@ -110,6 +113,9 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						sessionId: "session-forked",
 					}),
+				RespondPermission: () => Effect.succeed({ ok: true as const }),
+				AnswerQuestion: () => Effect.succeed({ ok: true as const }),
+				RejectQuestion: () => Effect.succeed({ ok: true as const }),
 				ListDirectories: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -218,6 +224,9 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ForkSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("RespondPermission")).toBe(true);
+		expect(WsRpcGroup.requests.has("AnswerQuestion")).toBe(true);
+		expect(WsRpcGroup.requests.has("RejectQuestion")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListDirectories")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
@@ -453,6 +462,32 @@ describe("browser WebSocket RPC contract", () => {
 					sessionId: "session-forked",
 				});
 
+				expect(
+					yield* client.RespondPermission({
+						projectSlug: "demo",
+						originId: "browser-tab-a",
+						requestId: "per-1",
+						decision: "allow",
+					}),
+				).toEqual({ ok: true });
+
+				expect(
+					yield* client.AnswerQuestion({
+						projectSlug: "demo",
+						originId: "browser-tab-a",
+						toolId: "que-1",
+						answers: { "0": "yes" },
+					}),
+				).toEqual({ ok: true });
+
+				expect(
+					yield* client.RejectQuestion({
+						projectSlug: "demo",
+						originId: "browser-tab-a",
+						toolId: "que-1",
+					}),
+				).toEqual({ ok: true });
+
 				const history = yield* client.LoadMoreHistory({
 					projectSlug: "demo",
 					sessionId: "session-1",
@@ -530,6 +565,29 @@ describe("browser WebSocket RPC contract", () => {
 				originId: "browser-tab-a",
 			})._tag,
 		).toBe("ForkSession");
+		expect(
+			new RespondPermission({
+				projectSlug: "demo",
+				originId: "browser-tab-a",
+				requestId: "per-1",
+				decision: "allow",
+			})._tag,
+		).toBe("RespondPermission");
+		expect(
+			new AnswerQuestion({
+				projectSlug: "demo",
+				originId: "browser-tab-a",
+				toolId: "que-1",
+				answers: { "0": "yes" },
+			})._tag,
+		).toBe("AnswerQuestion");
+		expect(
+			new RejectQuestion({
+				projectSlug: "demo",
+				originId: "browser-tab-a",
+				toolId: "que-1",
+			})._tag,
+		).toBe("RejectQuestion");
 		expect(
 			new ListDirectories({ projectSlug: "demo", path: "/tmp/" })._tag,
 		).toBe("ListDirectories");

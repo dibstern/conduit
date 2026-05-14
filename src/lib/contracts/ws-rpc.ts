@@ -159,6 +159,14 @@ export const OkResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
 });
 
+export const PermissionDecisionSchema = Schema.Literal(
+	"allow",
+	"allow_always",
+	"deny",
+);
+
+export const PermissionPersistScopeSchema = Schema.Literal("tool", "pattern");
+
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
@@ -279,6 +287,8 @@ export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
+export type PermissionDecision = typeof PermissionDecisionSchema.Type;
+export type PermissionPersistScope = typeof PermissionPersistScopeSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
@@ -557,6 +567,49 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 	},
 ) {}
 
+export class RespondPermission extends Schema.TaggedRequest<RespondPermission>()(
+	"RespondPermission",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
+			requestId: NonEmptyString,
+			decision: PermissionDecisionSchema,
+			persistScope: Schema.optional(PermissionPersistScopeSchema),
+			persistPattern: Schema.optional(Schema.String),
+		},
+	},
+) {}
+
+export class AnswerQuestion extends Schema.TaggedRequest<AnswerQuestion>()(
+	"AnswerQuestion",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
+			toolId: NonEmptyString,
+			answers: Schema.Record({ key: Schema.String, value: Schema.String }),
+		},
+	},
+) {}
+
+export class RejectQuestion extends Schema.TaggedRequest<RejectQuestion>()(
+	"RejectQuestion",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
+			toolId: NonEmptyString,
+		},
+	},
+) {}
+
 export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 	"LoadMoreHistory",
 	{
@@ -647,6 +700,9 @@ export const WsRpcRequest = Schema.Union(
 	ViewSession,
 	DeleteSession,
 	ForkSession,
+	RespondPermission,
+	AnswerQuestion,
+	RejectQuestion,
 	LoadMoreHistory,
 	RewindSession,
 	SendMessage,
@@ -679,6 +735,9 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ViewSession),
 	Rpc.fromTaggedRequest(DeleteSession),
 	Rpc.fromTaggedRequest(ForkSession),
+	Rpc.fromTaggedRequest(RespondPermission),
+	Rpc.fromTaggedRequest(AnswerQuestion),
+	Rpc.fromTaggedRequest(RejectQuestion),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
 	Rpc.fromTaggedRequest(SendMessage),

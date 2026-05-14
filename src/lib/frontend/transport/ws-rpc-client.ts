@@ -17,6 +17,8 @@ import {
 	type ListDirectoriesResponse,
 	type ListSessionsResponse,
 	type LoadMoreHistoryResponse,
+	type PermissionDecision,
+	type PermissionPersistScope,
 	type ReloadProviderSessionResponse,
 	type SetDefaultModelResponse,
 	type SwitchContextWindowResponse,
@@ -73,6 +75,28 @@ export interface ForkSessionRpcInput {
 	readonly originId: string;
 	readonly sessionId?: string;
 	readonly messageId?: string;
+}
+
+export interface RespondPermissionRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly requestId: string;
+	readonly decision: PermissionDecision;
+	readonly persistScope?: PermissionPersistScope;
+	readonly persistPattern?: string;
+}
+
+export interface AnswerQuestionRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly toolId: string;
+	readonly answers: Readonly<Record<string, string>>;
+}
+
+export interface RejectQuestionRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly toolId: string;
 }
 
 export interface GetTodoRpcInput {
@@ -321,6 +345,61 @@ const callForkSession = (input: ForkSessionRpcInput) =>
 				...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
 				...(input.messageId != null ? { messageId: input.messageId } : {}),
 			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callRespondPermission = (input: RespondPermissionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.RespondPermission({
+				projectSlug: input.projectSlug,
+				originId: input.originId,
+				requestId: input.requestId,
+				decision: input.decision,
+				...(input.persistScope != null
+					? { persistScope: input.persistScope }
+					: {}),
+				...(input.persistPattern != null
+					? { persistPattern: input.persistPattern }
+					: {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callAnswerQuestion = (input: AnswerQuestionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.AnswerQuestion({
+				projectSlug: input.projectSlug,
+				originId: input.originId,
+				toolId: input.toolId,
+				answers: { ...input.answers },
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callRejectQuestion = (input: RejectQuestionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.RejectQuestion(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -670,6 +749,27 @@ export async function forkSessionRpc(
 ): Promise<ForkSessionResponse> {
 	const runtime = await getRuntime();
 	return await runtime.runPromise(callForkSession(input));
+}
+
+export async function respondPermissionRpc(
+	input: RespondPermissionRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callRespondPermission(input));
+}
+
+export async function answerQuestionRpc(
+	input: AnswerQuestionRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callAnswerQuestion(input));
+}
+
+export async function rejectQuestionRpc(
+	input: RejectQuestionRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callRejectQuestion(input));
 }
 
 export async function getTodoRpc(

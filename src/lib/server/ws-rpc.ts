@@ -12,6 +12,11 @@ import {
 	switchVariantForSession,
 } from "../handlers/model.js";
 import {
+	handleAskUserResponse,
+	handlePermissionResponse,
+	handleQuestionReject,
+} from "../handlers/permissions.js";
+import {
 	cancelSessionById,
 	rewindSessionToMessage,
 	sendMessageToSession,
@@ -27,8 +32,10 @@ import {
 	viewSessionForClient,
 } from "../handlers/session.js";
 import { getCommandsForSession, getTodoState } from "../handlers/settings.js";
+import type { PermissionId } from "../shared-types.js";
 
 export {
+	AnswerQuestion,
 	CancelSession,
 	CreateSession,
 	type CreateSessionResponse,
@@ -61,9 +68,11 @@ export {
 	type LoadMoreHistoryResponse,
 	type ModelInfo,
 	type ProviderInfo,
+	RejectQuestion,
 	ReloadProviderSession,
 	type ReloadProviderSessionResponse,
 	RenameSession,
+	RespondPermission,
 	RewindSession,
 	SendMessage,
 	type SessionInfo,
@@ -493,6 +502,53 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 								message: `ForkSession failed: ${String(error)}`,
 							}),
 						),
+			),
+		),
+	RespondPermission: (request) =>
+		handlePermissionResponse(request.originId, {
+			requestId: request.requestId as PermissionId,
+			decision: request.decision,
+			...(request.persistScope != null
+				? { persistScope: request.persistScope }
+				: {}),
+			...(request.persistPattern != null
+				? { persistPattern: request.persistPattern }
+				: {}),
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `RespondPermission failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	AnswerQuestion: (request) =>
+		handleAskUserResponse(request.originId, {
+			toolId: request.toolId,
+			answers: request.answers,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `AnswerQuestion failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	RejectQuestion: (request) =>
+		handleQuestionReject(request.originId, {
+			toolId: request.toolId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `RejectQuestion failed: ${String(error)}`,
+					}),
+				),
 			),
 		),
 	LoadMoreHistory: (request) =>

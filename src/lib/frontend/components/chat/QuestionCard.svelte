@@ -4,7 +4,12 @@
 
 <script lang="ts">
 	import type { QuestionRequest } from "../../types.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import {
+		answerQuestionRpc,
+		rejectQuestionRpc,
+	} from "../../transport/ws-rpc-client.js";
 	import {
 		buildAnswerPayload,
 		formatQuestionHeader,
@@ -146,9 +151,12 @@
 	function handleSubmit() {
 		if (!canSubmit || resolved) return;
 		errorMessage = null; // Clear any previous error
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
 		const answers = buildAnswerPayload(selections, request.questions);
-		wsSend({
-			type: "ask_user_response",
+		void answerQuestionRpc({
+			projectSlug,
+			originId: getBrowserClientId(),
 			toolId: request.toolId,
 			answers,
 		});
@@ -168,7 +176,13 @@
 
 	function handleSkip() {
 		if (resolved) return;
-		wsSend({ type: "question_reject", toolId: request.toolId });
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		void rejectQuestionRpc({
+			projectSlug,
+			originId: getBrowserClientId(),
+			toolId: request.toolId,
+		});
 		resolved = "skipped";
 	}
 

@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. RPC-over-WS is partly started: `CancelSession`, `CreateSession`, `DeleteSession`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `ReloadProviderSession`, `RenameSession`, `RewindSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession` have moved through Effect RPC, but the remaining browser operations still use the legacy WS protocol.
+1. RPC-over-WS is partly started: `AnswerQuestion`, `CancelSession`, `CreateSession`, `DeleteSession`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RenameSession`, `RespondPermission`, `RewindSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession` have moved through Effect RPC, but the remaining browser operations still use the legacy WS protocol.
 2. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
 3. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
 4. CLI still imports/calls `startDaemonProcess`.
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
-8. RPC-over-WS vertical migration. Started locally with end-to-end `CancelSession`, `CreateSession`, `DeleteSession`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `ReloadProviderSession`, `RenameSession`, `RewindSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession`; broader browser operation slices remain.
+8. RPC-over-WS vertical migration. Started locally with end-to-end `AnswerQuestion`, `CancelSession`, `CreateSession`, `DeleteSession`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RenameSession`, `RespondPermission`, `RewindSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession`; broader browser operation slices remain.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist and production orchestration runtime creates OpenCode/Claude instances through plain driver values.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.
@@ -262,3 +262,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Switched the session context-menu fork and assistant-message fork button to typed RPC with browser tab `originId`.
 - Kept the legacy raw `fork_session` handler until integration helpers and fork E2E setup move off raw session lifecycle commands.
 - Verified locally with targeted RPC contract/server tests.
+
+2026-05-14, RPC permission and question response slice:
+
+- Implemented `RespondPermission`, `AnswerQuestion`, and `RejectQuestion` in `WsRpcServerLayer` through the existing Effect permission/question handlers.
+- Switched permission cards and ask-user question cards to typed RPC with browser tab `originId`; no production frontend callsite sends raw `permission_response`, `ask_user_response`, or `question_reject`.
+- Kept the legacy raw handlers until WS mock/E2E helpers move to RPC-aware assertions.
+- Verified locally with targeted RPC contract/server tests, `pnpm check`, `pnpm lint`, and `git diff --check`.

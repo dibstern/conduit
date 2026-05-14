@@ -3,9 +3,11 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
@@ -238,6 +240,130 @@ describe("WsRpcServerLayer ListSessions", () => {
 							wsHandler,
 							sessionManagerService,
 						}),
+					),
+				),
+			),
+		);
+	});
+
+	it.effect("responds to a permission request for the originating tab", () => {
+		const api = makeMockOpenCodeAPI();
+		const wsHandler = makeMockWebSocketHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+
+		return Effect.gen(function* () {
+			const pendingInteractions = yield* PendingInteractionServiceTag;
+			yield* pendingInteractions.recordPermissionRequest({
+				requestId: "per-1" as PermissionId,
+				sessionId: "session-1",
+				toolName: "Bash",
+				toolInput: { command: "pnpm test" },
+			});
+
+			const client = yield* rpcClient;
+			const result = yield* client.RespondPermission({
+				projectSlug: "project-a",
+				originId: "browser-tab-a",
+				requestId: "per-1",
+				decision: "allow",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(api.permission.reply).toHaveBeenCalledWith(
+				"session-1",
+				"per-1",
+				"once",
+			);
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "permission_resolved",
+				sessionId: "session-1",
+				requestId: "per-1",
+				decision: "once",
+			});
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
+				),
+			),
+		);
+	});
+
+	it.effect("answers an ask-user question for the originating tab", () => {
+		const api = makeMockOpenCodeAPI();
+		const wsHandler = makeMockWebSocketHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			decrementPendingQuestionCount,
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+			const result = yield* client.AnswerQuestion({
+				projectSlug: "project-a",
+				originId: "browser-tab-a",
+				toolId: "que-1",
+				answers: { "0": "PostgreSQL" },
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(api.question.reply).toHaveBeenCalledWith("que-1", [
+				["PostgreSQL"],
+			]);
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "ask_user_resolved",
+				toolId: "que-1",
+				sessionId: "session-1",
+			});
+			expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
+					),
+				),
+			),
+		);
+	});
+
+	it.effect("rejects an ask-user question for the originating tab", () => {
+		const api = makeMockOpenCodeAPI();
+		const wsHandler = makeMockWebSocketHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			decrementPendingQuestionCount,
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+			const result = yield* client.RejectQuestion({
+				projectSlug: "project-a",
+				originId: "browser-tab-a",
+				toolId: "que-1",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(api.question.reject).toHaveBeenCalledWith("que-1");
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "ask_user_resolved",
+				toolId: "que-1",
+				sessionId: "session-1",
+			});
+			expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
 					),
 				),
 			),
