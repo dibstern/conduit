@@ -20,10 +20,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Runtime } from "effect";
+import { Deferred, Effect, Runtime } from "effect";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
-import { createDeferred, type Deferred } from "../deferred.js";
+import {
+	createDeferred,
+	type Deferred as PromiseDeferred,
+} from "../deferred.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type {
 	CommandInfo,
@@ -196,7 +199,8 @@ function enumerateSkills(
 }
 
 // ─── Turn deferred ─────────────────────────────────────────────────────────
-// Uses the shared Deferred<TurnResult> from the provider utility module.
+// Turn queues still use the shared PromiseDeferred<TurnResult> utility until
+// the next provider cleanup slice moves them to Effect Deferred.
 
 // ─── Provider Instance Config ──────────────────────────────────────────────
 
@@ -218,12 +222,15 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	protected readonly sessions = new Map<string, ClaudeSessionContext>();
 
 	/** Per-session mutex: prevents duplicate session creation on concurrent sendTurnEffect(). */
-	private readonly sessionLocks = new Map<string, Promise<void>>();
+	private readonly sessionLocks = new Map<
+		string,
+		Deferred.Deferred<void, Error>
+	>();
 
 	/** Per-session queue of deferreds for in-flight turns. */
 	private readonly turnDeferredQueues = new Map<
 		string,
-		Deferred<TurnResult>[]
+		PromiseDeferred<TurnResult>[]
 	>();
 
 	/**
@@ -352,10 +359,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
 				}
-				yield* Effect.tryPromise({
-					try: () => pending,
-					catch: (cause) => cause,
-				});
+				yield* Deferred.await(pending);
 				return yield* this.sendTurnLocalEffect(input);
 			}
 
@@ -401,9 +405,8 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			this.pushTurnDeferred(sessionId, deferred);
 
 			// Set session lock synchronously before any effectful boundary.
-			const setupLock = createDeferred<void>();
-			setupLock.promise.catch(() => undefined);
-			this.sessionLocks.set(sessionId, setupLock.promise);
+			const setupLock = yield* Deferred.make<void, Error>();
+			this.sessionLocks.set(sessionId, setupLock);
 
 			let promptQueue: PromptQueueController | undefined;
 			const setup = Effect.gen(this, function* () {
@@ -504,14 +507,12 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 			yield* setup.pipe(
 				Effect.tap(() =>
-					Effect.sync(() => {
-						setupLock.resolve(undefined);
-					}),
+					Deferred.succeed(setupLock, undefined).pipe(Effect.ignore),
 				),
 				Effect.catchAll((err) =>
 					Effect.gen(this, function* () {
 						this.turnDeferredQueues.delete(sessionId);
-						setupLock.reject(asError(err));
+						yield* Deferred.fail(setupLock, asError(err)).pipe(Effect.ignore);
 						if (promptQueue) {
 							yield* promptQueue.close().pipe(Effect.ignore);
 						}
@@ -682,7 +683,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 	private pushTurnDeferred(
 		sessionId: string,
-		deferred: Deferred<TurnResult>,
+		deferred: PromiseDeferred<TurnResult>,
 	): void {
 		let queue = this.turnDeferredQueues.get(sessionId);
 		if (!queue) {
@@ -694,7 +695,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 	private shiftTurnDeferred(
 		sessionId: string,
-	): Deferred<TurnResult> | undefined {
+	): PromiseDeferred<TurnResult> | undefined {
 		const queue = this.turnDeferredQueues.get(sessionId);
 		if (!queue || queue.length === 0) return undefined;
 		const deferred = queue.shift();
