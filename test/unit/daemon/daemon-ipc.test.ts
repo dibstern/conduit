@@ -24,6 +24,19 @@ function makeContext(
 	const ctx: DaemonIPCContext = {
 		addProject: vi.fn(),
 		removeProject: vi.fn(),
+		getStatus: vi.fn().mockReturnValue({
+			ok: true,
+			uptime: 0,
+			port: 3000,
+			host: "127.0.0.1",
+			projectCount: 0,
+			sessionCount: 0,
+			clientCount: 0,
+			pinEnabled: false,
+			tlsEnabled: false,
+			keepAwake: false,
+			projects: [],
+		}),
 		getProjects: vi.fn().mockReturnValue([]),
 		setProjectTitle: vi.fn(),
 		getPinHash: vi.fn().mockReturnValue(null),
@@ -65,19 +78,7 @@ function makeContext(
 }
 
 function makeHandlers(ctx: DaemonIPCContext) {
-	return buildIPCHandlers(ctx, () => ({
-		ok: true,
-		uptime: 0,
-		port: 3000,
-		host: "127.0.0.1",
-		projectCount: 0,
-		sessionCount: 0,
-		clientCount: 0,
-		pinEnabled: false,
-		tlsEnabled: false,
-		keepAwake: false,
-		projects: [],
-	}));
+	return buildIPCHandlers(ctx);
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

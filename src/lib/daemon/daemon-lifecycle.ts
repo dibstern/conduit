@@ -37,7 +37,6 @@ import { serveStaticFile, tryServeStatic } from "../server/static-files.js";
 import type { SetupInfoResponse } from "../shared-types.js";
 import type { IPCResponse } from "../types.js";
 import { buildIPCHandlers, type DaemonIPCContext } from "./daemon-ipc.js";
-import type { DaemonStatus } from "./daemon-types.js";
 import {
 	parseCommand,
 	serializeResponse,
@@ -740,14 +739,13 @@ export function closeOnboardingServer(
 export function startIPCServer(
 	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
-	getStatus: () => DaemonStatus,
 	dispatchTaggedRequest: TaggedIpcDispatcher,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		// Remove stale socket file if it exists
 		removeSocketFile(ctx.socketPath);
 
-		const handlers = buildIPCHandlers(ipcContext, getStatus);
+		const handlers = buildIPCHandlers(ipcContext);
 		const rpcLayer = makeRpcHandlerLayer(handlers);
 
 		ctx.ipcServer = createNetServer((socket: Socket) => {

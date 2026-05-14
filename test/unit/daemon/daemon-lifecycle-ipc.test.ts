@@ -47,6 +47,10 @@ import type {
 	StoredProject,
 } from "../../../src/lib/types.js";
 
+type TestDaemonIPCContext = Omit<DaemonIPCContext, "getStatus"> & {
+	readonly getStatus?: () => DaemonStatus;
+};
+
 const makeContext = (socketPath: string): DaemonLifecycleContext => ({
 	httpServer: null,
 	onboardingServer: null,
@@ -65,9 +69,17 @@ const testTaggedDispatcher: TaggedIpcDispatcher = (request, rpcLayer) =>
 
 const startTestIPCServer = (
 	ctx: DaemonLifecycleContext,
-	ipcContext: DaemonIPCContext,
-	getStatus: () => DaemonStatus,
-) => startIPCServer(ctx, ipcContext, getStatus, testTaggedDispatcher);
+	ipcContext: TestDaemonIPCContext,
+	getStatus: () => DaemonStatus = makeStatus,
+) =>
+	startIPCServer(
+		ctx,
+		{
+			...ipcContext,
+			getStatus: ipcContext.getStatus ?? getStatus,
+		},
+		testTaggedDispatcher,
+	);
 
 const makeStatus = (overrides: Partial<DaemonStatus> = {}): DaemonStatus => ({
 	ok: true,
@@ -132,7 +144,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const projects: StoredProject[] = [];
 		const instances = new Map<string, OpenCodeInstance>();
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => {
 				const project = {
 					slug: "rpc-project",
@@ -216,7 +228,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		const setProjectModel = vi.fn(async () => {});
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => ({
 				slug: "project",
 				directory,
@@ -275,7 +287,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const setProjectAgent = vi.fn(async () => {});
 		warnSpy.mockClear();
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => ({
 				slug: "project",
 				directory,
@@ -332,7 +344,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		warnSpy.mockClear();
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => ({
 				slug: "legacy-project",
 				directory,
@@ -393,7 +405,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const persistConfig = vi.fn();
 		const scheduleShutdown = vi.fn();
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => ({
 				slug: "project",
 				directory,
@@ -448,7 +460,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => ({
 				slug: "project",
 				directory,
@@ -529,7 +541,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			makeInstance(id, config),
 		);
 
-		const ipcContext: DaemonIPCContext = {
+		const ipcContext: TestDaemonIPCContext = {
 			addProject: async (directory) => ({
 				slug: "project",
 				directory,

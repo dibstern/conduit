@@ -7,7 +7,10 @@ import {
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { buildIPCHandlers } from "../../../src/lib/daemon/daemon-ipc.js";
+import {
+	buildIPCHandlers,
+	type DaemonIPCContext,
+} from "../../../src/lib/daemon/daemon-ipc.js";
 import { createCommandRouter } from "../../../src/lib/daemon/ipc-protocol.js";
 import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
@@ -17,8 +20,24 @@ import type { InstanceConfig, StoredProject } from "../../../src/lib/types.js";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Build a minimal DaemonIPCContext backed by an InstanceManager for IPC tests. */
-function makeIPCContext(manager: InstanceManager, _configDir: string) {
+function makeIPCContext(
+	manager: InstanceManager,
+	_configDir: string,
+): DaemonIPCContext {
 	return {
+		getStatus: () => ({
+			ok: true,
+			uptime: 0,
+			port: 3000,
+			host: "127.0.0.1",
+			projectCount: 0,
+			sessionCount: 0,
+			clientCount: 0,
+			pinEnabled: false,
+			tlsEnabled: false,
+			keepAwake: false,
+			projects: [],
+		}),
 		getInstances: () => manager.getInstances(),
 		getInstance: (id: string) => manager.getInstance(id),
 		addInstance: (id: string, config: InstanceConfig) =>
@@ -147,19 +166,7 @@ describe("instance lifecycle integration", () => {
 	it("instance_add IPC command returns ok:true with instance data", async () => {
 		const manager = new InstanceManager();
 		const ctx = makeIPCContext(manager, tmpDir);
-		const handlers = buildIPCHandlers(ctx, () => ({
-			ok: true,
-			uptime: 0,
-			port: 3000,
-			host: "127.0.0.1",
-			projectCount: 0,
-			sessionCount: 0,
-			clientCount: 0,
-			pinEnabled: false,
-			tlsEnabled: false,
-			keepAwake: false,
-			projects: [],
-		}));
+		const handlers = buildIPCHandlers(ctx);
 		const router = createCommandRouter(handlers);
 
 		// Send instance_add command
@@ -189,19 +196,7 @@ describe("instance lifecycle integration", () => {
 	it("instance_remove IPC command after adding returns ok:true", async () => {
 		const manager = new InstanceManager();
 		const ctx = makeIPCContext(manager, tmpDir);
-		const handlers = buildIPCHandlers(ctx, () => ({
-			ok: true,
-			uptime: 0,
-			port: 3000,
-			host: "127.0.0.1",
-			projectCount: 0,
-			sessionCount: 0,
-			clientCount: 0,
-			pinEnabled: false,
-			tlsEnabled: false,
-			keepAwake: false,
-			projects: [],
-		}));
+		const handlers = buildIPCHandlers(ctx);
 		const router = createCommandRouter(handlers);
 
 		// Add first

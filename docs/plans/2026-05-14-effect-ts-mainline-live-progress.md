@@ -61,7 +61,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, `ProviderRegistry` now exposes only instance-first APIs, provider implementation/test naming is instance-first, provider wait state now uses Effect `Deferred` for `EventSinkImpl`, OpenCode pending turns, Claude setup locks, and Claude turn queues, and the old provider Promise-deferred helper is deleted.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
-11. Daemon composition readiness.
+11. Daemon composition readiness. Started locally: IPC status reads now live on the IPC context instead of passing a separate `DaemonLiveOptions.getStatus` callback through the Layer graph.
 12. Single-owner daemon cutover.
 13. Final guardrail cleanup.
 14. Final docs and verification.
@@ -543,3 +543,9 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 
 - Deleted the unused provider Promise-deferred helper and its unit tests after all provider waiters moved to Effect `Deferred`.
 - Added guard coverage so `src/lib/provider/deferred.ts` cannot return.
+
+2026-05-14, IPC status callback consolidation:
+
+- Moved daemon status reads into `DaemonIPCContext` so `DaemonLiveOptions` no longer carries a separate `getStatus` callback for IPC server wiring.
+- Updated IPC lifecycle/unit fixtures to use the single IPC context surface.
+- Added guard coverage so `DaemonLiveOptions.getStatus`, `options.getStatus`, and the old `buildIPCHandlers(ctx, getStatus)`/`startIPCServer(..., getStatus, ...)` signatures cannot return.

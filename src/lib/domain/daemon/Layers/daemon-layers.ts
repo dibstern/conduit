@@ -30,7 +30,6 @@ import {
 	startIPCServer,
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
-import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import {
 	removePidFile,
 	removeSocketFile,
@@ -359,13 +358,12 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 export const makeIpcServerLive = (
 	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
-	getStatus: () => DaemonStatus,
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const runtime = yield* Effect.runtime<never>();
 			yield* startLifecycleServer("startIPCServer", () =>
-				startIPCServer(ctx, ipcContext, getStatus, (request, rpcLayer) =>
+				startIPCServer(ctx, ipcContext, (request, rpcLayer) =>
 					Runtime.runPromise(runtime)(
 						dispatchTaggedRequestEffect(request, rpcLayer),
 					),
@@ -456,7 +454,6 @@ export interface DaemonLiveOptions {
 	// Server lifecycle (still imperative — AP-38 deferred)
 	ctx: DaemonLifecycleContext;
 	ipcContext: DaemonIPCContext;
-	getStatus: () => DaemonStatus;
 	onboarding: OnboardingServerDeps;
 	httpRouter: DaemonHttpRouterOptions;
 
@@ -577,7 +574,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.httpRouter);
 	const httpAndIpc = Layer.mergeAll(
 		makeHttpServerLive(options.ctx),
-		makeIpcServerLive(options.ctx, options.ipcContext, options.getStatus),
+		makeIpcServerLive(options.ctx, options.ipcContext),
 	).pipe(Layer.provideMerge(httpRequestHandler));
 
 	const servers = makeOnboardingServerLive(

@@ -228,6 +228,44 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not pass daemon status as a separate IPC Layer callback", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
+				pattern: /\bgetStatus:\s*\(\)\s*=>\s*DaemonStatus\b/,
+				reason:
+					"DaemonLiveOptions should not carry a separate IPC status callback",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
+				pattern: /\boptions\.getStatus\b/,
+				reason: "IPC status must come from DaemonIPCContext",
+			},
+			{
+				path: "src/lib/daemon/daemon-lifecycle.ts",
+				pattern: /\bstartIPCServer\([^)]*getStatus\b/s,
+				reason: "startIPCServer should receive one IPC context surface",
+			},
+			{
+				path: "src/lib/daemon/daemon-ipc.ts",
+				pattern: /\bbuildIPCHandlers\(\s*ctx:\s*DaemonIPCContext,\s*getStatus:/,
+				reason: "buildIPCHandlers should read status from DaemonIPCContext",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			const index = source.search(pattern);
+			if (index < 0) return [];
+			const line = source.slice(0, index).split("\n").length;
+			return [
+				{ path, line, source: source.split("\n")[line - 1]?.trim(), reason },
+			];
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not keep unused monitoring bridge services", () => {
 		const retiredNames =
 			/\b(?:MonitoringStateLive|MonitoringStateTag|SSETrackerLive|SSETrackerTag)\b/;

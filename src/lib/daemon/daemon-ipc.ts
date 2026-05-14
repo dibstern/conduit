@@ -20,6 +20,8 @@ export interface DaemonIPCContext {
 	addProject(directory: string): Promise<StoredProject>;
 	/** Remove a project by slug. */
 	removeProject(slug: string): Promise<void>;
+	/** Return the full daemon status snapshot. */
+	getStatus(): DaemonStatus;
 	/** Return all registered projects (enriched with live relay data). */
 	getProjects(): ReadonlyArray<
 		Readonly<
@@ -123,12 +125,8 @@ export interface IPCHandlerMap {
  * Build the IPC handler map for a daemon instance.
  *
  * @param ctx  Narrow interface into the running Daemon
- * @param getStatus  Returns the full DaemonStatus snapshot (spread into IPCResponse)
  */
-export function buildIPCHandlers(
-	ctx: DaemonIPCContext,
-	getStatus: () => DaemonStatus,
-): IPCHandlerMap {
+export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 	return {
 		addProject: async (directory: string): Promise<IPCResponse> => {
 			try {
@@ -169,7 +167,7 @@ export function buildIPCHandlers(
 		},
 
 		getStatus: async (): Promise<IPCResponse> => {
-			return { ...getStatus() };
+			return { ...ctx.getStatus() };
 		},
 
 		setPin: async (pin: string): Promise<IPCResponse> => {

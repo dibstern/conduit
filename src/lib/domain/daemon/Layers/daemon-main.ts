@@ -1219,6 +1219,7 @@ export async function startDaemonProcess(
 	const ipcContext = {
 		addProject: (dir: string) => addProject(dir),
 		removeProject: (slug: string) => removeProject(slug),
+		getStatus,
 		getProjects: () => {
 			const cfg = readRuntimeConfigSnapshot();
 			return registry.allProjects().map((project) => {
@@ -1413,7 +1414,6 @@ export async function startDaemonProcess(
 		socketPath,
 		ctx,
 		ipcContext,
-		getStatus,
 		onboarding: onboardingDeps,
 		httpRouter: {
 			auth,
