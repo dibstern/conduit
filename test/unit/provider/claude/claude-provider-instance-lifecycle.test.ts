@@ -2,7 +2,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
@@ -11,7 +11,6 @@ import type {
 	PendingApproval,
 	PendingQuestion,
 } from "../../../../src/lib/provider/claude/types.js";
-import { createDeferred } from "../../../../src/lib/provider/deferred.js";
 import type { TurnResult } from "../../../../src/lib/provider/types.js";
 import {
 	createMockEventSink,
@@ -53,6 +52,17 @@ function makeFakeSessionContext(
 		stopped: false,
 		...overrides,
 	};
+}
+
+function collectTurnFailure(
+	deferred: Deferred.Deferred<TurnResult, Error>,
+	rejected: Error[],
+): Promise<void> {
+	return Effect.runPromise(Deferred.await(deferred).pipe(Effect.either)).then(
+		(result) => {
+			if (result._tag === "Left") rejected.push(result.left);
+		},
+	);
 }
 
 describe("ClaudeProviderInstance lifecycle", () => {
@@ -212,8 +222,8 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-interrupt-reject", ctx);
 
-			const d1 = createDeferred<TurnResult>();
-			const d2 = createDeferred<TurnResult>();
+			const d1 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
+			const d2 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
 			(
 				instance as unknown as {
 					turnDeferredQueues: Map<string, (typeof d1)[]>;
@@ -221,14 +231,15 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			).turnDeferredQueues.set("sess-interrupt-reject", [d1, d2]);
 
 			const rejected: Error[] = [];
-			d1.promise.catch((e) => rejected.push(e));
-			d2.promise.catch((e) => rejected.push(e));
+			const caught = [
+				collectTurnFailure(d1, rejected),
+				collectTurnFailure(d2, rejected),
+			];
 
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-interrupt-reject"),
 			);
-			await Promise.resolve();
-			await Promise.resolve();
+			await Promise.all(caught);
 
 			expect(rejected).toHaveLength(2);
 			expect(rejected[0]?.message).toContain("interrupted");
@@ -470,25 +481,22 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
 			).sessions.set("sess-reject", ctx);
 
-			// Simulate two queued turn deferreds
-			const d1 = createDeferred<TurnResult>();
-			const d2 = createDeferred<TurnResult>();
+			const d1 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
+			const d2 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
 			(
 				instance as unknown as {
 					turnDeferredQueues: Map<string, (typeof d1)[]>;
 				}
 			).turnDeferredQueues.set("sess-reject", [d1, d2]);
 
-			// Swallow rejections to avoid unhandled-promise warnings
 			const rejected: Error[] = [];
-			d1.promise.catch((e) => rejected.push(e));
-			d2.promise.catch((e) => rejected.push(e));
+			const caught = [
+				collectTurnFailure(d1, rejected),
+				collectTurnFailure(d2, rejected),
+			];
 
 			await Effect.runPromise(instance.endSessionEffect("sess-reject"));
-
-			// Flush microtasks
-			await Promise.resolve();
-			await Promise.resolve();
+			await Promise.all(caught);
 
 			expect(rejected).toHaveLength(2);
 			expect(rejected[0]?.message).toContain("reload");

@@ -23,10 +23,6 @@ import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { Deferred, Effect, Runtime } from "effect";
 import { createLogger } from "../../logger.js";
 import { canonicalEvent } from "../../persistence/events.js";
-import {
-	createDeferred,
-	type Deferred as PromiseDeferred,
-} from "../deferred.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type {
 	CommandInfo,
@@ -199,8 +195,7 @@ function enumerateSkills(
 }
 
 // ─── Turn deferred ─────────────────────────────────────────────────────────
-// Turn queues still use the shared PromiseDeferred<TurnResult> utility until
-// the next provider cleanup slice moves them to Effect Deferred.
+// Turn queues use Effect Deferred and are completed from SDK stream callbacks.
 
 // ─── Provider Instance Config ──────────────────────────────────────────────
 
@@ -230,7 +225,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	/** Per-session queue of deferreds for in-flight turns. */
 	private readonly turnDeferredQueues = new Map<
 		string,
-		PromiseDeferred<TurnResult>[]
+		Deferred.Deferred<TurnResult, Error>[]
 	>();
 
 	/**
@@ -400,8 +395,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			const { sessionId } = input;
 			this.endedSessionStreams.delete(sessionId);
 
-			// Create a deferred for this turn.
-			const deferred = createDeferred<TurnResult>();
+			const deferred = yield* Deferred.make<TurnResult, Error>();
 			this.pushTurnDeferred(sessionId, deferred);
 
 			// Set session lock synchronously before any effectful boundary.
@@ -527,10 +521,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				),
 			);
 
-			return yield* Effect.tryPromise({
-				try: () => deferred.promise,
-				catch: (cause) => cause,
-			});
+			return yield* Deferred.await(deferred);
 		});
 	}
 
@@ -561,7 +552,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				ctx.currentModel = input.model.modelId;
 			}
 
-			const deferred = createDeferred<TurnResult>();
+			const deferred = yield* Deferred.make<TurnResult, Error>();
 			this.pushTurnDeferred(ctx.sessionId, deferred);
 
 			// Update turn id and event sink on context (latest sink wins).
@@ -572,10 +563,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			const userMessage = this.buildUserMessage(input);
 			yield* ctx.promptQueue.enqueue(userMessage);
 
-			return yield* Effect.tryPromise({
-				try: () => deferred.promise,
-				catch: (cause) => cause,
-			});
+			return yield* Deferred.await(deferred);
 		});
 	}
 
@@ -683,7 +671,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 	private pushTurnDeferred(
 		sessionId: string,
-		deferred: PromiseDeferred<TurnResult>,
+		deferred: Deferred.Deferred<TurnResult, Error>,
 	): void {
 		let queue = this.turnDeferredQueues.get(sessionId);
 		if (!queue) {
@@ -695,7 +683,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 	private shiftTurnDeferred(
 		sessionId: string,
-	): PromiseDeferred<TurnResult> | undefined {
+	): Deferred.Deferred<TurnResult, Error> | undefined {
 		const queue = this.turnDeferredQueues.get(sessionId);
 		if (!queue || queue.length === 0) return undefined;
 		const deferred = queue.shift();
@@ -712,7 +700,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		const deferred = this.shiftTurnDeferred(ctx.sessionId);
 		if (!deferred) return;
 		ctx.turnCount++;
-		deferred.resolve(this.sdkResultToTurnResult(ctx, result));
+		Deferred.unsafeDone(
+			deferred,
+			Effect.succeed(this.sdkResultToTurnResult(ctx, result)),
+		);
 	}
 
 	private resolveErrorTurn(ctx: ClaudeSessionContext, err: unknown): void {
@@ -722,20 +713,23 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		// Build an error TurnResult rather than rejecting the promise,
 		// so the caller gets a structured response.
 		const errorMsg = err instanceof Error ? err.message : String(err);
-		deferred.resolve({
-			status: "error",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			error: { code: "provider_error", message: errorMsg },
-			providerStateUpdates: [],
-		});
+		Deferred.unsafeDone(
+			deferred,
+			Effect.succeed({
+				status: "error",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				error: { code: "provider_error", message: errorMsg },
+				providerStateUpdates: [],
+			}),
+		);
 	}
 
 	private rejectTurnIfPending(ctx: ClaudeSessionContext, err: Error): void {
 		const deferred = this.shiftTurnDeferred(ctx.sessionId);
 		if (!deferred) return;
-		deferred.reject(err);
+		Deferred.unsafeDone(deferred, Effect.fail(err));
 	}
 
 	// ─── sdkResultToTurnResult ────────────────────────────────────────────
@@ -1017,10 +1011,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			const queue = this.turnDeferredQueues.get(sessionId);
 			if (!queue) return;
 			for (const d of queue) {
-				yield* Effect.try({
-					try: () => d.reject(new Error(reason)),
-					catch: (cause) => cause,
-				}).pipe(Effect.ignore);
+				yield* Deferred.fail(d, new Error(reason)).pipe(Effect.ignore);
 			}
 			this.turnDeferredQueues.delete(sessionId);
 		});
