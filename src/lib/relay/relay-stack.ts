@@ -18,7 +18,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Cause, Data, Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -48,8 +48,11 @@ import {
 } from "../domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
+	type ConfigTag,
+	type LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	type OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
 	PollerManagerTag,
 	StatusPollerTag,
@@ -57,6 +60,7 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
+	type OverridesStateTag,
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultVariant,
@@ -315,6 +319,167 @@ export interface ProjectRelay {
 	stop(): Promise<void>;
 }
 
+class RelayDefaultCommandQueueClosed extends Data.TaggedError(
+	"RelayDefaultCommandQueueClosed",
+)<Record<never, never>> {}
+
+type RelayDefaultCommand =
+	| {
+			readonly _tag: "SetDefaultAgent";
+			readonly agent: string;
+			readonly resolve: () => void;
+			readonly reject: (cause: unknown) => void;
+	  }
+	| {
+			readonly _tag: "SetDefaultModel";
+			readonly model: {
+				readonly providerID: string;
+				readonly modelID: string;
+			};
+			readonly resolve: () => void;
+			readonly reject: (cause: unknown) => void;
+	  };
+
+type RelayDefaultCommandResume = (
+	effect: Effect.Effect<RelayDefaultCommand, RelayDefaultCommandQueueClosed>,
+) => void;
+
+class RelayDefaultCommandQueue {
+	private pending: RelayDefaultCommand[] = [];
+	private takers: RelayDefaultCommandResume[] = [];
+	private closed = false;
+
+	setDefaultAgent(agent: string): Promise<void> {
+		return this.enqueue((resolve, reject) => ({
+			_tag: "SetDefaultAgent",
+			agent,
+			resolve,
+			reject,
+		}));
+	}
+
+	setDefaultModel(model: {
+		readonly providerID: string;
+		readonly modelID: string;
+	}): Promise<void> {
+		return this.enqueue((resolve, reject) => ({
+			_tag: "SetDefaultModel",
+			model,
+			resolve,
+			reject,
+		}));
+	}
+
+	take(): Effect.Effect<RelayDefaultCommand, RelayDefaultCommandQueueClosed> {
+		return Effect.async<RelayDefaultCommand, RelayDefaultCommandQueueClosed>(
+			(resume) => {
+				const command = this.pending.shift();
+				if (command) {
+					resume(Effect.succeed(command));
+					return;
+				}
+				if (this.closed) {
+					resume(Effect.fail(new RelayDefaultCommandQueueClosed()));
+					return;
+				}
+				this.takers.push(resume);
+				return Effect.sync(() => {
+					this.takers = this.takers.filter((taker) => taker !== resume);
+				});
+			},
+		);
+	}
+
+	close(): void {
+		if (this.closed) return;
+		this.closed = true;
+		const error = new RelayDefaultCommandQueueClosed();
+		for (const command of this.pending.splice(0)) {
+			command.reject(error);
+		}
+		for (const taker of this.takers.splice(0)) {
+			taker(Effect.fail(error));
+		}
+	}
+
+	private enqueue(
+		makeCommand: (
+			resolve: () => void,
+			reject: (cause: unknown) => void,
+		) => RelayDefaultCommand,
+	): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			if (this.closed) {
+				reject(new RelayDefaultCommandQueueClosed());
+				return;
+			}
+			const command = makeCommand(resolve, reject);
+			const taker = this.takers.shift();
+			if (taker) {
+				taker(Effect.succeed(command));
+				return;
+			}
+			this.pending.push(command);
+		});
+	}
+}
+
+const makeRelayDefaultCommandQueueLive = (
+	queue: RelayDefaultCommandQueue,
+): Layer.Layer<
+	never,
+	never,
+	| ConfigTag
+	| LoggerTag
+	| OpenCodeModelServiceTag
+	| OverridesStateTag
+	| WebSocketHandlerTag
+> =>
+	Layer.scopedDiscard(
+		Effect.gen(function* () {
+			const settle = <R>(
+				command: RelayDefaultCommand,
+				effect: Effect.Effect<void, unknown, R>,
+			) =>
+				effect.pipe(
+					Effect.matchCauseEffect({
+						onFailure: (cause) =>
+							Effect.sync(() => command.reject(Cause.squash(cause))),
+						onSuccess: () => Effect.sync(() => command.resolve()),
+					}),
+				);
+
+			const runCommand = (command: RelayDefaultCommand) => {
+				switch (command._tag) {
+					case "SetDefaultAgent":
+						return settle(command, setDefaultAgent(command.agent));
+					case "SetDefaultModel":
+						return settle(
+							command,
+							setDefaultModelForRelay({
+								clientId: "ipc",
+								provider: command.model.providerID,
+								model: command.model.modelID,
+							}).pipe(Effect.asVoid),
+						);
+				}
+			};
+
+			yield* Effect.addFinalizer(() => Effect.sync(() => queue.close()));
+			yield* Effect.forkScoped(
+				Effect.forever(
+					queue.take().pipe(
+						Effect.flatMap(runCommand),
+						Effect.catchTag(
+							"RelayDefaultCommandQueueClosed",
+							() => Effect.interrupt,
+						),
+					),
+				),
+			);
+		}),
+	);
+
 export interface ProjectRelayStatusSnapshot {
 	readonly sessionCount: number;
 	readonly clients: number;
@@ -551,6 +716,7 @@ export async function createProjectRelay(
 	// monitoring wiring share one view, while the poller manager itself remains
 	// runtime-owned by MessagePollerManagerLive.
 	const monitoringStateAccess = createMonitoringWiringState();
+	const defaultCommandQueue = new RelayDefaultCommandQueue();
 	const sessionLifecycleWiringLayer = makeSessionLifecycleWiringLive({
 		translator,
 		sseTracker: monitoringStateAccess.sseTracker,
@@ -560,6 +726,7 @@ export async function createProjectRelay(
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
+		makeRelayDefaultCommandQueueLive(defaultCommandQueue),
 		makeRelayCommandGateLive(config.slug),
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
@@ -784,17 +951,11 @@ export async function createProjectRelay(
 		},
 
 		setDefaultAgent(agent: string) {
-			return effectRuntime.runtime.runPromise(setDefaultAgent(agent));
+			return defaultCommandQueue.setDefaultAgent(agent);
 		},
 
 		setDefaultModel(model) {
-			return effectRuntime.runtime.runPromise(
-				setDefaultModelForRelay({
-					clientId: "ipc",
-					provider: model.providerID,
-					model: model.modelID,
-				}).pipe(Effect.asVoid),
-			);
+			return defaultCommandQueue.setDefaultModel(model);
 		},
 
 		async stop() {

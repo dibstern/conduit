@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	getDefaultAgent,
 	getDefaultModel,
 	getDefaultVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -149,5 +150,31 @@ describe("createProjectRelay override-state defaults", () => {
 			},
 			defaultVariant: "thinking",
 		});
+	});
+
+	it("applies public default-agent commands through the relay-owned command path", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-relay-agent-"));
+		mock = await createMockOpenCode();
+		relayServer = createServer();
+		await new Promise<void>((resolve) =>
+			relayServer?.listen(0, "127.0.0.1", resolve),
+		);
+
+		relay = await createProjectRelay({
+			httpServer: relayServer,
+			opencodeUrl: `http://127.0.0.1:${mock.port}`,
+			projectDir: process.cwd(),
+			slug: "test-default-agent-command",
+			configDir,
+			log: createSilentLogger(),
+		});
+
+		await relay.setDefaultAgent("plan");
+
+		const defaultAgent = await relay.effectRuntime.runtime.runPromise(
+			getDefaultAgent(),
+		);
+
+		expect(defaultAgent).toBe("plan");
 	});
 });

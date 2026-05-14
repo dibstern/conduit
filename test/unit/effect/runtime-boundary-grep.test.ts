@@ -1450,6 +1450,36 @@ describe("Effect runtime boundary grep", () => {
 		expect(boundaryIndex - markerIndex).toBeLessThan(300);
 	});
 
+	it("does not expose relay default commands as runtime re-entry wrappers", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern:
+					/setDefaultAgent\(agent:[\s\S]*?effectRuntime\.runtime\.runPromise\(/,
+				reason:
+					"ProjectRelay.setDefaultAgent should enqueue a relay-owned command, not re-enter the runtime",
+			},
+			{
+				pattern:
+					/setDefaultModel\(model[\s\S]*?effectRuntime\.runtime\.runPromise\(/,
+				reason:
+					"ProjectRelay.setDefaultModel should enqueue a relay-owned command, not re-enter the runtime",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not connect SSE and mark the command gate ready through separate runtime calls", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
