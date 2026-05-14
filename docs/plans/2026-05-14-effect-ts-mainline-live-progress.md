@@ -40,7 +40,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 | `Effect.promise(` on rejectable operations | Done | Recheck before final guardrail close. |
 | `concurrency: "unbounded"` on dynamic collections | Done | Recheck before final guardrail close. Fixed-size fanouts need inline justification. |
 | Throwing helpers called from Effect programs | Open | Broad grep needs call-path triage; defects and external boundaries can be reclassified. |
-| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged IPC dispatch now uses the daemon layer runtime at the socket boundary and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. Client-init no longer builds a Promise-shaped bridge in `relay-stack.ts`; remaining blockers are the other relay-stack transitional runtime bridges and any final grep hits. |
+| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged and legacy-format IPC dispatch now use the daemon layer runtime at the socket boundary, and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. Client-init no longer builds a Promise-shaped bridge in `relay-stack.ts`; remaining blockers are the other relay-stack transitional runtime bridges and any final grep hits. |
 
 ## Current Blockers
 
@@ -61,7 +61,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness and shutdown drain/command-gate stop each share one Effect program, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, and message/status-poller callbacks now use Effect-owned paths; runtime bridge cleanup remains for the other relay wiring clusters.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
-10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC still uses the old promise router.
+10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
 11. Daemon composition readiness.
 12. Single-owner daemon cutover.
 13. Final guardrail cleanup.
@@ -453,3 +453,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - `startIPCServer()` now requires its caller to pass the tagged dispatcher; production passes the daemon Layer runtime from `makeIpcServerLive()`, and direct lifecycle tests pass an explicit test dispatcher.
 - Added daemon lifecycle guard coverage so the default runtime fallback cannot return.
 - Verified locally with focused daemon lifecycle IPC/boundary tests and typecheck.
+
+2026-05-14, IPC legacy command dispatch cleanup:
+
+- Removed `createCommandRouter()` from `daemon-lifecycle.ts`'s socket dispatch path.
+- Legacy `cmd` IPC lines still parse and validate with the old `validateCommand()` semantics, then convert through `commandToTaggedRequestPayload()` and dispatch via the same tagged RPC handler as `_tag` requests.
+- Added daemon lifecycle guard coverage so legacy socket dispatch cannot return to the old promise router.
+- Verified locally with focused daemon lifecycle, IPC dispatch, RPC group, schema command, typecheck, lint, and diff hygiene checks.

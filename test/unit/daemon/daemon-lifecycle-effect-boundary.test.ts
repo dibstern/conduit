@@ -27,4 +27,14 @@ describe("daemon lifecycle Effect boundary", () => {
 		);
 		expect(source).not.toMatch(/defaultTaggedIpcDispatcher/);
 	});
+
+	it("does not dispatch legacy cmd IPC through the old promise router", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/daemon/daemon-lifecycle.ts"),
+			"utf8",
+		);
+
+		expect(source).not.toMatch(/createCommandRouter/);
+		expect(source).not.toMatch(/router\(cmd\)/);
+	});
 });

@@ -20,6 +20,7 @@ import {
 import * as Headers from "@effect/platform/Headers";
 import { Effect, Either, Schema } from "effect";
 import {
+	commandToTaggedRequestPayload,
 	IpcError,
 	IpcInstancesResponseSchema,
 	IpcKeepAwakeResponseSchema,
@@ -38,9 +39,9 @@ import type { IPCResponse } from "../types.js";
 import { buildIPCHandlers, type DaemonIPCContext } from "./daemon-ipc.js";
 import type { DaemonStatus } from "./daemon-types.js";
 import {
-	createCommandRouter,
 	parseCommand,
 	serializeResponse,
+	validateCommand,
 } from "./ipc-protocol.js";
 import { removeSocketFile } from "./pid-manager.js";
 
@@ -747,7 +748,6 @@ export function startIPCServer(
 		removeSocketFile(ctx.socketPath);
 
 		const handlers = buildIPCHandlers(ipcContext, getStatus);
-		const router = createCommandRouter(handlers);
 		const rpcLayer = makeRpcHandlerLayer(handlers);
 
 		ctx.ipcServer = createNetServer((socket: Socket) => {
@@ -816,7 +816,23 @@ export function startIPCServer(
 						log.warn(
 							"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
 						);
-						const response = await router(cmd);
+						const validationError = validateCommand(
+							cmd as Record<string, unknown> & { cmd: string },
+						);
+						let response: IPCResponse;
+						if (validationError) {
+							response = validationError;
+						} else {
+							const decoded = Schema.decodeUnknownEither(
+								IpcTaggedRequestSchema,
+							)(commandToTaggedRequestPayload(cmd));
+							response = Either.isRight(decoded)
+								? await dispatchTaggedRequest(decoded.right, rpcLayer)
+								: {
+										ok: false,
+										error: formatErrorDetail(decoded.left),
+									};
+						}
 						const ipcMs = Date.now() - ipcT0;
 						if (ipcMs > 100) {
 							log.warn(`[ipc] ${cmd.cmd} took ${ipcMs}ms`);
