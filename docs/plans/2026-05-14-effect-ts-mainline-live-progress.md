@@ -58,7 +58,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 4. Contracts and RPC boundary. Started locally: shared `WsRpcGroup`, import guard, and server/frontend re-export wrappers are in place.
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
-7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition is consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness and shutdown drain/command-gate stop each share one Effect program, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, and message/status-poller callbacks now use Effect-owned paths; runtime bridge cleanup remains for the other relay wiring clusters.
+7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness and shutdown drain/command-gate stop each share one Effect program, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, and message/status-poller callbacks now use Effect-owned paths; runtime bridge cleanup remains for the other relay wiring clusters.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
@@ -439,3 +439,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Moved OpenCode reachability probing and project-config default-model discovery into that startup Effect while preserving the existing warning-and-continue behavior for config API failures.
 - Added a runtime-boundary guard so API/WebSocket acquisition cannot split back into a separate `startupHandles` runtime bridge.
 - Verified locally with focused runtime-boundary and relay-stack default override tests, typecheck, lint, diff hygiene, and `test/integration/flows/initial-state.integration.ts`.
+
+2026-05-14, relay startup/setup bridge cleanup:
+
+- Collapsed relay callback wiring, monitoring, poller wiring, SSE consumer wiring, SSE connect, and command-gate readiness into the startup Effect program.
+- Removed the late `doneDeliveredRef` callback bridge by wiring poller and SSE done callbacks directly to the monitoring Effect result.
+- Added a runtime-boundary guard so relay wiring setup cannot split back into a second `relayManagedRuntime.runPromise(...)` program.
+- Verified locally with focused runtime-boundary, relay-stack default override, per-tab routing, and status-poller tests, plus typecheck, lint, and diff hygiene.

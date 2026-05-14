@@ -381,7 +381,6 @@ export async function createProjectRelay(
 	});
 
 	const translator = createTranslator();
-	let api: OpenCodeAPI;
 	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
 		RelayRuntimeContext,
 		PersistenceEffectError
@@ -561,11 +560,6 @@ export async function createProjectRelay(
 		}
 	}
 
-	// Late-binding: SSE wiring is set up before the stream connects, but SSE
-	// events arrive asynchronously. The ref is bound after monitoring wiring
-	// completes.
-	const doneDeliveredRef = { fn: (_sid: string) => {} };
-
 	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
 	// Monitoring state is created before the runtime so lifecycle wiring and
 	// monitoring wiring share one view, while the poller manager itself remains
@@ -585,13 +579,17 @@ export async function createProjectRelay(
 	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
+	const rpcWsHandler = new WsRpcWebSocketHandler({
+		runtime: relayManagedRuntime,
+	});
+	let stopMonitoring = () => {};
 	let startup: {
 		api: OpenCodeAPI;
 		wsHandler: WebSocketHandlerShape;
+		sseStream: SSEStream;
 		sessionId: string;
 		orchestration: OrchestrationLayer;
 		statusPoller: import("../domain/relay/Services/services.js").StatusPollerShape;
-		pollerManager: import("../domain/relay/Services/services.js").PollerManagerShape;
 	};
 	try {
 		startup = await relayManagedRuntime.runPromise(
@@ -655,62 +653,21 @@ export async function createProjectRelay(
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
-				return {
-					api,
-					wsHandler,
-					sessionId,
-					orchestration,
-					statusPoller,
-					pollerManager,
-				};
-			}),
-		);
-	} catch (err) {
-		await relayManagedRuntime.dispose();
-		throw err;
-	}
-	api = startup.api;
-	wsHandler = startup.wsHandler;
-	const sseStream = new SSEStream({
-		api,
-		log: sseLog,
-	});
-	const rpcWsHandler = new WsRpcWebSocketHandler({
-		runtime: relayManagedRuntime,
-	});
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	const { sessionId, orchestration, statusPoller, pollerManager } = startup;
-	log.info(`✓ Using session: ${sessionId}`);
-
-	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
-	const sseWiringDeps = {
-		translator,
-		wsHandler,
-		...(config.pushManager != null && { pushManager: config.pushManager }),
-		log: sseLog,
-		pipelineLog,
-		getSessionStatuses: () => statusPoller.getCurrentStatuses(),
-		listPendingQuestions: () => api.question.list(),
-		listPendingPermissions: () => api.permission.list(),
-		statusPoller,
-		slug: config.slug,
-		onDoneProcessed: (sid: string) => doneDeliveredRef.fn(sid),
-		...(dualWriteHook != null && { dualWriteHook }),
-	};
-
-	let stopMonitoring = () => {};
-
-	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
-	// Resolves the deferred promise in OpenCodeAdapter.sendTurnEffect() when a
-	// session transitions to idle, allowing the engine dispatch to complete.
-	orchestration.wireSSEToAdapter((event, handler) => {
-		sseStream.on(event, handler);
-	});
-
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	try {
-		await relayManagedRuntime.runPromise(
-			Effect.gen(function* () {
+				if (config.signal?.aborted) {
+					return yield* Effect.fail(new Error("Relay creation aborted"));
+				}
+				const sseStream = yield* Effect.sync(
+					() =>
+						new SSEStream({
+							api,
+							log: sseLog,
+						}),
+				);
+				yield* Effect.sync(() => {
+					orchestration.wireSSEToAdapter((event, handler) => {
+						sseStream.on(event, handler);
+					});
+				});
 				yield* wireRelayWebSocketCallbacksEffect({
 					wsHandler,
 					log: wsLog,
@@ -744,7 +701,6 @@ export async function createProjectRelay(
 				});
 				yield* Effect.sync(() => {
 					stopMonitoring = monitoring.stopMonitoring;
-					doneDeliveredRef.fn = monitoring.recordDoneDelivered;
 				});
 				yield* wirePollersEffect({
 					pollerManager,
@@ -759,21 +715,51 @@ export async function createProjectRelay(
 						slug: config.slug,
 					},
 					pollerLog,
-					onDoneProcessed: (sid: string) => doneDeliveredRef.fn(sid),
+					onDoneProcessed: monitoring.recordDoneDelivered,
 				});
-				yield* wireSSEConsumerEffect(sseWiringDeps, sseStream);
+				yield* wireSSEConsumerEffect(
+					{
+						translator,
+						wsHandler,
+						...(config.pushManager != null && {
+							pushManager: config.pushManager,
+						}),
+						log: sseLog,
+						pipelineLog,
+						getSessionStatuses: () => statusPoller.getCurrentStatuses(),
+						listPendingQuestions: () => api.question.list(),
+						listPendingPermissions: () => api.permission.list(),
+						statusPoller,
+						slug: config.slug,
+						onDoneProcessed: monitoring.recordDoneDelivered,
+						...(dualWriteHook != null && { dualWriteHook }),
+					},
+					sseStream,
+				);
 				yield* sseStream.connectEffect();
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
+				return {
+					api,
+					wsHandler,
+					sseStream,
+					sessionId,
+					orchestration,
+					statusPoller,
+				};
 			}),
 		);
 	} catch (err) {
 		stopMonitoring();
 		await rpcWsHandler.drain();
-		await effectRuntime.dispose();
+		await relayManagedRuntime.dispose();
 		await effectPersistenceRuntime?.dispose();
 		throw err;
 	}
+	const api = startup.api;
+	wsHandler = startup.wsHandler;
+	const { sessionId, orchestration, statusPoller, sseStream } = startup;
+	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
 	// PermissionTimeoutLive is composed into RelayStateLive — no imperative wiring.

@@ -703,6 +703,30 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not split relay startup acquisition from relay wiring setup", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern:
+					/await relayManagedRuntime\.runPromise\(\s*Effect\.gen\(function\* \(\) \{\s*yield\* wireRelayWebSocketCallbacksEffect/s,
+				reason:
+					"relay startup, callback wiring, monitoring, pollers, SSE, and gate readiness should be one setup Effect program",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not drain SSE as a bare shutdown runtime bridge", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
