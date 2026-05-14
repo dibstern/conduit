@@ -59,7 +59,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness runs inside startup, SSE shutdown drain and command-gate stop are scoped finalizers, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, message/status-poller callbacks now use Effect-owned paths, the standalone/E2E default-session API reads the startup snapshot instead of re-entering the session service, daemon/router session counts read a relay status snapshot instead of a sync runtime bridge, and the sole relay-stack `runPromise` is guarded as the public startup Promise boundary.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
-9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, `ProviderRegistry` now exposes only instance-first APIs, and provider implementation/test naming is instance-first.
+9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, `ProviderRegistry` now exposes only instance-first APIs, provider implementation/test naming is instance-first, and `EventSinkImpl` permission/question waits use Effect `Deferred`.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
 11. Daemon composition readiness.
 12. Single-owner daemon cutover.
@@ -508,3 +508,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Reclassified the remaining `relayManagedRuntime.runPromise(...)` in `relay-stack.ts` as the public `createProjectRelay()` Promise boundary rather than an app-internal relay service bridge.
 - Added guard coverage requiring exactly one relay-stack startup `runPromise` and requiring it to stay marked as relay acquisition/wiring/readiness owned by one startup Effect.
 - Verified locally with focused runtime-boundary guard coverage.
+
+2026-05-14, EventSink deferred cleanup:
+
+- Replaced `EventSinkImpl`'s Promise-backed permission/question deferred waits with Effect `Deferred`.
+- Kept `AbortSignal` abort as a synchronous callback boundary using `Deferred.unsafeDone` instead of adding an app-internal runtime bridge.
+- Added guard and interruption coverage so EventSink waits cannot return to `createDeferred` / `deferred.promise` / `Effect.tryPromise` and interrupted waiters clear pending state.
+- Verified locally with focused EventSink tests.

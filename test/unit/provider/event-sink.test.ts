@@ -1,5 +1,5 @@
 // test/unit/provider/event-sink.test.ts
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { EventSinkImpl } from "../../../src/lib/provider/event-sink.js";
@@ -219,6 +219,29 @@ describe("EventSinkImpl", () => {
 				id: "perm-4",
 				decision: "once",
 			});
+		});
+
+		it("removes pending permissions when the waiting fiber is interrupted", async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const fiber = yield* Effect.fork(
+						sink.requestPermission({
+							requestId: "perm-interrupt",
+							toolName: "bash",
+							toolInput: { patterns: [], metadata: {} },
+							sessionId: "s1",
+							turnId: "t1",
+							providerItemId: "item-interrupt",
+						}),
+					);
+
+					yield* Effect.yieldNow();
+					expect(sink.pendingCount).toBe(1);
+
+					yield* Fiber.interrupt(fiber);
+					expect(sink.pendingCount).toBe(0);
+				}),
+			);
 		});
 	});
 

@@ -47,6 +47,16 @@ describe("EventSink Effect boundary", () => {
 		expect(relayEventSink).not.toMatch(/runEffect/);
 	});
 
+	it("uses Effect Deferred for EventSink permission/question waits", () => {
+		const eventSink = source("src/lib/provider/event-sink.ts");
+
+		expect(eventSink).toContain("Deferred.make<PermissionResponse");
+		expect(eventSink).toContain("Deferred.make<Record<string, unknown>");
+		expect(eventSink).not.toContain("createDeferred");
+		expect(eventSink).not.toContain("deferred.promise");
+		expect(eventSink).not.toMatch(/Effect\.tryPromise\([^)]*deferred/);
+	});
+
 	it("keeps missing pending interaction failures typed", () => {
 		const relayEventSink = source("src/lib/provider/relay-event-sink.ts");
 
