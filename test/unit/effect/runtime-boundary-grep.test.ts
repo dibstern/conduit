@@ -779,6 +779,25 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not throw plain Error for gap endpoint HTTP failures", () => {
+		const path = "src/lib/instance/gap-endpoints.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const patterns = [
+			/throw new Error\(`GET \$\{path\} failed: \$\{res\.status\}`\)/,
+			/throw new Error\(`POST \$\{path\} failed: \$\{res\.status\}`\)/,
+		] as const;
+
+		const hits = patterns.flatMap((pattern) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not classify daemon startup instance errors by message text", () => {
 		const path = "src/lib/domain/daemon/Services/daemon-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

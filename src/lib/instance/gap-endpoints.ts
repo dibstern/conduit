@@ -1,7 +1,21 @@
+import { Data } from "effect";
+
 export interface GapEndpointsOptions {
 	baseUrl: string;
 	fetch?: typeof fetch;
 	headers?: Record<string, string>;
+}
+
+export class GapEndpointHttpError extends Data.TaggedError(
+	"GapEndpointHttpError",
+)<{
+	readonly method: "GET" | "POST";
+	readonly path: string;
+	readonly status: number;
+}> {
+	override get message(): string {
+		return `${this.method} ${this.path} failed: ${this.status}`;
+	}
 }
 
 export class GapEndpoints {
@@ -67,7 +81,13 @@ export class GapEndpoints {
 				headers: this.headers,
 			}),
 		);
-		if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+		if (!res.ok) {
+			throw new GapEndpointHttpError({
+				method: "GET",
+				path,
+				status: res.status,
+			});
+		}
 		if (res.status === 204) return undefined;
 		return res.json();
 	}
@@ -80,7 +100,13 @@ export class GapEndpoints {
 				body: JSON.stringify(body),
 			}),
 		);
-		if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
+		if (!res.ok) {
+			throw new GapEndpointHttpError({
+				method: "POST",
+				path,
+				status: res.status,
+			});
+		}
 		if (res.status === 204) return undefined;
 		const ct = res.headers.get("content-type") ?? "";
 		if (ct.includes("application/json")) return res.json();
