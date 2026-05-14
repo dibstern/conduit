@@ -657,4 +657,34 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not connect SSE and mark the command gate ready through separate runtime calls", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern:
+					/await relayManagedRuntime\.runPromise\(\s*sseStream\.connectEffect\(\)\s*\);/,
+				reason:
+					"SSE connection should be sequenced with command-gate readiness inside one Effect program",
+			},
+			{
+				pattern:
+					/await relayManagedRuntime\.runPromise\(\s*Effect\.gen\(function\* \(\) \{\s*const gate = yield\* RelayCommandGateTag;\s*yield\* gate\.markReady\(\);\s*\}\),\s*\);/,
+				reason:
+					"command-gate readiness should not be a standalone runtime bridge",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

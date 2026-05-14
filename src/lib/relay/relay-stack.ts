@@ -883,9 +883,9 @@ export async function createProjectRelay(
 
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	try {
-		await relayManagedRuntime.runPromise(sseStream.connectEffect());
 		await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				yield* sseStream.connectEffect();
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
 			}),
