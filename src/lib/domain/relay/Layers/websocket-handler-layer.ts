@@ -1,11 +1,13 @@
 import { Cause, Effect, Layer } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
-import { EffectWsHandler } from "../../../server/effect-ws-handler.js";
+import { makeEffectWsHandler } from "../../../server/effect-ws-handler.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../Services/services.js";
+import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
+import { makeWsTransportLive } from "./ws-transport-layer.js";
 
 export const WebSocketHandlerLive: Layer.Layer<
 	WebSocketHandlerTag,
@@ -17,7 +19,7 @@ export const WebSocketHandlerLive: Layer.Layer<
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 		const wsLog = log.child("ws-handler");
-		const handler = new EffectWsHandler({
+		const handler = yield* makeEffectWsHandler({
 			...(!config.noServer && {
 				server: config.httpServer,
 				...(config.verifyClient != null && {
@@ -50,4 +52,11 @@ export const WebSocketHandlerLive: Layer.Layer<
 
 		return handler;
 	}),
+).pipe(
+	Layer.provide(
+		Layer.mergeAll(
+			makeWsTransportLive({ noServer: true }),
+			makeWsHandlerStateLive(),
+		),
+	),
 );

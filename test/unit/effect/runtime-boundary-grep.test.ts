@@ -1335,6 +1335,35 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not let EffectWsHandler own a private ManagedRuntime bridge", () => {
+		const path = "src/lib/server/effect-ws-handler.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bManagedRuntime\b/,
+				reason:
+					"EffectWsHandler should be constructed by its scoped Layer, not own a private runtime",
+			},
+			{
+				pattern: /\.run(?:Promise|Sync)\(/,
+				reason:
+					"EffectWsHandler callbacks should fork into the relay runtime and keep sync reads on an explicit mirror",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not inject core relay ports into relay-stack", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

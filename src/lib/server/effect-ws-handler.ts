@@ -2,12 +2,11 @@ import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { Effect, Fiber, Layer, ManagedRuntime, Option } from "effect";
+import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RawData, WebSocket } from "ws";
 import {
 	makeHeartbeatFiber,
-	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
@@ -17,11 +16,6 @@ import {
 	broadcast,
 	broadcastPerSessionEvent,
 	closeAllClients,
-	getClientCount,
-	getClientIds,
-	getClientSession,
-	getSessionViewers,
-	makeWsHandlerStateLive,
 	markClientAlive,
 	markClientBootstrapped,
 	removeClient,
@@ -63,14 +57,35 @@ interface EffectWsHandlerOptions {
 
 type WsBridgeServices = WsHandlerStateTag | WsTransportTag;
 
+type WsRunFork = <A, E>(
+	effect: Effect.Effect<A, E, WsBridgeServices>,
+) => RuntimeFiber<A, E>;
+
+interface EffectWsHandlerRuntime {
+	readonly transport: WsTransport;
+	readonly runFork: WsRunFork;
+}
+
+export const makeEffectWsHandler = (
+	options: EffectWsHandlerOptions = {},
+): Effect.Effect<EffectWsHandler, never, WsBridgeServices> =>
+	Effect.gen(function* () {
+		const transport = yield* WsTransportTag;
+		const runtime = yield* Effect.runtime<WsBridgeServices>();
+		return new EffectWsHandler(options, {
+			transport,
+			runFork: Runtime.runFork(runtime),
+		});
+	});
+
 export class EffectWsHandler implements WebSocketHandlerShape {
 	private readonly events = new EventEmitter();
-	private readonly runtime: ManagedRuntime.ManagedRuntime<
-		WsBridgeServices,
-		never
-	>;
 	private readonly transport: WsTransport;
-	private readonly heartbeatFiber: RuntimeFiber<never, unknown>;
+	private readonly runFork: WsRunFork;
+	private readonly heartbeatFiber: RuntimeFiber<unknown, never>;
+	private readonly clients = new Set<string>();
+	private readonly clientSessions = new Map<string, string>();
+	private readonly sessionClients = new Map<string, Set<string>>();
 	private readonly upgradeListener?: (
 		req: IncomingMessage,
 		socket: Duplex,
@@ -78,23 +93,12 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	) => void;
 	private closed = false;
 
-	constructor(private readonly options: EffectWsHandlerOptions = {}) {
-		this.runtime = ManagedRuntime.make(
-			Layer.mergeAll(
-				makeWsHandlerStateLive(),
-				makeWsTransportLive({
-					noServer: true,
-					...(options.maxPayload != null && {
-						maxPayload: options.maxPayload,
-					}),
-				}),
-			),
-		);
-		this.transport = this.runtime.runSync(
-			Effect.gen(function* () {
-				return yield* WsTransportTag;
-			}),
-		);
+	constructor(
+		private readonly options: EffectWsHandlerOptions = {},
+		runtime: EffectWsHandlerRuntime,
+	) {
+		this.transport = runtime.transport;
+		this.runFork = runtime.runFork;
 		this.transport.wss.on("connection", (ws, req) =>
 			this.onConnection(ws, req),
 		);
@@ -111,7 +115,8 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			};
 			options.server.on("upgrade", this.upgradeListener);
 		}
-		this.heartbeatFiber = this.runtime.runFork(
+		this.heartbeatFiber = this.forkLogged(
+			"heartbeat",
 			makeHeartbeatFiber(options.heartbeatInterval ?? 30_000),
 		);
 	}
@@ -131,61 +136,60 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	}
 
 	broadcast(msg: RelayMessage): void {
-		this.runMutation("broadcast", broadcast(msg));
+		this.forkLogged("broadcast", broadcast(msg));
 	}
 
 	sendTo(clientId: string, msg: RelayMessage): void {
-		this.runMutation("sendTo", sendTo(clientId, msg));
+		this.forkLogged("sendTo", sendTo(clientId, msg));
 	}
 
 	setClientSession(clientId: string, sessionId: string): void {
-		this.runSyncMutation(
-			"setClientSession",
-			bindClientSession(clientId, sessionId),
-		);
+		this.recordClientSession(clientId, sessionId);
+		this.forkLogged("setClientSession", bindClientSession(clientId, sessionId));
 	}
 
 	getClientSession(clientId: string): string | undefined {
-		const session = this.runtime.runSync(getClientSession(clientId));
-		return Option.getOrUndefined(session);
+		return this.clientSessions.get(clientId);
 	}
 
 	getClientsForSession(sessionId: string): string[] {
-		return this.runtime.runSync(getSessionViewers(sessionId));
+		return [...(this.sessionClients.get(sessionId) ?? [])];
 	}
 
 	sendToSession(sessionId: string, msg: RelayMessage): void {
-		this.runMutation("sendToSession", sendToSession(sessionId, msg));
+		this.forkLogged("sendToSession", sendToSession(sessionId, msg));
 	}
 
 	broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void {
-		this.runMutation(
+		this.forkLogged(
 			"broadcastPerSessionEvent",
 			broadcastPerSessionEvent(sessionId, msg),
 		);
 	}
 
 	markClientBootstrapped(clientId: string): void {
-		this.runMutation(
-			"markClientBootstrapped",
-			markClientBootstrapped(clientId),
-		);
+		this.forkLogged("markClientBootstrapped", markClientBootstrapped(clientId));
 	}
 
 	getClientCount(): number {
-		return this.runtime.runSync(getClientCount);
+		return this.clients.size;
 	}
 
 	getClientIds(): string[] {
-		return this.runtime.runSync(getClientIds);
+		return [...this.clients];
 	}
 
 	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-		this.runtime
-			.runPromise(this.transport.handleUpgrade(req, socket, head))
-			.catch((err) => {
-				socket.destroy(err instanceof Error ? err : undefined);
-			});
+		this.forkLogged(
+			"handleUpgrade",
+			this.transport.handleUpgrade(req, socket, head).pipe(
+				Effect.catchAll((err) =>
+					Effect.sync(() => {
+						socket.destroy(err instanceof Error ? err : undefined);
+					}),
+				),
+			),
+		);
 	}
 
 	close(): void {
@@ -198,9 +202,13 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		if (this.options.server && this.upgradeListener) {
 			this.options.server.off("upgrade", this.upgradeListener);
 		}
-		await this.runtime.runPromise(closeAllClients());
-		await this.runtime.runPromise(Fiber.interrupt(this.heartbeatFiber));
-		await this.runtime.dispose();
+		this.clearClientMirror();
+		await this.runEffectPromise(
+			"drain",
+			closeAllClients().pipe(
+				Effect.zipRight(Fiber.interrupt(this.heartbeatFiber)),
+			),
+		);
 	}
 
 	private onConnection(ws: WebSocket, req: IncomingMessage): void {
@@ -214,20 +222,27 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			this.events.emit("client_error", { clientId, error: err });
 		});
 		ws.on("pong", () => {
-			this.runMutation("markClientAlive", markClientAlive(clientId));
+			this.forkLogged("markClientAlive", markClientAlive(clientId));
 		});
 
-		this.runtime
-			.runPromise(addClient(clientId, ws))
-			.then((clientCount) => {
-				this.events.emit("client_connected", {
-					clientId,
-					clientCount,
-					...(requestedSessionId != null && { requestedSessionId }),
-				});
-				this.broadcast(createClientCountMessage(clientCount));
-			})
-			.catch(this.logBridgeError("addClient"));
+		this.forkLogged(
+			"addClient",
+			addClient(clientId, ws).pipe(
+				Effect.tap((clientCount) =>
+					Effect.sync(() => {
+						this.recordClientConnected(clientId);
+						this.events.emit("client_connected", {
+							clientId,
+							clientCount,
+							...(requestedSessionId != null && { requestedSessionId }),
+						});
+					}),
+				),
+				Effect.flatMap((clientCount) =>
+					broadcast(createClientCountMessage(clientCount)),
+				),
+			),
+		);
 	}
 
 	private matchesPath(url: string | undefined): boolean {
@@ -260,17 +275,24 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 
 	private onClose(clientId: string): void {
 		if (this.closed) return;
-		this.runtime
-			.runPromise(removeClient(clientId))
-			.then(({ sessionId, newCount }) => {
-				this.events.emit("client_disconnected", {
-					clientId,
-					clientCount: newCount,
-					...(sessionId != null ? { sessionId } : {}),
-				});
-				this.broadcast(createClientCountMessage(newCount));
-			})
-			.catch(this.logBridgeError("removeClient"));
+		this.forkLogged(
+			"removeClient",
+			removeClient(clientId).pipe(
+				Effect.tap(({ sessionId, newCount }) =>
+					Effect.sync(() => {
+						this.recordClientRemoved(clientId);
+						this.events.emit("client_disconnected", {
+							clientId,
+							clientCount: newCount,
+							...(sessionId != null ? { sessionId } : {}),
+						});
+					}),
+				),
+				Effect.flatMap(({ newCount }) =>
+					broadcast(createClientCountMessage(newCount)),
+				),
+			),
+		);
 	}
 
 	private onMessage(clientId: string, raw: RawData): void {
@@ -302,22 +324,70 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		});
 	}
 
-	private runMutation<A, E, R extends WsBridgeServices>(
+	private forkLogged<A, E>(
 		op: string,
-		effect: Effect.Effect<A, E, R>,
-	): void {
-		this.runtime.runPromise(effect).catch(this.logBridgeError(op));
+		effect: Effect.Effect<A, E, WsBridgeServices>,
+	): RuntimeFiber<unknown, never> {
+		return this.runFork(
+			effect.pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.sync(() => this.logBridgeError(op)(Cause.pretty(cause))),
+				),
+			),
+		);
 	}
 
-	private runSyncMutation<A, E, R extends WsBridgeServices>(
+	private runEffectPromise<A, E>(
 		op: string,
-		effect: Effect.Effect<A, E, R>,
-	): void {
-		try {
-			this.runtime.runSync(effect);
-		} catch (err) {
-			this.logBridgeError(op)(err);
+		effect: Effect.Effect<A, E, WsBridgeServices>,
+	): Promise<void> {
+		const fiber = this.forkLogged(op, effect);
+		return new Promise((resolve, reject) => {
+			fiber.addObserver((exit) => {
+				if (Exit.isFailure(exit)) {
+					reject(exit);
+					return;
+				}
+				resolve();
+			});
+		});
+	}
+
+	private recordClientConnected(clientId: string): void {
+		this.recordClientRemoved(clientId);
+		this.clients.add(clientId);
+	}
+
+	private recordClientRemoved(clientId: string): void {
+		this.clients.delete(clientId);
+		const sessionId = this.clientSessions.get(clientId);
+		if (sessionId == null) return;
+		this.clientSessions.delete(clientId);
+		const viewers = this.sessionClients.get(sessionId);
+		if (!viewers) return;
+		viewers.delete(clientId);
+		if (viewers.size === 0) this.sessionClients.delete(sessionId);
+	}
+
+	private recordClientSession(clientId: string, sessionId: string): void {
+		if (!this.clients.has(clientId)) return;
+		const previous = this.clientSessions.get(clientId);
+		if (previous === sessionId) return;
+		if (previous != null) {
+			const viewers = this.sessionClients.get(previous);
+			viewers?.delete(clientId);
+			if (viewers?.size === 0) this.sessionClients.delete(previous);
 		}
+		this.clientSessions.set(clientId, sessionId);
+		const viewers = this.sessionClients.get(sessionId) ?? new Set<string>();
+		viewers.add(clientId);
+		this.sessionClients.set(sessionId, viewers);
+	}
+
+	private clearClientMirror(): void {
+		this.clients.clear();
+		this.clientSessions.clear();
+		this.sessionClients.clear();
 	}
 
 	private logBridgeError(op: string) {

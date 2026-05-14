@@ -1,8 +1,14 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { EffectWsHandler } from "../../../src/lib/server/effect-ws-handler.js";
+import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { makeWsHandlerStateLive } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
+import {
+	type EffectWsHandler,
+	makeEffectWsHandler,
+} from "../../../src/lib/server/effect-ws-handler.js";
 import type {
 	WsClientConnectedEvent,
 	WsMessageEvent,
@@ -16,6 +22,23 @@ afterEach(async () => {
 	}
 	cleanup = [];
 });
+
+async function createHandler(
+	options: Parameters<typeof makeEffectWsHandler>[0],
+): Promise<EffectWsHandler> {
+	const runtime = ManagedRuntime.make(
+		Layer.mergeAll(
+			makeWsHandlerStateLive(),
+			makeWsTransportLive({ noServer: true }),
+		),
+	);
+	const handler = await runtime.runPromise(makeEffectWsHandler(options));
+	cleanup.push(async () => {
+		await handler.drain();
+		await runtime.dispose();
+	});
+	return handler;
+}
 
 async function startServer(handler: EffectWsHandler): Promise<{
 	server: Server;
@@ -67,8 +90,7 @@ function waitForMessage(
 
 describe("Effect WS handler bridge", () => {
 	it("upgrades connections and emits routed client messages", async () => {
-		const handler = new EffectWsHandler({ heartbeatInterval: 300_000 });
-		cleanup.push(() => handler.drain());
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler);
 		const connected = onceConnected(handler);
 		const client = new WebSocket(`${url}?session=s1`);
@@ -91,8 +113,7 @@ describe("Effect WS handler bridge", () => {
 	});
 
 	it("sends system_error for invalid JSON without disconnecting", async () => {
-		const handler = new EffectWsHandler({ heartbeatInterval: 300_000 });
-		cleanup.push(() => handler.drain());
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler);
 		const client = new WebSocket(url);
 		cleanup.push(() => client.close());
@@ -113,8 +134,7 @@ describe("Effect WS handler bridge", () => {
 	});
 
 	it("updates viewer state synchronously when binding a client to a session", async () => {
-		const handler = new EffectWsHandler({ heartbeatInterval: 300_000 });
-		cleanup.push(() => handler.drain());
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler);
 		const connected = onceConnected(handler);
 		const client = new WebSocket(url);
@@ -130,8 +150,7 @@ describe("Effect WS handler bridge", () => {
 	});
 
 	it("uses the browser-provided client id when present", async () => {
-		const handler = new EffectWsHandler({ heartbeatInterval: 300_000 });
-		cleanup.push(() => handler.drain());
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler);
 		const connected = onceConnected(handler);
 		const client = new WebSocket(`${url}?client=browser-tab-1`);
