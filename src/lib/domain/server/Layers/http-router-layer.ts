@@ -55,7 +55,6 @@ export interface DaemonHttpRouterPushManager {
 export interface DaemonHttpRouterOptions {
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
-	readonly removeProject: (slug: string) => Promise<unknown>;
 	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 }
@@ -216,10 +215,7 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 				}),
 				staticDir: options.staticDir,
 				getProjects: options.getProjects,
-				removeProject: (slug: string) =>
-					Effect.tryPromise(() => options.removeProject(slug)).pipe(
-						Effect.asVoid,
-					),
+				removeProject: (slug: string) => daemonHandle.removeProject(slug),
 				getHealthResponse: () => daemonHandle.getStatus(),
 				loadThemes: options.loadThemes,
 				pushManager: options.pushManager,

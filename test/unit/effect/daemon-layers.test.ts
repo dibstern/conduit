@@ -2,7 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
+import {
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Ref,
+	Scope,
+} from "effect";
 import { expect } from "vitest";
 import {
 	DaemonLifecycleLayerError,
@@ -13,7 +22,10 @@ import {
 	SignalHandlerLayer,
 } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
-import { DaemonConfigRefLive } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import {
+	DaemonConfigRefLive,
+	DaemonConfigRefTag,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	DaemonHandleLive,
 	DaemonHandleTag,
@@ -237,7 +249,7 @@ describe("DaemonHandleTag", () => {
 					keepAwakeCommand: undefined,
 					keepAwakeArgs: undefined,
 					shuttingDown: false,
-					dismissedPaths: new Set(),
+					dismissedPaths: new Set(["/tmp/new-project"]),
 					startTime: Date.now() - 1_000,
 					hostExplicit: false,
 					persistedSessionCounts: new Map([["existing", 2]]),
@@ -258,6 +270,7 @@ describe("DaemonHandleTag", () => {
 
 			return Effect.gen(function* () {
 				const handle = yield* DaemonHandleTag;
+				const configRef = yield* DaemonConfigRefTag;
 
 				const initialStatus = yield* handle.getStatus();
 				expect(initialStatus.port).toBe(49876);
@@ -274,6 +287,10 @@ describe("DaemonHandleTag", () => {
 					"existing",
 					"new-project",
 				]);
+				const configAfterAdd = yield* Ref.get(configRef);
+				expect(configAfterAdd.dismissedPaths.has("/tmp/new-project")).toBe(
+					false,
+				);
 
 				yield* handle.removeProject("existing");
 				const afterRemove = yield* handle.getStatus();
@@ -281,6 +298,21 @@ describe("DaemonHandleTag", () => {
 				expect(afterRemove.projects.map((project) => project.slug)).toEqual([
 					"new-project",
 				]);
+				const configAfterRemove = yield* Ref.get(configRef);
+				expect(configAfterRemove.dismissedPaths.has("/tmp/existing")).toBe(
+					true,
+				);
+
+				const missingExit = yield* Effect.exit(handle.removeProject("missing"));
+				expect(Exit.isFailure(missingExit)).toBe(true);
+				if (Exit.isFailure(missingExit)) {
+					const failure = Cause.failureOption(missingExit.cause);
+					expect(Option.isSome(failure)).toBe(true);
+					if (Option.isSome(failure)) {
+						expect(failure.value._tag).toBe("ProjectNotFound");
+						expect(failure.value.slug).toBe("missing");
+					}
+				}
 			}).pipe(Effect.provide(layer));
 		},
 	);

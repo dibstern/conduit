@@ -1379,7 +1379,6 @@ export async function startDaemonProcess(
 		httpRouter: {
 			staticDir,
 			getProjects: getRouterProjects,
-			removeProject,
 			loadThemes: loadThemeFiles,
 			pushManager,
 		},

@@ -663,6 +663,28 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not pass daemon project removal as a router options callback", () => {
+		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
+		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
+		const daemonOptions = routerLayer.match(
+			/export interface DaemonHttpRouterOptions \{[\s\S]*?\n\}/,
+		)?.[0];
+		expect(daemonOptions).not.toBeUndefined();
+		expect(daemonOptions).not.toMatch(
+			/\bremoveProject:\s*\(slug:\s*string\)\s*=>\s*Promise\b/,
+		);
+
+		const daemonMain = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/daemon/Layers/daemon-main.ts"),
+			"utf8",
+		);
+		const httpRouterOptions = daemonMain.match(
+			/httpRouter:\s*\{[\s\S]*?\n\t\t\},/,
+		)?.[0];
+		expect(httpRouterOptions).not.toBeUndefined();
+		expect(httpRouterOptions).not.toMatch(/\bremoveProject\b/);
+	});
+
 	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

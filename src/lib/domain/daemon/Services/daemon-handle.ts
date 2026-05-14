@@ -1,16 +1,18 @@
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
-import { Context, Effect, HashMap, Layer, PubSub, Ref } from "effect";
+import { Context, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import {
+	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
 } from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import {
+	ProjectNotFound,
 	type ProjectRegistryState,
 	ProjectRegistryTag,
 } from "./project-registry-service.js";
@@ -19,7 +21,9 @@ import { RelayCacheTag } from "./relay-cache.js";
 export interface EffectDaemonHandle {
 	readonly port: Effect.Effect<number>;
 	readonly addProject: (dir: string) => Effect.Effect<StoredProject>;
-	readonly removeProject: (slug: string) => Effect.Effect<void>;
+	readonly removeProject: (
+		slug: string,
+	) => Effect.Effect<void, ProjectNotFound>;
 	readonly getStatus: () => Effect.Effect<DaemonStatus>;
 	readonly getProjects: () => Effect.Effect<ReadonlyArray<StoredProject>>;
 }
@@ -86,10 +90,25 @@ export const DaemonHandleLive: Layer.Layer<
 		const relayCache = yield* RelayCacheTag;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
+		const commitConfig = (
+			update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+		) =>
+			commitDaemonRuntimeConfig(update).pipe(
+				Effect.provideService(DaemonConfigRefTag, configRef),
+			);
 
 		const addProject = (directory: string) =>
 			Effect.gen(function* () {
 				const normalizedDirectory = normalizeProjectDirectory(directory);
+				yield* commitConfig((config) => {
+					if (!config.dismissedPaths.has(normalizedDirectory)) return config;
+					const dismissedPaths = new Set(config.dismissedPaths);
+					dismissedPaths.delete(normalizedDirectory);
+					return {
+						...config,
+						dismissedPaths,
+					};
+				});
 				const project = yield* Ref.modify(projectRef, (state) => {
 					const existing = Array.from(HashMap.values(state)).find(
 						(entry) => entry.project.directory === normalizedDirectory,
@@ -123,13 +142,28 @@ export const DaemonHandleLive: Layer.Layer<
 
 		const removeProject = (slug: string) =>
 			Effect.gen(function* () {
-				const removed = yield* Ref.modify(projectRef, (state) => {
-					if (!HashMap.has(state, slug)) return [false, state] as const;
-					return [true, HashMap.remove(state, slug)] as const;
+				const removedProject = yield* Ref.modify(projectRef, (state) => {
+					const entry = HashMap.get(state, slug);
+					if (Option.isNone(entry)) {
+						return [Option.none<StoredProject>(), state] as const;
+					}
+					return [
+						Option.some(entry.value.project),
+						HashMap.remove(state, slug),
+					] as const;
 				});
-				if (!removed) return;
+				if (Option.isNone(removedProject)) {
+					return yield* new ProjectNotFound({ slug });
+				}
 
 				yield* relayCache.invalidate(slug);
+				yield* commitConfig((config) => ({
+					...config,
+					dismissedPaths: new Set([
+						...config.dismissedPaths,
+						removedProject.value.directory,
+					]),
+				}));
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
