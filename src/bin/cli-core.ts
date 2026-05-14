@@ -5,7 +5,10 @@
 
 import { resolve } from "node:path";
 import { getTailscaleIP } from "../lib/cli/tls.js";
-import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
+import {
+	isDaemonSpawnPortInUseError,
+	spawnDaemon,
+} from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
 import { startDaemonProcess } from "../lib/domain/daemon/Layers/daemon-main.js";
@@ -653,10 +656,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			running = true;
 		} catch (err) {
 			const message = formatErrorDetail(err);
-			if (
-				message.includes("EADDRINUSE") ||
-				message.includes("address already in use")
-			) {
+			if (isDaemonSpawnPortInUseError(err)) {
 				stderr.write(`Port ${args.port} is already in use.\n`);
 				stderr.write("Try a different port: --port <number>\n");
 			} else {

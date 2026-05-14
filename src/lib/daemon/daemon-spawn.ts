@@ -6,8 +6,54 @@ import { type ChildProcess, spawn as cpSpawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
+import { Data } from "effect";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT, RELAY_ENV_KEYS } from "../env.js";
 import type { DaemonOptions, SpawnConfig } from "./daemon-types.js";
+
+export class DaemonSpawnPortInUseError extends Data.TaggedError(
+	"DaemonSpawnPortInUseError",
+)<{
+	readonly host: string;
+	readonly port: number;
+}> {
+	override get message(): string {
+		return `EADDRINUSE: Port ${this.port} address already in use. Stop the existing daemon with: npx conduit --stop`;
+	}
+}
+
+export class DaemonSpawnFailedError extends Data.TaggedError(
+	"DaemonSpawnFailedError",
+)<{
+	readonly logPath: string;
+	readonly cause?: unknown;
+}> {
+	override get message(): string {
+		return `Failed to spawn daemon process. Check logs: ${this.logPath}`;
+	}
+}
+
+export class DaemonSpawnExitedBeforeReadyError extends Data.TaggedError(
+	"DaemonSpawnExitedBeforeReadyError",
+)<{
+	readonly pid: number;
+	readonly logPath: string;
+}> {
+	override get message(): string {
+		return `Daemon process (pid ${this.pid}) exited before becoming ready. Check logs: ${this.logPath}`;
+	}
+}
+
+export function isDaemonSpawnPortInUseError(
+	error: unknown,
+): error is DaemonSpawnPortInUseError {
+	return (
+		error instanceof DaemonSpawnPortInUseError ||
+		(typeof error === "object" &&
+			error !== null &&
+			"_tag" in error &&
+			error._tag === "DaemonSpawnPortInUseError")
+	);
+}
 
 // ─── buildSpawnConfig ───────────────────────────────────────────────────────
 
@@ -90,9 +136,7 @@ export async function spawnDaemon(
 			.listen(port, host);
 	});
 	if (portInUse) {
-		throw new Error(
-			`EADDRINUSE: Port ${port} address already in use. Stop the existing daemon with: npx conduit --stop`,
-		);
+		throw new DaemonSpawnPortInUseError({ host, port });
 	}
 
 	// Ensure config directory exists
@@ -129,19 +173,34 @@ export async function spawnDaemon(
 	env[RELAY_ENV_KEYS.TLS] = "1";
 	if (options?.opencodeUrl) env[RELAY_ENV_KEYS.OC_URL] = options.opencodeUrl;
 
-	const child: ChildProcess = cpSpawn(
-		process.execPath,
-		[process.argv[1] ?? "daemon", "--daemon"],
-		{
-			detached: true,
-			stdio: ["ignore", logFd, logFd],
-			env,
-		},
-	);
+	let child: ChildProcess;
+	try {
+		child = cpSpawn(
+			process.execPath,
+			[process.argv[1] ?? "daemon", "--daemon"],
+			{
+				detached: true,
+				stdio: ["ignore", logFd, logFd],
+				env,
+			},
+		);
+	} catch (cause) {
+		try {
+			closeSync(logFd);
+		} catch {
+			// ignore — fd may already be closed
+		}
+		throw new DaemonSpawnFailedError({ logPath, cause });
+	}
 
 	const pid = child.pid;
 	if (!pid) {
-		throw new Error("Failed to spawn daemon process");
+		try {
+			closeSync(logFd);
+		} catch {
+			// ignore — fd may already be closed
+		}
+		throw new DaemonSpawnFailedError({ logPath });
 	}
 
 	// Detach child so parent can exit
@@ -174,9 +233,7 @@ export async function spawnDaemon(
 	try {
 		process.kill(pid, 0);
 	} catch {
-		throw new Error(
-			`Daemon process (pid ${pid}) exited before becoming ready. Check logs: ${logPath}`,
-		);
+		throw new DaemonSpawnExitedBeforeReadyError({ pid, logPath });
 	}
 
 	// Process is alive but socket not yet ready — return anyway

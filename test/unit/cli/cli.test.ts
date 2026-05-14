@@ -26,6 +26,7 @@ import {
 	sendIPCCommand,
 } from "../../../src/bin/cli-core.js";
 import { HELP_TEXT } from "../../../src/bin/cli-utils.js";
+import { DaemonSpawnPortInUseError } from "../../../src/lib/daemon/daemon-spawn.js";
 import type { IPCCommand, IPCResponse } from "../../../src/lib/types.js";
 
 const SEED = 42;
@@ -877,7 +878,10 @@ describe("T8: Error handling (AC8)", () => {
 		const cli = createMockCLI({
 			isDaemonRunning: async () => false,
 			spawnDaemon: async () => {
-				throw new Error("listen EADDRINUSE: address already in use");
+				throw new DaemonSpawnPortInUseError({
+					host: "127.0.0.1",
+					port: 2633,
+				});
 			},
 		});
 

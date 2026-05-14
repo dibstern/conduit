@@ -11,6 +11,7 @@ import { showProjectsMenu } from "../lib/cli/cli-projects.js";
 import { showSettingsMenu } from "../lib/cli/cli-settings.js";
 import { runSetup } from "../lib/cli/cli-setup.js";
 import { getTailscaleIP, hasMkcert } from "../lib/cli/tls.js";
+import { isDaemonSpawnPortInUseError } from "../lib/daemon/daemon-spawn.js";
 import { DEFAULT_CONFIG_DIR } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import { getVersion } from "../lib/version.js";
@@ -70,10 +71,7 @@ export async function defaultInteractiveMenu(
 			}
 		} catch (err) {
 			const message = formatErrorDetail(err);
-			if (
-				message.includes("EADDRINUSE") ||
-				message.includes("address already in use")
-			) {
+			if (isDaemonSpawnPortInUseError(err)) {
 				stderr.write(`Port ${setupResult.port} is already in use.\n`);
 				stderr.write("Try a different port: --port <number>\n");
 			} else {

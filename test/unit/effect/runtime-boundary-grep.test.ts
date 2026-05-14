@@ -853,6 +853,58 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not throw plain Error for daemon spawn lifecycle failures", () => {
+		const path = "src/lib/daemon/daemon-spawn.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const patterns = [
+			/throw new Error\(\s*`EADDRINUSE:/,
+			/throw new Error\("Failed to spawn daemon process"\)/,
+			/throw new Error\(\s*`Daemon process \(pid \$\{pid\}\) exited before becoming ready/,
+		] as const;
+
+		const hits = patterns.flatMap((pattern) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not classify daemon spawn port conflicts by message text", () => {
+		const checks = [
+			{
+				path: "src/bin/cli-core.ts",
+				patterns: [
+					/message\.includes\("EADDRINUSE"\)/,
+					/message\.includes\("address already in use"\)/,
+				],
+			},
+			{
+				path: "src/bin/cli-commands.ts",
+				patterns: [
+					/message\.includes\("EADDRINUSE"\)/,
+					/message\.includes\("address already in use"\)/,
+				],
+			},
+		] as const;
+
+		const hits = checks.flatMap(({ path, patterns }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return patterns.flatMap((pattern) =>
+				Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+					path,
+					line: source.slice(0, match.index).split("\n").length,
+					source: match[0].split("\n")[0]?.trim(),
+				})),
+			);
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not classify daemon startup instance errors by message text", () => {
 		const path = "src/lib/domain/daemon/Services/daemon-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
