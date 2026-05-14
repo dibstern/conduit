@@ -44,10 +44,9 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. RPC-over-WS is partly started: all ordinary browser operations, including debug log-level changes, have moved through Effect RPC. The only remaining production raw WS command is `pty_input`; it intentionally stays on the high-throughput terminal data plane until the frontend has a persistent RPC stream/client.
-2. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
-3. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
-4. CLI still imports/calls `startDaemonProcess`.
+1. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
+2. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
+3. CLI still imports/calls `startDaemonProcess`.
 
 ## Remaining Order
 
@@ -60,7 +59,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
-8. RPC-over-WS vertical migration. Started locally with all ordinary browser operations moved to typed RPC; only `pty_input` remains raw WS. Keep or replace `pty_input` only with a persistent RPC stream/client design.
+8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist and production orchestration runtime creates OpenCode/Claude instances through plain driver values.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.
@@ -324,3 +323,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Kept the shared Effect session lifecycle helpers for the typed `CreateSession`, `ViewSession`, `DeleteSession`, and `ForkSession` RPC server handlers.
 - Updated notification, scroll, subagent, fork, and snapshot-recorder E2E harnesses to drive session lifecycle through Effect RPC while keeping `/ws` as the server-push event channel.
 - Verified locally with `pnpm check`, `pnpm lint`, `git diff --check`, targeted router/session unit tests, `pnpm build:frontend`, notification-nav Playwright, notification-reducer Playwright, subagent Playwright, targeted replay Playwright for notification/fork/scroll, and a serial fork replay rerun. The targeted replay run exited 0 with four Playwright retries under high parallelism; the serial fork rerun passed cleanly.
+
+2026-05-14, RPC log-level cleanup and raw terminal reclassification:
+
+- Implemented `SetLogLevel` in the shared `WsRpcGroup` and `WsRpcServerLayer`.
+- Switched the debug panel verbose toggle to typed RPC and deleted the legacy incoming `set_log_level` raw WS command from router/schema/relay dispatch.
+- Reclassified the sole remaining raw production browser WS command, `pty_input`, as the terminal data-plane path pending a persistent RPC stream/client design.
+- Verified locally with `pnpm check`, `pnpm lint`, targeted RPC/router/schema/relay/store unit tests, `pnpm build:frontend`, `git diff --check`, and the pre-commit build/lint/full-unit/typecheck hook.
