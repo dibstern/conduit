@@ -871,6 +871,30 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not route daemon WebSocket upgrades through Runtime.runPromise", () => {
+		const path = "src/lib/domain/server/Layers/ws-routing-layer.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /Runtime\.runPromise\(runtime\)/,
+				reason:
+					"Node upgrade callbacks should hand off to the daemon runtime callback API instead of a Promise runtime re-entry",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("keeps daemon HTTP router ownership out of daemon-main", () => {
 		const retiredBridgePatterns = [
 			/effectRouterWithCors/,

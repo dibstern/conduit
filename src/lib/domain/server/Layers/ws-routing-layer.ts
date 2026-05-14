@@ -4,7 +4,16 @@
 import type http from "node:http";
 import type net from "node:net";
 import type { Duplex } from "node:stream";
-import { Context, Data, Duration, Effect, Layer, Ref, Runtime } from "effect";
+import {
+	Context,
+	Data,
+	Duration,
+	Effect,
+	Exit,
+	Layer,
+	Ref,
+	Runtime,
+} from "effect";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
@@ -321,14 +330,15 @@ export const WebSocketRoutingLive: Layer.Layer<
 				Effect.annotateLogs("component", "ws-routing"),
 			);
 
-		const runUpgrade = Runtime.runPromise(runtime);
 		const onUpgrade = (
 			req: http.IncomingMessage,
 			socket: net.Socket,
 			head: Buffer,
 		) => {
-			void runUpgrade(routeUpgrade(req, socket, head)).catch(() => {
-				if (!socket.destroyed) socket.destroy();
+			Runtime.runCallback(runtime)(routeUpgrade(req, socket, head), {
+				onExit: (exit) => {
+					if (Exit.isFailure(exit) && !socket.destroyed) socket.destroy();
+				},
 			});
 		};
 
