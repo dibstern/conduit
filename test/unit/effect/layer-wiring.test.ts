@@ -95,7 +95,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		httpRouter: {
 			staticDir: process.cwd(),
 			getProjects: () => [],
-			loadThemes: () => Promise.resolve({ bundled: {}, custom: {} }),
 			pushManager: null,
 		},
 		initialConfig: makeDaemonConfigFromOptions({

@@ -71,31 +71,32 @@ const TestPushLayer = Layer.succeed(PushProvider, {
 });
 
 const TestThemeLayer = Layer.succeed(ThemeProvider, {
-	loadThemes: async () => ({
-		bundled: {
-			"test-theme": {
-				name: "Test Theme",
-				variant: "dark" as const,
-				base00: "000000",
-				base01: "111111",
-				base02: "222222",
-				base03: "333333",
-				base04: "444444",
-				base05: "555555",
-				base06: "666666",
-				base07: "777777",
-				base08: "888888",
-				base09: "999999",
-				base0A: "AAAAAA",
-				base0B: "BBBBBB",
-				base0C: "CCCCCC",
-				base0D: "DDDDDD",
-				base0E: "EEEEEE",
-				base0F: "FFFFFF",
+	loadThemes: () =>
+		Effect.succeed({
+			bundled: {
+				"test-theme": {
+					name: "Test Theme",
+					variant: "dark" as const,
+					base00: "000000",
+					base01: "111111",
+					base02: "222222",
+					base03: "333333",
+					base04: "444444",
+					base05: "555555",
+					base06: "666666",
+					base07: "777777",
+					base08: "888888",
+					base09: "999999",
+					base0A: "AAAAAA",
+					base0B: "BBBBBB",
+					base0C: "CCCCCC",
+					base0D: "DDDDDD",
+					base0E: "EEEEEE",
+					base0F: "FFFFFF",
+				},
 			},
-		},
-		custom: {},
-	}),
+			custom: {},
+		}),
 });
 
 let setupInfoPort = 9999;

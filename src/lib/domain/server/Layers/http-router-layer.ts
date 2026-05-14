@@ -20,6 +20,7 @@ import {
 	ThemeProvider,
 } from "../../../server/effect-http-router.js";
 import type { PushSubscriptionData } from "../../../server/push.js";
+import { loadThemeFiles } from "../../../server/theme-loader.js";
 import type { ThemesResponse } from "../../../shared-types.js";
 import { TlsCertTag } from "../../daemon/Layers/tls-cert-layer.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
@@ -56,7 +57,6 @@ export interface DaemonHttpRouterPushManager {
 export interface DaemonHttpRouterOptions {
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
-	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 }
 
@@ -90,7 +90,7 @@ interface HttpRouterRequestHandlerOptions {
 		req: HttpServerRequest.HttpServerRequest,
 	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
 	readonly getHealthResponse?: () => Effect.Effect<object>;
-	readonly loadThemes: () => Promise<ThemesResponse>;
+	readonly loadThemes: () => Effect.Effect<ThemesResponse, unknown>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 	readonly caRootPath?: string | undefined;
 	readonly caCertDer?: Buffer | undefined;
@@ -193,7 +193,11 @@ export const makeStandaloneHttpRouterRequestHandler = (
 		delegateApiRequest:
 			options.delegateApiRequest ??
 			(() => Effect.fail(new Error("Project API route not found"))),
-		loadThemes: options.loadThemes,
+		loadThemes: () =>
+			Effect.tryPromise({
+				try: options.loadThemes,
+				catch: (cause) => cause,
+			}),
 		pushManager: options.pushManager,
 		caRootPath: options.caRootPath,
 		caCertDer: options.caCertDer,
@@ -219,7 +223,11 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 				getProjects: options.getProjects,
 				removeProject: (slug: string) => daemonHandle.removeProject(slug),
 				getHealthResponse: () => daemonHandle.getStatus(),
-				loadThemes: options.loadThemes,
+				loadThemes: () =>
+					Effect.tryPromise({
+						try: loadThemeFiles,
+						catch: (cause) => cause,
+					}),
 				pushManager: options.pushManager,
 				caRootPath: tls.caRootPath ?? undefined,
 				caCertDer: tls.caCertDer ?? undefined,

@@ -284,7 +284,6 @@ import { InstanceManager } from "../../../instance/instance-manager.js";
 import { createLogger, setLogFormat, setLogLevel } from "../../../logger.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { PushNotificationManager } from "../../../server/push.js";
-import { loadThemeFiles } from "../../../server/theme-loader.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { getVersion } from "../../../version.js";
@@ -1374,7 +1373,6 @@ export async function startDaemonProcess(
 		httpRouter: {
 			staticDir,
 			getProjects: getRouterProjects,
-			loadThemes: loadThemeFiles,
 			pushManager,
 		},
 		initialConfig: initialRuntimeConfig,

@@ -94,7 +94,7 @@ export class CaCertProvider extends Context.Tag("CaCertProvider")<
 export class ThemeProvider extends Context.Tag("ThemeProvider")<
 	ThemeProvider,
 	{
-		readonly loadThemes: () => Promise<ThemesResponse>;
+		readonly loadThemes: () => Effect.Effect<ThemesResponse, unknown>;
 	}
 >() {}
 
@@ -323,10 +323,12 @@ const themesHandler = Effect.gen(function* () {
 		);
 	}
 
-	const themes = yield* Effect.tryPromise({
-		try: () => maybeThemes.value.loadThemes(),
-		catch: () => new Error("Failed to load themes"),
-	});
+	const themes = yield* maybeThemes.value
+		.loadThemes()
+		.pipe(Effect.catchAll(() => Effect.succeed(null)));
+	if (themes === null) {
+		return yield* jsonError(500, "THEMES_ERROR", "Failed to load themes");
+	}
 
 	return yield* HttpServerResponse.json(themes);
 });

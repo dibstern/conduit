@@ -81,7 +81,6 @@ describe("makeDaemonHttpRouterLive", () => {
 			const routerLayer = makeDaemonHttpRouterLive({
 				staticDir,
 				getProjects: () => [],
-				loadThemes: () => Promise.resolve({ bundled: {}, custom: {} }),
 				pushManager: null,
 			}).pipe(
 				Layer.provideMerge(makeAuthManagerLive(new AuthManager())),
@@ -134,6 +133,68 @@ describe("makeDaemonHttpRouterLive", () => {
 					yield* Effect.tryPromise(() => response.arrayBuffer()),
 				);
 				expect(body).toEqual(caPayload);
+			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
+		}),
+	);
+
+	it.scoped("serves daemon themes from the production theme loader", () =>
+		Effect.gen(function* () {
+			const staticDir = yield* makeStaticDir;
+			const routerLayer = makeDaemonHttpRouterLive({
+				staticDir,
+				getProjects: () => [],
+				pushManager: null,
+			}).pipe(
+				Layer.provideMerge(makeAuthManagerLive(new AuthManager())),
+				Layer.provideMerge(DaemonConfigRefLive(baseConfig)),
+				Layer.provideMerge(
+					Layer.succeed(TlsCertTag, {
+						certs: null,
+						caRootPath: null,
+						caCertDer: null,
+						caCertPem: null,
+					}),
+				),
+				Layer.provideMerge(
+					Layer.succeed(DaemonHandleTag, {
+						port: Effect.succeed(2633),
+						addProject: () => Effect.die("unused"),
+						removeProject: (slug: string) =>
+							Effect.fail(new ProjectNotFound({ slug })),
+						getStatus: () =>
+							Effect.succeed({
+								ok: true,
+								uptime: 0,
+								port: 2633,
+								host: "127.0.0.1",
+								projectCount: 0,
+								sessionCount: 0,
+								clientCount: 0,
+								pinEnabled: false,
+								tlsEnabled: true,
+								keepAwake: false,
+								projects: [],
+							}),
+						getProjects: () => Effect.succeed([]),
+					}),
+				),
+			);
+
+			yield* Effect.gen(function* () {
+				const handler = yield* DaemonHttpRequestHandlerTag;
+				const { port } = yield* startServer(handler);
+
+				const response = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/api/themes`),
+				);
+				expect(response.status).toBe(200);
+				const body = (yield* Effect.tryPromise(() =>
+					response.json(),
+				)) as unknown;
+				expect(body).toMatchObject({
+					bundled: expect.any(Object),
+					custom: expect.any(Object),
+				});
 			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
 		}),
 	);
