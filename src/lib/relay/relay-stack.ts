@@ -38,10 +38,7 @@ import {
 	hasInstanceManagementConfig,
 	InstanceManagementServiceFromConfigLive,
 } from "../domain/relay/Services/instance-management-service.js";
-import {
-	PendingInteractionServiceLive,
-	PendingInteractionServiceTag,
-} from "../domain/relay/Services/pending-interaction-service.js";
+import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
 import {
 	makeRelayCommandGateLive,
@@ -125,7 +122,7 @@ import { wirePollers } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
-import { wireSSEConsumer } from "./sse-wiring.js";
+import { wireSSEConsumerEffect } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 import { handleRelayWsMessageThroughGate } from "./ws-message-dispatch-effect.js";
 
@@ -773,49 +770,23 @@ export async function createProjectRelay(
 	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
-	wireSSEConsumer(
-		{
-			translator,
-			sessionService: sessionServiceBridge,
-			pendingInteractions: {
-				recordPermissionRequest: (input) =>
-					relayManagedRuntime.runSync(
-						Effect.gen(function* () {
-							const service = yield* PendingInteractionServiceTag;
-							return yield* service.recordPermissionRequest(input);
-						}),
-					),
-				markPermissionReplied: (requestId) =>
-					relayManagedRuntime.runSync(
-						Effect.gen(function* () {
-							const service = yield* PendingInteractionServiceTag;
-							return yield* service.markPermissionReplied(requestId);
-						}),
-					),
-				recoverPendingPermissions: (permissions) =>
-					relayManagedRuntime.runSync(
-						Effect.gen(function* () {
-							const service = yield* PendingInteractionServiceTag;
-							return yield* service.recoverPendingPermissions(permissions);
-						}),
-					),
-			},
-			processingTimeouts,
-			wsHandler,
-			...(config.pushManager != null && { pushManager: config.pushManager }),
-			log: sseLog,
-			pipelineLog,
-			getSessionStatuses: () => statusPoller.getCurrentStatuses(),
-			getSessionParentMap: () => sessionServiceBridge.getSessionParentMap(),
-			listPendingQuestions: () => api.question.list(),
-			listPendingPermissions: () => api.permission.list(),
-			statusPoller,
-			slug: config.slug,
-			onDoneProcessed: (sid) => doneDeliveredRef.fn(sid),
-			...(dualWriteHook != null && { dualWriteHook }),
-		},
-		sseStream,
-	);
+	const sseWiringDeps = {
+		translator,
+		sessionService: sessionServiceBridge,
+		processingTimeouts,
+		wsHandler,
+		...(config.pushManager != null && { pushManager: config.pushManager }),
+		log: sseLog,
+		pipelineLog,
+		getSessionStatuses: () => statusPoller.getCurrentStatuses(),
+		getSessionParentMap: () => sessionServiceBridge.getSessionParentMap(),
+		listPendingQuestions: () => api.question.list(),
+		listPendingPermissions: () => api.permission.list(),
+		statusPoller,
+		slug: config.slug,
+		onDoneProcessed: (sid: string) => doneDeliveredRef.fn(sid),
+		...(dualWriteHook != null && { dualWriteHook }),
+	};
 
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
 	const {
@@ -874,6 +845,7 @@ export async function createProjectRelay(
 	try {
 		await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				yield* wireSSEConsumerEffect(sseWiringDeps, sseStream);
 				yield* sseStream.connectEffect();
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();

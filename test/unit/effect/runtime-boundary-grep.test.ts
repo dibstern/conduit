@@ -786,4 +786,45 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not run pending-interaction SSE writes through relay-stack runtime calls", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /PendingInteractionServiceTag/,
+				reason:
+					"SSE pending interaction writes should be owned by the SSE Effect handler",
+			},
+			{
+				pattern:
+					/recordPermissionRequest:\s*\([^)]*\)\s*=>\s*relayManagedRuntime\.runSync/s,
+				reason:
+					"permission recording should not use a sync runtime bridge in relay-stack",
+			},
+			{
+				pattern:
+					/markPermissionReplied:\s*\([^)]*\)\s*=>\s*relayManagedRuntime\.runSync/s,
+				reason:
+					"permission reply tracking should not use a sync runtime bridge in relay-stack",
+			},
+			{
+				pattern:
+					/recoverPendingPermissions:\s*\([^)]*\)\s*=>\s*relayManagedRuntime\.runSync/s,
+				reason:
+					"permission recovery should not use a sync runtime bridge in relay-stack",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

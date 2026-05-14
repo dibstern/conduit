@@ -3,11 +3,13 @@
 // OpenCode, translates them, filters by session, records to cache, broadcasts
 // to browser clients, and sends push notifications.
 
+import { Cause, Effect, Runtime } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingPermissionRequestInput,
 } from "../domain/relay/Services/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
@@ -132,6 +134,8 @@ export interface SSEWiringDeps {
 	dualWriteHook?: DualWriteHookPort;
 }
 
+export type EffectSSEWiringDeps = Omit<SSEWiringDeps, "pendingInteractions">;
+
 // ─── Push notification helper ────────────────────────────────────────────────
 // Extracted so both handleSSEEvent (SSE path) and relay-stack.ts (status/message
 // poller paths) can fire push notifications for done/error events. Without this,
@@ -196,21 +200,12 @@ export function sendPushForEvent(
 		);
 }
 
-// ─── Handle a single SSE event ───────────────────────────────────────────────
-
-export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
-	const {
-		translator,
-		sessionService,
-		processingTimeouts,
-		wsHandler,
-		pushManager,
-		pipelineLog,
-		log,
-	} = deps;
-
-	const eventSessionId = extractSessionId(event);
-	log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
+function recordSSEEventStart(
+	deps: EffectSSEWiringDeps,
+	event: SSEEvent,
+	eventSessionId: string | undefined,
+): void {
+	deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
 
 	// ── Write to SQLite event store ─────────────────────────────────────
 	if (deps.dualWriteHook) {
@@ -221,101 +216,165 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	// Record the timestamp of any message-related event so sessions are
 	// ordered by actual conversation activity, not metadata updates.
 	if (eventSessionId && event.type.startsWith("message.")) {
-		sessionService.recordMessageActivity(eventSessionId, Date.now());
+		deps.sessionService.recordMessageActivity(eventSessionId, Date.now());
 	}
-	// ── Permission / question bridge routing ──────────────────────────────
+}
 
-	if (event.type === "permission.asked") {
-		const props = event.properties as {
-			id?: string;
-			sessionID?: string;
-			permission?: string;
-			patterns?: string[];
-			metadata?: Record<string, unknown>;
-			always?: string[];
+function permissionRequestInput(
+	event: SSEEvent,
+	eventSessionId: string | undefined,
+): PendingPermissionRequestInput | undefined {
+	const props = event.properties as {
+		id?: string;
+		sessionID?: string;
+		permission?: string;
+		patterns?: string[];
+		metadata?: Record<string, unknown>;
+		always?: string[];
+	};
+	if (!props.id || !props.permission) return undefined;
+	return {
+		requestId: props.id as PermissionId,
+		sessionId: props.sessionID || eventSessionId || "",
+		toolName: props.permission,
+		toolInput: {
+			patterns: props.patterns ?? [],
+			metadata: props.metadata ?? {},
+		},
+		always: props.always ?? [],
+	};
+}
+
+function permissionRecoveryInputs(
+	pendingPermissions: Array<{
+		id: string;
+		permission: string;
+		[key: string]: unknown;
+	}>,
+): PendingPermissionRecoveryInput[] {
+	return pendingPermissions.map((p) => {
+		const sessionId = typeof p["sessionID"] === "string" ? p["sessionID"] : "";
+		const patterns = Array.isArray(p["patterns"])
+			? (p["patterns"] as string[])
+			: undefined;
+		const metadata =
+			typeof p["metadata"] === "object" && p["metadata"] !== null
+				? (p["metadata"] as Record<string, unknown>)
+				: undefined;
+		const always = Array.isArray(p["always"])
+			? (p["always"] as string[])
+			: undefined;
+		return {
+			id: p.id,
+			permission: p.permission,
+			sessionId,
+			...(patterns ? { patterns } : {}),
+			...(metadata ? { metadata } : {}),
+			...(always ? { always } : {}),
 		};
-		const pending =
-			props.id && props.permission
-				? deps.pendingInteractions.recordPermissionRequest({
-						requestId: props.id as PermissionId,
-						sessionId: props.sessionID || eventSessionId || "",
-						toolName: props.permission,
-						toolInput: {
-							patterns: props.patterns ?? [],
-							metadata: props.metadata ?? {},
-						},
-						always: props.always ?? [],
-					})
-				: null;
-		// Broadcast directly from recorded state — bypasses the translator so
-		// permissions are delivered even when the SSE event lacks sessionID.
-		if (pending) {
-			const permSessionId = pending.sessionId;
-			const permMsg: RelayMessage = {
-				type: "permission_request",
-				sessionId: permSessionId,
-				requestId: pending.requestId,
-				toolName: pending.toolName,
-				toolInput: pending.toolInput,
-				always: pending.always ?? [],
-			};
-			wsHandler.broadcast(permMsg);
-			if (pushManager) {
-				sendPushForEvent(
-					pushManager,
-					permMsg,
-					log,
-					buildPushContext(deps.slug, permSessionId),
-				);
-			}
-		} else if (pushManager) {
-			// Bridge rejected (missing id/permission) — still attempt push
-			const props = event.properties;
-			const id = typeof props["id"] === "string" ? props["id"] : "unknown";
-			const tool =
-				typeof props["permission"] === "string"
-					? props["permission"]
-					: "A tool";
-			sendPushForEvent(
-				pushManager,
-				{
-					type: "permission_request",
-					sessionId: eventSessionId ?? "",
-					requestId: id as PermissionId,
-					toolName: tool,
-					toolInput: {},
-				},
-				log,
-				buildPushContext(deps.slug, eventSessionId),
-			);
-		}
+	});
+}
+
+function broadcastRecoveredPermissions(
+	deps: EffectSSEWiringDeps,
+	recovered: readonly PendingPermission[],
+): void {
+	for (const perm of recovered) {
+		deps.wsHandler.broadcast({
+			type: "permission_request",
+			sessionId: perm.sessionId,
+			requestId: perm.requestId,
+			toolName: perm.toolName,
+			toolInput: perm.toolInput,
+			always: perm.always ?? [],
+		});
 	}
-	if (event.type === "question.asked") {
-		// No bridge storage needed — the translator produces an `ask_user`
-		// WebSocket message with the `que_` ID that the frontend stores and
-		// sends back with the answer.  The handler calls the OpenCode API
-		// directly.
-		log.debug(`question.asked: event received`);
-		if (eventSessionId) {
-			sessionService.incrementPendingQuestionCount(eventSessionId);
-		}
+}
+
+function broadcastPermissionAsked(
+	deps: EffectSSEWiringDeps,
+	event: SSEEvent,
+	eventSessionId: string | undefined,
+	pending: PendingPermission | null,
+): void {
+	const { wsHandler, pushManager, log } = deps;
+	if (pending) {
+		const permSessionId = pending.sessionId;
+		const permMsg: RelayMessage = {
+			type: "permission_request",
+			sessionId: permSessionId,
+			requestId: pending.requestId,
+			toolName: pending.toolName,
+			toolInput: pending.toolInput,
+			always: pending.always ?? [],
+		};
+		wsHandler.broadcast(permMsg);
 		if (pushManager) {
 			sendPushForEvent(
 				pushManager,
-				{
-					type: "ask_user",
-					sessionId: eventSessionId ?? "",
-					toolId: "",
-					questions: [],
-				},
+				permMsg,
 				log,
-				buildPushContext(deps.slug, eventSessionId),
+				buildPushContext(deps.slug, permSessionId),
 			);
 		}
+	} else if (pushManager) {
+		// Bridge rejected (missing id/permission) — still attempt push
+		const props = event.properties as Record<string, unknown>;
+		const id = typeof props["id"] === "string" ? props["id"] : "unknown";
+		const tool =
+			typeof props["permission"] === "string" ? props["permission"] : "A tool";
+		sendPushForEvent(
+			pushManager,
+			{
+				type: "permission_request",
+				sessionId: eventSessionId ?? "",
+				requestId: id as PermissionId,
+				toolName: tool,
+				toolInput: {},
+			},
+			log,
+			buildPushContext(deps.slug, eventSessionId),
+		);
 	}
-	if (isPermissionRepliedEvent(event)) {
-		deps.pendingInteractions.markPermissionReplied(event.properties.id);
+}
+
+function handleQuestionAsked(
+	deps: EffectSSEWiringDeps,
+	eventSessionId: string | undefined,
+): void {
+	deps.log.debug(`question.asked: event received`);
+	if (eventSessionId) {
+		deps.sessionService.incrementPendingQuestionCount(eventSessionId);
 	}
+	if (deps.pushManager) {
+		sendPushForEvent(
+			deps.pushManager,
+			{
+				type: "ask_user",
+				sessionId: eventSessionId ?? "",
+				toolId: "",
+				questions: [],
+			},
+			deps.log,
+			buildPushContext(deps.slug, eventSessionId),
+		);
+	}
+}
+
+function handleSSEEventAfterPending(
+	deps: EffectSSEWiringDeps,
+	event: SSEEvent,
+	eventSessionId: string | undefined,
+): void {
+	const {
+		translator,
+		sessionService,
+		processingTimeouts,
+		wsHandler,
+		pushManager,
+		pipelineLog,
+		log,
+	} = deps;
 
 	// ── Session updated (title change, etc.) → refresh session list ──────
 
@@ -471,11 +530,75 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	}
 }
 
-// ─── Wire all SSE consumer event listeners ───────────────────────────────────
+// ─── Handle a single SSE event ───────────────────────────────────────────────
 
-export function wireSSEConsumer(
-	deps: SSEWiringDeps,
+export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
+	const eventSessionId = extractSessionId(event);
+	recordSSEEventStart(deps, event, eventSessionId);
+	// ── Permission / question bridge routing ──────────────────────────────
+
+	if (event.type === "permission.asked") {
+		const input = permissionRequestInput(event, eventSessionId);
+		const pending = input
+			? deps.pendingInteractions.recordPermissionRequest(input)
+			: null;
+		broadcastPermissionAsked(deps, event, eventSessionId, pending);
+	}
+	if (event.type === "question.asked") {
+		handleQuestionAsked(deps, eventSessionId);
+	}
+	if (isPermissionRepliedEvent(event)) {
+		deps.pendingInteractions.markPermissionReplied(event.properties.id);
+	}
+
+	handleSSEEventAfterPending(deps, event, eventSessionId);
+}
+
+export const handleSSEEventEffect = (
+	deps: EffectSSEWiringDeps,
+	event: SSEEvent,
+) =>
+	Effect.gen(function* () {
+		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const eventSessionId = extractSessionId(event);
+		yield* Effect.sync(() => recordSSEEventStart(deps, event, eventSessionId));
+
+		if (event.type === "permission.asked") {
+			const input = permissionRequestInput(event, eventSessionId);
+			const pending = input
+				? yield* pendingInteractions.recordPermissionRequest(input)
+				: null;
+			yield* Effect.sync(() =>
+				broadcastPermissionAsked(deps, event, eventSessionId, pending),
+			);
+		}
+		if (event.type === "question.asked") {
+			yield* Effect.sync(() => handleQuestionAsked(deps, eventSessionId));
+		}
+		if (isPermissionRepliedEvent(event)) {
+			yield* pendingInteractions.markPermissionReplied(event.properties.id);
+		}
+
+		yield* Effect.sync(() =>
+			handleSSEEventAfterPending(deps, event, eventSessionId),
+		);
+	});
+
+interface SSEConsumerCallbacks {
+	handleEvent(event: SSEEvent): void;
+	recoverPendingPermissions(
+		pendingPermissions: Array<{
+			id: string;
+			permission: string;
+			[key: string]: unknown;
+		}>,
+	): void;
+}
+
+function wireSSEConsumerWithCallbacks(
+	deps: EffectSSEWiringDeps,
 	consumer: SSEStreamEvents,
+	callbacks: SSEConsumerCallbacks,
 ): void {
 	const { log } = deps;
 
@@ -525,40 +648,7 @@ export function wireSSEConsumer(
 					log.info(
 						`Rehydrating ${pendingPermissions.length} pending permission(s) from API`,
 					);
-					const recovered = deps.pendingInteractions.recoverPendingPermissions(
-						pendingPermissions.map((p) => {
-							const sessionId =
-								typeof p["sessionID"] === "string" ? p["sessionID"] : "";
-							const patterns = Array.isArray(p["patterns"])
-								? (p["patterns"] as string[])
-								: undefined;
-							const metadata =
-								typeof p["metadata"] === "object" && p["metadata"] !== null
-									? (p["metadata"] as Record<string, unknown>)
-									: undefined;
-							const always = Array.isArray(p["always"])
-								? (p["always"] as string[])
-								: undefined;
-							return {
-								id: p.id,
-								permission: p.permission,
-								sessionId,
-								...(patterns ? { patterns } : {}),
-								...(metadata ? { metadata } : {}),
-								...(always ? { always } : {}),
-							};
-						}),
-					);
-					for (const perm of recovered) {
-						deps.wsHandler.broadcast({
-							type: "permission_request",
-							sessionId: perm.sessionId,
-							requestId: perm.requestId,
-							toolName: perm.toolName,
-							toolInput: perm.toolInput,
-							always: perm.always ?? [],
-						});
-					}
+					callbacks.recoverPendingPermissions(pendingPermissions);
 				})
 				.catch((err: unknown) =>
 					log.warn(`Failed to rehydrate pending permissions: ${err}`),
@@ -652,6 +742,71 @@ export function wireSSEConsumer(
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
 	consumer.on("event", (event: unknown) => {
-		handleSSEEvent(deps, event as SSEEvent);
+		callbacks.handleEvent(event as SSEEvent);
 	});
 }
+
+// ─── Wire all SSE consumer event listeners ───────────────────────────────────
+
+export function wireSSEConsumer(
+	deps: SSEWiringDeps,
+	consumer: SSEStreamEvents,
+): void {
+	wireSSEConsumerWithCallbacks(deps, consumer, {
+		handleEvent: (event) => handleSSEEvent(deps, event),
+		recoverPendingPermissions: (pendingPermissions) => {
+			const recovered = deps.pendingInteractions.recoverPendingPermissions(
+				permissionRecoveryInputs(pendingPermissions),
+			);
+			broadcastRecoveredPermissions(deps, recovered);
+		},
+	});
+}
+
+export const wireSSEConsumerEffect = (
+	deps: EffectSSEWiringDeps,
+	consumer: SSEStreamEvents,
+) =>
+	Effect.gen(function* () {
+		const runtime = yield* Effect.runtime<PendingInteractionServiceTag>();
+		yield* Effect.sync(() => {
+			const runFork = Runtime.runFork(runtime);
+			wireSSEConsumerWithCallbacks(deps, consumer, {
+				handleEvent: (event) => {
+					runFork(
+						handleSSEEventEffect(deps, event).pipe(
+							Effect.catchAllCause((cause) =>
+								Effect.sync(() =>
+									deps.log.warn(
+										`SSE event handling failed: ${Cause.pretty(cause)}`,
+									),
+								),
+							),
+						),
+					);
+				},
+				recoverPendingPermissions: (pendingPermissions) => {
+					runFork(
+						Effect.gen(function* () {
+							const pendingInteractions = yield* PendingInteractionServiceTag;
+							const recovered =
+								yield* pendingInteractions.recoverPendingPermissions(
+									permissionRecoveryInputs(pendingPermissions),
+								);
+							yield* Effect.sync(() =>
+								broadcastRecoveredPermissions(deps, recovered),
+							);
+						}).pipe(
+							Effect.catchAllCause((cause) =>
+								Effect.sync(() =>
+									deps.log.warn(
+										`Failed to recover pending permissions: ${Cause.pretty(cause)}`,
+									),
+								),
+							),
+						),
+					);
+				},
+			});
+		});
+	});
