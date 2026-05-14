@@ -68,6 +68,53 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toHaveLength(allowedRuntimeBoundaries.length);
 	});
 
+	it("does not schedule daemon shutdown by re-entering the daemon runtime", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const scheduleShutdownIndex = source.indexOf("scheduleShutdown: () => {");
+		expect(scheduleShutdownIndex).toBeGreaterThanOrEqual(0);
+		const applyConfigIndex = source.indexOf(
+			"applyConfig: (config: Record<string, unknown>) => {",
+			scheduleShutdownIndex,
+		);
+		expect(applyConfigIndex).toBeGreaterThan(scheduleShutdownIndex);
+		const scheduleShutdownBlock = source.slice(
+			scheduleShutdownIndex,
+			applyConfigIndex,
+		);
+		const retiredBridgePatterns = [
+			{
+				pattern: /daemonRuntime\.runPromise/,
+				reason:
+					"legacy scheduleShutdown should dispose the owned runtime instead of re-entering it",
+			},
+			{
+				pattern: /ShutdownSignalTag/,
+				reason:
+					"ShutdownSignalTag is for the Effect-native NodeRuntime entrypoint, not the legacy ManagedRuntime stop path",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			scheduleShutdownBlock.split("\n").flatMap((line, index) =>
+				pattern.test(line)
+					? [
+							{
+								path,
+								line:
+									source.slice(0, scheduleShutdownIndex).split("\n").length +
+									index,
+								source: line.trim(),
+								reason,
+							},
+						]
+					: [],
+			),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{

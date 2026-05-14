@@ -23,7 +23,6 @@ import { NodeRuntime } from "@effect/platform-node";
 import type { Fiber } from "effect";
 import {
 	Context,
-	Deferred,
 	Duration,
 	Effect,
 	Layer,
@@ -45,11 +44,7 @@ import {
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
-import {
-	makeDaemonLive,
-	ShutdownAwaiterLive,
-	ShutdownSignalTag,
-} from "./daemon-layers.js";
+import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
@@ -1294,24 +1289,12 @@ export async function startDaemonProcess(
 		persistConfig: () => persistConfig(),
 		scheduleShutdown: () => {
 			shutdownTimer = setTimeout(() => {
-				// AP-25: Complete the ShutdownSignal Deferred so the Effect runtime
-				// begins graceful teardown (Layer finalizers in reverse order).
-				if (daemonRuntime) {
-					daemonRuntime.runPromise(
-						Effect.gen(function* () {
-							const deferred = yield* ShutdownSignalTag;
-							yield* Deferred.succeed(deferred, undefined);
-						}).pipe(
-							Effect.catchAll((e) =>
-								Effect.logWarning(
-									"scheduleShutdown: failed to complete ShutdownSignal",
-									{ error: String(e) },
-								),
-							),
-						),
+				void stop().catch((err) => {
+					log.warn(
+						{ err: formatErrorDetail(err) },
+						"Scheduled daemon shutdown failed",
 					);
-				}
-				stop();
+				});
 			}, DAEMON_SHUTDOWN_DELAY_MS);
 		},
 		applyConfig: (config: Record<string, unknown>) => {
