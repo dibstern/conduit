@@ -24,11 +24,24 @@ import {
 	Runtime,
 } from "effect";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
+import type {
+	InstanceConfig,
+	OpenCodeInstance,
+} from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
+import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
+	addInstance as addEffectInstance,
 	getInstances as getEffectInstances,
 	InstanceManagerStateTag,
+	PollerFibersTag,
+	persistConfig as persistEffectInstanceConfig,
+	removeInstance as removeEffectInstance,
+	startInstance as startEffectInstance,
+	stopInstance as stopEffectInstance,
+	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import {
 	allProjects as getEffectProjects,
@@ -115,7 +128,12 @@ export const RelayFactoryLive = (
 ): Layer.Layer<
 	RelayFactoryTag | HttpServerRefTag,
 	never,
-	DaemonConfigRefTag | ProjectRegistryTag | InstanceManagerStateTag
+	| DaemonConfigRefTag
+	| ProjectRegistryTag
+	| InstanceManagerStateTag
+	| PollerFibersTag
+	| DaemonEventBusTag
+	| ConfigPersistenceTag
 > =>
 	Layer.effect(
 		RelayFactoryTag,
@@ -124,6 +142,9 @@ export const RelayFactoryLive = (
 			const httpServerRef = yield* HttpServerRefTag;
 			const projectRegistry = yield* ProjectRegistryTag;
 			const instanceState = yield* InstanceManagerStateTag;
+			const pollerFibers = yield* PollerFibersTag;
+			const eventBus = yield* DaemonEventBusTag;
+			const configPersistence = yield* ConfigPersistenceTag;
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -153,6 +174,69 @@ export const RelayFactoryLive = (
 						Effect.provideService(InstanceManagerStateTag, instanceState),
 					),
 				);
+
+			const provideInstanceDeps = <A, E>(
+				effect: Effect.Effect<
+					A,
+					E,
+					| InstanceManagerStateTag
+					| PollerFibersTag
+					| DaemonEventBusTag
+					| ConfigPersistenceTag
+				>,
+			) =>
+				effect.pipe(
+					Effect.provideService(InstanceManagerStateTag, instanceState),
+					Effect.provideService(PollerFibersTag, pollerFibers),
+					Effect.provideService(DaemonEventBusTag, eventBus),
+					Effect.provideService(ConfigPersistenceTag, configPersistence),
+				);
+
+			const addInstance = (id: string, config: InstanceConfig) =>
+				runCallback(provideInstanceDeps(addEffectInstance({ id, ...config })));
+
+			const removeInstance = (id: string) =>
+				runCallback(provideInstanceDeps(removeEffectInstance(id)));
+
+			const startInstance = (id: string) =>
+				runCallback(provideInstanceDeps(startEffectInstance(id)));
+
+			const stopInstance = (id: string) =>
+				runCallback(provideInstanceDeps(stopEffectInstance(id)));
+
+			const updateInstance = (
+				id: string,
+				updates: {
+					readonly name?: string;
+					readonly env?: Record<string, string>;
+					readonly port?: number;
+				},
+			) =>
+				runCallback(
+					provideInstanceDeps(updateEffectInstance(id, updates)).pipe(
+						Effect.flatMap(() =>
+							getEffectInstances.pipe(
+								Effect.flatMap((instances) => {
+									const instance = Array.from(instances).find(
+										(candidate) => candidate.id === id,
+									);
+									if (instance === undefined) {
+										return Effect.fail(
+											new RelayFactoryError({
+												reason: `Instance "${id}" not found after update`,
+											}),
+										);
+									}
+									return Effect.succeed(instance as OpenCodeInstance);
+								}),
+								Effect.provideService(InstanceManagerStateTag, instanceState),
+							),
+						),
+					),
+				);
+
+			const persistConfig = () =>
+				runCallback(provideInstanceDeps(persistEffectInstanceConfig));
 
 			return {
 				create: (
@@ -194,9 +278,8 @@ export const RelayFactoryLive = (
 						// Read config for any runtime values needed
 						const _config = yield* Ref.get(configRef);
 
-						// Create the relay using the imperative createProjectRelay.
-						// Callbacks are stubbed — the full wiring of callbacks to
-						// Effect services happens when consumers are converted (Task 11+).
+						// Create the relay using the imperative createProjectRelay while
+						// threading Effect-owned daemon read models and instance callbacks.
 						const relay = yield* Effect.tryPromise({
 							try: () => {
 								const ac = new AbortController();
@@ -211,6 +294,12 @@ export const RelayFactoryLive = (
 									persistenceDbPath: dbPath,
 									getProjects,
 									getInstances,
+									addInstance,
+									removeInstance,
+									startInstance,
+									stopInstance,
+									updateInstance,
+									persistConfig,
 								});
 							},
 							catch: (cause) =>

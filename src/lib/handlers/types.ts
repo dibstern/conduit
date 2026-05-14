@@ -18,15 +18,18 @@ export interface InstanceManagementDeps {
 	getInstances: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
-	addInstance: (id: string, config: InstanceConfig) => OpenCodeInstance;
-	removeInstance: (id: string) => void;
+	addInstance: (
+		id: string,
+		config: InstanceConfig,
+	) => OpenCodeInstance | PromiseLike<OpenCodeInstance>;
+	removeInstance: (id: string) => void | PromiseLike<void>;
 	startInstance: (id: string) => Promise<void>;
-	stopInstance: (id: string) => void;
+	stopInstance: (id: string) => void | PromiseLike<void>;
 	updateInstance: (
 		id: string,
 		updates: { name?: string; env?: Record<string, string>; port?: number },
-	) => OpenCodeInstance;
-	persistConfig: () => void;
+	) => OpenCodeInstance | PromiseLike<OpenCodeInstance>;
+	persistConfig: () => void | PromiseLike<void>;
 }
 
 /** Project management capability group — only available in daemon mode. */

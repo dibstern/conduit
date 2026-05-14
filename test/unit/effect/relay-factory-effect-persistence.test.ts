@@ -10,6 +10,7 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
@@ -17,6 +18,7 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 
@@ -39,6 +41,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+						ConfigPersistenceNoopLive,
+						DaemonEventBusLive,
 						makeProjectRegistryLive(),
 						makeInstanceManagerStateLive(),
 					),
@@ -96,6 +100,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+						ConfigPersistenceNoopLive,
 						DaemonEventBusLive,
 						makeProjectRegistryLive([
 							{
@@ -148,7 +153,10 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					try: () => Promise.resolve(config?.getProjects?.() ?? []),
 					catch: (cause) => cause,
 				});
-				const instances = yield* Effect.tryPromise({
+				const instances = yield* Effect.tryPromise<
+					ReadonlyArray<Readonly<OpenCodeInstance>>,
+					unknown
+				>({
 					try: () => Promise.resolve(config?.getInstances?.() ?? []),
 					catch: (cause) => cause,
 				});
@@ -181,4 +189,116 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			);
 		},
 	);
+
+	it.effect("threads Effect-owned instance mutators into relay config", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-instance-"));
+		const projectDir = join(dir, "project");
+		const server = createServer();
+		createProjectRelayMock.mockResolvedValue({
+			stop: vi.fn(async () => undefined),
+		});
+
+		const layer = RelayFactoryLive(join(dir, "config")).pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+					ConfigPersistenceNoopLive,
+					DaemonEventBusLive,
+					makeProjectRegistryLive([
+						{
+							slug: "effect-project",
+							title: "Effect Project",
+							directory: projectDir,
+						},
+					]),
+					makeInstanceManagerStateLive(),
+				),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const httpServerRef = yield* HttpServerRefTag;
+			yield* Ref.set(httpServerRef, server);
+
+			const factory = yield* RelayFactoryTag;
+			yield* factory
+				.create(
+					{
+						slug: "effect-project",
+						title: "Effect Project",
+						directory: projectDir,
+					},
+					"http://localhost:4096",
+				)
+				.pipe(Effect.scoped);
+
+			const config = createProjectRelayMock.mock.calls[0]?.[0];
+			expect(config?.addInstance).toBeTypeOf("function");
+			expect(config?.removeInstance).toBeTypeOf("function");
+			expect(config?.updateInstance).toBeTypeOf("function");
+			expect(config?.persistConfig).toBeTypeOf("function");
+
+			const added = yield* Effect.tryPromise({
+				try: () =>
+					Promise.resolve(
+						config?.addInstance?.("remote", {
+							name: "Remote",
+							port: 4321,
+							managed: false,
+							url: "http://remote.example.test",
+						}),
+					),
+				catch: (cause) => cause,
+			});
+			expect(added).toEqual(
+				expect.objectContaining({
+					id: "remote",
+					name: "Remote",
+					port: 4321,
+					managed: false,
+				}),
+			);
+
+			const updated = yield* Effect.tryPromise({
+				try: () =>
+					Promise.resolve(
+						config?.updateInstance?.("remote", {
+							name: "Renamed",
+							port: 4322,
+						}),
+					),
+				catch: (cause) => cause,
+			});
+			expect(updated).toEqual(
+				expect.objectContaining({
+					id: "remote",
+					name: "Renamed",
+					port: 4322,
+				}),
+			);
+
+			yield* Effect.tryPromise({
+				try: () => Promise.resolve(config?.removeInstance?.("remote")),
+				catch: (cause) => cause,
+			});
+			const instances = yield* Effect.tryPromise({
+				try: () => Promise.resolve(config?.getInstances?.() ?? []),
+				catch: (cause) => cause,
+			});
+			expect(
+				instances.some(
+					(instance: Readonly<OpenCodeInstance>) => instance.id === "remote",
+				),
+			).toBe(false);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(
+				Effect.sync(() => {
+					server.close();
+					rmSync(dir, { recursive: true, force: true });
+					createProjectRelayMock.mockReset();
+				}),
+			),
+		);
+	});
 });

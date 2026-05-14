@@ -240,20 +240,20 @@ export interface ProjectRelayConfig {
 	addInstance?: (
 		id: string,
 		config: import("./shared-types.js").InstanceConfig,
-	) => import("./shared-types.js").OpenCodeInstance;
+	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Remove an instance by ID. */
-	removeInstance?: (id: string) => void;
+	removeInstance?: (id: string) => MaybePromise<void>;
 	/** Start a managed instance. */
 	startInstance?: (id: string) => Promise<void>;
 	/** Stop an instance. */
-	stopInstance?: (id: string) => void;
+	stopInstance?: (id: string) => MaybePromise<void>;
 	/** Update an instance's name, env, or port. */
 	updateInstance?: (
 		id: string,
 		updates: { name?: string; env?: Record<string, string>; port?: number },
-	) => import("./shared-types.js").OpenCodeInstance;
+	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Persist daemon config to disk after instance mutations. */
-	persistConfig?: () => void;
+	persistConfig?: () => MaybePromise<void>;
 	/** Change a project's instance binding and rebuild relay. */
 	setProjectInstance?: (
 		slug: string,

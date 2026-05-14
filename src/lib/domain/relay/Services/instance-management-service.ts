@@ -139,8 +139,8 @@ const makeInstanceManagementService = (
 		});
 
 	const persist = (operation: InstanceOperation) =>
-		Effect.try({
-			try: () => instanceMgmt.persistConfig(),
+		Effect.tryPromise({
+			try: () => Promise.resolve(instanceMgmt.persistConfig()),
 			catch: toError(operation),
 		});
 
@@ -155,29 +155,26 @@ const makeInstanceManagementService = (
 		add: (input) =>
 			Effect.gen(function* () {
 				const id = makeInstanceId(input.name, yield* list());
-				yield* Effect.try({
-					try: () => {
-						const hasUrl =
-							typeof input.url === "string" && input.url.length > 0;
-						const managed =
-							typeof input.managed === "boolean" ? input.managed : !hasUrl;
-						const config: InstanceConfig = {
-							name: input.name,
-							port: typeof input.port === "number" ? input.port : 0,
-							managed,
-							...(input.env != null && { env: input.env }),
-							...(hasUrl && input.url != null && { url: input.url }),
-						};
-						instanceMgmt.addInstance(id, config);
-					},
+				const hasUrl = typeof input.url === "string" && input.url.length > 0;
+				const managed =
+					typeof input.managed === "boolean" ? input.managed : !hasUrl;
+				const config: InstanceConfig = {
+					name: input.name,
+					port: typeof input.port === "number" ? input.port : 0,
+					managed,
+					...(input.env != null && { env: input.env }),
+					...(hasUrl && input.url != null && { url: input.url }),
+				};
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(instanceMgmt.addInstance(id, config)),
 					catch: toError("add"),
 				});
 				return yield* withPersistedList("add");
 			}),
 		remove: (instanceId) =>
 			Effect.gen(function* () {
-				yield* Effect.try({
-					try: () => instanceMgmt.removeInstance(instanceId),
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(instanceMgmt.removeInstance(instanceId)),
 					catch: toError("remove"),
 				});
 				return yield* withPersistedList("remove");
@@ -192,8 +189,8 @@ const makeInstanceManagementService = (
 			}),
 		stop: (instanceId) =>
 			Effect.gen(function* () {
-				yield* Effect.try({
-					try: () => instanceMgmt.stopInstance(instanceId),
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(instanceMgmt.stopInstance(instanceId)),
 					catch: toError("stop"),
 				});
 				return yield* list();
@@ -209,19 +206,22 @@ const makeInstanceManagementService = (
 				if (typeof input.port === "number") updates.port = input.port;
 				if (input.env !== undefined) updates.env = input.env;
 
-				yield* Effect.try({
-					try: () => instanceMgmt.updateInstance(instanceId, updates),
+				yield* Effect.tryPromise({
+					try: () =>
+						Promise.resolve(instanceMgmt.updateInstance(instanceId, updates)),
 					catch: toError("update"),
 				});
 				return yield* withPersistedList("update");
 			}),
 		rename: (instanceId, name) =>
 			Effect.gen(function* () {
-				yield* Effect.try({
+				yield* Effect.tryPromise({
 					try: () =>
-						instanceMgmt.updateInstance(instanceId, {
-							name: name.trim(),
-						}),
+						Promise.resolve(
+							instanceMgmt.updateInstance(instanceId, {
+								name: name.trim(),
+							}),
+						),
 					catch: toError("rename"),
 				});
 				return yield* withPersistedList("rename");

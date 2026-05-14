@@ -707,24 +707,25 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(services));
-	const registries = RelayFactoryLive(configDir).pipe(
-		Layer.provideMerge(registryState),
-	);
-
-	const withRelayCache = makeRelayCacheLayer.pipe(
-		Layer.provideMerge(registries),
-	);
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
-		Layer.provideMerge(withRelayCache),
+		Layer.provideMerge(registryState),
 	);
 
 	const withConfigPersistence = ConfigPersistenceLive.pipe(
 		Layer.provideMerge(effectSnapshotLayer),
 	);
 
-	const withDaemonHandle = DaemonHandleLive.pipe(
+	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(withConfigPersistence),
+	);
+
+	const withRelayCache = makeRelayCacheLayer.pipe(
+		Layer.provideMerge(registries),
+	);
+
+	const withDaemonHandle = DaemonHandleLive.pipe(
+		Layer.provideMerge(withRelayCache),
 	);
 
 	const keepAwakeLayer =

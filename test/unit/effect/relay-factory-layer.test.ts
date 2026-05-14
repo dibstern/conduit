@@ -8,10 +8,12 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 
@@ -60,6 +62,8 @@ describe("HttpServerRefTag", () => {
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+		ConfigPersistenceNoopLive,
+		DaemonEventBusLive,
 		makeProjectRegistryLive(),
 		makeInstanceManagerStateLive(),
 	);
