@@ -3,8 +3,7 @@
 <!-- Shows parent session title and a "← PARENT" button to navigate back. -->
 
 <script lang="ts">
-	import { wsSend } from "../../stores/ws.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 
 	// Find the active session and check if it has a parent
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
@@ -23,7 +22,7 @@
 
 	function navigateBack() {
 		if (parentId) {
-			wsSend({ type: "switch_session", sessionId: parentId });
+			switchToSession(parentId);
 		}
 	}
 

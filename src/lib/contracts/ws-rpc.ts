@@ -179,6 +179,11 @@ export const ListSessionsResponseSchema = Schema.Struct({
 	search: Schema.optional(Schema.Boolean),
 });
 
+export const CreateSessionResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	sessionId: Schema.String,
+});
+
 export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -266,6 +271,7 @@ export type ReloadProviderSessionResponse =
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
 export type SessionInfo = typeof SessionInfoSchema.Type;
 export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
+export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
@@ -491,6 +497,33 @@ export class ListSessions extends Schema.TaggedRequest<ListSessions>()(
 	},
 ) {}
 
+export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
+	"CreateSession",
+	{
+		failure: WsRpcError,
+		success: CreateSessionResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
+			title: Schema.optional(Schema.String),
+			requestId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
+	"ViewSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: NonEmptyString,
+		},
+	},
+) {}
+
 export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 	"LoadMoreHistory",
 	{
@@ -577,6 +610,8 @@ export const WsRpcRequest = Schema.Union(
 	GetToolContent,
 	GetModels,
 	ListSessions,
+	CreateSession,
+	ViewSession,
 	LoadMoreHistory,
 	RewindSession,
 	SendMessage,
@@ -605,6 +640,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetToolContent),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(ListSessions),
+	Rpc.fromTaggedRequest(CreateSession),
+	Rpc.fromTaggedRequest(ViewSession),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
 	Rpc.fromTaggedRequest(SendMessage),

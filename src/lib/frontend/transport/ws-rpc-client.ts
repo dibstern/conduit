@@ -3,6 +3,7 @@ import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import { getRuntime } from "./runtime.js";
 import {
+	type CreateSessionResponse,
 	type GetAgentsResponse,
 	type GetCommandsResponse,
 	type GetFileContentResponse,
@@ -45,6 +46,19 @@ export interface GetCommandsRpcInput {
 
 export interface GetProjectsRpcInput {
 	readonly projectSlug: string;
+}
+
+export interface CreateSessionRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly title?: string;
+	readonly requestId?: string;
+}
+
+export interface ViewSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId: string;
 }
 
 export interface GetTodoRpcInput {
@@ -227,6 +241,37 @@ const callGetProjects = (input: GetProjectsRpcInput) =>
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
 			return yield* client.GetProjects(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callCreateSession = (input: CreateSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.CreateSession({
+				projectSlug: input.projectSlug,
+				originId: input.originId,
+				...(input.title != null ? { title: input.title } : {}),
+				...(input.requestId != null ? { requestId: input.requestId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callViewSession = (input: ViewSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.ViewSession(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -548,6 +593,20 @@ export async function getProjectsRpc(
 ): Promise<GetProjectsResponse> {
 	const runtime = await getRuntime();
 	return await runtime.runPromise(callGetProjects(input));
+}
+
+export async function createSessionRpc(
+	input: CreateSessionRpcInput,
+): Promise<CreateSessionResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callCreateSession(input));
+}
+
+export async function viewSessionRpc(
+	input: ViewSessionRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callViewSession(input));
 }
 
 export async function getTodoRpc(

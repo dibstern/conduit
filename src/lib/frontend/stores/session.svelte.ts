@@ -3,7 +3,14 @@
 
 import { SvelteMap } from "svelte/reactivity";
 import type { ListSessionsResponse } from "../transport/ws-rpc.js";
-import { getAgentsRpc, getCommandsRpc } from "../transport/ws-rpc-client.js";
+import {
+	type CreateSessionRpcInput,
+	createSessionRpc,
+	getAgentsRpc,
+	getCommandsRpc,
+	type ViewSessionRpcInput,
+	viewSessionRpc,
+} from "../transport/ws-rpc-client.js";
 import type {
 	DateGroups,
 	RelayMessage,
@@ -11,6 +18,7 @@ import type {
 	SessionInfo,
 } from "../types.js";
 import { clearMessages, clearSessionChatState } from "./chat.svelte.js";
+import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
@@ -155,11 +163,30 @@ export function resetSessionCreation(): void {
  * shape so they can't diverge.
  */
 export function sendNewSession(
-	send: (data: Record<string, unknown>) => void,
+	start?: (input: CreateSessionRpcInput) => void,
 ): RequestId | null {
 	const requestId = requestNewSession();
 	if (!requestId) return null;
-	send({ type: "new_session", requestId });
+	const projectSlug = getCurrentSlug();
+	if (!projectSlug) {
+		failNewSession(requestId, "No active project");
+		return requestId;
+	}
+	const input: CreateSessionRpcInput = {
+		projectSlug,
+		requestId,
+		originId: getBrowserClientId(),
+	};
+	if (start) {
+		start(input);
+	} else {
+		void createSessionRpc(input).catch((error: unknown) =>
+			failNewSession(
+				requestId,
+				error instanceof Error ? error.message : String(error),
+			),
+		);
+	}
 	return requestId;
 }
 
@@ -406,7 +433,7 @@ export function consumeSwitchingFromId(): string | null {
  */
 export function switchToSession(
 	sessionId: string,
-	sendWs: (data: Record<string, unknown>) => void,
+	view?: (input: ViewSessionRpcInput) => void,
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
 	_switchingFromId = sessionState.currentId;
@@ -419,7 +446,18 @@ export function switchToSession(
 
 	const slug = getCurrentSlug();
 	if (slug) navigate(`/p/${slug}/s/${sessionId}`);
-	sendWs({ type: "view_session", sessionId });
+	if (slug) {
+		const input: ViewSessionRpcInput = {
+			projectSlug: slug,
+			sessionId,
+			originId: getBrowserClientId(),
+		};
+		if (view) {
+			view(input);
+		} else {
+			void viewSessionRpc(input).catch(() => undefined);
+		}
+	}
 	if (slug) {
 		void getAgentsRpc({ projectSlug: slug, sessionId })
 			.then(applyGetAgentsResponse)

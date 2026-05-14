@@ -19,13 +19,17 @@ import {
 } from "../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../handlers/reload.js";
 import {
+	createSessionForClient,
 	loadMoreHistoryForSession,
 	renameSessionForClient,
+	viewSessionForClient,
 } from "../handlers/session.js";
 import { getCommandsForSession, getTodoState } from "../handlers/settings.js";
 
 export {
 	CancelSession,
+	CreateSession,
+	type CreateSessionResponse,
 	GetAgents,
 	type GetAgentsResponse,
 	GetCommands,
@@ -68,6 +72,7 @@ export {
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
+	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
 	WsRpcRequest,
@@ -407,6 +412,38 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `ListSessions failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	CreateSession: (request) =>
+		createSessionForClient({
+			clientId: request.originId,
+			...(request.title != null ? { title: request.title } : {}),
+			...(request.requestId != null ? { requestId: request.requestId } : {}),
+		}).pipe(
+			Effect.map((session) => ({
+				projectSlug: request.projectSlug,
+				sessionId: session.id,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `CreateSession failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	ViewSession: (request) =>
+		viewSessionForClient({
+			clientId: request.originId,
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `ViewSession failed: ${String(error)}`,
 					}),
 				),
 			),

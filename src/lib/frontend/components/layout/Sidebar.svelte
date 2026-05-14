@@ -24,7 +24,7 @@
 	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import { terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { sendNewSession, sessionCreation } from "../../stores/session.svelte.js";
+	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
@@ -39,13 +39,13 @@
 	}
 
 	function handleNewSession() {
-		sendNewSession(wsSend);
+		sendNewSession();
 	}
 
 	function handleResumeSession() {
 		const id = prompt("Enter session ID to resume:");
 		if (id?.trim()) {
-			wsSend({ type: "switch_session", sessionId: id.trim() });
+			switchToSession(id.trim());
 		}
 	}
 

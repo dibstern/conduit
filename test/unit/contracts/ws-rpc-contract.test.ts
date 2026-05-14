@@ -4,6 +4,7 @@ import { Effect, Schema, type Scope } from "effect";
 import { expect } from "vitest";
 import {
 	CancelSession,
+	CreateSession,
 	GetAgents,
 	GetCommands,
 	GetFileContent,
@@ -26,6 +27,7 @@ import {
 	SwitchModel,
 	SwitchVariant,
 	SyncInputDraft,
+	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
 	WsRpcRequest,
@@ -94,6 +96,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						],
 						current: "demo",
 					}),
+				CreateSession: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						sessionId: "session-new",
+					}),
+				ViewSession: () => Effect.succeed({ ok: true as const }),
 				ListDirectories: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -198,6 +206,8 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetAgents")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetCommands")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetProjects")).toBe(true);
+		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListDirectories")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
@@ -396,6 +406,24 @@ describe("browser WebSocket RPC contract", () => {
 					{ id: "session-1", title: "Session 1" },
 				]);
 
+				const created = yield* client.CreateSession({
+					projectSlug: "demo",
+					originId: "browser-tab-a",
+					requestId: "request-1",
+				});
+				expect(created).toEqual({
+					projectSlug: "demo",
+					sessionId: "session-new",
+				});
+
+				expect(
+					yield* client.ViewSession({
+						projectSlug: "demo",
+						sessionId: "session-1",
+						originId: "browser-tab-a",
+					}),
+				).toEqual({ ok: true });
+
 				const history = yield* client.LoadMoreHistory({
 					projectSlug: "demo",
 					sessionId: "session-1",
@@ -446,6 +474,19 @@ describe("browser WebSocket RPC contract", () => {
 		expect(new GetAgents({ projectSlug: "demo" })._tag).toBe("GetAgents");
 		expect(new GetCommands({ projectSlug: "demo" })._tag).toBe("GetCommands");
 		expect(new GetProjects({ projectSlug: "demo" })._tag).toBe("GetProjects");
+		expect(
+			new CreateSession({
+				projectSlug: "demo",
+				originId: "browser-tab-a",
+			})._tag,
+		).toBe("CreateSession");
+		expect(
+			new ViewSession({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				originId: "browser-tab-a",
+			})._tag,
+		).toBe("ViewSession");
 		expect(
 			new ListDirectories({ projectSlug: "demo", path: "/tmp/" })._tag,
 		).toBe("ListDirectories");

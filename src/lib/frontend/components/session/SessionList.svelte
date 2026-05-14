@@ -110,7 +110,7 @@
 	}
 
 	function handleNewSession() {
-		if (!sendNewSession(wsSend)) return;
+		if (!sendNewSession()) return;
 		closeMobileSidebar();
 	}
 
@@ -155,7 +155,7 @@
 
 	function handleSwitchSession(id: string) {
 		if (id !== sessionState.currentId) {
-			switchToSession(id, wsSend);
+			switchToSession(id);
 		}
 		closeMobileSidebar();
 	}

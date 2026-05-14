@@ -329,9 +329,8 @@
 			planModeData = { mode: null, content: "" };
 
 			// Register notification-click → session navigation callback.
-			// Uses wsSend so switchToSession can notify the server.
 			onNavigateToSession((sessionId) => {
-				switchToSession(sessionId, wsSend);
+				switchToSession(sessionId);
 			});
 
 			// Listen for SW postMessage (push notification clicks)

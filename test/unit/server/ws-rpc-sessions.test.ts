@@ -4,14 +4,114 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+import {
+	makeMockSessionManagerService,
+	makeMockWebSocketHandler,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
 });
 
 describe("WsRpcServerLayer ListSessions", () => {
+	it.effect("creates a session for the originating browser tab", () => {
+		const createSession = vi.fn(() =>
+			Effect.succeed({
+				id: "session-new",
+				title: "New Session",
+			} as unknown as SessionDetail),
+		);
+		const sendDualSessionLists = vi.fn((send) =>
+			Effect.sync(() => {
+				send({
+					type: "session_list" as const,
+					sessions: [{ id: "session-new", title: "New Session" }],
+					roots: true,
+				});
+			}),
+		);
+		const wsHandler = makeMockWebSocketHandler();
+		const sessionManagerService = makeMockSessionManagerService({
+			createSession,
+			sendDualSessionLists,
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+
+			const result = yield* client.CreateSession({
+				projectSlug: "project-a",
+				originId: "browser-tab-a",
+				requestId: "request-1",
+			});
+
+			expect(result).toEqual({
+				projectSlug: "project-a",
+				sessionId: "session-new",
+			});
+			expect(createSession).toHaveBeenCalledWith(undefined);
+			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+				"browser-tab-a",
+				"session-new",
+			);
+			expect(wsHandler.sendTo).toHaveBeenCalledWith(
+				"browser-tab-a",
+				expect.objectContaining({
+					type: "session_switched",
+					id: "session-new",
+					requestId: "request-1",
+				}),
+			);
+			expect(sendDualSessionLists).toHaveBeenCalled();
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+					),
+				),
+			),
+		);
+	});
+
+	it.effect("views a session for the originating browser tab", () => {
+		const wsHandler = makeMockWebSocketHandler();
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+
+			const result = yield* client.ViewSession({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				originId: "browser-tab-a",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+				"browser-tab-a",
+				"session-1",
+			);
+			expect(wsHandler.sendTo).toHaveBeenCalledWith(
+				"browser-tab-a",
+				expect.objectContaining({
+					type: "session_switched",
+					id: "session-1",
+				}),
+			);
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(makeTestHandlerLayer({ wsHandler })),
+				),
+			),
+		);
+	});
+
 	it.effect("returns sessions for the requested root/all-session view", () => {
 		const listSessions = vi.fn((options?: { roots?: boolean }) =>
 			Effect.succeed(

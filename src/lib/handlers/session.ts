@@ -25,7 +25,7 @@ import {
 	type SessionHistorySource,
 	type SwitchClientOptions,
 } from "../session/session-switch.js";
-import type { PermissionId, RelayMessage } from "../shared-types.js";
+import type { PermissionId, RelayMessage, RequestId } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 import { getSessionInputDraft } from "./prompt.js";
 
@@ -290,16 +290,20 @@ const switchClientToSession = (
 		}
 	});
 
-export const handleViewSession = (
-	clientId: string,
-	payload: PayloadMap["view_session"],
-	skipMetadata?: boolean,
-) =>
+export const viewSessionForClient = ({
+	clientId,
+	sessionId,
+	skipMetadata,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly skipMetadata?: boolean;
+}) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
-		const { sessionId: id } = payload;
+		const id = sessionId;
 		if (!id) return;
 
 		yield* switchClientToSession(clientId, id);
@@ -320,20 +324,35 @@ export const handleViewSession = (
 		log.info(`client=${clientId} Viewing: ${id}`);
 	});
 
-export const handleNewSession = (
+export const handleViewSession = (
 	clientId: string,
-	payload: PayloadMap["new_session"],
+	payload: PayloadMap["view_session"],
+	skipMetadata?: boolean,
 ) =>
+	viewSessionForClient({
+		clientId,
+		sessionId: payload.sessionId,
+		...(skipMetadata != null ? { skipMetadata } : {}),
+	});
+
+export const createSessionForClient = ({
+	clientId,
+	title,
+	requestId,
+}: {
+	readonly clientId: string;
+	readonly title?: string;
+	readonly requestId?: string;
+}) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const { title, requestId } = payload;
 		const session = yield* sessionManagerService.createSession(title);
 
 		yield* switchClientToSession(clientId, session.id, {
-			...(requestId != null && { requestId }),
+			...(requestId != null && { requestId: requestId as RequestId }),
 			skipHistory: true,
 			skipPollerSeed: true,
 		});
@@ -355,7 +374,18 @@ export const handleNewSession = (
 		);
 
 		log.info(`client=${clientId} Created: ${session.id}`);
+		return session;
 	});
+
+export const handleNewSession = (
+	clientId: string,
+	payload: PayloadMap["new_session"],
+) =>
+	createSessionForClient({
+		clientId,
+		...(payload.title != null ? { title: payload.title } : {}),
+		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
+	}).pipe(Effect.asVoid);
 
 export const handleSwitchSession = (
 	clientId: string,

@@ -1,6 +1,8 @@
 export {
 	CancelSession,
 	type CommandInfo,
+	CreateSession,
+	type CreateSessionResponse,
 	GetAgents,
 	type GetAgentsResponse,
 	GetCommands,
@@ -44,6 +46,7 @@ export {
 	type SwitchVariantResponse,
 	SyncInputDraft,
 	type TodoItem,
+	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
 	WsRpcRequest,

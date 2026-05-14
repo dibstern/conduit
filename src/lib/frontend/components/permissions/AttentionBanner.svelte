@@ -64,7 +64,7 @@
 	function goToSession(sessionId: string) {
 		// Mark session as viewed in the reducer, then switch to it.
 		dispatch({ type: "session_viewed", sessionId });
-		switchToSession(sessionId, wsSend);
+		switchToSession(sessionId);
 	}
 
 	function dismiss() {
