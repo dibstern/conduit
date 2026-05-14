@@ -25,12 +25,21 @@ export interface PortScannerConfig {
 	onDiscovered: (port: number) => Effect.Effect<void>;
 	onLost: (port: number) => Effect.Effect<void>;
 	excludedPorts?: Set<number>;
+	getExcludedPorts?: () => Effect.Effect<ReadonlySet<number>>;
+	onScan?: (result: PortScanResult) => Effect.Effect<void>;
+}
+
+export interface PortScanResult {
+	readonly discovered: number[];
+	readonly lost: number[];
+	readonly active: number[];
 }
 
 // ─── Service interface ──────────────────────────────────────────────────────
 
 interface PortScannerService {
 	getKnownPorts: () => Effect.Effect<Set<number>>;
+	scanNow: () => Effect.Effect<PortScanResult>;
 }
 
 // ─── Tag ────────────────────────────────────────────────────────────────────
@@ -58,9 +67,13 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 				failureCounts: new Map(),
 			});
 
-			const runScan = Effect.gen(function* () {
+			const runScan: Effect.Effect<PortScanResult> = Effect.gen(function* () {
 				const [start, end] = config.portRange;
-				const excluded = config.excludedPorts ?? new Set<number>();
+				const excluded = new Set(config.excludedPorts ?? []);
+				if (config.getExcludedPorts != null) {
+					const dynamicExcluded = yield* config.getExcludedPorts();
+					for (const port of dynamicExcluded) excluded.add(port);
+				}
 				const ports = Array.from(
 					{ length: end - start + 1 },
 					(_, i) => start + i,
@@ -79,11 +92,16 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 				const current = yield* Ref.get(state);
 				const newKnown = new Set(current.knownPorts);
 				const newFailures = new Map(current.failureCounts);
+				const discovered: number[] = [];
+				const lost: number[] = [];
+				const active: number[] = [];
 
 				for (const { port, alive } of results) {
 					if (alive) {
+						active.push(port);
 						newFailures.delete(port);
 						if (!current.knownPorts.has(port)) {
+							discovered.push(port);
 							newKnown.add(port);
 							yield* config
 								.onDiscovered(port)
@@ -96,6 +114,7 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 					} else if (current.knownPorts.has(port)) {
 						const failures = (newFailures.get(port) ?? 0) + 1;
 						if (failures >= config.removalThreshold) {
+							lost.push(port);
 							newKnown.delete(port);
 							newFailures.delete(port);
 							yield* config
@@ -113,6 +132,14 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 					knownPorts: newKnown,
 					failureCounts: newFailures,
 				});
+
+				const result: PortScanResult = { discovered, lost, active };
+				if (config.onScan != null) {
+					yield* config
+						.onScan(result)
+						.pipe(Effect.catchAll((e) => Effect.logWarning("onScan error", e)));
+				}
+				return result;
 			});
 
 			// Background fiber — retries on unexpected errors
@@ -132,6 +159,7 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 			return {
 				getKnownPorts: () =>
 					Ref.get(state).pipe(Effect.map((s) => new Set(s.knownPorts))),
+				scanNow: () => runScan,
 			};
 		}),
 	);

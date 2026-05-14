@@ -47,6 +47,7 @@ import {
 } from "../Services/daemon-startup.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
 import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
+import { PortScannerTag } from "./port-scanner-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -258,7 +259,6 @@ import {
 	probeOpenCode,
 	probeOpenCodePort,
 } from "../../../daemon/daemon-utils.js";
-import { PortScanner, type ScanResult } from "../../../daemon/port-scanner.js";
 import { ProjectRegistry } from "../../../daemon/project-registry.js";
 import { fetchLatestVersion } from "../../../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
@@ -387,7 +387,6 @@ export async function startDaemonProcess(
 	let startTime = Date.now();
 	let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
 	let pushManager: PushNotificationManager | null = null;
-	let scanner: PortScanner | null = null;
 	// Layer-managed runtime — set after router setup, used by stop().
 	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic resolved at construction
 	let daemonRuntime: ManagedRuntime.ManagedRuntime<any, any> | null = null;
@@ -470,6 +469,24 @@ export async function startDaemonProcess(
 				},
 			});
 		});
+	}
+
+	function triggerPortScan(): Promise<{
+		discovered: number[];
+		lost: number[];
+		active: number[];
+	}> {
+		const runtime = shuttingDown ? null : daemonRuntime;
+		if (!runtime) {
+			return Promise.reject(new Error("Port scanner runtime is not available"));
+		}
+		return waitForDaemonRuntimeEffect(
+			runtime,
+			Effect.gen(function* () {
+				const portScanner = yield* PortScannerTag;
+				return yield* portScanner.scanNow();
+			}),
+		);
 	}
 
 	function syncEffectProjectRegistrySoon<R>(
@@ -732,12 +749,7 @@ export async function startDaemonProcess(
 				updateInstance: (id, updates) =>
 					instanceManager.updateInstance(id, updates),
 				persistConfig: () => persistConfig(),
-				...(scanner != null && {
-					triggerScan: () => {
-						if (!scanner) throw new Error("Scanner no longer available");
-						return scanner.scan();
-					},
-				}),
+				...(smartDefault && { triggerScan: triggerPortScan }),
 				setProjectInstance: (slug: string, instanceId: string) =>
 					setProjectInstance(slug, instanceId),
 				...(pushManager != null && { pushManager }),
@@ -937,11 +949,9 @@ export async function startDaemonProcess(
 		}
 		await flushConfigSave();
 		await saveDaemonConfig(buildConfig(), configDir);
-		// Drain imperative services not yet Layer-managed (Tasks 6-7)
-		await scanner?.drain();
+		// Drain imperative services not yet Layer-managed.
 		await instanceManager.drain();
 		await registry.drain();
-		scanner = null;
 		// Dispose the Layer-managed runtime — tears down in reverse order:
 		// servers (HTTP, IPC, onboarding), signal handlers, error handlers,
 		// PID/socket file cleanup, KeepAwake, VersionChecker, StorageMonitor,
@@ -1278,6 +1288,77 @@ export async function startDaemonProcess(
 			});
 		}, DAEMON_SHUTDOWN_DELAY_MS);
 	};
+	const portScannerOptions = smartDefault
+		? {
+				portRange: [4096, 4110] as [number, number],
+				scanInterval: Duration.millis(30_000),
+				removalThreshold: 3,
+				probeFn: (port: number) =>
+					Effect.tryPromise(() => probeOpenCodePort(port)).pipe(
+						Effect.catchAll(() => Effect.succeed(false)),
+					),
+				getExcludedPorts: () =>
+					Effect.sync(
+						() =>
+							new Set(
+								instanceManager
+									.getInstances()
+									.filter((instance) => instance.managed)
+									.map((instance) => instance.port),
+							),
+					),
+				onDiscovered: (port: number) =>
+					Effect.sync(() => {
+						const existing = instanceManager
+							.getInstances()
+							.find((instance) => instance.port === port);
+						if (existing) return;
+						const id = `discovered-${port}`;
+						try {
+							instanceManager.addInstance(id, {
+								name: `OpenCode :${port}`,
+								port,
+								managed: false,
+							});
+							log.info(`Auto-discovered OpenCode instance on port ${port}`);
+						} catch (err) {
+							log.warn(
+								`Failed to register discovered instance on port ${port}:`,
+								formatErrorDetail(err),
+							);
+						}
+					}),
+				onLost: (port: number) =>
+					Effect.sync(() => {
+						const instance = instanceManager
+							.getInstances()
+							.find(
+								(candidate) => candidate.port === port && !candidate.managed,
+							);
+						if (!instance) return;
+						try {
+							instanceManager.removeInstance(instance.id);
+							log.info(`Removed lost instance "${instance.id}" (port ${port})`);
+						} catch {
+							// Already removed
+						}
+					}),
+				onScan: (result: {
+					discovered: number[];
+					lost: number[];
+					active: number[];
+				}) =>
+					Effect.sync(() => {
+						if (result.discovered.length === 0 && result.lost.length === 0) {
+							return;
+						}
+						registry.broadcastToAll({
+							type: "instance_list",
+							instances: instanceManager.getInstances(),
+						});
+					}),
+			}
+		: undefined;
 	const daemonLiveOptions: DaemonLiveOptions = {
 		configDir,
 		pidPath,
@@ -1350,7 +1431,9 @@ export async function startDaemonProcess(
 			checkInterval: Duration.minutes(5),
 			highWaterMark: 0.9,
 		},
-		// PortScanner: deferred to Task 7
+		...(portScannerOptions !== undefined && {
+			portScanner: portScannerOptions,
+		}),
 		configPath: join(configDir, "daemon.json"),
 		configSnapshot: buildConfig,
 		relayFactory: (slug: string) =>
@@ -1408,69 +1491,6 @@ export async function startDaemonProcess(
 	log.info(
 		`[startup:${elapsed()}] TLS certs ${postStartupConfig.tlsEnabled ? "loaded" : "skipped"}`,
 	);
-
-	// ── Port scanner ──────────────────────────────────────────────────────
-	if (smartDefault) {
-		scanner = new PortScanner(
-			{
-				portRange: [4096, 4110],
-				intervalMs: 30_000,
-				probeTimeoutMs: 2000,
-				removalThreshold: 3,
-			},
-			(p) => probeOpenCodePort(p),
-		);
-
-		const managedPorts = new Set(
-			instanceManager
-				.getInstances()
-				.filter((i) => i.managed)
-				.map((i) => i.port),
-		);
-		scanner.excludePorts(managedPorts);
-
-		scanner.onScan = (result: ScanResult) => {
-			for (const p of result.discovered) {
-				const existing = instanceManager
-					.getInstances()
-					.find((i) => i.port === p);
-				if (existing) continue;
-				const id = `discovered-${p}`;
-				try {
-					instanceManager.addInstance(id, {
-						name: `OpenCode :${p}`,
-						port: p,
-						managed: false,
-					});
-					log.info(`Auto-discovered OpenCode instance on port ${p}`);
-				} catch (err) {
-					log.warn(
-						`Failed to register discovered instance on port ${p}:`,
-						formatErrorDetail(err),
-					);
-				}
-			}
-			for (const p of result.lost) {
-				const instance = instanceManager
-					.getInstances()
-					.find((i) => i.port === p && !i.managed);
-				if (instance) {
-					try {
-						instanceManager.removeInstance(instance.id);
-						log.info(`Removed lost instance "${instance.id}" (port ${p})`);
-					} catch {
-						// Already removed
-					}
-				}
-			}
-			if (result.discovered.length > 0 || result.lost.length > 0) {
-				const instances = instanceManager.getInstances();
-				registry.broadcastToAll({ type: "instance_list", instances });
-			}
-		};
-		scanner.start();
-		void scanner.scan();
-	}
 
 	log.info(`[startup:${elapsed()}] Port scanner + WS upgrade handler ready`);
 	log.info(

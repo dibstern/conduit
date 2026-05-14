@@ -895,6 +895,34 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not start the daemon port scanner through the legacy class bridge", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bnew PortScanner\(/,
+				reason:
+					"production daemon port scanning should be owned by PortScannerLive",
+			},
+			{
+				pattern: /\bscanner\?\.drain\(/,
+				reason: "PortScannerLive must drain through the daemon Layer scope",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("keeps daemon HTTP router ownership out of daemon-main", () => {
 		const retiredBridgePatterns = [
 			/effectRouterWithCors/,

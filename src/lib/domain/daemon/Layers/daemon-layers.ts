@@ -679,6 +679,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		? makePortScannerLive(options.portScanner)
 		: Layer.succeed(PortScannerTag, {
 				getKnownPorts: () => Effect.succeed(new Set<number>()),
+				scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 			});
 	const withBackground = Layer.mergeAll(
 		versionCheckLayer,
