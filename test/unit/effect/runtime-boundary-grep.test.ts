@@ -1364,6 +1364,40 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not let the RPC websocket handler own a private transport runtime", () => {
+		const path = "src/lib/server/ws-rpc-handler.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\btransportRuntime\b/,
+				reason:
+					"RPC websocket transport should be scoped into the relay runtime, not a second ManagedRuntime",
+			},
+			{
+				pattern: /\.run(?:Promise|Sync)\(/,
+				reason:
+					"RPC websocket upgrades should fork into the relay-owned transport runtime",
+			},
+			{
+				pattern: /ManagedRuntime\.make\(/,
+				reason:
+					"RPC websocket handler must not allocate a private ManagedRuntime",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not inject core relay ports into relay-stack", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

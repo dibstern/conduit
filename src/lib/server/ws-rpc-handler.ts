@@ -2,10 +2,11 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { Socket, SocketServer } from "@effect/platform";
 import { RpcSerialization, RpcServer } from "@effect/rpc";
-import { Effect, ManagedRuntime } from "effect";
+import type { ManagedRuntime } from "effect";
+import { Cause, Effect, Runtime } from "effect";
+import type { RuntimeFiber } from "effect/Fiber";
 import type { WebSocket } from "ws";
 import {
-	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
@@ -14,6 +15,15 @@ import { WsRpcGroup, WsRpcServerLayer } from "./ws-rpc.js";
 interface RpcWebSocketHandlerOptions {
 	readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown>;
 	readonly maxPayload?: number;
+}
+
+type RpcTransportRunFork = <A, E>(
+	effect: Effect.Effect<A, E, WsTransportTag>,
+) => RuntimeFiber<A, E>;
+
+interface RpcWebSocketHandlerRuntime {
+	readonly transport: WsTransport;
+	readonly runTransportFork: RpcTransportRunFork;
 }
 
 export interface RpcWebSocketHandlerShape {
@@ -48,34 +58,46 @@ const runRpcWebSocketConnection = (ws: WebSocket) =>
 		}),
 	);
 
+export const makeWsRpcWebSocketHandler = (
+	options: RpcWebSocketHandlerOptions,
+): Effect.Effect<WsRpcWebSocketHandler, never, WsTransportTag> =>
+	Effect.gen(function* () {
+		const transport = yield* WsTransportTag;
+		const runtime = yield* Effect.runtime<WsTransportTag>();
+		return new WsRpcWebSocketHandler(options, {
+			transport,
+			runTransportFork: Runtime.runFork(runtime),
+		});
+	});
+
 export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	private readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown>;
-	private readonly transportRuntime: ManagedRuntime.ManagedRuntime<
-		WsTransportTag,
-		never
-	>;
 	private readonly transport: WsTransport;
+	private readonly runTransportFork: RpcTransportRunFork;
 	private readonly clients = new Set<WebSocket>();
 	private closed = false;
 
-	constructor(options: RpcWebSocketHandlerOptions) {
+	constructor(
+		options: RpcWebSocketHandlerOptions,
+		runtime: RpcWebSocketHandlerRuntime,
+	) {
 		this.runtime = options.runtime;
-		this.transportRuntime = ManagedRuntime.make(
-			makeWsTransportLive({
-				noServer: true,
-				...(options.maxPayload != null && { maxPayload: options.maxPayload }),
-			}),
-		);
-		this.transport = this.transportRuntime.runSync(WsTransportTag);
+		this.transport = runtime.transport;
+		this.runTransportFork = runtime.runTransportFork;
 		this.transport.wss.on("connection", (ws) => this.onConnection(ws));
 	}
 
 	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-		this.transportRuntime
-			.runPromise(this.transport.handleUpgrade(req, socket, head))
-			.catch((err) => {
-				socket.destroy(err instanceof Error ? err : undefined);
-			});
+		this.forkTransport(
+			"handleUpgrade",
+			this.transport.handleUpgrade(req, socket, head).pipe(
+				Effect.catchAll((err) =>
+					Effect.sync(() => {
+						socket.destroy(err instanceof Error ? err : undefined);
+					}),
+				),
+			),
+		);
 	}
 
 	async drain(): Promise<void> {
@@ -85,12 +107,26 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 			ws.close();
 		}
 		this.clients.clear();
-		await this.transportRuntime.dispose();
 	}
 
 	private onConnection(ws: WebSocket): void {
 		this.clients.add(ws);
 		ws.on("close", () => this.clients.delete(ws));
 		this.runtime.runFork(runRpcWebSocketConnection(ws));
+	}
+
+	private forkTransport<A, E>(
+		op: string,
+		effect: Effect.Effect<A, E, WsTransportTag>,
+	): RuntimeFiber<unknown, never> {
+		return this.runTransportFork(
+			effect.pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.sync(() =>
+						console.error(`[ws-rpc-bridge] ${op} failed:`, Cause.pretty(cause)),
+					),
+				),
+			),
+		);
 	}
 }

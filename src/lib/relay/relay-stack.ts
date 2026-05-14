@@ -30,6 +30,7 @@ import {
 import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
+import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
 import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
@@ -102,8 +103,8 @@ import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
+	makeWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
-	WsRpcWebSocketHandler,
 } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -703,6 +704,10 @@ export async function createProjectRelay(
 		relayStateBridgesAndStatus,
 	);
 	const baseLayers = relayStateServicesAndBridges;
+	const fullBaseLayers = Layer.merge(
+		baseLayers,
+		makeWsTransportLive({ noServer: true }),
+	);
 
 	const effectRuntime: RelayRuntime = {
 		get runtime() {
@@ -729,16 +734,14 @@ export async function createProjectRelay(
 		makeRelayDefaultCommandQueueLive(defaultCommandQueue),
 		makeRelayCommandGateLive(config.slug),
 	).pipe(Layer.provide(baseLayers));
-	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
+	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	const rpcWsHandler = new WsRpcWebSocketHandler({
-		runtime: relayManagedRuntime,
-	});
 	let stopMonitoring = () => {};
 	let startup: {
 		api: OpenCodeAPI;
 		wsHandler: WebSocketHandlerShape;
+		rpcWsHandler: RpcWebSocketHandlerShape;
 		sseStream: SSEStreamPort;
 		sessionId: string;
 		orchestration: OrchestrationLayer;
@@ -751,6 +754,9 @@ export async function createProjectRelay(
 			Effect.gen(function* () {
 				const api = yield* OpenCodeAPITag;
 				const wsHandler = yield* WebSocketHandlerTag;
+				const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
+					runtime: relayManagedRuntime,
+				});
 				const statusSnapshot = yield* RelayStatusSnapshotTag;
 				const sseStream = yield* SSEStreamTag;
 				yield* Effect.tryPromise(() => api.app.path());
@@ -896,6 +902,7 @@ export async function createProjectRelay(
 				return {
 					api,
 					wsHandler,
+					rpcWsHandler,
 					sseStream,
 					sessionId,
 					orchestration,
@@ -905,13 +912,13 @@ export async function createProjectRelay(
 		);
 	} catch (err) {
 		stopMonitoring();
-		await rpcWsHandler.drain();
 		await relayManagedRuntime.dispose();
 		throw err;
 	}
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
-	const { sessionId, orchestration, sseStream, statusSnapshot } = startup;
+	const { rpcWsHandler, sessionId, orchestration, sseStream, statusSnapshot } =
+		startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
@@ -954,10 +961,10 @@ export async function createProjectRelay(
 			// Quiesce monitoring before runtime disposal so late status changes
 			// cannot restart message pollers during scoped shutdown.
 			stopMonitoring();
+			await rpcWsHandler.drain();
 			// Scoped finalizers own SSE drain, command-gate stop, provider instance
 			// shutdown, status-poller drain, and other Effect-managed resources.
 			await effectRuntime.dispose();
-			await rpcWsHandler.drain();
 		},
 	};
 }
