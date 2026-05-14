@@ -495,11 +495,15 @@ export const loadMoreHistoryForSession = ({
 		};
 	});
 
-/** Fork a session at a specific message point (ticket 5.3). */
-export const handleForkSession = (
-	clientId: string,
-	payload: PayloadMap["fork_session"],
-) =>
+export const forkSessionForClient = ({
+	clientId,
+	sessionId: requestedSessionId,
+	messageId,
+}: {
+	readonly clientId: string;
+	readonly sessionId?: string;
+	readonly messageId?: string;
+}) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -507,10 +511,8 @@ export const handleForkSession = (
 		const log = yield* LoggerTag;
 
 		const sessionId =
-			payload.sessionId || wsHandler.getClientSession(clientId) || "";
-		if (!sessionId) return;
-
-		const { messageId } = payload;
+			requestedSessionId || wsHandler.getClientSession(clientId) || "";
+		if (!sessionId) return undefined;
 
 		const forked = yield* Effect.tryPromise(() =>
 			client.session.fork(sessionId, {
@@ -592,4 +594,17 @@ export const handleForkSession = (
 		log.info(
 			`client=${clientId} Forked: ${sessionId} → ${forked.id}${messageId ? ` at ${messageId}` : ""}`,
 		);
+
+		return forked;
 	});
+
+/** Fork a session at a specific message point (ticket 5.3). */
+export const handleForkSession = (
+	clientId: string,
+	payload: PayloadMap["fork_session"],
+) =>
+	forkSessionForClient({
+		clientId,
+		...(payload.sessionId != null ? { sessionId: payload.sessionId } : {}),
+		...(payload.messageId != null ? { messageId: payload.messageId } : {}),
+	}).pipe(Effect.asVoid);

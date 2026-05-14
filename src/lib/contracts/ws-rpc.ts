@@ -192,6 +192,11 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	total: Schema.optional(Schema.Number),
 });
 
+export const ForkSessionResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	sessionId: Schema.String,
+});
+
 export const GetAgentsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	agents: Schema.Array(AgentInfoSchema),
@@ -273,6 +278,7 @@ export type SessionInfo = typeof SessionInfoSchema.Type;
 export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
+export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
@@ -537,6 +543,20 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 	},
 ) {}
 
+export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
+	"ForkSession",
+	{
+		failure: WsRpcError,
+		success: ForkSessionResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
+			messageId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 	"LoadMoreHistory",
 	{
@@ -626,6 +646,7 @@ export const WsRpcRequest = Schema.Union(
 	CreateSession,
 	ViewSession,
 	DeleteSession,
+	ForkSession,
 	LoadMoreHistory,
 	RewindSession,
 	SendMessage,
@@ -657,6 +678,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
 	Rpc.fromTaggedRequest(DeleteSession),
+	Rpc.fromTaggedRequest(ForkSession),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
 	Rpc.fromTaggedRequest(SendMessage),

@@ -6,6 +6,7 @@ import {
 	CancelSession,
 	CreateSession,
 	DeleteSession,
+	ForkSession,
 	GetAgents,
 	GetCommands,
 	GetFileContent,
@@ -104,6 +105,11 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				ViewSession: () => Effect.succeed({ ok: true as const }),
 				DeleteSession: () => Effect.succeed({ ok: true as const }),
+				ForkSession: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						sessionId: "session-forked",
+					}),
 				ListDirectories: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -211,6 +217,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("ForkSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListDirectories")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
@@ -435,6 +442,17 @@ describe("browser WebSocket RPC contract", () => {
 					}),
 				).toEqual({ ok: true });
 
+				const forked = yield* client.ForkSession({
+					projectSlug: "demo",
+					sessionId: "session-1",
+					messageId: "message-1",
+					originId: "browser-tab-a",
+				});
+				expect(forked).toEqual({
+					projectSlug: "demo",
+					sessionId: "session-forked",
+				});
+
 				const history = yield* client.LoadMoreHistory({
 					projectSlug: "demo",
 					sessionId: "session-1",
@@ -504,6 +522,14 @@ describe("browser WebSocket RPC contract", () => {
 				sessionId: "session-1",
 			})._tag,
 		).toBe("DeleteSession");
+		expect(
+			new ForkSession({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				messageId: "message-1",
+				originId: "browser-tab-a",
+			})._tag,
+		).toBe("ForkSession");
 		expect(
 			new ListDirectories({ projectSlug: "demo", path: "/tmp/" })._tag,
 		).toBe("ListDirectories");

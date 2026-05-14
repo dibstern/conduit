@@ -7,6 +7,7 @@ import type { SessionManagerService } from "../../../src/lib/domain/relay/Servic
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -153,6 +154,90 @@ describe("WsRpcServerLayer ListSessions", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+					),
+				),
+			),
+		);
+	});
+
+	it.effect("forks a session for the originating browser tab", () => {
+		const api = makeMockOpenCodeAPI();
+		vi.mocked(api.session.fork).mockResolvedValue({
+			id: "session-forked",
+			title: "Forked Session",
+			time: { created: 10, updated: 20 },
+		} as unknown as SessionDetail);
+		vi.mocked(api.session.message).mockResolvedValue({
+			id: "message-1",
+			time: { created: 9 },
+		} as unknown as Awaited<ReturnType<typeof api.session.message>>);
+		const setForkEntry = vi.fn(() => Effect.void);
+		const clearPaginationCursor = vi.fn(() => Effect.void);
+		const sendDualSessionLists = vi.fn((send) =>
+			Effect.sync(() => {
+				send({
+					type: "session_list" as const,
+					sessions: [{ id: "session-forked", title: "Forked Session" }],
+					roots: true,
+				});
+			}),
+		);
+		const wsHandler = makeMockWebSocketHandler();
+		const sessionManagerService = makeMockSessionManagerService({
+			listSessions: vi.fn(() =>
+				Effect.succeed([{ id: "session-1", title: "Original Session" }]),
+			),
+			clearPaginationCursor,
+			setForkEntry,
+			sendDualSessionLists,
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+
+			const result = yield* client.ForkSession({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				messageId: "message-1",
+				originId: "browser-tab-a",
+			});
+
+			expect(result).toEqual({
+				projectSlug: "project-a",
+				sessionId: "session-forked",
+			});
+			expect(api.session.fork).toHaveBeenCalledWith("session-1", {
+				messageID: "message-1",
+			});
+			expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
+			expect(setForkEntry).toHaveBeenCalledWith("session-forked", {
+				forkMessageId: "message-1",
+				parentID: "session-1",
+				forkPointTimestamp: 9,
+			});
+			expect(wsHandler.broadcast).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "session_forked",
+					sessionId: "session-forked",
+					parentId: "session-1",
+					parentTitle: "Original Session",
+				}),
+			);
+			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+				"browser-tab-a",
+				"session-forked",
+			);
+			expect(sendDualSessionLists).toHaveBeenCalled();
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							wsHandler,
+							sessionManagerService,
+						}),
 					),
 				),
 			),

@@ -21,6 +21,7 @@ import { reloadProviderSessionForClient } from "../handlers/reload.js";
 import {
 	createSessionForClient,
 	deleteSessionForClient,
+	forkSessionForClient,
 	loadMoreHistoryForSession,
 	renameSessionForClient,
 	viewSessionForClient,
@@ -32,6 +33,8 @@ export {
 	CreateSession,
 	type CreateSessionResponse,
 	DeleteSession,
+	ForkSession,
+	type ForkSessionResponse,
 	GetAgents,
 	type GetAgentsResponse,
 	GetCommands,
@@ -462,6 +465,34 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 						message: `DeleteSession failed: ${String(error)}`,
 					}),
 				),
+			),
+		),
+	ForkSession: (request) =>
+		forkSessionForClient({
+			clientId: request.originId,
+			...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
+			...(request.messageId != null ? { messageId: request.messageId } : {}),
+		}).pipe(
+			Effect.flatMap((session) =>
+				session == null
+					? Effect.fail(
+							new WsRpcError({
+								message: "ForkSession failed: no active session",
+							}),
+						)
+					: Effect.succeed({
+							projectSlug: request.projectSlug,
+							sessionId: session.id,
+						}),
+			),
+			Effect.catchAll((error) =>
+				error instanceof WsRpcError
+					? Effect.fail(error)
+					: Effect.fail(
+							new WsRpcError({
+								message: `ForkSession failed: ${String(error)}`,
+							}),
+						),
 			),
 		),
 	LoadMoreHistory: (request) =>

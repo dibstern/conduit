@@ -4,6 +4,8 @@ export {
 	CreateSession,
 	type CreateSessionResponse,
 	DeleteSession,
+	ForkSession,
+	type ForkSessionResponse,
 	GetAgents,
 	type GetAgentsResponse,
 	GetCommands,

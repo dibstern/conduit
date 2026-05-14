@@ -16,9 +16,13 @@
 		handleSessionList,
 	} from "../../stores/session.svelte.js";
 	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { deleteSessionRpc, listSessionsRpc, renameSessionRpc } from "../../transport/ws-rpc-client.js";
+	import {
+		deleteSessionRpc,
+		forkSessionRpc,
+		listSessionsRpc,
+		renameSessionRpc,
+	} from "../../transport/ws-rpc-client.js";
 	import { closeMobileSidebar, confirm, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -202,7 +206,13 @@
 	}
 
 	function handleCtxFork(id: string) {
-		wsSend({ type: "fork_session", sessionId: id });
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		void forkSessionRpc({
+			projectSlug,
+			sessionId: id,
+			originId: getBrowserClientId(),
+		});
 	}
 
 	function resetCleanupMode() {

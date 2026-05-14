@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { getRuntime } from "./runtime.js";
 import {
 	type CreateSessionResponse,
+	type ForkSessionResponse,
 	type GetAgentsResponse,
 	type GetCommandsResponse,
 	type GetFileContentResponse,
@@ -65,6 +66,13 @@ export interface DeleteSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
+}
+
+export interface ForkSessionRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly sessionId?: string;
+	readonly messageId?: string;
 }
 
 export interface GetTodoRpcInput {
@@ -294,6 +302,24 @@ const callDeleteSession = (input: DeleteSessionRpcInput) =>
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				...(input.originId != null ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callForkSession = (input: ForkSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.ForkSession({
+				projectSlug: input.projectSlug,
+				originId: input.originId,
+				...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
+				...(input.messageId != null ? { messageId: input.messageId } : {}),
 			});
 		}),
 	).pipe(
@@ -637,6 +663,13 @@ export async function deleteSessionRpc(
 ): Promise<void> {
 	const runtime = await getRuntime();
 	await runtime.runPromise(callDeleteSession(input));
+}
+
+export async function forkSessionRpc(
+	input: ForkSessionRpcInput,
+): Promise<ForkSessionResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callForkSession(input));
 }
 
 export async function getTodoRpc(
