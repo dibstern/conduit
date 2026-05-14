@@ -49,12 +49,19 @@ export async function getRuntime() {
 	return runtime;
 }
 
+/** Run transport-owned effects through the app-lifetime frontend runtime. */
+export async function runTransportEffect<A, E>(
+	effect: Effect.Effect<A, E, never>,
+): Promise<A> {
+	const rt = await getRuntime();
+	return await rt.runPromise(effect);
+}
+
 /** Interrupt the active stream fiber (connection lifetime). Called on disconnect/reconnect. */
 export async function interruptStream() {
 	if (activeStreamFiber) {
 		const fiber = activeStreamFiber;
-		const rt = await getRuntime();
-		await rt.runPromise(Fiber.interrupt(fiber));
+		await runTransportEffect(Fiber.interrupt(fiber));
 		if (activeStreamFiber === fiber) {
 			activeStreamFiber = null;
 		}

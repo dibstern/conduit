@@ -1,7 +1,7 @@
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
-import { getRuntime } from "./runtime.js";
+import { runTransportEffect } from "./runtime.js";
 import {
 	type CreateSessionResponse,
 	type DetectProxyResponse,
@@ -972,308 +972,263 @@ const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callCancelSession(input));
+	await runTransportEffect(callCancelSession(input));
 }
 
 export async function getModelsRpc(
 	input: GetModelsRpcInput,
 ): Promise<GetModelsResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetModels(input));
+	return await runTransportEffect(callGetModels(input));
 }
 
 export async function getAgentsRpc(
 	input: GetAgentsRpcInput,
 ): Promise<GetAgentsResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetAgents(input));
+	return await runTransportEffect(callGetAgents(input));
 }
 
 export async function getCommandsRpc(
 	input: GetCommandsRpcInput,
 ): Promise<GetCommandsResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetCommands(input));
+	return await runTransportEffect(callGetCommands(input));
 }
 
 export async function getProjectsRpc(
 	input: GetProjectsRpcInput,
 ): Promise<GetProjectsResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetProjects(input));
+	return await runTransportEffect(callGetProjects(input));
 }
 
 export async function addProjectRpc(
 	input: AddProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callAddProject(input));
+	return await runTransportEffect(callAddProject(input));
 }
 
 export async function removeProjectRpc(
 	input: RemoveProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callRemoveProject(input));
+	return await runTransportEffect(callRemoveProject(input));
 }
 
 export async function renameProjectRpc(
 	input: RenameProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callRenameProject(input));
+	return await runTransportEffect(callRenameProject(input));
 }
 
 export async function setProjectInstanceRpc(
 	input: SetProjectInstanceRpcInput,
 ): Promise<ProjectMutationResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callSetProjectInstance(input));
+	return await runTransportEffect(callSetProjectInstance(input));
 }
 
 export async function startInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callStartInstance(input));
+	return await runTransportEffect(callStartInstance(input));
 }
 
 export async function stopInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callStopInstance(input));
+	return await runTransportEffect(callStopInstance(input));
 }
 
 export async function removeInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callRemoveInstance(input));
+	return await runTransportEffect(callRemoveInstance(input));
 }
 
 export async function renameInstanceRpc(
 	input: RenameInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callRenameInstance(input));
+	return await runTransportEffect(callRenameInstance(input));
 }
 
 export async function scanNowRpc(
 	input: ScanNowRpcInput,
 ): Promise<ScanNowResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callScanNow(input));
+	return await runTransportEffect(callScanNow(input));
 }
 
 export async function detectProxyRpc(
 	input: DetectProxyRpcInput,
 ): Promise<DetectProxyResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callDetectProxy(input));
+	return await runTransportEffect(callDetectProxy(input));
 }
 
 export async function listPtysRpc(
 	input: ListPtysRpcInput,
 ): Promise<PtyListResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callListPtys(input));
+	return await runTransportEffect(callListPtys(input));
 }
 
 export async function createPtyRpc(input: CreatePtyRpcInput): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callCreatePty(input));
+	await runTransportEffect(callCreatePty(input));
 }
 
 export async function resizePtyRpc(input: ResizePtyRpcInput): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callResizePty(input));
+	await runTransportEffect(callResizePty(input));
 }
 
 export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callClosePty(input));
+	await runTransportEffect(callClosePty(input));
 }
 
 export async function createSessionRpc(
 	input: CreateSessionRpcInput,
 ): Promise<CreateSessionResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callCreateSession(input));
+	return await runTransportEffect(callCreateSession(input));
 }
 
 export async function viewSessionRpc(
 	input: ViewSessionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callViewSession(input));
+	await runTransportEffect(callViewSession(input));
 }
 
 export async function deleteSessionRpc(
 	input: DeleteSessionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callDeleteSession(input));
+	await runTransportEffect(callDeleteSession(input));
 }
 
 export async function forkSessionRpc(
 	input: ForkSessionRpcInput,
 ): Promise<ForkSessionResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callForkSession(input));
+	return await runTransportEffect(callForkSession(input));
 }
 
 export async function respondPermissionRpc(
 	input: RespondPermissionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callRespondPermission(input));
+	await runTransportEffect(callRespondPermission(input));
 }
 
 export async function answerQuestionRpc(
 	input: AnswerQuestionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callAnswerQuestion(input));
+	await runTransportEffect(callAnswerQuestion(input));
 }
 
 export async function rejectQuestionRpc(
 	input: RejectQuestionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callRejectQuestion(input));
+	await runTransportEffect(callRejectQuestion(input));
 }
 
 export async function getTodoRpc(
 	input: GetTodoRpcInput,
 ): Promise<GetTodoResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetTodo(input));
+	return await runTransportEffect(callGetTodo(input));
 }
 
 export async function getFileTreeRpc(
 	input: GetFileTreeRpcInput,
 ): Promise<GetFileTreeResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetFileTree(input));
+	return await runTransportEffect(callGetFileTree(input));
 }
 
 export async function getFileListRpc(
 	input: GetFileListRpcInput,
 ): Promise<GetFileListResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetFileList(input));
+	return await runTransportEffect(callGetFileList(input));
 }
 
 export async function getFileContentRpc(
 	input: GetFileContentRpcInput,
 ): Promise<GetFileContentResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetFileContent(input));
+	return await runTransportEffect(callGetFileContent(input));
 }
 
 export async function getToolContentRpc(
 	input: GetToolContentRpcInput,
 ): Promise<GetToolContentResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callGetToolContent(input));
+	return await runTransportEffect(callGetToolContent(input));
 }
 
 export async function listDirectoriesRpc(
 	input: ListDirectoriesRpcInput,
 ): Promise<ListDirectoriesResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callListDirectories(input));
+	return await runTransportEffect(callListDirectories(input));
 }
 
 export async function switchAgentRpc(
 	input: SwitchAgentRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callSwitchAgent(input));
+	await runTransportEffect(callSwitchAgent(input));
 }
 
 export async function switchContextWindowRpc(
 	input: SwitchContextWindowRpcInput,
 ): Promise<SwitchContextWindowResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callSwitchContextWindow(input));
+	return await runTransportEffect(callSwitchContextWindow(input));
 }
 
 export async function switchModelRpc(
 	input: SwitchModelRpcInput,
 ): Promise<SwitchModelResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callSwitchModel(input));
+	return await runTransportEffect(callSwitchModel(input));
 }
 
 export async function setDefaultModelRpc(
 	input: SetDefaultModelRpcInput,
 ): Promise<SetDefaultModelResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callSetDefaultModel(input));
+	return await runTransportEffect(callSetDefaultModel(input));
 }
 
 export async function reloadProviderSessionRpc(
 	input: ReloadProviderSessionRpcInput,
 ): Promise<ReloadProviderSessionResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callReloadProviderSession(input));
+	return await runTransportEffect(callReloadProviderSession(input));
 }
 
 export async function renameSessionRpc(
 	input: RenameSessionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callRenameSession(input));
+	await runTransportEffect(callRenameSession(input));
 }
 
 export async function switchVariantRpc(
 	input: SwitchVariantRpcInput,
 ): Promise<SwitchVariantResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callSwitchVariant(input));
+	return await runTransportEffect(callSwitchVariant(input));
 }
 
 export async function listSessionsRpc(
 	input: ListSessionsRpcInput,
 ): Promise<ListSessionsResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callListSessions(input));
+	return await runTransportEffect(callListSessions(input));
 }
 
 export async function loadMoreHistoryRpc(
 	input: LoadMoreHistoryRpcInput,
 ): Promise<LoadMoreHistoryResponse> {
-	const runtime = await getRuntime();
-	return await runtime.runPromise(callLoadMoreHistory(input));
+	return await runTransportEffect(callLoadMoreHistory(input));
 }
 
 export async function rewindSessionRpc(
 	input: RewindSessionRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callRewindSession(input));
+	await runTransportEffect(callRewindSession(input));
 }
 
 export async function sendMessageRpc(
 	input: SendMessageRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callSendMessage(input));
+	await runTransportEffect(callSendMessage(input));
 }
 
 export async function syncInputDraftRpc(
 	input: SyncInputDraftRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callSyncInputDraft(input));
+	await runTransportEffect(callSyncInputDraft(input));
 }
 
 export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
-	const runtime = await getRuntime();
-	await runtime.runPromise(callSetLogLevel(input));
+	await runTransportEffect(callSetLogLevel(input));
 }
