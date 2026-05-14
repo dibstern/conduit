@@ -114,85 +114,87 @@ const stopRelayFinalizer = (relay: Relay) =>
 export const makeRelayCacheLive = (
 	factory: RelayFactory,
 ): Layer.Layer<RelayCacheTag> =>
-	Layer.scoped(
-		RelayCacheTag,
-		Effect.gen(function* () {
-			// Capture the layer scope so ScopedRefs created at runtime
-			// (inside get) are tied to the layer lifecycle.
-			const layerScope = yield* Effect.scope;
-			const cacheRef = yield* Ref.make<CacheMap>(HashMap.empty());
-			const semaphore = yield* Effect.makeSemaphore(1);
+	Layer.scoped(RelayCacheTag, makeRelayCacheService(factory));
 
-			const get = (slug: string): Effect.Effect<Relay, unknown> =>
-				semaphore.withPermits(1)(
-					Effect.gen(function* () {
-						const map = yield* Ref.get(cacheRef);
-						const existing = HashMap.get(map, slug);
+export const makeRelayCacheService = (
+	factory: RelayFactory,
+): Effect.Effect<RelayCache, never, Scope.Scope> =>
+	Effect.gen(function* () {
+		// Capture the layer scope so ScopedRefs created at runtime
+		// (inside get) are tied to the layer lifecycle.
+		const layerScope = yield* Effect.scope;
+		const cacheRef = yield* Ref.make<CacheMap>(HashMap.empty());
+		const semaphore = yield* Effect.makeSemaphore(1);
 
-						if (Option.isSome(existing)) {
-							const value = yield* ScopedRef.get(existing.value);
-							if (value !== null) {
-								return value;
-							}
-						}
-
-						// Create a new ScopedRef for this slug, providing the
-						// layer scope so it's tied to the layer lifecycle.
-						const scopedRef = yield* ScopedRef.fromAcquire(
-							Effect.succeed<Relay | null>(null),
-						).pipe(Effect.provideService(Scope.Scope, layerScope));
-
-						// Set the ScopedRef with the factory + finalizer
-						yield* ScopedRef.set(
-							scopedRef,
-							Effect.gen(function* () {
-								const relay = yield* factory(slug);
-								yield* Effect.addFinalizer(() => stopRelayFinalizer(relay));
-								return relay;
-							}),
-						);
-
-						// Store in the HashMap
-						yield* Ref.update(cacheRef, (m) => HashMap.set(m, slug, scopedRef));
-
-						const relay = yield* ScopedRef.get(scopedRef);
-						if (relay === null) {
-							return yield* Effect.die(
-								new Error(`Relay cache returned null for "${slug}"`),
-							);
-						}
-						return relay;
-					}),
-				);
-
-			const peek = (slug: string): Effect.Effect<Option.Option<Relay>> =>
+		const get = (slug: string): Effect.Effect<Relay, unknown> =>
+			semaphore.withPermits(1)(
 				Effect.gen(function* () {
 					const map = yield* Ref.get(cacheRef);
 					const existing = HashMap.get(map, slug);
-					if (Option.isNone(existing)) {
-						return Option.none<Relay>();
-					}
-					const relay = yield* ScopedRef.get(existing.value);
-					return relay === null ? Option.none<Relay>() : Option.some(relay);
-				});
 
-			const invalidate = (slug: string): Effect.Effect<void> =>
-				semaphore.withPermits(1)(
-					Effect.gen(function* () {
-						const map = yield* Ref.get(cacheRef);
-						const existing = HashMap.get(map, slug);
-
-						if (Option.isSome(existing)) {
-							// Remove from HashMap first
-							yield* Ref.update(cacheRef, (m) => HashMap.remove(m, slug));
-
-							// Set ScopedRef to null — triggers previous scope close,
-							// which runs relay.stop() via the registered finalizer
-							yield* ScopedRef.set(existing.value, Effect.succeed(null));
+					if (Option.isSome(existing)) {
+						const value = yield* ScopedRef.get(existing.value);
+						if (value !== null) {
+							return value;
 						}
-					}),
-				);
+					}
 
-			return { get, peek, invalidate } satisfies RelayCache;
-		}),
-	);
+					// Create a new ScopedRef for this slug, providing the
+					// layer scope so it's tied to the layer lifecycle.
+					const scopedRef = yield* ScopedRef.fromAcquire(
+						Effect.succeed<Relay | null>(null),
+					).pipe(Effect.provideService(Scope.Scope, layerScope));
+
+					// Set the ScopedRef with the factory + finalizer
+					yield* ScopedRef.set(
+						scopedRef,
+						Effect.gen(function* () {
+							const relay = yield* factory(slug);
+							yield* Effect.addFinalizer(() => stopRelayFinalizer(relay));
+							return relay;
+						}),
+					);
+
+					// Store in the HashMap
+					yield* Ref.update(cacheRef, (m) => HashMap.set(m, slug, scopedRef));
+
+					const relay = yield* ScopedRef.get(scopedRef);
+					if (relay === null) {
+						return yield* Effect.die(
+							new Error(`Relay cache returned null for "${slug}"`),
+						);
+					}
+					return relay;
+				}),
+			);
+
+		const peek = (slug: string): Effect.Effect<Option.Option<Relay>> =>
+			Effect.gen(function* () {
+				const map = yield* Ref.get(cacheRef);
+				const existing = HashMap.get(map, slug);
+				if (Option.isNone(existing)) {
+					return Option.none<Relay>();
+				}
+				const relay = yield* ScopedRef.get(existing.value);
+				return relay === null ? Option.none<Relay>() : Option.some(relay);
+			});
+
+		const invalidate = (slug: string): Effect.Effect<void> =>
+			semaphore.withPermits(1)(
+				Effect.gen(function* () {
+					const map = yield* Ref.get(cacheRef);
+					const existing = HashMap.get(map, slug);
+
+					if (Option.isSome(existing)) {
+						// Remove from HashMap first
+						yield* Ref.update(cacheRef, (m) => HashMap.remove(m, slug));
+
+						// Set ScopedRef to null — triggers previous scope close,
+						// which runs relay.stop() via the registered finalizer
+						yield* ScopedRef.set(existing.value, Effect.succeed(null));
+					}
+				}),
+			);
+
+		return { get, peek, invalidate } satisfies RelayCache;
+	});

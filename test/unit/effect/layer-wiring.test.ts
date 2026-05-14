@@ -120,13 +120,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			checkInterval: Duration.hours(24),
 			highWaterMark: 0.9,
 		},
-		relayFactory: (slug: string) =>
-			Effect.succeed({
-				slug,
-				wsHandler: { handleUpgrade: () => {} },
-				rpcWsHandler: { handleUpgrade: () => {} },
-				stop: () => {},
-			}),
 	};
 };
 

@@ -775,18 +775,6 @@ export async function startDaemonProcess(
 		};
 	}
 
-	// ── Helper: ensureRelayStarted ────────────────────────────────────────
-	function ensureRelayStarted(slug: string): void {
-		const entry = registry.get(slug);
-		if (!entry) return;
-		if (entry.status === "ready") return;
-		if (entry.status === "registering" && registry.isStarting(slug)) return;
-		const opencodeUrl = resolveOpencodeUrl(entry.project.instanceId);
-		if (!opencodeUrl) return;
-		log.info({ slug }, "Lazy-starting relay on first client connection");
-		registry.startRelay(slug, buildRelayFactory(entry.project, opencodeUrl));
-	}
-
 	// ── Helper: setProjectInstance ────────────────────────────────────────
 	async function setProjectInstance(
 		slug: string,
@@ -1394,39 +1382,6 @@ export async function startDaemonProcess(
 			portScanner: portScannerOptions,
 		}),
 		configPath: join(configDir, "daemon.json"),
-		relayFactory: (slug: string) =>
-			Effect.tryPromise({
-				try: async () => {
-					ensureRelayStarted(slug);
-					const relay = await registry.waitForRelay(slug, 10_000);
-					return {
-						slug,
-						wsHandler: {
-							handleUpgrade: (
-								...args: Parameters<ProjectRelay["wsHandler"]["handleUpgrade"]>
-							) => {
-								registry.touchLastUsed(slug);
-								relay.wsHandler.handleUpgrade(...args);
-							},
-						},
-						rpcWsHandler: {
-							handleUpgrade: (
-								...args: Parameters<
-									ProjectRelay["rpcWsHandler"]["handleUpgrade"]
-								>
-							) => {
-								registry.touchLastUsed(slug);
-								relay.rpcWsHandler.handleUpgrade(...args);
-							},
-						},
-						getStatusSnapshot: () => relay.getStatusSnapshot(),
-						// Relay lifecycle is still owned by the legacy ProjectRegistry in
-						// this hybrid daemon; RelayCache only avoids duplicate WS starts.
-						stop: () => {},
-					};
-				},
-				catch: (cause) => cause,
-			}),
 	};
 
 	// Create and build the daemon Layer — starts servers, installs signal/error

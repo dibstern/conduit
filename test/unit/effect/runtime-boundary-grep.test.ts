@@ -1657,6 +1657,81 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not require callers to assemble the daemon relay factory", () => {
+		const daemonLayersPath = "src/lib/domain/daemon/Layers/daemon-layers.ts";
+		const daemonLayers = readFileSync(
+			join(REPO_ROOT, daemonLayersPath),
+			"utf8",
+		);
+		const optionsStart = daemonLayers.indexOf(
+			"export interface DaemonLiveOptions",
+		);
+		const makeDaemonStart = daemonLayers.indexOf(
+			"export const makeDaemonLive",
+			optionsStart,
+		);
+		expect(optionsStart).toBeGreaterThanOrEqual(0);
+		expect(makeDaemonStart).toBeGreaterThan(optionsStart);
+		const optionsSource = daemonLayers.slice(optionsStart, makeDaemonStart);
+
+		const daemonMainPath = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const daemonMain = readFileSync(join(REPO_ROOT, daemonMainPath), "utf8");
+		const daemonLiveOptions = daemonMain.match(
+			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
+		)?.[0];
+
+		const hits = [
+			...optionsSource.split("\n").flatMap((line, index) =>
+				/\brelayFactory:\s*RelayFactory\b/.test(line)
+					? [
+							{
+								path: daemonLayersPath,
+								line:
+									daemonLayers.slice(0, optionsStart).split("\n").length +
+									index,
+								source: line.trim(),
+								reason:
+									"DaemonLiveOptions should derive RelayCache from RelayFactoryTag inside the Layer graph",
+							},
+						]
+					: [],
+			),
+			...daemonLayers.split("\n").flatMap((line, index) =>
+				/makeRelayCacheLayer\(options\.relayFactory\)/.test(line)
+					? [
+							{
+								path: daemonLayersPath,
+								line: index + 1,
+								source: line.trim(),
+								reason:
+									"RelayCache construction should not consume a caller-injected factory",
+							},
+						]
+					: [],
+			),
+			...(daemonLiveOptions ?? "").split("\n").flatMap((line, index) =>
+				/\brelayFactory:\s*\(/.test(line)
+					? [
+							{
+								path: daemonMainPath,
+								line:
+									daemonMain.indexOf(daemonLiveOptions ?? "") < 0
+										? index + 1
+										: daemonMain
+												.slice(0, daemonMain.indexOf(daemonLiveOptions ?? ""))
+												.split("\n").length + index,
+								source: line.trim(),
+								reason:
+									"daemon-main should not bridge legacy registry relay creation into DaemonLiveOptions",
+							},
+						]
+					: [],
+			),
+		];
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not dispatch daemon IPC requests through Runtime.runPromise", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

@@ -72,16 +72,21 @@ import {
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
 import {
+	getInstances as getEffectInstances,
+	getInstanceUrl,
+	InstanceManagerStateTag,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
 import {
+	getProject,
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
+	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import {
-	makeRelayCacheLive,
-	type RelayFactory,
+	makeRelayCacheService,
+	RelayCacheTag,
 } from "../Services/relay-cache.js";
 import {
 	ConfigPersistenceLive,
@@ -93,7 +98,12 @@ import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectDiscoveryLive } from "./project-discovery-layer.js";
-import { HttpServerRefTag, RelayFactoryLive } from "./relay-factory-layer.js";
+import {
+	HttpServerRefTag,
+	RelayFactoryError,
+	RelayFactoryLive,
+	RelayFactoryTag,
+} from "./relay-factory-layer.js";
 import { SessionPrefetchLive } from "./session-prefetch-layer.js";
 import {
 	StorageMonitorLive,
@@ -309,12 +319,57 @@ export const makeDaemonStateFromDisk = (configPath: string) =>
 export const makeDaemonStateFromDiskNode = (configPath: string) =>
 	makeDaemonStateFromDisk(configPath).pipe(Layer.provide(NodeFileSystem.layer));
 
-/**
- * RelayCache layer — wraps makeRelayCacheLive with a factory function.
- * Re-exported for convenience in makeDaemonLive composition.
- */
-export const makeRelayCacheLayer = (factory: RelayFactory) =>
-	makeRelayCacheLive(factory);
+const resolveProjectOpencodeUrl = (project: {
+	readonly slug: string;
+	readonly instanceId?: string;
+}) =>
+	Effect.gen(function* () {
+		if (project.instanceId != null) {
+			return yield* getInstanceUrl(project.instanceId);
+		}
+
+		const instances = Array.from(yield* getEffectInstances);
+		const first = instances[0];
+		if (first == null) return null;
+		return yield* getInstanceUrl(first.id);
+	});
+
+export const makeRelayCacheLayer: Layer.Layer<
+	RelayCacheTag,
+	never,
+	RelayFactoryTag | ProjectRegistryTag | InstanceManagerStateTag
+> = Layer.scoped(
+	RelayCacheTag,
+	Effect.gen(function* () {
+		const relayFactory = yield* RelayFactoryTag;
+		const projectRegistry = yield* ProjectRegistryTag;
+		const instanceState = yield* InstanceManagerStateTag;
+
+		return yield* makeRelayCacheService((slug) =>
+			Effect.gen(function* () {
+				const project = yield* getProject(slug).pipe(
+					Effect.provideService(ProjectRegistryTag, projectRegistry),
+				);
+				const opencodeUrl = yield* resolveProjectOpencodeUrl(project).pipe(
+					Effect.provideService(InstanceManagerStateTag, instanceState),
+				);
+				if (opencodeUrl == null) {
+					return yield* new RelayFactoryError({
+						reason: `No OpenCode instance URL available for project "${slug}"`,
+					});
+				}
+				const relay = yield* relayFactory.create(project, opencodeUrl);
+				return {
+					slug,
+					wsHandler: relay.wsHandler,
+					rpcWsHandler: relay.rpcWsHandler,
+					getStatusSnapshot: () => relay.getStatusSnapshot(),
+					stop: () => relay.stop(),
+				};
+			}),
+		);
+	}),
+);
 
 // ─── Server Lifecycle Layers ──────────────────────────────────────────────
 
@@ -532,7 +587,7 @@ export const makePidFileLive = (
  *
  * Simplified from the original DaemonLiveOptions — fields that are now
  * provided by Layers (keepAwake config, versionCheck config, storageMon
- * config, configPath, relayFactory) have been moved to DaemonOptions or
+ * config, configPath) have been moved to DaemonOptions or
  * are derived internally. Only server lifecycle context (still imperative)
  * and optional background service configs remain.
  */
@@ -562,8 +617,6 @@ export interface DaemonLiveOptions {
 	// DaemonState + RelayCache (Tasks 1-4 integration)
 	/** Path to daemon.json config file. When set, loads config from disk. */
 	configPath?: string;
-	/** Factory for creating relay instances per slug. */
-	relayFactory: RelayFactory;
 }
 
 /**
@@ -656,7 +709,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(services));
 
-	const withRelayCache = makeRelayCacheLayer(options.relayFactory).pipe(
+	const withRelayCache = makeRelayCacheLayer.pipe(
 		Layer.provideMerge(registries),
 	);
 

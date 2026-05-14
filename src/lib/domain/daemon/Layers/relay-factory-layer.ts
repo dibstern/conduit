@@ -13,7 +13,7 @@
 import { mkdirSync } from "node:fs";
 import type http from "node:http";
 import { resolve } from "node:path";
-import { Context, Data, Effect, Layer, Ref, type Scope } from "effect";
+import { Context, Data, Effect, Layer, Ref } from "effect";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -57,19 +57,16 @@ export const HttpServerRefLive: Layer.Layer<HttpServerRefTag> = Layer.effect(
 /**
  * Factory service for creating ProjectRelay instances from Effect Context.
  *
- * The `create` method returns a scoped Effect that:
+ * The `create` method returns an Effect that:
  * 1. Opens a SQLite persistence DB for the project
  * 2. Calls createProjectRelay with dependencies from Context
- * 3. Registers a finalizer to close the persistence DB
- *
- * Callers must run the returned Effect in a Scope (e.g., via
- * Effect.scoped or within a Layer.scoped).
+ * 3. Lets RelayCache own the long-lived relay finalizer
  */
 export interface RelayFactory {
 	readonly create: (
 		project: StoredProject,
 		opencodeUrl: string,
-	) => Effect.Effect<ProjectRelay, RelayFactoryError, Scope.Scope>;
+	) => Effect.Effect<ProjectRelay, RelayFactoryError>;
 }
 
 // ─── RelayFactoryTag ────────────────────────────────────────────────────────
@@ -109,7 +106,7 @@ export const RelayFactoryLive = (
 				create: (
 					project: StoredProject,
 					opencodeUrl: string,
-				): Effect.Effect<ProjectRelay, RelayFactoryError, Scope.Scope> =>
+				): Effect.Effect<ProjectRelay, RelayFactoryError> =>
 					Effect.gen(function* () {
 						// Read current HTTP server from Ref
 						const httpServer = yield* Ref.get(httpServerRef);
