@@ -10,6 +10,7 @@ import type {
 	PendingPermissionRequestInput,
 } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
@@ -19,6 +20,7 @@ import { tagWithSessionId } from "../shared-types.js";
 import type { PendingPermission, RelayMessage } from "../types.js";
 import {
 	applyPipelineResult,
+	applyPipelineResultEffect,
 	type ProcessingTimeoutsPort,
 	processEvent,
 } from "./event-pipeline.js";
@@ -134,7 +136,10 @@ export interface SSEWiringDeps {
 	dualWriteHook?: DualWriteHookPort;
 }
 
-export type EffectSSEWiringDeps = Omit<SSEWiringDeps, "pendingInteractions">;
+export type EffectSSEWiringDeps = Omit<
+	SSEWiringDeps,
+	"pendingInteractions" | "processingTimeouts"
+>;
 
 // ─── Push notification helper ────────────────────────────────────────────────
 // Extracted so both handleSSEEvent (SSE path) and relay-stack.ts (status/message
@@ -362,7 +367,7 @@ function handleQuestionAsked(
 }
 
 function handleSSEEventAfterPending(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 ): void {
@@ -530,6 +535,185 @@ function handleSSEEventAfterPending(
 	}
 }
 
+const refreshSessionListAfterUpdateEffect = (
+	deps: EffectSSEWiringDeps,
+	statuses:
+		| Record<string, import("../instance/sdk-types.js").SessionStatus>
+		| undefined,
+) =>
+	Effect.tryPromise(() =>
+		deps.sessionService.sendDualSessionLists(
+			(msg) => deps.wsHandler.broadcast(msg),
+			{ statuses },
+		),
+	).pipe(
+		Effect.catchAll((err) =>
+			Effect.sync(() =>
+				deps.log.warn(
+					`Failed to refresh sessions after session.updated: ${err}`,
+				),
+			),
+		),
+	);
+
+const handleSSEEventAfterPendingEffect = (
+	deps: EffectSSEWiringDeps,
+	event: SSEEvent,
+	eventSessionId: string | undefined,
+) =>
+	Effect.gen(function* () {
+		const {
+			translator,
+			sessionService,
+			wsHandler,
+			pushManager,
+			pipelineLog,
+			log,
+		} = deps;
+
+		if (event.type === "session.updated") {
+			if (hasInfoWithSessionID(event.properties)) {
+				const info = event.properties.info;
+				const childId = info.sessionID ?? info.id;
+				const parentId =
+					typeof (info as Record<string, unknown>)["parentID"] === "string"
+						? ((info as Record<string, unknown>)["parentID"] as string)
+						: undefined;
+				if (childId && parentId) {
+					yield* Effect.sync(() =>
+						sessionService.addToParentMap(childId, parentId),
+					);
+				}
+			}
+
+			const statuses = deps.getSessionStatuses?.();
+			yield* refreshSessionListAfterUpdateEffect(deps, statuses);
+		}
+
+		if (isSessionErrorEvent(event)) {
+			const err = event.properties.error;
+			yield* Effect.sync(() =>
+				log.warn(
+					`event=${event.type} session=${eventSessionId ?? "?"} Session error: ${err?.name ?? "?"} — ${err?.data?.message ?? "(no message)"}`,
+				),
+			);
+		}
+
+		if (event.type === "session.status") {
+			const statusType = (
+				event.properties?.["status"] as { type?: string } | undefined
+			)?.type;
+			if (statusType === "idle" && eventSessionId && deps.statusPoller) {
+				yield* Effect.sync(() =>
+					deps.statusPoller?.notifySSEIdle(eventSessionId),
+				);
+			}
+		}
+
+		if (event.type === "permission.asked") return;
+
+		const translateResult = translator.translate(event, {
+			sessionId: eventSessionId,
+		});
+		if (!translateResult.ok) {
+			if (!translateResult.reason.startsWith("unhandled event type")) {
+				yield* Effect.sync(() =>
+					log.verbose(
+						`translate skip: ${translateResult.reason} (${event.type})`,
+					),
+				);
+			}
+			return;
+		}
+
+		const targetSessionId = eventSessionId;
+		const toSend: RelayMessage[] = translateResult.messages.map((m) =>
+			targetSessionId
+				? tagWithSessionId(m, targetSessionId)
+				: (m as RelayMessage),
+		);
+		for (let msg of toSend) {
+			if (
+				msg.type === "permission_request" ||
+				msg.type === "permission_resolved"
+			) {
+				yield* Effect.sync(() => wsHandler.broadcast(msg));
+				continue;
+			}
+
+			if (msg.type === "ask_user" || msg.type === "ask_user_resolved") {
+				if (msg.type === "ask_user") {
+					const askMsg = msg as Extract<RelayMessage, { type: "ask_user" }>;
+					yield* Effect.sync(() =>
+						log.debug(
+							`Routing ask_user to session=${targetSessionId ?? "?"}: toolId=${askMsg.toolId} questionCount=${askMsg.questions?.length ?? 0}`,
+						),
+					);
+				}
+				if (targetSessionId) {
+					yield* Effect.sync(() => {
+						wsHandler.sendToSession(targetSessionId, msg);
+						wsHandler.broadcast({
+							type: "notification_event",
+							eventType: msg.type,
+							...(targetSessionId != null
+								? { sessionId: targetSessionId }
+								: {}),
+						});
+					});
+				} else {
+					yield* Effect.sync(() => wsHandler.broadcast(msg));
+				}
+				continue;
+			}
+
+			const viewers = targetSessionId
+				? wsHandler.getClientsForSession(targetSessionId)
+				: [];
+			const pipeResult = processEvent(msg, targetSessionId, viewers);
+			msg = pipeResult.msg;
+
+			yield* applyPipelineResultEffect(pipeResult, targetSessionId, {
+				wsHandler,
+				log: pipelineLog,
+			});
+
+			if (msg.type === "done" && targetSessionId) {
+				yield* Effect.sync(() => deps.onDoneProcessed?.(targetSessionId));
+			}
+
+			const isSubagent =
+				targetSessionId != null &&
+				(deps.getSessionParentMap?.().has(targetSessionId) ?? false);
+			const notification = resolveNotifications(
+				msg,
+				pipeResult.route,
+				isSubagent,
+				targetSessionId,
+			);
+			if (notification.sendPush && pushManager) {
+				yield* Effect.sync(() =>
+					sendPushForEvent(
+						pushManager,
+						msg,
+						log,
+						buildPushContext(deps.slug, targetSessionId),
+					),
+				);
+			}
+			if (
+				notification.broadcastCrossSession &&
+				notification.crossSessionPayload
+			) {
+				yield* Effect.sync(() =>
+					wsHandler.broadcast(
+						notification.crossSessionPayload as import("../shared-types.js").RelayMessage,
+					),
+				);
+			}
+		}
+	});
+
 // ─── Handle a single SSE event ───────────────────────────────────────────────
 
 export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
@@ -579,9 +763,7 @@ export const handleSSEEventEffect = (
 			yield* pendingInteractions.markPermissionReplied(event.properties.id);
 		}
 
-		yield* Effect.sync(() =>
-			handleSSEEventAfterPending(deps, event, eventSessionId),
-		);
+		yield* handleSSEEventAfterPendingEffect(deps, event, eventSessionId);
 	});
 
 interface SSEConsumerCallbacks {
@@ -768,7 +950,9 @@ export const wireSSEConsumerEffect = (
 	consumer: SSEStreamEvents,
 ) =>
 	Effect.gen(function* () {
-		const runtime = yield* Effect.runtime<PendingInteractionServiceTag>();
+		const runtime = yield* Effect.runtime<
+			PendingInteractionServiceTag | OverridesStateTag
+		>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);
 			wireSSEConsumerWithCallbacks(deps, consumer, {

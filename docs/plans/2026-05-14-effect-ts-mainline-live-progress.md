@@ -404,3 +404,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Removed production monitoring's direct `sessionServiceBridge` and `processingTimeouts` dependencies from `relay-stack.ts`; sync `wireMonitoring()` remains for direct unit-test wiring.
 - Added runtime-boundary coverage so production monitoring cannot move back to `wireMonitoring({ ...sessionServiceBridge, processingTimeouts })`.
 - Verified locally with focused monitoring/effect-executor/event-pipeline/runtime-boundary tests, typecheck, lint, diff hygiene, and the initial-state plus SSE-aware poller integration tests.
+
+2026-05-14, SSE processing-timeout ownership cleanup:
+
+- Moved production SSE pipeline timeout side effects from relay-stack's `processingTimeouts` bridge into `handleSSEEventEffect()` via `applyPipelineResultEffect()`.
+- Removed the relay-stack `clearProcessingTimeout` / `resetProcessingTimeout` `runFork` bridge; sync `handleSSEEvent()` still owns direct unit-test wiring through `SSEWiringDeps`.
+- Added runtime-boundary and Effect-path behavior coverage so production SSE wiring cannot depend on relay-stack timeout bridges.
+- Verified locally with focused SSE/event-pipeline/runtime-boundary tests, typecheck, lint, diff hygiene, and the initial-state plus SSE-aware poller integration tests.

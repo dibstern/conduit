@@ -893,4 +893,37 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not bridge SSE processing timeouts through relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bconst processingTimeouts = \{/,
+				reason:
+					"SSE pipeline timeout side effects should run through the Effect overrides state",
+			},
+			{
+				pattern: /wireSSEConsumerEffect\([\s\S]*processingTimeouts/,
+				reason:
+					"production SSE wiring should not consume relay-stack timeout bridges",
+			},
+			{
+				pattern:
+					/relayManagedRuntime\.runFork\(\s*(?:clear|reset)ProcessingTimeout/,
+				reason: "processing timeout mutation must stay inside Effect programs",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

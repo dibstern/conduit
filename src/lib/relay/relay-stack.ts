@@ -55,9 +55,6 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
-	clearProcessingTimeout,
-	PROCESSING_TIMEOUT_DURATION,
-	resetProcessingTimeout,
 	setDefaultModel,
 	setDefaultVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
@@ -479,19 +476,6 @@ export async function createProjectRelay(
 
 	let wsHandler: WebSocketHandlerShape;
 
-	// Late-binding runtime: callbacks fire after full relay initialization, but
-	// registering them here keeps the external WebSocket boundary thin.
-	const processingTimeouts = {
-		clearProcessingTimeout: (sessionId: string) => {
-			relayManagedRuntime.runFork(clearProcessingTimeout(sessionId));
-		},
-		resetProcessingTimeout: (sessionId: string) => {
-			relayManagedRuntime.runFork(
-				resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
-			);
-		},
-	};
-
 	const hasInstanceManagement = hasInstanceManagementConfig(config);
 
 	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
@@ -773,7 +757,6 @@ export async function createProjectRelay(
 	const sseWiringDeps = {
 		translator,
 		sessionService: sessionServiceBridge,
-		processingTimeouts,
 		wsHandler,
 		...(config.pushManager != null && { pushManager: config.pushManager }),
 		log: sseLog,
