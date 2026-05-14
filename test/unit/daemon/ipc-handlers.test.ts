@@ -6,8 +6,8 @@ import {
 // Verify that Effect-returning IPC handlers correctly interact with services.
 
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer, Ref } from "effect";
-import { expect } from "vitest";
+import { Deferred, Effect, Exit, Layer, Ref } from "effect";
+import { expect, vi } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
 import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
@@ -535,6 +535,48 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 				expect(result.instance).toBeDefined();
 			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns an IPC error when instance add rejects", () =>
+			Effect.gen(function* () {
+				const persistConfig = vi.fn();
+				const layers = Layer.mergeAll(
+					makeDaemonStateLive(),
+					makeMockProjectMgmt(),
+					makeMockInstanceMgmt({
+						addInstance: () => {
+							throw new Error("Max instances reached (5)");
+						},
+						persistConfig,
+					}),
+					makeOverridesStateLive(),
+					makeMockKeepAwake(),
+					makeMockConfigRef(),
+					makeMockShutdownSignal(),
+					Layer.succeed(ConfigPersistenceTag, {
+						requestSave: Effect.void,
+						flush: Effect.void,
+					}),
+				);
+
+				const exit = yield* Effect.exit(
+					handleInstanceAdd({
+						cmd: "instance_add",
+						name: "Overflow",
+						managed: true,
+						port: 5001,
+					}).pipe(Effect.provide(layers)),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: "Error: Max instances reached (5)",
+					});
+				}
+				expect(persistConfig).not.toHaveBeenCalled();
+			}),
 		);
 	});
 

@@ -6,7 +6,7 @@ import { InstanceMgmtTag } from "./management-service.js";
 // 3. Returns an IPCResponse-compatible object
 // 4. Error channel is `never` (handlers catch/transform expected errors)
 
-import { Deferred, Effect, Ref, type Schema } from "effect";
+import { Data, Deferred, Effect, Ref, type Schema } from "effect";
 import { hashPin } from "../../../auth.js";
 import type { IPCCommandSchema } from "../../../daemon/ipc-protocol.js";
 import type { IPCResponse } from "../../../types.js";
@@ -38,6 +38,16 @@ type CmdOf<C extends string> = Extract<DecodedCommand, { cmd: C }>;
 
 /** Dependencies needed for persistConfig calls. */
 type PersistDeps = ConfigPersistenceTag;
+
+class InstanceMgmtOperationFailed extends Data.TaggedError(
+	"InstanceMgmtOperationFailed",
+)<{
+	readonly operation: string;
+	readonly cause: unknown;
+}> {}
+
+const formatInstanceMgmtFailure = (failure: InstanceMgmtOperationFailed) =>
+	String(failure.cause);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -356,10 +366,25 @@ export const handleInstanceAdd = (
 		};
 		if (cmd.env !== undefined) config.env = cmd.env as Record<string, string>;
 		if (cmd.url !== undefined) config.url = cmd.url;
-		const instance = mgmt.addInstance(id, config);
-		mgmt.persistConfig();
-
-		return { ok: true, instance };
+		return yield* Effect.try({
+			try: () => {
+				const instance = mgmt.addInstance(id, config);
+				mgmt.persistConfig();
+				return { ok: true, instance };
+			},
+			catch: (cause) =>
+				new InstanceMgmtOperationFailed({
+					operation: "addInstance",
+					cause,
+				}),
+		}).pipe(
+			Effect.catchAll((failure) =>
+				Effect.succeed({
+					ok: false,
+					error: formatInstanceMgmtFailure(failure),
+				}),
+			),
+		);
 	});
 
 export const handleInstanceRemove = (
