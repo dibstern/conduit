@@ -7,6 +7,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
+	autoStartManagedDefault,
 	type CrashCounter,
 	CrashCounterTag,
 	recordCrashCounter,
@@ -19,7 +20,10 @@ import {
 
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-import { invalidInstanceUrl } from "../../../src/lib/instance/instance-errors.js";
+import {
+	instanceNotFound,
+	invalidInstanceUrl,
+} from "../../../src/lib/instance/instance-errors.js";
 
 // ─── Mock helpers ──────────────────────────────────────────────────────────
 
@@ -267,6 +271,81 @@ describe("daemon startup effects", () => {
 
 				expect(Exit.isSuccess(exit)).toBe(true);
 				expect(addInstance).toHaveBeenCalledTimes(2);
+			}),
+		);
+
+		it.effect(
+			"continues when auto-start rejects with an expected instance error",
+			() =>
+				Effect.gen(function* () {
+					const instances: DaemonInstanceConfig[] = [
+						{
+							id: "inst-missing",
+							name: "Missing Instance",
+							port: 4001,
+							managed: true,
+						},
+						{
+							id: "inst-good",
+							name: "Good Instance",
+							port: 4002,
+							managed: true,
+						},
+					];
+
+					const startInstance = vi.fn().mockImplementation((id: string) => {
+						if (id === "inst-missing") {
+							return Promise.reject(instanceNotFound(id));
+						}
+						return Promise.resolve();
+					});
+
+					const mockMgmt = makeMockInstanceMgmt({ startInstance });
+					const exit = yield* Effect.exit(
+						autoStartManagedDefault.pipe(
+							Effect.provide(
+								Layer.mergeAll(
+									makeDaemonStateLive({ instances }),
+									Layer.succeed(InstanceMgmtTag, mockMgmt),
+								),
+							),
+						),
+					);
+
+					expect(Exit.isSuccess(exit)).toBe(true);
+					expect(startInstance).toHaveBeenCalledTimes(2);
+				}),
+		);
+
+		it.effect("treats untyped auto-start rejections as startup defects", () =>
+			Effect.gen(function* () {
+				const instances: DaemonInstanceConfig[] = [
+					{
+						id: "inst-bug",
+						name: "Buggy Instance",
+						port: 4001,
+						managed: true,
+					},
+				];
+
+				const startInstance = vi
+					.fn()
+					.mockRejectedValue(new Error("unexpected bug"));
+
+				const mockMgmt = makeMockInstanceMgmt({ startInstance });
+				const exit = yield* Effect.exit(
+					autoStartManagedDefault.pipe(
+						Effect.provide(
+							Layer.mergeAll(
+								makeDaemonStateLive({ instances }),
+								Layer.succeed(InstanceMgmtTag, mockMgmt),
+							),
+						),
+					),
+				);
+
+				expect(Exit.isFailure(exit)).toBe(true);
+				expect(startInstance).toHaveBeenCalledTimes(1);
 			}),
 		);
 	});

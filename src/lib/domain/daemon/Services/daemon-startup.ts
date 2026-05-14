@@ -34,6 +34,13 @@ class InstanceRehydrationFailed extends Data.TaggedError(
 	readonly cause: unknown;
 }> {}
 
+class InstanceAutoStartFailed extends Data.TaggedError(
+	"InstanceAutoStartFailed",
+)<{
+	readonly instanceId: string;
+	readonly cause: unknown;
+}> {}
+
 const isTaggedInstanceLimitExceeded = (cause: unknown): boolean =>
 	typeof cause === "object" &&
 	cause !== null &&
@@ -61,7 +68,7 @@ const isExpectedLegacyInstanceManagerError = (cause: unknown): boolean => {
 	return isTaggedExpectedInstanceManagerError(cause);
 };
 
-const formatRehydrationCause = (cause: unknown): string =>
+const formatInstanceManagerCause = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
 
 // ─── CrashCounter service ──────────────────────────────────────────────────
@@ -166,7 +173,7 @@ export const rehydrateInstances: Effect.Effect<
 						return Effect.die(failure.cause);
 					}
 					return Effect.logWarning(
-						`Rehydration failed for instance ${failure.instanceId}: ${formatRehydrationCause(failure.cause)}`,
+						`Rehydration failed for instance ${failure.instanceId}: ${formatInstanceManagerCause(failure.cause)}`,
 					);
 				}),
 				Effect.annotateLogs("instanceId", inst.id),
@@ -229,12 +236,22 @@ export const autoStartManagedDefault: Effect.Effect<
 	yield* Effect.forEach(
 		state.instances.filter((i) => i.managed),
 		(inst: DaemonInstanceConfig) =>
-			Effect.tryPromise(() => mgmt.startInstance(inst.id)).pipe(
-				Effect.catchTag("UnknownException", (e) =>
-					Effect.logWarning(
-						`Failed to auto-start instance ${inst.id}: ${e.message}`,
-					),
-				),
+			Effect.tryPromise({
+				try: () => mgmt.startInstance(inst.id),
+				catch: (cause) =>
+					new InstanceAutoStartFailed({
+						instanceId: inst.id,
+						cause,
+					}),
+			}).pipe(
+				Effect.catchTag("InstanceAutoStartFailed", (failure) => {
+					if (!isExpectedLegacyInstanceManagerError(failure.cause)) {
+						return Effect.die(failure.cause);
+					}
+					return Effect.logWarning(
+						`Failed to auto-start instance ${failure.instanceId}: ${formatInstanceManagerCause(failure.cause)}`,
+					);
+				}),
 				Effect.annotateLogs("instanceId", inst.id),
 			),
 		{ concurrency: 1, discard: true },

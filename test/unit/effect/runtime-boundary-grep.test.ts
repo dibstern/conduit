@@ -799,6 +799,25 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not hide daemon startup auto-start failures behind UnknownException", () => {
+		const path = "src/lib/domain/daemon/Services/daemon-startup.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const patterns = [
+			/Effect\.tryPromise\(\s*\(\)\s*=>\s*mgmt\.startInstance/,
+			/catchTag\("UnknownException",\s*\(e\)\s*=>\s*Effect\.logWarning/,
+		] as const;
+
+		const hits = patterns.flatMap((pattern) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("routes daemon config ref mutations through the commit helper", () => {
 		const roots = [
 			join(REPO_ROOT, "src/lib/domain/daemon"),
