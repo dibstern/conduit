@@ -19,6 +19,7 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
+import { DEFAULT_OPENCODE_PORT } from "../../../constants.js";
 import {
 	instanceAlreadyExists,
 	instanceLimitExceeded,
@@ -79,6 +80,10 @@ export interface InstanceManagerState {
 	config: InstanceManagerConfig;
 }
 
+export interface InstanceManagerStateOptions {
+	readonly defaultOpencodeUrl?: string | undefined;
+}
+
 export const emptyInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
 ): InstanceManagerState => ({
@@ -88,14 +93,48 @@ export const emptyInstanceManagerState = (
 	config: { ...DEFAULT_CONFIG, ...config },
 });
 
+const defaultInstanceForUrl = (url: string): DaemonInstanceConfig => {
+	let port = DEFAULT_OPENCODE_PORT;
+	try {
+		const parsed = new URL(url);
+		port = parsed.port
+			? Number.parseInt(parsed.port, 10)
+			: DEFAULT_OPENCODE_PORT;
+	} catch {
+		port = DEFAULT_OPENCODE_PORT;
+	}
+
+	return {
+		id: "default",
+		name: "Default",
+		port,
+		managed: false,
+		url,
+	};
+};
+
+const withDefaultOpencodeInstance = (
+	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
+	options?: InstanceManagerStateOptions,
+): ReadonlyArray<DaemonInstanceConfig> => {
+	const defaultUrl = options?.defaultOpencodeUrl;
+	if (defaultUrl == null) return initialInstances;
+	if (initialInstances.some((instance) => instance.id === "default")) {
+		return initialInstances;
+	}
+	return [defaultInstanceForUrl(defaultUrl), ...initialInstances];
+};
+
 const buildInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
+	options?: InstanceManagerStateOptions,
 ): InstanceManagerState => {
+	const instances = withDefaultOpencodeInstance(initialInstances, options);
 	const now = Date.now();
 	return {
 		instances: HashMap.fromIterable(
-			initialInstances.map((instance) => {
+			instances.map((instance) => {
 				const opencodeInstance: OpenCodeInstance = {
 					id: instance.id,
 					name: instance.name,
@@ -110,7 +149,7 @@ const buildInstanceManagerState = (
 			}),
 		),
 		externalUrls: HashMap.fromIterable(
-			initialInstances.flatMap((instance) =>
+			instances.flatMap((instance) =>
 				instance.url === undefined
 					? []
 					: ([[instance.id, instance.url]] as const),
@@ -147,14 +186,16 @@ export class PollerFibersTag extends Context.Tag("PollerFibers")<
 export const makeInstanceManagerStateLive = (
 	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
+	options?: InstanceManagerStateOptions,
 ): Layer.Layer<InstanceManagerStateTag | PollerFibersTag> =>
 	Layer.scoped(
 		InstanceManagerStateTag,
-		Ref.make(buildInstanceManagerState(config, initialInstances)),
+		Ref.make(buildInstanceManagerState(config, initialInstances, options)),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
 
 export const makeInstanceManagerStateFromDaemonStateLive = (
 	config?: Partial<InstanceManagerConfig>,
+	options?: InstanceManagerStateOptions,
 ): Layer.Layer<
 	InstanceManagerStateTag | PollerFibersTag,
 	never,
@@ -166,7 +207,7 @@ export const makeInstanceManagerStateFromDaemonStateLive = (
 			const stateRef = yield* DaemonStateTag;
 			const state = yield* Ref.get(stateRef);
 			return yield* Ref.make(
-				buildInstanceManagerState(config, state.instances),
+				buildInstanceManagerState(config, state.instances, options),
 			);
 		}),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));

@@ -11,7 +11,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
+import {
+	Deferred,
+	Duration,
+	Effect,
+	HashMap,
+	Layer,
+	PubSub,
+	Ref,
+} from "effect";
 import { expect } from "vitest";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
@@ -262,6 +270,33 @@ describe("makeDaemonLive wiring", () => {
 				expect(fibers).toBeDefined();
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
+
+	it.scoped("seeds the CLI OpenCode URL into Effect instance state", () => {
+		const options = {
+			...makeMockOptions(),
+			defaultOpencodeUrl: "http://127.0.0.1:4567",
+		};
+		return Effect.gen(function* () {
+			const stateRef = yield* InstanceManagerStateTag;
+			const state = yield* Ref.get(stateRef);
+			const instance = HashMap.get(state.instances, "default");
+			const externalUrl = HashMap.get(state.externalUrls, "default");
+
+			expect(instance._tag).toBe("Some");
+			if (instance._tag === "Some") {
+				expect(instance.value).toMatchObject({
+					id: "default",
+					name: "Default",
+					port: 4567,
+					managed: false,
+				});
+			}
+			expect(externalUrl._tag).toBe("Some");
+			if (externalUrl._tag === "Some") {
+				expect(externalUrl.value).toBe("http://127.0.0.1:4567");
+			}
+		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+	});
 
 	it.scoped("provides RelayFactoryTag and HttpServerRefTag (Tier 2)", () =>
 		Effect.gen(function* () {

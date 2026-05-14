@@ -552,6 +552,7 @@ export interface DaemonLiveOptions {
 	versionCheck?: Parameters<typeof VersionCheckerLive>[0];
 	storageMon?: Parameters<typeof StorageMonitorLive>[0];
 	portScanner?: Parameters<typeof PortScannerLive>[0];
+	defaultOpencodeUrl?: string;
 
 	// DaemonOptions-derived values (computed by caller from DaemonOptions)
 	configDir: string;
@@ -635,9 +636,17 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const projectRegistryLayer = options.configPath
 		? makeProjectRegistryFromDaemonStateLive
 		: makeProjectRegistryLive();
+	const instanceManagerOptions = {
+		...(options.defaultOpencodeUrl !== undefined && {
+			defaultOpencodeUrl: options.defaultOpencodeUrl,
+		}),
+	};
 	const instanceManagerLayer = options.configPath
-		? makeInstanceManagerStateFromDaemonStateLive()
-		: makeInstanceManagerStateLive();
+		? makeInstanceManagerStateFromDaemonStateLive(
+				undefined,
+				instanceManagerOptions,
+			)
+		: makeInstanceManagerStateLive(undefined, [], instanceManagerOptions);
 
 	const registries = Layer.mergeAll(
 		projectRegistryLayer,

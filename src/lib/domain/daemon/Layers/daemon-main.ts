@@ -1335,6 +1335,7 @@ export async function startDaemonProcess(
 			scheduleShutdown: scheduleLegacyPostResponseShutdown,
 		},
 		staticDir,
+		...(initialUrl != null && { defaultOpencodeUrl: initialUrl }),
 		initialConfig: initialRuntimeConfig,
 		configMirror: {
 			set: (config) =>
