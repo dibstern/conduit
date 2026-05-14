@@ -936,6 +936,30 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not dispatch daemon IPC requests through Runtime.runPromise", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-layers.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /Runtime\.runPromise\(runtime\)/,
+				reason:
+					"the daemon IPC socket callback should use the daemon runtime callback boundary, not a Promise runtime re-entry",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not drive relay internals directly from daemon-main IPC handlers", () => {
 		const retiredBridgePatterns = [
 			{

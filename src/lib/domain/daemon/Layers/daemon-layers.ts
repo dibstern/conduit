@@ -5,10 +5,12 @@
 
 import { NodeFileSystem } from "@effect/platform-node";
 import {
+	Cause,
 	Context,
 	Data,
 	Deferred,
 	Effect,
+	Exit,
 	Layer,
 	PubSub,
 	Ref,
@@ -30,6 +32,7 @@ import {
 	startHttpServer,
 	startIPCServer,
 	startOnboardingServer,
+	type TaggedIpcDispatcher,
 } from "../../../daemon/daemon-lifecycle.js";
 import {
 	removePidFile,
@@ -383,10 +386,7 @@ export const makeIpcServerLive = (
 				startIPCServer(
 					ctx,
 					ipcContext,
-					(request, rpcLayer) =>
-						Runtime.runPromise(runtime)(
-							dispatchTaggedRequestEffect(request, rpcLayer),
-						),
+					makeTaggedIpcDispatcher(runtime),
 					resolvedPostResponseActions,
 				),
 			);
@@ -395,6 +395,33 @@ export const makeIpcServerLive = (
 			);
 		}),
 	);
+
+type IpcDispatchServices =
+	| ConfigPersistenceTag
+	| DaemonConfigRefTag
+	| DaemonStateTag
+	| KeepAwakeTag
+	| ShutdownSignalTag;
+
+function makeTaggedIpcDispatcher(
+	runtime: Runtime.Runtime<IpcDispatchServices>,
+): TaggedIpcDispatcher {
+	return (request, rpcLayer) =>
+		new Promise((resolve, reject) => {
+			Runtime.runCallback(runtime)(
+				dispatchTaggedRequestEffect(request, rpcLayer),
+				{
+					onExit: (exit) => {
+						if (Exit.isSuccess(exit)) {
+							resolve(exit.value);
+							return;
+						}
+						reject(Cause.squash(exit.cause));
+					},
+				},
+			);
+		});
+}
 
 /**
  * Onboarding server layer — starts an HTTP-only onboarding server when TLS is
