@@ -236,7 +236,6 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AuthManager } from "../../../auth.js";
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
 import {
 	DAEMON_SHUTDOWN_DELAY_MS,
@@ -524,14 +523,6 @@ export async function startDaemonProcess(
 		});
 
 	// ── Core services ─────────────────────────────────────────────────────
-	// AuthManager with reactive pinHash: initially reads from local `pinHash`
-	// variable. After the daemon runtime is built, pinHash changes go through
-	// DaemonConfigRef (updated via IPC handlers), and AuthManager reads them
-	// reactively through the getPinHash getter closure.
-	const auth = new AuthManager({
-		getPinHash: () => readRuntimeConfigSnapshot().pinHash,
-	});
-
 	const instanceManager = new InstanceManager();
 	const registry = new ProjectRegistry();
 
@@ -1307,7 +1298,6 @@ export async function startDaemonProcess(
 		},
 		onboarding: onboardingDeps,
 		httpRouter: {
-			auth,
 			staticDir,
 			getProjects: getRouterProjects,
 			removeProject,

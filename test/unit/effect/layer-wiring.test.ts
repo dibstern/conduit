@@ -15,7 +15,6 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
 import { expect } from "vitest";
-import { AuthManager } from "../../../src/lib/auth.js";
 import type { OnboardingServerDeps } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
@@ -111,7 +110,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		},
 		onboarding: {} as OnboardingServerDeps,
 		httpRouter: {
-			auth: new AuthManager(),
 			staticDir: process.cwd(),
 			getProjects: () => [],
 			removeProject: () => Promise.resolve(),

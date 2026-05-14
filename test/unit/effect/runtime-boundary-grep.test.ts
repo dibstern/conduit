@@ -376,6 +376,71 @@ describe("Effect runtime boundary grep", () => {
 		expect([...daemonMainHits, ...contextHits]).toEqual([]);
 	});
 
+	it("does not route daemon HTTP auth through daemon-main config snapshot callbacks", () => {
+		const daemonMainPath = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const daemonMainSource = readFileSync(
+			join(REPO_ROOT, daemonMainPath),
+			"utf8",
+		);
+		const daemonMainHits = [
+			{
+				pattern: /\bnew AuthManager\b/,
+				reason:
+					"daemon HTTP auth should use AuthManagerFromConfigLive, not a daemon-main AuthManager",
+			},
+			{
+				pattern: /getPinHash:\s*\(\) => readRuntimeConfigSnapshot\(\)\.pinHash/,
+				reason: "auth pinHash reads should stay inside the Effect auth layer",
+			},
+		].flatMap(({ pattern, reason }) =>
+			daemonMainSource.split("\n").flatMap((line, index) =>
+				pattern.test(line)
+					? [
+							{
+								path: daemonMainPath,
+								line: index + 1,
+								source: line.trim(),
+								reason,
+							},
+						]
+					: [],
+			),
+		);
+
+		const routerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
+		const routerSource = readFileSync(join(REPO_ROOT, routerPath), "utf8");
+		const daemonOptionsStart = routerSource.indexOf(
+			"export interface DaemonHttpRouterOptions",
+		);
+		const standaloneOptionsStart = routerSource.indexOf(
+			"export interface StandaloneHttpRouterOptions",
+			daemonOptionsStart,
+		);
+		expect(daemonOptionsStart).toBeGreaterThanOrEqual(0);
+		expect(standaloneOptionsStart).toBeGreaterThan(daemonOptionsStart);
+		const daemonOptionsSource = routerSource.slice(
+			daemonOptionsStart,
+			standaloneOptionsStart,
+		);
+		const routerHits = daemonOptionsSource.split("\n").flatMap((line, index) =>
+			/\bauth:\s*AuthManager\b/.test(line)
+				? [
+						{
+							path: routerPath,
+							line:
+								routerSource.slice(0, daemonOptionsStart).split("\n").length +
+								index,
+							source: line.trim(),
+							reason:
+								"DaemonHttpRouterOptions should not accept a separate AuthManager",
+						},
+					]
+				: [],
+		);
+
+		expect([...daemonMainHits, ...routerHits]).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{

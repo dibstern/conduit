@@ -22,7 +22,11 @@ import {
 import type { PushSubscriptionData } from "../../../server/push.js";
 import type { ThemesResponse } from "../../../shared-types.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
-import { makeAuthManagerLive } from "./auth-middleware.js";
+import {
+	type AuthManagerService,
+	AuthManagerTag,
+	makeAuthManagerLive,
+} from "./auth-middleware.js";
 
 export type { RouterProjectInfo };
 
@@ -47,7 +51,6 @@ export interface DaemonHttpRouterPushManager {
 }
 
 export interface DaemonHttpRouterOptions {
-	readonly auth: AuthManager;
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly removeProject: (slug: string) => Promise<unknown>;
@@ -77,7 +80,7 @@ export interface StandaloneHttpRouterOptions {
 }
 
 interface HttpRouterRequestHandlerOptions {
-	readonly auth: AuthManager;
+	readonly authLayer: Layer.Layer<AuthManagerTag>;
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly removeProject?: (slug: string) => Effect.Effect<void, unknown>;
@@ -99,7 +102,7 @@ const buildHttpRouterRequestHandler = (
 	options: HttpRouterRequestHandlerOptions,
 ): DaemonHttpRequestHandler => {
 	let routerLayer = Layer.mergeAll(
-		makeAuthManagerLive(options.auth),
+		options.authLayer,
 		Layer.succeed(StaticDirTag, options.staticDir),
 		Layer.succeed(ProjectsProvider, { getProjects: options.getProjects }),
 		Layer.succeed(SetupInfoProvider, {
@@ -181,7 +184,7 @@ export const makeStandaloneHttpRouterRequestHandler = (
 	options: StandaloneHttpRouterOptions,
 ): DaemonHttpRequestHandler =>
 	buildHttpRouterRequestHandler({
-		auth: options.auth,
+		authLayer: makeAuthManagerLive(options.auth),
 		staticDir: options.staticDir,
 		getProjects: options.getProjects,
 		removeProject: (slug) =>
@@ -202,9 +205,10 @@ export const makeStandaloneHttpRouterRequestHandler = (
 export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 	Layer.effect(
 		DaemonHttpRequestHandlerTag,
-		Effect.sync(() =>
-			buildHttpRouterRequestHandler({
-				auth: options.auth,
+		Effect.gen(function* () {
+			const auth: AuthManagerService = yield* AuthManagerTag;
+			return buildHttpRouterRequestHandler({
+				authLayer: Layer.succeed(AuthManagerTag, auth),
 				staticDir: options.staticDir,
 				getProjects: options.getProjects,
 				removeProject: (slug: string) =>
@@ -216,6 +220,6 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 				getHealthResponse: options.getHealthResponse,
 				loadThemes: options.loadThemes,
 				pushManager: options.pushManager,
-			}),
-		),
+			});
+		}),
 	);
