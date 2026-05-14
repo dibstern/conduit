@@ -25,12 +25,12 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	},
 	{
 		path: "src/lib/provider/claude/claude-permission-bridge.ts",
-		linePattern: /Effect\.runPromise\($/,
+		linePattern: /Effect\.runPromise\(/,
 		reason: "Claude SDK canUseTool callback requires a Promise-shaped wait",
 	},
 	{
 		path: "src/lib/instance/sdk-factory.ts",
-		linePattern: /Effect\.runPromise\(fetchWithRetry\(/,
+		linePattern: /Effect\.runPromise\(/,
 		reason: "OpenCode SDK and GapEndpoints require a Promise-shaped fetch",
 	},
 ];

@@ -19,7 +19,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import type { EventSink, PermissionDecision } from "../types.js";
+import type {
+	EventSink,
+	PermissionDecision,
+	PermissionResponse,
+} from "../types.js";
 import type {
 	CanUseTool,
 	ClaudeSessionContext,
@@ -49,6 +53,12 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 			},
 		);
 	});
+}
+
+function runPermissionRequestAtSdkBoundary(
+	effect: Effect.Effect<PermissionResponse, unknown>,
+): Promise<PermissionResponse> {
+	return Effect.runPromise(effect);
 }
 
 export class ClaudePermissionBridge {
@@ -104,7 +114,7 @@ export class ClaudePermissionBridge {
 
 		try {
 			// Fire permission.asked at the SDK callback boundary.
-			const sinkPromise = Effect.runPromise(
+			const sinkPromise = runPermissionRequestAtSdkBoundary(
 				sink.requestPermission({
 					requestId,
 					sessionId: ctx.sessionId,

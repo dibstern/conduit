@@ -21,4 +21,14 @@ describe("SDK factory Effect boundary", () => {
 			);
 		}
 	});
+
+	it("keeps retry fetch Promise execution behind a named Fetch API boundary", () => {
+		const source = readSource("src/lib/instance/sdk-factory.ts");
+
+		expect(source).toContain("runRetryFetchAtFetchBoundary");
+		expect(source.match(/Effect\.runPromise/g)).toHaveLength(1);
+		expect(source).toMatch(
+			/function runRetryFetchAtFetchBoundary[\s\S]*Effect\.runPromise/,
+		);
+	});
 });

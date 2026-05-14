@@ -29,6 +29,14 @@ export interface SdkFactoryResult {
 	authHeaders: Record<string, string>;
 }
 
+function runRetryFetchAtFetchBoundary(
+	input: RequestInfo | URL,
+	init: RequestInit | undefined,
+	retry: RetryFetchOptions,
+): ReturnType<typeof fetch> {
+	return Effect.runPromise(fetchWithRetry(input, init, retry));
+}
+
 /**
  * Creates an authenticated OpenCode SDK client.
  *
@@ -39,7 +47,7 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 	const baseFetch: typeof fetch =
 		options.fetch ??
 		((input: RequestInfo | URL, init?: RequestInit) =>
-			Effect.runPromise(fetchWithRetry(input, init, options.retry ?? {})));
+			runRetryFetchAtFetchBoundary(input, init, options.retry ?? {}));
 
 	const password = options.auth?.password ?? ENV.opencodePassword;
 	const username = options.auth?.username ?? ENV.opencodeUsername;
