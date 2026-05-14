@@ -57,6 +57,7 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
+	setDefaultAgent,
 	setDefaultModel,
 	setDefaultVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
@@ -79,6 +80,7 @@ import {
 } from "../domain/server/Layers/http-router-layer.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
+import { setDefaultModelForRelay } from "../handlers/model.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
@@ -302,6 +304,13 @@ export interface ProjectRelay {
 	getStatusSnapshot(): ProjectRelayStatusSnapshot;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
+	/** Set the relay-wide default agent through the relay-owned Effect runtime. */
+	setDefaultAgent(agent: string): Promise<void>;
+	/** Set the relay-wide default model through the relay-owned Effect runtime. */
+	setDefaultModel(model: {
+		readonly providerID: string;
+		readonly modelID: string;
+	}): Promise<void>;
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -788,6 +797,20 @@ export async function createProjectRelay(
 
 		isAnySessionProcessing() {
 			return getProjectRelayStatusSnapshot().isProcessing;
+		},
+
+		setDefaultAgent(agent: string) {
+			return effectRuntime.runtime.runPromise(setDefaultAgent(agent));
+		},
+
+		setDefaultModel(model) {
+			return effectRuntime.runtime.runPromise(
+				setDefaultModelForRelay({
+					clientId: "ipc",
+					provider: model.providerID,
+					model: model.modelID,
+				}).pipe(Effect.asVoid),
+			);
 		},
 
 		async stop() {

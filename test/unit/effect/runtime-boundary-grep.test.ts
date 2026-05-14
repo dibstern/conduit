@@ -266,6 +266,29 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not drive relay internals directly from daemon-main IPC handlers", () => {
+		const retiredBridgePatterns = [
+			{
+				pattern: /relay\.effectRuntime\.runtime\.runPromise/,
+				reason:
+					"daemon-main should use the ProjectRelay public surface, not its runtime internals",
+			},
+		] as const;
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not keep unused monitoring bridge services", () => {
 		const retiredNames =
 			/\b(?:MonitoringStateLive|MonitoringStateTag|SSETrackerLive|SSETrackerTag)\b/;

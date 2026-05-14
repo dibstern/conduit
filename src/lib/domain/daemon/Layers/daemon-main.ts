@@ -35,7 +35,6 @@ import {
 	Supervisor,
 } from "effect";
 import type { DaemonOptions } from "../../../daemon/daemon-types.js";
-import { setDefaultAgent } from "../../relay/Services/session-overrides-state.js";
 import {
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
@@ -269,7 +268,6 @@ import { ProjectRegistry } from "../../../daemon/project-registry.js";
 import { fetchLatestVersion } from "../../../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
-import { setDefaultModelForRelay } from "../../../handlers/model.js";
 import { InstanceManager } from "../../../instance/instance-manager.js";
 import { createLogger, setLogFormat, setLogLevel } from "../../../logger.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
@@ -1338,20 +1336,14 @@ export async function startDaemonProcess(
 		) => instanceManager.updateInstance(id, updates),
 		setProjectAgent: async (slug: string, agent: string) => {
 			const relay = getReadyProjectRelay(slug);
-			await relay.effectRuntime.runtime.runPromise(setDefaultAgent(agent));
+			await relay.setDefaultAgent(agent);
 		},
 		setProjectModel: async (
 			slug: string,
 			model: { providerID: string; modelID: string },
 		) => {
 			const relay = getReadyProjectRelay(slug);
-			await relay.effectRuntime.runtime.runPromise(
-				setDefaultModelForRelay({
-					clientId: "ipc",
-					provider: model.providerID,
-					model: model.modelID,
-				}),
-			);
+			await relay.setDefaultModel(model);
 		},
 	};
 
