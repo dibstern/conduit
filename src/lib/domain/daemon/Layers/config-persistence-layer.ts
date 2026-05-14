@@ -56,19 +56,6 @@ export class ConfigPersistenceWriteError extends Data.TaggedError(
 	}
 }
 
-export class ConfigPersistenceSnapshotError extends Data.TaggedError(
-	"ConfigPersistenceSnapshotError",
-)<{
-	operation: string;
-	cause: unknown;
-}> {
-	get message(): string {
-		const inner =
-			this.cause instanceof Error ? this.cause.message : String(this.cause);
-		return `${this.operation} failed: ${inner}`;
-	}
-}
-
 export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 	const configRef = yield* DaemonConfigRefTag;
 	const runtime = yield* Ref.get(configRef);
@@ -125,18 +112,6 @@ export const ConfigSnapshotFromEffectStateLive = Layer.effect(
 		} satisfies ConfigSnapshot;
 	}),
 );
-
-export const makeConfigSnapshotLive = (build: () => DaemonConfig) =>
-	Layer.succeed(ConfigSnapshotTag, {
-		build: Effect.try({
-			try: build,
-			catch: (cause) =>
-				new ConfigPersistenceSnapshotError({
-					operation: "buildDaemonConfigSnapshot",
-					cause,
-				}),
-		}),
-	});
 
 // ─── ConfigWriter service ──────────────────────────────────────────────────
 

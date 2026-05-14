@@ -364,34 +364,6 @@ describe("makeDaemonLive wiring", () => {
 					tlsEnabled: false,
 					hostExplicit: false,
 				}),
-				configSnapshot: () => ({
-					pid: process.pid,
-					port: 53124,
-					pinHash: null,
-					tls: false,
-					debug: false,
-					keepAwake: false,
-					dangerouslySkipPermissions: false,
-					projects: [
-						{
-							path: "/tmp/alpha",
-							slug: "alpha",
-							title: "Alpha",
-							addedAt: 1700000000000,
-							instanceId: "remote-1",
-							sessionCount: 4,
-						},
-					],
-					instances: [
-						{
-							id: "remote-1",
-							name: "Remote",
-							port: 4096,
-							managed: false,
-							url: "https://opencode.example.test",
-						},
-					],
-				}),
 			} satisfies DaemonLiveOptions;
 
 			const persisted = yield* Effect.gen(function* () {
@@ -402,20 +374,15 @@ describe("makeDaemonLive wiring", () => {
 				yield* configPersistence.flush;
 				const raw = readFileSync(join(configDir, "daemon.json"), "utf-8");
 				return JSON.parse(raw) as {
+					port: number;
 					projects: Array<{ slug: string; sessionCount?: number }>;
 					instances: Array<{ id: string; url?: string }>;
 				};
 			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 
-			expect(persisted.projects).toEqual([
-				expect.objectContaining({ slug: "alpha", sessionCount: 4 }),
-			]);
-			expect(persisted.instances).toEqual([
-				expect.objectContaining({
-					id: "remote-1",
-					url: "https://opencode.example.test",
-				}),
-			]);
+			expect(persisted.port).toBe(53124);
+			expect(persisted.projects).toEqual([]);
+			expect(persisted.instances).toEqual([]);
 		}),
 	);
 

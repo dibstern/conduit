@@ -804,6 +804,31 @@ describe("Effect runtime boundary grep", () => {
 		expect(daemonMain).not.toContain("new PushNotificationManager");
 	});
 
+	it("does not pass daemon config snapshots through DaemonLiveOptions", () => {
+		const daemonLayersPath = "src/lib/domain/daemon/Layers/daemon-layers.ts";
+		const daemonLayers = readFileSync(
+			join(REPO_ROOT, daemonLayersPath),
+			"utf8",
+		);
+		const liveOptions = daemonLayers.match(
+			/export interface DaemonLiveOptions \{[\s\S]*?\n\}/,
+		)?.[0];
+		expect(liveOptions).not.toBeUndefined();
+		expect(liveOptions).not.toMatch(/\bconfigSnapshot\b/);
+		expect(daemonLayers).toContain("ConfigSnapshotFromEffectStateLive");
+		expect(daemonLayers).not.toContain("makeConfigSnapshotLive");
+
+		const daemonMain = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/daemon/Layers/daemon-main.ts"),
+			"utf8",
+		);
+		const daemonLiveOptions = daemonMain.match(
+			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
+		)?.[0];
+		expect(daemonLiveOptions).not.toBeUndefined();
+		expect(daemonLiveOptions).not.toMatch(/\bconfigSnapshot\b/);
+	});
+
 	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

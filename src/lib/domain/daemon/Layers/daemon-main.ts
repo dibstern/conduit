@@ -1393,7 +1393,6 @@ export async function startDaemonProcess(
 			portScanner: portScannerOptions,
 		}),
 		configPath: join(configDir, "daemon.json"),
-		configSnapshot: buildConfig,
 		relayFactory: (slug: string) =>
 			Effect.tryPromise({
 				try: async () => {

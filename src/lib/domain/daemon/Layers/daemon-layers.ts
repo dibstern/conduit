@@ -17,7 +17,6 @@ import {
 	Runtime,
 	Stream,
 } from "effect";
-import type { DaemonConfig } from "../../../daemon/config-persistence.js";
 import type { DaemonIPCContext } from "../../../daemon/daemon-ipc.js";
 import {
 	closeHttpServer,
@@ -88,7 +87,6 @@ import {
 	ConfigPersistenceLive,
 	ConfigPersistenceTag,
 	ConfigSnapshotFromEffectStateLive,
-	makeConfigSnapshotLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
@@ -563,11 +561,6 @@ export interface DaemonLiveOptions {
 	// DaemonState + RelayCache (Tasks 1-4 integration)
 	/** Path to daemon.json config file. When set, loads config from disk. */
 	configPath?: string;
-	/**
-	 * Snapshot source for daemon.json writes. The legacy hybrid daemon passes
-	 * its live buildConfig() until project/instance state is fully Effect-owned.
-	 */
-	configSnapshot?: () => DaemonConfig;
 	/** Factory for creating relay instances per slug. */
 	relayFactory: RelayFactory;
 }
@@ -658,14 +651,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(registries),
 	);
 
-	const configSnapshotLayer = (
-		options.configSnapshot
-			? makeConfigSnapshotLive(options.configSnapshot)
-			: ConfigSnapshotFromEffectStateLive
-	).pipe(Layer.provideMerge(withRelayCache));
+	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
+		Layer.provideMerge(withRelayCache),
+	);
 
 	const withConfigPersistence = ConfigPersistenceLive.pipe(
-		Layer.provideMerge(configSnapshotLayer),
+		Layer.provideMerge(effectSnapshotLayer),
 	);
 
 	const withDaemonHandle = DaemonHandleLive.pipe(
