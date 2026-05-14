@@ -1216,11 +1216,6 @@ export async function startDaemonProcess(
 				updateEffectProject(slug, { title }),
 			);
 		},
-		getPinHash: () => readRuntimeConfigSnapshot().pinHash,
-		setPinHash: (hash: string) => {
-			updateRuntimeConfigSync((c) => ({ ...c, pinHash: hash }));
-			persistConfig();
-		},
 		persistConfig: () => persistConfig(),
 		scheduleShutdown: () => {
 			shutdownTimer = setTimeout(() => {

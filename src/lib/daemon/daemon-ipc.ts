@@ -34,10 +34,6 @@ export interface DaemonIPCContext {
 	>;
 	/** Set the project title via registry. */
 	setProjectTitle(slug: string, title: string): void;
-	/** Get current PIN hash (null if unset). */
-	getPinHash(): string | null;
-	/** Update the PIN hash, auth manager, and persist config. */
-	setPinHash(hash: string): void;
 	/** Persist daemon config to disk. */
 	persistConfig(): void;
 	/** Schedule a graceful daemon shutdown. */
@@ -165,10 +161,12 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 		},
 
 		setPin: async (pin: string): Promise<IPCResponse> => {
-			// Hash the PIN, update auth enforcement, and persist config
-			const { hashPin } = await import("../auth.js");
-			ctx.setPinHash(hashPin(pin));
-			return { ok: true };
+			void pin;
+			return {
+				ok: false,
+				error:
+					"set_pin is handled by Effect IPC dispatch, not buildIPCHandlers",
+			};
 		},
 
 		setKeepAwake: async (enabled: boolean): Promise<IPCResponse> => {

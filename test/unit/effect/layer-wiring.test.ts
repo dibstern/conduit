@@ -98,8 +98,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			}),
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			applyConfig: () => {},
@@ -614,7 +612,7 @@ describe("makeDaemonLive wiring", () => {
 				// Start: no pin
 				expect(yield* auth.hasPin()).toBe(false);
 
-				// Simulate IPC setPinHash → updates DaemonConfigRef
+				// Simulate IPC PIN update through DaemonConfigRef.
 				yield* Ref.update(configRef, (c) => ({ ...c, pinHash: "abc123" }));
 
 				// AuthManager reads reactively

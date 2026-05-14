@@ -61,8 +61,6 @@ function makeIPCContext(
 		removeProject: async () => {},
 		getProjects: () => [],
 		setProjectTitle: () => {},
-		getPinHash: () => null,
-		setPinHash: () => {},
 		persistConfig: () => {},
 		scheduleShutdown: () => {},
 		setProjectAgent: async () => {},

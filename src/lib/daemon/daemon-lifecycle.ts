@@ -33,6 +33,7 @@ import {
 import {
 	handleSetKeepAwake,
 	handleSetKeepAwakeCommand,
+	handleSetPin,
 } from "../domain/daemon/Services/ipc-handlers.js";
 import { IpcRpcGroup } from "../domain/daemon/Services/ipc-rpc-group.js";
 import { formatErrorDetail } from "../errors.js";
@@ -144,9 +145,9 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 				}),
 			),
 		SetPin: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.setPin(request.pin),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
+			handleSetPin({
+				cmd: "set_pin",
+				pin: request.pin,
 			}).pipe(
 				Effect.flatMap((response) =>
 					response.ok

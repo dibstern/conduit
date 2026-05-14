@@ -133,6 +133,13 @@ const makeNativeIpcDispatcher = () => {
 			runtime.runPromise(
 				dispatchTaggedRequestEffect(request, rpcLayer),
 			)) satisfies TaggedIpcDispatcher,
+		readConfig: () =>
+			runtime.runPromise(
+				Effect.gen(function* () {
+					const ref = yield* DaemonConfigRefTag;
+					return yield* Ref.get(ref);
+				}),
+			),
 		dispose: () => runtime.dispose(),
 	};
 };
@@ -224,8 +231,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 					});
 				}
 			},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -290,8 +295,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -345,8 +348,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -392,6 +393,64 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		}
 	});
 
+	it("routes tagged SetPin through the native Effect handler", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
+		const ctx = makeContext(join(tmp, "daemon.sock"));
+		const native = makeNativeIpcDispatcher();
+
+		const ipcContext: TestDaemonIPCContext = {
+			addProject: async (directory) => ({
+				slug: "project",
+				directory,
+				title: "Project",
+			}),
+			removeProject: async () => {},
+			getProjects: () => [],
+			setProjectTitle: () => {},
+			persistConfig: () => {},
+			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
+			getInstances: () => [],
+			getInstance: () => undefined,
+			addInstance: (id, config) => makeInstance(id, config),
+			removeInstance: () => {},
+			startInstance: async () => {},
+			stopInstance: () => {},
+			updateInstance: (id, updates) =>
+				makeInstance(id, {
+					name: updates.name ?? id,
+					port: updates.port ?? 0,
+					managed: true,
+					...(updates.env !== undefined ? { env: updates.env } : {}),
+				}),
+		};
+
+		try {
+			await startIPCServer(
+				ctx,
+				{
+					...ipcContext,
+					getStatus: ipcContext.getStatus ?? makeStatus,
+				},
+				native.dispatch,
+			);
+			const response = await sendJsonLine(ctx.socketPath, {
+				_tag: "SetPin",
+				pin: "1234",
+			});
+
+			expect(response).toEqual({ ok: true });
+			const config = await native.readConfig();
+			expect(config.pinHash).toEqual(expect.any(String));
+			expect(config.pinHash).not.toBe("1234");
+		} finally {
+			await closeIPCServer(ctx);
+			await native.dispose();
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
 	it("routes legacy set_agent through the project override port", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
@@ -407,8 +466,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent,
@@ -461,8 +518,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -519,8 +574,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig,
 			scheduleShutdown,
 			applyConfig,
@@ -571,8 +624,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -649,8 +700,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			getPinHash: () => null,
-			setPinHash: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},

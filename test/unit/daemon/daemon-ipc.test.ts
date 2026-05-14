@@ -39,8 +39,6 @@ function makeContext(
 		}),
 		getProjects: vi.fn().mockReturnValue([]),
 		setProjectTitle: vi.fn(),
-		getPinHash: vi.fn().mockReturnValue(null),
-		setPinHash: vi.fn(),
 		persistConfig: vi.fn(),
 		scheduleShutdown: vi.fn(),
 		getInstances: vi.fn().mockReturnValue([]),

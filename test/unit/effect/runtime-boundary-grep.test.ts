@@ -179,6 +179,61 @@ describe("Effect runtime boundary grep", () => {
 		expect([...hits, ...contextHits]).toEqual([]);
 	});
 
+	it("does not route PIN IPC through daemon-main runtime callbacks", () => {
+		const daemonMainPath = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const daemonMainSource = readFileSync(
+			join(REPO_ROOT, daemonMainPath),
+			"utf8",
+		);
+		const daemonMainHits = daemonMainSource
+			.split("\n")
+			.flatMap((line, index) =>
+				/\bsetPinHash:\s*\(/.test(line)
+					? [
+							{
+								path: daemonMainPath,
+								line: index + 1,
+								source: line.trim(),
+								reason:
+									"daemon-main should not expose PIN mutation callbacks to IPC",
+							},
+						]
+					: [],
+			);
+
+		const daemonIpcPath = "src/lib/daemon/daemon-ipc.ts";
+		const daemonIpcSource = readFileSync(
+			join(REPO_ROOT, daemonIpcPath),
+			"utf8",
+		);
+		const contextStart = daemonIpcSource.indexOf(
+			"export interface DaemonIPCContext",
+		);
+		const contextEnd = daemonIpcSource.indexOf(
+			"export interface IPCHandlerMap",
+			contextStart,
+		);
+		expect(contextStart).toBeGreaterThanOrEqual(0);
+		expect(contextEnd).toBeGreaterThan(contextStart);
+		const contextSource = daemonIpcSource.slice(contextStart, contextEnd);
+		const contextHits = contextSource.split("\n").flatMap((line, index) =>
+			/\b(getPinHash|setPinHash)\b/.test(line)
+				? [
+						{
+							path: daemonIpcPath,
+							line:
+								daemonIpcSource.slice(0, contextStart).split("\n").length +
+								index,
+							source: line.trim(),
+							reason: "DaemonIPCContext should not carry PIN callbacks",
+						},
+					]
+				: [],
+		);
+
+		expect([...daemonMainHits, ...contextHits]).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{
