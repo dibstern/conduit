@@ -36,6 +36,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../../daemon/Services/relay-cache.js";
+import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import {
 	type AuthManagerService,
@@ -63,10 +64,6 @@ export interface DaemonHttpRouterPushManager {
 		subscription: PushSubscriptionData,
 	) => void;
 	readonly removeSubscription: (endpoint: string) => void;
-}
-
-export interface DaemonHttpRouterOptions {
-	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 }
 
 export interface StandaloneHttpRouterOptions {
@@ -264,10 +261,7 @@ export const makeStandaloneHttpRouterRequestHandler = (
 		caCertDer: options.caCertDer,
 	});
 
-export const makeDaemonHttpRouterLive = (
-	options: DaemonHttpRouterOptions,
-	staticDir: string,
-) =>
+export const makeDaemonHttpRouterLive = (staticDir: string) =>
 	Layer.effect(
 		DaemonHttpRequestHandlerTag,
 		Effect.gen(function* () {
@@ -277,6 +271,8 @@ export const makeDaemonHttpRouterLive = (
 			const tls = yield* TlsCertTag;
 			const projectRegistry = yield* ProjectRegistryTag;
 			const relayCache = yield* RelayCacheTag;
+			const pushManager = yield* PushManagerTag;
+			const legacyPushManager = yield* pushManager.getLegacyManager;
 			return buildHttpRouterRequestHandler({
 				authLayer: Layer.succeed(AuthManagerTag, auth),
 				setupInfoLayer: Layer.succeed(SetupInfoProvider, {
@@ -298,7 +294,7 @@ export const makeDaemonHttpRouterLive = (
 						try: loadThemeFiles,
 						catch: (cause) => cause,
 					}),
-				pushManager: options.pushManager,
+				pushManager: Option.getOrUndefined(legacyPushManager),
 				caRootPath: tls.caRootPath ?? undefined,
 				caCertDer: tls.caCertDer ?? undefined,
 			});

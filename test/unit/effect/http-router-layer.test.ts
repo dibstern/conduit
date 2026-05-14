@@ -30,6 +30,8 @@ import {
 	DaemonHttpRequestHandlerTag,
 	makeDaemonHttpRouterLive,
 } from "../../../src/lib/domain/server/Layers/http-router-layer.js";
+import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
+import type { PushSubscriptionData } from "../../../src/lib/server/push.js";
 
 const baseConfig = {
 	port: 2633,
@@ -121,14 +123,18 @@ const makeDaemonRouterLayer = (
 		readonly relaySnapshots?: ReadonlyMap<string, RelayStatusSnapshot>;
 		readonly persistedSessionCounts?: ReadonlyMap<string, number>;
 		readonly caCertDer?: Buffer;
+		readonly pushManager?: {
+			readonly getPublicKey: () => string | null;
+			readonly addSubscription: (
+				endpoint: string,
+				subscription: PushSubscriptionData,
+			) => void;
+			readonly removeSubscription: (endpoint: string) => void;
+			readonly sendToAll: (payload: unknown) => Promise<void>;
+		};
 	},
 ) =>
-	makeDaemonHttpRouterLive(
-		{
-			pushManager: null,
-		},
-		staticDir,
-	).pipe(
+	makeDaemonHttpRouterLive(staticDir).pipe(
 		Layer.provideMerge(makeAuthManagerLive(new AuthManager())),
 		Layer.provideMerge(
 			DaemonConfigRefLive({
@@ -163,6 +169,31 @@ const makeDaemonRouterLayer = (
 					);
 				},
 				invalidate: () => Effect.void,
+			}),
+		),
+		Layer.provideMerge(
+			Layer.succeed(PushManagerTag, {
+				subscribe: () => Effect.void,
+				unsubscribe: () => Effect.void,
+				broadcast: () => Effect.void,
+				getPublicKey: Effect.succeed(
+					options.pushManager?.getPublicKey() ?? undefined,
+				),
+				addSubscription: (endpoint, subscription) =>
+					Effect.sync(() =>
+						options.pushManager?.addSubscription(endpoint, subscription),
+					),
+				removeSubscription: (endpoint) =>
+					Effect.sync(() => options.pushManager?.removeSubscription(endpoint)),
+				sendToAll: (payload) =>
+					Effect.sync(() => {
+						void options.pushManager?.sendToAll(payload);
+					}),
+				getLegacyManager: Effect.succeed(
+					options.pushManager
+						? Option.some(options.pushManager)
+						: Option.none(),
+				),
 			}),
 		),
 	);
@@ -360,5 +391,75 @@ describe("makeDaemonHttpRouterLive", () => {
 					});
 				}).pipe(Effect.provide(Layer.fresh(routerLayer)));
 			}),
+	);
+
+	it.scoped("serves push routes from the Effect-owned push manager", () =>
+		Effect.gen(function* () {
+			const staticDir = yield* makeStaticDir;
+			const added: Array<{
+				readonly endpoint: string;
+				readonly subscription: PushSubscriptionData;
+			}> = [];
+			const removed: string[] = [];
+			const routerLayer = makeDaemonRouterLayer(staticDir, {
+				projects: [],
+				pushManager: {
+					getPublicKey: () => "daemon-vapid-key",
+					addSubscription: (endpoint, subscription) => {
+						added.push({ endpoint, subscription });
+					},
+					removeSubscription: (endpoint) => {
+						removed.push(endpoint);
+					},
+					sendToAll: async () => {},
+				},
+			});
+
+			yield* Effect.gen(function* () {
+				const handler = yield* DaemonHttpRequestHandlerTag;
+				const { port } = yield* startServer(handler);
+
+				const keyResponse = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/api/push/vapid-key`),
+				);
+				expect(keyResponse.status).toBe(200);
+				expect(yield* Effect.tryPromise(() => keyResponse.json())).toEqual({
+					publicKey: "daemon-vapid-key",
+				});
+
+				const subscribeResponse = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/api/push/subscribe`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({
+							subscription: {
+								endpoint: "https://push.example/sub",
+								keys: { p256dh: "p256dh", auth: "auth" },
+							},
+						}),
+					}),
+				);
+				expect(subscribeResponse.status).toBe(200);
+				expect(added).toEqual([
+					{
+						endpoint: "https://push.example/sub",
+						subscription: {
+							endpoint: "https://push.example/sub",
+							keys: { p256dh: "p256dh", auth: "auth" },
+						},
+					},
+				]);
+
+				const unsubscribeResponse = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/api/push/unsubscribe`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ endpoint: "https://push.example/sub" }),
+					}),
+				);
+				expect(unsubscribeResponse.status).toBe(200);
+				expect(removed).toEqual(["https://push.example/sub"]);
+			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
+		}),
 	);
 });

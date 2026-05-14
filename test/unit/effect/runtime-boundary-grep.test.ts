@@ -136,6 +136,24 @@ function productionSourceFiles(dir: string): string[] {
 	return files;
 }
 
+function extractDaemonHttpRouterOptions(source: string): {
+	readonly source: string;
+	readonly start: number;
+} {
+	const interfaceMatch =
+		/export interface DaemonHttpRouterOptions \{[\s\S]*?\n\}/.exec(source);
+	if (interfaceMatch?.index != null) {
+		return { source: interfaceMatch[0], start: interfaceMatch.index };
+	}
+
+	const typeMatch = /export type DaemonHttpRouterOptions[^\n]*/.exec(source);
+	if (typeMatch?.index != null) {
+		return { source: typeMatch[0], start: typeMatch.index };
+	}
+
+	return { source: "", start: -1 };
+}
+
 describe("Effect runtime boundary grep", () => {
 	it("keeps app-internal Effect runtime bridges on an explicit allowlist", () => {
 		const hits = tsFiles(SRC_LIB).flatMap((file) => {
@@ -534,34 +552,24 @@ describe("Effect runtime boundary grep", () => {
 
 		const routerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const routerSource = readFileSync(join(REPO_ROOT, routerPath), "utf8");
-		const daemonOptionsStart = routerSource.indexOf(
-			"export interface DaemonHttpRouterOptions",
-		);
-		const standaloneOptionsStart = routerSource.indexOf(
-			"export interface StandaloneHttpRouterOptions",
-			daemonOptionsStart,
-		);
-		expect(daemonOptionsStart).toBeGreaterThanOrEqual(0);
-		expect(standaloneOptionsStart).toBeGreaterThan(daemonOptionsStart);
-		const daemonOptionsSource = routerSource.slice(
-			daemonOptionsStart,
-			standaloneOptionsStart,
-		);
-		const routerHits = daemonOptionsSource.split("\n").flatMap((line, index) =>
-			/\bauth:\s*AuthManager\b/.test(line)
-				? [
-						{
-							path: routerPath,
-							line:
-								routerSource.slice(0, daemonOptionsStart).split("\n").length +
-								index,
-							source: line.trim(),
-							reason:
-								"DaemonHttpRouterOptions should not accept a separate AuthManager",
-						},
-					]
-				: [],
-		);
+		const daemonOptions = extractDaemonHttpRouterOptions(routerSource);
+		const routerHits = daemonOptions.source
+			.split("\n")
+			.flatMap((line, index) =>
+				/\bauth:\s*AuthManager\b/.test(line)
+					? [
+							{
+								path: routerPath,
+								line:
+									routerSource.slice(0, daemonOptions.start).split("\n")
+										.length + index,
+								source: line.trim(),
+								reason:
+									"DaemonHttpRouterOptions should not accept a separate AuthManager",
+							},
+						]
+					: [],
+			);
 
 		expect([...daemonMainHits, ...routerHits]).toEqual([]);
 	});
@@ -601,34 +609,24 @@ describe("Effect runtime boundary grep", () => {
 
 		const routerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const routerSource = readFileSync(join(REPO_ROOT, routerPath), "utf8");
-		const daemonOptionsStart = routerSource.indexOf(
-			"export interface DaemonHttpRouterOptions",
-		);
-		const standaloneOptionsStart = routerSource.indexOf(
-			"export interface StandaloneHttpRouterOptions",
-			daemonOptionsStart,
-		);
-		expect(daemonOptionsStart).toBeGreaterThanOrEqual(0);
-		expect(standaloneOptionsStart).toBeGreaterThan(daemonOptionsStart);
-		const daemonOptionsSource = routerSource.slice(
-			daemonOptionsStart,
-			standaloneOptionsStart,
-		);
-		const routerHits = daemonOptionsSource.split("\n").flatMap((line, index) =>
-			/\bget(?:Port|IsTls):\s*\(\)/.test(line)
-				? [
-						{
-							path: routerPath,
-							line:
-								routerSource.slice(0, daemonOptionsStart).split("\n").length +
-								index,
-							source: line.trim(),
-							reason:
-								"DaemonHttpRouterOptions should not accept setup-info callbacks",
-						},
-					]
-				: [],
-		);
+		const daemonOptions = extractDaemonHttpRouterOptions(routerSource);
+		const routerHits = daemonOptions.source
+			.split("\n")
+			.flatMap((line, index) =>
+				/\bget(?:Port|IsTls):\s*\(\)/.test(line)
+					? [
+							{
+								path: routerPath,
+								line:
+									routerSource.slice(0, daemonOptions.start).split("\n")
+										.length + index,
+								source: line.trim(),
+								reason:
+									"DaemonHttpRouterOptions should not accept setup-info callbacks",
+							},
+						]
+					: [],
+			);
 
 		expect([...daemonMainHits, ...routerHits]).toEqual([]);
 	});
@@ -666,10 +664,7 @@ describe("Effect runtime boundary grep", () => {
 	it("does not pass daemon project removal as a router options callback", () => {
 		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
-		const daemonOptions = routerLayer.match(
-			/export interface DaemonHttpRouterOptions \{[\s\S]*?\n\}/,
-		)?.[0];
-		expect(daemonOptions).not.toBeUndefined();
+		const daemonOptions = extractDaemonHttpRouterOptions(routerLayer).source;
 		expect(daemonOptions).not.toMatch(
 			/\bremoveProject:\s*\(slug:\s*string\)\s*=>\s*Promise\b/,
 		);
@@ -681,8 +676,7 @@ describe("Effect runtime boundary grep", () => {
 		const httpRouterOptions = daemonMain.match(
 			/httpRouter:\s*\{[\s\S]*?\n\t\t\},/,
 		)?.[0];
-		expect(httpRouterOptions).not.toBeUndefined();
-		expect(httpRouterOptions).not.toMatch(/\bremoveProject\b/);
+		expect(httpRouterOptions ?? "").not.toMatch(/\bremoveProject\b/);
 	});
 
 	it("wires daemon CA downloads from TlsCertTag instead of daemon-main placeholders", () => {
@@ -711,10 +705,7 @@ describe("Effect runtime boundary grep", () => {
 	it("does not pass daemon theme loading as a router options callback", () => {
 		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
-		const daemonOptions = routerLayer.match(
-			/export interface DaemonHttpRouterOptions \{[\s\S]*?\n\}/,
-		)?.[0];
-		expect(daemonOptions).not.toBeUndefined();
+		const daemonOptions = extractDaemonHttpRouterOptions(routerLayer).source;
 		expect(daemonOptions).not.toMatch(/\bloadThemes\b/);
 
 		const daemonRouterFactory = routerLayer.match(
@@ -731,18 +722,14 @@ describe("Effect runtime boundary grep", () => {
 		const httpRouterOptions = daemonMain.match(
 			/httpRouter:\s*\{[\s\S]*?\n\t\t\},/,
 		)?.[0];
-		expect(httpRouterOptions).not.toBeUndefined();
-		expect(httpRouterOptions).not.toMatch(/\bloadThemes\b/);
+		expect(httpRouterOptions ?? "").not.toMatch(/\bloadThemes\b/);
 		expect(daemonMain).not.toMatch(/import \{ loadThemeFiles \}/);
 	});
 
 	it("does not duplicate staticDir inside daemon router options", () => {
 		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
-		const daemonOptions = routerLayer.match(
-			/export interface DaemonHttpRouterOptions \{[\s\S]*?\n\}/,
-		)?.[0];
-		expect(daemonOptions).not.toBeUndefined();
+		const daemonOptions = extractDaemonHttpRouterOptions(routerLayer).source;
 		expect(daemonOptions).not.toMatch(/\bstaticDir\b/);
 
 		const daemonRouterFactory = routerLayer.match(
@@ -759,17 +746,13 @@ describe("Effect runtime boundary grep", () => {
 		const httpRouterOptions = daemonMain.match(
 			/httpRouter:\s*\{[\s\S]*?\n\t\t\},/,
 		)?.[0];
-		expect(httpRouterOptions).not.toBeUndefined();
-		expect(httpRouterOptions).not.toMatch(/\bstaticDir\b/);
+		expect(httpRouterOptions ?? "").not.toMatch(/\bstaticDir\b/);
 	});
 
 	it("does not pass daemon project lists as a router options callback", () => {
 		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
-		const daemonOptions = routerLayer.match(
-			/export interface DaemonHttpRouterOptions \{[\s\S]*?\n\}/,
-		)?.[0];
-		expect(daemonOptions).not.toBeUndefined();
+		const daemonOptions = extractDaemonHttpRouterOptions(routerLayer).source;
 		expect(daemonOptions).not.toMatch(/\bgetProjects\b/);
 
 		const daemonRouterFactory = routerLayer.match(
@@ -787,9 +770,38 @@ describe("Effect runtime boundary grep", () => {
 		const httpRouterOptions = daemonMain.match(
 			/httpRouter:\s*\{[\s\S]*?\n\t\t\},/,
 		)?.[0];
-		expect(httpRouterOptions).not.toBeUndefined();
-		expect(httpRouterOptions).not.toMatch(/\bgetProjects\b/);
+		expect(httpRouterOptions ?? "").not.toMatch(/\bgetProjects\b/);
 		expect(daemonMain).not.toContain("const getRouterProjects =");
+	});
+
+	it("does not pass daemon push manager through HTTP router options", () => {
+		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
+		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
+		const daemonOptions = extractDaemonHttpRouterOptions(routerLayer).source;
+		expect(daemonOptions).not.toMatch(/\bpushManager\b/);
+
+		const daemonLayers = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/daemon/Layers/daemon-layers.ts"),
+			"utf8",
+		);
+		const liveOptions = daemonLayers.match(
+			/export interface DaemonLiveOptions \{[\s\S]*?\n\}/,
+		)?.[0];
+		expect(liveOptions).not.toBeUndefined();
+		expect(liveOptions).not.toMatch(/\bhttpRouter\b/);
+		expect(daemonLayers).toContain("PushNotificationManagerLive(configDir)");
+
+		const daemonMain = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/daemon/Layers/daemon-main.ts"),
+			"utf8",
+		);
+		const daemonLiveOptions = daemonMain.match(
+			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
+		)?.[0];
+		expect(daemonLiveOptions).not.toBeUndefined();
+		expect(daemonLiveOptions).not.toMatch(/\bhttpRouter\b/);
+		expect(daemonMain).not.toContain("let pushManager");
+		expect(daemonMain).not.toContain("new PushNotificationManager");
 	});
 
 	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {

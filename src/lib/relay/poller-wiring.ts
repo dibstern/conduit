@@ -8,7 +8,7 @@ import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
-import type { PushNotificationManager } from "../server/push.js";
+import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
@@ -53,7 +53,7 @@ export interface PollerWiringDeps {
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	config: {
-		pushManager?: PushNotificationManager;
+		pushManager?: PushNotificationSender;
 		slug: string;
 	};
 	pollerLog: Logger;

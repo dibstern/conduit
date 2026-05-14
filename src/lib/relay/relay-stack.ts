@@ -99,7 +99,7 @@ import {
 	type OrchestrationLayer,
 } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
-import type { PushNotificationManager } from "../server/push.js";
+import type { PushNotificationSender } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
@@ -215,7 +215,7 @@ export class EffectRelayServer {
 		staticDir?: string;
 		pin?: string;
 		tls?: { key: Buffer; cert: Buffer; caRoot?: string };
-		pushManager?: PushNotificationManager;
+		pushManager?: PushNotificationSender;
 	};
 
 	constructor(
@@ -225,7 +225,7 @@ export class EffectRelayServer {
 			staticDir?: string;
 			pin?: string;
 			tls?: { key: Buffer; cert: Buffer; caRoot?: string };
-			pushManager?: PushNotificationManager;
+			pushManager?: PushNotificationSender;
 		} = {},
 	) {
 		this.options = options;
@@ -545,7 +545,7 @@ export interface RelayStackConfig {
 	/** Logger instance — defaults to a console-backed root logger */
 	log?: Logger;
 	/** Optional pre-initialized push notification manager */
-	pushManager?: PushNotificationManager;
+	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */
 	configDir?: string;
 	/**
@@ -1030,12 +1030,13 @@ export async function createRelayStack(
 
 	// ── Push notification manager ────────────────────────────────────────────
 
-	let pushMgr: PushNotificationManager | undefined = config.pushManager;
+	let pushMgr: PushNotificationSender | undefined = config.pushManager;
 	if (!pushMgr) {
 		try {
 			const { PushNotificationManager } = await import("../server/push.js");
-			pushMgr = new PushNotificationManager();
-			await pushMgr.init();
+			const manager = new PushNotificationManager();
+			await manager.init();
+			pushMgr = manager;
 		} catch {
 			pushMgr = undefined;
 		}

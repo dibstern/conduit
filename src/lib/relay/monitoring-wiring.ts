@@ -17,7 +17,7 @@ import {
 } from "../domain/relay/Services/session-status-poller.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
-import type { PushNotificationManager } from "../server/push.js";
+import type { PushNotificationSender } from "../server/push.js";
 import type { RelayMessage } from "../shared-types.js";
 import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
@@ -116,7 +116,7 @@ export interface MonitoringWiringDeps {
 	sseStream: SSEConnectionHealthLike;
 	config: {
 		pollerGatingConfig?: Partial<PollerGatingConfig>;
-		pushManager?: PushNotificationManager;
+		pushManager?: PushNotificationSender;
 		slug: string;
 	};
 	statusLog: Logger;

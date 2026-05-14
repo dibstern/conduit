@@ -59,6 +59,13 @@ export interface PushPayload {
 	[key: string]: unknown;
 }
 
+export interface PushNotificationSender {
+	getPublicKey(): string | null;
+	addSubscription(clientId: string, subscription: PushSubscriptionData): void;
+	removeSubscription(clientId: string): void;
+	sendToAll(payload: PushPayload): Promise<void>;
+}
+
 export class PushNotificationManagerNotInitializedError extends Data.TaggedError(
 	"PushNotificationManagerNotInitializedError",
 )<{
@@ -81,7 +88,7 @@ export class PushVapidKeysNotInitializedError extends Data.TaggedError(
 
 // ─── PushNotificationManager ─────────────────────────────────────────────────
 
-export class PushNotificationManager {
+export class PushNotificationManager implements PushNotificationSender {
 	private readonly vapidSubject: string;
 	private readonly configDir: string;
 	private readonly webpush: WebPushModule;

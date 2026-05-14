@@ -92,9 +92,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			setProjectModel: () => Promise.resolve(),
 		},
 		staticDir: process.cwd(),
-		httpRouter: {
-			pushManager: null,
-		},
 		initialConfig: makeDaemonConfigFromOptions({
 			port: 0,
 			host: "127.0.0.1",

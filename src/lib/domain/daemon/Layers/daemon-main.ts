@@ -30,6 +30,7 @@ import {
 	Exit,
 	Layer,
 	ManagedRuntime,
+	Option,
 	RuntimeFlags,
 	RuntimeFlagsPatch,
 	Schedule,
@@ -283,10 +284,11 @@ import { formatErrorDetail } from "../../../errors.js";
 import { InstanceManager } from "../../../instance/instance-manager.js";
 import { createLogger, setLogFormat, setLogLevel } from "../../../logger.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
-import type { PushNotificationManager } from "../../../server/push.js";
+import type { PushNotificationSender } from "../../../server/push.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { getVersion } from "../../../version.js";
+import { PushManagerTag } from "../../server/Services/push-service.js";
 import {
 	addWithoutRelay as addEffectProjectWithoutRelay,
 	remove as removeEffectProject,
@@ -401,7 +403,7 @@ export async function startDaemonProcess(
 	let shuttingDown = false;
 	let startTime = Date.now();
 	let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
-	let pushManager: PushNotificationManager | null = null;
+	let relayPushSender: PushNotificationSender | undefined;
 	// Layer-managed runtime — set after router setup, used by stop().
 	// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime generic resolved at construction
 	let daemonRuntime: ManagedRuntime.ManagedRuntime<any, any> | null = null;
@@ -767,7 +769,7 @@ export async function startDaemonProcess(
 				...(smartDefault && { triggerScan: triggerPortScan }),
 				setProjectInstance: (slug: string, instanceId: string) =>
 					setProjectInstance(slug, instanceId),
-				...(pushManager != null && { pushManager }),
+				...(relayPushSender != null && { pushManager: relayPushSender }),
 				configDir,
 			});
 		};
@@ -1240,17 +1242,6 @@ export async function startDaemonProcess(
 	// IPC server is now started by makeIpcServerLive (via makeDaemonLive).
 	log.debug(`[startup:${elapsed()}] IPC context built`);
 
-	// ── Push notifications ────────────────────────────────────────────────
-	try {
-		const { PushNotificationManager } = await import("../../../server/push.js");
-		pushManager = new PushNotificationManager({ configDir });
-		await pushManager.init();
-	} catch (err) {
-		log.warn("Push notifications unavailable:", formatErrorDetail(err));
-		pushManager = null;
-	}
-	log.debug(`[startup:${elapsed()}] Push notifications init done`);
-
 	// ── Layer-managed daemon lifecycle ────────────────────────────────────
 	const initialRuntimeConfig = runtimeConfigSnapshot;
 	const firstProject = registry.allProjects()[0];
@@ -1344,9 +1335,6 @@ export async function startDaemonProcess(
 			scheduleShutdown: scheduleLegacyPostResponseShutdown,
 		},
 		staticDir,
-		httpRouter: {
-			pushManager,
-		},
 		initialConfig: initialRuntimeConfig,
 		configMirror: {
 			set: (config) =>
@@ -1446,13 +1434,21 @@ export async function startDaemonProcess(
 	// CrashCounter, AuthManager (reactive pinHash from DaemonConfigRef).
 	try {
 		daemonRuntime = ManagedRuntime.make(makeDaemonLive(daemonLiveOptions));
-		lifecycleContext = await waitForDaemonRuntimeEffect(
+		const startupServices = await waitForDaemonRuntimeEffect(
 			daemonRuntime,
 			Effect.gen(function* () {
 				yield* DaemonConfigRefTag;
-				return yield* DaemonLifecycleContextTag;
+				const context = yield* DaemonLifecycleContextTag;
+				const push = yield* PushManagerTag;
+				const maybePushManager = yield* push.getLegacyManager;
+				return {
+					context,
+					relayPushSender: Option.getOrUndefined(maybePushManager),
+				};
 			}),
 		);
+		lifecycleContext = startupServices.context;
+		relayPushSender = startupServices.relayPushSender;
 	} catch (err) {
 		log.error({ err: formatErrorDetail(err) }, "Daemon startup failed");
 		throw err;

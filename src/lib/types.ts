@@ -2,7 +2,7 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
 import type { Logger } from "./logger.js";
-import type { PushNotificationManager } from "./server/push.js";
+import type { PushNotificationSender } from "./server/push.js";
 import type { PartType, PermissionId, ToolStatus } from "./shared-types.js";
 
 // Re-export all shared types (shared between server and frontend)
@@ -264,7 +264,7 @@ export interface ProjectRelayConfig {
 	/** Return cached update version if one is available (for replaying to new clients). */
 	getCachedUpdate?: () => string | null;
 	/** Optional push notification manager for server-side push delivery */
-	pushManager?: PushNotificationManager;
+	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */
 	configDir?: string;
 	/**

@@ -42,13 +42,13 @@ import {
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
-	type DaemonHttpRouterOptions,
 	makeDaemonHttpRouterLive,
 } from "../../server/Layers/http-router-layer.js";
 import {
 	WebSocketRelayRouterLive,
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
+import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
 import {
 	loadConfig,
 	PersistencePathTag,
@@ -543,7 +543,6 @@ export interface DaemonLiveOptions {
 	ipcContext: DaemonIPCContext;
 	ipcPostResponseActions?: IpcPostResponseActions;
 	staticDir: string;
-	httpRouter: DaemonHttpRouterOptions;
 
 	/** Full runtime config snapshot used to seed DaemonConfigRef. */
 	initialConfig: DaemonRuntimeConfig;
@@ -623,6 +622,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		AuthManagerFromConfigLive,
 		tlsCertWithDeps,
 		EnsureCertsLive,
+		PushNotificationManagerLive(configDir),
 	).pipe(Layer.provideMerge(foundation));
 
 	// ── Tier 2: Registries + state containers ──────────────────────────────
@@ -686,10 +686,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
-	const httpRequestHandler = makeDaemonHttpRouterLive(
-		options.httpRouter,
-		options.staticDir,
-	);
+	const httpRequestHandler = makeDaemonHttpRouterLive(options.staticDir);
 	const httpAndIpc = Layer.mergeAll(
 		HttpServerLive,
 		makeIpcServerLive(options.ipcContext, options.ipcPostResponseActions),

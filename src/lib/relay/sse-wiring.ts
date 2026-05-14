@@ -18,7 +18,7 @@ import type {
 	DualWriteHookPort,
 	DualWriteResult,
 } from "../persistence/dual-write-hook.js";
-import type { PushNotificationManager } from "../server/push.js";
+import type { PushNotificationSender } from "../server/push.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { PendingPermission, RelayMessage } from "../types.js";
@@ -108,7 +108,7 @@ export interface SSEWiringDeps {
 		 */
 		broadcastPerSessionEvent: (sessionId: string, msg: RelayMessage) => void;
 	};
-	pushManager?: PushNotificationManager;
+	pushManager?: PushNotificationSender;
 	log: Logger;
 	pipelineLog: Logger;
 	/** Optional: current session statuses for processing flags */
@@ -423,10 +423,11 @@ const handleQuestionAskedEffect = (
 			const sessionService = yield* SessionManagerServiceTag;
 			yield* sessionService.incrementPendingQuestionCount(eventSessionId);
 		}
-		if (deps.pushManager) {
+		const pushManager = deps.pushManager;
+		if (pushManager) {
 			yield* Effect.sync(() =>
 				sendPushForEvent(
-					deps.pushManager as PushNotificationManager,
+					pushManager,
 					{
 						type: "ask_user",
 						sessionId: eventSessionId ?? "",
