@@ -698,6 +698,30 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not drain SSE as a bare shutdown runtime bridge", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern:
+					/await relayManagedRuntime\.runPromise\(\s*sseStream\.drainEffect\(\)\s*\);/,
+				reason:
+					"relay shutdown should sequence SSE drain and command-gate stop inside one Effect program",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not keep a duplicate pending-question bridge for SSE wiring", () => {
 		const retiredBridgePatterns = [
 			{

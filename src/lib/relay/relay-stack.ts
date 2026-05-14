@@ -922,7 +922,13 @@ export async function createProjectRelay(
 			// cannot restart message pollers during shutdown.
 			stopMonitoring();
 			// 2. Drain event sources (stop + await pending work)
-			await relayManagedRuntime.runPromise(sseStream.drainEffect());
+			await relayManagedRuntime.runPromise(
+				Effect.gen(function* () {
+					yield* sseStream.drainEffect();
+					const gate = yield* RelayCommandGateTag;
+					yield* gate.stop();
+				}),
+			);
 			// 3. Dispose Effect ManagedRuntimes. Scoped finalizers own provider
 			// adapter shutdown, status poller drain, and other Effect-managed resources.
 			await effectRuntime.dispose();
