@@ -72,6 +72,67 @@ describe("RelayCache", () => {
 		}),
 	);
 
+	it.scoped("peeks cached relays without creating them", () =>
+		Effect.gen(function* () {
+			let callCount = 0;
+			const factory: RelayFactory = (slug) =>
+				Effect.sync(() => {
+					callCount++;
+					return makeTestRelay(slug);
+				});
+
+			const layer = makeRelayCacheLive(factory);
+			const cache = yield* Effect.provide(RelayCacheTag, layer);
+
+			const missing = yield* cache.peek("my-project");
+			expect(Option.isNone(missing)).toBe(true);
+			expect(callCount).toBe(0);
+
+			const relay = yield* cache.get("my-project");
+			const cached = yield* cache.peek("my-project");
+
+			expect(Option.isSome(cached)).toBe(true);
+			if (Option.isSome(cached)) {
+				expect(cached.value).toBe(relay);
+			}
+			expect(callCount).toBe(1);
+		}),
+	);
+
+	it.scoped("peek does not wait for in-flight relay creation", () =>
+		Effect.gen(function* () {
+			const factoryStarted = yield* Deferred.make<void>();
+			const releaseFactory = yield* Deferred.make<void>();
+			const factory: RelayFactory = (slug) =>
+				Effect.gen(function* () {
+					yield* Deferred.succeed(factoryStarted, undefined);
+					yield* Deferred.await(releaseFactory);
+					return makeTestRelay(slug);
+				});
+
+			const layer = makeRelayCacheLive(factory);
+			const cache = yield* Effect.provide(RelayCacheTag, layer);
+
+			const getFiber = yield* Effect.fork(cache.get("my-project"));
+			yield* Deferred.await(factoryStarted);
+
+			const peekFiber = yield* Effect.fork(cache.peek("my-project"));
+			yield* Effect.yieldNow();
+			const peekExit = yield* Fiber.poll(peekFiber);
+
+			expect(Option.isSome(peekExit)).toBe(true);
+			if (Option.isSome(peekExit)) {
+				expect(Exit.isSuccess(peekExit.value)).toBe(true);
+				if (Exit.isSuccess(peekExit.value)) {
+					expect(Option.isNone(peekExit.value.value)).toBe(true);
+				}
+			}
+
+			yield* Deferred.succeed(releaseFactory, undefined);
+			yield* Fiber.join(getFiber);
+		}),
+	);
+
 	it.scoped("deduplicates concurrent gets for same slug", () =>
 		Effect.gen(function* () {
 			let callCount = 0;

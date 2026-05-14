@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue } from "effect";
+import { Effect, Layer, Option, Queue } from "effect";
 import { expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
@@ -39,6 +39,7 @@ const makeStubRelayCache = (): RelayCache => ({
 			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
 		}),
+	peek: () => Effect.succeed(Option.none()),
 	invalidate: (_slug: string) => Effect.void,
 });
 

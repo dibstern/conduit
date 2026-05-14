@@ -61,7 +61,7 @@ const testProjects: RouterProjectInfo[] = [
 // ─── Test Layers ───────────────────────────────────────────────────────────
 
 const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
-	getProjects: () => testProjects,
+	getProjects: () => Effect.succeed(testProjects),
 });
 
 const TestPushLayer = Layer.succeed(PushProvider, {

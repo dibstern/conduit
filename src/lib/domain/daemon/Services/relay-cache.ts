@@ -25,6 +25,12 @@ import {
 // ─── Relay interface ────────────────────────────────────────────────────────
 
 /** A running relay instance for a project slug. */
+export interface RelayStatusSnapshot {
+	readonly sessionCount: number;
+	readonly clients: number;
+	readonly isProcessing: boolean;
+}
+
 export interface Relay {
 	slug: string;
 	wsHandler: {
@@ -41,6 +47,7 @@ export interface Relay {
 			head: Buffer,
 		) => void;
 	};
+	getStatusSnapshot?: () => RelayStatusSnapshot;
 	stop: () => void | Promise<void>;
 }
 
@@ -65,6 +72,8 @@ export type RelayFactory = (slug: string) => Effect.Effect<Relay, unknown>;
 export interface RelayCache {
 	/** Get or create a relay for the given slug. */
 	get: (slug: string) => Effect.Effect<Relay, unknown>;
+	/** Get a cached relay if one exists. Must not create or start a relay. */
+	peek: (slug: string) => Effect.Effect<Option.Option<Relay>>;
 	/** Invalidate (stop and remove) the relay for the given slug. */
 	invalidate: (slug: string) => Effect.Effect<void>;
 }
@@ -156,6 +165,17 @@ export const makeRelayCacheLive = (
 					}),
 				);
 
+			const peek = (slug: string): Effect.Effect<Option.Option<Relay>> =>
+				Effect.gen(function* () {
+					const map = yield* Ref.get(cacheRef);
+					const existing = HashMap.get(map, slug);
+					if (Option.isNone(existing)) {
+						return Option.none<Relay>();
+					}
+					const relay = yield* ScopedRef.get(existing.value);
+					return relay === null ? Option.none<Relay>() : Option.some(relay);
+				});
+
 			const invalidate = (slug: string): Effect.Effect<void> =>
 				semaphore.withPermits(1)(
 					Effect.gen(function* () {
@@ -173,6 +193,6 @@ export const makeRelayCacheLive = (
 					}),
 				);
 
-			return { get, invalidate } satisfies RelayCache;
+			return { get, peek, invalidate } satisfies RelayCache;
 		}),
 	);

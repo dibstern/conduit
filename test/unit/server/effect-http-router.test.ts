@@ -38,7 +38,7 @@ const testProjects: RouterProjectInfo[] = [
 ];
 
 const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
-	getProjects: () => testProjects,
+	getProjects: () => Effect.succeed(testProjects),
 });
 
 const TestHealthLayer = Layer.succeed(HealthProvider, {

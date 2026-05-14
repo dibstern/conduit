@@ -237,6 +237,7 @@ describe("DaemonHandleTag", () => {
 						rpcWsHandler: { handleUpgrade: () => {} },
 						stop: () => {},
 					}),
+				peek: () => Effect.succeed(Option.none()),
 				invalidate: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(

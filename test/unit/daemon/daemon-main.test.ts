@@ -13,7 +13,7 @@ import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cac
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
 import {
 	projectDiscovery,
@@ -90,6 +90,7 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 		}),
 		Layer.succeed(RelayCacheTag, {
 			get: () => Effect.die("not implemented in test"),
+			peek: () => Effect.succeed(Option.none()),
 			invalidate: () => Effect.die("not implemented in test"),
 		}),
 		Layer.succeed(ConfigTag, {

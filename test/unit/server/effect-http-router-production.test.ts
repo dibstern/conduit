@@ -55,7 +55,7 @@ function makeHandler(options?: {
 	const auth = options?.auth ?? new AuthManager();
 	const layer = Layer.mergeAll(
 		Layer.succeed(ProjectsProvider, {
-			getProjects: () => options?.projects ?? oneProject,
+			getProjects: () => Effect.succeed(options?.projects ?? oneProject),
 		}),
 		makeAuthManagerLive(auth),
 		Layer.succeed(StaticDirTag, staticDir),

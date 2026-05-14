@@ -287,7 +287,6 @@ import type { PushNotificationManager } from "../../../server/push.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { getVersion } from "../../../version.js";
-import type { RouterProjectInfo } from "../../server/Layers/http-router-layer.js";
 import {
 	addWithoutRelay as addEffectProjectWithoutRelay,
 	remove as removeEffectProject,
@@ -1252,31 +1251,6 @@ export async function startDaemonProcess(
 	}
 	log.debug(`[startup:${elapsed()}] Push notifications init done`);
 
-	// ── HTTP request router ───────────────────────────────────────────────
-	const getRouterProjects = (): RouterProjectInfo[] => {
-		const cfg = readRuntimeConfigSnapshot();
-		return registry.allProjects().map((project) => {
-			// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
-			const entry = registry.get(project.slug)!;
-			const relay = entry.status === "ready" ? entry.relay : undefined;
-			const relayStatus = relay?.getStatusSnapshot();
-			return {
-				slug: project.slug,
-				directory: project.directory,
-				title: project.title,
-				status: entry.status,
-				...(entry.status === "error" && { error: entry.error }),
-				clients: relayStatus?.clients ?? 0,
-				sessions:
-					relayStatus?.sessionCount ||
-					cfg.persistedSessionCounts.get(project.slug) ||
-					persistedSessionCounts.get(project.slug) ||
-					0,
-				isProcessing: relayStatus?.isProcessing ?? false,
-			} satisfies RouterProjectInfo;
-		});
-	};
-
 	// ── Layer-managed daemon lifecycle ────────────────────────────────────
 	const initialRuntimeConfig = runtimeConfigSnapshot;
 	const firstProject = registry.allProjects()[0];
@@ -1371,7 +1345,6 @@ export async function startDaemonProcess(
 		},
 		staticDir,
 		httpRouter: {
-			getProjects: getRouterProjects,
 			pushManager,
 		},
 		initialConfig: initialRuntimeConfig,
@@ -1458,6 +1431,7 @@ export async function startDaemonProcess(
 								relay.rpcWsHandler.handleUpgrade(...args);
 							},
 						},
+						getStatusSnapshot: () => relay.getStatusSnapshot(),
 						// Relay lifecycle is still owned by the legacy ProjectRegistry in
 						// this hybrid daemon; RelayCache only avoids duplicate WS starts.
 						stop: () => {},

@@ -62,7 +62,7 @@ export interface RouterProjectInfo {
 
 export class ProjectsProvider extends Context.Tag("ProjectsProvider")<
 	ProjectsProvider,
-	{ readonly getProjects: () => RouterProjectInfo[] }
+	{ readonly getProjects: () => Effect.Effect<RouterProjectInfo[]> }
 >() {}
 
 /** Health response provider — optionally overridden by daemon mode. */
@@ -187,7 +187,7 @@ const healthHandler = Effect.gen(function* () {
 		? yield* maybeHealth.value.getHealthResponse()
 		: ({
 				ok: true,
-				projects: getProjects().length,
+				projects: (yield* getProjects()).length,
 				uptime: process.uptime(),
 			} satisfies HealthResponse);
 
@@ -204,7 +204,7 @@ const infoHandler = Effect.gen(function* () {
 /** GET /api/projects */
 const projectsHandler = Effect.gen(function* () {
 	const { getProjects } = yield* ProjectsProvider;
-	const projects = getProjects();
+	const projects = yield* getProjects();
 
 	return yield* HttpServerResponse.json({
 		projects: projects.map(serializeProject),
@@ -367,7 +367,7 @@ const setupPageHandler = serveStaticFile("/index.html");
 
 const rootHandler = Effect.gen(function* () {
 	const { getProjects } = yield* ProjectsProvider;
-	const projects = getProjects();
+	const projects = yield* getProjects();
 	if (projects.length === 1 && projects[0]) {
 		return HttpServerResponse.empty({
 			status: 302,
@@ -415,7 +415,7 @@ const projectRouteHandler = Effect.gen(function* () {
 	const pathname = new URL(req.url, `http://${host}`).pathname;
 	const subPath = pathname.slice(`/p/${rawSlug}`.length) || "/";
 	const { getProjects } = yield* ProjectsProvider;
-	const project = getProjects().find((p) => p.slug === slug);
+	const project = (yield* getProjects()).find((p) => p.slug === slug);
 
 	if (!project) {
 		return yield* jsonError(404, "NOT_FOUND", `Project "${slug}" not found`);

@@ -5,7 +5,7 @@ import {
 	NodeHttpServer,
 	NodePath,
 } from "@effect/platform-node";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import type { AuthManager } from "../../../auth.js";
 import {
 	CaCertProvider,
@@ -23,8 +23,19 @@ import type { PushSubscriptionData } from "../../../server/push.js";
 import { loadThemeFiles } from "../../../server/theme-loader.js";
 import type { ThemesResponse } from "../../../shared-types.js";
 import { TlsCertTag } from "../../daemon/Layers/tls-cert-layer.js";
-import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
+import {
+	DaemonConfigRefTag,
+	type DaemonRuntimeConfig,
+} from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../../daemon/Services/daemon-handle.js";
+import {
+	ProjectRegistryTag,
+	type ProjectState,
+} from "../../daemon/Services/project-registry-service.js";
+import {
+	type RelayCache,
+	RelayCacheTag,
+} from "../../daemon/Services/relay-cache.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import {
 	type AuthManagerService,
@@ -55,7 +66,6 @@ export interface DaemonHttpRouterPushManager {
 }
 
 export interface DaemonHttpRouterOptions {
-	readonly getProjects: () => RouterProjectInfo[];
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 }
 
@@ -81,7 +91,7 @@ interface HttpRouterRequestHandlerOptions {
 	readonly authLayer: Layer.Layer<AuthManagerTag>;
 	readonly setupInfoLayer: Layer.Layer<SetupInfoProvider>;
 	readonly staticDir: string;
-	readonly getProjects: () => RouterProjectInfo[];
+	readonly getProjects: () => Effect.Effect<RouterProjectInfo[]>;
 	readonly removeProject?: (slug: string) => Effect.Effect<void, unknown>;
 	readonly delegateApiRequest?: (
 		slug: string,
@@ -174,6 +184,58 @@ const buildHttpRouterRequestHandler = (
 	};
 };
 
+const routerStatusForProjectState = (
+	entry: ProjectState,
+): NonNullable<RouterProjectInfo["status"]> => {
+	switch (entry._tag) {
+		case "Ready":
+			return "ready";
+		case "Error":
+			return "error";
+		case "Registering":
+			return "registering";
+	}
+};
+
+const makeDaemonProjectsReader = (deps: {
+	readonly configRef: Ref.Ref<DaemonRuntimeConfig>;
+	readonly projectRegistry: Ref.Ref<HashMap.HashMap<string, ProjectState>>;
+	readonly relayCache: RelayCache;
+}) => {
+	const { configRef, projectRegistry, relayCache } = deps;
+	return () =>
+		Effect.gen(function* () {
+			const config = yield* Ref.get(configRef);
+			const state = yield* Ref.get(projectRegistry);
+			const entries = Array.from(HashMap.entries(state)).sort(
+				([, a], [, b]) => (b.project.lastUsed ?? 0) - (a.project.lastUsed ?? 0),
+			);
+
+			return yield* Effect.forEach(entries, ([slug, entry]) =>
+				Effect.gen(function* () {
+					const cachedRelay = yield* relayCache.peek(slug);
+					const relayStatus = Option.isSome(cachedRelay)
+						? cachedRelay.value.getStatusSnapshot?.()
+						: undefined;
+					const sessions =
+						relayStatus?.sessionCount ||
+						config.persistedSessionCounts.get(slug) ||
+						0;
+					return {
+						slug,
+						directory: entry.project.directory,
+						title: entry.project.title,
+						status: routerStatusForProjectState(entry),
+						...(entry._tag === "Error" && { error: entry.error }),
+						clients: relayStatus?.clients ?? 0,
+						sessions,
+						isProcessing: relayStatus?.isProcessing ?? false,
+					} satisfies RouterProjectInfo;
+				}),
+			);
+		});
+};
+
 export const makeStandaloneHttpRouterRequestHandler = (
 	options: StandaloneHttpRouterOptions,
 ): DaemonHttpRequestHandler =>
@@ -184,7 +246,7 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			getIsTls: () => Effect.sync(options.getIsTls),
 		}),
 		staticDir: options.staticDir,
-		getProjects: options.getProjects,
+		getProjects: () => Effect.sync(options.getProjects),
 		removeProject: (slug) =>
 			options.removeProject(slug)
 				? Effect.void
@@ -213,6 +275,8 @@ export const makeDaemonHttpRouterLive = (
 			const configRef = yield* DaemonConfigRefTag;
 			const daemonHandle = yield* DaemonHandleTag;
 			const tls = yield* TlsCertTag;
+			const projectRegistry = yield* ProjectRegistryTag;
+			const relayCache = yield* RelayCacheTag;
 			return buildHttpRouterRequestHandler({
 				authLayer: Layer.succeed(AuthManagerTag, auth),
 				setupInfoLayer: Layer.succeed(SetupInfoProvider, {
@@ -222,7 +286,11 @@ export const makeDaemonHttpRouterLive = (
 						Ref.get(configRef).pipe(Effect.map((config) => config.tlsEnabled)),
 				}),
 				staticDir,
-				getProjects: options.getProjects,
+				getProjects: makeDaemonProjectsReader({
+					configRef,
+					projectRegistry,
+					relayCache,
+				}),
 				removeProject: (slug: string) => daemonHandle.removeProject(slug),
 				getHealthResponse: () => daemonHandle.getStatus(),
 				loadThemes: () =>

@@ -62,12 +62,14 @@ const NoOpRelayCacheLive = Layer.succeed(RelayCacheTag, {
 			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
 		}),
+	peek: () => Effect.succeed(Option.none()),
 	invalidate: (_slug: string) => Effect.void,
 } satisfies RelayCache);
 
 /** Failing RelayCache for testing error paths (dies with defect). */
 const FailingRelayCacheLive = Layer.succeed(RelayCacheTag, {
 	get: (_slug: string) => Effect.die(new Error("relay-boom")),
+	peek: () => Effect.succeed(Option.none()),
 	invalidate: (_slug: string) => Effect.void,
 } satisfies RelayCache);
 
@@ -268,6 +270,7 @@ describe("ProjectRegistry Effect - remove", () => {
 					rpcWsHandler: { handleUpgrade: () => {} },
 					stop: () => {},
 				}),
+			peek: () => Effect.succeed(Option.none()),
 			invalidate: (slug: string) =>
 				Effect.sync(() => {
 					invalidatedSlug = slug;
@@ -615,6 +618,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 							rpcWsHandler: { handleUpgrade: () => {} },
 							stop: () => {},
 						}),
+					peek: () => Effect.succeed(Option.none()),
 					invalidate: (slug: string) =>
 						Effect.gen(function* () {
 							const inFlight = yield* Ref.updateAndGet(current, (n) => n + 1);
