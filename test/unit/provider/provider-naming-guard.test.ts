@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -37,6 +37,12 @@ describe("provider naming guard", () => {
 			expect.arrayContaining([
 				expect.stringMatching(/(?:opencode|claude)-adapter/),
 			]),
+		);
+	});
+
+	it("does not keep the provider Promise-deferred helper", () => {
+		expect(existsSync(join(REPO_ROOT, "src/lib/provider/deferred.ts"))).toBe(
+			false,
 		);
 	});
 });
