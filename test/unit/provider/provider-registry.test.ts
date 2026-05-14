@@ -1,5 +1,7 @@
 // test/unit/provider/provider-registry.test.ts
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderAdapterFailure } from "../../../src/lib/provider/errors.js";
@@ -8,10 +10,9 @@ import {
 	ProviderRegistryLive,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import type {
-	ProviderAdapter,
-	ProviderInstance,
-} from "../../../src/lib/provider/types.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
+
+const REPO_ROOT = process.cwd();
 
 function makeStubInstance(providerId: string): ProviderInstance {
 	return {
@@ -96,7 +97,7 @@ describe("ProviderRegistry", () => {
 
 	it("getInstanceOrThrow throws for unknown provider", () => {
 		expect(() => registry.getInstanceOrThrow("unknown")).toThrow(
-			"No adapter registered for provider: unknown",
+			"No provider instance registered for provider: unknown",
 		);
 	});
 
@@ -211,18 +212,13 @@ describe("ProviderRegistry", () => {
 		expect(second).toBe(false);
 	});
 
-	it("keeps adapter-named methods as compatibility shims", () => {
-		const instance = makeStubInstance("opencode");
-
-		registry.registerAdapter(instance as ProviderAdapter);
-
-		expect(registry.getAdapter("opencode")).toBe(instance);
-		expect(registry.getAdapterOrThrow("opencode")).toBe(instance);
-		expect(registry.hasAdapter("opencode")).toBe(true);
-
-		registry.removeAdapter("opencode");
-
-		expect(registry.getAdapter("opencode")).toBeUndefined();
-		expect(registry.hasAdapter("opencode")).toBe(false);
+	it("does not expose adapter-named registry shims", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/provider-registry.ts"),
+			"utf8",
+		);
+		expect(source).not.toMatch(
+			/\b(?:registerAdapter|getAdapter|getAdapterEffect|getAdapterOrThrow|hasAdapter|removeAdapter)\b/,
+		);
 	});
 });

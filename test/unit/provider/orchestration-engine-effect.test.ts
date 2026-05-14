@@ -100,7 +100,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				}
 
 				const adapter = makeStubAdapter("opencode");
-				registry.registerAdapter(adapter);
+				registry.registerInstance(adapter);
 				const result = yield* engine.dispatchEffect(command);
 
 				expect(result).toMatchObject({ status: "completed" });
@@ -127,7 +127,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				}),
 			);
 
-			registry.registerAdapter({
+			registry.registerInstance({
 				...makeStubAdapter("opencode"),
 				sendTurn,
 				sendTurnEffect,
@@ -154,7 +154,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 			});
 			const discoverEffect = vi.fn(() => Effect.succeed(capabilities()));
 
-			registry.registerAdapter({
+			registry.registerInstance({
 				...makeStubAdapter("claude"),
 				discover,
 				discoverEffect,
@@ -182,7 +182,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 			});
 			const interruptTurnEffect = vi.fn(() => Effect.void);
 
-			registry.registerAdapter({
+			registry.registerInstance({
 				...makeStubAdapter("claude"),
 				interruptTurn,
 				interruptTurnEffect,
@@ -215,7 +215,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				});
 				const resolvePermissionEffect = vi.fn(() => Effect.void);
 
-				registry.registerAdapter({
+				registry.registerInstance({
 					...makeStubAdapter("claude"),
 					resolvePermission,
 					resolvePermissionEffect,
@@ -255,7 +255,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const resolveQuestionEffect = vi.fn(() => Effect.void);
 				const answers = { choice: "A" };
 
-				registry.registerAdapter({
+				registry.registerInstance({
 					...makeStubAdapter("claude"),
 					resolveQuestion,
 					resolveQuestionEffect,
@@ -290,7 +290,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 			});
 			const endSessionEffect = vi.fn(() => Effect.void);
 
-			registry.registerAdapter({
+			registry.registerInstance({
 				...makeStubAdapter("claude"),
 				endSession,
 				endSessionEffect,

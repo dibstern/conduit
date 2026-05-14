@@ -30,10 +30,10 @@ describe("Provider wiring with Claude adapter", () => {
 		const registry = new ProviderRegistry();
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
 
-		registry.registerAdapter(adapter);
+		registry.registerInstance(adapter);
 
-		expect(registry.hasAdapter("claude")).toBe(true);
-		expect(registry.getAdapter("claude")).toBe(adapter);
+		expect(registry.hasInstance("claude")).toBe(true);
+		expect(registry.getInstance("claude")).toBe(adapter);
 	});
 
 	it("lists both providers when both registered", () => {
@@ -63,8 +63,8 @@ describe("Provider wiring with Claude adapter", () => {
 			endSessionEffect: () => Effect.void,
 		};
 
-		registry.registerAdapter(opencode);
-		registry.registerAdapter(claude);
+		registry.registerInstance(opencode);
+		registry.registerInstance(claude);
 
 		const providers = registry.listProviders();
 		expect(providers).toContain("opencode");
@@ -75,7 +75,7 @@ describe("Provider wiring with Claude adapter", () => {
 	it("OrchestrationEngine dispatches discover to Claude adapter", async () => {
 		const registry = new ProviderRegistry();
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		registry.registerAdapter(adapter);
+		registry.registerInstance(adapter);
 
 		const engine = new OrchestrationEngine({ registry });
 		const caps = await Effect.runPromise(
@@ -98,13 +98,13 @@ describe("Provider wiring with Claude adapter", () => {
 			Effect.runPromise(
 				engine.dispatchEffect({ type: "discover", providerId: "nonexistent" }),
 			),
-		).rejects.toThrow("No adapter registered");
+		).rejects.toThrow("No provider instance registered");
 	});
 
 	it("shutdownAllEffect shuts down Claude adapter", async () => {
 		const registry = new ProviderRegistry();
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		registry.registerAdapter(adapter);
+		registry.registerInstance(adapter);
 
 		// Should not throw
 		await Effect.runPromise(registry.shutdownAllEffect());
@@ -113,7 +113,7 @@ describe("Provider wiring with Claude adapter", () => {
 	it("session binding tracks provider for session", () => {
 		const registry = new ProviderRegistry();
 		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		registry.registerAdapter(adapter);
+		registry.registerInstance(adapter);
 
 		const engine = new OrchestrationEngine({ registry });
 		engine.bindSession("sess-1", "claude");
@@ -163,7 +163,7 @@ describe("Provider wiring with Claude adapter", () => {
 			workspaceRoot: workspace,
 			queryFactory,
 		});
-		registry.registerAdapter(adapter);
+		registry.registerInstance(adapter);
 
 		const engine = new OrchestrationEngine({ registry });
 

@@ -37,19 +37,9 @@ export class ProviderRegistry {
 		log.info(`Registered provider instance: ${instance.providerId}`);
 	}
 
-	/** Compatibility shim while callers move to registerInstance(). */
-	registerAdapter(instance: ProviderInstance): void {
-		this.registerInstance(instance);
-	}
-
 	/** Get a provider instance by provider ID, or undefined if not registered. */
 	getInstance(providerId: string): ProviderInstance | undefined {
 		return this.instances.get(providerId);
-	}
-
-	/** Compatibility shim while callers move to getInstance(). */
-	getAdapter(providerId: string): ProviderInstance | undefined {
-		return this.getInstance(providerId);
 	}
 
 	/** Get a provider instance by provider ID, failing with a typed Effect error if absent. */
@@ -62,13 +52,6 @@ export class ProviderRegistry {
 			: Effect.fail(new ProviderNotRegistered({ providerId }));
 	}
 
-	/** Compatibility shim while callers move to getInstanceEffect(). */
-	getAdapterEffect(
-		providerId: string,
-	): Effect.Effect<ProviderInstance, ProviderNotRegistered> {
-		return this.getInstanceEffect(providerId);
-	}
-
 	/** Get a provider instance by provider ID, throwing if not registered. */
 	getInstanceOrThrow(providerId: string): ProviderInstance {
 		const instance = this.instances.get(providerId);
@@ -78,29 +61,14 @@ export class ProviderRegistry {
 		return instance;
 	}
 
-	/** Compatibility shim while callers move to getInstanceOrThrow(). */
-	getAdapterOrThrow(providerId: string): ProviderInstance {
-		return this.getInstanceOrThrow(providerId);
-	}
-
 	/** Check if an instance is registered for the given provider ID. */
 	hasInstance(providerId: string): boolean {
 		return this.instances.has(providerId);
 	}
 
-	/** Compatibility shim while callers move to hasInstance(). */
-	hasAdapter(providerId: string): boolean {
-		return this.hasInstance(providerId);
-	}
-
 	/** Remove a provider instance by provider ID. No-op if not registered. */
 	removeInstance(providerId: string): void {
 		this.instances.delete(providerId);
-	}
-
-	/** Compatibility shim while callers move to removeInstance(). */
-	removeAdapter(providerId: string): void {
-		this.removeInstance(providerId);
 	}
 
 	/** List all registered provider IDs. */

@@ -65,7 +65,7 @@ describe("Orchestration wiring", () => {
 		const client = makeStubClient();
 		const layer = createOrchestrationLayer({ client });
 
-		expect(layer.registry.hasAdapter("opencode")).toBe(true);
+		expect(layer.registry.hasInstance("opencode")).toBe(true);
 	});
 
 	it("exposes orchestration services through the scoped runtime layer", async () => {
@@ -81,8 +81,8 @@ describe("Orchestration wiring", () => {
 
 			expect(layer.engine).toBeInstanceOf(OrchestrationEngine);
 			expect(layer.registry).toBeInstanceOf(ProviderRegistry);
-			expect(layer.registry.hasAdapter("opencode")).toBe(true);
-			expect(layer.registry.hasAdapter("claude")).toBe(true);
+			expect(layer.registry.hasInstance("opencode")).toBe(true);
+			expect(layer.registry.hasInstance("claude")).toBe(true);
 		} finally {
 			await runtime.dispose();
 		}

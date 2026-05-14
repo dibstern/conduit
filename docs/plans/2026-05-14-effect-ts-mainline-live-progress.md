@@ -45,7 +45,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 ## Current Blockers
 
 1. Project relay construction still has a startup runtime boundary in `relay-stack.ts`; the client-init/default-session/session-count/shutdown bridges are removed.
-2. Provider architecture now has instance-first registry APIs in production orchestration; remaining cleanup is class/error/test naming that still says adapter where it no longer reflects ownership.
+2. Provider architecture now has instance-first registry APIs in production orchestration and no adapter-named registry shims; remaining cleanup is class/error/test naming that still says adapter where it no longer reflects ownership.
 3. CLI still imports/calls `startDaemonProcess`.
 
 ## Remaining Order
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness runs inside startup, SSE shutdown drain and command-gate stop are scoped finalizers, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, message/status-poller callbacks now use Effect-owned paths, the standalone/E2E default-session API reads the startup snapshot instead of re-entering the session service, and daemon/router session counts read a relay status snapshot instead of a sync runtime bridge; runtime bridge cleanup remains for the startup boundary.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
-9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
+9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes only instance-first APIs.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
 11. Daemon composition readiness.
 12. Single-owner daemon cutover.
@@ -334,7 +334,8 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 2026-05-14, provider registry instance API:
 
 - Added `ProviderRegistry` instance-first APIs (`registerInstance`, `getInstance*`, `hasInstance`, `removeInstance`) and moved production orchestration dispatch/wiring to them.
-- Left adapter-named registry methods as compatibility shims only; remaining provider cleanup is naming debt in adapter class/error/test surfaces.
+- Removed adapter-named registry compatibility shims after moving local callers to the instance-first API.
+- Added guard coverage so adapter-named registry methods cannot return; remaining provider cleanup is naming debt in adapter class/error/test surfaces.
 - Verified locally with targeted provider registry, orchestration engine, orchestration wiring, scoped-layer, and Claude provider wiring tests.
 
 2026-05-14, client-init runtime bridge cleanup:

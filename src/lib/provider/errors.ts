@@ -6,7 +6,7 @@ export class ProviderNotRegistered extends Data.TaggedError(
 	readonly providerId: string;
 }> {
 	get message(): string {
-		return `No adapter registered for provider: ${this.providerId}`;
+		return `No provider instance registered for provider: ${this.providerId}`;
 	}
 }
 

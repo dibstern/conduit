@@ -170,7 +170,7 @@ describe("OrchestrationEngine", () => {
 	beforeEach(() => {
 		registry = new ProviderRegistry();
 		opencode = makeStubAdapter("opencode");
-		registry.registerAdapter(opencode);
+		registry.registerInstance(opencode);
 		engine = new OrchestrationEngine({ registry });
 	});
 
@@ -216,7 +216,9 @@ describe("OrchestrationEngine", () => {
 						abortSignal: new AbortController().signal,
 					},
 				}),
-			).rejects.toThrow("No adapter registered for provider: unknown");
+			).rejects.toThrow(
+				"No provider instance registered for provider: unknown",
+			);
 		});
 
 		it("records session-to-provider binding", async () => {
@@ -400,7 +402,7 @@ describe("OrchestrationEngine", () => {
 
 		it("rebinding a session to a different provider updates the mapping", () => {
 			const claude = makeStubAdapter("claude");
-			registry.registerAdapter(claude);
+			registry.registerInstance(claude);
 
 			engine.bindSession("s1", "opencode");
 			engine.bindSession("s1", "claude");
@@ -570,7 +572,7 @@ describe("OrchestrationEngine", () => {
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerAdapter(adapter);
+			claudeRegistry.registerInstance(adapter);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -606,7 +608,7 @@ describe("OrchestrationEngine", () => {
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerAdapter(adapter);
+			claudeRegistry.registerInstance(adapter);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -669,7 +671,7 @@ describe("OrchestrationEngine", () => {
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerAdapter(adapter);
+			claudeRegistry.registerInstance(adapter);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -707,7 +709,7 @@ describe("OrchestrationEngine", () => {
 			);
 
 			const throwingRegistry = new ProviderRegistry();
-			throwingRegistry.registerAdapter(throwingAdapter);
+			throwingRegistry.registerInstance(throwingAdapter);
 			const throwingEngine = new OrchestrationEngine({
 				registry: throwingRegistry,
 			});
@@ -775,7 +777,7 @@ describe("OrchestrationEngine", () => {
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
-			claudeRegistry.registerAdapter(adapter);
+			claudeRegistry.registerInstance(adapter);
 
 			const claudeEngine = new OrchestrationEngine({
 				registry: claudeRegistry,
@@ -819,7 +821,7 @@ describe("OrchestrationEngine", () => {
 			);
 
 			const reg = new ProviderRegistry();
-			reg.registerAdapter(failing);
+			reg.registerInstance(failing);
 			const eng = new OrchestrationEngine({ registry: reg });
 			eng.bindSession("s-err", "opencode");
 
@@ -851,7 +853,7 @@ describe("OrchestrationEngine", () => {
 			);
 
 			const reg = new ProviderRegistry();
-			reg.registerAdapter(failing);
+			reg.registerInstance(failing);
 			const eng = new OrchestrationEngine({ registry: reg });
 			eng.bindSession("s-perm", "opencode");
 
@@ -885,7 +887,7 @@ describe("OrchestrationEngine", () => {
 			);
 
 			const reg = new ProviderRegistry();
-			reg.registerAdapter(failing);
+			reg.registerInstance(failing);
 			const eng = new OrchestrationEngine({ registry: reg });
 
 			await expect(
