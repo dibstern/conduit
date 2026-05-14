@@ -19,6 +19,7 @@ import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
+	RelayCreationAbortedError,
 } from "../../../src/lib/relay/relay-stack.js";
 
 interface MockOpenCode {
@@ -176,5 +177,27 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		expect(defaultAgent).toBe("plan");
+	});
+
+	it("rejects relay creation cancellation with a tagged error", async () => {
+		relayServer = createServer();
+		const controller = new AbortController();
+		controller.abort();
+
+		const rejected = createProjectRelay({
+			httpServer: relayServer,
+			opencodeUrl: "http://127.0.0.1:9",
+			projectDir: process.cwd(),
+			slug: "test-aborted-relay",
+			signal: controller.signal,
+			log: createSilentLogger(),
+		});
+
+		await expect(rejected).rejects.toBeInstanceOf(RelayCreationAbortedError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "RelayCreationAbortedError",
+			slug: "test-aborted-relay",
+			message: "Relay creation aborted for test-aborted-relay",
+		});
 	});
 });

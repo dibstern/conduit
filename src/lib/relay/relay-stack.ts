@@ -145,6 +145,47 @@ const DEFAULT_STATIC_DIR = existsSync(_staticCandidate)
 	? _staticCandidate
 	: join(process.cwd(), "dist", "frontend");
 
+export class RelayCreationAbortedError extends Data.TaggedError(
+	"RelayCreationAbortedError",
+)<{
+	readonly slug: string;
+}> {
+	override get message(): string {
+		return `Relay creation aborted for ${this.slug}`;
+	}
+}
+
+export class RelayHttpServerUnavailableError extends Data.TaggedError(
+	"RelayHttpServerUnavailableError",
+)<Record<never, never>> {
+	override get message(): string {
+		return "HTTP server not available after start()";
+	}
+}
+
+export class RelayProjectDirectoryError extends Data.TaggedError(
+	"RelayProjectDirectoryError",
+)<{
+	readonly directory: string;
+	readonly reason: "missing" | "not-directory";
+}> {
+	override get message(): string {
+		return this.reason === "not-directory"
+			? `Not a directory: ${this.directory}`
+			: `Directory does not exist: ${this.directory}`;
+	}
+}
+
+export class RelayCreationInProgressError extends Data.TaggedError(
+	"RelayCreationInProgressError",
+)<{
+	readonly directory: string;
+}> {
+	override get message(): string {
+		return `Relay for ${this.directory} is still being created`;
+	}
+}
+
 interface StandaloneProjectEntry {
 	slug: string;
 	directory: string;
@@ -736,7 +777,6 @@ export async function createProjectRelay(
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers);
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	let stopMonitoring = () => {};
 	let startup: {
 		api: OpenCodeAPI;
@@ -748,6 +788,9 @@ export async function createProjectRelay(
 		statusSnapshot: RelayStatusSnapshotService;
 	};
 	try {
+		if (config.signal?.aborted) {
+			throw new RelayCreationAbortedError({ slug: config.slug });
+		}
 		// External startup boundary for createProjectRelay()'s Promise API.
 		// The startup Effect owns relay acquisition, wiring, and readiness.
 		startup = await relayManagedRuntime.runPromise(
@@ -821,7 +864,9 @@ export async function createProjectRelay(
 						? yield* makeEffectDualWriteHook(log.child("dual-write"))
 						: undefined;
 				if (config.signal?.aborted) {
-					return yield* Effect.fail(new Error("Relay creation aborted"));
+					return yield* Effect.fail(
+						new RelayCreationAbortedError({ slug: config.slug }),
+					);
 				}
 				yield* Effect.sync(() => {
 					orchestration.wireSSEToInstance((event, handler) => {
@@ -1017,7 +1062,7 @@ export async function createRelayStack(
 
 	const maybeServer = server.getHttpServer();
 	if (!maybeServer) {
-		throw new Error("HTTP server not available after start()");
+		throw new RelayHttpServerUnavailableError();
 	}
 	// Assign to a fresh const so TypeScript narrows to non-null in closures.
 	const httpServer = maybeServer;
@@ -1057,11 +1102,10 @@ export async function createRelayStack(
 		// Validate directory exists on disk
 		const dirStat = await stat(directory).catch(() => null);
 		if (!dirStat?.isDirectory()) {
-			throw new Error(
-				dirStat
-					? `Not a directory: ${directory}`
-					: `Directory does not exist: ${directory}`,
-			);
+			throw new RelayProjectDirectoryError({
+				directory,
+				reason: dirStat ? "not-directory" : "missing",
+			});
 		}
 
 		const existingSlugs = new Set(relays.keys());
@@ -1073,7 +1117,7 @@ export async function createRelayStack(
 		if (relays.has(slug) || pendingSlugs.has(slug)) {
 			const existing = relays.get(slug);
 			if (existing) return { slug, title, directory };
-			throw new Error(`Relay for ${directory} is still being created`);
+			throw new RelayCreationInProgressError({ directory });
 		}
 
 		pendingSlugs.add(slug);

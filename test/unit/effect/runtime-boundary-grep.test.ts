@@ -1878,6 +1878,28 @@ describe("Effect runtime boundary grep", () => {
 		expect(boundaryIndex - markerIndex).toBeLessThan(300);
 	});
 
+	it("does not throw plain Error for relay startup and add-project domain failures", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const patterns = [
+			/throw new Error\("Relay creation aborted"\)/,
+			/Effect\.fail\(new Error\("Relay creation aborted"\)\)/,
+			/throw new Error\("HTTP server not available after start\(\)"\)/,
+			/throw new Error\(\s*dirStat\s*\?/,
+			/throw new Error\(`Relay for \$\{directory\} is still being created`\)/,
+		] as const;
+
+		const hits = patterns.flatMap((pattern) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not expose relay default commands as runtime re-entry wrappers", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
