@@ -8,7 +8,7 @@ Use this guide before changing daemon behavior, project routing, relay wiring, e
 |---|---|
 | CLI | `src/bin/cli.ts` is the thin entrypoint; `src/bin/cli-core.ts` routes commands. |
 | Process model | The CLI either runs a relay in-process with `foreground` or controls a long-lived daemon over Unix socket IPC. |
-| Daemon | Daemon lifecycle is split between extracted `src/lib/daemon/*` modules and Effect layers in `src/lib/effect/*`; the current CLI still enters through `startDaemonProcess` while Effect-native daemon layers are being mainlined. |
+| Daemon | Daemon lifecycle is split between extracted `src/lib/daemon/*` modules and Effect domain services/layers under `src/lib/domain/daemon/*`; the current CLI still enters through `startDaemonProcess` while Effect-native daemon layers are being mainlined. |
 | Multi-project model | One daemon can host many projects, each mounted under `/p/<slug>`. |
 
 ## System Context Diagram
@@ -20,14 +20,15 @@ Mermaid Diagram: docs/agent-guide/system-context-diagram.mermaid
 | Layer | Main modules | Responsibility |
 |---|---|---|
 | CLI / control | `src/bin/*`, `src/lib/cli/*` | Operator-facing commands, setup, watcher, TLS helpers |
-| Daemon | `src/lib/daemon/*`, `src/lib/effect/daemon-*` | Process lifecycle, persisted state, IPC, project and instance registration |
+| Daemon | `src/lib/daemon/*`, `src/lib/domain/daemon/*` | Process lifecycle, persisted state, IPC, project and instance registration |
 | HTTP / WS edge | `src/lib/server/*` | Shared HTTP server, auth gate, static assets, project route dispatch, WebSocket upgrades |
-| Project relay | `src/lib/relay/*` | Per-project relay composition, provider event ingestion, event translation, pollers, PTY upstreams |
-| Persistence | `src/lib/persistence/*` | SQLite event store, projectors (sessions, messages, turns, providers, approvals, activities), migrations |
+| Project relay | `src/lib/relay/*`, `src/lib/domain/relay/*` | Per-project relay composition, provider event ingestion, event translation, pollers, PTY upstreams |
+| Persistence | `src/lib/persistence/*`, `src/lib/domain/persistence/*` | SQLite event store, projectors (sessions, messages, turns, providers, approvals, activities), migrations |
 | Provider adapters | `src/lib/provider/*` | Stateless execution engines (OpenCode, Claude Agent SDK) that stream events into the event store |
 | Session domain | `src/lib/session/*` | Active session tracking, history paging, status polling, client-to-session registry |
 | OpenCode instances | `src/lib/instance/*` | Managed and unmanaged OpenCode SDK/API runtimes, health checks, URL resolution, spawn/stop |
 | Browser handlers | `src/lib/handlers/*` | Message-type dispatch into session, prompt, model, file, terminal, and instance actions |
+| Contracts | `src/lib/contracts/*` | Implementation-free shared schemas and protocol declarations |
 | Frontend SPA | `src/lib/frontend/*` | Svelte 5 app served by the relay |
 
 ## Per-Project Relay Flow Diagram
@@ -56,7 +57,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 
 ## Provider Runtime Notes
 
-- Do not assume a fixed OpenCode HTTP server on `localhost:4096`. Managed OpenCode test instances can run on dynamic ports, and the active base URL should come from daemon/project config, logs, or test output.
+- Do not assume a fixed OpenCode HTTP server or debug port. Managed OpenCode test instances can run on dynamic ports, and the active base URL should come from daemon/project config, logs, or test output.
 - OpenCode integration goes through the OpenCode SDK/API client in `src/lib/instance/*` and `src/lib/provider/opencode-adapter.ts`.
 - Claude integration goes through the Claude Agent SDK adapter in `src/lib/provider/claude/*`; Claude flows normally expose SDK events rather than a separate localhost debug server.
 - The SQLite event store is the durable handoff between provider adapters and browser clients. Provider adapters should not become another source of UI state.

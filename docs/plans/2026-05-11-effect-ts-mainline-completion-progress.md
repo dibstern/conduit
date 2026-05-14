@@ -1,5 +1,9 @@
 # Effect.ts Mainline Completion Progress
 
+> Historical progress log. Do not use this file as the live working checklist for new implementation slices.
+> Current live status lives in `docs/plans/2026-05-14-effect-ts-mainline-live-progress.md`.
+> Consult this file only for baseline evidence, detailed command output, and older phase notes.
+
 Phase 0 baseline captured from `/Users/dstern/.config/codex/worktrees/bb7e/conduit` on branch
 `ds/effect-mainline-completion`.
 
@@ -315,7 +319,10 @@ Baseline status: not green. No baseline repair was mixed into Phase 0.
 
 ## Behavior Smoke Checklist
 
-Provider-backed behavior smoke is blocked because the expected local OpenCode endpoint is not reachable:
+Historical Phase 0 provider-backed behavior smoke was blocked because the explicitly configured local OpenCode
+endpoint was not reachable at the time. Do not treat this as current development-environment truth; provider smoke
+should use an explicit reachable OpenCode instance URL/password for the run, and tests should not silently assume
+`localhost:4096` unless that is the configured endpoint.
 
 ```text
 $ curl -sS -u "opencode:$OPENCODE_SERVER_PASSWORD" http://localhost:4096/health
@@ -2956,8 +2963,9 @@ Tests  1297 passed (1297)
 ```text
 $ pnpm test:e2e -- --grep "websocket"
 Exit: 1
-Plan command issue:
+Historical failed command:
   Playwright received the extra "--" as a file matcher and reported "No tests found" after the frontend build.
+Correct current command form: `pnpm test:e2e --grep "websocket"`.
 ```
 
 ```text
@@ -3081,12 +3089,62 @@ Reopened implementation slices:
   Effect provider/orchestration methods, fold Claude prompt queue ownership into the adapter lifecycle, and decide the
   exact SDK fetch bridge policy.
 
+Planning decision, 2026-05-14:
+
+- The remaining daemon migration should use a single production owner. Do not add the previously proposed
+  `--daemon-runtime=effect|legacy` product flag.
+- HTTP/WS routing ownership and project relay ownership are prerequisites to the CLI cutover. Build the Effect daemon
+  path to parity on the branch only after the daemon no longer depends on externally assembled router or relay objects,
+  then cut `src/bin/cli-core.ts` over to `NodeRuntime.runMain(Layer.launch(...))` in the same slice that removes the
+  production `startDaemonProcess` import.
+- The scoped relay Layer is the long-term relay constructor and owner. `createProjectRelay()` may remain only as a
+  temporary compatibility wrapper while daemon/project-registry consumers move to the Layer-owned relay service.
+- Router-owned daemon data should move behind Effect services that read daemon/project/config state directly.
+  Callback-shaped route provider objects such as `ProjectsProvider`, `HealthProvider`, `SetupInfoProvider`, and
+  `RemoveProjectProvider` are bridge shapes unless they represent a true external API boundary.
+- Final `Effect.runPromise` / `Effect.runSync` exceptions should be limited to true external callbacks. OpenCode SDK
+  `fetch` and Claude SDK `canUseTool` may stay if they delegate into Effect immediately. Internal daemon IPC dispatch,
+  Node HTTP handler construction, relay callbacks, handlers, and orchestration call sites remain blockers until the
+  owning phases move them into scoped Layers or the top-level daemon runtime.
+- The rest of the plan should be ordered by live guardrail blockers, not historical phase numbers. As of the refreshed
+  2026-05-14 greps, production `src` is clean for `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and
+  dynamic `concurrency: "unbounded"`. The remaining blocker order is router service ownership and HTTP runtime
+  boundary, scoped project relay ownership, IPC socket ownership, daemon composition readiness, single-owner daemon
+  cutover, final guardrail cleanup, then final docs/verification.
+- Rollback should be a branch or PR revert. A comparison harness is acceptable only when it is test-only and cannot
+  become a supported runtime mode.
+- Hybrid relay architecture is now the target: keep per-project relay as the deployment, lifecycle, scope, and routing
+  unit, but adopt command/event/projector/read-model inside each relay before full relay ownership conversion continues.
+- Add a move-only domain organization PR before the next large semantic slices. The goal is a clean domain-first
+  structure with `Services` / `Layers` ownership instead of continuing to grow the flat `src/lib/effect/*` bucket.
+- Add a shared contracts/RPC boundary and move browser/server communication toward Effect RPC over WebSocket. WebSocket
+  remains a core transport strength; the change is typed RPC over WS, not polling.
+- Preserve per-browser-tab active state in browser route/Svelte state. The daemon stores durable project/session state,
+  not which browser tab is focused on which session.
+- Add a command gate so commands cannot run before relay replay, projection, subscriptions, and reactors are ready.
+- Use a per-relay event bus only with an explicit backpressure/replay policy. Do not default to unbounded in-memory
+  PubSub unless the implementation PR documents why it is safe.
+- Move provider adapters toward a plain `ProviderDriver -> scoped ProviderInstance` model, with only the provider
+  instance registry represented as a Context service.
+- Defer Effect v4 (`effect@4.0.0-beta.*` and v4 `effect/unstable/*` package topology) until after the current Effect 3.x
+  ownership migration is complete and the guardrail checklist is closed.
+
 Documentation changes:
 
 - `docs/agent-guide/architecture.md`: updated the runtime shape from the stale `daemon.ts`/OpenCode-only wording to the
   current extracted daemon modules, provider adapters, and OpenCode/Claude SDK reality.
 - `docs/agent-guide/testing.md`: fixed E2E argument examples and documented that live OpenCode tests use dynamic
   instance URLs, not an assumed `localhost:4096`.
+- `docs/plans/2026-05-11-effect-ts-mainline-completion-plan.md`: added the Effect version policy, target architecture
+  refresh, Phase 0.5 move-only organization, Phase 0.6 contracts/RPC design, hybrid relay CQRS requirements, provider
+  driver shape, RPC-over-WS handler/frontend guidance, and the reordered remaining implementation sequence.
+- Follow-up audit tightened Phase 0.6 so the contracts boundary defaults to strict `src/lib/contracts/*`, names
+  `WsRpcGroup`, blocks handler migration on the RPC target, and requires a static import guard preventing contracts from
+  importing daemon, relay runtime, provider implementation, frontend stores/components, persistence implementation, or
+  service/Layer implementation code.
+- Historical progress headings may be misleading where older cleanup slices used `Phase 9.x` labels for deletion work
+  or reused a decimal phase number. The current dependency order is the plan's Remaining Implementation Order; treat
+  progress headings as historical labels, not current scheduling authority.
 
 ## Phase 3.41: Static Route Decode Error Boundary
 

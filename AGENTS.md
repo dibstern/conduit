@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Do not assume a fixed OpenCode server is running at `localhost:4096`. Modern development uses provider adapters:
-OpenCode through the OpenCode SDK/API client, and Claude through the Claude Agent SDK. Some tests spawn ephemeral
-OpenCode instances on dynamic ports; Claude flows usually do not expose a local HTTP debug port.
+Do not assume a fixed local OpenCode server or debug port. Modern development uses provider adapters: OpenCode through
+the OpenCode SDK/API client, and Claude through the Claude Agent SDK. Tests may spawn ephemeral OpenCode instances on
+dynamic ports; Claude flows usually do not expose a local HTTP debug port.
 NEVER stash changes, you are interrupting other sessions and work.
 
 ## Purpose
@@ -25,6 +25,8 @@ Read `docs/agent-guide/architecture.md` before changing daemon behavior, project
 
 - `src/bin/`: CLI entrypoints.
 - `src/lib/daemon/`: daemon lifecycle, IPC,  config persistence, projects.
+- `src/lib/domain/`: Effect service and Layer owners, organized by daemon, relay, provider, persistence, and server domain.
+- `src/lib/contracts/`: implementation-free shared schemas and protocol declarations.
 - `src/lib/server/`: HTTP and WebSocket server, router, static files, push.
 - `src/lib/relay/`: provider event pipeline, pollers, PTY upstream wiring.
 - `src/lib/persistence/`: SQLite event store, projectors, migrations.
@@ -63,8 +65,8 @@ Read `docs/agent-guide/testing.md` before choosing broader verification. Use the
 
 - Local conduit: It runs at `http://localhost:2633/`.
 - Provider debugging:
-    - OpenCode: do not assume port `4096`. Discover the active OpenCode base URL from the daemon/project config,
-      test output, or logs. Contract tests print their ephemeral OpenCode URL when they start.
+    - OpenCode: discover the active OpenCode base URL from the daemon/project config, test output, or logs. Tests that
+      spawn OpenCode print their ephemeral URL when they start.
     - If a real OpenCode HTTP server is active, set `OPENCODE_URL` to its base URL and inspect it with
       `curl -s -u "opencode:$OPENCODE_SERVER_PASSWORD" "$OPENCODE_URL/<DESIRED-PATH>" 2>&1 | python3 -m json.tool`.
     - Claude: use Claude Agent SDK logs/events and conduit's persisted event stream; there usually is no separate
