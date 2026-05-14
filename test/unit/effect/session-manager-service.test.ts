@@ -15,6 +15,10 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
+	RelayStatusSnapshotLive,
+	RelayStatusSnapshotTag,
+} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	StatusPollerTag,
@@ -294,6 +298,65 @@ describe("SessionManagerService", () => {
 				});
 				const extra = yield* Queue.poll(sub);
 				expect(Option.isNone(extra)).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		},
+	);
+
+	it.scoped(
+		"live service updates the relay status session-count snapshot",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "list").mockResolvedValue([
+				{
+					id: "session-1",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Session 1",
+					version: "1.0.0",
+					time: { created: 1, updated: 1 },
+				},
+				{
+					id: "session-2",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Session 2",
+					version: "1.0.0",
+					time: { created: 2, updated: 2 },
+				},
+			]);
+			vi.spyOn(api.session, "create").mockResolvedValue({
+				id: "session-3",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Session 3",
+				version: "1.0.0",
+				time: { created: 3, updated: 3 },
+			});
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					RelayStatusSnapshotLive,
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const snapshot = yield* RelayStatusSnapshotTag;
+
+				expect(snapshot.getSnapshot().sessionCount).toBe(0);
+				yield* service.listSessions();
+				expect(snapshot.getSnapshot().sessionCount).toBe(2);
+
+				yield* service.createSession("Session 3");
+				expect(snapshot.getSnapshot().sessionCount).toBe(3);
+
+				yield* service.deleteSession("session-1");
+				expect(snapshot.getSnapshot().sessionCount).toBe(2);
 			}).pipe(Effect.provide(Layer.fresh(layer)));
 		},
 	);

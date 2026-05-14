@@ -42,6 +42,10 @@ import {
 	makeRelayCommandGateLive,
 	RelayCommandGateTag,
 } from "../domain/relay/Services/relay-command-gate.js";
+import {
+	type RelayStatusSnapshotService,
+	RelayStatusSnapshotTag,
+} from "../domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
 	OpenCodeFileServiceLive,
@@ -290,14 +294,20 @@ export interface ProjectRelay {
 	orchestration: OrchestrationLayer;
 	/** Effect ManagedRuntime for dispatching through the Effect handler pipeline. */
 	effectRuntime: RelayRuntime;
+	/** Current read-only relay status snapshot for daemon/router status views. */
+	getStatusSnapshot(): ProjectRelayStatusSnapshot;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
-	/** Session count from the most recent unfiltered service read. */
-	getLastKnownSessionCount(): number;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
 	stop(): Promise<void>;
+}
+
+export interface ProjectRelayStatusSnapshot {
+	readonly sessionCount: number;
+	readonly clients: number;
+	readonly isProcessing: boolean;
 }
 
 // ─── Full Stack Config ──────────────────────────────────────────────────────
@@ -385,17 +395,6 @@ export async function createProjectRelay(
 		RelayRuntimeContext,
 		PersistenceEffectError
 	>;
-	const runSessionServiceSync = <A>(
-		run: (
-			service: import("../domain/relay/Services/session-manager-service.js").SessionManagerService,
-		) => Effect.Effect<A, unknown>,
-	): A =>
-		relayManagedRuntime.runSync(
-			Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				return yield* run(service);
-			}),
-		);
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
 	const initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
@@ -579,12 +578,14 @@ export async function createProjectRelay(
 		sessionId: string;
 		orchestration: OrchestrationLayer;
 		statusPoller: import("../domain/relay/Services/services.js").StatusPollerShape;
+		statusSnapshot: RelayStatusSnapshotService;
 	};
 	try {
 		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const api = yield* OpenCodeAPITag;
 				const wsHandler = yield* WebSocketHandlerTag;
+				const statusSnapshot = yield* RelayStatusSnapshotTag;
 				yield* Effect.tryPromise(() => api.app.path());
 				yield* Effect.sync(() =>
 					log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
@@ -735,6 +736,7 @@ export async function createProjectRelay(
 					sessionId,
 					orchestration,
 					statusPoller,
+					statusSnapshot,
 				};
 			}),
 		);
@@ -747,7 +749,8 @@ export async function createProjectRelay(
 	}
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
-	const { sessionId, orchestration, statusPoller, sseStream } = startup;
+	const { sessionId, orchestration, statusPoller, sseStream, statusSnapshot } =
+		startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
@@ -755,6 +758,17 @@ export async function createProjectRelay(
 	// Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
 
 	// ── Return project relay ────────────────────────────────────────────────
+	const getProjectRelayStatusSnapshot = (): ProjectRelayStatusSnapshot => {
+		const statuses = statusPoller.getCurrentStatuses();
+		const isProcessing = Object.values(statuses).some(
+			(status) => status.type === "busy" || status.type === "retry",
+		);
+		return {
+			...statusSnapshot.getSnapshot(),
+			clients: wsHandler.getClientCount(),
+			isProcessing,
+		};
+	};
 
 	return {
 		wsHandler,
@@ -766,17 +780,10 @@ export async function createProjectRelay(
 		effectRuntime,
 		initialSessionId: sessionId,
 
-		isAnySessionProcessing() {
-			const statuses = statusPoller.getCurrentStatuses();
-			return Object.values(statuses).some(
-				(s) => s.type === "busy" || s.type === "retry",
-			);
-		},
+		getStatusSnapshot: getProjectRelayStatusSnapshot,
 
-		getLastKnownSessionCount() {
-			return runSessionServiceSync((service) =>
-				service.getLastKnownSessionCount(),
-			);
+		isAnySessionProcessing() {
+			return getProjectRelayStatusSnapshot().isProcessing;
 		},
 
 		async stop() {
@@ -930,7 +937,14 @@ export async function createRelayStack(
 
 			// Only register AFTER relay is successfully created
 			relays.set(slug, newRelay);
-			server.addProject({ slug, directory, title });
+			server.addProject({
+				slug,
+				directory,
+				title,
+				getClientCount: () => newRelay.getStatusSnapshot().clients,
+				getSessionCount: () => newRelay.getStatusSnapshot().sessionCount,
+				getIsProcessing: () => newRelay.getStatusSnapshot().isProcessing,
+			});
 
 			log.info(`Added project: ${title} (${slug}) → ${directory}`);
 		} catch (err) {
@@ -972,6 +986,14 @@ export async function createRelayStack(
 		}),
 	});
 	relays.set(config.slug, relay);
+	server.addProject({
+		slug: config.slug,
+		directory: config.projectDir,
+		title: config.slug,
+		getClientCount: () => relay.getStatusSnapshot().clients,
+		getSessionCount: () => relay.getStatusSnapshot().sessionCount,
+		getIsProcessing: () => relay.getStatusSnapshot().isProcessing,
+	});
 
 	// ── WebSocket upgrade handler ───────────────────────────────────────────
 	// Routes connections by URL: /p/{slug}/ws → project relay, /p/{slug}/rpc

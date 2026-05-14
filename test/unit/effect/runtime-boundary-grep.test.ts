@@ -1036,6 +1036,34 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not expose session-count runtime bridges from relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bgetLastKnownSessionCount\(\)/,
+				reason:
+					"daemon status should read the relay status snapshot instead of re-entering the session service synchronously",
+			},
+			{
+				pattern: /\brunSessionServiceSync\b/,
+				reason: "relay-stack should not keep sync session service accessors",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not fork WebSocket callback programs directly from relay-stack", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

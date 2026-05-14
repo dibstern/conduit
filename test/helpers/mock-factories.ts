@@ -458,9 +458,13 @@ export function createMockProjectRelay(
 			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],
 			dispose: vi.fn().mockResolvedValue(undefined),
 		},
+		getStatusSnapshot: vi.fn(() => ({
+			sessionCount: 0,
+			clients: 0,
+			isProcessing: false,
+		})),
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
 		initialSessionId: "s1",
-		getLastKnownSessionCount: vi.fn().mockReturnValue(0),
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,
 	};

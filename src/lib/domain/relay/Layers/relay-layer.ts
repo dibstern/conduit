@@ -16,6 +16,7 @@ import { ClientMessageSerializationLive } from "../Services/client-message-seria
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
+import { RelayStatusSnapshotLive } from "../Services/relay-status-snapshot.js";
 import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../Services/session-overrides-state.js";
@@ -30,6 +31,7 @@ import { RateLimiterLive } from "./rate-limiter-layer.js";
 const sessionManagerDepsLive = Layer.mergeAll(
 	makeSessionManagerStateLive(),
 	DaemonEventBusLive,
+	RelayStatusSnapshotLive,
 );
 
 const SessionManagerStateAndServiceLive = Layer.provideMerge(

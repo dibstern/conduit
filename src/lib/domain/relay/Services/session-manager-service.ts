@@ -38,6 +38,7 @@ import {
 	publishSessionCreated,
 	publishSessionDeleted,
 } from "../../daemon/Services/daemon-pubsub.js";
+import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 
@@ -130,6 +131,32 @@ const sessionRowsToInfo = (
 		pendingQuestionCounts: toReadonlyMap(state.pendingQuestionCounts),
 	});
 
+const updateRelaySessionCountSnapshot = (sessionCount: number) =>
+	Effect.serviceOption(RelayStatusSnapshotTag).pipe(
+		Effect.flatMap((snapshot) =>
+			snapshot._tag === "Some"
+				? snapshot.value.setSessionCount(sessionCount)
+				: Effect.void,
+		),
+	);
+
+const incrementLastKnownSessionCount = () =>
+	Effect.gen(function* () {
+		const stateRef = yield* SessionManagerStateTag;
+		const sessionCount = yield* Ref.modify(stateRef, (state) => {
+			const nextCount = state.lastKnownSessionCount + 1;
+			return [
+				nextCount,
+				{
+					...state,
+					lastKnownSessionCount: nextCount,
+				},
+			];
+		});
+		yield* updateRelaySessionCountSnapshot(sessionCount);
+		return sessionCount;
+	});
+
 // ─── Free functions ─────────────────────────────────────────────────────────
 
 /**
@@ -161,6 +188,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
 					lastKnownSessionCount: rows.length,
 				}));
+				yield* updateRelaySessionCountSnapshot(rows.length);
 			}
 			return sessionRowsToInfo(rows, options, state);
 		}
@@ -190,6 +218,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 				cachedParentMap: sessionDetailsParentMap(sessions, s.forkMeta),
 				lastKnownSessionCount: sessions.length,
 			}));
+			yield* updateRelaySessionCountSnapshot(sessions.length);
 		}
 
 		return toSessionInfoList(
@@ -238,6 +267,7 @@ export const initialize = (title?: string) =>
 				lastKnownSessionCount: existing.length,
 			};
 		});
+		yield* updateRelaySessionCountSnapshot(existing.length);
 
 		if (existing.length > 0) {
 			const sorted = [...existing].sort((a, b) => {
@@ -255,6 +285,7 @@ export const initialize = (title?: string) =>
 			...s,
 			lastKnownSessionCount: 1,
 		}));
+		yield* updateRelaySessionCountSnapshot(1);
 		return session.id;
 	}).pipe(Effect.withSpan("session.initialize"));
 
@@ -320,6 +351,8 @@ export const deleteSession = (sessionId: string) =>
 				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
 		});
+		const state = yield* Ref.get(stateRef);
+		yield* updateRelaySessionCountSnapshot(state.lastKnownSessionCount);
 	}).pipe(
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.deleteSession", { attributes: { sessionId } }),
@@ -839,6 +872,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const session = yield* createSession(title).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
 					);
+					yield* incrementLastKnownSessionCount().pipe(
+						Effect.provideService(SessionManagerStateTag, stateRef),
+					);
 					yield* publishSessionCreated(session.id).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),
 					);
@@ -858,6 +894,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 				Effect.gen(function* () {
 					const session = yield* createSession(title).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
+					);
+					yield* incrementLastKnownSessionCount().pipe(
+						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
 					yield* publishSessionCreated(session.id).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),

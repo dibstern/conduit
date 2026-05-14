@@ -564,8 +564,9 @@ export async function startDaemonProcess(
 			projects: registry.allProjects().map((p) => {
 				const e = registry.get(p.slug);
 				const relay = e?.status === "ready" ? e.relay : undefined;
+				const relayStatus = relay?.getStatusSnapshot();
 				const sessionCount =
-					relay?.getLastKnownSessionCount() ||
+					relayStatus?.sessionCount ||
 					cfg.persistedSessionCounts.get(p.slug) ||
 					persistedSessionCounts.get(p.slug) ||
 					0;
@@ -967,8 +968,9 @@ export async function startDaemonProcess(
 			const e = registry.get(slug);
 			if (!e) continue;
 			const relay = e.status === "ready" ? e.relay : undefined;
+			const relayStatus = relay?.getStatusSnapshot();
 			sessionCount +=
-				relay?.getLastKnownSessionCount() ||
+				relayStatus?.sessionCount ||
 				cfg.persistedSessionCounts.get(slug) ||
 				persistedSessionCounts.get(slug) ||
 				0;
@@ -1223,15 +1225,16 @@ export async function startDaemonProcess(
 				// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
 				const entry = registry.get(project.slug)!;
 				const relay = entry.status === "ready" ? entry.relay : undefined;
+				const relayStatus = relay?.getStatusSnapshot();
 				return {
 					...project,
 					sessions:
-						relay?.getLastKnownSessionCount() ||
+						relayStatus?.sessionCount ||
 						cfg.persistedSessionCounts.get(project.slug) ||
 						persistedSessionCounts.get(project.slug) ||
 						0,
-					clients: relay?.wsHandler.getClientCount() ?? 0,
-					isProcessing: relay?.isAnySessionProcessing() ?? false,
+					clients: relayStatus?.clients ?? 0,
+					isProcessing: relayStatus?.isProcessing ?? false,
 				};
 			});
 		},
@@ -1372,19 +1375,20 @@ export async function startDaemonProcess(
 			// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
 			const entry = registry.get(project.slug)!;
 			const relay = entry.status === "ready" ? entry.relay : undefined;
+			const relayStatus = relay?.getStatusSnapshot();
 			return {
 				slug: project.slug,
 				directory: project.directory,
 				title: project.title,
 				status: entry.status,
 				...(entry.status === "error" && { error: entry.error }),
-				clients: relay?.wsHandler.getClientCount() ?? 0,
+				clients: relayStatus?.clients ?? 0,
 				sessions:
-					relay?.getLastKnownSessionCount() ||
+					relayStatus?.sessionCount ||
 					cfg.persistedSessionCounts.get(project.slug) ||
 					persistedSessionCounts.get(project.slug) ||
 					0,
-				isProcessing: relay?.isAnySessionProcessing() ?? false,
+				isProcessing: relayStatus?.isProcessing ?? false,
 			} satisfies RouterProjectInfo;
 		});
 	};

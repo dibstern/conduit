@@ -40,11 +40,11 @@ Every open item must be removed or explicitly reclassified before the migration 
 | `Effect.promise(` on rejectable operations | Done | Recheck before final guardrail close. |
 | `concurrency: "unbounded"` on dynamic collections | Done | Recheck before final guardrail close. Fixed-size fanouts need inline justification. |
 | Throwing helpers called from Effect programs | Open | Broad grep needs call-path triage; defects and external boundaries can be reclassified. |
-| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged and legacy-format IPC dispatch now use the daemon layer runtime at the socket boundary, and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. Client-init and default-session startup state no longer build Promise-shaped bridges in `relay-stack.ts`; remaining blockers are the other relay-stack transitional runtime bridges and any final grep hits. |
+| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged and legacy-format IPC dispatch now use the daemon layer runtime at the socket boundary, and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. Client-init, default-session startup state, and relay session-count status no longer build Promise/sync session-service bridges in `relay-stack.ts`; remaining blockers are the startup/shutdown runtime boundaries and any final grep hits. |
 
 ## Current Blockers
 
-1. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`; the client-init and default-session Promise bridges are removed.
+1. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`; the client-init/default-session/session-count bridges are removed.
 2. Provider architecture now has instance-first registry APIs in production orchestration; remaining cleanup is class/error/test naming that still says adapter where it no longer reflects ownership.
 3. CLI still imports/calls `startDaemonProcess`.
 
@@ -58,7 +58,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 4. Contracts and RPC boundary. Started locally: shared `WsRpcGroup`, import guard, and server/frontend re-export wrappers are in place.
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
-7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness and shutdown drain/command-gate stop each share one Effect program, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, message/status-poller callbacks now use Effect-owned paths, and the standalone/E2E default-session API reads the startup snapshot instead of re-entering the session service; runtime bridge cleanup remains for the other relay wiring clusters.
+7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness and shutdown drain/command-gate stop each share one Effect program, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, message/status-poller callbacks now use Effect-owned paths, the standalone/E2E default-session API reads the startup snapshot instead of re-entering the session service, and daemon/router session counts read a relay status snapshot instead of a sync runtime bridge; runtime bridge cleanup remains for the startup and shutdown boundaries.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
@@ -467,3 +467,11 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Moved the E2E harness cleanup seed to that snapshot and updated relay test factories to match the new public shape.
 - Added a runtime-boundary guard so relay-stack cannot restore the Promise-shaped default-session accessor or `runSessionServicePromise()` helper.
 - Verified locally with focused runtime-boundary, relay-stack default override, project-registry tests, typecheck, lint, and diff hygiene checks.
+
+2026-05-14, relay status snapshot cleanup:
+
+- Added `RelayStatusSnapshotLive`, owned by the relay Effect graph, and wired session-count updates from session list, initialize, create, and delete paths.
+- Replaced `ProjectRelay.getLastKnownSessionCount()` with `ProjectRelay.getStatusSnapshot()` so daemon config, IPC project lists, and router project metadata read one snapshot without re-entering the relay runtime.
+- Updated standalone relay project metadata to use the same snapshot for sessions, clients, and processing state.
+- Added behavior coverage for session-count snapshot updates and a runtime-boundary guard so `runSessionServiceSync()` / the old count accessor cannot return to `relay-stack.ts`.
+- Verified locally with focused runtime-boundary, session-manager-service, daemon status, layer wiring, project-registry, status-poller, relay-stack default override, typecheck, lint, and diff hygiene checks.
