@@ -175,6 +175,34 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not keep legacy daemon-main session count prefetch", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /Prefetch session counts/,
+				reason: "SessionPrefetchLive owns startup session count prefetch",
+			},
+			{
+				pattern: /\/session\?limit=10000/,
+				reason:
+					"daemon-main must not run a parallel fetch loop outside the scoped Layer",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not route keep-awake IPC through daemon-main runtime callbacks", () => {
 		const retiredBridgePatterns = [
 			{

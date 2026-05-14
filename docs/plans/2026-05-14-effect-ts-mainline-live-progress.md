@@ -61,7 +61,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, `ProviderRegistry` now exposes only instance-first APIs, provider implementation/test naming is instance-first, provider wait state now uses Effect `Deferred` for `EventSinkImpl`, OpenCode pending turns, Claude setup locks, and Claude turn queues, and the old provider Promise-deferred helper is deleted.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
-11. Daemon composition readiness. Started locally: IPC status reads now live on the IPC context instead of passing a separate `DaemonLiveOptions.getStatus` callback through the Layer graph, keep-awake/PIN/shutdown IPC now run through native Effect handlers, restart-config IPC now mutates `DaemonConfigRefTag` natively, and legacy ManagedRuntime shutdown/restart scheduling is isolated to the IPC socket post-response hook instead of `DaemonIPCContext`.
+11. Daemon composition readiness. Started locally: IPC status reads now live on the IPC context instead of passing a separate `DaemonLiveOptions.getStatus` callback through the Layer graph, keep-awake/PIN/shutdown IPC now run through native Effect handlers, restart-config IPC now mutates `DaemonConfigRefTag` natively, legacy ManagedRuntime shutdown/restart scheduling is isolated to the IPC socket post-response hook instead of `DaemonIPCContext`, and startup session-count prefetch is owned by `SessionPrefetchLive` instead of a daemon-main fetch loop.
 12. Single-owner daemon cutover.
 13. Final guardrail cleanup.
 14. Final docs and verification.
@@ -91,3 +91,9 @@ Detailed completed-slice notes moved to `docs/plans/2026-05-14-effect-ts-mainlin
 - Removed shutdown/restart scheduling from `DaemonIPCContext` and isolated it behind `IpcPostResponseActions`.
 - `Shutdown` and `RestartWithConfig` now run only native Effect IPC handlers before the socket response; the socket layer schedules legacy shutdown after a successful response write.
 - Verified locally with focused daemon IPC tests, runtime-boundary guard coverage, `pnpm check`, `pnpm lint`, full pre-commit build/lint/test/typecheck, and diff hygiene checks.
+
+2026-05-14, daemon session-prefetch bridge cleanup:
+
+- Deleted the daemon-main startup `/session?limit=10000` fetch loop; `SessionPrefetchLive` is now the only startup session-count prefetch owner.
+- Added daemon-state seeded coverage proving `SessionPrefetchLive` reads projects and instances from the same Effect daemon state used in production composition.
+- Verified locally with focused scoped-fiber/runtime-boundary/getStatus tests, `pnpm check`, `pnpm lint`, and diff hygiene checks.

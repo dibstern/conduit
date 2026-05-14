@@ -34,13 +34,16 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	type InstanceManagerState,
 	InstanceManagerStateTag,
+	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 	PollerFibersTag,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
+	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
 	type ProjectState,
@@ -408,6 +411,62 @@ describe("prefetchSessionCounts", () => {
 							]),
 						),
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
+					),
+				),
+			),
+		),
+	);
+
+	it.scoped("uses daemon-state seeded projects and instances", () =>
+		Effect.gen(function* () {
+			const fetchMock = vi.fn().mockResolvedValue({
+				json: () => Promise.resolve([{ id: "s1" }, { id: "s2" }]),
+			});
+			vi.stubGlobal("fetch", fetchMock);
+
+			const count = yield* prefetchSessionCounts;
+			expect(count).toBe(1);
+			expect(fetchMock).toHaveBeenCalledWith(
+				"http://localhost:4567/session?limit=10000",
+				expect.objectContaining({
+					headers: expect.objectContaining({
+						"x-opencode-directory": "/tmp/seeded-project",
+					}),
+				}),
+			);
+
+			const configRef = yield* DaemonConfigRefTag;
+			const config = yield* Ref.get(configRef);
+			expect(config.persistedSessionCounts.get("seeded-project")).toBe(2);
+		}).pipe(
+			Effect.provide(
+				Layer.fresh(
+					Layer.mergeAll(
+						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
+						makeProjectRegistryFromDaemonStateLive,
+						makeInstanceManagerStateFromDaemonStateLive(),
+					).pipe(
+						Layer.provideMerge(
+							makeDaemonStateLive({
+								projects: [
+									{
+										slug: "seeded-project",
+										path: "/tmp/seeded-project",
+										title: "Seeded Project",
+										addedAt: 1,
+										instanceId: "default",
+									},
+								],
+								instances: [
+									{
+										id: "default",
+										name: "Default",
+										port: 4567,
+										managed: true,
+									},
+								],
+							}),
+						),
 					),
 				),
 			),

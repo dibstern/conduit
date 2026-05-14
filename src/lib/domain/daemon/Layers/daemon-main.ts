@@ -1469,46 +1469,6 @@ export async function startDaemonProcess(
 		`[startup:${elapsed()}] Relay startup dispatched for ${registry.size} project(s)`,
 	);
 
-	// ── Prefetch session counts ───────────────────────────────────────────
-	for (const slug of registry.slugs()) {
-		const entry = registry.get(slug);
-		if (!entry) continue;
-		if (persistedSessionCounts.has(slug)) continue;
-		const url = resolveOpencodeUrl(entry.project.instanceId);
-		if (!url) continue;
-		const instanceId = entry.project.instanceId ?? "default";
-		const instance = instanceManager.getInstance(instanceId);
-		const password =
-			instance?.env?.["OPENCODE_SERVER_PASSWORD"] ??
-			process.env["OPENCODE_SERVER_PASSWORD"] ??
-			"";
-		const username =
-			instance?.env?.["OPENCODE_SERVER_USERNAME"] ??
-			process.env["OPENCODE_SERVER_USERNAME"] ??
-			"opencode";
-		const headers: Record<string, string> = {
-			"x-opencode-directory": entry.project.directory,
-		};
-		if (password) {
-			headers["Authorization"] =
-				`Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-		}
-		fetch(`${url}/session?limit=10000`, { headers })
-			.then((res) => res.json())
-			.then((data: unknown) => {
-				if (Array.isArray(data)) {
-					persistedSessionCounts.set(slug, data.length);
-					updateRuntimeConfigSync((c) => ({
-						...c,
-						persistedSessionCounts: new Map(persistedSessionCounts),
-					}));
-				}
-			})
-			.catch(() => {
-				// Best-effort
-			});
-	}
-
 	// ── Instance status listener for relay resets ─────────────────────────
 	instanceManager.on("status_changed", (instance: OpenCodeInstance) => {
 		if (instance.status !== "healthy") return;
