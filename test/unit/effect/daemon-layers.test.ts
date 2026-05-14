@@ -12,7 +12,15 @@ import {
 	ShutdownSignalTag,
 	SignalHandlerLayer,
 } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { DaemonHandleTag } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefLive } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import {
+	DaemonHandleLive,
+	DaemonHandleTag,
+} from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 describe("SignalHandlerLayer", () => {
 	it.scoped("installs signal handlers on layer build", () =>
@@ -204,5 +212,76 @@ describe("DaemonHandleTag", () => {
 			// DaemonHandleTag should be importable and have the correct key
 			expect(DaemonHandleTag.key).toBe("DaemonHandle");
 		}),
+	);
+
+	it.effect(
+		"provides an Effect-owned handle backed by daemon config and project registry services",
+		() => {
+			const relayCacheStub = Layer.succeed(RelayCacheTag, {
+				get: (slug: string) =>
+					Effect.succeed({
+						slug,
+						wsHandler: { handleUpgrade: () => {} },
+						rpcWsHandler: { handleUpgrade: () => {} },
+						stop: () => {},
+					}),
+				invalidate: () => Effect.void,
+			});
+			const handleDeps = Layer.mergeAll(
+				DaemonConfigRefLive({
+					port: 49876,
+					host: "127.0.0.1",
+					pinHash: "pin-hash",
+					tlsEnabled: true,
+					keepAwake: true,
+					keepAwakeCommand: undefined,
+					keepAwakeArgs: undefined,
+					shuttingDown: false,
+					dismissedPaths: new Set(),
+					startTime: Date.now() - 1_000,
+					hostExplicit: false,
+					persistedSessionCounts: new Map([["existing", 2]]),
+				}),
+				DaemonEventBusLive,
+				ConfigPersistenceNoopLive,
+				makeProjectRegistryLive([
+					{
+						slug: "existing",
+						directory: "/tmp/existing",
+						title: "Existing",
+						lastUsed: 100,
+					},
+				]),
+				relayCacheStub,
+			);
+			const layer = DaemonHandleLive.pipe(Layer.provideMerge(handleDeps));
+
+			return Effect.gen(function* () {
+				const handle = yield* DaemonHandleTag;
+
+				const initialStatus = yield* handle.getStatus();
+				expect(initialStatus.port).toBe(49876);
+				expect(initialStatus.host).toBe("127.0.0.1");
+				expect(initialStatus.projectCount).toBe(1);
+				expect(initialStatus.sessionCount).toBe(2);
+				expect(initialStatus.pinEnabled).toBe(true);
+				expect(initialStatus.tlsEnabled).toBe(true);
+				expect(initialStatus.keepAwake).toBe(true);
+
+				yield* handle.addProject("/tmp/new-project");
+				const projects = yield* handle.getProjects();
+				expect(projects.map((project) => project.slug).sort()).toEqual([
+					"existing",
+					"new-project",
+				]);
+
+				yield* handle.removeProject("existing");
+				const afterRemove = yield* handle.getStatus();
+				expect(afterRemove.projectCount).toBe(1);
+				expect(afterRemove.projects.map((project) => project.slug)).toEqual([
+					"new-project",
+				]);
+			}).pipe(Effect.provide(layer));
+		},
 	);
 });

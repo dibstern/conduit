@@ -61,6 +61,7 @@ import {
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
 } from "../Services/daemon-config-ref.js";
+import { DaemonHandleLive } from "../Services/daemon-handle.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
@@ -635,6 +636,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(configSnapshotLayer),
 	);
 
+	const withDaemonHandle = DaemonHandleLive.pipe(
+		Layer.provideMerge(withConfigPersistence),
+	);
+
 	const keepAwakeLayer =
 		options.keepAwake !== undefined
 			? makeKeepAwakeLive(options.keepAwake)
@@ -645,7 +650,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 					isSupported: () => Effect.succeed(false),
 				});
 	const withDaemonControl = keepAwakeLayer.pipe(
-		Layer.provideMerge(withConfigPersistence),
+		Layer.provideMerge(withDaemonHandle),
 	);
 
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────

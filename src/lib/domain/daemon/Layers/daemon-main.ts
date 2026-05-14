@@ -172,28 +172,10 @@ export const makeDaemonProgramLayer = (
 		}).pipe(Effect.annotateLogs("component", "daemon-main")),
 	).pipe(Layer.provide(Layer.merge(daemonLayer, makeSupervisorLive)));
 
-// ─── DaemonHandleTag ────────────────────────────────────────────────────
-// Effect-native handle for foreground mode. Provides the same capabilities
-// as the imperative DaemonHandle interface but via Effect-typed methods.
-// AP-41: This Tag is used by foreground mode to interact with the running
-// daemon without going through IPC.
-
-export interface EffectDaemonHandle {
-	readonly port: Effect.Effect<number>;
-	readonly addProject: (dir: string) => Effect.Effect<void>;
-	readonly removeProject: (slug: string) => Effect.Effect<void>;
-	readonly getStatus: () => Effect.Effect<
-		import("../../../daemon/daemon-types.js").DaemonStatus
-	>;
-	readonly getProjects: () => Effect.Effect<
-		ReadonlyArray<import("../../../types.js").StoredProject>
-	>;
-}
-
-export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+export {
 	DaemonHandleTag,
-	EffectDaemonHandle
->() {}
+	type EffectDaemonHandle,
+} from "../Services/daemon-handle.js";
 
 // ─── startDaemonEffect ──────────────────────────────────────────────────
 // Effect-native daemon entry point. Uses NodeRuntime.runMain which handles

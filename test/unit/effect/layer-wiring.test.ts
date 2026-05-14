@@ -34,6 +34,7 @@ import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonHandleTag } from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
 import {
 	DaemonEvent,
 	DaemonEventBusTag,
@@ -261,6 +262,16 @@ describe("makeDaemonLive wiring", () => {
 			const state = yield* Ref.get(ref);
 			// Empty registry on startup
 			expect(state).toBeDefined();
+		}).pipe(Effect.provide(makeDaemonLayer())),
+	);
+
+	it.scoped("provides DaemonHandleTag from the composed daemon graph", () =>
+		Effect.gen(function* () {
+			const handle = yield* DaemonHandleTag;
+			const status = yield* handle.getStatus();
+			expect(status.port).toBeGreaterThan(0);
+			expect(status.host).toBe("127.0.0.1");
+			expect(status.projectCount).toBe(0);
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
