@@ -4,7 +4,7 @@ import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/managem
 // and error isolation policy.
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	type CrashCounter,
@@ -217,6 +217,60 @@ describe("daemon startup effects", () => {
 				// Both instances were attempted
 				expect(addInstance).toHaveBeenCalledTimes(2);
 			}),
+		);
+
+		it.effect(
+			"continues when legacy instance manager rejects persisted config",
+			() =>
+				Effect.gen(function* () {
+					const instances: DaemonInstanceConfig[] = [
+						{
+							id: "inst-bad-url",
+							name: "Bad URL",
+							port: 4001,
+							managed: false,
+							url: "not-a-url",
+						},
+						{
+							id: "inst-good",
+							name: "Good Instance",
+							port: 4002,
+							managed: true,
+						},
+					];
+
+					const addInstance = vi.fn().mockImplementation((id: string) => {
+						if (id === "inst-bad-url") {
+							throw new Error(
+								'Invalid URL for instance "inst-bad-url": not-a-url',
+							);
+						}
+						return {
+							id,
+							name: "Good Instance",
+							port: 4002,
+							managed: true,
+							status: "stopped",
+							restartCount: 0,
+							createdAt: Date.now(),
+						};
+					});
+
+					const mockMgmt = makeMockInstanceMgmt({ addInstance });
+					const exit = yield* Effect.exit(
+						rehydrateInstances.pipe(
+							Effect.provide(
+								Layer.mergeAll(
+									makeDaemonStateLive({ instances }),
+									Layer.succeed(InstanceMgmtTag, mockMgmt),
+								),
+							),
+						),
+					);
+
+					expect(Exit.isSuccess(exit)).toBe(true);
+					expect(addInstance).toHaveBeenCalledTimes(2);
+				}),
 		);
 	});
 });

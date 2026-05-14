@@ -27,6 +27,33 @@ export class CrashLimitExceeded extends Data.TaggedError("CrashLimitExceeded")<{
 	count: number;
 }> {}
 
+class InstanceRehydrationFailed extends Data.TaggedError(
+	"InstanceRehydrationFailed",
+)<{
+	readonly instanceId: string;
+	readonly cause: unknown;
+}> {}
+
+const isTaggedInstanceLimitExceeded = (cause: unknown): boolean =>
+	typeof cause === "object" &&
+	cause !== null &&
+	"_tag" in cause &&
+	(cause as { _tag: string })._tag === "InstanceLimitExceeded";
+
+const isExpectedLegacyInstanceManagerError = (cause: unknown): boolean => {
+	if (cause instanceof OpenCodeConnectionError) return true;
+	if (isTaggedInstanceLimitExceeded(cause)) return true;
+	if (!(cause instanceof Error)) return false;
+	return (
+		cause.message.includes("already exists") ||
+		cause.message.includes("Max instances reached") ||
+		cause.message.startsWith("Invalid URL for instance")
+	);
+};
+
+const formatRehydrationCause = (cause: unknown): string =>
+	cause instanceof Error ? cause.message : String(cause);
+
 // ─── CrashCounter service ──────────────────────────────────────────────────
 
 /** Interface for crash counting — tracks consecutive crashes to detect boot loops. */
@@ -107,35 +134,30 @@ export const rehydrateInstances: Effect.Effect<
 	yield* Effect.forEach(
 		state.instances,
 		(inst: DaemonInstanceConfig) =>
-			Effect.try(() => {
-				const config: InstanceConfig = {
-					name: inst.name,
-					port: inst.port,
-					managed: inst.managed,
-					...(inst.env != null && { env: inst.env }),
-					...(inst.url != null && { url: inst.url }),
-				};
-				mgmt.addInstance(inst.id, config);
+			Effect.try({
+				try: () => {
+					const config: InstanceConfig = {
+						name: inst.name,
+						port: inst.port,
+						managed: inst.managed,
+						...(inst.env != null && { env: inst.env }),
+						...(inst.url != null && { url: inst.url }),
+					};
+					mgmt.addInstance(inst.id, config);
+				},
+				catch: (cause) =>
+					new InstanceRehydrationFailed({
+						instanceId: inst.id,
+						cause,
+					}),
 			}).pipe(
-				Effect.catchTag("UnknownException", (e) => {
-					// Check if the underlying cause is a tagged error we expect
-					if (e.error instanceof OpenCodeConnectionError) {
-						return Effect.logWarning(
-							`Rehydration failed for instance ${inst.id}: ${e.error.message}`,
-						);
+				Effect.catchTag("InstanceRehydrationFailed", (failure) => {
+					if (!isExpectedLegacyInstanceManagerError(failure.cause)) {
+						return Effect.die(failure.cause);
 					}
-					if (
-						e.error &&
-						typeof e.error === "object" &&
-						"_tag" in e.error &&
-						(e.error as { _tag: string })._tag === "InstanceLimitExceeded"
-					) {
-						return Effect.logWarning(
-							`Instance limit exceeded rehydrating ${inst.id}`,
-						);
-					}
-					// Re-throw unexpected errors as defects
-					return Effect.die(e.error);
+					return Effect.logWarning(
+						`Rehydration failed for instance ${failure.instanceId}: ${formatRehydrationCause(failure.cause)}`,
+					);
 				}),
 				Effect.annotateLogs("instanceId", inst.id),
 			),
