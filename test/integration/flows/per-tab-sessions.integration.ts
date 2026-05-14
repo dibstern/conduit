@@ -188,11 +188,15 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Clear and send input_sync from client1
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({ type: "input_sync", text: "typing from tab1" });
+		await client1.syncInputDraft("typing from tab1", {
+			sessionId: sharedId,
+			originId: "browser-tab-a",
+		});
 
 		// Client2 should receive it (same session)
 		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
 		expect(msg["text"]).toBe("typing from tab1");
+		expect(msg["from"]).toBe("browser-tab-a");
 
 		await client1.close();
 		await client2.close();
@@ -224,7 +228,10 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Send input_sync from client1 (session A)
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({ type: "input_sync", text: "isolated input" });
+		await client1.syncInputDraft("isolated input", {
+			sessionId: a["id"] as string,
+			originId: "browser-tab-a",
+		});
 
 		// Wait and verify client2 (session B) does NOT receive it
 		await new Promise((r) => setTimeout(r, 1000));

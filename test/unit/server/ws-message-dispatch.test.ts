@@ -72,9 +72,11 @@ import {
 	chatState,
 	clearMessages,
 	handleToolStart,
+	inputSyncState,
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import {
 	clearInstanceState,
 	instanceState,
@@ -100,6 +102,9 @@ beforeEach(() => {
 	ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
+	inputSyncState.text = "";
+	inputSyncState.lastFrom = "";
+	inputSyncState.lastUpdated = 0;
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
@@ -110,6 +115,9 @@ afterEach(() => {
 	ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
+	inputSyncState.text = "";
+	inputSyncState.lastFrom = "";
+	inputSyncState.lastUpdated = 0;
 });
 
 // ─── Gap 1: handleToolContentResponse (AC5) ─────────────────────────────────
@@ -254,6 +262,34 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		// tool-b should still be truncated
 		expect(toolB.result).toBe("truncated output…");
 		expect(toolB.isTruncated).toBe(true);
+	});
+});
+
+describe("input_sync dispatch", () => {
+	it("ignores draft echoes from this browser tab", () => {
+		inputSyncState.text = "before";
+		inputSyncState.lastUpdated = 10;
+
+		handleMessage({
+			type: "input_sync",
+			text: "self echo",
+			from: getBrowserClientId(),
+		});
+
+		expect(inputSyncState.text).toBe("before");
+		expect(inputSyncState.lastUpdated).toBe(10);
+	});
+
+	it("applies drafts from another browser tab", () => {
+		handleMessage({
+			type: "input_sync",
+			text: "other tab draft",
+			from: "browser-tab-b",
+		});
+
+		expect(inputSyncState.text).toBe("other tab draft");
+		expect(inputSyncState.lastFrom).toBe("browser-tab-b");
+		expect(inputSyncState.lastUpdated).toBeGreaterThan(0);
 	});
 });
 

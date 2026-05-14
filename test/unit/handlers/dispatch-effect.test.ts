@@ -12,10 +12,9 @@ import type { WebSocketHandlerShape } from "../../../src/lib/domain/relay/Servic
 import { WebSocketError } from "../../../src/lib/errors.js";
 import { dispatchMessageEffect } from "../../../src/lib/handlers/index.js";
 import {
-	clearSessionInputDraft,
-	getSessionInputDraft,
-} from "../../../src/lib/handlers/prompt.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+	makeMockOpenCodeAPI,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -45,19 +44,20 @@ function mockWsHandler(
 // ─── Dispatch routing ───────────────────────────────────────────────────────
 
 describe("dispatchMessageEffect", () => {
-	it.effect("dispatches input_sync with validated payload", () => {
+	it.effect("dispatches rewind with validated payload", () => {
+		const api = makeMockOpenCodeAPI();
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
-			getClientsForSession: vi.fn(() => ["client-1"]),
 		});
-		const layer = makeTestHandlerLayer({ wsHandler: ws });
+		const layer = makeTestHandlerLayer({ api, wsHandler: ws });
 
-		clearSessionInputDraft("session-42");
 		return Effect.gen(function* () {
-			yield* dispatchMessageEffect("client-1", "input_sync", {
-				text: "hello",
+			yield* dispatchMessageEffect("client-1", "rewind", {
+				messageId: "msg-1",
 			}) as Effect.Effect<void, never>;
-			expect(getSessionInputDraft("session-42")).toBe("hello");
+			expect(api.session.revert).toHaveBeenCalledWith("session-42", {
+				messageID: "msg-1",
+			});
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -88,9 +88,9 @@ describe("dispatchMessageEffect", () => {
 	// ─── Schema validation ─────────────────────────────────────────────────
 
 	it.effect("fails with ParseError when payload is malformed", () => {
-		// input_sync requires { text: string } — passing a number should fail
-		const effect = dispatchMessageEffect("client-1", "input_sync", {
-			text: 42,
+		// switch_session requires { sessionId: string } — passing a number should fail
+		const effect = dispatchMessageEffect("client-1", "switch_session", {
+			sessionId: 42,
 		}).pipe(Effect.either) as Effect.Effect<
 			import("effect").Either.Either<void, unknown>
 		>;
@@ -103,8 +103,8 @@ describe("dispatchMessageEffect", () => {
 	});
 
 	it.effect("fails with ParseError when required fields are missing", () => {
-		const effect = dispatchMessageEffect("client-1", "input_sync", {
-			// missing text
+		const effect = dispatchMessageEffect("client-1", "switch_session", {
+			// missing sessionId
 		}).pipe(Effect.either) as Effect.Effect<
 			import("effect").Either.Either<void, unknown>
 		>;
@@ -117,20 +117,21 @@ describe("dispatchMessageEffect", () => {
 	});
 
 	it.effect("accepts payloads with extra unknown fields (open schema)", () => {
+		const api = makeMockOpenCodeAPI();
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => ["client-1"]),
 		});
-		const layer = makeTestHandlerLayer({ wsHandler: ws });
+		const layer = makeTestHandlerLayer({ api, wsHandler: ws });
 
 		// Schema.Struct allows extra keys by default
-		clearSessionInputDraft("session-1");
 		return Effect.gen(function* () {
-			yield* dispatchMessageEffect("client-1", "input_sync", {
-				text: "draft",
+			yield* dispatchMessageEffect("client-1", "rewind", {
+				messageId: "msg-1",
 				extraField: "should be ignored",
 			}) as Effect.Effect<void, never>;
-			expect(getSessionInputDraft("session-1")).toBe("draft");
+			expect(api.session.revert).toHaveBeenCalledWith("session-1", {
+				messageID: "msg-1",
+			});
 		}).pipe(Effect.provide(layer));
 	});
 });

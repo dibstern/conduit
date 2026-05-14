@@ -27,11 +27,6 @@ const RewindMsg = Schema.Struct({
 	uuid: Schema.optional(Schema.String),
 });
 
-const InputSyncMsg = Schema.Struct({
-	type: Schema.Literal("input_sync"),
-	text: Schema.String,
-});
-
 // ── Permissions / Questions ──────────────────────────────────────────────────
 
 const PermissionResponseMsg = Schema.Struct({
@@ -206,7 +201,6 @@ const SetLogLevelMsg = Schema.Struct({
 export const IncomingWsMessage = Schema.Union(
 	// Prompt / Messages
 	RewindMsg,
-	InputSyncMsg,
 	// Permissions / Questions
 	PermissionResponseMsg,
 	AskUserResponseMsg,

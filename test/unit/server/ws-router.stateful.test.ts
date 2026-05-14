@@ -403,7 +403,6 @@ const validMessageTypes: IncomingMessageType[] = [
 	"delete_session",
 	"fork_session",
 	"terminal_command",
-	"input_sync",
 	"add_project",
 	"pty_create",
 	"pty_input",

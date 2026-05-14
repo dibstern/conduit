@@ -23,9 +23,9 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { rateLimitChatSend, wsSend } from "../../stores/ws.svelte.js";
+	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { cancelSessionRpc, sendMessageRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
@@ -129,6 +129,18 @@
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
 
+	function syncInputDraft(text: string) {
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!sessionId || !projectSlug) return;
+		void syncInputDraftRpc({
+			projectSlug,
+			sessionId,
+			text,
+			originId: getBrowserClientId(),
+		}).catch(() => undefined);
+	}
+
 	function handleInput() {
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
@@ -139,7 +151,7 @@
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
 		inputSyncTimer = setTimeout(() => {
 			inputSyncTimer = null;
-			wsSend({ type: "input_sync", text: inputText });
+			syncInputDraft(inputText);
 		}, 300);
 	}
 
@@ -265,7 +277,7 @@
 			clearTimeout(inputSyncTimer);
 			inputSyncTimer = null;
 		}
-		wsSend({ type: "input_sync", text: "" });
+		syncInputDraft("");
 		if (textareaEl) {
 			textareaEl.style.height = "auto";
 		}

@@ -27,10 +27,6 @@ export const PayloadSchemas: {
 		uuid: Schema.optional(Schema.String),
 	}),
 
-	input_sync: Schema.Struct({
-		text: Schema.String,
-	}),
-
 	permission_response: Schema.Struct({
 		requestId: PermissionId,
 		decision: Schema.String,

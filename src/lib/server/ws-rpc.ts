@@ -11,7 +11,11 @@ import {
 	switchModelForSession,
 	switchVariantForSession,
 } from "../handlers/model.js";
-import { cancelSessionById, sendMessageToSession } from "../handlers/prompt.js";
+import {
+	cancelSessionById,
+	sendMessageToSession,
+	syncInputDraftForSession,
+} from "../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../handlers/reload.js";
 import {
 	loadMoreHistoryForSession,
@@ -61,6 +65,7 @@ export {
 	type SwitchModelResponse,
 	SwitchVariant,
 	type SwitchVariantResponse,
+	SyncInputDraft,
 	WsRpcError,
 	WsRpcGroup,
 	WsRpcRequest,
@@ -453,6 +458,21 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `SendMessage failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	SyncInputDraft: (request) =>
+		syncInputDraftForSession({
+			sessionId: request.sessionId,
+			text: request.text,
+			...(request.originId ? { from: request.originId } : {}),
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `SyncInputDraft failed: ${String(error)}`,
 					}),
 				),
 			),

@@ -12,7 +12,6 @@ import type { PermissionId, RequestId } from "../shared-types.js";
  */
 export interface PayloadMap {
 	rewind: { messageId?: string; uuid?: string };
-	input_sync: { text: string };
 	permission_response: {
 		requestId: PermissionId;
 		decision: string;

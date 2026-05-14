@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. RPC-over-WS is partly started: `CancelSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `ReloadProviderSession`, `RenameSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, and `SwitchVariant` have moved through Effect RPC, but the remaining browser operations still use the legacy WS protocol.
+1. RPC-over-WS is partly started: `CancelSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `ReloadProviderSession`, `RenameSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, and `SyncInputDraft` have moved through Effect RPC, but the remaining browser operations still use the legacy WS protocol.
 2. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
 3. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
 4. CLI still imports/calls `startDaemonProcess`.
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
-8. RPC-over-WS vertical migration. Started locally with end-to-end `CancelSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `ReloadProviderSession`, `RenameSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, and `SwitchVariant`; broader browser operation slices remain.
+8. RPC-over-WS vertical migration. Started locally with end-to-end `CancelSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `ReloadProviderSession`, `RenameSession`, `SendMessage`, `SetDefaultModel`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, and `SyncInputDraft`; broader browser operation slices remain.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist and production orchestration runtime creates OpenCode/Claude instances through plain driver values.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.
@@ -221,3 +221,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Deleted the legacy `get_todo`, `rename_session`, `search_sessions`, and `load_more_history` browser WS commands from payload schemas, router types, dispatch tables, frontend callsites, integration helpers, and old wire snapshots.
 - Fixed the history pagination path so `LoadMoreHistory` RPC responses flow through `history_page` handling and clear per-session `historyLoading` / update per-session pagination state, not only the old global compatibility state.
 - Verified locally with `pnpm check`, `pnpm lint`, targeted RPC/contract/component/store/handler tests, and focused session lifecycle plus WS handler coverage integration flows.
+
+2026-05-14, RPC input draft sync slice:
+
+- Implemented `SyncInputDraft` in `WsRpcServerLayer`; the browser input box now sends debounced and immediate-clear drafts through typed RPC with explicit `sessionId` and per-tab `originId`.
+- Deleted the legacy incoming `input_sync` WS command from payload schemas, router types, dispatch tables, and incoming-message schema coverage. The server-pushed `input_sync` event remains as the cross-tab draft update message.
+- Preserved per-tab semantics by making the frontend ignore `input_sync` echoes whose `from` matches the current browser tab id, while other tabs on the same session still receive the draft.
+- Verified locally with `pnpm check`, `pnpm lint`, targeted RPC/router/dispatch/handler unit tests, and focused multi-client/per-tab integration flows.

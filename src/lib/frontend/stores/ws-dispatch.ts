@@ -839,6 +839,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleBannerMessage(msg);
 			break;
 		case "input_sync":
+			if (isOwnBrowserClientId(msg.from)) break;
 			handleInputSyncReceived(msg);
 			break;
 

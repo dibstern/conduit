@@ -41,6 +41,7 @@ export {
 	type SwitchModelResponse,
 	SwitchVariant,
 	type SwitchVariantResponse,
+	SyncInputDraft,
 	type TodoItem,
 	WsRpcError,
 	WsRpcGroup,

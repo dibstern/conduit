@@ -88,9 +88,9 @@ import {
 } from "../../../src/lib/handlers/permissions.js";
 import {
 	cancelSessionById,
-	handleInputSync,
 	handleMessage,
 	handleRewind,
+	syncInputDraftForSession,
 } from "../../../src/lib/handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../../src/lib/handlers/reload.js";
 import {
@@ -2720,38 +2720,56 @@ describe("cancelSessionById", () => {
 	});
 });
 
-describe("handleInputSync", () => {
-	it.effect("forwards input to other clients in same session", () => {
+describe("syncInputDraftForSession", () => {
+	it.effect("forwards input to clients in the target session", () => {
 		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
 			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
 		});
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleInputSync("client-1", { text: "hello" }).pipe(
+		return syncInputDraftForSession({
+			sessionId: "session-1",
+			text: "hello",
+			from: "browser-tab-a",
+		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				// Should send to client-2 but NOT client-1 (the sender)
+				expect(ws.getClientsForSession).toHaveBeenCalledWith("session-1");
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "input_sync",
+					text: "hello",
+					from: "browser-tab-a",
+				});
 				expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
 					type: "input_sync",
 					text: "hello",
-					from: "client-1",
+					from: "browser-tab-a",
 				});
-				expect(ws.sendTo).toHaveBeenCalledTimes(1);
+				expect(ws.sendTo).toHaveBeenCalledTimes(2);
 			}),
 		);
 	});
 
-	it.effect("does nothing when no session", () => {
-		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
+	it.effect("clears the draft by forwarding an empty sync", () => {
+		const ws = mockWsHandler({
+			getClientsForSession: vi.fn(() => ["client-1"]),
+		});
 
 		const layer = Layer.succeed(WebSocketHandlerTag, ws);
 
-		return handleInputSync("client-1", { text: "hello" }).pipe(
+		return syncInputDraftForSession({
+			sessionId: "session-1",
+			text: "",
+			from: "browser-tab-a",
+		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ws.sendTo).not.toHaveBeenCalled();
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "input_sync",
+					text: "",
+					from: "browser-tab-a",
+				});
 			}),
 		);
 	});

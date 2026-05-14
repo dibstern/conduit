@@ -567,31 +567,31 @@ export const handleRewind = (clientId: string, payload: PayloadMap["rewind"]) =>
 		}
 	});
 
-export const handleInputSync = (
-	clientId: string,
-	payload: PayloadMap["input_sync"],
-) =>
+export const syncInputDraftForSession = ({
+	sessionId,
+	text,
+	from,
+}: {
+	sessionId: string;
+	text: string;
+	from?: string;
+}) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 
-		const senderSession = wsHandler.getClientSession(clientId);
-		if (!senderSession) return;
-
 		// Store the draft so newly connecting clients receive it
-		if (payload.text) {
-			sessionInputDrafts.set(senderSession, payload.text);
+		if (text) {
+			sessionInputDrafts.set(sessionId, text);
 		} else {
-			sessionInputDrafts.delete(senderSession);
+			sessionInputDrafts.delete(sessionId);
 		}
 
-		const targets = wsHandler.getClientsForSession(senderSession);
+		const targets = wsHandler.getClientsForSession(sessionId);
 		for (const targetId of targets) {
-			if (targetId !== clientId) {
-				wsHandler.sendTo(targetId, {
-					type: "input_sync",
-					text: payload.text,
-					from: clientId,
-				});
-			}
+			wsHandler.sendTo(targetId, {
+				type: "input_sync",
+				text,
+				...(from ? { from } : {}),
+			});
 		}
 	});

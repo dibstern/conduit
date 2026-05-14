@@ -519,6 +519,20 @@ export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
 	},
 ) {}
 
+export class SyncInputDraft extends Schema.TaggedRequest<SyncInputDraft>()(
+	"SyncInputDraft",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			text: Schema.String,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 	"CancelSession",
 	{
@@ -552,6 +566,7 @@ export const WsRpcRequest = Schema.Union(
 	ListSessions,
 	LoadMoreHistory,
 	SendMessage,
+	SyncInputDraft,
 	CancelSession,
 );
 
@@ -578,6 +593,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(SendMessage),
+	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
 );
 

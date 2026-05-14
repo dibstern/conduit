@@ -24,6 +24,7 @@ import {
 	SwitchContextWindow,
 	SwitchModel,
 	SwitchVariant,
+	SyncInputDraft,
 	WsRpcError,
 	WsRpcGroup,
 	WsRpcRequest,
@@ -181,6 +182,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						hasMore: false,
 					}),
 				SendMessage: () => Effect.succeed({ ok: true as const }),
+				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
 			}),
 		),
@@ -210,6 +212,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(true);
 		expect(WsRpcGroup.requests.has("LoadMoreHistory")).toBe(true);
 		expect(WsRpcGroup.requests.has("SendMessage")).toBe(true);
+		expect(WsRpcGroup.requests.has("SyncInputDraft")).toBe(true);
 		expect(WsRpcGroup.requests.has("CancelSession")).toBe(true);
 		expect(typeof RpcClient.make).toBe("function");
 	});
@@ -415,6 +418,15 @@ describe("browser WebSocket RPC contract", () => {
 						text: "hello",
 					}),
 				).toEqual({ ok: true });
+
+				expect(
+					yield* client.SyncInputDraft({
+						projectSlug: "demo",
+						sessionId: "session-1",
+						text: "draft",
+						originId: "browser-tab-a",
+					}),
+				).toEqual({ ok: true });
 			}),
 		),
 	);
@@ -500,6 +512,14 @@ describe("browser WebSocket RPC contract", () => {
 				text: "hello",
 			})._tag,
 		).toBe("SendMessage");
+		expect(
+			new SyncInputDraft({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				text: "draft",
+				originId: "browser-tab-a",
+			})._tag,
+		).toBe("SyncInputDraft");
 		expect(
 			new CancelSession({ projectSlug: "demo", sessionId: "session-1" })._tag,
 		).toBe("CancelSession");

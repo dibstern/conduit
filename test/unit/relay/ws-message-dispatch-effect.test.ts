@@ -18,7 +18,10 @@ import {
 	handleRelayWsMessageThroughGate,
 } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+import {
+	makeMockOpenCodeAPI,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 function mockLogger(): Logger {
 	const logger: Logger = {
@@ -78,8 +81,8 @@ describe("handleRelayWsMessage", () => {
 				commandId: "cmd-a",
 				receivedAt: 1000,
 				clientId: "client-1",
-				handler: "input_sync",
-				payload: { text: "draft" },
+				handler: "rewind",
+				payload: { messageId: "msg-1" },
 				sendTo,
 				log: mockLogger(),
 				dispatch,
@@ -234,29 +237,28 @@ describe("handleRelayWsMessage", () => {
 	);
 
 	it.effect("uses dispatchMessageEffect by default", () => {
+		const api = makeMockOpenCodeAPI();
 		const wsHandler = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
 		});
 		const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
 		const layer = Layer.mergeAll(
 			makeBaseLayer(),
-			makeTestHandlerLayer({ wsHandler }),
+			makeTestHandlerLayer({ api, wsHandler }),
 		);
 
 		return handleRelayWsMessage({
 			clientId: "client-1",
-			handler: "input_sync",
-			payload: { text: "draft" },
+			handler: "rewind",
+			payload: { messageId: "msg-1" },
 			sendTo,
 			log: mockLogger(),
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-2",
-					expect.objectContaining({ type: "input_sync", text: "draft" }),
-				);
+				expect(api.session.revert).toHaveBeenCalledWith("session-1", {
+					messageID: "msg-1",
+				});
 				expect(sendTo).not.toHaveBeenCalled();
 			}),
 		);

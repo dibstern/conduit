@@ -144,6 +144,13 @@ export interface SendMessageRpcInput {
 	readonly originId?: string;
 }
 
+export interface SyncInputDraftRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly text: string;
+	readonly originId?: string;
+}
+
 export interface WsRpcLocation {
 	readonly protocol: string;
 	readonly host: string;
@@ -471,6 +478,24 @@ const callSendMessage = (input: SendMessageRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.SyncInputDraft({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				text: input.text,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
 ): Promise<void> {
@@ -616,4 +641,11 @@ export async function sendMessageRpc(
 ): Promise<void> {
 	const runtime = await getRuntime();
 	await runtime.runPromise(callSendMessage(input));
+}
+
+export async function syncInputDraftRpc(
+	input: SyncInputDraftRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callSyncInputDraft(input));
 }

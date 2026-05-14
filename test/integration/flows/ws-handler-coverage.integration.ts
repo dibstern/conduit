@@ -146,7 +146,7 @@ describe("Integration: WS Handler Coverage", () => {
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 		const sessionId = client1.getActiveSessionId();
-		expect(sessionId).toBeTruthy();
+		if (!sessionId) throw new Error("Expected active session after init");
 		client2.send({ type: "view_session", sessionId });
 		await client2.waitFor("session_switched", {
 			timeout: 3000,
@@ -155,9 +155,13 @@ describe("Integration: WS Handler Coverage", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({ type: "input_sync", text: "typing something" });
+		await client1.syncInputDraft("typing something", {
+			sessionId,
+			originId: "browser-tab-a",
+		});
 		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
 		expect(msg["text"]).toBe("typing something");
+		expect(msg["from"]).toBe("browser-tab-a");
 
 		await client1.close();
 		await client2.close();

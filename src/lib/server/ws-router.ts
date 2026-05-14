@@ -16,7 +16,6 @@ export type IncomingMessageType =
 	| "delete_session"
 	| "fork_session"
 	| "terminal_command"
-	| "input_sync"
 	| "add_project"
 	| "remove_project"
 	| "rename_project"
@@ -46,7 +45,6 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"delete_session",
 	"fork_session",
 	"terminal_command",
-	"input_sync",
 	"add_project",
 	"remove_project",
 	"rename_project",

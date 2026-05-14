@@ -134,6 +134,43 @@ export class TestWsClient {
 		}
 	}
 
+	async syncInputDraft(
+		text: string,
+		opts: {
+			readonly sessionId?: string;
+			readonly originId?: string;
+		} = {},
+	): Promise<void> {
+		const sessionId = opts.sessionId ?? this.getActiveSessionId();
+		if (!sessionId) {
+			throw new Error("Cannot sync input draft before session_switched");
+		}
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.SyncInputDraft({
+							projectSlug: "integration-test",
+							sessionId,
+							text,
+							...(opts.originId ? { originId: opts.originId } : {}),
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
 	async cancelSession(sessionId = this.getActiveSessionId()): Promise<void> {
 		if (!sessionId) {
 			throw new Error("Cannot cancel before session_switched");
