@@ -11,6 +11,12 @@ interface AllowedRuntimeBoundary {
 	readonly reason: string;
 }
 
+interface AllowedPlainThrow {
+	readonly path: string;
+	readonly snippetPattern: RegExp;
+	readonly reason: string;
+}
+
 const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	{
 		path: "src/lib/domain/server/Layers/http-router-layer.ts",
@@ -29,6 +35,79 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	},
 ];
 
+const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
+	{
+		path: "src/lib/utils.ts",
+		snippetPattern: /throw new Error\(`Unexpected value:/,
+		reason: "assertNever defect path for compile-time exhaustiveness",
+	},
+	{
+		path: "src/lib/frontend/app-entry.ts",
+		snippetPattern: /Missing #app mount point/,
+		reason: "browser app mount invariant",
+	},
+	{
+		path: "src/lib/frontend/utils/notifications.ts",
+		snippetPattern: /Service workers are not supported in this browser/,
+		reason: "browser capability failure surfaced to UI caller",
+	},
+	{
+		path: "src/lib/frontend/utils/notifications.ts",
+		snippetPattern: /Failed to fetch VAPID key from server/,
+		reason: "browser push setup failure surfaced to UI caller",
+	},
+	{
+		path: "src/lib/frontend/stories/mocks.ts",
+		snippetPattern: /throw new Error\('Refresh failed'\)/,
+		reason: "storybook/mock fixture text, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/input/input-utils.ts",
+		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
+		reason: "browser attachment validation failure surfaced to UI caller",
+	},
+	{
+		path: "src/lib/frontend/components/input/input-utils.ts",
+		snippetPattern: /Canvas 2D context unavailable/,
+		reason: "browser image-processing capability invariant",
+	},
+	{
+		path: "src/lib/frontend/components/input/input-utils.ts",
+		snippetPattern: /Image is too large and could not be resized below 5 MB/,
+		reason: "browser attachment validation failure surfaced to UI caller",
+	},
+	{
+		path: "src/lib/frontend/stores/chat.svelte.ts",
+		snippetPattern: /currentChat\(\) is read-only/,
+		reason: "frontend mutation invariant on derived chat state",
+	},
+	{
+		path: "src/lib/frontend/stores/chat.svelte.ts",
+		snippetPattern: /EMPTY_MESSAGES\.toolRegistry is read-only/,
+		reason: "frontend mutation invariant on empty sentinel state",
+	},
+	{
+		path: "src/lib/frontend/stores/chat.svelte.ts",
+		snippetPattern: /Attempted to mutate EMPTY_STATE/,
+		reason: "dev-only frontend routing invariant",
+	},
+	{
+		path: "src/lib/frontend/stores/chat.svelte.ts",
+		snippetPattern: /getOrCreateSessionActivity: empty sessionId/,
+		reason: "frontend session-store invariant",
+	},
+	{
+		path: "src/lib/frontend/stores/chat.svelte.ts",
+		snippetPattern: /getOrCreateSessionMessages: empty sessionId/,
+		reason: "frontend session-store invariant",
+	},
+	{
+		path: "src/lib/frontend/stores/ws-dispatch.ts",
+		snippetPattern: /routePerSession: missing sessionId/,
+		reason: "dev-only frontend event-routing invariant",
+	},
+];
+
 function tsFiles(dir: string): string[] {
 	const files: string[] = [];
 	for (const entry of readdirSync(dir)) {
@@ -37,6 +116,20 @@ function tsFiles(dir: string): string[] {
 		if (stat.isDirectory()) {
 			files.push(...tsFiles(path));
 		} else if (path.endsWith(".ts")) {
+			files.push(path);
+		}
+	}
+	return files;
+}
+
+function productionSourceFiles(dir: string): string[] {
+	const files: string[] = [];
+	for (const entry of readdirSync(dir)) {
+		const path = join(dir, entry);
+		const stat = statSync(path);
+		if (stat.isDirectory()) {
+			files.push(...productionSourceFiles(path));
+		} else if (path.endsWith(".ts") || path.endsWith(".svelte")) {
 			files.push(path);
 		}
 	}
@@ -66,6 +159,38 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(unexpected).toEqual([]);
 		expect(hits).toHaveLength(allowedRuntimeBoundaries.length);
+	});
+
+	it("keeps remaining production plain Error throws explicitly reclassified", () => {
+		const hits = productionSourceFiles(SRC_LIB).flatMap((file) => {
+			const relPath = relative(REPO_ROOT, file);
+			const lines = readFileSync(file, "utf8").split("\n");
+			return lines.flatMap((line, index) =>
+				line.includes("throw new Error")
+					? [
+							{
+								path: relPath,
+								line: index + 1,
+								source: lines
+									.slice(index, index + 3)
+									.join("\n")
+									.trim(),
+							},
+						]
+					: [],
+			);
+		});
+
+		const unexpected = hits.filter(
+			(hit) =>
+				!allowedPlainErrorThrows.some(
+					(boundary) =>
+						boundary.path === hit.path &&
+						boundary.snippetPattern.test(hit.source),
+				),
+		);
+
+		expect(unexpected).toEqual([]);
 	});
 
 	it("does not schedule daemon shutdown by re-entering the daemon runtime", () => {
