@@ -5,7 +5,10 @@ import { SqlClient } from "@effect/sql";
 import { Effect, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DualWriteLog } from "../../../src/lib/persistence/dual-write-hook.js";
-import { EffectDualWriteHook } from "../../../src/lib/persistence/effect/dual-write-hook-effect.js";
+import {
+	type EffectDualWriteHook,
+	makeEffectDualWriteHook,
+} from "../../../src/lib/persistence/effect/dual-write-hook-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectRuntime,
@@ -33,11 +36,11 @@ describe("EffectDualWriteHook", () => {
 	let runtime: PersistenceEffectRuntime | undefined;
 	let hook: EffectDualWriteHook | undefined;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		dir = mkdtempSync(join(tmpdir(), "conduit-effect-dual-write-"));
 		const filename = join(dir, "events.db");
 		runtime = ManagedRuntime.make(makePersistenceEffectLayer(filename));
-		hook = new EffectDualWriteHook({ runtime, log: makeLogger() });
+		hook = await runtime.runPromise(makeEffectDualWriteHook(makeLogger()));
 	});
 
 	afterEach(async () => {
@@ -46,15 +49,17 @@ describe("EffectDualWriteHook", () => {
 		if (dir) rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("persists and projects translated SSE events through Effect services", () => {
+	it("persists and projects translated SSE events through Effect services", async () => {
 		if (!hook || !runtime) throw new Error("test runtime not initialized");
-		const result = hook.onSSEEvent(
-			makeSSEEvent("message.created", {
-				sessionID: SESSION_ID,
-				messageID: "msg-effect-001",
-				info: { role: "assistant", parts: [] },
-			}),
-			SESSION_ID,
+		const result = await Effect.runPromise(
+			hook.onSSEEventEffect(
+				makeSSEEvent("message.created", {
+					sessionID: SESSION_ID,
+					messageID: "msg-effect-001",
+					info: { role: "assistant", parts: [] },
+				}),
+				SESSION_ID,
+			),
 		);
 
 		if (!result.ok) throw new Error(result.error ?? result.reason);

@@ -1353,6 +1353,54 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("keeps Effect dual-write persistence inside the relay runtime", () => {
+		const hookPath = "src/lib/persistence/effect/dual-write-hook-effect.ts";
+		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");
+		const relayPath = "src/lib/relay/relay-stack.ts";
+		const relaySource = readFileSync(join(REPO_ROOT, relayPath), "utf8");
+		const retiredBridgePatterns = [
+			{
+				path: hookPath,
+				source: hookSource,
+				pattern: /\bruntime\.runSync\(/g,
+				reason:
+					"EffectDualWriteHook must return Effect programs instead of entering a runtime",
+			},
+			{
+				path: hookPath,
+				source: hookSource,
+				pattern: /\bruntime\.runPromise\(/g,
+				reason: "EffectDualWriteHook must not own async runtime bridge calls",
+			},
+			{
+				path: relayPath,
+				source: relaySource,
+				pattern: /\bEffectDualWriteHook\(\{\s*runtime:/gs,
+				reason:
+					"relay-stack must not construct a separate persistence runtime for dual-write",
+			},
+			{
+				path: relayPath,
+				source: relaySource,
+				pattern: /\beffectPersistenceRuntime\b/g,
+				reason:
+					"dual-write persistence should be owned by the relay runtime Layer graph",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(
+			({ path, source, pattern, reason }) =>
+				Array.from(source.matchAll(pattern), (match) => ({
+					path,
+					line: source.slice(0, match.index).split("\n").length,
+					source: match[0],
+					reason,
+				})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("keeps relay startup as the only relay-stack runPromise boundary", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

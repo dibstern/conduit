@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { Effect, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { EffectDualWriteHook } from "../../../src/lib/persistence/effect/dual-write-hook-effect.js";
+import { makeEffectDualWriteHook } from "../../../src/lib/persistence/effect/dual-write-hook-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
@@ -158,7 +158,7 @@ describe("Relay stack Effect dual-write wiring", () => {
 		const source = readFileSync("src/lib/relay/relay-stack.ts", "utf8");
 
 		expect(source).not.toContain("new DualWriteHook");
-		expect(source).toContain("new EffectDualWriteHook");
+		expect(source).toContain("makeEffectDualWriteHook");
 		expect(source).toContain(
 			"makePersistenceEffectLayer(config.persistenceDbPath)",
 		);
@@ -170,21 +170,22 @@ describe("Relay stack Effect dual-write wiring", () => {
 			makePersistenceEffectLayer(join(dir, "events.db")),
 		);
 		try {
-			const hook = new EffectDualWriteHook({
-				runtime,
-				log: createSilentLogger().child("dual-write"),
-			});
+			const hook = await runtime.runPromise(
+				makeEffectDualWriteHook(createSilentLogger().child("dual-write")),
+			);
 
-			const result = hook.onSSEEvent(
-				{
-					type: "message.created",
-					properties: {
-						sessionID: "test-session",
-						messageID: "msg-001",
-						info: { role: "assistant", parts: [] },
+			const result = await Effect.runPromise(
+				hook.onSSEEventEffect(
+					{
+						type: "message.created",
+						properties: {
+							sessionID: "test-session",
+							messageID: "msg-001",
+							info: { role: "assistant", parts: [] },
+						},
 					},
-				},
-				"test-session",
+					"test-session",
+				),
 			);
 
 			expect(result.ok).toBe(true);

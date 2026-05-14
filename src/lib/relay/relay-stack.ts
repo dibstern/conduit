@@ -83,12 +83,10 @@ import { formatErrorDetail } from "../errors.js";
 import { setDefaultModelForRelay } from "../handlers/model.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
-import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
-import { EffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
+import { makeEffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
-	type PersistenceEffectRuntime,
 } from "../persistence/effect/live.js";
 import {
 	getOrchestrationLayer,
@@ -548,23 +546,6 @@ export async function createProjectRelay(
 		dispose: () => relayManagedRuntime.dispose(),
 	};
 
-	// ── Dual-write hook (SSE → SQLite event store) ──────────────────────
-	let effectPersistenceRuntime: PersistenceEffectRuntime | undefined;
-	let dualWriteHook: DualWriteHookPort | undefined;
-	if (persistenceEffectLayer != null) {
-		const persistenceRuntime = ManagedRuntime.make(persistenceEffectLayer);
-		try {
-			dualWriteHook = new EffectDualWriteHook({
-				runtime: persistenceRuntime,
-				log: log.child("dual-write"),
-			});
-			effectPersistenceRuntime = persistenceRuntime;
-		} catch (err) {
-			await persistenceRuntime.dispose();
-			throw err;
-		}
-	}
-
 	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
 	// Monitoring state is created before the runtime so lifecycle wiring and
 	// monitoring wiring share one view, while the poller manager itself remains
@@ -663,6 +644,10 @@ export async function createProjectRelay(
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
+				const dualWriteHook =
+					persistenceEffectLayer != null
+						? yield* makeEffectDualWriteHook(log.child("dual-write"))
+						: undefined;
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(new Error("Relay creation aborted"));
 				}
@@ -757,7 +742,6 @@ export async function createProjectRelay(
 		stopMonitoring();
 		await rpcWsHandler.drain();
 		await relayManagedRuntime.dispose();
-		await effectPersistenceRuntime?.dispose();
 		throw err;
 	}
 	const api = startup.api;
@@ -820,7 +804,6 @@ export async function createProjectRelay(
 			// Scoped finalizers own SSE drain, command-gate stop, provider instance
 			// shutdown, status-poller drain, and other Effect-managed resources.
 			await effectRuntime.dispose();
-			await effectPersistenceRuntime?.dispose();
 			await rpcWsHandler.drain();
 		},
 	};

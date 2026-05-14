@@ -22,8 +22,10 @@ describe("handleSSEEventEffect", () => {
 			pendingInteractions: _pendingInteractions,
 			sessionService: _sessionService,
 			getSessionParentMap: _getSessionParentMap,
+			dualWriteHook: _dualWriteHook,
 			...effectDeps
-		} = deps satisfies EffectSSEWiringDeps;
+		} = deps;
+		effectDeps satisfies EffectSSEWiringDeps;
 		const translated: RelayMessage = {
 			type: "done",
 			sessionId: "session-1",
@@ -80,8 +82,10 @@ describe("handleSSEEventEffect", () => {
 			pendingInteractions: _pendingInteractions,
 			sessionService: _sessionService,
 			getSessionParentMap: _getSessionParentMap,
+			dualWriteHook: _dualWriteHook,
 			...effectDeps
-		} = deps satisfies EffectSSEWiringDeps;
+		} = deps;
+		effectDeps satisfies EffectSSEWiringDeps;
 		const recordMessageActivity = vi.fn(() => Effect.void);
 		const translated: RelayMessage = {
 			type: "delta",

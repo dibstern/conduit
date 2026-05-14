@@ -14,7 +14,10 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
-import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
+import type {
+	DualWriteHookPort,
+	DualWriteResult,
+} from "../persistence/dual-write-hook.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
@@ -143,7 +146,17 @@ export type EffectSSEWiringDeps = Omit<
 	| "processingTimeouts"
 	| "sessionService"
 	| "getSessionParentMap"
->;
+	| "dualWriteHook"
+> & {
+	/** Effect-native dual-write hook owned by the relay runtime. */
+	dualWriteHook?: {
+		onSSEEventEffect(
+			event: SSEEvent,
+			sessionId: string | undefined,
+		): Effect.Effect<DualWriteResult>;
+		onReconnect(): void;
+	};
+};
 
 // ─── Push notification helper ────────────────────────────────────────────────
 // Extracted so both handleSSEEvent (SSE path) and relay-stack.ts (status/message
@@ -235,13 +248,12 @@ const recordSSEEventStartEffect = (
 	eventSessionId: string | undefined,
 ) =>
 	Effect.gen(function* () {
-		yield* Effect.sync(() => {
-			deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
-
-			if (deps.dualWriteHook) {
-				deps.dualWriteHook.onSSEEvent(event, eventSessionId);
-			}
-		});
+		yield* Effect.sync(() =>
+			deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`),
+		);
+		if (deps.dualWriteHook) {
+			yield* deps.dualWriteHook.onSSEEventEffect(event, eventSessionId);
+		}
 
 		if (eventSessionId && event.type.startsWith("message.")) {
 			const sessionService = yield* SessionManagerServiceTag;
@@ -305,7 +317,7 @@ function permissionRecoveryInputs(
 }
 
 function broadcastRecoveredPermissions(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps | EffectSSEWiringDeps,
 	recovered: readonly PendingPermission[],
 ): void {
 	for (const perm of recovered) {
@@ -321,7 +333,7 @@ function broadcastRecoveredPermissions(
 }
 
 function broadcastPermissionAsked(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps | EffectSSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 	pending: PendingPermission | null,
@@ -843,7 +855,7 @@ function questionCountsBySession(
 }
 
 function broadcastRecoveredQuestions(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps | EffectSSEWiringDeps,
 	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
 ): void {
 	for (const pq of pendingQuestions) {
@@ -897,7 +909,7 @@ const recoverPendingQuestionsEffect = (
 	});
 
 function wireSSEConsumerWithCallbacks(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps | EffectSSEWiringDeps,
 	consumer: SSEStreamEvents,
 	callbacks: SSEConsumerCallbacks,
 ): void {
