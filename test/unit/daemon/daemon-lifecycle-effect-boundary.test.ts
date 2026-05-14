@@ -15,4 +15,16 @@ describe("daemon lifecycle Effect boundary", () => {
 			/Effect\s*\.\s*run(?:Promise|Sync)\s*\(\s*decodeTaggedRequest\s*\(/,
 		);
 	});
+
+	it("does not own a default runtime dispatcher for tagged IPC", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/daemon/daemon-lifecycle.ts"),
+			"utf8",
+		);
+
+		expect(source).not.toMatch(
+			/Runtime\.runPromise\(Runtime\.defaultRuntime\)/,
+		);
+		expect(source).not.toMatch(/defaultTaggedIpcDispatcher/);
+	});
 });

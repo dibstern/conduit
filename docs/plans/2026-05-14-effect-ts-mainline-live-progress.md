@@ -40,7 +40,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 | `Effect.promise(` on rejectable operations | Done | Recheck before final guardrail close. |
 | `concurrency: "unbounded"` on dynamic collections | Done | Recheck before final guardrail close. Fixed-size fanouts need inline justification. |
 | Throwing helpers called from Effect programs | Open | Broad grep needs call-path triage; defects and external boundaries can be reclassified. |
-| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged IPC dispatch now uses the daemon layer runtime at the socket boundary. Client-init no longer builds a Promise-shaped bridge in `relay-stack.ts`; remaining blockers are the other relay-stack transitional runtime bridges and any final grep hits. |
+| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged IPC dispatch now uses the daemon layer runtime at the socket boundary and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. Client-init no longer builds a Promise-shaped bridge in `relay-stack.ts`; remaining blockers are the other relay-stack transitional runtime bridges and any final grep hits. |
 
 ## Current Blockers
 
@@ -61,7 +61,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness and shutdown drain/command-gate stop each share one Effect program, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, and message/status-poller callbacks now use Effect-owned paths; runtime bridge cleanup remains for the other relay wiring clusters.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
-10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
+10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.
 12. Single-owner daemon cutover.
 13. Final guardrail cleanup.
@@ -446,3 +446,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Removed the late `doneDeliveredRef` callback bridge by wiring poller and SSE done callbacks directly to the monitoring Effect result.
 - Added a runtime-boundary guard so relay wiring setup cannot split back into a second `relayManagedRuntime.runPromise(...)` program.
 - Verified locally with focused runtime-boundary, relay-stack default override, per-tab routing, and status-poller tests, plus typecheck, lint, and diff hygiene.
+
+2026-05-14, IPC tagged-dispatch runtime ownership:
+
+- Removed the default `Runtime.defaultRuntime` tagged IPC dispatcher from `daemon-lifecycle.ts`.
+- `startIPCServer()` now requires its caller to pass the tagged dispatcher; production passes the daemon Layer runtime from `makeIpcServerLive()`, and direct lifecycle tests pass an explicit test dispatcher.
+- Added daemon lifecycle guard coverage so the default runtime fallback cannot return.
+- Verified locally with focused daemon lifecycle IPC/boundary tests and typecheck.

@@ -18,7 +18,7 @@ import {
 } from "node:net";
 
 import * as Headers from "@effect/platform/Headers";
-import { Effect, Either, Runtime, Schema } from "effect";
+import { Effect, Either, Schema } from "effect";
 import {
 	IpcError,
 	IpcInstancesResponseSchema,
@@ -367,11 +367,6 @@ export type TaggedIpcDispatcher = (
 	request: IpcTaggedRequest,
 	rpcLayer: ReturnType<typeof makeRpcHandlerLayer>,
 ) => Promise<IPCResponse>;
-
-const defaultTaggedIpcDispatcher: TaggedIpcDispatcher = (request, rpcLayer) =>
-	Runtime.runPromise(Runtime.defaultRuntime)(
-		dispatchTaggedRequestEffect(request, rpcLayer),
-	);
 
 // ─── Context interface ──────────────────────────────────────────────────────
 // Mutable context so lifecycle functions can store server references back.
@@ -745,7 +740,7 @@ export function startIPCServer(
 	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
 	getStatus: () => DaemonStatus,
-	dispatchTaggedRequest: TaggedIpcDispatcher = defaultTaggedIpcDispatcher,
+	dispatchTaggedRequest: TaggedIpcDispatcher,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		// Remove stale socket file if it exists

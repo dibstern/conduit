@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Runtime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 const warnSpy = vi.hoisted(() => vi.fn());
@@ -34,7 +35,9 @@ import type { DaemonIPCContext } from "../../../src/lib/daemon/daemon-ipc.js";
 import {
 	closeIPCServer,
 	type DaemonLifecycleContext,
+	dispatchTaggedRequestEffect,
 	startIPCServer,
+	type TaggedIpcDispatcher,
 } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../src/lib/daemon/daemon-types.js";
 import { parseCommand } from "../../../src/lib/daemon/ipc-protocol.js";
@@ -54,6 +57,17 @@ const makeContext = (socketPath: string): DaemonLifecycleContext => ({
 	socketPath,
 	router: null,
 });
+
+const testTaggedDispatcher: TaggedIpcDispatcher = (request, rpcLayer) =>
+	Runtime.runPromise(Runtime.defaultRuntime)(
+		dispatchTaggedRequestEffect(request, rpcLayer),
+	);
+
+const startTestIPCServer = (
+	ctx: DaemonLifecycleContext,
+	ipcContext: DaemonIPCContext,
+	getStatus: () => DaemonStatus,
+) => startIPCServer(ctx, ipcContext, getStatus, testTaggedDispatcher);
 
 const makeStatus = (overrides: Partial<DaemonStatus> = {}): DaemonStatus => ({
 	ok: true,
@@ -174,7 +188,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, ipcContext, makeStatus);
 
 			expect(
 				parseCommand('{"_tag":"AddProject","directory":"/tmp/rpc"}'),
@@ -236,7 +250,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, ipcContext, makeStatus);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "SetModel",
 				slug: "project-a",
@@ -295,7 +309,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, ipcContext, makeStatus);
 			const response = await sendJsonLine(ctx.socketPath, {
 				cmd: "set_agent",
 				slug: "project-a",
@@ -352,7 +366,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, ipcContext, makeStatus);
 			const response = await sendJsonLine(ctx.socketPath, {
 				cmd: "add_project",
 				directory: "/tmp/legacy",
@@ -414,7 +428,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, ipcContext, makeStatus);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "RestartWithConfig",
 				config: { tls: true, port: 2634 },
@@ -468,7 +482,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, () =>
+			await startTestIPCServer(ctx, ipcContext, () =>
 				makeStatus({
 					tlsEnabled: true,
 					pinEnabled: true,
@@ -549,7 +563,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, ipcContext, makeStatus);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "InstanceAdd",
 				name: "Managed Missing Port",
