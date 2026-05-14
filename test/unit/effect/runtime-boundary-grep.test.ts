@@ -673,6 +673,31 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("keeps relay startup as the only relay-stack runPromise boundary", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = Array.from(
+			source.matchAll(/relayManagedRuntime\.runPromise\(/g),
+		).map((match) => ({
+			path,
+			line: source.slice(0, match.index).split("\n").length,
+			source: match[0],
+		}));
+		const marker =
+			"External startup boundary for createProjectRelay()'s Promise API.";
+		const markerIndex = source.indexOf(marker);
+		const boundaryIndex = source.indexOf("relayManagedRuntime.runPromise(");
+
+		expect(hits).toHaveLength(1);
+		expect(hits[0]).toMatchObject({
+			path,
+			source: "relayManagedRuntime.runPromise(",
+		});
+		expect(markerIndex).toBeGreaterThanOrEqual(0);
+		expect(markerIndex).toBeLessThan(boundaryIndex);
+		expect(boundaryIndex - markerIndex).toBeLessThan(300);
+	});
+
 	it("does not connect SSE and mark the command gate ready through separate runtime calls", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

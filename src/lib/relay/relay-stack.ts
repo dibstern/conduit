@@ -589,6 +589,8 @@ export async function createProjectRelay(
 		statusSnapshot: RelayStatusSnapshotService;
 	};
 	try {
+		// External startup boundary for createProjectRelay()'s Promise API.
+		// The startup Effect owns relay acquisition, wiring, and readiness.
 		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const api = yield* OpenCodeAPITag;
