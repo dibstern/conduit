@@ -685,6 +685,29 @@ describe("Effect runtime boundary grep", () => {
 		expect(httpRouterOptions).not.toMatch(/\bremoveProject\b/);
 	});
 
+	it("wires daemon CA downloads from TlsCertTag instead of daemon-main placeholders", () => {
+		const routerLayer = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/server/Layers/http-router-layer.ts"),
+			"utf8",
+		);
+		const daemonRouterFactory = routerLayer.match(
+			/export const makeDaemonHttpRouterLive[\s\S]*?\n\t\);/,
+		)?.[0];
+		expect(daemonRouterFactory).not.toBeUndefined();
+		expect(daemonRouterFactory).toContain("yield* TlsCertTag");
+		expect(daemonRouterFactory).toContain("caRootPath: tls.caRootPath");
+		expect(daemonRouterFactory).toContain("caCertDer: tls.caCertDer");
+
+		const daemonMain = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/daemon/Layers/daemon-main.ts"),
+			"utf8",
+		);
+		expect(daemonMain).not.toContain(
+			"A future task will wire the router to read",
+		);
+		expect(daemonMain).not.toContain("CaCertProvider is now available");
+	});
+
 	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

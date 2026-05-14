@@ -1278,11 +1278,6 @@ export async function startDaemonProcess(
 		});
 	};
 
-	// CaCertProvider is now available via TlsCertTag in the Layer.
-	// The /ca/download endpoint uses Effect.serviceOption(CaCertProvider) and
-	// handles absence gracefully. A future task will wire the router to read
-	// directly from TlsCertTag.
-
 	// ── Layer-managed daemon lifecycle ────────────────────────────────────
 	const initialRuntimeConfig = runtimeConfigSnapshot;
 	const firstProject = registry.allProjects()[0];

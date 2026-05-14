@@ -21,6 +21,7 @@ import {
 } from "../../../server/effect-http-router.js";
 import type { PushSubscriptionData } from "../../../server/push.js";
 import type { ThemesResponse } from "../../../shared-types.js";
+import { TlsCertTag } from "../../daemon/Layers/tls-cert-layer.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../../daemon/Services/daemon-handle.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
@@ -205,6 +206,7 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 			const auth: AuthManagerService = yield* AuthManagerTag;
 			const configRef = yield* DaemonConfigRefTag;
 			const daemonHandle = yield* DaemonHandleTag;
+			const tls = yield* TlsCertTag;
 			return buildHttpRouterRequestHandler({
 				authLayer: Layer.succeed(AuthManagerTag, auth),
 				setupInfoLayer: Layer.succeed(SetupInfoProvider, {
@@ -219,6 +221,8 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 				getHealthResponse: () => daemonHandle.getStatus(),
 				loadThemes: options.loadThemes,
 				pushManager: options.pushManager,
+				caRootPath: tls.caRootPath ?? undefined,
+				caCertDer: tls.caCertDer ?? undefined,
 			});
 		}),
 	);
