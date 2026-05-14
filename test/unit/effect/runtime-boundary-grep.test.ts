@@ -926,4 +926,32 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not bridge production SSE session service calls through relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /const sseWiringDeps = \{[\s\S]*sessionService:/,
+				reason:
+					"production SSE event handling should consume SessionManagerServiceTag directly",
+			},
+			{
+				pattern: /const sseWiringDeps = \{[\s\S]*getSessionParentMap:/,
+				reason:
+					"production SSE notification routing should read parent maps through SessionManagerServiceTag",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

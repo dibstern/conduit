@@ -756,13 +756,11 @@ export async function createProjectRelay(
 	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
 	const sseWiringDeps = {
 		translator,
-		sessionService: sessionServiceBridge,
 		wsHandler,
 		...(config.pushManager != null && { pushManager: config.pushManager }),
 		log: sseLog,
 		pipelineLog,
 		getSessionStatuses: () => statusPoller.getCurrentStatuses(),
-		getSessionParentMap: () => sessionServiceBridge.getSessionParentMap(),
 		listPendingQuestions: () => api.question.list(),
 		listPendingPermissions: () => api.permission.list(),
 		statusPoller,

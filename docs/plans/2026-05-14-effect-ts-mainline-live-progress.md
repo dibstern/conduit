@@ -411,3 +411,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Removed the relay-stack `clearProcessingTimeout` / `resetProcessingTimeout` `runFork` bridge; sync `handleSSEEvent()` still owns direct unit-test wiring through `SSEWiringDeps`.
 - Added runtime-boundary and Effect-path behavior coverage so production SSE wiring cannot depend on relay-stack timeout bridges.
 - Verified locally with focused SSE/event-pipeline/runtime-boundary tests, typecheck, lint, diff hygiene, and the initial-state plus SSE-aware poller integration tests.
+
+2026-05-14, SSE session-service ownership cleanup:
+
+- Removed production SSE wiring's `sessionServiceBridge` and parent-map callbacks from `relay-stack.ts`.
+- Moved SSE message activity, pending-question counts, session-list refresh, parent-map reads, and question-count increments to `SessionManagerServiceTag` inside the Effect SSE callback path.
+- Kept sync `SSEWiringDeps.sessionService` only for direct unit-test wiring while production `wireSSEConsumerEffect()` consumes the relay runtime service graph.
+- Verified locally with focused SSE/rehydration/event-pipeline/runtime-boundary tests, typecheck, lint, diff hygiene, and the initial-state plus SSE-aware poller integration tests.

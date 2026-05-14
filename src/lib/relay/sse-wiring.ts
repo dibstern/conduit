@@ -10,6 +10,7 @@ import type {
 	PendingPermissionRequestInput,
 } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
@@ -138,7 +139,10 @@ export interface SSEWiringDeps {
 
 export type EffectSSEWiringDeps = Omit<
 	SSEWiringDeps,
-	"pendingInteractions" | "processingTimeouts"
+	| "pendingInteractions"
+	| "processingTimeouts"
+	| "sessionService"
+	| "getSessionParentMap"
 >;
 
 // ─── Push notification helper ────────────────────────────────────────────────
@@ -206,7 +210,7 @@ export function sendPushForEvent(
 }
 
 function recordSSEEventStart(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 ): void {
@@ -224,6 +228,26 @@ function recordSSEEventStart(
 		deps.sessionService.recordMessageActivity(eventSessionId, Date.now());
 	}
 }
+
+const recordSSEEventStartEffect = (
+	deps: EffectSSEWiringDeps,
+	event: SSEEvent,
+	eventSessionId: string | undefined,
+) =>
+	Effect.gen(function* () {
+		yield* Effect.sync(() => {
+			deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
+
+			if (deps.dualWriteHook) {
+				deps.dualWriteHook.onSSEEvent(event, eventSessionId);
+			}
+		});
+
+		if (eventSessionId && event.type.startsWith("message.")) {
+			const sessionService = yield* SessionManagerServiceTag;
+			yield* sessionService.recordMessageActivity(eventSessionId, Date.now());
+		}
+	});
 
 function permissionRequestInput(
 	event: SSEEvent,
@@ -344,7 +368,7 @@ function broadcastPermissionAsked(
 }
 
 function handleQuestionAsked(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	eventSessionId: string | undefined,
 ): void {
 	deps.log.debug(`question.asked: event received`);
@@ -365,6 +389,33 @@ function handleQuestionAsked(
 		);
 	}
 }
+
+const handleQuestionAskedEffect = (
+	deps: EffectSSEWiringDeps,
+	eventSessionId: string | undefined,
+) =>
+	Effect.gen(function* () {
+		yield* Effect.sync(() => deps.log.debug(`question.asked: event received`));
+		if (eventSessionId) {
+			const sessionService = yield* SessionManagerServiceTag;
+			yield* sessionService.incrementPendingQuestionCount(eventSessionId);
+		}
+		if (deps.pushManager) {
+			yield* Effect.sync(() =>
+				sendPushForEvent(
+					deps.pushManager as PushNotificationManager,
+					{
+						type: "ask_user",
+						sessionId: eventSessionId ?? "",
+						toolId: "",
+						questions: [],
+					},
+					deps.log,
+					buildPushContext(deps.slug, eventSessionId),
+				),
+			);
+		}
+	});
 
 function handleSSEEventAfterPending(
 	deps: SSEWiringDeps,
@@ -541,20 +592,22 @@ const refreshSessionListAfterUpdateEffect = (
 		| Record<string, import("../instance/sdk-types.js").SessionStatus>
 		| undefined,
 ) =>
-	Effect.tryPromise(() =>
-		deps.sessionService.sendDualSessionLists(
-			(msg) => deps.wsHandler.broadcast(msg),
-			{ statuses },
-		),
-	).pipe(
-		Effect.catchAll((err) =>
-			Effect.sync(() =>
-				deps.log.warn(
-					`Failed to refresh sessions after session.updated: ${err}`,
+	Effect.gen(function* () {
+		const sessionService = yield* SessionManagerServiceTag;
+		yield* sessionService
+			.sendDualSessionLists((msg) => deps.wsHandler.broadcast(msg), {
+				statuses,
+			})
+			.pipe(
+				Effect.catchAll((err) =>
+					Effect.sync(() =>
+						deps.log.warn(
+							`Failed to refresh sessions after session.updated: ${err}`,
+						),
+					),
 				),
-			),
-		),
-	);
+			);
+	});
 
 const handleSSEEventAfterPendingEffect = (
 	deps: EffectSSEWiringDeps,
@@ -562,14 +615,7 @@ const handleSSEEventAfterPendingEffect = (
 	eventSessionId: string | undefined,
 ) =>
 	Effect.gen(function* () {
-		const {
-			translator,
-			sessionService,
-			wsHandler,
-			pushManager,
-			pipelineLog,
-			log,
-		} = deps;
+		const { translator, wsHandler, pushManager, pipelineLog, log } = deps;
 
 		if (event.type === "session.updated") {
 			if (hasInfoWithSessionID(event.properties)) {
@@ -580,9 +626,8 @@ const handleSSEEventAfterPendingEffect = (
 						? ((info as Record<string, unknown>)["parentID"] as string)
 						: undefined;
 				if (childId && parentId) {
-					yield* Effect.sync(() =>
-						sessionService.addToParentMap(childId, parentId),
-					);
+					const sessionService = yield* SessionManagerServiceTag;
+					yield* sessionService.addToParentMap(childId, parentId);
 				}
 			}
 
@@ -682,9 +727,13 @@ const handleSSEEventAfterPendingEffect = (
 				yield* Effect.sync(() => deps.onDoneProcessed?.(targetSessionId));
 			}
 
+			let parentMap = new Map<string, string>();
+			if (targetSessionId != null) {
+				const sessionService = yield* SessionManagerServiceTag;
+				parentMap = yield* sessionService.getSessionParentMap();
+			}
 			const isSubagent =
-				targetSessionId != null &&
-				(deps.getSessionParentMap?.().has(targetSessionId) ?? false);
+				targetSessionId != null && parentMap.has(targetSessionId);
 			const notification = resolveNotifications(
 				msg,
 				pipeResult.route,
@@ -745,7 +794,7 @@ export const handleSSEEventEffect = (
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const eventSessionId = extractSessionId(event);
-		yield* Effect.sync(() => recordSSEEventStart(deps, event, eventSessionId));
+		yield* recordSSEEventStartEffect(deps, event, eventSessionId);
 
 		if (event.type === "permission.asked") {
 			const input = permissionRequestInput(event, eventSessionId);
@@ -757,7 +806,7 @@ export const handleSSEEventEffect = (
 			);
 		}
 		if (event.type === "question.asked") {
-			yield* Effect.sync(() => handleQuestionAsked(deps, eventSessionId));
+			yield* handleQuestionAskedEffect(deps, eventSessionId);
 		}
 		if (isPermissionRepliedEvent(event)) {
 			yield* pendingInteractions.markPermissionReplied(event.properties.id);
@@ -775,7 +824,77 @@ interface SSEConsumerCallbacks {
 			[key: string]: unknown;
 		}>,
 	): void;
+	recoverPendingQuestions(
+		pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
+	): void;
 }
+
+function questionCountsBySession(
+	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
+): Map<string, number> {
+	const questionCounts = new Map<string, number>();
+	for (const pq of pendingQuestions) {
+		const sid = pq["sessionID"] as string | undefined;
+		if (sid) {
+			questionCounts.set(sid, (questionCounts.get(sid) ?? 0) + 1);
+		}
+	}
+	return questionCounts;
+}
+
+function broadcastRecoveredQuestions(
+	deps: EffectSSEWiringDeps,
+	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
+): void {
+	for (const pq of pendingQuestions) {
+		const rawQuestions = pq["questions"] as
+			| Array<{
+					question?: string;
+					header?: string;
+					options?: Array<{
+						label?: string;
+						description?: string;
+					}>;
+					multiple?: boolean;
+					custom?: boolean;
+			  }>
+			| undefined;
+		if (!Array.isArray(rawQuestions)) continue;
+
+		const questions = mapQuestionFields(rawQuestions);
+		const tool = pq["tool"] as { callID?: string } | undefined;
+		const toolCallId = tool?.callID;
+
+		const qSessionId = pq["sessionID"] as string | undefined;
+		const askMsg: RelayMessage = {
+			type: "ask_user" as const,
+			sessionId: qSessionId ?? "",
+			toolId: pq.id,
+			questions,
+			...(toolCallId ? { toolUseId: toolCallId } : {}),
+		};
+
+		if (qSessionId) {
+			deps.wsHandler.sendToSession(qSessionId, askMsg);
+		} else {
+			deps.wsHandler.broadcast(askMsg);
+		}
+	}
+}
+
+const recoverPendingQuestionsEffect = (
+	deps: EffectSSEWiringDeps,
+	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
+) =>
+	Effect.gen(function* () {
+		const sessionService = yield* SessionManagerServiceTag;
+		yield* sessionService.setPendingQuestionCounts(
+			questionCountsBySession(pendingQuestions),
+		);
+		yield* Effect.sync(() =>
+			broadcastRecoveredQuestions(deps, pendingQuestions),
+		);
+	});
 
 function wireSSEConsumerWithCallbacks(
 	deps: EffectSSEWiringDeps,
@@ -848,57 +967,11 @@ function wireSSEConsumerWithCallbacks(
 						`listPendingQuestions returned ${pendingQuestions.length} question(s)`,
 					);
 
-					// Build per-session pending question counts and update SessionManager.
-					// This runs even when length === 0 to clear stale counts from a
-					// previous connection.
-					const questionCounts = new Map<string, number>();
-					for (const pq of pendingQuestions) {
-						const sid = pq["sessionID"] as string | undefined;
-						if (sid) {
-							questionCounts.set(sid, (questionCounts.get(sid) ?? 0) + 1);
-						}
-					}
-					deps.sessionService.setPendingQuestionCounts(questionCounts);
-
-					if (pendingQuestions.length === 0) return;
-					log.info(
-						`Rehydrating ${pendingQuestions.length} pending question(s) from API`,
-					);
-					for (const pq of pendingQuestions) {
-						const rawQuestions = pq["questions"] as
-							| Array<{
-									question?: string;
-									header?: string;
-									options?: Array<{
-										label?: string;
-										description?: string;
-									}>;
-									multiple?: boolean;
-									custom?: boolean;
-							  }>
-							| undefined;
-						if (!Array.isArray(rawQuestions)) continue;
-
-						const questions = mapQuestionFields(rawQuestions);
-						const tool = pq["tool"] as { callID?: string } | undefined;
-						const toolCallId = tool?.callID;
-
-						const qSessionId = pq["sessionID"] as string | undefined;
-						const askMsg: RelayMessage = {
-							type: "ask_user" as const,
-							sessionId: qSessionId ?? "",
-							toolId: pq.id,
-							questions,
-							...(toolCallId ? { toolUseId: toolCallId } : {}),
-						};
-
-						// Route to clients viewing this question's session
-						if (qSessionId) {
-							deps.wsHandler.sendToSession(qSessionId, askMsg);
-						} else {
-							// No sessionID — broadcast as fallback (defensive)
-							deps.wsHandler.broadcast(askMsg);
-						}
+					callbacks.recoverPendingQuestions(pendingQuestions);
+					if (pendingQuestions.length > 0) {
+						log.info(
+							`Rehydrating ${pendingQuestions.length} pending question(s) from API`,
+						);
 					}
 				})
 				.catch((err: unknown) =>
@@ -942,6 +1015,12 @@ export function wireSSEConsumer(
 			);
 			broadcastRecoveredPermissions(deps, recovered);
 		},
+		recoverPendingQuestions: (pendingQuestions) => {
+			deps.sessionService.setPendingQuestionCounts(
+				questionCountsBySession(pendingQuestions),
+			);
+			broadcastRecoveredQuestions(deps, pendingQuestions);
+		},
 	});
 }
 
@@ -951,7 +1030,9 @@ export const wireSSEConsumerEffect = (
 ) =>
 	Effect.gen(function* () {
 		const runtime = yield* Effect.runtime<
-			PendingInteractionServiceTag | OverridesStateTag
+			| PendingInteractionServiceTag
+			| OverridesStateTag
+			| SessionManagerServiceTag
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);
@@ -985,6 +1066,19 @@ export const wireSSEConsumerEffect = (
 								Effect.sync(() =>
 									deps.log.warn(
 										`Failed to recover pending permissions: ${Cause.pretty(cause)}`,
+									),
+								),
+							),
+						),
+					);
+				},
+				recoverPendingQuestions: (pendingQuestions) => {
+					runFork(
+						recoverPendingQuestionsEffect(deps, pendingQuestions).pipe(
+							Effect.catchAllCause((cause) =>
+								Effect.sync(() =>
+									deps.log.warn(
+										`Failed to recover pending questions: ${Cause.pretty(cause)}`,
 									),
 								),
 							),

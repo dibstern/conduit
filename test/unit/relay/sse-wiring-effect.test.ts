@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
@@ -19,6 +20,8 @@ describe("handleSSEEventEffect", () => {
 		const {
 			processingTimeouts: _processingTimeouts,
 			pendingInteractions: _pendingInteractions,
+			sessionService: _sessionService,
+			getSessionParentMap: _getSessionParentMap,
 			...effectDeps
 		} = deps satisfies EffectSSEWiringDeps;
 		const translated: RelayMessage = {
@@ -53,6 +56,9 @@ describe("handleSSEEventEffect", () => {
 					Layer.mergeAll(
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
+						Layer.succeed(SessionManagerServiceTag, {
+							getSessionParentMap: () => Effect.succeed(new Map()),
+						} as never),
 					),
 				),
 			),
@@ -65,5 +71,52 @@ describe("handleSSEEventEffect", () => {
 			"session-1",
 			translated,
 		);
+	});
+
+	it("records message activity through SessionManagerServiceTag", async () => {
+		const deps = createMockSSEWiringDeps();
+		const {
+			processingTimeouts: _processingTimeouts,
+			pendingInteractions: _pendingInteractions,
+			sessionService: _sessionService,
+			getSessionParentMap: _getSessionParentMap,
+			...effectDeps
+		} = deps satisfies EffectSSEWiringDeps;
+		const recordMessageActivity = vi.fn(() => Effect.void);
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "session-1",
+			text: "hello",
+		};
+		vi.mocked(effectDeps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "session-1" },
+		};
+
+		await Effect.runPromise(
+			handleSSEEventEffect(effectDeps, event).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						PendingInteractionServiceLive,
+						makeOverridesStateLive(),
+						Layer.succeed(SessionManagerServiceTag, {
+							recordMessageActivity,
+							getSessionParentMap: () => Effect.succeed(new Map()),
+						} as never),
+					),
+				),
+			),
+		);
+
+		expect(recordMessageActivity).toHaveBeenCalledWith(
+			"session-1",
+			expect.any(Number),
+		);
+		expect(deps.sessionService.recordMessageActivity).not.toHaveBeenCalled();
 	});
 });
