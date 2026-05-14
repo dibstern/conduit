@@ -418,3 +418,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Moved SSE message activity, pending-question counts, session-list refresh, parent-map reads, and question-count increments to `SessionManagerServiceTag` inside the Effect SSE callback path.
 - Kept sync `SSEWiringDeps.sessionService` only for direct unit-test wiring while production `wireSSEConsumerEffect()` consumes the relay runtime service graph.
 - Verified locally with focused SSE/rehydration/event-pipeline/runtime-boundary tests, typecheck, lint, diff hygiene, and the initial-state plus SSE-aware poller integration tests.
+
+2026-05-14, relay session-service bridge object cleanup:
+
+- Deleted the broad `sessionServiceBridge` object from `relay-stack.ts` after production SSE, poller, and monitoring paths stopped using it.
+- Left only explicit runtime calls for the still-synchronous public `ProjectRelay.getLastKnownSessionCount()` and Promise-returning `ProjectRelay.getDefaultSessionId()` compatibility methods.
+- Added a runtime-boundary guard so broad relay-stack session service bridge objects cannot return.
+- Verified locally with focused runtime-boundary and SSE Effect tests, typecheck, lint, and diff hygiene.

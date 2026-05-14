@@ -410,51 +410,6 @@ export async function createProjectRelay(
 				return yield* run(service);
 			}),
 		);
-	const sessionServiceBridge = {
-		recordMessageActivity: (sessionId: string, timestamp?: number): void => {
-			runSessionServiceSync((service) =>
-				service.recordMessageActivity(sessionId, timestamp),
-			);
-		},
-		incrementPendingQuestionCount: (sessionId: string): void => {
-			runSessionServiceSync((service) =>
-				service.incrementPendingQuestionCount(sessionId),
-			);
-		},
-		addToParentMap: (childId: string, parentId: string): void => {
-			runSessionServiceSync((service) =>
-				service.addToParentMap(childId, parentId),
-			);
-		},
-		sendDualSessionLists: (
-			send: (
-				msg: Extract<
-					import("../shared-types.js").RelayMessage,
-					{ type: "session_list" }
-				>,
-			) => void,
-			options?: {
-				statuses?:
-					| Record<string, import("../instance/sdk-types.js").SessionStatus>
-					| undefined;
-			},
-		): Promise<void> =>
-			runSessionServicePromise((service) =>
-				service.sendDualSessionLists(send, options),
-			),
-		setPendingQuestionCounts: (counts: ReadonlyMap<string, number>): void => {
-			runSessionServiceSync((service) =>
-				service.setPendingQuestionCounts(counts),
-			);
-		},
-		getSessionParentMap: (): Map<string, string> =>
-			runSessionServiceSync((service) => service.getSessionParentMap()),
-		getLastKnownSessionCount: (): number =>
-			runSessionServiceSync((service) => service.getLastKnownSessionCount()),
-		getDefaultSessionId: (title?: string): Promise<string> =>
-			runSessionServicePromise((service) => service.getDefaultSessionId(title)),
-	};
-
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
 	let initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
@@ -857,11 +812,15 @@ export async function createProjectRelay(
 		},
 
 		getLastKnownSessionCount() {
-			return sessionServiceBridge.getLastKnownSessionCount();
+			return runSessionServiceSync((service) =>
+				service.getLastKnownSessionCount(),
+			);
 		},
 
 		getDefaultSessionId(title?: string) {
-			return sessionServiceBridge.getDefaultSessionId(title);
+			return runSessionServicePromise((service) =>
+				service.getDefaultSessionId(title),
+			);
 		},
 
 		async stop() {
