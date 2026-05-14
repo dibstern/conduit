@@ -66,38 +66,7 @@ export function rawSend(data: Record<string, unknown>): void {
 		ws.send(JSON.stringify(data));
 		return;
 	}
-	// WS not open — queue instance management commands for send-on-reconnect.
-	// These are the commands that users trigger from the ConnectOverlay or
-	// SettingsPanel while the connection is down.
-	const type = data["type"] as string;
-	if (
-		type === "instance_start" ||
-		type === "instance_stop" ||
-		type === "instance_add" ||
-		type === "instance_remove" ||
-		type === "instance_update" ||
-		type === "set_project_instance" ||
-		type === "scan_now" ||
-		type === "instance_rename"
-	) {
-		_offlineQueue.push(data);
-	}
-}
-
-// ─── Offline message queue ──────────────────────────────────────────────────
-// Instance management commands sent while WS is closed are queued here
-// and flushed when the connection is re-established.
-
-let _offlineQueue: Record<string, unknown>[] = [];
-
-/** Flush any queued offline messages over the now-open WebSocket. */
-export function flushOfflineQueue(): void {
-	if (_offlineQueue.length === 0) return;
-	const queue = _offlineQueue;
-	_offlineQueue = [];
-	for (const msg of queue) {
-		rawSend(msg);
-	}
+	// WS not open — no current raw WS command is safe to replay offline.
 }
 
 /** Schedule the drain timer for the queued message. */

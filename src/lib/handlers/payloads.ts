@@ -24,28 +24,5 @@ export interface PayloadMap {
 	view_session: { sessionId: string };
 	delete_session: { sessionId: string };
 	fork_session: { sessionId?: string; messageId?: string };
-	add_project: { directory: string; instanceId?: string };
-	remove_project: { slug: string };
-	rename_project: { slug: string; title: string };
 	pty_input: { ptyId: string; data: string };
-	instance_add: {
-		name: string;
-		url?: string;
-		managed?: boolean;
-		port?: number;
-		env?: Record<string, string>;
-	};
-	instance_remove: { instanceId: string };
-	instance_start: { instanceId: string };
-	instance_stop: { instanceId: string };
-	instance_update: {
-		instanceId: string;
-		name?: string;
-		port?: number;
-		env?: Record<string, string>;
-	};
-	set_project_instance: { slug: string; instanceId: string };
-	instance_rename: { instanceId: string; name: string };
-	proxy_detect: Record<string, never>;
-	scan_now: Record<string, never>;
 }

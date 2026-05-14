@@ -56,13 +56,6 @@ export function beginProxyDetection(): void {
 	}, 5_000);
 }
 
-export function startProxyDetection(
-	sendFn: (msg: Record<string, unknown>) => void,
-): void {
-	beginProxyDetection();
-	sendFn({ type: "proxy_detect" });
-}
-
 export function handleProxyDetected(
 	msg: Extract<RelayMessage, { type: "proxy_detected" }>,
 ): void {
@@ -111,17 +104,6 @@ export function beginScan(): void {
 /** Clear the scan-in-flight flag (e.g. when the server returns an error). */
 export function clearScanInFlight(): void {
 	scanInFlight = false;
-}
-
-/**
- * Send a `scan_now` message and mark the scan as in-flight.
- * The flag is cleared when `handleScanResult` receives a response.
- */
-export function triggerScan(
-	sendFn: (msg: Record<string, unknown>) => void,
-): void {
-	beginScan();
-	sendFn({ type: "scan_now" });
 }
 
 export function handleScanResult(

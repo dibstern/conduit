@@ -59,7 +59,7 @@ export {
 } from "./ws-send.svelte.js";
 
 import { handleMessage } from "./ws-dispatch.js";
-import { flushOfflineQueue, setWsGetter } from "./ws-send.svelte.js";
+import { setWsGetter } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
@@ -244,7 +244,6 @@ function doConnect(slug: string | undefined, generation: number): void {
 		wsState.relayStatus = undefined;
 		wsState.relayError = undefined;
 		_reconnectDelay = RECONNECT_BASE_MS;
-		flushOfflineQueue();
 		_onConnectFn?.();
 	});
 

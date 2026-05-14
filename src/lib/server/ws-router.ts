@@ -15,20 +15,8 @@ export type IncomingMessageType =
 	| "switch_session"
 	| "delete_session"
 	| "fork_session"
-	| "add_project"
-	| "remove_project"
-	| "rename_project"
 	| "pty_input"
-	| "instance_add"
-	| "instance_remove"
-	| "instance_start"
-	| "instance_stop"
-	| "instance_update"
-	| "instance_rename"
-	| "set_project_instance"
 	| "view_session"
-	| "proxy_detect"
-	| "scan_now"
 	| "set_log_level";
 
 const VALID_MESSAGE_TYPES = new Set<string>([
@@ -39,20 +27,8 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"switch_session",
 	"delete_session",
 	"fork_session",
-	"add_project",
-	"remove_project",
-	"rename_project",
 	"pty_input",
-	"instance_add",
-	"instance_remove",
-	"instance_start",
-	"instance_stop",
-	"instance_update",
-	"instance_rename",
-	"set_project_instance",
 	"view_session",
-	"proxy_detect",
-	"scan_now",
 	"set_log_level",
 ]);
 

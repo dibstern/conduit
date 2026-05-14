@@ -1,4 +1,3 @@
-import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/management-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 // ─── Effect Handler Tests (Batch 1) ─────────────────────────────────────────
 // Verifies that the Effect handler implementations produce the expected
@@ -9,13 +8,11 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { InstanceManagementServiceLive } from "../../../src/lib/domain/relay/Services/instance-management-service.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
-import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
 import type {
 	SessionManagerShape,
 	WebSocketHandlerShape,
@@ -70,13 +67,6 @@ import {
 	handleGetFileList,
 } from "../../../src/lib/handlers/files.js";
 import {
-	handleInstanceAdd,
-	handleInstanceRemove,
-	handleInstanceStart,
-	handleInstanceStop,
-	handleScanNow,
-} from "../../../src/lib/handlers/instance.js";
-import {
 	sendModelsStateToClient,
 	switchModelForSession,
 	switchVariantForSession,
@@ -106,7 +96,6 @@ import {
 } from "../../../src/lib/handlers/settings.js";
 import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
-import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import {
@@ -1462,195 +1451,6 @@ describe("handlePtyInput", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(terminal.sendInput).not.toHaveBeenCalled();
-			}),
-		);
-	});
-});
-
-// ─── Instance handler tests ───────────────────────────────────────────────
-
-function mockInstanceMgmt(): InstanceManagementDeps {
-	const mockInstance = {
-		id: "test-instance",
-		name: "Test Instance",
-		port: 3000,
-		status: "stopped" as const,
-		managed: true,
-		restartCount: 0,
-		createdAt: Date.now(),
-	};
-	return {
-		getInstances: vi.fn(() => []),
-		addInstance: vi.fn(() => mockInstance),
-		removeInstance: vi.fn(),
-		startInstance: vi.fn(async () => {}),
-		stopInstance: vi.fn(),
-		updateInstance: vi.fn(() => mockInstance),
-		persistConfig: vi.fn(),
-	};
-}
-
-const makeInstanceManagementLayer = (instanceMgmt: InstanceManagementDeps) =>
-	InstanceManagementServiceLive.pipe(
-		Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
-	);
-
-describe("handleInstanceAdd", () => {
-	it.effect("adds instance and broadcasts list", () => {
-		const ws = mockWsHandler();
-		const instanceMgmt = mockInstanceMgmt();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			makeInstanceManagementLayer(instanceMgmt),
-		);
-
-		return handleInstanceAdd("client-1", { name: "Test Instance" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(instanceMgmt.addInstance).toHaveBeenCalled();
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({ type: "instance_list" }),
-				);
-				expect(instanceMgmt.persistConfig).toHaveBeenCalled();
-			}),
-		);
-	});
-
-	it.effect("sends error when instanceMgmt is not available", () => {
-		const ws = mockWsHandler();
-
-		// No InstanceMgmtTag provided — serviceOption returns None
-		const layer = Layer.succeed(WebSocketHandlerTag, ws);
-
-		return handleInstanceAdd("client-1", { name: "Test" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "system_error",
-					code: "INSTANCE_ERROR",
-					message: "Instance management not available",
-				});
-			}),
-		);
-	});
-});
-
-describe("handleInstanceRemove", () => {
-	it.effect("removes instance and broadcasts list", () => {
-		const ws = mockWsHandler();
-		const instanceMgmt = mockInstanceMgmt();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			makeInstanceManagementLayer(instanceMgmt),
-		);
-
-		return handleInstanceRemove("client-1", {
-			instanceId: "test-instance",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(instanceMgmt.removeInstance).toHaveBeenCalledWith(
-					"test-instance",
-				);
-				expect(instanceMgmt.persistConfig).toHaveBeenCalled();
-			}),
-		);
-	});
-});
-
-describe("handleInstanceStart", () => {
-	it.effect("starts instance and broadcasts list", () => {
-		const ws = mockWsHandler();
-		const instanceMgmt = mockInstanceMgmt();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			makeInstanceManagementLayer(instanceMgmt),
-		);
-
-		return handleInstanceStart("client-1", {
-			instanceId: "test-instance",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(instanceMgmt.startInstance).toHaveBeenCalledWith(
-					"test-instance",
-				);
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({ type: "instance_list" }),
-				);
-			}),
-		);
-	});
-});
-
-describe("handleInstanceStop", () => {
-	it.effect("stops instance and broadcasts list", () => {
-		const ws = mockWsHandler();
-		const instanceMgmt = mockInstanceMgmt();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			makeInstanceManagementLayer(instanceMgmt),
-		);
-
-		return handleInstanceStop("client-1", {
-			instanceId: "test-instance",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(instanceMgmt.stopInstance).toHaveBeenCalledWith("test-instance");
-			}),
-		);
-	});
-});
-
-describe("handleScanNow", () => {
-	it.effect("sends error when scan deps not available", () => {
-		const ws = mockWsHandler();
-
-		const layer = Layer.succeed(WebSocketHandlerTag, ws);
-
-		return handleScanNow("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "system_error",
-					code: "INSTANCE_ERROR",
-					message: "Port scanning not available",
-				});
-			}),
-		);
-	});
-
-	it.effect("sends scan result when available", () => {
-		const ws = mockWsHandler();
-		const scanService = {
-			scanNow: vi.fn(() =>
-				Effect.succeed({
-					discovered: [8080],
-					lost: [],
-					active: [3000, 8080],
-				}),
-			),
-		};
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ScanServiceTag, scanService),
-		);
-
-		return handleScanNow("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "scan_result",
-					discovered: [8080],
-					lost: [],
-					active: [3000, 8080],
-				});
 			}),
 		);
 	});

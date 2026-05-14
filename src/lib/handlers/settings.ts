@@ -1,37 +1,19 @@
 // ─── Settings Handlers ───────────────────────────────────────────────────────
 
 import { Effect } from "effect";
-import {
-	type ProjectManagementNotSupported,
-	type ProjectManagementServiceError,
-	ProjectManagementServiceTag,
-} from "../domain/relay/Services/project-management-service.js";
+import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
 import {
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { type ErrorCode, RelayError } from "../errors.js";
 import type { TodoItem } from "../shared-types.js";
-import type { PayloadMap } from "./payloads.js";
 
 export const MAX_PROJECT_TITLE_LENGTH = 100;
 
 export const normalizeProjectTitle = (title: string): string =>
 	title.trim().slice(0, MAX_PROJECT_TITLE_LENGTH);
-
-const toProjectSystemError = (
-	error: ProjectManagementServiceError | ProjectManagementNotSupported,
-	code: ErrorCode,
-) => {
-	if (error._tag === "ProjectManagementNotSupported") {
-		return new RelayError(error.message, {
-			code: "NOT_SUPPORTED",
-		}).toSystemError();
-	}
-	return RelayError.fromCaught(error.cause, code).toSystemError();
-};
 
 export const handleGetCommands = (
 	clientId: string,
@@ -99,122 +81,5 @@ export const handleGetProjects = (
 		});
 	});
 
-export const handleAddProject = (
-	clientId: string,
-	payload: PayloadMap["add_project"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const projectService = yield* ProjectManagementServiceTag;
-
-		const { directory } = payload;
-		if (!directory || typeof directory !== "string") {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("add_project requires a non-empty 'directory' field", {
-					code: "INVALID_REQUEST",
-				}).toSystemError(),
-			);
-			return;
-		}
-		const addResult = yield* Effect.either(
-			projectService.add(directory, payload.instanceId),
-		);
-		if (addResult._tag === "Left") {
-			wsHandler.sendTo(
-				clientId,
-				toProjectSystemError(addResult.left, "ADD_PROJECT_FAILED"),
-			);
-			return;
-		}
-		const current = yield* projectService.currentSlug();
-		wsHandler.sendTo(clientId, {
-			type: "project_list",
-			projects: addResult.right.projects,
-			current,
-			addedSlug: addResult.right.project.slug,
-		});
-	});
-
 export const getTodoState = (): Effect.Effect<readonly TodoItem[]> =>
 	Effect.succeed([]);
-
-export const handleRemoveProject = (
-	clientId: string,
-	payload: PayloadMap["remove_project"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const projectService = yield* ProjectManagementServiceTag;
-
-		const { slug } = payload;
-		if (!slug || typeof slug !== "string") {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("remove_project requires a non-empty 'slug' field", {
-					code: "INVALID_REQUEST",
-				}).toSystemError(),
-			);
-			return;
-		}
-		const removeResult = yield* Effect.either(projectService.remove(slug));
-		if (removeResult._tag === "Left") {
-			wsHandler.sendTo(
-				clientId,
-				toProjectSystemError(removeResult.left, "REMOVE_PROJECT_FAILED"),
-			);
-			return;
-		}
-		const current = yield* projectService.currentSlug();
-		wsHandler.broadcast({
-			type: "project_list",
-			projects: removeResult.right,
-			current,
-		});
-	});
-
-export const handleRenameProject = (
-	clientId: string,
-	payload: PayloadMap["rename_project"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const projectService = yield* ProjectManagementServiceTag;
-
-		const { slug } = payload;
-		if (!slug || typeof slug !== "string") {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("rename_project requires a non-empty 'slug' field", {
-					code: "INVALID_REQUEST",
-				}).toSystemError(),
-			);
-			return;
-		}
-		const title = normalizeProjectTitle(payload.title ?? "");
-		if (!title) {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError("rename_project requires a non-empty 'title' field", {
-					code: "INVALID_REQUEST",
-				}).toSystemError(),
-			);
-			return;
-		}
-		const renameResult = yield* Effect.either(
-			projectService.rename(slug, title),
-		);
-		if (renameResult._tag === "Left") {
-			wsHandler.sendTo(
-				clientId,
-				toProjectSystemError(renameResult.left, "RENAME_PROJECT_FAILED"),
-			);
-			return;
-		}
-		const current = yield* projectService.currentSlug();
-		wsHandler.broadcast({
-			type: "project_list",
-			projects: renameResult.right,
-			current,
-		});
-	});

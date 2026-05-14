@@ -60,67 +60,8 @@ export const PayloadSchemas: {
 		messageId: Schema.optional(Schema.String),
 	}),
 
-	add_project: Schema.Struct({
-		directory: Schema.String,
-		instanceId: Schema.optional(Schema.String),
-	}),
-
-	remove_project: Schema.Struct({
-		slug: Schema.String,
-	}),
-
-	rename_project: Schema.Struct({
-		slug: Schema.String,
-		title: Schema.String,
-	}),
-
 	pty_input: Schema.Struct({
 		ptyId: Schema.String,
 		data: Schema.String,
 	}),
-
-	instance_add: Schema.Struct({
-		name: Schema.String,
-		url: Schema.optional(Schema.String),
-		managed: Schema.optional(Schema.Boolean),
-		port: Schema.optional(Schema.Number),
-		env: Schema.optional(
-			Schema.Record({ key: Schema.String, value: Schema.String }),
-		),
-	}),
-
-	instance_remove: Schema.Struct({
-		instanceId: Schema.String,
-	}),
-
-	instance_start: Schema.Struct({
-		instanceId: Schema.String,
-	}),
-
-	instance_stop: Schema.Struct({
-		instanceId: Schema.String,
-	}),
-
-	instance_update: Schema.Struct({
-		instanceId: Schema.String,
-		name: Schema.optional(Schema.String),
-		port: Schema.optional(Schema.Number),
-		env: Schema.optional(
-			Schema.Record({ key: Schema.String, value: Schema.String }),
-		),
-	}),
-
-	set_project_instance: Schema.Struct({
-		slug: Schema.String,
-		instanceId: Schema.String,
-	}),
-
-	instance_rename: Schema.Struct({
-		instanceId: Schema.String,
-		name: Schema.String,
-	}),
-
-	proxy_detect: Schema.Struct({}),
-
-	scan_now: Schema.Struct({}),
 };

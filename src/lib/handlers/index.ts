@@ -15,17 +15,6 @@ export {
 	handleGetFileList,
 } from "./files.js";
 export {
-	handleInstanceAdd,
-	handleInstanceRemove,
-	handleInstanceRename,
-	handleInstanceStart,
-	handleInstanceStop,
-	handleInstanceUpdate,
-	handleProxyDetect,
-	handleScanNow,
-	handleSetProjectInstance,
-} from "./instance.js";
-export {
 	setDefaultModelForRelay,
 	switchModelForSession,
 	switchVariantForSession,
@@ -53,11 +42,8 @@ export {
 	renameSessionForClient,
 } from "./session.js";
 export {
-	handleAddProject,
 	handleGetCommands,
 	handleGetProjects,
-	handleRemoveProject,
-	handleRenameProject,
 } from "./settings.js";
 export { handlePtyInput } from "./terminal.js";
 export { handleGetToolContent } from "./tool-content.js";
@@ -67,17 +53,6 @@ export { handleGetToolContent } from "./tool-content.js";
 
 import { Effect, Schema } from "effect";
 import { WebSocketError } from "../errors.js";
-import {
-	handleInstanceAdd as handleInstanceAddImpl,
-	handleInstanceRemove as handleInstanceRemoveImpl,
-	handleInstanceRename as handleInstanceRenameImpl,
-	handleInstanceStart as handleInstanceStartImpl,
-	handleInstanceStop as handleInstanceStopImpl,
-	handleInstanceUpdate as handleInstanceUpdateImpl,
-	handleProxyDetect as handleProxyDetectImpl,
-	handleScanNow as handleScanNowImpl,
-	handleSetProjectInstance as handleSetProjectInstanceImpl,
-} from "./instance.js";
 import { PayloadSchemas } from "./payload-schemas.js";
 import type { PayloadMap } from "./payloads.js";
 import {
@@ -92,11 +67,6 @@ import {
 	handleSwitchSession as handleSwitchSessionImpl,
 	handleViewSession as handleViewSessionImpl,
 } from "./session.js";
-import {
-	handleAddProject as handleAddProjectImpl,
-	handleRemoveProject as handleRemoveProjectImpl,
-	handleRenameProject as handleRenameProjectImpl,
-} from "./settings.js";
 import { handlePtyInput as handlePtyInputImpl } from "./terminal.js";
 
 type AnyEffectHandler = (
@@ -125,22 +95,8 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	view_session: handleViewSessionImpl,
 	delete_session: handleDeleteSessionImpl,
 	fork_session: handleForkSessionImpl,
-	// Settings
-	add_project: handleAddProjectImpl,
-	remove_project: handleRemoveProjectImpl,
-	rename_project: handleRenameProjectImpl,
 	// Terminal
 	pty_input: handlePtyInputImpl,
-	// Instance management
-	instance_add: handleInstanceAddImpl,
-	instance_remove: handleInstanceRemoveImpl,
-	instance_start: handleInstanceStartImpl,
-	instance_stop: handleInstanceStopImpl,
-	instance_update: handleInstanceUpdateImpl,
-	instance_rename: handleInstanceRenameImpl,
-	set_project_instance: handleSetProjectInstanceImpl,
-	proxy_detect: handleProxyDetectImpl,
-	scan_now: handleScanNowImpl,
 };
 
 /**

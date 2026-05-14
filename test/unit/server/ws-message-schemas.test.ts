@@ -46,21 +46,6 @@ describe("decodeWsMessage", () => {
 		}),
 	);
 
-	it.effect("decodes instance_add with name and optional fields", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "instance_add",
-				name: "dev-server",
-				port: 8080,
-				managed: true,
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("instance_add");
-			expect((decoded as any).name).toBe("dev-server");
-			expect((decoded as any).port).toBe(8080);
-		}),
-	);
-
 	it.effect("decodes pty_input with ptyId and data", () =>
 		Effect.gen(function* () {
 			const raw = { type: "pty_input", ptyId: "pty-1", data: "ls\n" };
@@ -89,14 +74,6 @@ describe("decodeWsMessage", () => {
 			const decoded = yield* decodeWsMessage(raw);
 			expect(decoded.type).toBe("permission_response");
 			expect((decoded as any).decision).toBe("allow");
-		}),
-	);
-
-	it.effect("decodes add_project with directory", () =>
-		Effect.gen(function* () {
-			const raw = { type: "add_project", directory: "/home/user/project" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect((decoded as any).directory).toBe("/home/user/project");
 		}),
 	);
 });
@@ -139,7 +116,19 @@ describe("IncomingWsMessage schema rejections", () => {
 		"pty_create",
 		"pty_resize",
 		"pty_close",
-	])("rejects retired terminal control message %s", (type) => {
+		"add_project",
+		"remove_project",
+		"rename_project",
+		"instance_add",
+		"instance_remove",
+		"instance_start",
+		"instance_stop",
+		"instance_update",
+		"instance_rename",
+		"set_project_instance",
+		"proxy_detect",
+		"scan_now",
+	])("rejects retired incoming message %s", (type) => {
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)({ type });
 		expect(Either.isLeft(result)).toBe(true);
 	});
@@ -158,20 +147,8 @@ describe("IncomingWsMessage coverage", () => {
 		"switch_session",
 		"delete_session",
 		"fork_session",
-		"add_project",
-		"remove_project",
-		"rename_project",
 		"pty_input",
-		"instance_add",
-		"instance_remove",
-		"instance_start",
-		"instance_stop",
-		"instance_update",
-		"instance_rename",
-		"set_project_instance",
 		"view_session",
-		"proxy_detect",
-		"scan_now",
 		"set_log_level",
 	] as const;
 
@@ -185,20 +162,8 @@ describe("IncomingWsMessage coverage", () => {
 		switch_session: { sessionId: "s1" },
 		delete_session: { sessionId: "s1" },
 		fork_session: {},
-		add_project: { directory: "/tmp" },
-		remove_project: { slug: "s" },
-		rename_project: { slug: "s", title: "t" },
 		pty_input: { ptyId: "p1", data: "x" },
-		instance_add: { name: "n" },
-		instance_remove: { instanceId: "i1" },
-		instance_start: { instanceId: "i1" },
-		instance_stop: { instanceId: "i1" },
-		instance_update: { instanceId: "i1" },
-		instance_rename: { instanceId: "i1", name: "n" },
-		set_project_instance: { slug: "s", instanceId: "i1" },
 		view_session: { sessionId: "s1" },
-		proxy_detect: {},
-		scan_now: {},
 		set_log_level: { level: "debug" },
 	};
 

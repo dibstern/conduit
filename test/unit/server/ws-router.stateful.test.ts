@@ -402,14 +402,7 @@ const validMessageTypes: IncomingMessageType[] = [
 	"switch_session",
 	"delete_session",
 	"fork_session",
-	"add_project",
 	"pty_input",
-	"instance_add",
-	"instance_remove",
-	"instance_start",
-	"instance_stop",
-	"instance_update",
-	"set_project_instance",
 ];
 
 const arbInvalidType = fc

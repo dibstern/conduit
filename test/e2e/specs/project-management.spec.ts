@@ -7,12 +7,13 @@
 
 import { expect, test } from "@playwright/test";
 import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
+type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -31,14 +32,14 @@ async function waitForChatReady(page: Page): Promise<void> {
 
 /**
  * Set up WS mock with single-instance init + project management handlers.
- * Directory autocomplete is served through the RPC websocket.
- * Responds to `remove_project` and `rename_project` with updated project lists.
+ * Directory autocomplete and project mutations are served through the RPC
+ * websocket.
  */
 async function setupWithProjectManagement(
 	page: Page,
 	baseURL?: string,
-): Promise<WsMockControl> {
-	await mockWsRpc(page, {
+): Promise<ProjectManagementControl> {
+	const rpc = await mockWsRpc(page, {
 		handlers: {
 			ListDirectories: (params) => {
 				const path = String(params["path"] ?? "");
@@ -48,6 +49,41 @@ async function setupWithProjectManagement(
 					entries: getMockDirectories(path),
 				};
 			},
+			RenameProject: (params) => {
+				const slug = String(params["slug"] ?? "");
+				const title = String(params["title"] ?? "");
+				return {
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					projects: baseProjects().map((project) =>
+						project.slug === slug ? { ...project, title } : project,
+					),
+					current: "myapp",
+				};
+			},
+			RemoveProject: (params) => {
+				const slug = String(params["slug"] ?? "");
+				return {
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					projects: baseProjects().filter((project) => project.slug !== slug),
+					current: "myapp",
+				};
+			},
+			AddProject: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				projects: [
+					...baseProjects(),
+					{
+						slug: "new-project",
+						title: "new-project",
+						directory: String(params["directory"] ?? "/src/new-project"),
+						...(typeof params["instanceId"] === "string"
+							? { instanceId: params["instanceId"] }
+							: {}),
+					},
+				],
+				current: "myapp",
+				addedSlug: "new-project",
+			}),
 		},
 	});
 	const control = await mockRelayWebSocket(page, {
@@ -55,54 +91,25 @@ async function setupWithProjectManagement(
 		responses: new Map(),
 		initDelay: 0,
 		messageDelay: 0,
-		onClientMessage: (parsed, ctrl) => {
-			// Respond to remove_project with updated project list
-			if (parsed["type"] === "remove_project") {
-				const slug = parsed["slug"] as string;
-				ctrl.sendMessage({
-					type: "project_list",
-					projects: [
-						{
-							slug: "myapp",
-							title: "myapp",
-							directory: "/src/myapp",
-						},
-						{
-							slug: "mylib",
-							title: "mylib",
-							directory: "/src/mylib",
-						},
-					].filter((p) => p.slug !== slug),
-					current: "myapp",
-				});
-			}
-
-			// Respond to rename_project with updated project list
-			if (parsed["type"] === "rename_project") {
-				const slug = parsed["slug"] as string;
-				const title = parsed["title"] as string;
-				ctrl.sendMessage({
-					type: "project_list",
-					projects: [
-						{
-							slug: "myapp",
-							title: slug === "myapp" ? title : "myapp",
-							directory: "/src/myapp",
-						},
-						{
-							slug: "mylib",
-							title: slug === "mylib" ? title : "mylib",
-							directory: "/src/mylib",
-						},
-					],
-					current: "myapp",
-				});
-			}
-		},
 	});
 	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 	await waitForChatReady(page);
-	return control;
+	return Object.assign(control, { rpc });
+}
+
+function baseProjects() {
+	return [
+		{
+			slug: "myapp",
+			title: "myapp",
+			directory: "/src/myapp",
+		},
+		{
+			slug: "mylib",
+			title: "mylib",
+			directory: "/src/mylib",
+		},
+	];
 }
 
 /** Mock directory entries for autocomplete testing. */
@@ -448,10 +455,7 @@ test.describe("Project Rename", () => {
 		await expect(renameInput).toHaveValue("mylib");
 	});
 
-	test("Enter commits rename and sends rename_project WS message", async ({
-		page,
-		baseURL,
-	}) => {
+	test("Enter commits rename through RPC", async ({ page, baseURL }) => {
 		const control = await setupWithProjectManagement(page, baseURL);
 		await openProjectSwitcher(page);
 
@@ -467,15 +471,10 @@ test.describe("Project Rename", () => {
 		// Input should disappear
 		await expect(renameInput).not.toBeVisible();
 
-		// Verify the rename_project WS message
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "rename_project",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "RenameProject",
 		);
-		expect(msg).toMatchObject({
-			type: "rename_project",
+		expect(request.payload).toMatchObject({
 			slug: "mylib",
 			title: "My Library",
 		});
@@ -500,17 +499,12 @@ test.describe("Project Rename", () => {
 		// Input should disappear
 		await expect(renameInput).not.toBeVisible();
 
-		// Verify no rename_project message was sent
-		// Wait a bit to ensure no message arrives
+		// Wait a bit to ensure no rename request arrives.
 		await page.waitForTimeout(300);
-		const messages = control.getClientMessages();
-		const renameMessages = messages.filter(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "rename_project",
-		);
-		expect(renameMessages).toHaveLength(0);
+		const renameRequests = control.rpc
+			.getRequests()
+			.filter((request) => request.tag === "RenameProject");
+		expect(renameRequests).toHaveLength(0);
 	});
 
 	test("renamed project shows new title after server responds", async ({
@@ -529,8 +523,7 @@ test.describe("Project Rename", () => {
 		await renameInput.fill("My Library");
 		await renameInput.press("Enter");
 
-		// After server responds with updated project_list, title should update
-		// (the onClientMessage handler sends back the updated list)
+		// After RPC responds with the updated project list, title should update.
 		await expect(
 			page.locator("[data-testid='project-item']").nth(1),
 		).toContainText("My Library", { timeout: 5_000 });
@@ -556,7 +549,7 @@ test.describe("Project Delete", () => {
 		await expect(confirmModal).toContainText("conduit");
 	});
 
-	test("confirming removal sends remove_project WS message", async ({
+	test("confirming removal sends RemoveProject RPC", async ({
 		page,
 		baseURL,
 	}) => {
@@ -571,15 +564,10 @@ test.describe("Project Delete", () => {
 		// Click the confirm button in the modal
 		await page.click("#confirm-modal button:has-text('Remove')");
 
-		// Verify the remove_project WS message
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "remove_project",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "RemoveProject",
 		);
-		expect(msg).toMatchObject({
-			type: "remove_project",
+		expect(request.payload).toMatchObject({
 			slug: "mylib",
 		});
 	});
@@ -602,16 +590,12 @@ test.describe("Project Delete", () => {
 		// Modal should close
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 
-		// Verify no remove_project message was sent
+		// Verify no RemoveProject RPC was sent.
 		await page.waitForTimeout(300);
-		const messages = control.getClientMessages();
-		const removeMessages = messages.filter(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "remove_project",
-		);
-		expect(removeMessages).toHaveLength(0);
+		const removeRequests = control.rpc
+			.getRequests()
+			.filter((request) => request.tag === "RemoveProject");
+		expect(removeRequests).toHaveLength(0);
 	});
 
 	test("removed project disappears from the list", async ({

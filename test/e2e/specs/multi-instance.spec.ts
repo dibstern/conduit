@@ -16,12 +16,14 @@ import {
 	workInstanceStarting,
 	workInstanceStopped,
 } from "../fixtures/mockup-state.js";
+import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
+type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
 
 /** The project URL for multi-instance tests (must match fixture's current slug). */
 const PROJECT_URL = "/p/myapp/";
@@ -53,7 +55,8 @@ async function gotoAndWait(
 async function setupMultiInstance(
 	page: Page,
 	baseURL?: string,
-): Promise<WsMockControl> {
+): Promise<MultiInstanceControl> {
+	const rpc = await mockInstanceRpc(page);
 	const control = await mockRelayWebSocket(page, {
 		initMessages: multiInstanceInitMessages,
 		responses: new Map(),
@@ -61,14 +64,15 @@ async function setupMultiInstance(
 		messageDelay: 0,
 	});
 	await gotoAndWait(page, baseURL);
-	return control;
+	return Object.assign(control, { rpc });
 }
 
 /** Set up WS mock with single-instance init, navigate, wait for ready. */
 async function setupSingleInstance(
 	page: Page,
 	baseURL?: string,
-): Promise<WsMockControl> {
+): Promise<MultiInstanceControl> {
+	const rpc = await mockInstanceRpc(page);
 	const control = await mockRelayWebSocket(page, {
 		initMessages: singleInstanceInitMessages,
 		responses: new Map(),
@@ -76,14 +80,15 @@ async function setupSingleInstance(
 		messageDelay: 0,
 	});
 	await gotoAndWait(page, baseURL);
-	return control;
+	return Object.assign(control, { rpc });
 }
 
 /** Set up WS mock with no instances (for Getting Started panel tests). */
 async function setupNoInstances(
 	page: Page,
 	baseURL?: string,
-): Promise<WsMockControl> {
+): Promise<MultiInstanceControl> {
+	const rpc = await mockInstanceRpc(page);
 	const control = await mockRelayWebSocket(page, {
 		initMessages: noInstanceInitMessages,
 		responses: new Map(),
@@ -91,7 +96,83 @@ async function setupNoInstances(
 		messageDelay: 0,
 	});
 	await gotoAndWait(page, baseURL);
-	return control;
+	return Object.assign(control, { rpc });
+}
+
+async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
+	return await mockWsRpc(page, {
+		handlers: {
+			DetectProxy: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				found: false,
+				port: 8317,
+			}),
+			StartInstance: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				instances: [personalInstanceUnhealthy, workInstanceStarting],
+			}),
+			StopInstance: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				instances: [personalInstanceUnhealthy, workInstanceStopped],
+			}),
+			RemoveInstance: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				instances: [personalInstanceUnhealthy],
+			}),
+			RenameInstance: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				instances: [
+					personalInstanceUnhealthy,
+					{ ...workInstanceHealthy, name: String(params["name"] ?? "Work") },
+				],
+			}),
+			ScanNow: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				discovered: [4098],
+				lost: [],
+				active: [4096, 4098],
+			}),
+			AddProject: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				projects: [
+					{
+						slug: "myapp",
+						title: "myapp",
+						directory: "/src/myapp",
+						instanceId: "personal",
+					},
+					{
+						slug: "test-generator-skill",
+						title: "test-generator-skill",
+						directory: String(params["directory"] ?? ""),
+						...(typeof params["instanceId"] === "string"
+							? { instanceId: params["instanceId"] }
+							: {}),
+					},
+				],
+				current: "myapp",
+				addedSlug: "test-generator-skill",
+			}),
+			SetProjectInstance: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				projects: [
+					{
+						slug: "myapp",
+						title: "myapp",
+						directory: "/src/myapp",
+						instanceId: String(params["instanceId"] ?? "personal"),
+					},
+					{
+						slug: "company-api",
+						title: "company-api",
+						directory: "/src/company-api",
+						instanceId: "work",
+					},
+				],
+				current: "myapp",
+			}),
+		},
+	});
 }
 
 /** Open the ProjectSwitcher dropdown. On mobile, opens hamburger first. */
@@ -479,51 +560,37 @@ test.describe("Instance Management Settings", () => {
 		await expect(page.getByText("Remove")).toBeVisible();
 	});
 
-	test("start button sends instance_start WS message", async ({
-		page,
-		baseURL,
-	}) => {
+	test("start button sends StartInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		const gearBtn = page.locator("#settings-btn, [title='Settings']");
 		await gearBtn.click();
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Start')");
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "instance_start",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "StartInstance",
 		);
-		expect(msg).toMatchObject({
-			type: "instance_start",
+		expect(request.payload).toMatchObject({
 			instanceId: "work",
 		});
 	});
 
-	test("stop button sends instance_stop WS message", async ({
-		page,
-		baseURL,
-	}) => {
+	test("stop button sends StopInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		const gearBtn = page.locator("#settings-btn, [title='Settings']");
 		await gearBtn.click();
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await page.click("button:has-text('Stop')");
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "instance_stop",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "StopInstance",
 		);
-		expect(msg).toMatchObject({
-			type: "instance_stop",
+		expect(request.payload).toMatchObject({
 			instanceId: "personal",
 		});
 	});
 
-	test("remove button shows confirmation then sends instance_remove", async ({
+	test("remove button shows confirmation then sends RemoveInstance RPC", async ({
 		page,
 		baseURL,
 	}) => {
@@ -537,14 +604,10 @@ test.describe("Instance Management Settings", () => {
 		await expect(confirmModal).toBeVisible();
 		await expect(confirmModal).toContainText("Work");
 		await page.click("#confirm-modal button:has-text('Confirm')");
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "instance_remove",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "RemoveInstance",
 		);
-		expect(msg).toMatchObject({
-			type: "instance_remove",
+		expect(request.payload).toMatchObject({
 			instanceId: "work",
 		});
 	});
@@ -604,10 +667,7 @@ test.describe("Instance Management Settings", () => {
 		await expect(instanceList).toContainText("4098");
 	});
 
-	test("Scan Now button sends scan_now WS message", async ({
-		page,
-		baseURL,
-	}) => {
+	test("Scan Now button sends ScanNow RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		const gearBtn = page.locator("#settings-btn, [title='Settings']");
 		await gearBtn.click();
@@ -617,19 +677,10 @@ test.describe("Instance Management Settings", () => {
 		await expect(scanBtn).toBeVisible();
 		await scanBtn.click();
 
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "scan_now",
-		);
-		expect(msg).toMatchObject({ type: "scan_now" });
+		await control.rpc.waitForRequest((req) => req.tag === "ScanNow");
 	});
 
-	test("inline rename sends instance_rename WS message", async ({
-		page,
-		baseURL,
-	}) => {
+	test("inline rename sends RenameInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		const gearBtn = page.locator("#settings-btn, [title='Settings']");
 		await gearBtn.click();
@@ -647,14 +698,10 @@ test.describe("Instance Management Settings", () => {
 		await renameInput.fill("Production");
 		await renameInput.press("Enter");
 
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "instance_rename",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "RenameInstance",
 		);
-		expect(msg).toMatchObject({
-			type: "instance_rename",
+		expect(request.payload).toMatchObject({
 			instanceId: "work",
 			name: "Production",
 		});
@@ -757,6 +804,7 @@ test.describe("Dashboard: Instance Status Banner", () => {
 			}
 			return m;
 		});
+		await mockInstanceRpc(page);
 		await mockRelayWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
@@ -789,6 +837,7 @@ test.describe("Dashboard: Instance Status Banner", () => {
 			}
 			return m;
 		});
+		await mockInstanceRpc(page);
 		await mockRelayWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
@@ -836,6 +885,7 @@ test.describe("Dashboard: Instance Status Banner", () => {
 			}
 			return m;
 		});
+		await mockInstanceRpc(page);
 		const control = await mockRelayWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
@@ -863,7 +913,7 @@ test.describe("Dashboard: Instance Status Banner", () => {
 // ─── Group 11: Add Project with Instance Binding ────────────────────────────
 
 test.describe("Add Project: Instance Binding", () => {
-	test("add_project WS message includes selected instanceId", async ({
+	test("AddProject RPC includes selected instanceId", async ({
 		page,
 		baseURL,
 	}) => {
@@ -884,15 +934,10 @@ test.describe("Add Project: Instance Binding", () => {
 		// Click "Add"
 		await page.click("text=Add");
 
-		// Verify the add_project message includes instanceId
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "add_project",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "AddProject",
 		);
-		expect(msg).toMatchObject({
-			type: "add_project",
+		expect(request.payload).toMatchObject({
 			directory: "~/src/work/ds/test-generator-skill",
 			instanceId: "work",
 		});
@@ -902,7 +947,7 @@ test.describe("Add Project: Instance Binding", () => {
 // ─── Group 12: Instance Selector Rebinds Current Project ────────────────────
 
 test.describe("Instance Selector: Rebind Project", () => {
-	test("clicking instance in dropdown sends set_project_instance and updates badge", async ({
+	test("clicking instance in dropdown sends SetProjectInstance RPC and updates badge", async ({
 		page,
 		baseURL,
 	}) => {
@@ -920,15 +965,10 @@ test.describe("Instance Selector: Rebind Project", () => {
 		// Click "Work" in the dropdown
 		await dropdown.getByText("Work").click();
 
-		// Should send a set_project_instance message
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "set_project_instance",
+		const request = await control.rpc.waitForRequest(
+			(req) => req.tag === "SetProjectInstance",
 		);
-		expect(msg).toMatchObject({
-			type: "set_project_instance",
+		expect(request.payload).toMatchObject({
 			slug: "myapp",
 			instanceId: "work",
 		});
@@ -1096,7 +1136,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		).toBeVisible({ timeout: 3_000 });
 	});
 
-	test("'Scan Now' link in Getting Started sends scan_now", async ({
+	test("'Scan Now' link in Getting Started sends ScanNow RPC", async ({
 		page,
 		baseURL,
 	}) => {
@@ -1110,13 +1150,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		await expect(scanLink).toBeVisible();
 		await scanLink.click();
 
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "scan_now",
-		);
-		expect(msg).toMatchObject({ type: "scan_now" });
+		await control.rpc.waitForRequest((req) => req.tag === "ScanNow");
 	});
 
 	test("discovered instance shows 'discovered' badge", async ({

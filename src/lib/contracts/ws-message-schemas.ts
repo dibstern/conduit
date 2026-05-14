@@ -69,93 +69,12 @@ const ForkSessionMsg = Schema.Struct({
 	messageId: Schema.optional(Schema.String),
 });
 
-// ── Settings / Projects ──────────────────────────────────────────────────────
-
-const AddProjectMsg = Schema.Struct({
-	type: Schema.Literal("add_project"),
-	directory: Schema.String,
-	instanceId: Schema.optional(Schema.String),
-});
-
-const RemoveProjectMsg = Schema.Struct({
-	type: Schema.Literal("remove_project"),
-	slug: Schema.String,
-});
-
-const RenameProjectMsg = Schema.Struct({
-	type: Schema.Literal("rename_project"),
-	slug: Schema.String,
-	title: Schema.String,
-});
-
-// ── File operations ──────────────────────────────────────────────────────────
-
 // ── Terminal / PTY ───────────────────────────────────────────────────────────
 
 const PtyInputMsg = Schema.Struct({
 	type: Schema.Literal("pty_input"),
 	ptyId: Schema.String,
 	data: Schema.String,
-});
-
-// ── Instance management ──────────────────────────────────────────────────────
-
-const InstanceAddMsg = Schema.Struct({
-	type: Schema.Literal("instance_add"),
-	name: Schema.String,
-	url: Schema.optional(Schema.String),
-	managed: Schema.optional(Schema.Boolean),
-	port: Schema.optional(Schema.Number),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-});
-
-const InstanceRemoveMsg = Schema.Struct({
-	type: Schema.Literal("instance_remove"),
-	instanceId: Schema.String,
-});
-
-const InstanceStartMsg = Schema.Struct({
-	type: Schema.Literal("instance_start"),
-	instanceId: Schema.String,
-});
-
-const InstanceStopMsg = Schema.Struct({
-	type: Schema.Literal("instance_stop"),
-	instanceId: Schema.String,
-});
-
-const InstanceUpdateMsg = Schema.Struct({
-	type: Schema.Literal("instance_update"),
-	instanceId: Schema.String,
-	name: Schema.optional(Schema.String),
-	port: Schema.optional(Schema.Number),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-});
-
-const InstanceRenameMsg = Schema.Struct({
-	type: Schema.Literal("instance_rename"),
-	instanceId: Schema.String,
-	name: Schema.String,
-});
-
-const SetProjectInstanceMsg = Schema.Struct({
-	type: Schema.Literal("set_project_instance"),
-	slug: Schema.String,
-	instanceId: Schema.String,
-});
-
-// ── Network / Scanning ───────────────────────────────────────────────────────
-
-const ProxyDetectMsg = Schema.Struct({
-	type: Schema.Literal("proxy_detect"),
-});
-
-const ScanNowMsg = Schema.Struct({
-	type: Schema.Literal("scan_now"),
 });
 
 // ── Daemon operations ────────────────────────────────────────────────────────
@@ -179,23 +98,8 @@ export const IncomingWsMessage = Schema.Union(
 	ViewSessionMsg,
 	DeleteSessionMsg,
 	ForkSessionMsg,
-	// Settings / Projects
-	AddProjectMsg,
-	RemoveProjectMsg,
-	RenameProjectMsg,
 	// Terminal / PTY
 	PtyInputMsg,
-	// Instance management
-	InstanceAddMsg,
-	InstanceRemoveMsg,
-	InstanceStartMsg,
-	InstanceStopMsg,
-	InstanceUpdateMsg,
-	InstanceRenameMsg,
-	SetProjectInstanceMsg,
-	// Network / Scanning
-	ProxyDetectMsg,
-	ScanNowMsg,
 	// Daemon operations
 	SetLogLevelMsg,
 );

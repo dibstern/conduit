@@ -27,6 +27,36 @@ export interface RpcMockOptions {
 	readonly handlers: Record<string, RpcHandler>;
 }
 
+export interface RecordedRpcRequest {
+	readonly tag: string;
+	readonly payload: Record<string, unknown>;
+}
+
+export class RpcMockControl {
+	private readonly requests: RecordedRpcRequest[] = [];
+
+	record(tag: string, payload: Record<string, unknown>): void {
+		this.requests.push({ tag, payload });
+	}
+
+	getRequests(): readonly RecordedRpcRequest[] {
+		return this.requests;
+	}
+
+	async waitForRequest(
+		predicate: (request: RecordedRpcRequest) => boolean,
+		timeout = 5000,
+	): Promise<RecordedRpcRequest> {
+		const start = Date.now();
+		while (Date.now() - start < timeout) {
+			const match = this.requests.find(predicate);
+			if (match) return match;
+			await new Promise((r) => setTimeout(r, 50));
+		}
+		throw new Error("Timed out waiting for RPC request");
+	}
+}
+
 const isJsonRpcRequest = (value: unknown): value is JsonRpcRequest =>
 	typeof value === "object" &&
 	value !== null &&
@@ -51,11 +81,12 @@ const sendJson = (ws: WebSocketRoute, message: unknown) => {
 async function handleMessage(
 	ws: WebSocketRoute,
 	handlers: Record<string, RpcHandler>,
+	control: RpcMockControl,
 	raw: unknown,
 ) {
 	if (Array.isArray(raw)) {
 		for (const item of raw) {
-			await handleMessage(ws, handlers, item);
+			await handleMessage(ws, handlers, control, item);
 		}
 		return;
 	}
@@ -64,6 +95,7 @@ async function handleMessage(
 		return;
 	}
 	if (isEffectRpcRequest(raw)) {
+		control.record(raw.tag, raw.payload ?? {});
 		const handler = handlers[raw.tag];
 		if (!handler) return;
 		try {
@@ -95,6 +127,7 @@ async function handleMessage(
 	if (!handler || raw.id == null) return;
 
 	try {
+		control.record(raw.method, raw.params ?? {});
 		const result = await handler(raw.params ?? {}, raw);
 		sendJson(ws, { jsonrpc: "2.0", id: raw.id, result });
 	} catch (error) {
@@ -112,15 +145,17 @@ async function handleMessage(
 export async function mockWsRpc(
 	page: Page,
 	options: RpcMockOptions,
-): Promise<void> {
+): Promise<RpcMockControl> {
+	const control = new RpcMockControl();
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		ws.onMessage((data) => {
 			if (typeof data !== "string") return;
 			try {
-				void handleMessage(ws, options.handlers, JSON.parse(data));
+				void handleMessage(ws, options.handlers, control, JSON.parse(data));
 			} catch {
 				// Ignore malformed client frames in tests.
 			}
 		});
 	});
+	return control;
 }

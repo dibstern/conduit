@@ -10,11 +10,11 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
+	beginScan,
 	clearInstanceState,
 	getScanResult,
 	handleScanResult,
 	isScanInFlight,
-	triggerScan,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
@@ -28,18 +28,15 @@ beforeEach(() => {
 });
 
 describe("scanInFlight state management", () => {
-	it("triggerScan sets scanInFlight and sends scan_now message", () => {
+	it("beginScan sets scanInFlight without depending on legacy WS commands", () => {
 		clearInstanceState();
-		const sendFn = vi.fn();
-		triggerScan(sendFn);
+		beginScan();
 		expect(isScanInFlight()).toBe(true);
-		expect(sendFn).toHaveBeenCalledWith({ type: "scan_now" });
 	});
 
 	it("handleScanResult clears scanInFlight", () => {
 		clearInstanceState();
-		const sendFn = vi.fn();
-		triggerScan(sendFn);
+		beginScan();
 		expect(isScanInFlight()).toBe(true);
 
 		handleScanResult({
@@ -59,8 +56,7 @@ describe("scanInFlight state management", () => {
 
 	it("stores active ports from scan result", () => {
 		clearInstanceState();
-		const sendFn = vi.fn();
-		triggerScan(sendFn);
+		beginScan();
 
 		handleScanResult({
 			type: "scan_result",
@@ -80,11 +76,10 @@ describe("scanInFlight state management", () => {
 
 	it("clears scanInFlight when server responds with system_error INSTANCE_ERROR", () => {
 		clearInstanceState();
-		const sendFn = vi.fn();
-		triggerScan(sendFn);
+		beginScan();
 		expect(isScanInFlight()).toBe(true);
 
-		// Server sends error instead of scan_result (e.g. triggerScan not wired)
+		// Server sends error instead of scan_result.
 		const errorMsg: RelayMessage = {
 			type: "system_error",
 			code: "INSTANCE_ERROR",
