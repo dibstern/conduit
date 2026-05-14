@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	fetchLatestVersion,
 	isNewer,
+	NpmRegistryInvalidResponseError,
+	NpmRegistryResponseError,
 	VersionChecker,
 } from "../../../src/lib/daemon/version-check.js";
 
@@ -159,20 +161,36 @@ describe("Ticket 3.4 — fetchLatestVersion()", () => {
 
 	it("throws on 404 response", async () => {
 		const fetcher = mockFetchError(404);
-		await expect(
-			fetchLatestVersion(
-				"nonexistent-pkg",
-				"https://registry.npmjs.org",
-				fetcher,
-			),
-		).rejects.toThrow(/404/);
+		const rejected = fetchLatestVersion(
+			"nonexistent-pkg",
+			"https://registry.npmjs.org",
+			fetcher,
+		);
+
+		await expect(rejected).rejects.toBeInstanceOf(NpmRegistryResponseError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "NpmRegistryResponseError",
+			packageName: "nonexistent-pkg",
+			status: 404,
+			message: "npm registry returned 404 for nonexistent-pkg",
+		});
 	});
 
 	it("throws on 500 response", async () => {
 		const fetcher = mockFetchError(500);
-		await expect(
-			fetchLatestVersion("conduit", "https://registry.npmjs.org", fetcher),
-		).rejects.toThrow(/500/);
+		const rejected = fetchLatestVersion(
+			"conduit",
+			"https://registry.npmjs.org",
+			fetcher,
+		);
+
+		await expect(rejected).rejects.toBeInstanceOf(NpmRegistryResponseError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "NpmRegistryResponseError",
+			packageName: "conduit",
+			status: 500,
+			message: "npm registry returned 500 for conduit",
+		});
 	});
 
 	it("throws on network error", async () => {
@@ -191,9 +209,20 @@ describe("Ticket 3.4 — fetchLatestVersion()", () => {
 				}),
 		) as unknown as typeof globalThis.fetch;
 
-		await expect(
-			fetchLatestVersion("conduit", "https://registry.npmjs.org", fetcher),
-		).rejects.toThrow(/no version field/);
+		const rejected = fetchLatestVersion(
+			"conduit",
+			"https://registry.npmjs.org",
+			fetcher,
+		);
+
+		await expect(rejected).rejects.toBeInstanceOf(
+			NpmRegistryInvalidResponseError,
+		);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "NpmRegistryInvalidResponseError",
+			packageName: "conduit",
+			message: "npm registry returned no version field for conduit",
+		});
 	});
 });
 

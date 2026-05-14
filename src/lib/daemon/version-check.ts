@@ -1,6 +1,8 @@
 // ─── Version Check (Ticket 3.4) ────────────────────────────────────────────────
 // Periodically checks npm for newer versions and notifies via callbacks.
 
+import { Data } from "effect";
+
 import { getVersion } from "../version.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -36,6 +38,27 @@ export type VersionCheckEvents = {
 	update_available: [{ current: string; latest: string }];
 	check_error: [{ error: Error }];
 };
+
+export class NpmRegistryResponseError extends Data.TaggedError(
+	"NpmRegistryResponseError",
+)<{
+	readonly packageName: string;
+	readonly status: number;
+}> {
+	override get message(): string {
+		return `npm registry returned ${this.status} for ${this.packageName}`;
+	}
+}
+
+export class NpmRegistryInvalidResponseError extends Data.TaggedError(
+	"NpmRegistryInvalidResponseError",
+)<{
+	readonly packageName: string;
+}> {
+	override get message(): string {
+		return `npm registry returned no version field for ${this.packageName}`;
+	}
+}
 
 // ─── Semver comparison ─────────────────────────────────────────────────────────
 
@@ -170,17 +193,16 @@ export async function fetchLatestVersion(
 	});
 
 	if (!response.ok) {
-		throw new Error(
-			`npm registry returned ${response.status} for ${packageName}`,
-		);
+		throw new NpmRegistryResponseError({
+			packageName,
+			status: response.status,
+		});
 	}
 
 	const data = (await response.json()) as { version?: string };
 
 	if (!data.version || typeof data.version !== "string") {
-		throw new Error(
-			`npm registry returned no version field for ${packageName}`,
-		);
+		throw new NpmRegistryInvalidResponseError({ packageName });
 	}
 
 	return data.version;
