@@ -298,6 +298,25 @@ describe("IPC RPC request group", () => {
 		),
 	);
 
+	it.effect("updates native shutdown state through Shutdown RPC", () =>
+		provideRpc(
+			Effect.gen(function* () {
+				const client = yield* RpcTest.makeClient(IpcRpcGroup);
+				const result = yield* client.Shutdown({});
+
+				expect(result).toEqual({ ok: true });
+
+				const ref = yield* DaemonStateTag;
+				const state = yield* Ref.get(ref);
+				expect(state.shuttingDown).toBe(true);
+
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.shuttingDown).toBe(true);
+			}),
+		),
+	);
+
 	it.effect("preserves RestartWithConfig overrides through RPC handlers", () =>
 		provideRpc(
 			Effect.gen(function* () {

@@ -451,6 +451,64 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		}
 	});
 
+	it("routes tagged Shutdown through the native Effect handler", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
+		const ctx = makeContext(join(tmp, "daemon.sock"));
+		const native = makeNativeIpcDispatcher();
+		const scheduleShutdown = vi.fn();
+
+		const ipcContext: TestDaemonIPCContext = {
+			addProject: async (directory) => ({
+				slug: "project",
+				directory,
+				title: "Project",
+			}),
+			removeProject: async () => {},
+			getProjects: () => [],
+			setProjectTitle: () => {},
+			persistConfig: () => {},
+			scheduleShutdown,
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
+			getInstances: () => [],
+			getInstance: () => undefined,
+			addInstance: (id, config) => makeInstance(id, config),
+			removeInstance: () => {},
+			startInstance: async () => {},
+			stopInstance: () => {},
+			updateInstance: (id, updates) =>
+				makeInstance(id, {
+					name: updates.name ?? id,
+					port: updates.port ?? 0,
+					managed: true,
+					...(updates.env !== undefined ? { env: updates.env } : {}),
+				}),
+		};
+
+		try {
+			await startIPCServer(
+				ctx,
+				{
+					...ipcContext,
+					getStatus: ipcContext.getStatus ?? makeStatus,
+				},
+				native.dispatch,
+			);
+			const response = await sendJsonLine(ctx.socketPath, {
+				_tag: "Shutdown",
+			});
+
+			expect(response).toEqual({ ok: true });
+			const config = await native.readConfig();
+			expect(config.shuttingDown).toBe(true);
+			expect(scheduleShutdown).toHaveBeenCalled();
+		} finally {
+			await closeIPCServer(ctx);
+			await native.dispose();
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
 	it("routes legacy set_agent through the project override port", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));

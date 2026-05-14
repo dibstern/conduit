@@ -35,6 +35,7 @@ import {
 	handleSetKeepAwake,
 	handleSetKeepAwakeCommand,
 	handleSetPin,
+	handleShutdown,
 } from "../domain/daemon/Services/ipc-handlers.js";
 import { IpcRpcGroup } from "../domain/daemon/Services/ipc-rpc-group.js";
 import { formatErrorDetail } from "../errors.js";
@@ -182,11 +183,21 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 				),
 			),
 		Shutdown: () =>
-			Effect.tryPromise({
-				try: () => handlers.shutdown(),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.orDie,
+			handleShutdown({ cmd: "shutdown" }).pipe(
+				Effect.zipRight(
+					Effect.tryPromise({
+						try: () => handlers.shutdown(),
+						catch: (error) =>
+							new IpcError({ message: formatErrorDetail(error) }),
+					}).pipe(
+						Effect.flatMap((shutdownResponse) =>
+							shutdownResponse.ok
+								? Effect.void
+								: Effect.fail(ipcFailure(shutdownResponse)),
+						),
+						Effect.orDie,
+					),
+				),
 				Effect.map(() => ({ ok: true as const })),
 			),
 		SetAgent: (request) =>

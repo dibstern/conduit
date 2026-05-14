@@ -262,12 +262,21 @@ export const handleSetKeepAwakeCommand = (
 
 export const handleShutdown = (
 	_cmd: CmdOf<"shutdown">,
-): Effect.Effect<IPCResponse, never, DaemonStateTag | ShutdownSignalTag> =>
+): Effect.Effect<
+	IPCResponse,
+	never,
+	DaemonStateTag | DaemonConfigRefTag | ShutdownSignalTag
+> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
+		const configRef = yield* DaemonConfigRefTag;
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
+			shuttingDown: true,
+		}));
+		yield* Ref.update(configRef, (c) => ({
+			...c,
 			shuttingDown: true,
 		}));
 

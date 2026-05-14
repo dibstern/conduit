@@ -331,6 +331,10 @@ describe("IPC handlers", () => {
 				const state = yield* Ref.get(ref);
 				expect(state.shuttingDown).toBe(true);
 
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.shuttingDown).toBe(true);
+
 				// AP-25: Verify ShutdownSignal Deferred was completed
 				const deferred = yield* ShutdownSignalTag;
 				const isDone = yield* Deferred.isDone(deferred);
