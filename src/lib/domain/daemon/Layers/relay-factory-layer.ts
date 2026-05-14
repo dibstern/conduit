@@ -20,6 +20,7 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Option,
 	Ref,
 	Runtime,
 } from "effect";
@@ -29,6 +30,7 @@ import type {
 	OpenCodeInstance,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
+import { PushManagerTag } from "../../server/Services/push-service.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -47,6 +49,8 @@ import {
 	allProjects as getEffectProjects,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import { PortScannerTag } from "./port-scanner-layer.js";
+import { VersionCheckerTag } from "./version-checker-layer.js";
 
 // ─── Error types ────────────────────────────────────────────────────────────
 
@@ -134,6 +138,9 @@ export const RelayFactoryLive = (
 	| PollerFibersTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
+	| PortScannerTag
+	| VersionCheckerTag
+	| PushManagerTag
 > =>
 	Layer.effect(
 		RelayFactoryTag,
@@ -145,6 +152,9 @@ export const RelayFactoryLive = (
 			const pollerFibers = yield* PollerFibersTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
+			const portScanner = yield* PortScannerTag;
+			const versionChecker = yield* VersionCheckerTag;
+			const pushManager = yield* PushManagerTag;
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -238,6 +248,11 @@ export const RelayFactoryLive = (
 			const persistConfig = () =>
 				runCallback(provideInstanceDeps(persistEffectInstanceConfig));
 
+			const triggerScan = () => runCallback(portScanner.scanNow());
+
+			const getCachedUpdate = () =>
+				runCallback(versionChecker.getLatestKnown());
+
 			return {
 				create: (
 					project: StoredProject,
@@ -277,6 +292,9 @@ export const RelayFactoryLive = (
 
 						// Read config for any runtime values needed
 						const _config = yield* Ref.get(configRef);
+						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
+							Effect.map(Option.getOrUndefined),
+						);
 
 						// Create the relay using the imperative createProjectRelay while
 						// threading Effect-owned daemon read models and instance callbacks.
@@ -300,6 +318,11 @@ export const RelayFactoryLive = (
 									stopInstance,
 									updateInstance,
 									persistConfig,
+									triggerScan,
+									getCachedUpdate,
+									...(relayPushSender != null && {
+										pushManager: relayPushSender,
+									}),
 								});
 							},
 							catch: (cause) =>

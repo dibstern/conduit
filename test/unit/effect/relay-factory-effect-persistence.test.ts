@@ -3,13 +3,15 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
+import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -18,6 +20,7 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
@@ -25,6 +28,27 @@ const createProjectRelayMock = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 	createProjectRelay: createProjectRelayMock,
 }));
+
+const NoopAuxiliaryDaemonServices = Layer.mergeAll(
+	Layer.succeed(PortScannerTag, {
+		getKnownPorts: () => Effect.succeed(new Set<number>()),
+		scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
+	}),
+	Layer.succeed(VersionCheckerTag, {
+		getLatestKnown: () => Effect.succeed(null),
+		getCurrentVersion: () => Effect.succeed("unknown"),
+	}),
+	Layer.succeed(PushManagerTag, {
+		subscribe: () => Effect.void,
+		unsubscribe: () => Effect.void,
+		broadcast: () => Effect.void,
+		getPublicKey: Effect.succeed(undefined),
+		addSubscription: () => Effect.void,
+		removeSubscription: () => Effect.void,
+		sendToAll: () => Effect.void,
+		getLegacyManager: Effect.succeed(Option.none()),
+	}),
+);
 
 describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect(
@@ -45,6 +69,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						DaemonEventBusLive,
 						makeProjectRegistryLive(),
 						makeInstanceManagerStateLive(),
+						NoopAuxiliaryDaemonServices,
 					),
 				),
 			);
@@ -123,6 +148,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							],
 							{ defaultOpencodeUrl: "http://localhost:4096" },
 						),
+						NoopAuxiliaryDaemonServices,
 					),
 				),
 			);
@@ -212,6 +238,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						},
 					]),
 					makeInstanceManagerStateLive(),
+					NoopAuxiliaryDaemonServices,
 				),
 			),
 		);
@@ -290,6 +317,110 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					(instance: Readonly<OpenCodeInstance>) => instance.id === "remote",
 				),
 			).toBe(false);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(
+				Effect.sync(() => {
+					server.close();
+					rmSync(dir, { recursive: true, force: true });
+					createProjectRelayMock.mockReset();
+				}),
+			),
+		);
+	});
+
+	it.effect("threads auxiliary daemon services into relay config", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-aux-"));
+		const projectDir = join(dir, "project");
+		const server = createServer();
+		const scanResult = {
+			discovered: [4321],
+			lost: [4320],
+			active: [4321, 4322],
+		};
+		const pushManager = {
+			getPublicKey: () => "public-key",
+			addSubscription: vi.fn(),
+			removeSubscription: vi.fn(),
+			sendToAll: vi.fn(async () => undefined),
+		};
+		createProjectRelayMock.mockResolvedValue({
+			stop: vi.fn(async () => undefined),
+		});
+
+		const layer = RelayFactoryLive(join(dir, "config")).pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+					ConfigPersistenceNoopLive,
+					DaemonEventBusLive,
+					makeProjectRegistryLive([
+						{
+							slug: "effect-project",
+							title: "Effect Project",
+							directory: projectDir,
+						},
+					]),
+					makeInstanceManagerStateLive(),
+					Layer.succeed(PortScannerTag, {
+						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
+						scanNow: () => Effect.succeed(scanResult),
+					}),
+					Layer.succeed(VersionCheckerTag, {
+						getLatestKnown: () => Effect.succeed("9.9.9"),
+						getCurrentVersion: () => Effect.succeed("1.0.0"),
+					}),
+					Layer.succeed(PushManagerTag, {
+						subscribe: () => Effect.void,
+						unsubscribe: () => Effect.void,
+						broadcast: () => Effect.void,
+						getPublicKey: Effect.succeed("public-key"),
+						addSubscription: () => Effect.void,
+						removeSubscription: () => Effect.void,
+						sendToAll: () => Effect.void,
+						getLegacyManager: Effect.succeed(Option.some(pushManager)),
+					}),
+				),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const httpServerRef = yield* HttpServerRefTag;
+			yield* Ref.set(httpServerRef, server);
+
+			const factory = yield* RelayFactoryTag;
+			yield* factory
+				.create(
+					{
+						slug: "effect-project",
+						title: "Effect Project",
+						directory: projectDir,
+					},
+					"http://localhost:4096",
+				)
+				.pipe(Effect.scoped);
+
+			const config = createProjectRelayMock.mock.calls[0]?.[0];
+			expect(config?.triggerScan).toBeTypeOf("function");
+			expect(config?.getCachedUpdate).toBeTypeOf("function");
+			expect(config?.pushManager).toBe(pushManager);
+			const triggerScan = config?.triggerScan;
+			const getCachedUpdate = config?.getCachedUpdate;
+			if (triggerScan == null || getCachedUpdate == null) {
+				expect.fail("expected relay auxiliary callbacks");
+			}
+
+			const scan = yield* Effect.tryPromise({
+				try: () => triggerScan(),
+				catch: (cause) => cause,
+			});
+			expect(scan).toEqual(scanResult);
+
+			const cachedUpdate = yield* Effect.tryPromise({
+				try: () => Promise.resolve(getCachedUpdate()),
+				catch: (cause) => cause,
+			});
+			expect(cachedUpdate).toBe("9.9.9");
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
 			Effect.ensuring(

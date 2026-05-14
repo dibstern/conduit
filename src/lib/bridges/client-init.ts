@@ -164,7 +164,7 @@ export interface ClientInitDeps {
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 	/** Optional supplier of cached update version (for replaying to new clients) */
-	getCachedUpdate?: () => string | null;
+	getCachedUpdate?: () => string | null | PromiseLike<string | null>;
 	/** Optional Claude SDK capability discovery, provided by the relay Effect runtime. */
 	discoverClaudeCapabilities?: () => Promise<ProviderCapabilities>;
 	log: Logger;
@@ -174,7 +174,7 @@ export interface ClientInitEffectOptions {
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
-	readonly getCachedUpdate?: () => string | null;
+	readonly getCachedUpdate?: () => string | null | PromiseLike<string | null>;
 }
 
 const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
@@ -698,7 +698,16 @@ export const handleClientConnectedEffect = (
 		}
 
 		if (options.getCachedUpdate) {
-			const version = options.getCachedUpdate();
+			const version = yield* Effect.tryPromise({
+				try: () => Promise.resolve(options.getCachedUpdate?.() ?? null),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.catchAll((err) =>
+					sendInitErrorEffect(clientId, err, "Failed to replay update").pipe(
+						Effect.as(null),
+					),
+				),
+			);
 			if (version) {
 				wsHandler.sendTo(clientId, { type: "update_available", version });
 			}
@@ -1120,9 +1129,13 @@ export async function handleClientConnected(
 
 	// ── Cached update notification ───────────────────────────────────────
 	if (deps.getCachedUpdate) {
-		const version = deps.getCachedUpdate();
-		if (version) {
-			wsHandler.sendTo(clientId, { type: "update_available", version });
+		try {
+			const version = await deps.getCachedUpdate();
+			if (version) {
+				wsHandler.sendTo(clientId, { type: "update_available", version });
+			}
+		} catch (err) {
+			sendInitError(err, "Failed to replay update");
 		}
 	}
 }

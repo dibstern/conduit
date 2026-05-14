@@ -672,6 +672,23 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		PushNotificationManagerLive(configDir),
 	).pipe(Layer.provideMerge(foundation));
 
+	const versionCheckLayer = options.versionCheck
+		? makeVersionCheckerLive(options.versionCheck)
+		: Layer.succeed(VersionCheckerTag, {
+				getLatestKnown: () => Effect.succeed(null),
+				getCurrentVersion: () => Effect.succeed("unknown"),
+			});
+	const portScannerLayer = options.portScanner
+		? makePortScannerLive(options.portScanner)
+		: Layer.succeed(PortScannerTag, {
+				getKnownPorts: () => Effect.succeed(new Set<number>()),
+				scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
+			});
+	const auxiliaryServices = Layer.mergeAll(
+		versionCheckLayer,
+		portScannerLayer,
+	).pipe(Layer.provideMerge(services));
+
 	// ── Tier 2: Registries + state containers ──────────────────────────────
 	// State containers and factories. ProjectRegistryLive and
 	// InstanceManagerStateLive have no construction deps but are logically
@@ -706,7 +723,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		instanceManagerLayer,
 	)
 		.pipe(Layer.provideMerge(stateLayer))
-		.pipe(Layer.provideMerge(services));
+		.pipe(Layer.provideMerge(auxiliaryServices));
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
 		Layer.provideMerge(registryState),
@@ -759,29 +776,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// When a config is not provided, a no-op stub Layer provides the Tag
 	// so the service is always resolvable. This avoids type erasure and
 	// ensures wiring tests can verify all Tags without any casts.
-	const versionCheckLayer = options.versionCheck
-		? makeVersionCheckerLive(options.versionCheck)
-		: Layer.succeed(VersionCheckerTag, {
-				getLatestKnown: () => Effect.succeed(null),
-				getCurrentVersion: () => Effect.succeed("unknown"),
-			});
 	const storageMonLayer = options.storageMon
 		? makeStorageMonitorLive(options.storageMon)
 		: Layer.succeed(StorageMonitorTag, {
 				getUsage: () => Effect.succeed(0),
 				getLastCheck: () => Effect.succeed(0),
 			});
-	const portScannerLayer = options.portScanner
-		? makePortScannerLive(options.portScanner)
-		: Layer.succeed(PortScannerTag, {
-				getKnownPorts: () => Effect.succeed(new Set<number>()),
-				scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
-			});
-	const withBackground = Layer.mergeAll(
-		versionCheckLayer,
-		storageMonLayer,
-		portScannerLayer,
-	).pipe(Layer.provideMerge(withDaemonWiring));
+	const withBackground = storageMonLayer.pipe(
+		Layer.provideMerge(withDaemonWiring),
+	);
 
 	const withWsRelayRouter = WebSocketRelayRouterLive.pipe(
 		Layer.provideMerge(withBackground),
