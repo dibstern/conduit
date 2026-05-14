@@ -292,8 +292,8 @@ export interface ProjectRelay {
 	effectRuntime: RelayRuntime;
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
-	/** Resolve the top-level default session through the Effect session service. */
-	getDefaultSessionId(title?: string): Promise<string>;
+	/** Session selected during relay startup. */
+	readonly initialSessionId: string;
 	/** Session count from the most recent unfiltered service read. */
 	getLastKnownSessionCount(): number;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -340,13 +340,13 @@ export interface RelayStack {
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
+	/** Session selected during relay startup. */
+	readonly initialSessionId: string;
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;
 	/** The base URL of the relay server */
 	getBaseUrl(): string;
-	/** Resolve the top-level default session through the Effect session service. */
-	getDefaultSessionId(title?: string): Promise<string>;
 	/** Stop all components */
 	stop(): Promise<void>;
 }
@@ -391,17 +391,6 @@ export async function createProjectRelay(
 		) => Effect.Effect<A, unknown>,
 	): A =>
 		relayManagedRuntime.runSync(
-			Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				return yield* run(service);
-			}),
-		);
-	const runSessionServicePromise = <A>(
-		run: (
-			service: import("../domain/relay/Services/session-manager-service.js").SessionManagerService,
-		) => Effect.Effect<A, unknown>,
-	): Promise<A> =>
-		relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				return yield* run(service);
@@ -775,6 +764,7 @@ export async function createProjectRelay(
 		translator,
 		orchestration,
 		effectRuntime,
+		initialSessionId: sessionId,
 
 		isAnySessionProcessing() {
 			const statuses = statusPoller.getCurrentStatuses();
@@ -786,12 +776,6 @@ export async function createProjectRelay(
 		getLastKnownSessionCount() {
 			return runSessionServiceSync((service) =>
 				service.getLastKnownSessionCount(),
-			);
-		},
-
-		getDefaultSessionId(title?: string) {
-			return runSessionServicePromise((service) =>
-				service.getDefaultSessionId(title),
 			);
 		},
 
@@ -1056,6 +1040,7 @@ export async function createRelayStack(
 		sseStream: relay.sseStream,
 		client: relay.client,
 		translator: relay.translator,
+		initialSessionId: relay.initialSessionId,
 
 		getPort() {
 			const addr = httpServer.address();
@@ -1068,10 +1053,6 @@ export async function createRelayStack(
 			const port = typeof addr === "object" && addr ? addr.port : config.port;
 			const protocol = config.tls ? "https" : "http";
 			return `${protocol}://127.0.0.1:${port}`;
-		},
-
-		getDefaultSessionId(title?: string) {
-			return relay.getDefaultSessionId(title);
 		},
 
 		async stop() {

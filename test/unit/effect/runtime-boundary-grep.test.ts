@@ -1007,6 +1007,35 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not expose default-session runtime bridges from relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bgetDefaultSessionId\(title\?: string\)/,
+				reason:
+					"relay startup should expose the initial session id as data instead of re-entering the session service through a Promise bridge",
+			},
+			{
+				pattern: /\brunSessionServicePromise\b/,
+				reason:
+					"relay-stack should not keep Promise-shaped session service accessors",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not fork WebSocket callback programs directly from relay-stack", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

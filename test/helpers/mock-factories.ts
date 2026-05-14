@@ -459,7 +459,7 @@ export function createMockProjectRelay(
 			dispose: vi.fn().mockResolvedValue(undefined),
 		},
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
-		getDefaultSessionId: vi.fn().mockResolvedValue("s1"),
+		initialSessionId: "s1",
 		getLastKnownSessionCount: vi.fn().mockReturnValue(0),
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,
