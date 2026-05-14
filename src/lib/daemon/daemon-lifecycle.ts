@@ -31,6 +31,7 @@ import {
 	IpcTaggedRequestSchema,
 } from "../contracts/ipc-requests.js";
 import {
+	handleRestartWithConfig,
 	handleSetKeepAwake,
 	handleSetKeepAwakeCommand,
 	handleSetPin,
@@ -212,15 +213,24 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 				),
 			),
 		RestartWithConfig: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.restartWithConfig(request.config),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
+			handleRestartWithConfig({
+				cmd: "restart_with_config",
+				...(request.config !== undefined ? { config: request.config } : {}),
 			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
+				Effect.flatMap((response) => {
+					if (!response.ok) return Effect.fail(ipcFailure(response));
+					return Effect.tryPromise({
+						try: () => handlers.restartWithConfig(),
+						catch: (error) =>
+							new IpcError({ message: formatErrorDetail(error) }),
+					}).pipe(
+						Effect.flatMap((shutdownResponse) =>
+							shutdownResponse.ok
+								? Effect.succeed({ ok: true as const })
+								: Effect.fail(ipcFailure(shutdownResponse)),
+						),
+					);
+				}),
 			),
 		InstanceList: () =>
 			Effect.tryPromise({

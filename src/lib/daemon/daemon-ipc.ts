@@ -38,8 +38,6 @@ export interface DaemonIPCContext {
 	persistConfig(): void;
 	/** Schedule a graceful daemon shutdown. */
 	scheduleShutdown(): void;
-	/** Apply restart-time daemon config overrides before scheduling shutdown. */
-	applyConfig?(config: Record<string, unknown>): void;
 	/** Return all registered OpenCode instances. */
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Look up a single instance by ID. */
@@ -226,8 +224,11 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 			config?: Record<string, unknown>,
 		): Promise<IPCResponse> => {
 			if (config !== undefined) {
-				ctx.applyConfig?.(config);
-				ctx.persistConfig();
+				return {
+					ok: false,
+					error:
+						"restart_with_config is handled by Effect IPC dispatch, not buildIPCHandlers",
+				};
 			}
 			// Schedule shutdown and return ok
 			ctx.scheduleShutdown();

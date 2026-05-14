@@ -100,7 +100,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			setProjectTitle: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
-			applyConfig: () => {},
 			getInstances: () => [],
 			getInstance: () => undefined,
 			addInstance: () => ({}) as OpenCodeInstance,

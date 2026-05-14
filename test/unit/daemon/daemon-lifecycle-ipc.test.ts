@@ -561,8 +561,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 	it("passes RestartWithConfig overrides through daemon RPC dispatch", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-		const applyConfig = vi.fn();
-		const persistConfig = vi.fn();
+		const native = makeNativeIpcDispatcher();
 		const scheduleShutdown = vi.fn();
 
 		const ipcContext: TestDaemonIPCContext = {
@@ -574,9 +573,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			removeProject: async () => {},
 			getProjects: () => [],
 			setProjectTitle: () => {},
-			persistConfig,
+			persistConfig: () => {},
 			scheduleShutdown,
-			applyConfig,
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -595,18 +593,28 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		};
 
 		try {
-			await startTestIPCServer(ctx, ipcContext, makeStatus);
+			await startIPCServer(
+				ctx,
+				{
+					...ipcContext,
+					getStatus: ipcContext.getStatus ?? makeStatus,
+				},
+				native.dispatch,
+			);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "RestartWithConfig",
 				config: { tls: true, port: 2634 },
 			});
 
 			expect(response).toEqual({ ok: true });
-			expect(applyConfig).toHaveBeenCalledWith({ tls: true, port: 2634 });
-			expect(persistConfig).toHaveBeenCalled();
+			const config = await native.readConfig();
+			expect(config.tlsEnabled).toBe(true);
+			expect(config.port).toBe(2634);
+			expect(config.shuttingDown).toBe(true);
 			expect(scheduleShutdown).toHaveBeenCalled();
 		} finally {
 			await closeIPCServer(ctx);
+			await native.dispose();
 			await rm(tmp, { recursive: true, force: true });
 		}
 	});

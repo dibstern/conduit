@@ -63,6 +63,33 @@ const applyRestartConfig = (
 	};
 };
 
+const applyRestartRuntimeConfig = (
+	config: import("./daemon-config-ref.js").DaemonRuntimeConfig,
+	update: Record<string, unknown> | undefined,
+) => {
+	if (update === undefined) return config;
+	return {
+		...config,
+		...(typeof update["port"] === "number" ? { port: update["port"] } : {}),
+		...(typeof update["tls"] === "boolean"
+			? { tlsEnabled: update["tls"] }
+			: {}),
+		...(typeof update["pinHash"] === "string" || update["pinHash"] === null
+			? { pinHash: update["pinHash"] }
+			: {}),
+		...(typeof update["keepAwake"] === "boolean"
+			? { keepAwake: update["keepAwake"] }
+			: {}),
+		...(typeof update["keepAwakeCommand"] === "string"
+			? { keepAwakeCommand: update["keepAwakeCommand"] }
+			: {}),
+		...(Array.isArray(update["keepAwakeArgs"]) &&
+		update["keepAwakeArgs"].every((arg) => typeof arg === "string")
+			? { keepAwakeArgs: [...update["keepAwakeArgs"]] }
+			: {}),
+	};
+};
+
 // ─── Project handlers ────────────────────────────────────────────────────────
 
 export const handleAddProject = (
@@ -459,13 +486,18 @@ export const handleRestartWithConfig = (
 ): Effect.Effect<
 	IPCResponse,
 	never,
-	DaemonStateTag | ShutdownSignalTag | PersistDeps
+	DaemonStateTag | DaemonConfigRefTag | ShutdownSignalTag | PersistDeps
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
+		const configRef = yield* DaemonConfigRefTag;
 
 		yield* Ref.update(ref, (s) => ({
 			...applyRestartConfig(s, cmd.config),
+			shuttingDown: true,
+		}));
+		yield* Ref.update(configRef, (c) => ({
+			...applyRestartRuntimeConfig(c, cmd.config),
 			shuttingDown: true,
 		}));
 

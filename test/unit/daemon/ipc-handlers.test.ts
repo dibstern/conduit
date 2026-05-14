@@ -471,12 +471,30 @@ describe("IPC handlers", () => {
 			Effect.gen(function* () {
 				const result = yield* handleRestartWithConfig({
 					cmd: "restart_with_config",
+					config: {
+						port: 2634,
+						tls: true,
+						pinHash: "next-pin-hash",
+						keepAwake: true,
+					},
 				});
 
 				expect(result.ok).toBe(true);
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.shuttingDown).toBe(true);
+				expect(state.port).toBe(2634);
+				expect(state.tls).toBe(true);
+				expect(state.pinHash).toBe("next-pin-hash");
+				expect(state.keepAwake).toBe(true);
+
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.shuttingDown).toBe(true);
+				expect(config.port).toBe(2634);
+				expect(config.tlsEnabled).toBe(true);
+				expect(config.pinHash).toBe("next-pin-hash");
+				expect(config.keepAwake).toBe(true);
 
 				// AP-25: Verify ShutdownSignal Deferred was completed
 				const deferred = yield* ShutdownSignalTag;

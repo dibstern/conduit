@@ -610,37 +610,6 @@ export async function startDaemonProcess(
 		while (_pendingSave) await _pendingSave;
 	}
 
-	function applyRestartConfig(config: Record<string, unknown>): void {
-		updateRuntimeConfigSync((current) => {
-			let next = current;
-			if (typeof config["port"] === "number") {
-				next = { ...next, port: config["port"] };
-			}
-			if (typeof config["tls"] === "boolean") {
-				next = { ...next, tlsEnabled: config["tls"] };
-			}
-			if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
-				next = { ...next, pinHash: config["pinHash"] };
-			}
-			if (typeof config["keepAwake"] === "boolean") {
-				next = { ...next, keepAwake: config["keepAwake"] };
-			}
-			if (typeof config["keepAwakeCommand"] === "string") {
-				next = { ...next, keepAwakeCommand: config["keepAwakeCommand"] };
-			}
-			if (
-				Array.isArray(config["keepAwakeArgs"]) &&
-				config["keepAwakeArgs"].every((arg) => typeof arg === "string")
-			) {
-				next = { ...next, keepAwakeArgs: [...config["keepAwakeArgs"]] };
-			}
-			return next;
-		});
-		if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
-			pinHash = config["pinHash"];
-		}
-	}
-
 	// ── Registry event listeners ──────────────────────────────────────────
 	registry.on("project_added", () => persistConfig());
 	registry.on("project_ready", () => persistConfig());
@@ -1226,9 +1195,6 @@ export async function startDaemonProcess(
 					);
 				});
 			}, DAEMON_SHUTDOWN_DELAY_MS);
-		},
-		applyConfig: (config: Record<string, unknown>) => {
-			applyRestartConfig(config);
 		},
 		getInstances: () => instanceManager.getInstances(),
 		getInstance: (id: string) => instanceManager.getInstance(id),

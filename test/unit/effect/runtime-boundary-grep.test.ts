@@ -73,14 +73,14 @@ describe("Effect runtime boundary grep", () => {
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const scheduleShutdownIndex = source.indexOf("scheduleShutdown: () => {");
 		expect(scheduleShutdownIndex).toBeGreaterThanOrEqual(0);
-		const applyConfigIndex = source.indexOf(
-			"applyConfig: (config: Record<string, unknown>) => {",
+		const getInstancesIndex = source.indexOf(
+			"getInstances: () => instanceManager.getInstances()",
 			scheduleShutdownIndex,
 		);
-		expect(applyConfigIndex).toBeGreaterThan(scheduleShutdownIndex);
+		expect(getInstancesIndex).toBeGreaterThan(scheduleShutdownIndex);
 		const scheduleShutdownBlock = source.slice(
 			scheduleShutdownIndex,
-			applyConfigIndex,
+			getInstancesIndex,
 		);
 		const retiredBridgePatterns = [
 			{
@@ -111,6 +111,35 @@ describe("Effect runtime boundary grep", () => {
 					: [],
 			),
 		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not route restart config IPC through daemon-main callbacks", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bapplyConfig:\s*\(/,
+				reason:
+					"restart config mutation should run through native Effect IPC handlers",
+			},
+			{
+				path: "src/lib/daemon/daemon-ipc.ts",
+				pattern: /\bapplyConfig\??\s*\(/,
+				reason: "DaemonIPCContext should not carry restart config callbacks",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
 
 		expect(hits).toEqual([]);
 	});

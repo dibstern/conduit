@@ -313,6 +313,12 @@ describe("IPC RPC request group", () => {
 				expect(state.shuttingDown).toBe(true);
 				expect(state.tls).toBe(true);
 				expect(state.port).toBe(2634);
+
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.shuttingDown).toBe(true);
+				expect(config.tlsEnabled).toBe(true);
+				expect(config.port).toBe(2634);
 			}),
 		),
 	);

@@ -366,6 +366,7 @@ export const makeIpcServerLive = (
 				| DaemonConfigRefTag
 				| DaemonStateTag
 				| KeepAwakeTag
+				| ShutdownSignalTag
 			>();
 			yield* startLifecycleServer("startIPCServer", () =>
 				startIPCServer(ctx, ipcContext, (request, rpcLayer) =>
