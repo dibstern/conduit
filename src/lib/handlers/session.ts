@@ -392,16 +392,19 @@ export const handleSwitchSession = (
 	payload: PayloadMap["switch_session"],
 ) => handleViewSession(clientId, payload);
 
-export const handleDeleteSession = (
-	clientId: string,
-	payload: PayloadMap["delete_session"],
-) =>
+export const deleteSessionForClient = ({
+	clientId,
+	sessionId,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+}) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const { sessionId: id } = payload;
+		const id = sessionId;
 		if (!id) return;
 
 		// Find ALL clients viewing this session before deletion
@@ -435,6 +438,15 @@ export const handleDeleteSession = (
 			wsHandler.broadcast(msg),
 		);
 		log.info(`client=${clientId} Deleted: ${id}`);
+	});
+
+export const handleDeleteSession = (
+	clientId: string,
+	payload: PayloadMap["delete_session"],
+) =>
+	deleteSessionForClient({
+		clientId,
+		sessionId: payload.sessionId,
 	});
 
 export const renameSessionForClient = ({

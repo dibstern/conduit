@@ -3,6 +3,7 @@ export {
 	type CommandInfo,
 	CreateSession,
 	type CreateSessionResponse,
+	DeleteSession,
 	GetAgents,
 	type GetAgentsResponse,
 	GetCommands,

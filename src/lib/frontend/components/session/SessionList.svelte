@@ -17,7 +17,8 @@
 	} from "../../stores/session.svelte.js";
 	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
-	import { listSessionsRpc, renameSessionRpc } from "../../transport/ws-rpc-client.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { deleteSessionRpc, listSessionsRpc, renameSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { closeMobileSidebar, confirm, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -186,7 +187,13 @@
 			"Delete",
 		);
 		if (confirmed) {
-			wsSend({ type: "delete_session", sessionId: id });
+			const projectSlug = getCurrentSlug();
+			if (!projectSlug) return;
+			void deleteSessionRpc({
+				projectSlug,
+				sessionId: id,
+				originId: getBrowserClientId(),
+			});
 		}
 	}
 
@@ -241,8 +248,14 @@
 			"Delete",
 		);
 		if (confirmed) {
+			const projectSlug = getCurrentSlug();
+			if (!projectSlug) return;
 			for (const id of selectedForDeletion) {
-				wsSend({ type: "delete_session", sessionId: id });
+				void deleteSessionRpc({
+					projectSlug,
+					sessionId: id,
+					originId: getBrowserClientId(),
+				});
 			}
 			resetCleanupMode();
 		}

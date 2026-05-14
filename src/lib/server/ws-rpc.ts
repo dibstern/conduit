@@ -20,6 +20,7 @@ import {
 import { reloadProviderSessionForClient } from "../handlers/reload.js";
 import {
 	createSessionForClient,
+	deleteSessionForClient,
 	loadMoreHistoryForSession,
 	renameSessionForClient,
 	viewSessionForClient,
@@ -30,6 +31,7 @@ export {
 	CancelSession,
 	CreateSession,
 	type CreateSessionResponse,
+	DeleteSession,
 	GetAgents,
 	type GetAgentsResponse,
 	GetCommands,
@@ -444,6 +446,20 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `ViewSession failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	DeleteSession: (request) =>
+		deleteSessionForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `DeleteSession failed: ${String(error)}`,
 					}),
 				),
 			),

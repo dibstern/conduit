@@ -112,6 +112,53 @@ describe("WsRpcServerLayer ListSessions", () => {
 		);
 	});
 
+	it.effect("deletes a session through the shared session handler", () => {
+		const deleteSession = vi.fn(() => Effect.void);
+		const sendDualSessionLists = vi.fn((send) =>
+			Effect.sync(() => {
+				send({
+					type: "session_list" as const,
+					sessions: [],
+					roots: true,
+				});
+			}),
+		);
+		const wsHandler = makeMockWebSocketHandler({
+			getClientsForSession: vi.fn(() => []),
+		});
+		const sessionManagerService = makeMockSessionManagerService({
+			deleteSession,
+			sendDualSessionLists,
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+
+			const result = yield* client.DeleteSession({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				originId: "browser-tab-a",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(deleteSession).toHaveBeenCalledWith("session-1");
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "session_deleted",
+				sessionId: "session-1",
+			});
+			expect(sendDualSessionLists).toHaveBeenCalled();
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+					),
+				),
+			),
+		);
+	});
+
 	it.effect("returns sessions for the requested root/all-session view", () => {
 		const listSessions = vi.fn((options?: { roots?: boolean }) =>
 			Effect.succeed(

@@ -524,6 +524,19 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 	},
 ) {}
 
+export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
+	"DeleteSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 	"LoadMoreHistory",
 	{
@@ -612,6 +625,7 @@ export const WsRpcRequest = Schema.Union(
 	ListSessions,
 	CreateSession,
 	ViewSession,
+	DeleteSession,
 	LoadMoreHistory,
 	RewindSession,
 	SendMessage,
@@ -642,6 +656,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
+	Rpc.fromTaggedRequest(DeleteSession),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
 	Rpc.fromTaggedRequest(SendMessage),

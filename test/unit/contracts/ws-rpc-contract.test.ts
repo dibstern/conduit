@@ -5,6 +5,7 @@ import { expect } from "vitest";
 import {
 	CancelSession,
 	CreateSession,
+	DeleteSession,
 	GetAgents,
 	GetCommands,
 	GetFileContent,
@@ -102,6 +103,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: "session-new",
 					}),
 				ViewSession: () => Effect.succeed({ ok: true as const }),
+				DeleteSession: () => Effect.succeed({ ok: true as const }),
 				ListDirectories: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -208,6 +210,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetProjects")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListDirectories")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
@@ -424,6 +427,14 @@ describe("browser WebSocket RPC contract", () => {
 					}),
 				).toEqual({ ok: true });
 
+				expect(
+					yield* client.DeleteSession({
+						projectSlug: "demo",
+						sessionId: "session-1",
+						originId: "browser-tab-a",
+					}),
+				).toEqual({ ok: true });
+
 				const history = yield* client.LoadMoreHistory({
 					projectSlug: "demo",
 					sessionId: "session-1",
@@ -487,6 +498,12 @@ describe("browser WebSocket RPC contract", () => {
 				originId: "browser-tab-a",
 			})._tag,
 		).toBe("ViewSession");
+		expect(
+			new DeleteSession({
+				projectSlug: "demo",
+				sessionId: "session-1",
+			})._tag,
+		).toBe("DeleteSession");
 		expect(
 			new ListDirectories({ projectSlug: "demo", path: "/tmp/" })._tag,
 		).toBe("ListDirectories");

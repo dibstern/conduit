@@ -61,6 +61,12 @@ export interface ViewSessionRpcInput {
 	readonly originId: string;
 }
 
+export interface DeleteSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
 export interface GetTodoRpcInput {
 	readonly projectSlug: string;
 }
@@ -272,6 +278,23 @@ const callViewSession = (input: ViewSessionRpcInput) =>
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
 			yield* client.ViewSession(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callDeleteSession = (input: DeleteSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.DeleteSession({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				...(input.originId != null ? { originId: input.originId } : {}),
+			});
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -607,6 +630,13 @@ export async function viewSessionRpc(
 ): Promise<void> {
 	const runtime = await getRuntime();
 	await runtime.runPromise(callViewSession(input));
+}
+
+export async function deleteSessionRpc(
+	input: DeleteSessionRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callDeleteSession(input));
 }
 
 export async function getTodoRpc(
