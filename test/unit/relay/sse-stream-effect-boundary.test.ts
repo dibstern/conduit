@@ -23,6 +23,18 @@ describe("SSE stream Effect boundary", () => {
 		expect(source).not.toContain("sseStream.connect()");
 		expect(source).not.toContain("sseStream.drain()");
 		expect(source).toContain("sseStream.connectEffect()");
-		expect(source).toContain("sseStream.drainEffect()");
+		expect(source).toContain("SSEStreamLive");
+	});
+
+	it("relay-stack does not construct or drain SSE as an imperative runtime bridge", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/relay/relay-stack.ts"),
+			"utf8",
+		);
+
+		expect(source).not.toMatch(/\bnew SSEStream\b/);
+		expect(source).not.toMatch(
+			/relayManagedRuntime\.runPromise\([\s\S]*sseStream\.drainEffect/,
+		);
 	});
 });

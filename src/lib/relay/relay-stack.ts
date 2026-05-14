@@ -64,6 +64,10 @@ import {
 	PollerPubSubTag,
 	PollerStateTag,
 } from "../domain/relay/Services/session-status-poller.js";
+import {
+	SSEStreamLive,
+	SSEStreamTag,
+} from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceLive } from "../domain/relay/Services/terminal-service.js";
 import {
 	ToolContentServiceLive,
@@ -120,7 +124,7 @@ import {
 import { wirePollersEffect } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
-import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
+import type { SSEStreamPort } from "./sse-stream.js";
 import { wireSSEConsumerEffect } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 import { wireRelayWebSocketCallbacksEffect } from "./websocket-callback-wiring.js";
@@ -437,6 +441,9 @@ export async function createProjectRelay(
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const sseStreamLayer = SSEStreamLive.pipe(
+		Layer.provide(Layer.mergeAll(openCodeApiLayer, loggerLayer)),
+	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
@@ -485,6 +492,7 @@ export async function createProjectRelay(
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
+		sseStreamLayer,
 		projectManagementServiceLayer,
 		DirectoryListingServiceLive,
 		scanServiceLayer,
@@ -574,7 +582,7 @@ export async function createProjectRelay(
 	let startup: {
 		api: OpenCodeAPI;
 		wsHandler: WebSocketHandlerShape;
-		sseStream: SSEStream;
+		sseStream: SSEStreamPort;
 		sessionId: string;
 		orchestration: OrchestrationLayer;
 		statusPoller: import("../domain/relay/Services/services.js").StatusPollerShape;
@@ -586,6 +594,7 @@ export async function createProjectRelay(
 				const api = yield* OpenCodeAPITag;
 				const wsHandler = yield* WebSocketHandlerTag;
 				const statusSnapshot = yield* RelayStatusSnapshotTag;
+				const sseStream = yield* SSEStreamTag;
 				yield* Effect.tryPromise(() => api.app.path());
 				yield* Effect.sync(() =>
 					log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
@@ -646,13 +655,6 @@ export async function createProjectRelay(
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(new Error("Relay creation aborted"));
 				}
-				const sseStream = yield* Effect.sync(
-					() =>
-						new SSEStream({
-							api,
-							log: sseLog,
-						}),
-				);
 				yield* Effect.sync(() => {
 					orchestration.wireSSEToAdapter((event, handler) => {
 						sseStream.on(event, handler);
@@ -787,23 +789,13 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
-			// 1. Quiesce monitoring before draining sources so late status changes
-			// cannot restart message pollers during shutdown.
+			// Quiesce monitoring before runtime disposal so late status changes
+			// cannot restart message pollers during scoped shutdown.
 			stopMonitoring();
-			// 2. Drain event sources (stop + await pending work)
-			await relayManagedRuntime.runPromise(
-				Effect.gen(function* () {
-					yield* sseStream.drainEffect();
-					const gate = yield* RelayCommandGateTag;
-					yield* gate.stop();
-				}),
-			);
-			// 3. Dispose Effect ManagedRuntimes. Scoped finalizers own provider
-			// adapter shutdown, status poller drain, and other Effect-managed resources.
+			// Scoped finalizers own SSE drain, command-gate stop, provider adapter
+			// shutdown, status-poller drain, and other Effect-managed resources.
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();
-			// 4. Clean up remaining resources
-			// Permission, processing timeout, message poller, websocket, and PTY resources are managed by scoped Effect layers.
 			await rpcWsHandler.drain();
 		},
 	};
