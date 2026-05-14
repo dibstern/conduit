@@ -717,4 +717,39 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not keep a bespoke pending-permission bridge for SSE wiring", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern: /\bpendingPermissions:\s*\{/,
+				reason: "SSE wiring should use the pending interaction service surface",
+			},
+			{
+				path: "src/lib/relay/sse-wiring.ts",
+				pattern: /\bPendingPermissionsLike\b/,
+				reason:
+					"SSE wiring should name pending interactions after the owned service",
+			},
+			{
+				path: "src/lib/relay/sse-wiring.ts",
+				pattern: /\bdeps\.pendingPermissions\b/,
+				reason:
+					"SSE wiring should use deps.pendingInteractions for pending state",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		expect(hits).toEqual([]);
+	});
 });

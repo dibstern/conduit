@@ -770,22 +770,22 @@ export async function createProjectRelay(
 		{
 			translator,
 			sessionService: sessionServiceBridge,
-			pendingPermissions: {
-				record: (input) =>
+			pendingInteractions: {
+				recordPermissionRequest: (input) =>
 					relayManagedRuntime.runSync(
 						Effect.gen(function* () {
 							const service = yield* PendingInteractionServiceTag;
 							return yield* service.recordPermissionRequest(input);
 						}),
 					),
-				markReplied: (requestId) =>
+				markPermissionReplied: (requestId) =>
 					relayManagedRuntime.runSync(
 						Effect.gen(function* () {
 							const service = yield* PendingInteractionServiceTag;
 							return yield* service.markPermissionReplied(requestId);
 						}),
 					),
-				recover: (permissions) =>
+				recoverPendingPermissions: (permissions) =>
 					relayManagedRuntime.runSync(
 						Effect.gen(function* () {
 							const service = yield* PendingInteractionServiceTag;

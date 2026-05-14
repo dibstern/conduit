@@ -74,10 +74,12 @@ interface SessionServiceLike {
 	setPendingQuestionCounts(counts: Map<string, number>): void;
 }
 
-interface PendingPermissionsLike {
-	record(input: PendingPermissionRequestInput): PendingPermission;
-	markReplied(requestId: string): boolean;
-	recover(
+interface PendingInteractionServiceLike {
+	recordPermissionRequest(
+		input: PendingPermissionRequestInput,
+	): PendingPermission;
+	markPermissionReplied(requestId: string): boolean;
+	recoverPendingPermissions(
 		permissions: readonly PendingPermissionRecoveryInput[],
 	): PendingPermission[];
 }
@@ -85,7 +87,7 @@ interface PendingPermissionsLike {
 export interface SSEWiringDeps {
 	translator: Translator;
 	sessionService: SessionServiceLike;
-	pendingPermissions: PendingPermissionsLike;
+	pendingInteractions: PendingInteractionServiceLike;
 	processingTimeouts: ProcessingTimeoutsPort;
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
@@ -234,7 +236,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		};
 		const pending =
 			props.id && props.permission
-				? deps.pendingPermissions.record({
+				? deps.pendingInteractions.recordPermissionRequest({
 						requestId: props.id as PermissionId,
 						sessionId: props.sessionID || eventSessionId || "",
 						toolName: props.permission,
@@ -312,7 +314,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		}
 	}
 	if (isPermissionRepliedEvent(event)) {
-		deps.pendingPermissions.markReplied(event.properties.id);
+		deps.pendingInteractions.markPermissionReplied(event.properties.id);
 	}
 
 	// ── Session updated (title change, etc.) → refresh session list ──────
@@ -523,7 +525,7 @@ export function wireSSEConsumer(
 					log.info(
 						`Rehydrating ${pendingPermissions.length} pending permission(s) from API`,
 					);
-					const recovered = deps.pendingPermissions.recover(
+					const recovered = deps.pendingInteractions.recoverPendingPermissions(
 						pendingPermissions.map((p) => {
 							const sessionId =
 								typeof p["sessionID"] === "string" ? p["sessionID"] : "";

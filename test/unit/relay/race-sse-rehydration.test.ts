@@ -109,7 +109,9 @@ describe("race: SSE rehydration generation counter", () => {
 		delete (deps as Partial<SSEWiringDeps>).listPendingQuestions;
 
 		// Mock recovery to return recoverable permissions
-		vi.mocked(deps.pendingPermissions.recover).mockImplementation((input) =>
+		vi.mocked(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).mockImplementation((input) =>
 			input.map((p) => ({
 				requestId:
 					p.id as unknown as import("../../../src/lib/shared-types.js").PermissionId,

@@ -315,8 +315,8 @@ export function createMockSSEWiringDeps(
 		translator: createMockTranslator(),
 		sessionService:
 			createMockSessionMgr() as unknown as SSEWiringDeps["sessionService"],
-		pendingPermissions: {
-			record: vi.fn((input) => ({
+		pendingInteractions: {
+			recordPermissionRequest: vi.fn((input) => ({
 				requestId: input.requestId,
 				sessionId: input.sessionId,
 				toolName: input.toolName,
@@ -324,11 +324,11 @@ export function createMockSSEWiringDeps(
 				always: [...(input.always ?? [])],
 				timestamp: Date.now(),
 			})),
-			markReplied: vi.fn(() => true),
-			recover: vi.fn(
+			markPermissionReplied: vi.fn(() => true),
+			recoverPendingPermissions: vi.fn(
 				(
 					permissions: Parameters<
-						SSEWiringDeps["pendingPermissions"]["recover"]
+						SSEWiringDeps["pendingInteractions"]["recoverPendingPermissions"]
 					>[0],
 				) =>
 					permissions.map((permission) => ({

@@ -405,7 +405,9 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.pendingPermissions.record).toHaveBeenCalledWith({
+		expect(
+			deps.pendingInteractions.recordPermissionRequest,
+		).toHaveBeenCalledWith({
 			requestId: "perm-1",
 			sessionId: "session-1",
 			toolName: "Bash",
@@ -480,7 +482,9 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.pendingPermissions.markReplied).toHaveBeenCalledWith("perm-1");
+		expect(deps.pendingInteractions.markPermissionReplied).toHaveBeenCalledWith(
+			"perm-1",
+		);
 	});
 
 	it("does not record non-cacheable events to cache", () => {
@@ -962,7 +966,9 @@ describe("wireSSEConsumer", () => {
 		});
 
 		// Should recover into pending permission state
-		expect(deps.pendingPermissions.recover).toHaveBeenCalledWith([
+		expect(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).toHaveBeenCalledWith([
 			expect.objectContaining({
 				id: "perm-recover-1",
 				permission: "Bash",
@@ -1000,7 +1006,9 @@ describe("wireSSEConsumer", () => {
 		});
 
 		// Should not recover or broadcast anything
-		expect(deps.pendingPermissions.recover).not.toHaveBeenCalled();
+		expect(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).not.toHaveBeenCalled();
 	});
 
 	it("sets pending question counts from API on SSE connect", async () => {
