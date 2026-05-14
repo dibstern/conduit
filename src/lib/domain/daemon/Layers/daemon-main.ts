@@ -1301,8 +1301,6 @@ export async function startDaemonProcess(
 			staticDir,
 			getProjects: getRouterProjects,
 			removeProject,
-			getPort: () => readRuntimeConfigSnapshot().port,
-			getIsTls: () => readRuntimeConfigSnapshot().tlsEnabled,
 			getHealthResponse: () => getStatus(),
 			loadThemes: loadThemeFiles,
 			pushManager,

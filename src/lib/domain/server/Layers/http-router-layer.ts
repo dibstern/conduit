@@ -5,7 +5,7 @@ import {
 	NodeHttpServer,
 	NodePath,
 } from "@effect/platform-node";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Ref } from "effect";
 import type { AuthManager } from "../../../auth.js";
 import {
 	CaCertProvider,
@@ -21,6 +21,7 @@ import {
 } from "../../../server/effect-http-router.js";
 import type { PushSubscriptionData } from "../../../server/push.js";
 import type { ThemesResponse } from "../../../shared-types.js";
+import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import {
 	type AuthManagerService,
@@ -54,8 +55,6 @@ export interface DaemonHttpRouterOptions {
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly removeProject: (slug: string) => Promise<unknown>;
-	readonly getPort: () => number;
-	readonly getIsTls: () => boolean;
 	readonly getHealthResponse: () => object;
 	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
@@ -81,6 +80,7 @@ export interface StandaloneHttpRouterOptions {
 
 interface HttpRouterRequestHandlerOptions {
 	readonly authLayer: Layer.Layer<AuthManagerTag>;
+	readonly setupInfoLayer: Layer.Layer<SetupInfoProvider>;
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly removeProject?: (slug: string) => Effect.Effect<void, unknown>;
@@ -89,8 +89,6 @@ interface HttpRouterRequestHandlerOptions {
 		subPath: string,
 		req: HttpServerRequest.HttpServerRequest,
 	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
-	readonly getPort: () => number;
-	readonly getIsTls: () => boolean;
 	readonly getHealthResponse?: () => object;
 	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
@@ -105,10 +103,7 @@ const buildHttpRouterRequestHandler = (
 		options.authLayer,
 		Layer.succeed(StaticDirTag, options.staticDir),
 		Layer.succeed(ProjectsProvider, { getProjects: options.getProjects }),
-		Layer.succeed(SetupInfoProvider, {
-			getPort: options.getPort,
-			getIsTls: options.getIsTls,
-		}),
+		options.setupInfoLayer,
 		Layer.succeed(ThemeProvider, { loadThemes: options.loadThemes }),
 		NodeFileSystem.layer,
 		NodePath.layer,
@@ -185,6 +180,10 @@ export const makeStandaloneHttpRouterRequestHandler = (
 ): DaemonHttpRequestHandler =>
 	buildHttpRouterRequestHandler({
 		authLayer: makeAuthManagerLive(options.auth),
+		setupInfoLayer: Layer.succeed(SetupInfoProvider, {
+			getPort: () => Effect.sync(options.getPort),
+			getIsTls: () => Effect.sync(options.getIsTls),
+		}),
 		staticDir: options.staticDir,
 		getProjects: options.getProjects,
 		removeProject: (slug) =>
@@ -194,8 +193,6 @@ export const makeStandaloneHttpRouterRequestHandler = (
 		delegateApiRequest:
 			options.delegateApiRequest ??
 			(() => Effect.fail(new Error("Project API route not found"))),
-		getPort: options.getPort,
-		getIsTls: options.getIsTls,
 		loadThemes: options.loadThemes,
 		pushManager: options.pushManager,
 		caRootPath: options.caRootPath,
@@ -207,16 +204,21 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 		DaemonHttpRequestHandlerTag,
 		Effect.gen(function* () {
 			const auth: AuthManagerService = yield* AuthManagerTag;
+			const configRef = yield* DaemonConfigRefTag;
 			return buildHttpRouterRequestHandler({
 				authLayer: Layer.succeed(AuthManagerTag, auth),
+				setupInfoLayer: Layer.succeed(SetupInfoProvider, {
+					getPort: () =>
+						Ref.get(configRef).pipe(Effect.map((config) => config.port)),
+					getIsTls: () =>
+						Ref.get(configRef).pipe(Effect.map((config) => config.tlsEnabled)),
+				}),
 				staticDir: options.staticDir,
 				getProjects: options.getProjects,
 				removeProject: (slug: string) =>
 					Effect.tryPromise(() => options.removeProject(slug)).pipe(
 						Effect.asVoid,
 					),
-				getPort: options.getPort,
-				getIsTls: options.getIsTls,
 				getHealthResponse: options.getHealthResponse,
 				loadThemes: options.loadThemes,
 				pushManager: options.pushManager,

@@ -102,8 +102,8 @@ export class ThemeProvider extends Context.Tag("ThemeProvider")<
 export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 	SetupInfoProvider,
 	{
-		readonly getPort: () => number;
-		readonly getIsTls: () => boolean;
+		readonly getPort: () => Effect.Effect<number>;
+		readonly getIsTls: () => Effect.Effect<boolean>;
 	}
 >() {}
 
@@ -340,8 +340,8 @@ const setupInfoHandler = Effect.gen(function* () {
 	}
 
 	const setup = maybeSetup.value;
-	const port = setup.getPort();
-	const isTls = setup.getIsTls();
+	const port = yield* setup.getPort();
+	const isTls = yield* setup.getIsTls();
 	const request = yield* HttpServerRequest.HttpServerRequest;
 	const hostHeader = request.headers["host"] ?? `localhost:${port}`;
 	const hostBase = hostHeader.replace(/:\d+$/, "");

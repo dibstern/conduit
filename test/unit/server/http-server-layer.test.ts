@@ -102,8 +102,8 @@ let setupInfoPort = 9999;
 let setupInfoIsTls = false;
 
 const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
-	getPort: () => setupInfoPort,
-	getIsTls: () => setupInfoIsTls,
+	getPort: () => Effect.sync(() => setupInfoPort),
+	getIsTls: () => Effect.sync(() => setupInfoIsTls),
 });
 
 let staticDir = "";

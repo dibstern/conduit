@@ -441,6 +441,73 @@ describe("Effect runtime boundary grep", () => {
 		expect([...daemonMainHits, ...routerHits]).toEqual([]);
 	});
 
+	it("does not route daemon setup info through daemon-main config snapshot callbacks", () => {
+		const daemonMainPath = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const daemonMainSource = readFileSync(
+			join(REPO_ROOT, daemonMainPath),
+			"utf8",
+		);
+		const daemonMainHits = [
+			{
+				pattern: /getPort:\s*\(\) => readRuntimeConfigSnapshot\(\)\.port/,
+				reason:
+					"setup-info port should be read from DaemonConfigRefTag inside the router layer",
+			},
+			{
+				pattern:
+					/getIsTls:\s*\(\) => readRuntimeConfigSnapshot\(\)\.tlsEnabled/,
+				reason:
+					"setup-info TLS state should be read from DaemonConfigRefTag inside the router layer",
+			},
+		].flatMap(({ pattern, reason }) =>
+			daemonMainSource.split("\n").flatMap((line, index) =>
+				pattern.test(line)
+					? [
+							{
+								path: daemonMainPath,
+								line: index + 1,
+								source: line.trim(),
+								reason,
+							},
+						]
+					: [],
+			),
+		);
+
+		const routerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
+		const routerSource = readFileSync(join(REPO_ROOT, routerPath), "utf8");
+		const daemonOptionsStart = routerSource.indexOf(
+			"export interface DaemonHttpRouterOptions",
+		);
+		const standaloneOptionsStart = routerSource.indexOf(
+			"export interface StandaloneHttpRouterOptions",
+			daemonOptionsStart,
+		);
+		expect(daemonOptionsStart).toBeGreaterThanOrEqual(0);
+		expect(standaloneOptionsStart).toBeGreaterThan(daemonOptionsStart);
+		const daemonOptionsSource = routerSource.slice(
+			daemonOptionsStart,
+			standaloneOptionsStart,
+		);
+		const routerHits = daemonOptionsSource.split("\n").flatMap((line, index) =>
+			/\bget(?:Port|IsTls):\s*\(\)/.test(line)
+				? [
+						{
+							path: routerPath,
+							line:
+								routerSource.slice(0, daemonOptionsStart).split("\n").length +
+								index,
+							source: line.trim(),
+							reason:
+								"DaemonHttpRouterOptions should not accept setup-info callbacks",
+						},
+					]
+				: [],
+		);
+
+		expect([...daemonMainHits, ...routerHits]).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{
