@@ -22,11 +22,6 @@ export const PayloadSchemas: {
 	// biome-ignore lint/suspicious/noExplicitAny: Schema Struct produces readonly/undefined-widened types that differ structurally from PayloadMap; `any` avoids a fight with exactOptionalPropertyTypes while keeping the key-exhaustiveness constraint
 	[K in keyof PayloadMap]: Schema.Schema<any, any>;
 } = {
-	rewind: Schema.Struct({
-		messageId: Schema.optional(Schema.String),
-		uuid: Schema.optional(Schema.String),
-	}),
-
 	permission_response: Schema.Struct({
 		requestId: PermissionId,
 		decision: Schema.String,

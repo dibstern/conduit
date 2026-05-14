@@ -18,6 +18,7 @@ import {
 	LoadMoreHistory,
 	ReloadProviderSession,
 	RenameSession,
+	RewindSession,
 	SendMessage,
 	SetDefaultModel,
 	SwitchAgent,
@@ -181,6 +182,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						],
 						hasMore: false,
 					}),
+				RewindSession: () => Effect.succeed({ ok: true as const }),
 				SendMessage: () => Effect.succeed({ ok: true as const }),
 				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
@@ -211,6 +213,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetToolContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(true);
 		expect(WsRpcGroup.requests.has("LoadMoreHistory")).toBe(true);
+		expect(WsRpcGroup.requests.has("RewindSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("SendMessage")).toBe(true);
 		expect(WsRpcGroup.requests.has("SyncInputDraft")).toBe(true);
 		expect(WsRpcGroup.requests.has("CancelSession")).toBe(true);
@@ -412,6 +415,14 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				expect(
+					yield* client.RewindSession({
+						projectSlug: "demo",
+						sessionId: "session-1",
+						messageId: "message-1",
+					}),
+				).toEqual({ ok: true });
+
+				expect(
 					yield* client.SendMessage({
 						projectSlug: "demo",
 						sessionId: "session-1",
@@ -505,6 +516,13 @@ describe("browser WebSocket RPC contract", () => {
 				offset: 50,
 			})._tag,
 		).toBe("LoadMoreHistory");
+		expect(
+			new RewindSession({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				messageId: "message-1",
+			})._tag,
+		).toBe("RewindSession");
 		expect(
 			new SendMessage({
 				projectSlug: "demo",

@@ -30,6 +30,7 @@ export {
 	ReloadProviderSession,
 	type ReloadProviderSessionResponse,
 	RenameSession,
+	RewindSession,
 	SendMessage,
 	type SessionInfo,
 	SetDefaultModel,

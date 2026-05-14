@@ -51,7 +51,6 @@ const validMessageTypes: IncomingMessageType[] = [
 	"pty_input",
 	"pty_resize",
 	"pty_close",
-	"rewind",
 	"instance_add",
 	"instance_remove",
 	"instance_start",
@@ -408,7 +407,7 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(isRouteError(invalidResult)).toBe(true);
 
 			// Verify our test list has exactly the right number of routed types.
-			expect(validMessageTypes).toHaveLength(26);
+			expect(validMessageTypes).toHaveLength(25);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

@@ -18,10 +18,7 @@ import {
 	handleRelayWsMessageThroughGate,
 } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
-import {
-	makeMockOpenCodeAPI,
-	makeTestHandlerLayer,
-} from "../../helpers/mock-factories.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 function mockLogger(): Logger {
 	const logger: Logger = {
@@ -81,8 +78,8 @@ describe("handleRelayWsMessage", () => {
 				commandId: "cmd-a",
 				receivedAt: 1000,
 				clientId: "client-1",
-				handler: "rewind",
-				payload: { messageId: "msg-1" },
+				handler: "switch_session",
+				payload: { sessionId: "session-1" },
 				sendTo,
 				log: mockLogger(),
 				dispatch,
@@ -237,28 +234,26 @@ describe("handleRelayWsMessage", () => {
 	);
 
 	it.effect("uses dispatchMessageEffect by default", () => {
-		const api = makeMockOpenCodeAPI();
-		const wsHandler = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
+		const wsHandler = mockWsHandler();
 		const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
 		const layer = Layer.mergeAll(
 			makeBaseLayer(),
-			makeTestHandlerLayer({ api, wsHandler }),
+			makeTestHandlerLayer({ wsHandler }),
 		);
 
 		return handleRelayWsMessage({
 			clientId: "client-1",
-			handler: "rewind",
-			payload: { messageId: "msg-1" },
+			handler: "switch_session",
+			payload: { sessionId: "session-1" },
 			sendTo,
 			log: mockLogger(),
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(api.session.revert).toHaveBeenCalledWith("session-1", {
-					messageID: "msg-1",
-				});
+				expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+					"client-1",
+					"session-1",
+				);
 				expect(sendTo).not.toHaveBeenCalled();
 			}),
 		);

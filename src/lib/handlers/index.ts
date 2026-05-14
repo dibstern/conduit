@@ -39,7 +39,7 @@ export {
 	clearSessionInputDraft,
 	getSessionInputDraft,
 	handleMessage,
-	handleRewind,
+	rewindSessionToMessage,
 	syncInputDraftForSession,
 } from "./prompt.js";
 export { reloadProviderSessionForClient } from "./reload.js";
@@ -91,7 +91,6 @@ import {
 	handlePermissionResponse as handlePermissionResponseImpl,
 	handleQuestionReject as handleQuestionRejectImpl,
 } from "./permissions.js";
-import { handleRewind as handleRewindImpl } from "./prompt.js";
 import {
 	handleDeleteSession as handleDeleteSessionImpl,
 	handleForkSession as handleForkSessionImpl,
@@ -128,8 +127,6 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	keyof PayloadMap,
 	AnyEffectHandler
 > = {
-	// Prompt
-	rewind: handleRewindImpl,
 	// Permissions
 	permission_response: handlePermissionResponseImpl,
 	ask_user_response: handleAskUserResponseImpl,

@@ -23,7 +23,6 @@ export type IncomingMessageType =
 	| "pty_input"
 	| "pty_resize"
 	| "pty_close"
-	| "rewind"
 	| "instance_add"
 	| "instance_remove"
 	| "instance_start"
@@ -52,7 +51,6 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"pty_input",
 	"pty_resize",
 	"pty_close",
-	"rewind",
 	"instance_add",
 	"instance_remove",
 	"instance_start",

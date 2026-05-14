@@ -19,14 +19,6 @@ import { PermissionId, RequestId } from "../shared-types.js";
 // ─── Individual message schemas ─────────────────────────────────────────────
 // Each schema includes `type: Schema.Literal(...)` as the discriminant.
 
-// ── Prompt / Messages ────────────────────────────────────────────────────────
-
-const RewindMsg = Schema.Struct({
-	type: Schema.Literal("rewind"),
-	messageId: Schema.optional(Schema.String),
-	uuid: Schema.optional(Schema.String),
-});
-
 // ── Permissions / Questions ──────────────────────────────────────────────────
 
 const PermissionResponseMsg = Schema.Struct({
@@ -199,8 +191,6 @@ const SetLogLevelMsg = Schema.Struct({
 // Covers all remaining legacy IncomingMessageType values from ws-router.ts.
 
 export const IncomingWsMessage = Schema.Union(
-	// Prompt / Messages
-	RewindMsg,
 	// Permissions / Questions
 	PermissionResponseMsg,
 	AskUserResponseMsg,

@@ -504,6 +504,19 @@ export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 	},
 ) {}
 
+export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
+	"RewindSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			messageId: NonEmptyString,
+		},
+	},
+) {}
+
 export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
 	"SendMessage",
 	{
@@ -565,6 +578,7 @@ export const WsRpcRequest = Schema.Union(
 	GetModels,
 	ListSessions,
 	LoadMoreHistory,
+	RewindSession,
 	SendMessage,
 	SyncInputDraft,
 	CancelSession,
@@ -592,6 +606,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
+	Rpc.fromTaggedRequest(RewindSession),
 	Rpc.fromTaggedRequest(SendMessage),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),

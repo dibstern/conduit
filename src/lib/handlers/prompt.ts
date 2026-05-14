@@ -40,7 +40,6 @@ import {
 } from "../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../provider/types.js";
 import { isClaudeProvider } from "./model.js";
-import type { PayloadMap } from "./payloads.js";
 import type { PromptOptions } from "./types.js";
 
 // ─── Minimal no-op EventSink for OpenCodeAdapter (which ignores it) ──────────
@@ -547,22 +546,27 @@ export const cancelSessionById = (clientId: string, sessionId: string) =>
 		});
 	});
 
-export const handleRewind = (clientId: string, payload: PayloadMap["rewind"]) =>
+export const rewindSessionToMessage = ({
+	clientId,
+	sessionId,
+	messageId,
+}: {
+	clientId: string;
+	sessionId: string;
+	messageId: string;
+}) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const messageId = payload.messageId ?? payload.uuid ?? "";
-		const activeId = wsHandler.getClientSession(clientId);
-		if (messageId && activeId) {
+		if (messageId) {
 			yield* Effect.tryPromise(() =>
-				client.session.revert(activeId, { messageID: messageId }),
+				client.session.revert(sessionId, { messageID: messageId }),
 			);
-			yield* sessionManagerService.clearPaginationCursor(activeId);
+			yield* sessionManagerService.clearPaginationCursor(sessionId);
 			log.info(
-				`client=${clientId} session=${activeId} Reverted to message: ${messageId}`,
+				`client=${clientId} session=${sessionId} Reverted to message: ${messageId}`,
 			);
 		}
 	});

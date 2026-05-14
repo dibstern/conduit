@@ -11,10 +11,7 @@ import { expect, vi } from "vitest";
 import type { WebSocketHandlerShape } from "../../../src/lib/domain/relay/Services/services.js";
 import { WebSocketError } from "../../../src/lib/errors.js";
 import { dispatchMessageEffect } from "../../../src/lib/handlers/index.js";
-import {
-	makeMockOpenCodeAPI,
-	makeTestHandlerLayer,
-} from "../../helpers/mock-factories.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
 
@@ -44,20 +41,18 @@ function mockWsHandler(
 // ─── Dispatch routing ───────────────────────────────────────────────────────
 
 describe("dispatchMessageEffect", () => {
-	it.effect("dispatches rewind with validated payload", () => {
-		const api = makeMockOpenCodeAPI();
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-42"),
-		});
-		const layer = makeTestHandlerLayer({ api, wsHandler: ws });
+	it.effect("dispatches switch_session with validated payload", () => {
+		const ws = mockWsHandler();
+		const layer = makeTestHandlerLayer({ wsHandler: ws });
 
 		return Effect.gen(function* () {
-			yield* dispatchMessageEffect("client-1", "rewind", {
-				messageId: "msg-1",
+			yield* dispatchMessageEffect("client-1", "switch_session", {
+				sessionId: "session-42",
 			}) as Effect.Effect<void, never>;
-			expect(api.session.revert).toHaveBeenCalledWith("session-42", {
-				messageID: "msg-1",
-			});
+			expect(ws.setClientSession).toHaveBeenCalledWith(
+				"client-1",
+				"session-42",
+			);
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -117,21 +112,16 @@ describe("dispatchMessageEffect", () => {
 	});
 
 	it.effect("accepts payloads with extra unknown fields (open schema)", () => {
-		const api = makeMockOpenCodeAPI();
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const layer = makeTestHandlerLayer({ api, wsHandler: ws });
+		const ws = mockWsHandler();
+		const layer = makeTestHandlerLayer({ wsHandler: ws });
 
 		// Schema.Struct allows extra keys by default
 		return Effect.gen(function* () {
-			yield* dispatchMessageEffect("client-1", "rewind", {
-				messageId: "msg-1",
+			yield* dispatchMessageEffect("client-1", "switch_session", {
+				sessionId: "session-1",
 				extraField: "should be ignored",
 			}) as Effect.Effect<void, never>;
-			expect(api.session.revert).toHaveBeenCalledWith("session-1", {
-				messageID: "msg-1",
-			});
+			expect(ws.setClientSession).toHaveBeenCalledWith("client-1", "session-1");
 		}).pipe(Effect.provide(layer));
 	});
 });

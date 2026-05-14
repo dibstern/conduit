@@ -89,7 +89,7 @@ import {
 import {
 	cancelSessionById,
 	handleMessage,
-	handleRewind,
+	rewindSessionToMessage,
 	syncInputDraftForSession,
 } from "../../../src/lib/handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../../src/lib/handlers/reload.js";
@@ -2775,11 +2775,8 @@ describe("syncInputDraftForSession", () => {
 	});
 });
 
-describe("handleRewind", () => {
+describe("rewindSessionToMessage", () => {
 	it.effect("reverts to a specific message and clears cursor", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 		const log = mockLogger();
 		const legacyClearPaginationCursor = vi.fn(() => {
 			throw new Error("legacy clearPaginationCursor should not be used");
@@ -2797,12 +2794,15 @@ describe("handleRewind", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(LoggerTag, log),
 		);
 
-		return handleRewind("client-1", { messageId: "msg-1" }).pipe(
+		return rewindSessionToMessage({
+			clientId: "client-1",
+			sessionId: "session-1",
+			messageId: "msg-1",
+		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {

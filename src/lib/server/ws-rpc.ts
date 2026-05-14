@@ -13,6 +13,7 @@ import {
 } from "../handlers/model.js";
 import {
 	cancelSessionById,
+	rewindSessionToMessage,
 	sendMessageToSession,
 	syncInputDraftForSession,
 } from "../handlers/prompt.js";
@@ -54,6 +55,7 @@ export {
 	ReloadProviderSession,
 	type ReloadProviderSessionResponse,
 	RenameSession,
+	RewindSession,
 	SendMessage,
 	type SessionInfo,
 	SetDefaultModel,
@@ -425,6 +427,21 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `LoadMoreHistory failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	RewindSession: (request) =>
+		rewindSessionToMessage({
+			clientId: "rpc",
+			sessionId: request.sessionId,
+			messageId: request.messageId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `RewindSession failed: ${String(error)}`,
 					}),
 				),
 			),

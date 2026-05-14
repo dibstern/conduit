@@ -136,6 +136,12 @@ export interface LoadMoreHistoryRpcInput {
 	readonly offset: number;
 }
 
+export interface RewindSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly messageId: string;
+}
+
 export interface SendMessageRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -459,6 +465,19 @@ const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callRewindSession = (input: RewindSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.RewindSession(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSendMessage = (input: SendMessageRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -634,6 +653,13 @@ export async function loadMoreHistoryRpc(
 ): Promise<LoadMoreHistoryResponse> {
 	const runtime = await getRuntime();
 	return await runtime.runPromise(callLoadMoreHistory(input));
+}
+
+export async function rewindSessionRpc(
+	input: RewindSessionRpcInput,
+): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callRewindSession(input));
 }
 
 export async function sendMessageRpc(

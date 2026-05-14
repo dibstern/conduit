@@ -11,7 +11,9 @@
 		exitRewindMode,
 		selectRewindMessage,
 	} from "../../stores/ui.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { rewindSessionRpc } from "../../transport/ws-rpc-client.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -45,9 +47,15 @@
 
 	function handleConfirm(): void {
 		const uuid = uiState.rewindSelectedUuid;
-		if (!uuid) return;
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!uuid || !sessionId || !projectSlug) return;
 
-		wsSend({ type: "rewind", uuid, mode: selectedMode });
+		void rewindSessionRpc({
+			projectSlug,
+			sessionId,
+			messageId: uuid,
+		}).catch(() => undefined);
 		onRewind?.(uuid, selectedMode);
 
 		exitRewindMode();
