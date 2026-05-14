@@ -18,12 +18,9 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Cause, Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
-import {
-	type ClientInitDeps,
-	handleClientConnected,
-} from "../bridges/client-init.js";
+import { handleClientConnectedEffect } from "../bridges/client-init.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -34,10 +31,7 @@ import {
 import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
-import {
-	AgentServiceLive,
-	AgentServiceTag,
-} from "../domain/relay/Services/agent-service.js";
+import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
 import { ClientMessageSerializationTag } from "../domain/relay/Services/client-message-serialization.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
@@ -55,12 +49,9 @@ import {
 } from "../domain/relay/Services/relay-command-gate.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
-	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
-	OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
-	OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -68,13 +59,6 @@ import {
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearProcessingTimeout,
-	getContextWindow,
-	getDefaultContextWindow,
-	getDefaultModel,
-	getDefaultVariant,
-	getModel,
-	getVariant,
-	hasActiveProcessingTimeout,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
 	setDefaultModel,
@@ -85,10 +69,7 @@ import {
 	PollerStateTag,
 	type SessionStatusPollerService,
 } from "../domain/relay/Services/session-status-poller.js";
-import {
-	OpenCodeTerminalServiceLive,
-	OpenCodeTerminalServiceTag,
-} from "../domain/relay/Services/terminal-service.js";
+import { OpenCodeTerminalServiceLive } from "../domain/relay/Services/terminal-service.js";
 import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
@@ -108,7 +89,6 @@ import {
 	type PersistenceEffectError,
 	type PersistenceEffectRuntime,
 } from "../persistence/effect/live.js";
-import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	getOrchestrationLayer,
 	makeOrchestrationRuntimeLayer,
@@ -122,10 +102,6 @@ import {
 	type RpcWebSocketHandlerShape,
 	WsRpcWebSocketHandler,
 } from "../server/ws-rpc-handler.js";
-import {
-	resolveSessionHistoryFromRows,
-	type SessionHistorySource,
-} from "../session/session-switch.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
@@ -522,170 +498,6 @@ export async function createProjectRelay(
 		},
 	};
 
-	const resolveClientInitHistory = (
-		sessionId: string,
-	): Promise<SessionHistorySource> =>
-		relayManagedRuntime.runPromise(
-			Effect.gen(function* () {
-				const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-				if (readQueryOption._tag === "Some") {
-					const rows =
-						yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-					return resolveSessionHistoryFromRows(rows, { pageSize: 50 });
-				}
-
-				const sessionManagerService = yield* SessionManagerServiceTag;
-				const historyResult = yield* Effect.either(
-					sessionManagerService.loadPreRenderedHistory(sessionId),
-				);
-				if (historyResult._tag === "Right") {
-					return {
-						kind: "rest-history",
-						history: historyResult.right,
-					} satisfies SessionHistorySource;
-				}
-
-				const logger = yield* LoggerTag;
-				logger.warn(
-					`Failed to load client init history for ${sessionId}: ${formatErrorDetail(historyResult.left)}`,
-				);
-				return { kind: "empty" } satisfies SessionHistorySource;
-			}),
-		);
-
-	// ── Client init deps + connection handlers ──────────────────────────────
-	const clientInitDeps: ClientInitDeps = {
-		get wsHandler() {
-			return wsHandler;
-		},
-		get client() {
-			return api;
-		},
-		sessionService: {
-			getDefaultSessionId: (title) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* SessionManagerServiceTag;
-						return yield* service.getDefaultSessionId(title);
-					}),
-				),
-			sendDualSessionLists: (send, options) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* SessionManagerServiceTag;
-						return yield* service.sendDualSessionLists(send, options);
-					}),
-				),
-			resolveSessionHistory: resolveClientInitHistory,
-			loadPreRenderedHistory: (sessionId, offset) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* SessionManagerServiceTag;
-						return yield* service.loadPreRenderedHistory(sessionId, offset);
-					}),
-				),
-			seedPaginationCursor: (sessionId, messageId) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* SessionManagerServiceTag;
-						return yield* service.seedPaginationCursor(sessionId, messageId);
-					}),
-				),
-		},
-		overrideState: {
-			getModel: (sessionId) =>
-				relayManagedRuntime.runPromise(getModel(sessionId)),
-			getDefaultModel: () => relayManagedRuntime.runPromise(getDefaultModel()),
-			getVariant: (sessionId) =>
-				relayManagedRuntime.runPromise(getVariant(sessionId)),
-			getDefaultVariant: () =>
-				relayManagedRuntime.runPromise(getDefaultVariant()),
-			getContextWindow: (sessionId) =>
-				relayManagedRuntime.runPromise(getContextWindow(sessionId)),
-			getDefaultContextWindow: () =>
-				relayManagedRuntime.runPromise(getDefaultContextWindow()),
-			setDefaultModel: (model) =>
-				relayManagedRuntime.runPromise(setDefaultModel(model)),
-			hasActiveProcessingTimeout: (sessionId) =>
-				relayManagedRuntime.runPromise(hasActiveProcessingTimeout(sessionId)),
-		},
-		terminal: {
-			replay: (clientId) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* OpenCodeTerminalServiceTag;
-						yield* service.replay(clientId);
-					}),
-				),
-		},
-		agentService: {
-			listAgents: (activeSessionId) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* AgentServiceTag;
-						return yield* service.listAgents(activeSessionId);
-					}),
-				),
-		},
-		modelService: {
-			getSession: (sessionId) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* OpenCodeModelServiceTag;
-						return yield* service.getSession(sessionId);
-					}),
-				),
-			listProviders: () =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* OpenCodeModelServiceTag;
-						return yield* service.listProviders();
-					}),
-				),
-		},
-		pendingInteractions: {
-			listPendingPermissions: () =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* PendingInteractionServiceTag;
-						return yield* service.listPendingPermissions();
-					}),
-				),
-			recoverPendingPermissions: (permissions) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* PendingInteractionServiceTag;
-						return yield* service.recoverPendingPermissions(permissions);
-					}),
-				),
-			listPendingQuestions: (sessionId) =>
-				relayManagedRuntime.runPromise(
-					Effect.gen(function* () {
-						const service = yield* PendingInteractionServiceTag;
-						return yield* service.listPendingQuestions(sessionId);
-					}),
-				),
-		},
-		get statusPoller() {
-			return relayManagedRuntime.runSync(StatusPollerTag);
-		},
-		...(config.getInstances != null && { getInstances: config.getInstances }),
-		...(config.getCachedUpdate != null && {
-			getCachedUpdate: config.getCachedUpdate,
-		}),
-		discoverClaudeCapabilities: () =>
-			relayManagedRuntime.runPromise(
-				Effect.gen(function* () {
-					const engine = yield* OrchestrationEngineTag;
-					return yield* engine.dispatchEffect({
-						type: "discover",
-						providerId: "claude",
-					});
-				}),
-			),
-		log: wsLog,
-	};
-
 	const hasInstanceManagement = hasInstanceManagementConfig(config);
 
 	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
@@ -885,11 +697,23 @@ export async function createProjectRelay(
 		wsLog.info(
 			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
 		);
-		handleClientConnected(clientInitDeps, clientId, requestedSessionId).catch(
-			(err) =>
-				wsLog.error(
-					`Client init failed for ${clientId}: ${formatErrorDetail(err)}`,
+		relayManagedRuntime.runFork(
+			handleClientConnectedEffect(clientId, requestedSessionId, {
+				...(config.getInstances != null && {
+					getInstances: config.getInstances,
+				}),
+				...(config.getCachedUpdate != null && {
+					getCachedUpdate: config.getCachedUpdate,
+				}),
+			}).pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.sync(() =>
+						wsLog.error(
+							`Client init failed for ${clientId}: ${Cause.pretty(cause)}`,
+						),
+					),
 				),
+			),
 		);
 	});
 	wsHandler.on("client_disconnected", ({ clientId }) => {

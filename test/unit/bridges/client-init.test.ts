@@ -318,6 +318,31 @@ describe("handleClientConnected — session list", () => {
 		});
 	});
 
+	it("sends initial session_list before marking the client bootstrapped", async () => {
+		const deps = createMockClientInitDeps();
+
+		await handleClientConnected(deps, "client-1");
+
+		const sendTo = vi.mocked(deps.wsHandler.sendTo);
+		const markClientBootstrapped = vi.mocked(
+			deps.wsHandler.markClientBootstrapped,
+		);
+		const sessionListOrder = sendTo.mock.invocationCallOrder.find(
+			(_, index) => sendTo.mock.calls[index]?.[1].type === "session_list",
+		);
+		const bootstrappedOrder =
+			markClientBootstrapped.mock.invocationCallOrder[0];
+
+		expect(sessionListOrder).toBeDefined();
+		expect(bootstrappedOrder).toBeDefined();
+		if (sessionListOrder === undefined || bootstrappedOrder === undefined) {
+			throw new Error(
+				"session_list and bootstrap calls should both be recorded",
+			);
+		}
+		expect(sessionListOrder).toBeLessThan(bootstrappedOrder);
+	});
+
 	it("sends INIT_FAILED when sendDualSessionLists throws", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.sessionService.sendDualSessionLists).mockRejectedValue(
@@ -329,6 +354,27 @@ describe("handleClientConnected — session list", () => {
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
 			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
+		);
+		const sendTo = vi.mocked(deps.wsHandler.sendTo);
+		const markClientBootstrapped = vi.mocked(
+			deps.wsHandler.markClientBootstrapped,
+		);
+		const initFailedOrder = sendTo.mock.invocationCallOrder.find(
+			(_, index) => sendTo.mock.calls[index]?.[1].type === "system_error",
+		);
+		const bootstrappedOrder =
+			markClientBootstrapped.mock.invocationCallOrder[0];
+
+		expect(initFailedOrder).toBeDefined();
+		expect(bootstrappedOrder).toBeDefined();
+		if (initFailedOrder === undefined || bootstrappedOrder === undefined) {
+			throw new Error(
+				"INIT_FAILED and bootstrap calls should both be recorded",
+			);
+		}
+		expect(initFailedOrder).toBeLessThan(bootstrappedOrder);
+		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
+			"client-1",
 		);
 	});
 });

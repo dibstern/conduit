@@ -589,4 +589,38 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not build client-init service bridges in relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bClientInitDeps\b/,
+				reason:
+					"client init should consume relay Effect services directly, not a Promise-shaped dependency object",
+			},
+			{
+				pattern: /\bclientInitDeps\b/,
+				reason:
+					"relay-stack should dispatch one Effect at the WebSocket callback boundary",
+			},
+			{
+				pattern: /\bresolveClientInitHistory\b/,
+				reason:
+					"client-init history resolution belongs to the Effect-owned client-init handler",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

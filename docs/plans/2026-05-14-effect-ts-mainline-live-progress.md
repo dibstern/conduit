@@ -40,11 +40,11 @@ Every open item must be removed or explicitly reclassified before the migration 
 | `Effect.promise(` on rejectable operations | Done | Recheck before final guardrail close. |
 | `concurrency: "unbounded"` on dynamic collections | Done | Recheck before final guardrail close. Fixed-size fanouts need inline justification. |
 | Throwing helpers called from Effect programs | Open | Broad grep needs call-path triage; defects and external boundaries can be reclassified. |
-| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged IPC dispatch now uses the daemon layer runtime at the socket boundary. Remaining blockers are relay-stack transitional runtime bridges and any final grep hits. |
+| App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged IPC dispatch now uses the daemon layer runtime at the socket boundary. Client-init no longer builds a Promise-shaped bridge in `relay-stack.ts`; remaining blockers are the other relay-stack transitional runtime bridges and any final grep hits. |
 
 ## Current Blockers
 
-1. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
+1. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`; the client-init bridge is removed.
 2. Provider architecture now has instance-first registry APIs in production orchestration; remaining cleanup is class/error/test naming that still says adapter where it no longer reflects ownership.
 3. CLI still imports/calls `startDaemonProcess`.
 
@@ -58,7 +58,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 4. Contracts and RPC boundary. Started locally: shared `WsRpcGroup`, import guard, and server/frontend re-export wrappers are in place.
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
-7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
+7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, and client init now forks one Effect-owned bootstrap at the WebSocket callback boundary; runtime bridge cleanup remains for the other relay wiring clusters.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes instance-first APIs while keeping adapter-named compatibility shims.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
@@ -336,3 +336,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Added `ProviderRegistry` instance-first APIs (`registerInstance`, `getInstance*`, `hasInstance`, `removeInstance`) and moved production orchestration dispatch/wiring to them.
 - Left adapter-named registry methods as compatibility shims only; remaining provider cleanup is naming debt in adapter class/error/test surfaces.
 - Verified locally with targeted provider registry, orchestration engine, orchestration wiring, scoped-layer, and Claude provider wiring tests.
+
+2026-05-14, client-init runtime bridge cleanup:
+
+- Added `handleClientConnectedEffect()` as the production client bootstrap path; it consumes relay services directly from the runtime Layer graph and owns history resolution, session switching, reconnect replay, model/agent bootstrap, terminal replay, instance list, and cached update emission.
+- Removed the `ClientInitDeps` / `clientInitDeps` Promise-shaped bridge and `resolveClientInitHistory` adapter from `relay-stack.ts`; the `client_connected` WebSocket callback now forks one Effect program.
+- Added a runtime-boundary guard so the client-init bridge cannot return to `relay-stack.ts`, and tightened bootstrap ordering coverage around `session_list` before `markClientBootstrapped`.
+- Verified locally with `pnpm check`, `pnpm lint`, focused client-init/runtime-boundary/relay-stack tests, and `test/integration/flows/initial-state.integration.ts`.
