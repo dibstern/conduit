@@ -1060,6 +1060,7 @@ export async function startDaemonProcess(
 		...c,
 		keepAwakeCommand,
 		keepAwakeArgs,
+		startTime: Date.now(),
 		dismissedPaths: new Set(dismissedPaths),
 		persistedSessionCounts: new Map(persistedSessionCounts),
 	}));
@@ -1483,8 +1484,6 @@ export async function startDaemonProcess(
 
 	// Signal handlers and error handlers are now managed by
 	// SignalHandlerLayer and ProcessErrorHandlerLayer (via makeDaemonLive).
-
-	updateRuntimeConfigSync((c) => ({ ...c, startTime: Date.now() }));
 
 	// ── Discover projects (non-blocking) ──────────────────────────────────
 	if (smartDefault) {

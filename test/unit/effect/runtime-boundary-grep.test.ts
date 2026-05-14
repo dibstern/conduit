@@ -203,6 +203,31 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not re-enter the daemon runtime to seed startup time", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern:
+					/updateRuntimeConfigSync\(\(c\) => \(\{ \.\.\.c, startTime: Date\.now\(\) \}\)\)/,
+				reason:
+					"startup time should be part of the initial DaemonConfigRef value, not a post-start runtime mutation",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not route keep-awake IPC through daemon-main runtime callbacks", () => {
 		const retiredBridgePatterns = [
 			{
