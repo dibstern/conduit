@@ -15,7 +15,9 @@ import type { ProjectRelayConfig, RelayMessage } from "../types.js";
 
 /** Instance management capability group — only available in daemon mode. */
 export interface InstanceManagementDeps {
-	getInstances: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
+	getInstances: () =>
+		| ReadonlyArray<Readonly<OpenCodeInstance>>
+		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 	addInstance: (id: string, config: InstanceConfig) => OpenCodeInstance;
 	removeInstance: (id: string) => void;
 	startInstance: (id: string) => Promise<void>;

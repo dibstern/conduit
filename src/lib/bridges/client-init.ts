@@ -160,7 +160,9 @@ export interface ClientInitDeps {
 		>;
 	};
 	/** Optional supplier of the current OpenCode instance list */
-	getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
+	getInstances?: () =>
+		| ReadonlyArray<Readonly<OpenCodeInstance>>
+		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 	/** Optional supplier of cached update version (for replaying to new clients) */
 	getCachedUpdate?: () => string | null;
 	/** Optional Claude SDK capability discovery, provided by the relay Effect runtime. */
@@ -169,7 +171,9 @@ export interface ClientInitDeps {
 }
 
 export interface ClientInitEffectOptions {
-	readonly getInstances?: () => ReadonlyArray<Readonly<OpenCodeInstance>>;
+	readonly getInstances?: () =>
+		| ReadonlyArray<Readonly<OpenCodeInstance>>
+		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 	readonly getCachedUpdate?: () => string | null;
 }
 
@@ -680,7 +684,16 @@ export const handleClientConnectedEffect = (
 			);
 
 		if (options.getInstances) {
-			const instances = options.getInstances();
+			const instances = yield* Effect.tryPromise({
+				try: () => Promise.resolve(options.getInstances?.() ?? []),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.catchAll((err) =>
+					sendInitErrorEffect(clientId, err, "Failed to list instances").pipe(
+						Effect.as([] as ReadonlyArray<Readonly<OpenCodeInstance>>),
+					),
+				),
+			);
 			wsHandler.sendTo(clientId, { type: "instance_list", instances });
 		}
 
@@ -1097,8 +1110,12 @@ export async function handleClientConnected(
 
 	// ── Instance list ─────────────────────────────────────────────────────
 	if (deps.getInstances) {
-		const instances = deps.getInstances();
-		wsHandler.sendTo(clientId, { type: "instance_list", instances });
+		try {
+			const instances = await deps.getInstances();
+			wsHandler.sendTo(clientId, { type: "instance_list", instances });
+		} catch (err) {
+			sendInitError(err, "Failed to list instances");
+		}
 	}
 
 	// ── Cached update notification ───────────────────────────────────────

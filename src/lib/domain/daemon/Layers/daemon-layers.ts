@@ -701,13 +701,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			)
 		: makeInstanceManagerStateLive(undefined, [], instanceManagerOptions);
 
-	const registries = Layer.mergeAll(
+	const registryState = Layer.mergeAll(
 		projectRegistryLayer,
 		instanceManagerLayer,
-		RelayFactoryLive(configDir),
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(services));
+	const registries = RelayFactoryLive(configDir).pipe(
+		Layer.provideMerge(registryState),
+	);
 
 	const withRelayCache = makeRelayCacheLayer.pipe(
 		Layer.provideMerge(registries),

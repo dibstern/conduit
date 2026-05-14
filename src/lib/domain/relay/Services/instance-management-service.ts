@@ -8,6 +8,7 @@ import { InstanceMgmtTag } from "../../daemon/Services/management-service.js";
 import { ConfigTag } from "./services.js";
 
 type InstanceOperation =
+	| "list"
 	| "add"
 	| "remove"
 	| "start"
@@ -37,7 +38,10 @@ export interface UpdateInstanceInput {
 }
 
 export interface InstanceManagementService {
-	list(): Effect.Effect<ReadonlyArray<Readonly<OpenCodeInstance>>>;
+	list(): Effect.Effect<
+		ReadonlyArray<Readonly<OpenCodeInstance>>,
+		InstanceManagementServiceError
+	>;
 	add(
 		input: AddInstanceInput,
 	): Effect.Effect<
@@ -128,7 +132,11 @@ export const hasInstanceManagementConfig = (
 const makeInstanceManagementService = (
 	instanceMgmt: import("../../../handlers/types.js").InstanceManagementDeps,
 ): InstanceManagementService => {
-	const list = () => instanceMgmt.getInstances();
+	const list = () =>
+		Effect.tryPromise({
+			try: () => Promise.resolve(instanceMgmt.getInstances()),
+			catch: toError("list"),
+		});
 
 	const persist = (operation: InstanceOperation) =>
 		Effect.try({
@@ -139,20 +147,20 @@ const makeInstanceManagementService = (
 	const withPersistedList = (operation: InstanceOperation) =>
 		Effect.gen(function* () {
 			yield* persist(operation);
-			return list();
+			return yield* list();
 		});
 
 	return {
-		list: () => Effect.sync(list),
+		list,
 		add: (input) =>
 			Effect.gen(function* () {
+				const id = makeInstanceId(input.name, yield* list());
 				yield* Effect.try({
 					try: () => {
 						const hasUrl =
 							typeof input.url === "string" && input.url.length > 0;
 						const managed =
 							typeof input.managed === "boolean" ? input.managed : !hasUrl;
-						const id = makeInstanceId(input.name, list());
 						const config: InstanceConfig = {
 							name: input.name,
 							port: typeof input.port === "number" ? input.port : 0,
@@ -180,7 +188,7 @@ const makeInstanceManagementService = (
 					try: () => instanceMgmt.startInstance(instanceId),
 					catch: toError("start"),
 				});
-				return list();
+				return yield* list();
 			}),
 		stop: (instanceId) =>
 			Effect.gen(function* () {
@@ -188,7 +196,7 @@ const makeInstanceManagementService = (
 					try: () => instanceMgmt.stopInstance(instanceId),
 					catch: toError("stop"),
 				});
-				return list();
+				return yield* list();
 			}),
 		update: (instanceId, input) =>
 			Effect.gen(function* () {

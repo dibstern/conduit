@@ -5,6 +5,8 @@ import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type { PartType, PermissionId, ToolStatus } from "./shared-types.js";
 
+type MaybePromise<T> = T | PromiseLike<T>;
+
 // Re-export all shared types (shared between server and frontend)
 export type {
 	AgentInfo,
@@ -208,12 +210,14 @@ export interface ProjectRelayConfig {
 		callback: (result: boolean, code?: number, message?: string) => void,
 	) => void;
 	/** Return the relay's registered project list (for the project switcher). */
-	getProjects?: () => ReadonlyArray<{
-		slug: string;
-		title: string;
-		directory: string;
-		instanceId?: string;
-	}>;
+	getProjects?: () => MaybePromise<
+		ReadonlyArray<{
+			slug: string;
+			title: string;
+			directory: string;
+			instanceId?: string;
+		}>
+	>;
 	/** Remove a project from the registry. */
 	removeProject?: (slug: string) => void | Promise<void>;
 	/** Set a project's display title. */
@@ -229,8 +233,8 @@ export interface ProjectRelayConfig {
 		instanceId?: string;
 	}>;
 	/** Return the current list of OpenCode instances (for the instance switcher). */
-	getInstances?: () => ReadonlyArray<
-		Readonly<import("./shared-types.js").OpenCodeInstance>
+	getInstances?: () => MaybePromise<
+		ReadonlyArray<Readonly<import("./shared-types.js").OpenCodeInstance>>
 	>;
 	/** Add a new instance. Returns the created instance. */
 	addInstance?: (

@@ -77,10 +77,20 @@ export const ProjectManagementServiceLive: Layer.Layer<
 		const config = yield* ConfigTag;
 		const settingsService = yield* OpenCodeSettingsServiceTag;
 
-		const listConfigProjects = () => config.getProjects?.();
+		const listConfigProjects = (): Effect.Effect<
+			ReadonlyArray<ProjectInfo> | undefined,
+			ProjectManagementServiceError
+		> => {
+			const getProjects = config.getProjects;
+			if (getProjects == null) return Effect.succeed(undefined);
+			return Effect.tryPromise({
+				try: () => Promise.resolve(getProjects()),
+				catch: toError("list"),
+			});
+		};
 		const listProjects = () =>
 			Effect.gen(function* () {
-				const configProjects = listConfigProjects();
+				const configProjects = yield* listConfigProjects();
 				if (configProjects != null) return configProjects;
 				const ocProjects = yield* settingsService
 					.listProjects()
@@ -108,7 +118,7 @@ export const ProjectManagementServiceLive: Layer.Layer<
 						try: () => addProject(directory, instanceId),
 						catch: toError("add"),
 					});
-					const projects = listConfigProjects() ?? [project];
+					const projects = (yield* listConfigProjects()) ?? [project];
 					return { project, projects };
 				}),
 			remove: (slug) =>
@@ -124,7 +134,7 @@ export const ProjectManagementServiceLive: Layer.Layer<
 						try: () => Promise.resolve(removeProject(slug)),
 						catch: toError("remove"),
 					});
-					return listConfigProjects() ?? [];
+					return (yield* listConfigProjects()) ?? [];
 				}),
 			rename: (slug, title) =>
 				Effect.gen(function* () {
@@ -139,7 +149,7 @@ export const ProjectManagementServiceLive: Layer.Layer<
 						try: () => setProjectTitle(slug, title),
 						catch: toError("rename"),
 					});
-					return listConfigProjects() ?? [];
+					return (yield* listConfigProjects()) ?? [];
 				}),
 			setProjectInstance: (slug, instanceId) =>
 				Effect.gen(function* () {
@@ -155,7 +165,8 @@ export const ProjectManagementServiceLive: Layer.Layer<
 						try: () => Promise.resolve(setProjectInstance(slug, instanceId)),
 						catch: toError("setInstance"),
 					});
-					return getProjects();
+					const projects = yield* listConfigProjects();
+					return projects ?? [];
 				}),
 		};
 	}),

@@ -13,10 +13,27 @@
 import { mkdirSync } from "node:fs";
 import type http from "node:http";
 import { resolve } from "node:path";
-import { Context, Data, Effect, Layer, Ref } from "effect";
+import {
+	Cause,
+	Context,
+	Data,
+	Effect,
+	Exit,
+	Layer,
+	Ref,
+	Runtime,
+} from "effect";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import {
+	getInstances as getEffectInstances,
+	InstanceManagerStateTag,
+} from "../Services/instance-manager-service.js";
+import {
+	allProjects as getEffectProjects,
+	ProjectRegistryTag,
+} from "../Services/project-registry-service.js";
 
 // ─── Error types ────────────────────────────────────────────────────────────
 
@@ -95,12 +112,47 @@ export class RelayFactoryTag extends Context.Tag("RelayFactory")<
  */
 export const RelayFactoryLive = (
 	configDir: string,
-): Layer.Layer<RelayFactoryTag | HttpServerRefTag, never, DaemonConfigRefTag> =>
+): Layer.Layer<
+	RelayFactoryTag | HttpServerRefTag,
+	never,
+	DaemonConfigRefTag | ProjectRegistryTag | InstanceManagerStateTag
+> =>
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const httpServerRef = yield* HttpServerRefTag;
+			const projectRegistry = yield* ProjectRegistryTag;
+			const instanceState = yield* InstanceManagerStateTag;
+			const runtime = yield* Effect.runtime<never>();
+
+			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
+				new Promise<A>((resolve, reject) => {
+					Runtime.runCallback(runtime)(effect, {
+						onExit: (exit) => {
+							if (Exit.isSuccess(exit)) {
+								resolve(exit.value);
+								return;
+							}
+							reject(Cause.squash(exit.cause));
+						},
+					});
+				});
+
+			const getProjects = () =>
+				runCallback(
+					getEffectProjects.pipe(
+						Effect.provideService(ProjectRegistryTag, projectRegistry),
+					),
+				);
+
+			const getInstances = () =>
+				runCallback(
+					getEffectInstances.pipe(
+						Effect.map((instances) => Array.from(instances)),
+						Effect.provideService(InstanceManagerStateTag, instanceState),
+					),
+				);
 
 			return {
 				create: (
@@ -157,6 +209,8 @@ export const RelayFactoryLive = (
 									signal: ac.signal,
 									configDir,
 									persistenceDbPath: dbPath,
+									getProjects,
+									getInstances,
 								});
 							},
 							catch: (cause) =>

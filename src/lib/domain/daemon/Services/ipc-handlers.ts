@@ -372,8 +372,17 @@ export const handleInstanceList = (
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
-		const instances = mgmt.getInstances();
-		return { ok: true, instances };
+		return yield* tryInstanceMgmtPromise("getInstances", () =>
+			Promise.resolve(mgmt.getInstances()),
+		).pipe(
+			Effect.map((instances) => ({ ok: true, instances }) as IPCResponse),
+			Effect.catchAll((failure) =>
+				Effect.succeed({
+					ok: false,
+					error: formatInstanceMgmtFailure(failure),
+				} as IPCResponse),
+			),
+		);
 	});
 
 export const handleInstanceAdd = (
@@ -467,7 +476,13 @@ export const handleInstanceStatus = (
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
-		const instances = mgmt.getInstances();
+		const instances = yield* tryInstanceMgmtPromise("getInstances", () =>
+			Promise.resolve(mgmt.getInstances()),
+		).pipe(
+			Effect.catchAll((failure) =>
+				Effect.fail(failInstanceMgmtOperation("getInstances", failure)),
+			),
+		);
 		const instance = instances.find((i) => i.id === cmd.id);
 
 		if (!instance) {
@@ -475,7 +490,14 @@ export const handleInstanceStatus = (
 		}
 
 		return { ok: true, instance };
-	});
+	}).pipe(
+		Effect.catchAll((failure) =>
+			Effect.succeed({
+				ok: false,
+				error: formatInstanceMgmtFailure(failure),
+			} as IPCResponse),
+		),
+	);
 
 export const handleInstanceUpdate = (
 	cmd: CmdOf<"instance_update">,

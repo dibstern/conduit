@@ -12,6 +12,8 @@ import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 
 // ─── HttpServerRefTag tests ─────────────────────────────────────────────────
 
@@ -56,7 +58,11 @@ describe("HttpServerRefTag", () => {
 // ─── RelayFactoryTag tests ──────────────────────────────────────────────────
 
 describe("RelayFactoryTag", () => {
-	const configLayer = DaemonConfigRefLive(makeDaemonConfigFromOptions({}));
+	const configLayer = Layer.mergeAll(
+		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+		makeProjectRegistryLive(),
+		makeInstanceManagerStateLive(),
+	);
 
 	// RelayFactoryLive provides both RelayFactoryTag and HttpServerRefTag.
 	// It requires DaemonConfigRefTag from the caller.
