@@ -5,15 +5,13 @@ import {
 // ─── IPC Effect Handlers Tests ────────────────────────────────────────────────
 // Verify that Effect-returning IPC handlers correctly interact with services.
 
-import { FileSystem } from "@effect/platform";
-import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
 import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
-import { PersistencePathTag } from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import type { DaemonState } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
@@ -49,49 +47,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 
-// ─── In-memory test FileSystem ────────────────────────────────────────────────
-
-const makeTestFileSystem = () => {
-	const files = new Map<string, string>();
-
-	const fs: FileSystem.FileSystem = FileSystem.makeNoop({
-		readFileString: (path: string) =>
-			Effect.gen(function* () {
-				const content = files.get(path);
-				if (content === undefined) {
-					return yield* Effect.fail(
-						new SystemError({
-							reason: "NotFound",
-							module: "FileSystem",
-							method: "readFileString",
-							description: `File not found: ${path}`,
-							pathOrDescriptor: path,
-						}),
-					);
-				}
-				return content;
-			}),
-		writeFileString: (path: string, data: string) =>
-			Effect.sync(() => {
-				files.set(path, data);
-			}),
-		rename: (oldPath: string, newPath: string) =>
-			Effect.sync(() => {
-				const content = files.get(oldPath);
-				if (content !== undefined) {
-					files.set(newPath, content);
-					files.delete(oldPath);
-				}
-			}),
-		makeDirectory: () => Effect.void,
-	});
-
-	return { files, layer: Layer.succeed(FileSystem.FileSystem, fs) };
-};
-
 // ─── Mock factories ──────────────────────────────────────────────────────────
-
-const CONFIG_PATH = "/test-config/daemon.json";
 
 const makeMockProjectMgmt = () =>
 	Layer.succeed(ProjectMgmtTag, {
@@ -177,10 +133,7 @@ const makeMockShutdownSignal = () =>
 	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
 
 const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
-	const testFs = makeTestFileSystem();
 	return Layer.mergeAll(
-		testFs.layer,
-		Layer.succeed(PersistencePathTag, CONFIG_PATH),
 		makeDaemonStateLive(stateOverrides),
 		makeMockProjectMgmt(),
 		makeMockInstanceMgmt(),
@@ -188,6 +141,10 @@ const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
 		makeMockKeepAwake(),
 		makeMockConfigRef(),
 		makeMockShutdownSignal(),
+		Layer.succeed(ConfigPersistenceTag, {
+			requestSave: Effect.void,
+			flush: Effect.void,
+		}),
 	);
 };
 
@@ -324,6 +281,9 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwake).toBe(true);
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.keepAwake).toBe(true);
 
 				// Verify KeepAwakeTag was activated
 				const ka = yield* KeepAwakeTag;
@@ -348,6 +308,9 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwake).toBe(false);
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.keepAwake).toBe(false);
 
 				// Verify KeepAwakeTag was deactivated
 				const isActive = yield* ka.isActive();
@@ -454,6 +417,10 @@ describe("IPC handlers", () => {
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwakeCommand).toBe("caffeinate");
 				expect(state.keepAwakeArgs).toEqual(["-d"]);
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.keepAwakeCommand).toBe("caffeinate");
+				expect(config.keepAwakeArgs).toEqual(["-d"]);
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});

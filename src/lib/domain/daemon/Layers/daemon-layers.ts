@@ -361,7 +361,12 @@ export const makeIpcServerLive = (
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			const runtime = yield* Effect.runtime<never>();
+			const runtime = yield* Effect.runtime<
+				| ConfigPersistenceTag
+				| DaemonConfigRefTag
+				| DaemonStateTag
+				| KeepAwakeTag
+			>();
 			yield* startLifecycleServer("startIPCServer", () =>
 				startIPCServer(ctx, ipcContext, (request, rpcLayer) =>
 					Runtime.runPromise(runtime)(
@@ -570,6 +575,23 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			: ConfigSnapshotFromEffectStateLive
 	).pipe(Layer.provideMerge(withRelayCache));
 
+	const withConfigPersistence = ConfigPersistenceLive.pipe(
+		Layer.provideMerge(configSnapshotLayer),
+	);
+
+	const keepAwakeLayer =
+		options.keepAwake !== undefined
+			? makeKeepAwakeLive(options.keepAwake)
+			: Layer.succeed(KeepAwakeTag, {
+					activate: () => Effect.void,
+					deactivate: () => Effect.void,
+					isActive: () => Effect.succeed(false),
+					isSupported: () => Effect.succeed(false),
+				});
+	const withDaemonControl = keepAwakeLayer.pipe(
+		Layer.provideMerge(withConfigPersistence),
+	);
+
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.httpRouter);
 	const httpAndIpc = Layer.mergeAll(
@@ -580,32 +602,14 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const servers = makeOnboardingServerLive(
 		options.ctx,
 		options.onboarding,
-	).pipe(
-		Layer.provideMerge(httpAndIpc),
-		Layer.provideMerge(configSnapshotLayer),
-	);
+	).pipe(Layer.provideMerge(httpAndIpc), Layer.provideMerge(withDaemonControl));
 
-	const withConfigPersistence = ConfigPersistenceLive.pipe(
-		Layer.provideMerge(servers),
-	);
-
-	const withDaemonWiring = DaemonWiringLive.pipe(
-		Layer.provideMerge(withConfigPersistence),
-	);
+	const withDaemonWiring = DaemonWiringLive.pipe(Layer.provideMerge(servers));
 
 	// ── Tier 4: Background services (optional) ────────────────────────────
 	// When a config is not provided, a no-op stub Layer provides the Tag
 	// so the service is always resolvable. This avoids type erasure and
 	// ensures wiring tests can verify all Tags without any casts.
-	const keepAwakeLayer =
-		options.keepAwake !== undefined
-			? makeKeepAwakeLive(options.keepAwake)
-			: Layer.succeed(KeepAwakeTag, {
-					activate: () => Effect.void,
-					deactivate: () => Effect.void,
-					isActive: () => Effect.succeed(false),
-					isSupported: () => Effect.succeed(false),
-				});
 	const versionCheckLayer = options.versionCheck
 		? makeVersionCheckerLive(options.versionCheck)
 		: Layer.succeed(VersionCheckerTag, {
@@ -624,7 +628,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				getKnownPorts: () => Effect.succeed(new Set<number>()),
 			});
 	const withBackground = Layer.mergeAll(
-		keepAwakeLayer,
 		versionCheckLayer,
 		storageMonLayer,
 		portScannerLayer,

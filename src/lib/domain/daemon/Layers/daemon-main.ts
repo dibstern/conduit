@@ -45,7 +45,6 @@ import {
 } from "../Services/daemon-startup.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
 import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
-import { KeepAwakeTag } from "./keep-awake-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -640,28 +639,6 @@ export async function startDaemonProcess(
 		if (typeof config["pinHash"] === "string" || config["pinHash"] === null) {
 			pinHash = config["pinHash"];
 		}
-		if (typeof config["keepAwake"] === "boolean") {
-			// AP-22: Forward keepAwake toggle to KeepAwakeTag
-			if (daemonRuntime) {
-				daemonRuntime.runPromise(
-					Effect.gen(function* () {
-						const ka = yield* KeepAwakeTag;
-						if (config["keepAwake"]) {
-							yield* ka.activate();
-						} else {
-							yield* ka.deactivate();
-						}
-					}).pipe(
-						Effect.catchAll((e) =>
-							Effect.logWarning(
-								"applyRestartConfig: failed to toggle KeepAwakeTag",
-								{ error: String(e) },
-							),
-						),
-					),
-				);
-			}
-		}
 	}
 
 	// ── Registry event listeners ──────────────────────────────────────────
@@ -1242,48 +1219,6 @@ export async function startDaemonProcess(
 		getPinHash: () => readRuntimeConfigSnapshot().pinHash,
 		setPinHash: (hash: string) => {
 			updateRuntimeConfigSync((c) => ({ ...c, pinHash: hash }));
-			persistConfig();
-		},
-		getKeepAwake: () => readRuntimeConfigSnapshot().keepAwake,
-		setKeepAwake: (enabled: boolean) => {
-			updateRuntimeConfigSync((c) => ({ ...c, keepAwake: enabled }));
-			// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling.
-			let supported = false;
-			let active = false;
-			if (daemonRuntime) {
-				daemonRuntime.runPromise(
-					Effect.gen(function* () {
-						const ka = yield* KeepAwakeTag;
-						if (enabled) {
-							yield* ka.activate();
-						} else {
-							yield* ka.deactivate();
-						}
-						supported = yield* ka.isSupported();
-						active = yield* ka.isActive();
-					}).pipe(
-						Effect.catchAll((e) =>
-							Effect.logWarning("setKeepAwake: failed to toggle KeepAwakeTag", {
-								error: String(e),
-							}),
-						),
-					),
-				);
-			}
-			persistConfig();
-			return { supported, active };
-		},
-		setKeepAwakeCommand: (command: string, args: string[]) => {
-			updateRuntimeConfigSync((c) => ({
-				...c,
-				keepAwakeCommand: command,
-				keepAwakeArgs: args,
-			}));
-			// AP-23: KeepAwakeTag is scoped and its command is fixed at construction.
-			// To apply a new command, the Layer would need to be rebuilt (Task 11).
-			// For now, persist the new command so it takes effect on next restart.
-			// If keep-awake is currently active, deactivate and reactivate won't
-			// change the underlying process — that requires Layer reconstruction.
 			persistConfig();
 		},
 		persistConfig: () => persistConfig(),

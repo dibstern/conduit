@@ -3,7 +3,6 @@
 // the appropriate Effect-returning IPC handler.
 
 import type { Socket } from "node:net";
-import type { FileSystem } from "@effect/platform";
 import { Context, Effect, Schema, Stream } from "effect";
 import type { DaemonIPCContext } from "../../../daemon/daemon-ipc.js";
 import {
@@ -14,7 +13,7 @@ import type { IPCResponse } from "../../../types.js";
 import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import type { ShutdownSignalTag } from "../Layers/daemon-layers.js";
 import type { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
-import type { PersistencePathTag } from "./daemon-config-persistence.js";
+import type { ConfigPersistenceTag } from "./config-persistence-service.js";
 import type { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonStateTag } from "./daemon-state.js";
 import {
@@ -46,8 +45,7 @@ import type { InstanceMgmtTag, ProjectMgmtTag } from "./management-service.js";
 export type IpcHandlerDeps =
 	| DaemonStateTag
 	| DaemonConfigRefTag
-	| FileSystem.FileSystem
-	| PersistencePathTag
+	| ConfigPersistenceTag
 	| InstanceMgmtTag
 	| ProjectMgmtTag
 	| OverridesStateTag

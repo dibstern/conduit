@@ -6,7 +6,6 @@ import { InstanceMgmtTag } from "./management-service.js";
 // 3. Returns an IPCResponse-compatible object
 // 4. Error channel is `never` (handlers catch/transform expected errors)
 
-import type { FileSystem } from "@effect/platform";
 import { Deferred, Effect, Ref, type Schema } from "effect";
 import { hashPin } from "../../../auth.js";
 import type { IPCCommandSchema } from "../../../daemon/ipc-protocol.js";
@@ -21,9 +20,9 @@ import {
 import { ShutdownSignalTag } from "../Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import {
-	type PersistencePathTag,
-	persistConfig,
-} from "./daemon-config-persistence.js";
+	type ConfigPersistenceTag,
+	requestConfigSave,
+} from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonStateTag } from "./daemon-state.js";
 
@@ -35,7 +34,7 @@ type CmdOf<C extends string> = Extract<DecodedCommand, { cmd: C }>;
 // ─── Shared dependency types ─────────────────────────────────────────────────
 
 /** Dependencies needed for persistConfig calls. */
-type PersistDeps = DaemonStateTag | FileSystem.FileSystem | PersistencePathTag;
+type PersistDeps = ConfigPersistenceTag;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,7 +95,7 @@ export const handleAddProject = (
 			],
 		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 		return { ok: true, slug, directory: cmd.directory };
 	});
 
@@ -117,7 +116,7 @@ export const handleRemoveProject = (
 			projects: s.projects.filter((p) => p.slug !== cmd.slug),
 		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 		return { ok: true };
 	});
 
@@ -140,7 +139,7 @@ export const handleSetProjectTitle = (
 			),
 		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 		return { ok: true };
 	});
 
@@ -167,7 +166,7 @@ export const handleSetPin = (
 			pinHash: hashed,
 		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 		return { ok: true };
 	});
 
@@ -176,10 +175,11 @@ export const handleSetKeepAwake = (
 ): Effect.Effect<
 	IPCResponse,
 	never,
-	DaemonStateTag | KeepAwakeTag | PersistDeps
+	DaemonStateTag | DaemonConfigRefTag | KeepAwakeTag | PersistDeps
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
+		const configRef = yield* DaemonConfigRefTag;
 		const keepAwake = yield* KeepAwakeTag;
 
 		// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling,
@@ -198,24 +198,38 @@ export const handleSetKeepAwake = (
 			...s,
 			keepAwake: cmd.enabled,
 		}));
+		yield* Ref.update(configRef, (c) => ({
+			...c,
+			keepAwake: cmd.enabled,
+		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 		return { ok: true, supported, active };
 	});
 
 export const handleSetKeepAwakeCommand = (
 	cmd: CmdOf<"set_keep_awake_command">,
-): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
+): Effect.Effect<
+	IPCResponse,
+	never,
+	DaemonStateTag | DaemonConfigRefTag | PersistDeps
+> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
+		const configRef = yield* DaemonConfigRefTag;
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
 			keepAwakeCommand: cmd.command,
 			keepAwakeArgs: [...cmd.args],
 		}));
+		yield* Ref.update(configRef, (c) => ({
+			...c,
+			keepAwakeCommand: cmd.command,
+			keepAwakeArgs: [...cmd.args],
+		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 		return { ok: true };
 	});
 
@@ -455,7 +469,7 @@ export const handleRestartWithConfig = (
 			shuttingDown: true,
 		}));
 
-		yield* persistConfig;
+		yield* requestConfigSave;
 
 		// AP-25: Complete the ShutdownSignal Deferred to trigger graceful shutdown.
 		const shutdownDeferred = yield* ShutdownSignalTag;

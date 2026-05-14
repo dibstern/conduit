@@ -38,12 +38,6 @@ export interface DaemonIPCContext {
 	getPinHash(): string | null;
 	/** Update the PIN hash, auth manager, and persist config. */
 	setPinHash(hash: string): void;
-	/** Get current keepAwake state. */
-	getKeepAwake(): boolean;
-	/** Update keepAwake state, underlying manager, and persist config. */
-	setKeepAwake(enabled: boolean): { supported: boolean; active: boolean };
-	/** Set custom keep-awake command and args, replacing the current manager. */
-	setKeepAwakeCommand(command: string, args: string[]): void;
 	/** Persist daemon config to disk. */
 	persistConfig(): void;
 	/** Schedule a graceful daemon shutdown. */
@@ -178,20 +172,25 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 		},
 
 		setKeepAwake: async (enabled: boolean): Promise<IPCResponse> => {
-			const result = ctx.setKeepAwake(enabled);
-			return { ok: true, supported: result.supported, active: result.active };
+			void enabled;
+			return {
+				ok: false,
+				error:
+					"set_keep_awake is handled by Effect IPC dispatch, not buildIPCHandlers",
+			};
 		},
 
 		setKeepAwakeCommand: async (
 			command: string,
 			args: string[],
 		): Promise<IPCResponse> => {
-			try {
-				ctx.setKeepAwakeCommand(command, args);
-				return { ok: true };
-			} catch (err) {
-				return { ok: false, error: formatErrorDetail(err) };
-			}
+			void command;
+			void args;
+			return {
+				ok: false,
+				error:
+					"set_keep_awake_command is handled by Effect IPC dispatch, not buildIPCHandlers",
+			};
 		},
 
 		shutdown: async (): Promise<IPCResponse> => {

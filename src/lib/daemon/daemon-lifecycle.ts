@@ -30,6 +30,10 @@ import {
 	type IpcTaggedRequest,
 	IpcTaggedRequestSchema,
 } from "../contracts/ipc-requests.js";
+import {
+	handleSetKeepAwake,
+	handleSetKeepAwakeCommand,
+} from "../domain/daemon/Services/ipc-handlers.js";
 import { IpcRpcGroup } from "../domain/daemon/Services/ipc-rpc-group.js";
 import { formatErrorDetail } from "../errors.js";
 import { createLogger } from "../logger.js";
@@ -151,9 +155,9 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 				),
 			),
 		SetKeepAwake: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.setKeepAwake(request.enabled),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
+			handleSetKeepAwake({
+				cmd: "set_keep_awake",
+				enabled: request.enabled,
 			}).pipe(
 				Effect.flatMap((response) =>
 					response.ok
@@ -164,10 +168,10 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 				),
 			),
 		SetKeepAwakeCommand: (request) =>
-			Effect.tryPromise({
-				try: () =>
-					handlers.setKeepAwakeCommand(request.command, [...request.args]),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
+			handleSetKeepAwakeCommand({
+				cmd: "set_keep_awake_command",
+				command: request.command,
+				args: [...request.args],
 			}).pipe(
 				Effect.flatMap((response) =>
 					response.ok

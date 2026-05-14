@@ -61,7 +61,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, `ProviderRegistry` now exposes only instance-first APIs, provider implementation/test naming is instance-first, provider wait state now uses Effect `Deferred` for `EventSinkImpl`, OpenCode pending turns, Claude setup locks, and Claude turn queues, and the old provider Promise-deferred helper is deleted.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
-11. Daemon composition readiness. Started locally: IPC status reads now live on the IPC context instead of passing a separate `DaemonLiveOptions.getStatus` callback through the Layer graph, and legacy scheduled shutdown now disposes its owned `ManagedRuntime` instead of re-entering the runtime to complete `ShutdownSignalTag`.
+11. Daemon composition readiness. Started locally: IPC status reads now live on the IPC context instead of passing a separate `DaemonLiveOptions.getStatus` callback through the Layer graph, legacy scheduled shutdown now disposes its owned `ManagedRuntime` instead of re-entering the runtime to complete `ShutdownSignalTag`, and keep-awake IPC now runs through native Effect handlers with `KeepAwakeTag` / `ConfigPersistenceTag` available before the IPC server starts.
 12. Single-owner daemon cutover.
 13. Final guardrail cleanup.
 14. Final docs and verification.
@@ -566,3 +566,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 
 - Removed the legacy `scheduleShutdown()` call back into `ShutdownSignalTag`; the legacy daemon path now schedules `stop()` and lets `ManagedRuntime.dispose()` tear down the Layer graph.
 - Added guard coverage so scheduled shutdown cannot re-enter `daemonRuntime.runPromise(...)`.
+
+2026-05-14, daemon keep-awake IPC bridge cleanup:
+
+- Routed tagged and legacy-converted keep-awake IPC requests through the native Effect IPC handlers instead of `DaemonIPCContext` callbacks.
+- Moved `ConfigPersistenceLive` and `KeepAwakeTag` earlier in daemon Layer composition so IPC can use the owned services directly.
+- Updated keep-awake handlers to update both `DaemonStateTag` and `DaemonConfigRefTag`, then request persistence through `ConfigPersistenceTag`.
+- Added guard coverage so `daemon-main.ts` cannot reintroduce keep-awake runtime callbacks.

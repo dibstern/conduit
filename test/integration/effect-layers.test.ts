@@ -13,6 +13,7 @@ import { Deferred, Effect, Layer, Queue, Ref } from "effect";
 import { expect } from "vitest";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { ConfigPersistenceTag } from "../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { PersistencePathTag } from "../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
 import type { DaemonRuntimeConfig } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonConfigRefTag } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
@@ -192,6 +193,10 @@ const ipcDepsLayer = Layer.mergeAll(
 	makeMockKeepAwake(),
 	makeMockConfigRef(),
 	makeMockShutdownSignal(),
+	Layer.succeed(ConfigPersistenceTag, {
+		requestSave: Effect.void,
+		flush: Effect.void,
+	}),
 );
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

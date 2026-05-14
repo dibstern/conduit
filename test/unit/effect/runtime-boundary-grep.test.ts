@@ -115,6 +115,70 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not route keep-awake IPC through daemon-main runtime callbacks", () => {
+		const retiredBridgePatterns = [
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bKeepAwakeTag\b/,
+				reason: "keep-awake IPC should run through native Effect IPC handlers",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bsetKeepAwake(Command)?:\s*\(/,
+				reason:
+					"daemon-main should not expose keep-awake mutation callbacks to IPC",
+			},
+			{
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
+				pattern: /\bgetKeepAwake:\s*\(/,
+				reason: "keep-awake status should come from the daemon status snapshot",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				);
+		});
+
+		const daemonIpcPath = "src/lib/daemon/daemon-ipc.ts";
+		const daemonIpcSource = readFileSync(
+			join(REPO_ROOT, daemonIpcPath),
+			"utf8",
+		);
+		const contextStart = daemonIpcSource.indexOf(
+			"export interface DaemonIPCContext",
+		);
+		const contextEnd = daemonIpcSource.indexOf(
+			"export interface IPCHandlerMap",
+			contextStart,
+		);
+		expect(contextStart).toBeGreaterThanOrEqual(0);
+		expect(contextEnd).toBeGreaterThan(contextStart);
+		const contextSource = daemonIpcSource.slice(contextStart, contextEnd);
+		const contextHits = contextSource.split("\n").flatMap((line, index) =>
+			/\b(getKeepAwake|setKeepAwake|setKeepAwakeCommand)\b/.test(line)
+				? [
+						{
+							path: daemonIpcPath,
+							line:
+								daemonIpcSource.slice(0, contextStart).split("\n").length +
+								index,
+							source: line.trim(),
+							reason: "DaemonIPCContext should not carry keep-awake callbacks",
+						},
+					]
+				: [],
+		);
+
+		expect([...hits, ...contextHits]).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{

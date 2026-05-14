@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Runtime } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Ref, Runtime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 const warnSpy = vi.hoisted(() => vi.fn());
@@ -41,8 +41,14 @@ import {
 } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../src/lib/daemon/daemon-types.js";
 import { parseCommand } from "../../../src/lib/daemon/ipc-protocol.js";
+import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import type {
 	InstanceConfig,
+	IPCResponse,
 	OpenCodeInstance,
 	StoredProject,
 } from "../../../src/lib/types.js";
@@ -64,7 +70,10 @@ const makeContext = (socketPath: string): DaemonLifecycleContext => ({
 
 const testTaggedDispatcher: TaggedIpcDispatcher = (request, rpcLayer) =>
 	Runtime.runPromise(Runtime.defaultRuntime)(
-		dispatchTaggedRequestEffect(request, rpcLayer),
+		dispatchTaggedRequestEffect(
+			request,
+			rpcLayer,
+		) as Effect.Effect<IPCResponse>,
 	);
 
 const startTestIPCServer = (
@@ -80,6 +89,53 @@ const startTestIPCServer = (
 		},
 		testTaggedDispatcher,
 	);
+
+const makeNativeIpcDispatcher = () => {
+	const initialConfig: import("../../../src/lib/domain/daemon/Services/daemon-config-ref.js").DaemonRuntimeConfig =
+		{
+			port: 2633,
+			host: "127.0.0.1",
+			pinHash: null,
+			tlsEnabled: false,
+			keepAwake: false,
+			keepAwakeCommand: undefined,
+			keepAwakeArgs: undefined,
+			shuttingDown: false,
+			dismissedPaths: new Set<string>(),
+			startTime: Date.now(),
+			hostExplicit: false,
+			persistedSessionCounts: new Map<string, number>(),
+		};
+	const nativeLayer = Layer.mergeAll(
+		makeDaemonStateLive(),
+		Layer.effect(DaemonConfigRefTag, Ref.make(initialConfig)),
+		Layer.effect(
+			KeepAwakeTag,
+			Effect.gen(function* () {
+				const active = yield* Ref.make(false);
+				return {
+					activate: () => Ref.set(active, true),
+					deactivate: () => Ref.set(active, false),
+					isActive: () => Ref.get(active),
+					isSupported: () => Effect.succeed(true),
+				};
+			}),
+		),
+		Layer.succeed(ConfigPersistenceTag, {
+			requestSave: Effect.void,
+			flush: Effect.void,
+		}),
+		Layer.effect(ShutdownSignalTag, Deferred.make<void>()),
+	);
+	const runtime = ManagedRuntime.make(nativeLayer);
+	return {
+		dispatch: ((request, rpcLayer) =>
+			runtime.runPromise(
+				dispatchTaggedRequestEffect(request, rpcLayer),
+			)) satisfies TaggedIpcDispatcher,
+		dispose: () => runtime.dispose(),
+	};
+};
 
 const makeStatus = (overrides: Partial<DaemonStatus> = {}): DaemonStatus => ({
 	ok: true,
@@ -170,9 +226,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -239,9 +292,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setProjectTitle: () => {},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -281,6 +331,67 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		}
 	});
 
+	it("routes tagged SetKeepAwake through the native Effect handler", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
+		const ctx = makeContext(join(tmp, "daemon.sock"));
+		const native = makeNativeIpcDispatcher();
+
+		const ipcContext: TestDaemonIPCContext = {
+			addProject: async (directory) => ({
+				slug: "project",
+				directory,
+				title: "Project",
+			}),
+			removeProject: async () => {},
+			getProjects: () => [],
+			setProjectTitle: () => {},
+			getPinHash: () => null,
+			setPinHash: () => {},
+			persistConfig: () => {},
+			scheduleShutdown: () => {},
+			setProjectAgent: async () => {},
+			setProjectModel: async () => {},
+			getInstances: () => [],
+			getInstance: () => undefined,
+			addInstance: (id, config) => makeInstance(id, config),
+			removeInstance: () => {},
+			startInstance: async () => {},
+			stopInstance: () => {},
+			updateInstance: (id, updates) =>
+				makeInstance(id, {
+					name: updates.name ?? id,
+					port: updates.port ?? 0,
+					managed: true,
+					...(updates.env !== undefined ? { env: updates.env } : {}),
+				}),
+		};
+
+		try {
+			await startIPCServer(
+				ctx,
+				{
+					...ipcContext,
+					getStatus: ipcContext.getStatus ?? makeStatus,
+				},
+				native.dispatch,
+			);
+			const response = await sendJsonLine(ctx.socketPath, {
+				_tag: "SetKeepAwake",
+				enabled: true,
+			});
+
+			expect(response).toEqual({
+				ok: true,
+				supported: true,
+				active: true,
+			});
+		} finally {
+			await closeIPCServer(ctx);
+			await native.dispose();
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
 	it("routes legacy set_agent through the project override port", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
@@ -298,9 +409,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setProjectTitle: () => {},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent,
@@ -355,9 +463,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setProjectTitle: () => {},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -416,9 +521,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setProjectTitle: () => {},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig,
 			scheduleShutdown,
 			applyConfig,
@@ -471,9 +573,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setProjectTitle: () => {},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
@@ -552,9 +651,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			setProjectTitle: () => {},
 			getPinHash: () => null,
 			setPinHash: () => {},
-			getKeepAwake: () => false,
-			setKeepAwake: () => ({ supported: true, active: false }),
-			setKeepAwakeCommand: () => {},
 			persistConfig: () => {},
 			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
