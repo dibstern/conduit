@@ -3,6 +3,7 @@ import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-listing-service.js";
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { switchContextWindowForSession } from "../handlers/context-window.js";
 import {
@@ -31,10 +32,15 @@ import {
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../handlers/session.js";
-import { getCommandsForSession, getTodoState } from "../handlers/settings.js";
+import {
+	getCommandsForSession,
+	getTodoState,
+	normalizeProjectTitle,
+} from "../handlers/settings.js";
 import type { PermissionId } from "../shared-types.js";
 
 export {
+	AddProject,
 	AnswerQuestion,
 	CancelSession,
 	CreateSession,
@@ -67,10 +73,13 @@ export {
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
 	type ModelInfo,
+	type ProjectMutationResponse,
 	type ProviderInfo,
 	RejectQuestion,
 	ReloadProviderSession,
 	type ReloadProviderSessionResponse,
+	RemoveProject,
+	RenameProject,
 	RenameSession,
 	RespondPermission,
 	RewindSession,
@@ -78,6 +87,7 @@ export {
 	type SessionInfo,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
+	SetProjectInstance,
 	SwitchAgent,
 	SwitchContextWindow,
 	type SwitchContextWindowResponse,
@@ -150,6 +160,120 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `GetProjects failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	AddProject: (request) =>
+		Effect.gen(function* () {
+			const projectService = yield* ProjectManagementServiceTag;
+			const result = yield* projectService.add(
+				request.directory,
+				request.instanceId,
+			);
+			const current = yield* projectService.currentSlug();
+			return {
+				projectSlug: request.projectSlug,
+				projects: result.projects,
+				...(current ? { current } : {}),
+				addedSlug: result.project.slug,
+			};
+		}).pipe(
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `AddProject failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	RemoveProject: (request) =>
+		Effect.gen(function* () {
+			const projectService = yield* ProjectManagementServiceTag;
+			const wsHandler = yield* WebSocketHandlerTag;
+			const projects = yield* projectService.remove(request.slug);
+			const current = yield* projectService.currentSlug();
+			const message = {
+				type: "project_list" as const,
+				projects,
+				...(current ? { current } : {}),
+			};
+			wsHandler.broadcast(message);
+			return {
+				projectSlug: request.projectSlug,
+				projects,
+				...(current ? { current } : {}),
+			};
+		}).pipe(
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `RemoveProject failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	RenameProject: (request) =>
+		Effect.gen(function* () {
+			const projectService = yield* ProjectManagementServiceTag;
+			const wsHandler = yield* WebSocketHandlerTag;
+			const title = normalizeProjectTitle(request.title);
+			if (!title) {
+				return yield* Effect.fail(
+					new WsRpcError({
+						message: "RenameProject failed: title is required",
+					}),
+				);
+			}
+			const projects = yield* projectService.rename(request.slug, title);
+			const current = yield* projectService.currentSlug();
+			const message = {
+				type: "project_list" as const,
+				projects,
+				...(current ? { current } : {}),
+			};
+			wsHandler.broadcast(message);
+			return {
+				projectSlug: request.projectSlug,
+				projects,
+				...(current ? { current } : {}),
+			};
+		}).pipe(
+			Effect.catchAll((error) =>
+				error instanceof WsRpcError
+					? Effect.fail(error)
+					: Effect.fail(
+							new WsRpcError({
+								message: `RenameProject failed: ${String(error)}`,
+							}),
+						),
+			),
+		),
+	SetProjectInstance: (request) =>
+		Effect.gen(function* () {
+			const projectService = yield* ProjectManagementServiceTag;
+			const wsHandler = yield* WebSocketHandlerTag;
+			const projects = yield* projectService.setProjectInstance(
+				request.slug,
+				request.instanceId,
+			);
+			const current = yield* projectService.currentSlug();
+			const message = {
+				type: "project_list" as const,
+				projects,
+				...(current ? { current } : {}),
+			};
+			wsHandler.broadcast(message);
+			return {
+				projectSlug: request.projectSlug,
+				projects,
+				...(current ? { current } : {}),
+			};
+		}).pipe(
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `SetProjectInstance failed: ${String(error)}`,
 					}),
 				),
 			),

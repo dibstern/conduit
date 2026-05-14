@@ -13,8 +13,12 @@
 	} from "../../stores/ui.svelte.js";
 	import { wsState, wsSend } from "../../stores/ws.svelte.js";
 	import { terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
-	import { getCurrentSlug, navigate } from "../../stores/router.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import {
+		applyProjectMutationResponse,
+		projectState,
+	} from "../../stores/project.svelte.js";
+	import { setProjectInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import {
 		instanceState,
 		getInstanceById,
@@ -83,7 +87,13 @@
 		// Rebind the current project to the selected instance
 		const slug = getCurrentSlug();
 		if (slug) {
-			wsSend({ type: "set_project_instance", slug, instanceId });
+			void setProjectInstanceRpc({
+				projectSlug: slug,
+				slug,
+				instanceId,
+			})
+				.then(applyProjectMutationResponse)
+				.catch(() => undefined);
 		}
 	}
 

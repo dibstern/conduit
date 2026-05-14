@@ -16,7 +16,10 @@ import { type ErrorCode, RelayError } from "../errors.js";
 import type { TodoItem } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 
-const MAX_PROJECT_TITLE_LENGTH = 100;
+export const MAX_PROJECT_TITLE_LENGTH = 100;
+
+export const normalizeProjectTitle = (title: string): string =>
+	title.trim().slice(0, MAX_PROJECT_TITLE_LENGTH);
 
 const toProjectSystemError = (
 	error: ProjectManagementServiceError | ProjectManagementNotSupported,
@@ -188,7 +191,7 @@ export const handleRenameProject = (
 			);
 			return;
 		}
-		let title = (payload.title ?? "").trim();
+		const title = normalizeProjectTitle(payload.title ?? "");
 		if (!title) {
 			wsHandler.sendTo(
 				clientId,
@@ -198,7 +201,6 @@ export const handleRenameProject = (
 			);
 			return;
 		}
-		title = title.slice(0, MAX_PROJECT_TITLE_LENGTH);
 		const renameResult = yield* Effect.either(
 			projectService.rename(slug, title),
 		);

@@ -3,6 +3,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Schema, type Scope } from "effect";
 import { expect } from "vitest";
 import {
+	AddProject,
 	AnswerQuestion,
 	CancelSession,
 	CreateSession,
@@ -22,11 +23,14 @@ import {
 	LoadMoreHistory,
 	RejectQuestion,
 	ReloadProviderSession,
+	RemoveProject,
+	RenameProject,
 	RenameSession,
 	RespondPermission,
 	RewindSession,
 	SendMessage,
 	SetDefaultModel,
+	SetProjectInstance,
 	SwitchAgent,
 	SwitchContextWindow,
 	SwitchModel,
@@ -97,6 +101,50 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 								slug: "demo",
 								title: "Demo",
 								directory: "/tmp/demo",
+							},
+						],
+						current: "demo",
+					}),
+				AddProject: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						projects: [
+							{
+								slug: "new-project",
+								title: "New Project",
+								directory: request.directory,
+							},
+						],
+						current: "demo",
+						addedSlug: "new-project",
+					}),
+				RemoveProject: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						projects: [],
+						current: "demo",
+					}),
+				RenameProject: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						projects: [
+							{
+								slug: request.slug,
+								title: request.title,
+								directory: "/tmp/demo",
+							},
+						],
+						current: "demo",
+					}),
+				SetProjectInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						projects: [
+							{
+								slug: request.slug,
+								title: "Demo",
+								directory: "/tmp/demo",
+								instanceId: request.instanceId,
 							},
 						],
 						current: "demo",
@@ -220,6 +268,10 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetAgents")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetCommands")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetProjects")).toBe(true);
+		expect(WsRpcGroup.requests.has("AddProject")).toBe(true);
+		expect(WsRpcGroup.requests.has("RemoveProject")).toBe(true);
+		expect(WsRpcGroup.requests.has("RenameProject")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
@@ -293,6 +345,39 @@ describe("browser WebSocket RPC contract", () => {
 					],
 					current: "demo",
 				});
+
+				const addedProject = yield* client.AddProject({
+					projectSlug: "demo",
+					directory: "/tmp/new-project",
+					instanceId: "inst-1",
+				});
+				expect(addedProject.addedSlug).toBe("new-project");
+				expect(addedProject.projects[0]?.directory).toBe("/tmp/new-project");
+
+				expect(
+					yield* client.RemoveProject({
+						projectSlug: "demo",
+						slug: "old-project",
+					}),
+				).toEqual({
+					projectSlug: "demo",
+					projects: [],
+					current: "demo",
+				});
+
+				const renamedProject = yield* client.RenameProject({
+					projectSlug: "demo",
+					slug: "demo",
+					title: "Renamed Demo",
+				});
+				expect(renamedProject.projects[0]?.title).toBe("Renamed Demo");
+
+				const reboundProject = yield* client.SetProjectInstance({
+					projectSlug: "demo",
+					slug: "demo",
+					instanceId: "inst-2",
+				});
+				expect(reboundProject.projects[0]?.instanceId).toBe("inst-2");
 
 				const directories = yield* client.ListDirectories({
 					projectSlug: "demo",
@@ -538,6 +623,32 @@ describe("browser WebSocket RPC contract", () => {
 		expect(new GetAgents({ projectSlug: "demo" })._tag).toBe("GetAgents");
 		expect(new GetCommands({ projectSlug: "demo" })._tag).toBe("GetCommands");
 		expect(new GetProjects({ projectSlug: "demo" })._tag).toBe("GetProjects");
+		expect(
+			new AddProject({
+				projectSlug: "demo",
+				directory: "/tmp/new-project",
+			})._tag,
+		).toBe("AddProject");
+		expect(
+			new RemoveProject({
+				projectSlug: "demo",
+				slug: "old-project",
+			})._tag,
+		).toBe("RemoveProject");
+		expect(
+			new RenameProject({
+				projectSlug: "demo",
+				slug: "demo",
+				title: "Renamed Demo",
+			})._tag,
+		).toBe("RenameProject");
+		expect(
+			new SetProjectInstance({
+				projectSlug: "demo",
+				slug: "demo",
+				instanceId: "inst-1",
+			})._tag,
+		).toBe("SetProjectInstance");
 		expect(
 			new CreateSession({
 				projectSlug: "demo",

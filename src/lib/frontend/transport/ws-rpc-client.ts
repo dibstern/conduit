@@ -19,6 +19,7 @@ import {
 	type LoadMoreHistoryResponse,
 	type PermissionDecision,
 	type PermissionPersistScope,
+	type ProjectMutationResponse,
 	type ReloadProviderSessionResponse,
 	type SetDefaultModelResponse,
 	type SwitchContextWindowResponse,
@@ -49,6 +50,29 @@ export interface GetCommandsRpcInput {
 
 export interface GetProjectsRpcInput {
 	readonly projectSlug: string;
+}
+
+export interface AddProjectRpcInput {
+	readonly projectSlug: string;
+	readonly directory: string;
+	readonly instanceId?: string;
+}
+
+export interface RemoveProjectRpcInput {
+	readonly projectSlug: string;
+	readonly slug: string;
+}
+
+export interface RenameProjectRpcInput {
+	readonly projectSlug: string;
+	readonly slug: string;
+	readonly title: string;
+}
+
+export interface SetProjectInstanceRpcInput {
+	readonly projectSlug: string;
+	readonly slug: string;
+	readonly instanceId: string;
 }
 
 export interface CreateSessionRpcInput {
@@ -279,6 +303,62 @@ const callGetProjects = (input: GetProjectsRpcInput) =>
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
 			return yield* client.GetProjects(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callAddProject = (input: AddProjectRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.AddProject({
+				projectSlug: input.projectSlug,
+				directory: input.directory,
+				...(input.instanceId != null ? { instanceId: input.instanceId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callRemoveProject = (input: RemoveProjectRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.RemoveProject(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callRenameProject = (input: RenameProjectRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.RenameProject(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.SetProjectInstance(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -721,6 +801,34 @@ export async function getProjectsRpc(
 ): Promise<GetProjectsResponse> {
 	const runtime = await getRuntime();
 	return await runtime.runPromise(callGetProjects(input));
+}
+
+export async function addProjectRpc(
+	input: AddProjectRpcInput,
+): Promise<ProjectMutationResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callAddProject(input));
+}
+
+export async function removeProjectRpc(
+	input: RemoveProjectRpcInput,
+): Promise<ProjectMutationResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callRemoveProject(input));
+}
+
+export async function renameProjectRpc(
+	input: RenameProjectRpcInput,
+): Promise<ProjectMutationResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callRenameProject(input));
+}
+
+export async function setProjectInstanceRpc(
+	input: SetProjectInstanceRpcInput,
+): Promise<ProjectMutationResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callSetProjectInstance(input));
 }
 
 export async function createSessionRpc(

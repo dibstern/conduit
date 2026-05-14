@@ -222,6 +222,13 @@ export const GetProjectsResponseSchema = Schema.Struct({
 	current: Schema.optional(Schema.String),
 });
 
+export const ProjectMutationResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	projects: Schema.Array(ProjectInfoSchema),
+	current: Schema.optional(Schema.String),
+	addedSlug: Schema.optional(Schema.String),
+});
+
 export const ListDirectoriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	path: Schema.String,
@@ -263,6 +270,7 @@ export type CommandInfo = typeof CommandInfoSchema.Type;
 export type GetCommandsResponse = typeof GetCommandsResponseSchema.Type;
 export type ProjectInfo = typeof ProjectInfoSchema.Type;
 export type GetProjectsResponse = typeof GetProjectsResponseSchema.Type;
+export type ProjectMutationResponse = typeof ProjectMutationResponseSchema.Type;
 export type ListDirectoriesResponse = typeof ListDirectoriesResponseSchema.Type;
 export type TodoItem = typeof TodoItemSchema.Type;
 export type GetTodoResponse = typeof GetTodoResponseSchema.Type;
@@ -322,6 +330,57 @@ export class GetProjects extends Schema.TaggedRequest<GetProjects>()(
 		success: GetProjectsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+		},
+	},
+) {}
+
+export class AddProject extends Schema.TaggedRequest<AddProject>()(
+	"AddProject",
+	{
+		failure: WsRpcError,
+		success: ProjectMutationResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			directory: NonEmptyString,
+			instanceId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
+	"RemoveProject",
+	{
+		failure: WsRpcError,
+		success: ProjectMutationResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			slug: NonEmptyString,
+		},
+	},
+) {}
+
+export class RenameProject extends Schema.TaggedRequest<RenameProject>()(
+	"RenameProject",
+	{
+		failure: WsRpcError,
+		success: ProjectMutationResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			slug: NonEmptyString,
+			title: NonEmptyString,
+		},
+	},
+) {}
+
+export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>()(
+	"SetProjectInstance",
+	{
+		failure: WsRpcError,
+		success: ProjectMutationResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			slug: NonEmptyString,
+			instanceId: NonEmptyString,
 		},
 	},
 ) {}
@@ -695,6 +754,10 @@ export const WsRpcRequest = Schema.Union(
 	GetFileContent,
 	GetToolContent,
 	GetModels,
+	AddProject,
+	RemoveProject,
+	RenameProject,
+	SetProjectInstance,
 	ListSessions,
 	CreateSession,
 	ViewSession,
@@ -730,6 +793,10 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileContent),
 	Rpc.fromTaggedRequest(GetToolContent),
 	Rpc.fromTaggedRequest(GetModels),
+	Rpc.fromTaggedRequest(AddProject),
+	Rpc.fromTaggedRequest(RemoveProject),
+	Rpc.fromTaggedRequest(RenameProject),
+	Rpc.fromTaggedRequest(SetProjectInstance),
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
