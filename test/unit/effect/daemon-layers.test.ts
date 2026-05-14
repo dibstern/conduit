@@ -7,8 +7,8 @@ import {
 	ShutdownAwaiterLive,
 	ShutdownSignalTag,
 	SignalHandlerLayer,
-} from "../../../src/lib/effect/daemon-layers.js";
-import { DaemonHandleTag } from "../../../src/lib/effect/daemon-main.js";
+} from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { DaemonHandleTag } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
 describe("SignalHandlerLayer", () => {
 	it.scoped("installs signal handlers on layer build", () =>

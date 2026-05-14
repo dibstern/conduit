@@ -1,6 +1,6 @@
 import { Cause, Effect } from "effect";
-import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
-import { RateLimiterTag } from "../effect/rate-limiter-layer.js";
+import { ClientMessageSerializationTag } from "../domain/relay/Services/client-message-serialization.js";
+import { RelayCommandGateTag } from "../domain/relay/Services/relay-command-gate.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { dispatchMessageEffect } from "../handlers/index.js";
 import type { Logger, LogLevel } from "../logger.js";
@@ -20,6 +20,12 @@ export interface RelayWsMessageDispatchOptions<R = never> {
 	readonly sendTo: (clientId: string, message: RelayMessage) => void;
 	readonly log: Logger;
 	readonly dispatch?: RelayWsDispatch<R>;
+}
+
+export interface RelayWsMessageGateOptions<R = never>
+	extends RelayWsMessageDispatchOptions<R> {
+	readonly commandId: string;
+	readonly receivedAt?: number;
 }
 
 const validLogLevels = new Set<LogLevel>([
@@ -71,24 +77,9 @@ export const handleRelayWsMessage = <R = never>({
 }: RelayWsMessageDispatchOptions<R>): Effect.Effect<
 	void,
 	never,
-	RateLimiterTag | ClientMessageSerializationTag | R
+	ClientMessageSerializationTag | R
 > =>
 	Effect.gen(function* () {
-		if (handler === "message") {
-			const limiter = yield* RateLimiterTag;
-			const result = yield* limiter.checkLimit(clientId);
-			if (!result.allowed) {
-				yield* Effect.sync(() =>
-					sendTo(clientId, {
-						type: "system_error",
-						code: "RATE_LIMITED",
-						message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
-					}),
-				);
-				return;
-			}
-		}
-
 		if (handler === "set_log_level") {
 			const level = getPayloadLevel(payload);
 			if (isLogLevel(level)) {
@@ -104,4 +95,38 @@ export const handleRelayWsMessage = <R = never>({
 		yield* serialization
 			.withClient(clientId, dispatch(clientId, handler, payload))
 			.pipe(renderDispatchError(clientId, sendTo, log));
+	});
+
+export const handleRelayWsMessageThroughGate = <R = never>({
+	commandId,
+	receivedAt = Date.now(),
+	...options
+}: RelayWsMessageGateOptions<R>): Effect.Effect<
+	void,
+	never,
+	RelayCommandGateTag | ClientMessageSerializationTag | R
+> =>
+	Effect.gen(function* () {
+		const gate = yield* RelayCommandGateTag;
+		yield* gate
+			.submit(
+				{
+					commandId,
+					clientId: options.clientId,
+					messageType: options.handler,
+					receivedAt,
+				},
+				handleRelayWsMessage(options),
+			)
+			.pipe(
+				Effect.catchTag("RelayCommandRejected", (error) =>
+					Effect.sync(() => {
+						options.log.warn(error.message);
+						options.sendTo(
+							options.clientId,
+							RelayError.fromCaught(error, "INTERNAL_ERROR").toSystemError(),
+						);
+					}),
+				),
+			);
 	});

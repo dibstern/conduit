@@ -2,18 +2,18 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { expect, vi } from "vitest";
-import { makePtyRuntimeLive } from "../../../src/lib/effect/pty-manager-layer.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { makePtyRuntimeLive } from "../../../src/lib/domain/relay/Layers/pty-manager-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	PtyManagerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
-} from "../../../src/lib/effect/terminal-service.js";
+} from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 import {

@@ -15,7 +15,7 @@ import {
 } from "node:http";
 import { Effect, Ref } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { PollerStateTag } from "../../../src/lib/effect/session-status-poller.js";
+import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,

@@ -3,18 +3,18 @@ import { Effect, Fiber, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
 import {
-	AuthManagerFromConfigLive,
-	AuthManagerTag,
-} from "../../../src/lib/effect/auth-middleware.js";
-import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
-} from "../../../src/lib/effect/daemon-config-ref.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	CrashCounterLive,
 	CrashCounterTag,
-} from "../../../src/lib/effect/daemon-startup.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
+import {
+	AuthManagerFromConfigLive,
+	AuthManagerTag,
+} from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
 // ─── AuthManagerFromConfigLive tests ─────────────────────────────────────────
 

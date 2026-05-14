@@ -15,7 +15,7 @@ import {
 } from "node:http";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PendingInteractionServiceTag } from "../../../src/lib/effect/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,

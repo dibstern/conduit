@@ -8,7 +8,7 @@ import { getTailscaleIP } from "../lib/cli/tls.js";
 import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
-import { startDaemonProcess } from "../lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../lib/domain/daemon/Layers/daemon-main.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCCommand, IPCResponse } from "../lib/types.js";

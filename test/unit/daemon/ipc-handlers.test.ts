@@ -1,3 +1,7 @@
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+} from "../../../src/lib/domain/daemon/Services/management-service.js";
 // ─── IPC Effect Handlers Tests ────────────────────────────────────────────────
 // Verify that Effect-returning IPC handlers correctly interact with services.
 
@@ -7,14 +11,15 @@ import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
-import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
-import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
-import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
-import type { DaemonState } from "../../../src/lib/effect/daemon-state.js";
+import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { PersistencePathTag } from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
+import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import type { DaemonState } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	handleAddProject,
 	handleGetStatus,
@@ -35,17 +40,13 @@ import {
 	handleSetPin,
 	handleSetProjectTitle,
 	handleShutdown,
-} from "../../../src/lib/effect/ipc-handlers.js";
-import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
-import {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/daemon/Services/ipc-handlers.js";
+
 import {
 	getAgent,
 	getModel,
 	makeOverridesStateLive,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 
 // ─── In-memory test FileSystem ────────────────────────────────────────────────
@@ -153,7 +154,7 @@ const makeMockKeepAwake = () =>
 
 /** Mock DaemonConfigRefTag — Ref with sensible defaults. */
 const makeMockConfigRef = () => {
-	const initial: import("../../../src/lib/effect/daemon-config-ref.js").DaemonRuntimeConfig =
+	const initial: import("../../../src/lib/domain/daemon/Services/daemon-config-ref.js").DaemonRuntimeConfig =
 		{
 			port: 2633,
 			host: "127.0.0.1",

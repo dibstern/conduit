@@ -1,16 +1,16 @@
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Session Lifecycle Wiring (G4) ───────────────────────────────────────────
 // Subscribes to DaemonEventBus lifecycle and relay broadcast events.
 
 import { Data, Effect, FiberMap, Layer, Ref, Stream } from "effect";
-import { DaemonEventBusTag } from "../effect/daemon-pubsub.js";
+import { DaemonEventBusTag } from "../domain/daemon/Services/daemon-pubsub.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	PollerManagerTag,
 	type StatusPollerShape,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
+} from "../domain/relay/Services/services.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";

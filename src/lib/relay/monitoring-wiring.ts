@@ -4,7 +4,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
+import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
@@ -43,10 +43,6 @@ interface OpenCodeSessionReaderLike {
 	};
 }
 
-interface SessionRegistryLike {
-	hasViewers(sessionId: string): boolean;
-}
-
 interface SSEConnectionHealthLike {
 	isConnected(): boolean;
 }
@@ -80,7 +76,6 @@ export interface MonitoringWiringDeps {
 	processingTimeouts: ProcessingTimeoutsPort;
 	statusPoller: SessionStatusPollerService;
 	pollerManager: PollerManagerLike;
-	registry: SessionRegistryLike;
 	sseStream: SSEConnectionHealthLike;
 	config: {
 		pollerGatingConfig?: Partial<PollerGatingConfig>;
@@ -141,7 +136,6 @@ export function wireMonitoring(
 		processingTimeouts,
 		statusPoller,
 		pollerManager,
-		registry,
 		sseStream,
 		config,
 		statusLog,
@@ -273,7 +267,7 @@ export function wireMonitoring(
 					{ connected: sseStream.isConnected() },
 					sseTracker,
 					parentMap,
-					(sid) => registry.hasViewers(sid),
+					(sid) => wsHandler.getClientsForSession(sid).length > 0,
 					now,
 				),
 			);

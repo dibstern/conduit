@@ -1,6 +1,7 @@
 // ─── Project Store ──────────────────────────────────────────────────────────
 // Manages the list of registered projects and the current project slug.
 
+import type { GetProjectsResponse } from "../transport/ws-rpc.js";
 import type { ProjectInfo, RelayMessage } from "../types.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -49,4 +50,20 @@ export function handleProjectList(
 			}
 		});
 	}
+}
+
+export function applyGetProjectsResponse(response: GetProjectsResponse): void {
+	handleProjectList({
+		type: "project_list",
+		projects: response.projects.map((project) => ({
+			slug: project.slug,
+			title: project.title,
+			directory: project.directory,
+			...(project.clientCount != null
+				? { clientCount: project.clientCount }
+				: {}),
+			...(project.instanceId != null ? { instanceId: project.instanceId } : {}),
+		})),
+		...(response.current != null ? { current: response.current } : {}),
+	});
 }

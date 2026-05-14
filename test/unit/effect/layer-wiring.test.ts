@@ -15,41 +15,42 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Layer, PubSub, Ref } from "effect";
 import { expect } from "vitest";
+import { AuthManager } from "../../../src/lib/auth.js";
 import type { OnboardingServerDeps } from "../../../src/lib/daemon/daemon-lifecycle.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
-import { ConfigPersistenceTag } from "../../../src/lib/effect/config-persistence-layer.js";
-import {
-	DaemonConfigRefTag,
-	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	type DaemonLiveOptions,
 	makeDaemonLive,
 	ShutdownSignalTag,
-} from "../../../src/lib/effect/daemon-layers.js";
+} from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import {
+	HttpServerRefTag,
+	RelayFactoryTag,
+} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { StorageMonitorTag } from "../../../src/lib/domain/daemon/Layers/storage-monitor-layer.js";
+import { TlsCertTag } from "../../../src/lib/domain/daemon/Layers/tls-cert-layer.js";
+import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
+import {
+	DaemonConfigRefTag,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	DaemonEvent,
 	DaemonEventBusTag,
-} from "../../../src/lib/effect/daemon-pubsub.js";
-import { CrashCounterTag } from "../../../src/lib/effect/daemon-startup.js";
-import { DaemonStateTag } from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { CrashCounterTag } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
+import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	addInstance,
 	InstanceManagerStateTag,
 	PollerFibersTag,
-} from "../../../src/lib/effect/instance-manager-service.js";
-import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	addWithoutRelay,
 	ProjectRegistryTag,
-} from "../../../src/lib/effect/project-registry-service.js";
-import {
-	HttpServerRefTag,
-	RelayFactoryTag,
-} from "../../../src/lib/effect/relay-factory-layer.js";
-import { StorageMonitorTag } from "../../../src/lib/effect/storage-monitor-layer.js";
-import { TlsCertTag } from "../../../src/lib/effect/tls-cert-layer.js";
-import { VersionCheckerTag } from "../../../src/lib/effect/version-checker-layer.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
@@ -116,6 +117,17 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			instances: [],
 		}),
 		onboarding: {} as OnboardingServerDeps,
+		httpRouter: {
+			auth: new AuthManager(),
+			staticDir: process.cwd(),
+			getProjects: () => [],
+			removeProject: () => Promise.resolve(),
+			getPort: () => 0,
+			getIsTls: () => false,
+			getHealthResponse: () => ({ ok: true }),
+			loadThemes: () => Promise.resolve({ bundled: {}, custom: {} }),
+			pushManager: null,
+		},
 		initialConfig: makeDaemonConfigFromOptions({
 			port: 0,
 			host: "127.0.0.1",
@@ -140,6 +152,7 @@ const makeMockOptions = (): DaemonLiveOptions => {
 			Effect.succeed({
 				slug,
 				wsHandler: { handleUpgrade: () => {} },
+				rpcWsHandler: { handleUpgrade: () => {} },
 				stop: () => {},
 			}),
 	};

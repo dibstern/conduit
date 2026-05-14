@@ -4,7 +4,7 @@ import { expect } from "vitest";
 import {
 	ClientMessageSerializationLive,
 	ClientMessageSerializationTag,
-} from "../../../src/lib/effect/client-message-serialization.js";
+} from "../../../src/lib/domain/relay/Services/client-message-serialization.js";
 
 const provideFreshSerialization = <A, E>(
 	effect: Effect.Effect<A, E, ClientMessageSerializationTag>,

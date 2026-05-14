@@ -1,11 +1,11 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue } from "effect";
 import { expect } from "vitest";
-import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addWithoutRelay,
 	broadcastToAll,
@@ -14,11 +14,11 @@ import {
 	makeProjectRegistryLive,
 	markReady,
 	waitForRelay,
-} from "../../../src/lib/effect/project-registry-service.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	type RelayCache,
 	RelayCacheTag,
-} from "../../../src/lib/effect/relay-cache.js";
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
@@ -36,6 +36,7 @@ const makeStubRelayCache = (): RelayCache => ({
 		Effect.succeed({
 			slug: _slug,
 			wsHandler: { handleUpgrade: () => {} },
+			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
 		}),
 	invalidate: (_slug: string) => Effect.void,

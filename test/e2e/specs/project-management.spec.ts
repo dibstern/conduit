@@ -7,6 +7,7 @@
 
 import { expect, test } from "@playwright/test";
 import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -29,31 +30,32 @@ async function waitForChatReady(page: Page): Promise<void> {
 }
 
 /**
- * Set up WS mock with single-instance init + directory listing handler.
- * Responds to `list_directories` with mock directory entries.
+ * Set up WS mock with single-instance init + project management handlers.
+ * Directory autocomplete is served through the RPC websocket.
  * Responds to `remove_project` and `rename_project` with updated project lists.
  */
 async function setupWithProjectManagement(
 	page: Page,
 	baseURL?: string,
 ): Promise<WsMockControl> {
+	await mockWsRpc(page, {
+		handlers: {
+			ListDirectories: (params) => {
+				const path = String(params["path"] ?? "");
+				return {
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					path,
+					entries: getMockDirectories(path),
+				};
+			},
+		},
+	});
 	const control = await mockRelayWebSocket(page, {
 		initMessages: singleInstanceInitMessages,
 		responses: new Map(),
 		initDelay: 0,
 		messageDelay: 0,
 		onClientMessage: (parsed, ctrl) => {
-			// Respond to list_directories with mock entries
-			if (parsed["type"] === "list_directories") {
-				const path = parsed["path"] as string;
-				const entries = getMockDirectories(path);
-				ctrl.sendMessage({
-					type: "directory_list",
-					path,
-					entries,
-				});
-			}
-
 			// Respond to remove_project with updated project list
 			if (parsed["type"] === "remove_project") {
 				const slug = parsed["slug"] as string;
@@ -90,26 +92,6 @@ async function setupWithProjectManagement(
 						{
 							slug: "mylib",
 							title: slug === "mylib" ? title : "mylib",
-							directory: "/src/mylib",
-						},
-					],
-					current: "myapp",
-				});
-			}
-
-			// Respond to get_projects with the current list
-			if (parsed["type"] === "get_projects") {
-				ctrl.sendMessage({
-					type: "project_list",
-					projects: [
-						{
-							slug: "myapp",
-							title: "myapp",
-							directory: "/src/myapp",
-						},
-						{
-							slug: "mylib",
-							title: "mylib",
 							directory: "/src/mylib",
 						},
 					],
@@ -328,32 +310,6 @@ test.describe("Directory Autocomplete", () => {
 
 		// Input value should remain unchanged
 		await expect(input).toHaveValue("/src/");
-	});
-
-	test("sends list_directories WS message on input", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
-		await page.getByText("Add project").click();
-
-		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
-		);
-		await input.fill("/src/");
-
-		// Wait for the WS message to be sent (after debounce)
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "list_directories",
-		);
-		expect(msg).toMatchObject({
-			type: "list_directories",
-			path: "/src/",
-		});
 	});
 
 	test("clicking an entry selects it", async ({ page, baseURL }) => {

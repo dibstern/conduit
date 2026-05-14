@@ -1,3 +1,4 @@
+import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/management-service.js";
 // ─── Daemon Startup Effects Tests ──────────────────────────────────────────
 // TDD tests for startup effect functions: crash counting, instance rehydration,
 // and error isolation policy.
@@ -10,12 +11,12 @@ import {
 	CrashCounterTag,
 	recordCrashCounter,
 	rehydrateInstances,
-} from "../../../src/lib/effect/daemon-startup.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import {
 	type DaemonInstanceConfig,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
-import { InstanceMgmtTag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 

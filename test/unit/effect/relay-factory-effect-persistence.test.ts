@@ -6,14 +6,14 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref } from "effect";
 import { expect, vi } from "vitest";
 import {
-	DaemonConfigRefLive,
-	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import {
 	HttpServerRefTag,
 	RelayFactoryLive,
 	RelayFactoryTag,
-} from "../../../src/lib/effect/relay-factory-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 

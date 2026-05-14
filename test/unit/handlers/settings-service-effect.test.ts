@@ -1,12 +1,12 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { ProjectManagementServiceLive } from "../../../src/lib/effect/project-management-service.js";
+import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ConfigTag,
 	OpenCodeSettingsServiceTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	handleGetCommands,
 	handleGetProjects,

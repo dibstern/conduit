@@ -4,11 +4,11 @@ import { expect, vi } from "vitest";
 import {
 	LoggerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
-} from "../../../src/lib/effect/terminal-service.js";
+} from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import {
 	handlePtyClose,
 	handlePtyInput,

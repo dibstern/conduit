@@ -46,9 +46,8 @@ describe("Integration: Error Handling", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list");
-		expect(Array.isArray(msg["agents"])).toBe(true);
+		const result = await client.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
 
 		await client.close();
 	});
@@ -68,44 +67,42 @@ describe("Integration: Error Handling", () => {
 		await client.close();
 	});
 
-	it("get_file_content with non-existent path returns response without crash", async () => {
+	it("GetFileContent RPC with non-existent path fails without crashing", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({
-			type: "get_file_content",
-			path: "/nonexistent/path/file.txt",
-		});
-
-		// OpenCode may return file_content (with empty content) or an error —
-		// either way, the server should not crash
-		await new Promise((r) => setTimeout(r, 1000));
+		try {
+			const result = await client.getFileContent("/nonexistent/path/file.txt");
+			expect(result.path).toBe("/nonexistent/path/file.txt");
+			expect(typeof result.content).toBe("string");
+		} catch (error) {
+			expect(error).toBeInstanceOf(Error);
+		}
 
 		// Verify the server is still alive
 		client.clearReceived();
-		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list");
-		expect(Array.isArray(msg["agents"])).toBe(true);
+		const result = await client.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
 
 		await client.close();
 	});
 
-	it("message without text field is handled gracefully", async () => {
+	it("removed legacy message command is rejected gracefully", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		// Send a "message" type without the required text field
+		// Browser sends now use RPC; the old WS command should be treated as
+		// an unknown legacy command, not routed to the prompt handler.
 		client.send({ type: "message" });
 
-		// Wait for the server to process — it should not crash
-		await new Promise((r) => setTimeout(r, 1000));
+		const errMsg = await client.waitFor("system_error", { timeout: 3000 });
+		expect(errMsg["code"]).toBe("UNKNOWN_MESSAGE_TYPE");
 
 		// Verify the client is still connected and functional
-		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list");
-		expect(Array.isArray(msg["agents"])).toBe(true);
+		const result = await client.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
 
 		await client.close();
 	});
@@ -119,18 +116,17 @@ describe("Integration: Error Handling", () => {
 		client.send({ type: "nonexistent_type_1" });
 		client.send({ type: "nonexistent_type_2" });
 		client.send({ type: "nonexistent_type_3" });
-		client.send({ type: "get_file_content", path: "/does/not/exist.txt" });
-		client.send({ type: "message" }); // missing text
+		client.send({ type: "get_file_content", path: "/does/not/exist.txt" }); // removed legacy WS command
+		client.send({ type: "message" }); // removed legacy WS command
 
 		// Wait for the server to process them all
 		await new Promise((r) => setTimeout(r, 2000));
 
 		// Now send a valid request and verify the server still works
 		client.clearReceived();
-		client.send({ type: "get_agents" });
-		const msg = await client.waitFor("agent_list");
-		expect(Array.isArray(msg["agents"])).toBe(true);
-		expect((msg["agents"] as unknown[]).length).toBeGreaterThan(0);
+		const result = await client.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
+		expect(result.agents.length).toBeGreaterThan(0);
 
 		await client.close();
 	});

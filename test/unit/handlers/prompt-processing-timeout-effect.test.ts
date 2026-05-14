@@ -1,21 +1,21 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { PendingInteractionServiceLive } from "../../../src/lib/effect/pending-interaction-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
 	startProcessingTimeout,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
-	handleCancel,
+	cancelSessionById,
 	handleMessage,
 } from "../../../src/lib/handlers/prompt.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -99,7 +99,7 @@ describe("prompt processing timeouts through Effect state", () => {
 					"2 minutes",
 					() => Effect.void,
 				);
-				yield* handleCancel("client-1", {});
+				yield* cancelSessionById("client-1", "session-1");
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
 			}).pipe(Effect.provide(layer));

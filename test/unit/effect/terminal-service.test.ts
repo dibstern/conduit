@@ -1,19 +1,19 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	PtyManagerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
-} from "../../../src/lib/effect/terminal-service.js";
+} from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	PtyManager,

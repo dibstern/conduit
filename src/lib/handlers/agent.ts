@@ -6,10 +6,9 @@ import {
 	filterAgents,
 	toWireAgents,
 	type WireAgent,
-} from "../effect/agent-service.js";
-import { WebSocketHandlerTag } from "../effect/services.js";
+} from "../domain/relay/Services/agent-service.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import type { RelayMessage } from "../types.js";
-import type { PayloadMap } from "./payloads.js";
 
 export { filterAgents, toWireAgents };
 
@@ -29,7 +28,7 @@ function toAgentListMessage({
 
 export const handleGetAgents = (
 	clientId: string,
-	_payload: PayloadMap["get_agents"],
+	_payload: Record<string, never>,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -37,19 +36,4 @@ export const handleGetAgents = (
 		const activeSessionId = wsHandler.getClientSession(clientId);
 		const result = yield* agentService.listAgents(activeSessionId);
 		wsHandler.sendTo(clientId, toAgentListMessage(result));
-	});
-
-export const handleSwitchAgent = (
-	clientId: string,
-	payload: PayloadMap["switch_agent"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const agentService = yield* AgentServiceTag;
-
-		yield* agentService.switchAgent({
-			clientId,
-			sessionId: wsHandler.getClientSession(clientId),
-			agentId: payload.agentId,
-		});
 	});

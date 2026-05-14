@@ -7,17 +7,17 @@
 // independently testable and relay-stack stays slim.
 
 import { mapQuestionFields } from "../bridges/question-bridge.js";
-import type { AgentList } from "../effect/agent-service.js";
+import type { AgentList } from "../domain/relay/Services/agent-service.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingQuestion,
-} from "../effect/pending-interaction-service.js";
+} from "../domain/relay/Services/pending-interaction-service.js";
 import type {
 	OpenCodeProviderList,
 	OpenCodeSessionDetail,
-} from "../effect/services.js";
-import type { ModelOverride } from "../effect/session-overrides-state.js";
-import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
+} from "../domain/relay/Services/services.js";
+import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
+import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -417,8 +417,8 @@ export async function handleClientConnected(
 		wsHandler.sendTo(clientId, { type: "model_list", providers });
 
 		// Merge Claude in-process models when the orchestration engine is available.
-		// Mirrors handleGetModels so the initial client_connected payload doesn't
-		// overwrite the merged list the client later receives from get_models.
+		// Mirrors model discovery so the initial client_connected payload doesn't
+		// overwrite the merged list the client later receives from RPC.
 		//   "Anthropic - opencode" → routes via OpenCode REST API
 		//   "Anthropic - claude"  → routes via in-process Claude Agent SDK
 		if (deps.discoverClaudeCapabilities) {

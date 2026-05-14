@@ -11,47 +11,17 @@ import { expect } from "vitest";
 import {
 	decodeWsMessage,
 	IncomingWsMessage,
-} from "../../../src/lib/effect/ws-message-schemas.js";
+} from "../../../src/lib/contracts/ws-message-schemas.js";
 
 // ─── Decode helper (Effect-based) ──────────────────────────────────────────
 
 describe("decodeWsMessage", () => {
-	it.effect("decodes a simple no-payload message (list_sessions)", () =>
+	it.effect("decodes terminal_command with action", () =>
 		Effect.gen(function* () {
-			const raw = { type: "list_sessions" };
+			const raw = { type: "terminal_command", action: "list" };
 			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("list_sessions");
-		}),
-	);
-
-	it.effect("decodes message with payload (message)", () =>
-		Effect.gen(function* () {
-			const raw = { type: "message", text: "hello" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("message");
-			expect((decoded as any).text).toBe("hello");
-		}),
-	);
-
-	it.effect("decodes message with optional images (message)", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "message",
-				text: "look at this",
-				images: ["data:image/png;base64,abc"],
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("message");
-			expect((decoded as any).images).toEqual(["data:image/png;base64,abc"]);
-		}),
-	);
-
-	it.effect("decodes get_file_content with path", () =>
-		Effect.gen(function* () {
-			const raw = { type: "get_file_content", path: "/src/main.ts" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("get_file_content");
-			expect((decoded as any).path).toBe("/src/main.ts");
+			expect(decoded.type).toBe("terminal_command");
+			expect((decoded as any).action).toBe("list");
 		}),
 	);
 
@@ -61,19 +31,6 @@ describe("decodeWsMessage", () => {
 			const decoded = yield* decodeWsMessage(raw);
 			expect(decoded.type).toBe("switch_session");
 			expect((decoded as any).sessionId).toBe("sess-123");
-		}),
-	);
-
-	it.effect("decodes rename_session with sessionId and title", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "rename_session",
-				sessionId: "s1",
-				title: "New Title",
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("rename_session");
-			expect((decoded as any).title).toBe("New Title");
 		}),
 	);
 
@@ -95,28 +52,6 @@ describe("decodeWsMessage", () => {
 			const decoded = yield* decodeWsMessage(raw);
 			expect((decoded as any).sessionId).toBe("s1");
 			expect((decoded as any).messageId).toBe("m1");
-		}),
-	);
-
-	it.effect("decodes search_sessions with query", () =>
-		Effect.gen(function* () {
-			const raw = { type: "search_sessions", query: "bug fix" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("search_sessions");
-			expect((decoded as any).query).toBe("bug fix");
-		}),
-	);
-
-	it.effect("decodes switch_model with modelId and providerId", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "switch_model",
-				modelId: "claude-opus-4-0-20250514",
-				providerId: "anthropic",
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect((decoded as any).modelId).toBe("claude-opus-4-0-20250514");
-			expect((decoded as any).providerId).toBe("anthropic");
 		}),
 	);
 
@@ -187,14 +122,6 @@ describe("decodeWsMessage", () => {
 			expect((decoded as any).directory).toBe("/home/user/project");
 		}),
 	);
-
-	it.effect("decodes reload_provider_session (empty payload)", () =>
-		Effect.gen(function* () {
-			const raw = { type: "reload_provider_session" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("reload_provider_session");
-		}),
-	);
 });
 
 // ─── Schema rejection tests (synchronous Either-based) ──────────────────────
@@ -212,8 +139,7 @@ describe("IncomingWsMessage schema rejections", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("rejects message type with wrong payload shape", () => {
-		// 'message' requires { text: string }, not { content: string }
+	it("rejects the removed legacy message type", () => {
 		const raw = { type: "message", content: "wrong field" };
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
 		expect(Either.isLeft(result)).toBe(true);
@@ -225,14 +151,8 @@ describe("IncomingWsMessage schema rejections", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("rejects rename_session missing title", () => {
-		const raw = { type: "rename_session", sessionId: "s1" };
-		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
-		expect(Either.isLeft(result)).toBe(true);
-	});
-
-	it("rejects get_file_content missing path", () => {
-		const raw = { type: "get_file_content" };
+	it("rejects terminal_command missing action", () => {
+		const raw = { type: "terminal_command" };
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
 		expect(Either.isLeft(result)).toBe(true);
 	});
@@ -247,43 +167,25 @@ describe("IncomingWsMessage schema rejections", () => {
 // ─── Exhaustiveness: every IncomingMessageType has a schema ──────────────────
 
 describe("IncomingWsMessage coverage", () => {
-	// All 50 incoming message types from ws-router.ts (the source of truth).
+	// Incoming message types from ws-router.ts (the source of truth).
 	// This test ensures IncomingWsMessage covers every one.
 	const ALL_INCOMING_TYPES = [
-		"message",
 		"permission_response",
 		"ask_user_response",
 		"question_reject",
 		"new_session",
 		"switch_session",
 		"delete_session",
-		"rename_session",
 		"fork_session",
-		"list_sessions",
-		"search_sessions",
-		"load_more_history",
 		"terminal_command",
 		"input_sync",
-		"switch_agent",
-		"switch_model",
-		"get_todo",
-		"get_agents",
-		"get_models",
-		"get_commands",
-		"get_projects",
 		"add_project",
-		"list_directories",
 		"remove_project",
 		"rename_project",
-		"get_file_list",
-		"get_file_content",
-		"get_file_tree",
-		"get_tool_content",
 		"pty_create",
 		"pty_input",
 		"pty_resize",
 		"pty_close",
-		"cancel",
 		"rewind",
 		"instance_add",
 		"instance_remove",
@@ -292,53 +194,31 @@ describe("IncomingWsMessage coverage", () => {
 		"instance_update",
 		"instance_rename",
 		"set_project_instance",
-		"set_default_model",
-		"switch_variant",
-		"switch_context_window",
 		"view_session",
 		"proxy_detect",
 		"scan_now",
 		"set_log_level",
-		"reload_provider_session",
 	] as const;
 
 	// For each type, construct a minimal valid payload and verify it decodes.
 	// This catches missing union members at test time.
 	const MINIMAL_PAYLOADS: Record<string, Record<string, unknown>> = {
-		message: { text: "hi" },
 		permission_response: { requestId: "per_x", decision: "allow" },
 		ask_user_response: { toolId: "t1", answers: {} },
 		question_reject: { toolId: "t1" },
 		new_session: {},
 		switch_session: { sessionId: "s1" },
 		delete_session: { sessionId: "s1" },
-		rename_session: { sessionId: "s1", title: "t" },
 		fork_session: {},
-		list_sessions: {},
-		search_sessions: { query: "q" },
-		load_more_history: { offset: 0 },
 		terminal_command: { action: "list" },
 		input_sync: { text: "draft" },
-		switch_agent: { agentId: "a1" },
-		switch_model: { modelId: "m1", providerId: "p1" },
-		get_todo: {},
-		get_agents: {},
-		get_models: {},
-		get_commands: {},
-		get_projects: {},
 		add_project: { directory: "/tmp" },
-		list_directories: { path: "/" },
 		remove_project: { slug: "s" },
 		rename_project: { slug: "s", title: "t" },
-		get_file_list: {},
-		get_file_content: { path: "/f" },
-		get_file_tree: {},
-		get_tool_content: { toolId: "t1" },
 		pty_create: {},
 		pty_input: { ptyId: "p1", data: "x" },
 		pty_resize: { ptyId: "p1" },
 		pty_close: { ptyId: "p1" },
-		cancel: {},
 		rewind: {},
 		instance_add: { name: "n" },
 		instance_remove: { instanceId: "i1" },
@@ -347,14 +227,10 @@ describe("IncomingWsMessage coverage", () => {
 		instance_update: { instanceId: "i1" },
 		instance_rename: { instanceId: "i1", name: "n" },
 		set_project_instance: { slug: "s", instanceId: "i1" },
-		set_default_model: { provider: "p", model: "m" },
-		switch_variant: { variant: "v" },
-		switch_context_window: { contextWindow: "1m" },
 		view_session: { sessionId: "s1" },
 		proxy_detect: {},
 		scan_now: {},
 		set_log_level: { level: "debug" },
-		reload_provider_session: {},
 	};
 
 	for (const msgType of ALL_INCOMING_TYPES) {

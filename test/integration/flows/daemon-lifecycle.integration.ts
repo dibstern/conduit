@@ -12,8 +12,8 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import { setLogLevel } from "../../../src/lib/logger.js";
 
 // Suppress info-level log noise

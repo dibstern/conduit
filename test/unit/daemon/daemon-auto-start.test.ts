@@ -25,8 +25,8 @@ import {
 	isOpencodeInstalled,
 	probeOpenCode,
 } from "../../../src/lib/daemon/daemon-utils.js";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);

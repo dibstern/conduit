@@ -1,6 +1,7 @@
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OrchestrationEngineTag } from "../../../src/lib/effect/services.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
 import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
@@ -37,7 +38,9 @@ describe("orchestration scoped layer", () => {
 			.spyOn(ClaudeAdapter.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
 		const runtime = ManagedRuntime.make(
-			makeOrchestrationRuntimeLayer({ client: makeStubClient() }),
+			makeOrchestrationRuntimeLayer().pipe(
+				Layer.provide(Layer.succeed(OpenCodeAPITag, makeStubClient())),
+			),
 		);
 
 		try {

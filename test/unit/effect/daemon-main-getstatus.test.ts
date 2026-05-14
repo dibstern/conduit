@@ -8,9 +8,9 @@ import {
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { makeDaemonConfigFromOptions } from "../../../src/lib/effect/daemon-config-ref.js";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { resolveRuntimeConfigUpdateSync } from "../../../src/lib/effect/daemon-main.js";
+import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { resolveRuntimeConfigUpdateSync } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
 const ensureCertsMock = vi.hoisted(() => vi.fn());
@@ -94,7 +94,7 @@ describe("daemon main runtime config status", () => {
 
 	it("reports TLS success with 0.0.0.0 host and the actual bound port", async () => {
 		const { startDaemonProcess } = await import(
-			"../../../src/lib/effect/daemon-main.js"
+			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
 		);
 
 		daemon = await startDaemonProcess({
@@ -116,7 +116,7 @@ describe("daemon main runtime config status", () => {
 
 	it("reports TLS disabled with the explicit loopback host", async () => {
 		const { startDaemonProcess } = await import(
-			"../../../src/lib/effect/daemon-main.js"
+			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
 		);
 
 		daemon = await startDaemonProcess({
@@ -140,7 +140,7 @@ describe("daemon main runtime config status", () => {
 
 	it("applies restart TLS config before persistence and shutdown", async () => {
 		const { startDaemonProcess } = await import(
-			"../../../src/lib/effect/daemon-main.js"
+			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
 		);
 		const socketPath = join(tmpDir, "relay.sock");
 
@@ -171,7 +171,7 @@ describe("daemon main runtime config status", () => {
 
 	it("keeps keep-awake startup config in the runtime-backed ref and persisted config", async () => {
 		const { startDaemonProcess } = await import(
-			"../../../src/lib/effect/daemon-main.js"
+			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
 		);
 
 		daemon = await startDaemonProcess({
@@ -201,7 +201,7 @@ describe("daemon main runtime config status", () => {
 
 	it("keeps rehydrated dismissed paths and session counts in runtime-backed reads and persistence", async () => {
 		const { startDaemonProcess } = await import(
-			"../../../src/lib/effect/daemon-main.js"
+			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
 		);
 		const projectPath = join(tmpDir, "persisted-project");
 		const dismissedPath = join(tmpDir, "dismissed-project");

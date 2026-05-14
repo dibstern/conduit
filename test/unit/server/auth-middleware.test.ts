@@ -13,7 +13,7 @@ import {
 	authStatusRoute,
 	makeAuthManagerLive,
 	withAuthGate,
-} from "../../../src/lib/effect/auth-middleware.js";
+} from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
 const authLayer = (auth: AuthManager) => makeAuthManagerLive(auth);
 

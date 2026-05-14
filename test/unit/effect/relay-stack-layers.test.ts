@@ -1,13 +1,14 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
-import { RelayStateLive } from "../../../src/lib/effect/relay-layer.js";
-import { LoggerTag, OpenCodeAPITag } from "../../../src/lib/effect/services.js";
-import { SessionManagerStateTag } from "../../../src/lib/effect/session-manager-state.js";
-import { OverridesStateTag } from "../../../src/lib/effect/session-overrides-state.js";
-import { SessionRegistryStateTag } from "../../../src/lib/effect/session-registry-state.js";
-import { PollerStateTag } from "../../../src/lib/effect/session-status-poller.js";
-import { WsHandlerStateTag } from "../../../src/lib/effect/ws-handler-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
+import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { OverridesStateTag } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionRegistryStateTag } from "../../../src/lib/domain/relay/Services/session-registry-state.js";
+import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { WsHandlerStateTag } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,

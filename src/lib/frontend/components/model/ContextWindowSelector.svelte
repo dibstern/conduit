@@ -9,7 +9,9 @@
 		discoveryState,
 		getActiveContextWindowOptions,
 	} from "../../stores/discovery.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { switchContextWindowRpc } from "../../transport/ws-rpc-client.js";
 
 	let { onOpen }: { onOpen?: () => void } = $props();
 
@@ -48,8 +50,24 @@
 		e: MouseEvent,
 	) {
 		e.stopPropagation();
-		wsSend({ type: "switch_context_window", contextWindow: option.value });
+		const previousContextWindow = discoveryState.currentContextWindow;
 		discoveryState.currentContextWindow = option.value;
+		const projectSlug = getCurrentSlug();
+		const sessionId = sessionState.currentId;
+		if (projectSlug && sessionId) {
+			void switchContextWindowRpc({
+				projectSlug,
+				sessionId,
+				contextWindow: option.value,
+			})
+				.then((response) => {
+					discoveryState.currentContextWindow = response.contextWindow;
+					discoveryState.availableContextWindowOptions = response.options;
+				})
+				.catch(() => {
+					discoveryState.currentContextWindow = previousContextWindow;
+				});
+		}
 		dropdownOpen = false;
 	}
 

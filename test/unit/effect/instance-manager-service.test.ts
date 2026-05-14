@@ -4,11 +4,11 @@ import { expect } from "vitest";
 import {
 	ConfigPersistenceNoopLive,
 	ConfigPersistenceTag,
-} from "../../../src/lib/effect/config-persistence-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type AddInstanceInput,
 	addInstance,
@@ -21,7 +21,7 @@ import {
 	startInstance,
 	stopInstance,
 	updateInstance,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 
 // Shared test layer: InstanceManagerState + PollerFibers + DaemonEventBus
 const testLayer = makeInstanceManagerStateLive().pipe(

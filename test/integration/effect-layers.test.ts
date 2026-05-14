@@ -1,3 +1,7 @@
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+} from "../../src/lib/domain/daemon/Services/management-service.js";
 // ─── Integration: Full Layer Composition ─────────────────────────────────────
 // Verifies that all Effect-native state modules compose into a single Layer
 // and key services work end-to-end.
@@ -7,57 +11,54 @@ import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Queue, Ref } from "effect";
 import { expect } from "vitest";
-import { PersistencePathTag } from "../../src/lib/effect/daemon-config-persistence.js";
-import type { DaemonRuntimeConfig } from "../../src/lib/effect/daemon-config-ref.js";
-import { DaemonConfigRefTag } from "../../src/lib/effect/daemon-config-ref.js";
-import { ShutdownSignalTag } from "../../src/lib/effect/daemon-layers.js";
+import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { PersistencePathTag } from "../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
+import type { DaemonRuntimeConfig } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonConfigRefTag } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 	publishStatusChanged,
 	subscribeToDaemonEvents,
-} from "../../src/lib/effect/daemon-pubsub.js";
+} from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../src/lib/effect/daemon-state.js";
+} from "../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
-} from "../../src/lib/effect/instance-manager-service.js";
-import { decodeAndDispatch } from "../../src/lib/effect/ipc-dispatch.js";
-import { KeepAwakeTag } from "../../src/lib/effect/keep-awake-layer.js";
-import {
-	makePollerManagerStateLive,
-	PollerManagerStateTag,
-} from "../../src/lib/effect/message-poller.js";
-import {
-	RateLimiterLive,
-	RateLimiterTag,
-} from "../../src/lib/effect/rate-limiter-layer.js";
+} from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { decodeAndDispatch } from "../../src/lib/domain/daemon/Services/ipc-dispatch.js";
 import {
 	makeRelayCacheLive,
 	RelayCacheTag,
-} from "../../src/lib/effect/relay-cache.js";
+} from "../../src/lib/domain/daemon/Services/relay-cache.js";
 import {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-} from "../../src/lib/effect/services.js";
+	RateLimiterLive,
+	RateLimiterTag,
+} from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import {
+	makePollerManagerStateLive,
+	PollerManagerStateTag,
+} from "../../src/lib/domain/relay/Services/message-poller.js";
+
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../src/lib/effect/session-manager-state.js";
+} from "../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	clearSession,
 	getModel,
 	makeOverridesStateLive,
 	OverridesStateTag,
 	setModel,
-} from "../../src/lib/effect/session-overrides-state.js";
+} from "../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	makePollerStateLive,
 	PollerStateTag,
-} from "../../src/lib/effect/session-status-poller.js";
+} from "../../src/lib/domain/relay/Services/session-status-poller.js";
 
 // ─── In-memory FileSystem for IPC persistence ────────────────────────────────
 
@@ -112,6 +113,7 @@ const composedLayer = Layer.mergeAll(
 		Effect.succeed({
 			slug,
 			wsHandler: { handleUpgrade: () => {} },
+			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
 		}),
 	),

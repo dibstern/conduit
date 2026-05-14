@@ -28,12 +28,12 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	HttpServerConfigTag,
 	HttpServerLive,
-} from "../../../src/lib/effect/http-server-layer.js";
-import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
+} from "../../../src/lib/domain/server/Layers/http-server-layer.js";
+import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	effectRouter,
 	effectRouterWithCors,

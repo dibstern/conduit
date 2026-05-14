@@ -6,14 +6,14 @@ import {
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getContextWindow,
 	getDefaultContextWindow,
 	makeOverridesStateLive,
 	setDefaultModel,
 	setModel,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";

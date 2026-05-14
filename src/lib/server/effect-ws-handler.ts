@@ -6,6 +6,12 @@ import { Effect, Fiber, Layer, ManagedRuntime, Option } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RawData, WebSocket } from "ws";
 import {
+	makeHeartbeatFiber,
+	makeWsTransportLive,
+	type WsTransport,
+	WsTransportTag,
+} from "../domain/relay/Layers/ws-transport-layer.js";
+import {
 	addClient,
 	bindClientSession,
 	broadcast,
@@ -22,14 +28,7 @@ import {
 	sendTo,
 	sendToSession,
 	type WsHandlerStateTag,
-} from "../effect/ws-handler-service.js";
-import {
-	makeHeartbeatFiber,
-	makeWsTransportLive,
-	type WsTransport,
-	WsTransportTag,
-} from "../effect/ws-transport-layer.js";
-import type { SessionRegistry } from "../session/session-registry.js";
+} from "../domain/relay/Services/ws-handler-service.js";
 import type { RelayMessage } from "../shared-types.js";
 import type {
 	WebSocketHandlerShape,
@@ -54,7 +53,6 @@ type WsEventMap = {
 interface EffectWsHandlerOptions {
 	heartbeatInterval?: number;
 	maxPayload?: number;
-	registry?: SessionRegistry;
 	server?: Server;
 	pathPrefix?: string;
 	verifyClient?: (
@@ -141,8 +139,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	}
 
 	setClientSession(clientId: string, sessionId: string): void {
-		this.options.registry?.setClientSession(clientId, sessionId);
-		this.runMutation(
+		this.runSyncMutation(
 			"setClientSession",
 			bindClientSession(clientId, sessionId),
 		);
@@ -150,10 +147,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 
 	getClientSession(clientId: string): string | undefined {
 		const session = this.runtime.runSync(getClientSession(clientId));
-		return (
-			Option.getOrUndefined(session) ??
-			this.options.registry?.getClientSession(clientId)
-		);
+		return Option.getOrUndefined(session);
 	}
 
 	getClientsForSession(sessionId: string): string[] {
@@ -204,7 +198,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		if (this.options.server && this.upgradeListener) {
 			this.options.server.off("upgrade", this.upgradeListener);
 		}
-		this.options.registry?.clear();
 		await this.runtime.runPromise(closeAllClients());
 		await this.runtime.runPromise(Fiber.interrupt(this.heartbeatFiber));
 		await this.runtime.dispose();
@@ -269,15 +262,10 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		this.runtime
 			.runPromise(removeClient(clientId))
 			.then(({ sessionId, newCount }) => {
-				const registrySessionId = this.options.registry?.removeClient(clientId);
 				this.events.emit("client_disconnected", {
 					clientId,
 					clientCount: newCount,
-					...(sessionId != null
-						? { sessionId }
-						: registrySessionId != null
-							? { sessionId: registrySessionId }
-							: {}),
+					...(sessionId != null ? { sessionId } : {}),
 				});
 				this.broadcast(createClientCountMessage(newCount));
 			})
@@ -318,6 +306,17 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		effect: Effect.Effect<A, E, R>,
 	): void {
 		this.runtime.runPromise(effect).catch(this.logBridgeError(op));
+	}
+
+	private runSyncMutation<A, E, R extends WsBridgeServices>(
+		op: string,
+		effect: Effect.Effect<A, E, R>,
+	): void {
+		try {
+			this.runtime.runSync(effect);
+		} catch (err) {
+			this.logBridgeError(op)(err);
+		}
 	}
 
 	private logBridgeError(op: string) {

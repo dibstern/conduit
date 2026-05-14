@@ -32,6 +32,7 @@ import type {
 	PermissionDecision,
 	ProviderAdapter,
 	ProviderAgentInfo,
+	ProviderDriver,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -1070,3 +1071,8 @@ export class ClaudeAdapter implements ProviderAdapter {
 		return this.permissionBridge;
 	}
 }
+
+export const ClaudeDriver: ProviderDriver<ClaudeAdapterDeps> = {
+	providerId: "claude",
+	create: (deps) => Effect.sync(() => new ClaudeAdapter(deps)),
+};

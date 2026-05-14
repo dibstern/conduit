@@ -5,7 +5,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/effect/pending-interaction-service.js";
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 
 describe("PendingInteractionService", () => {

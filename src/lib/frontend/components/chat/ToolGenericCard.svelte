@@ -7,7 +7,9 @@
 	import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../../ui-constants.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
+	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
 	import Icon from "../shared/Icon.svelte";
 	import BlockGrid from '../shared/BlockGrid.svelte';
@@ -28,12 +30,23 @@
 	}
 
 	function requestFullContent() {
+		const slug = getCurrentSlug();
+		if (!slug) return;
 		loadingFullContent = true;
-		wsSend({ type: "get_tool_content", toolId: message.id });
 		clearTimeout(loadingTimeout);
 		loadingTimeout = setTimeout(() => {
 			loadingFullContent = false;
 		}, TOOL_CONTENT_LOAD_TIMEOUT_MS);
+		void getToolContentRpc({ projectSlug: slug, toolId: message.id })
+			.then((response) => {
+				applyToolContentResponse(response);
+				loadingFullContent = false;
+				clearTimeout(loadingTimeout);
+			})
+			.catch(() => {
+				loadingFullContent = false;
+				clearTimeout(loadingTimeout);
+			});
 	}
 
 	$effect(() => {

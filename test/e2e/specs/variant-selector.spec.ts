@@ -9,12 +9,16 @@ import {
 	noVariantInitMessages,
 	variantInitMessages,
 } from "../fixtures/mockup-state.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
+type VariantSetupControl = WsMockControl & {
+	readonly rpcCalls: Record<string, unknown>[];
+};
 
 /** The project URL for variant tests (must match fixture's current slug). */
 const PROJECT_URL = "/p/myapp/";
@@ -32,7 +36,20 @@ async function waitForChatReady(page: Page): Promise<void> {
 async function setupWithVariants(
 	page: Page,
 	baseURL?: string,
-): Promise<WsMockControl> {
+): Promise<VariantSetupControl> {
+	const rpcCalls: Record<string, unknown>[] = [];
+	await mockWsRpc(page, {
+		handlers: {
+			SwitchVariant: (params) => {
+				rpcCalls.push(params);
+				return {
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					variant: String(params["variant"] ?? ""),
+					variants: ["low", "medium", "high", "max"],
+				};
+			},
+		},
+	});
 	const control = await mockRelayWebSocket(page, {
 		initMessages: variantInitMessages,
 		responses: new Map(),
@@ -41,7 +58,7 @@ async function setupWithVariants(
 	});
 	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 	await waitForChatReady(page);
-	return control;
+	return Object.assign(control, { rpcCalls });
 }
 
 /** Set up WS mock with model that has NO variants. */
@@ -49,6 +66,15 @@ async function setupWithoutVariants(
 	page: Page,
 	baseURL?: string,
 ): Promise<WsMockControl> {
+	await mockWsRpc(page, {
+		handlers: {
+			SwitchVariant: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				variant: String(params["variant"] ?? ""),
+				variants: [],
+			}),
+		},
+	});
 	const control = await mockRelayWebSocket(page, {
 		initMessages: noVariantInitMessages,
 		responses: new Map(),
@@ -195,10 +221,10 @@ test.describe("Variant selection updates UI", () => {
 	});
 });
 
-// ─── Group 4: Variant Selection Sends Correct WS Message ────────────────────
+// ─── Group 4: Variant Selection Sends Correct RPC Request ───────────────────
 
-test.describe("Variant selection sends WS message", () => {
-	test("selecting a variant sends switch_variant message", async ({
+test.describe("Variant selection sends RPC request", () => {
+	test("selecting a variant sends SwitchVariant request", async ({
 		page,
 		baseURL,
 	}) => {
@@ -208,20 +234,16 @@ test.describe("Variant selection sends WS message", () => {
 		await badge.click();
 		await page.locator("[data-testid='variant-option-high']").click();
 
-		// Verify the correct WS message was sent
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "switch_variant",
-		);
-		expect(msg).toMatchObject({
-			type: "switch_variant",
-			variant: "high",
-		});
+		await expect
+			.poll(() => control.rpcCalls.at(-1))
+			.toMatchObject({
+				projectSlug: "myapp",
+				sessionId: "sess-var-001",
+				variant: "high",
+			});
 	});
 
-	test("selecting default sends switch_variant with empty string", async ({
+	test("selecting default sends SwitchVariant with empty string", async ({
 		page,
 		baseURL,
 	}) => {
@@ -237,20 +259,22 @@ test.describe("Variant selection sends WS message", () => {
 		await badge.click();
 		await page.locator("[data-testid='variant-option-default']").click();
 
-		// Find the last switch_variant message (should be the "default" one)
-		const msgs = control
-			.getClientMessages()
-			.filter(
-				(m: unknown) =>
-					typeof m === "object" &&
-					m !== null &&
-					(m as { type?: string }).type === "switch_variant",
-			);
-		expect(msgs.length).toBeGreaterThanOrEqual(2);
-		expect(msgs[msgs.length - 1]).toMatchObject({
-			type: "switch_variant",
-			variant: "",
-		});
+		await expect
+			.poll(() => control.rpcCalls.at(-1))
+			.toMatchObject({
+				projectSlug: "myapp",
+				sessionId: "sess-var-001",
+				variant: "",
+			});
+		expect(control.rpcCalls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					projectSlug: "myapp",
+					sessionId: "sess-var-001",
+					variant: "low",
+				}),
+			]),
+		);
 	});
 });
 
@@ -290,15 +314,13 @@ test.describe("Ctrl+T keyboard shortcut", () => {
 		await page.keyboard.press("Control+t");
 		await expect(badge).toContainText("low");
 
-		// Verify WS message
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "switch_variant" &&
-				(m as { variant?: string }).variant === "low",
-		);
-		expect(msg).toMatchObject({ type: "switch_variant", variant: "low" });
+		await expect
+			.poll(() => control.rpcCalls.find((call) => call["variant"] === "low"))
+			.toMatchObject({
+				projectSlug: "myapp",
+				sessionId: "sess-var-001",
+				variant: "low",
+			});
 
 		// Second Ctrl+T: low → medium
 		await page.keyboard.press("Control+t");

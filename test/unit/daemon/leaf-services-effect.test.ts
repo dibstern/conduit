@@ -16,23 +16,23 @@ import { expect, vi } from "vitest";
 import {
 	KeepAwakeLive,
 	KeepAwakeTag,
-} from "../../../src/lib/effect/keep-awake-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import {
 	PortScannerLive,
 	PortScannerTag,
-} from "../../../src/lib/effect/port-scanner-layer.js";
-import {
-	RateLimiterLive,
-	RateLimiterTag,
-} from "../../../src/lib/effect/rate-limiter-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	StorageMonitorLive,
 	StorageMonitorTag,
-} from "../../../src/lib/effect/storage-monitor-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/storage-monitor-layer.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
-} from "../../../src/lib/effect/version-checker-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
+import {
+	RateLimiterLive,
+	RateLimiterTag,
+} from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 
 /** Helper: build the layer, run the body, then close the scope. */
 const withMonitor = (

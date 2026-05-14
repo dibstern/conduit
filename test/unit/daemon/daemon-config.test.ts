@@ -6,7 +6,7 @@ import { expect } from "vitest";
 import {
 	DaemonEnvConfigLive,
 	DaemonEnvConfigTag,
-} from "../../../src/lib/effect/daemon-config.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

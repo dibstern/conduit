@@ -4,35 +4,35 @@ import { expect } from "vitest";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
-} from "../../../src/lib/effect/instance-manager-service.js";
-import {
-	makePollerManagerStateLive,
-	PollerManagerStateTag,
-} from "../../../src/lib/effect/message-poller.js";
-import {
-	RateLimiterLive,
-	RateLimiterTag,
-} from "../../../src/lib/effect/rate-limiter-layer.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	makeRelayCacheLive,
 	RelayCacheTag,
-} from "../../../src/lib/effect/relay-cache.js";
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	RateLimiterLive,
+	RateLimiterTag,
+} from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import {
+	makePollerManagerStateLive,
+	PollerManagerStateTag,
+} from "../../../src/lib/domain/relay/Services/message-poller.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../../src/lib/effect/session-manager-state.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	makePollerStateLive,
 	PollerStateTag,
-} from "../../../src/lib/effect/session-status-poller.js";
+} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 
 describe("Full Layer composition", () => {
 	const composedLayer = Layer.mergeAll(
@@ -45,6 +45,7 @@ describe("Full Layer composition", () => {
 			Effect.succeed({
 				slug,
 				wsHandler: { handleUpgrade: () => {} },
+				rpcWsHandler: { handleUpgrade: () => {} },
 				stop: () => {},
 			}),
 		),

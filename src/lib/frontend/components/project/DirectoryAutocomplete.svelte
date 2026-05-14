@@ -1,12 +1,12 @@
 <!-- ─── DirectoryAutocomplete ──────────────────────────────────────────────── -->
-<!-- Drop-up autocomplete for filesystem directory paths. Sends list_directories -->
-<!-- over WebSocket on debounced input changes. Arrow keys + Enter to select,  -->
+<!-- Drop-up autocomplete for filesystem directory paths. Uses RPC on         -->
+<!-- debounced input changes. Arrow keys + Enter to select,                  -->
 <!-- Tab to drill into a directory level (terminal-style tab-completion).       -->
 
 <script lang="ts">
-	import { onMount, onDestroy } from "svelte";
-	import { wsSend } from "../../stores/ws.svelte.js";
-	import { onDirectoryList } from "../../stores/ws-listeners.js";
+	import { onDestroy } from "svelte";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { listDirectoriesRpc } from "../../transport/ws-rpc-client.js";
 	import Icon from "../shared/Icon.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
@@ -33,26 +33,7 @@
 
 	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
-	let unsubDir: (() => void) | undefined;
-
-	onMount(() => {
-		unsubDir = onDirectoryList((msg) => {
-			if (msg.type !== "directory_list") return;
-			const dirMsg = msg as {
-				type: "directory_list";
-				path: string;
-				entries: string[];
-			};
-			// Only accept responses that match our last request to avoid stale data
-			if (dirMsg.path !== lastRequestPath) return;
-			entries = dirMsg.entries;
-			loading = false;
-			visible = entries.length > 0;
-		});
-	});
-
 	onDestroy(() => {
-		unsubDir?.();
 		if (debounceTimer) clearTimeout(debounceTimer);
 	});
 
@@ -64,21 +45,40 @@
 
 	// ─── Input handling ─────────────────────────────────────────────────────────
 
-	function requestDirectories(path: string) {
+	async function requestDirectories(path: string) {
 		if (!path || path.length < 1) {
 			entries = [];
 			visible = false;
+			loading = false;
+			return;
+		}
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) {
+			entries = [];
+			visible = false;
+			loading = false;
 			return;
 		}
 		loading = true;
 		lastRequestPath = path;
-		wsSend({ type: "list_directories", path });
+		try {
+			const response = await listDirectoriesRpc({ projectSlug, path });
+			if (response.path !== lastRequestPath) return;
+			entries = [...response.entries];
+			loading = false;
+			visible = entries.length > 0;
+		} catch {
+			if (path !== lastRequestPath) return;
+			entries = [];
+			loading = false;
+			visible = false;
+		}
 	}
 
 	function handleInput() {
 		if (debounceTimer) clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => {
-			requestDirectories(value);
+			void requestDirectories(value);
 		}, 150);
 	}
 
@@ -91,7 +91,7 @@
 	function drillInto(entry: string) {
 		value = entry;
 		// Immediately request next level
-		requestDirectories(entry);
+		void requestDirectories(entry);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -147,7 +147,7 @@
 		if (value && entries.length > 0) {
 			visible = true;
 		} else if (value) {
-			requestDirectories(value);
+			void requestDirectories(value);
 		}
 	}
 

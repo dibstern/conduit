@@ -15,6 +15,7 @@ import {
 	EventStoreError,
 	makeEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
 	makeProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -36,8 +37,6 @@ import {
 	type EventId,
 	type EventMetadata,
 } from "../../../src/lib/persistence/events.js";
-import { runMigrationsEffect } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -228,9 +227,9 @@ const makeTestLayer = (
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
 ) => {
 	const testSqliteLayer = makeTestSqliteLayer();
-	const schemaLayer = Layer.effectDiscard(
-		runMigrationsEffect(schemaMigrations),
-	).pipe(Layer.provide(testSqliteLayer));
+	const schemaLayer = Layer.effectDiscard(makeEffectSqlMigrator()).pipe(
+		Layer.provide(testSqliteLayer),
+	);
 	const baseLayer = Layer.merge(testSqliteLayer, schemaLayer);
 
 	const eventStoreLayer = Layer.effect(
@@ -662,7 +661,7 @@ describe("EventStoreEffect", () => {
 			await runWithSqliteFile(
 				filename,
 				Effect.gen(function* () {
-					yield* runMigrationsEffect(schemaMigrations);
+					yield* makeEffectSqlMigrator();
 					yield* seedSession("s-independent-concurrent-appends");
 				}),
 			);

@@ -10,7 +10,7 @@ import {
 	rateLimitRejectionsCounter,
 	sseReconnectsCounter,
 	wsConnectionsGauge,
-} from "../../../src/lib/effect/metrics.js";
+} from "../../../src/lib/domain/daemon/Services/metrics.js";
 
 describe("Effect.Metric definitions", () => {
 	it.effect("wsConnectionsGauge increments and decrements", () =>

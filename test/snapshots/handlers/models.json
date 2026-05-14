@@ -107,38 +107,7 @@
 			}
 		}
 	],
-	"switch_model_opencode_success": [
-		{
-			"channel": "sendToSession",
-			"sessionId": "session-1",
-			"message": {
-				"type": "model_info",
-				"model": "gpt-4",
-				"provider": "openai"
-			}
-		},
-		{
-			"channel": "sendToSession",
-			"sessionId": "session-1",
-			"message": {
-				"type": "variant_info",
-				"variant": "",
-				"variants": ["standard", "fast"]
-			}
-		}
-	],
-	"switch_variant_opencode_success": [
-		{
-			"channel": "sendToSession",
-			"sessionId": "session-1",
-			"message": {
-				"type": "variant_info",
-				"variant": "v2",
-				"variants": ["v2", "v3"]
-			}
-		}
-	],
-	"set_default_model_opencode_success": [
+	"default_model_opencode_success": [
 		{
 			"channel": "broadcast",
 			"message": {

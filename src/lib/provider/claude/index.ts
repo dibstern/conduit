@@ -6,7 +6,7 @@
  */
 
 export type { ClaudeAdapterDeps } from "./claude-adapter.js";
-export { ClaudeAdapter } from "./claude-adapter.js";
+export { ClaudeAdapter, ClaudeDriver } from "./claude-adapter.js";
 export type { ClaudeEventTranslatorDeps } from "./claude-event-translator.js";
 export { ClaudeEventTranslator } from "./claude-event-translator.js";
 export type { ClaudePermissionBridgeDeps } from "./claude-permission-bridge.js";

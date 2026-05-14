@@ -6,12 +6,12 @@ import {
 	ProjectManagementServiceError,
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
-} from "../../../src/lib/effect/project-management-service.js";
+} from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ConfigTag,
 	type OpenCodeSettingsService,
 	OpenCodeSettingsServiceTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 const makeSettingsService = (

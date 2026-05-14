@@ -15,8 +15,8 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";

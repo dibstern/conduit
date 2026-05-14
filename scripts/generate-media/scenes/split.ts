@@ -99,18 +99,6 @@ export const splitScene: SceneDefinition = {
 							return;
 						}
 
-						if (parsed.type === "load_more_history") {
-							ws.send(
-								JSON.stringify({
-									type: "history_page",
-									sessionId: parsed.sessionId ?? "",
-									messages: [],
-									hasMore: false,
-								}),
-							);
-							return;
-						}
-
 						if (parsed.type === "list_sessions") {
 							const sessionList = splitInit.find(
 								(m) => m.type === "session_list",

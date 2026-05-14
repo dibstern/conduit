@@ -6,7 +6,7 @@ import {
 	makePersistenceServiceLive,
 	type PersistenceError,
 	type PersistenceServiceTag,
-} from "../../effect/persistence-service.js";
+} from "../../domain/persistence/Services/persistence-service.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,

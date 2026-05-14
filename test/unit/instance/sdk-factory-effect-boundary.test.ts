@@ -11,8 +11,8 @@ describe("SDK factory Effect boundary", () => {
 	it("does not run a local Effect runtime for synchronous SDK client creation", () => {
 		const sources = [
 			"src/lib/relay/relay-stack.ts",
-			"src/lib/effect/project-discovery-layer.ts",
-			"src/lib/effect/daemon-main.ts",
+			"src/lib/domain/daemon/Layers/project-discovery-layer.ts",
+			"src/lib/domain/daemon/Layers/daemon-main.ts",
 		].map(readSource);
 
 		for (const source of sources) {

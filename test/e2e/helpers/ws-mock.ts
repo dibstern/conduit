@@ -154,16 +154,6 @@ export async function mockRelayWebSocket(
 					}
 				}
 
-				// Respond to get_models, get_agents, etc. with cached data
-				if (parsed.type === "get_models") {
-					const modelList = options.initMessages.find(
-						(m) => m.type === "model_list",
-					);
-					if (modelList) {
-						ws.send(JSON.stringify(modelList));
-					}
-				}
-
 				if (parsed.type === "get_agents") {
 					const agentList = options.initMessages.find(
 						(m) => m.type === "agent_list",
@@ -171,18 +161,6 @@ export async function mockRelayWebSocket(
 					if (agentList) {
 						ws.send(JSON.stringify(agentList));
 					}
-				}
-
-				if (parsed.type === "load_more_history") {
-					// Return empty history
-					ws.send(
-						JSON.stringify({
-							type: "history_page",
-							sessionId: parsed.sessionId ?? "",
-							messages: [],
-							hasMore: false,
-						}),
-					);
 				}
 			} catch {
 				// Ignore parse errors

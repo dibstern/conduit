@@ -4,13 +4,14 @@
 // engine) from an OpenCodeClient. Used by relay-stack.ts to instantiate the
 // provider layer alongside the existing relay pipeline.
 
-import { Context, Effect, Layer } from "effect";
-import { OrchestrationEngineTag } from "../effect/services.js";
+import { Context, Effect, Layer, type Scope } from "effect";
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
-import { ClaudeAdapter } from "./claude/index.js";
-import { OpenCodeAdapter } from "./opencode-adapter.js";
+import { ClaudeAdapter, ClaudeDriver } from "./claude/index.js";
+import { OpenCodeAdapter, OpenCodeDriver } from "./opencode-adapter.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import type { TurnResult } from "./types.js";
@@ -19,6 +20,10 @@ const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
+	readonly workspaceRoot?: string;
+}
+
+export interface OrchestrationRuntimeLayerOptions {
 	readonly workspaceRoot?: string;
 }
 
@@ -83,6 +88,28 @@ function createOrchestrationComponents(
 	return { engine, registry, adapter };
 }
 
+const createOrchestrationComponentsEffect = (
+	options: OrchestrationLayerOptions,
+): Effect.Effect<OrchestrationComponents, never, Scope.Scope> =>
+	Effect.gen(function* () {
+		const registry = new ProviderRegistry();
+		const adapter = (yield* OpenCodeDriver.create({
+			client: options.client,
+			...(options.workspaceRoot != null
+				? { workspaceRoot: options.workspaceRoot }
+				: {}),
+		})) as OpenCodeAdapter;
+		registry.registerInstance(adapter);
+
+		const claudeAdapter = yield* ClaudeDriver.create({
+			workspaceRoot: options.workspaceRoot ?? process.cwd(),
+		});
+		registry.registerInstance(claudeAdapter);
+
+		const engine = new OrchestrationEngine({ registry });
+		return { engine, registry, adapter };
+	});
+
 function createOrchestrationView(
 	components: OrchestrationComponents,
 ): OrchestrationLayer {
@@ -130,12 +157,22 @@ export function createOrchestrationLayer(
 }
 
 export const makeOrchestrationRuntimeLayer = (
-	options: OrchestrationLayerOptions,
-): Layer.Layer<ProviderRegistryTag | OrchestrationEngineTag> => {
+	options: OrchestrationRuntimeLayerOptions = {},
+): Layer.Layer<
+	ProviderRegistryTag | OrchestrationEngineTag,
+	never,
+	OpenCodeAPITag
+> => {
 	const componentsLayer = Layer.scoped(
 		OrchestrationComponentsTag,
 		Effect.gen(function* () {
-			const components = createOrchestrationComponents(options);
+			const client = yield* OpenCodeAPITag;
+			const components = yield* createOrchestrationComponentsEffect({
+				client,
+				...(options.workspaceRoot != null
+					? { workspaceRoot: options.workspaceRoot }
+					: {}),
+			});
 			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
 			return components;
 		}),

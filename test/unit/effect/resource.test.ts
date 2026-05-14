@@ -6,7 +6,7 @@ import {
 	delayed,
 	repeating,
 	trackedFetch,
-} from "../../../src/lib/effect/resource.js";
+} from "../../../src/lib/domain/relay/Services/resource.js";
 
 describe("Effect resource utilities", () => {
 	it("trackedFetch is a callable that returns a scoped effect", () => {

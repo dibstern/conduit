@@ -10,13 +10,13 @@ import {
 	OpenCodeModelServiceTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getModel,
 	getVariant,
 	makeOverridesStateLive,
-} from "../../../src/lib/effect/session-overrides-state.js";
-import { handleSwitchModel } from "../../../src/lib/handlers/model.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { switchModelForSession } from "../../../src/lib/handlers/model.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
@@ -104,7 +104,9 @@ describe("model handlers with Effect override state", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleSwitchModel("client-1", {
+				yield* switchModelForSession({
+					clientId: "client-1",
+					sessionId: "session-1",
 					modelId: "gpt-4",
 					providerId: "openai",
 				});
@@ -174,7 +176,9 @@ describe("model handlers with Effect override state", () => {
 			} as unknown as OrchestrationEngine;
 
 			return Effect.gen(function* () {
-				yield* handleSwitchModel("client-1", {
+				yield* switchModelForSession({
+					clientId: "client-1",
+					sessionId: "session-1",
 					providerId: "openai",
 					modelId: "gpt-4",
 				});

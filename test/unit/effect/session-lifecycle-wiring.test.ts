@@ -2,25 +2,24 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, PubSub } from "effect";
 import { expect, vi } from "vitest";
+import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
 import {
 	DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
-} from "../../../src/lib/effect/daemon-pubsub.js";
-import { makePinoLoggerLive } from "../../../src/lib/effect/pino-logger-layer.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	PollerManagerTag,
-	type StatusPollerShape,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
-} from "../../../src/lib/effect/session-manager-service.js";
-import { makeSessionManagerStateLive } from "../../../src/lib/effect/session-manager-state.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
@@ -28,7 +27,10 @@ import {
 	makeSessionLifecycleWiringLive,
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
-import { makeMockOpenCodeAPI } from "../../helpers/mock-factories.js";
+import {
+	makeMockOpenCodeAPI,
+	makeMockStatusPoller,
+} from "../../helpers/mock-factories.js";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -72,10 +74,10 @@ function makeMockServices() {
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
 		},
-		statusPoller: {
+		statusPoller: makeMockStatusPoller({
 			isProcessing: vi.fn().mockReturnValue(false),
 			clearMessageActivity: vi.fn(),
-		} satisfies StatusPollerShape,
+		}),
 		log: createSilentLogger(),
 	};
 }

@@ -1,8 +1,8 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { setDefaultAgent } from "../../../src/lib/effect/session-overrides-state.js";
-import { handleSwitchAgent } from "../../../src/lib/handlers/agent.js";
+import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { setDefaultAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import {
 	makeMockOpenCodeAPI,
@@ -24,7 +24,12 @@ describe("agent selection state", () => {
 		});
 
 		return Effect.gen(function* () {
-			yield* handleSwitchAgent("client-1", { agentId: "plan" });
+			const agentService = yield* AgentServiceTag;
+			yield* agentService.switchAgent({
+				clientId: "client-1",
+				sessionId: "session-1",
+				agentId: "plan",
+			});
 			yield* handleMessage("client-1", { text: "implement this" });
 
 			expect(api.session.prompt).toHaveBeenCalledWith(

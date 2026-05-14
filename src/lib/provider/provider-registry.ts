@@ -6,7 +6,7 @@
 import { Context, Effect, Layer } from "effect";
 import { createLogger } from "../logger.js";
 import { ProviderNotRegistered } from "./errors.js";
-import type { ProviderAdapter } from "./types.js";
+import type { ProviderAdapter, ProviderInstance } from "./types.js";
 
 const log = createLogger("provider-registry");
 
@@ -16,7 +16,7 @@ export class ProviderRegistryTag extends Context.Tag("ProviderRegistry")<
 >() {}
 
 export const ProviderRegistryLive = (
-	adapters: Iterable<ProviderAdapter> = [],
+	adapters: Iterable<ProviderInstance> = [],
 ): Layer.Layer<ProviderRegistryTag> =>
 	Layer.effect(
 		ProviderRegistryTag,
@@ -24,29 +24,33 @@ export const ProviderRegistryLive = (
 	);
 
 export class ProviderRegistry {
-	private readonly adapters = new Map<string, ProviderAdapter>();
+	private readonly adapters = new Map<string, ProviderInstance>();
 
-	constructor(adapters: Iterable<ProviderAdapter> = []) {
+	constructor(adapters: Iterable<ProviderInstance> = []) {
 		for (const adapter of adapters) {
-			this.registerAdapter(adapter);
+			this.registerInstance(adapter);
 		}
+	}
+
+	registerInstance(instance: ProviderInstance): void {
+		this.adapters.set(instance.providerId, instance);
+		log.info(`Registered provider instance: ${instance.providerId}`);
 	}
 
 	/** Register an adapter. Overwrites any existing adapter with the same providerId. */
 	registerAdapter(adapter: ProviderAdapter): void {
-		this.adapters.set(adapter.providerId, adapter);
-		log.info(`Registered provider adapter: ${adapter.providerId}`);
+		this.registerInstance(adapter);
 	}
 
 	/** Get an adapter by provider ID, or undefined if not registered. */
-	getAdapter(providerId: string): ProviderAdapter | undefined {
+	getAdapter(providerId: string): ProviderInstance | undefined {
 		return this.adapters.get(providerId);
 	}
 
 	/** Get an adapter by provider ID, failing with a typed Effect error if absent. */
 	getAdapterEffect(
 		providerId: string,
-	): Effect.Effect<ProviderAdapter, ProviderNotRegistered> {
+	): Effect.Effect<ProviderInstance, ProviderNotRegistered> {
 		const adapter = this.adapters.get(providerId);
 		return adapter
 			? Effect.succeed(adapter)
@@ -54,7 +58,7 @@ export class ProviderRegistry {
 	}
 
 	/** Get an adapter by provider ID, throwing if not registered. */
-	getAdapterOrThrow(providerId: string): ProviderAdapter {
+	getAdapterOrThrow(providerId: string): ProviderInstance {
 		const adapter = this.adapters.get(providerId);
 		if (!adapter) {
 			throw new ProviderNotRegistered({ providerId });

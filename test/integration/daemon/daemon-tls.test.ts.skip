@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { startHttpServer } from "../../../src/lib/daemon/daemon-lifecycle.js";
 
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
 // ─── Generate test certs (same pattern as server.pbt.test.ts) ────────────────
 

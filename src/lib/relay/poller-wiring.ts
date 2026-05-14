@@ -3,7 +3,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
+import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationManager } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";

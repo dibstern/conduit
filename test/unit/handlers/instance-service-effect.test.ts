@@ -5,8 +5,8 @@ import {
 	type InstanceManagementService,
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
-} from "../../../src/lib/effect/instance-management-service.js";
-import { WebSocketHandlerTag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/instance-management-service.js";
+import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	handleInstanceAdd,
 	handleInstanceStart,

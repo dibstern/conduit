@@ -2,13 +2,18 @@
 // Returns full (pre-truncation) tool result content from the SQLite tool_content table.
 
 import { Effect } from "effect";
-import { WebSocketHandlerTag } from "../effect/services.js";
-import { ToolContentServiceTag } from "../effect/tool-content-service.js";
-import type { PayloadMap } from "./payloads.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
+import { ToolContentServiceTag } from "../domain/relay/Services/tool-content-service.js";
+
+export const getToolContentValue = (toolId: string) =>
+	Effect.gen(function* () {
+		const toolContent = yield* ToolContentServiceTag;
+		return yield* toolContent.get(toolId);
+	});
 
 export const handleGetToolContent = (
 	clientId: string,
-	payload: PayloadMap["get_tool_content"],
+	payload: { toolId: string },
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -26,8 +31,7 @@ export const handleGetToolContent = (
 			return;
 		}
 
-		const toolContent = yield* ToolContentServiceTag;
-		const content = yield* toolContent.get(toolId);
+		const content = yield* getToolContentValue(toolId);
 
 		if (content !== undefined) {
 			wsHandler.sendTo(clientId, {

@@ -18,7 +18,7 @@ import {
 	reconcile,
 	reconcileNow,
 	type StatusCorrection,
-} from "../../../src/lib/effect/session-status-poller.js";
+} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { readSessionStatusesFromEffect } from "../../../src/lib/session/session-status-effect.js";
 

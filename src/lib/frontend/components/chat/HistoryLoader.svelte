@@ -1,6 +1,6 @@
 <!-- ─── History Loader ─────────────────────────────────────────────────────── -->
 <!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
-<!-- Sends load_more_history requests; responses are handled by ws-dispatch -->
+<!-- Sends LoadMoreHistory RPC requests; responses are handled by ws-dispatch -->
 <!-- which converts and prepends into the session's message list. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
@@ -14,7 +14,10 @@
 		prependMessages,
 	} from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { handleMessage } from "../../stores/ws-dispatch.js";
+	import { loadMoreHistoryRpc } from "../../transport/ws-rpc-client.js";
+	import type { RelayMessage } from "../../types.js";
 
 	const HISTORY_PAGE_SIZE = 50;
 
@@ -86,14 +89,28 @@
 		}
 
 		// Server request for older messages.
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
 		slot.messages.historyLoading = true;
 		// offset = number of messages already loaded (tracked by ws-dispatch).
 		// For cache→server transitions, messageCount was seeded above.
-		wsSend({
-			type: "load_more_history",
+		void loadMoreHistoryRpc({
+			projectSlug,
 			sessionId,
 			offset: slot.messages.historyMessageCount,
-		});
+		})
+			.then((response) => {
+				handleMessage({
+					type: "history_page",
+					sessionId: response.sessionId,
+					messages: response.messages,
+					hasMore: response.hasMore,
+					...(response.total != null ? { total: response.total } : {}),
+				} as Extract<RelayMessage, { type: "history_page" }>);
+			})
+			.catch(() => {
+				slot.messages.historyLoading = false;
+			});
 	}
 </script>
 

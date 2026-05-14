@@ -1,6 +1,7 @@
 // ─── Session Store Tests ─────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	applyListSessionsResponse,
 	clearSessionState,
 	completeNewSession,
 	ERROR_DISPLAY_MS,
@@ -80,7 +81,7 @@ beforeEach(() => {
 });
 
 describe("switchToSession", () => {
-	it("requests active-provider commands and agents after changing session", () => {
+	it("notifies the legacy WS viewer state after changing session", () => {
 		const sendWs = vi.fn();
 		sessionState.currentId = "old-session";
 
@@ -90,12 +91,8 @@ describe("switchToSession", () => {
 			type: "view_session",
 			sessionId: "new-session",
 		});
-		expect(sendWs).toHaveBeenCalledWith({ type: "get_agents" });
-		expect(sendWs).toHaveBeenCalledWith({ type: "get_commands" });
 		expect(sendWs.mock.calls.map((call) => call[0])).toEqual([
 			{ type: "view_session", sessionId: "new-session" },
-			{ type: "get_agents" },
-			{ type: "get_commands" },
 		]);
 	});
 });
@@ -188,6 +185,31 @@ describe("handleSessionList", () => {
 		expect(sessionState.allSessions).toHaveLength(2);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(sessionState.allSessions[0]!.id).toBe("a");
+	});
+
+	it("applies ListSessions RPC responses through the same session-list path", () => {
+		applyListSessionsResponse({
+			projectSlug: "project-a",
+			roots: true,
+			sessions: [
+				{
+					id: "rpc-root",
+					title: "RPC Root",
+					updatedAt: 123,
+					pendingQuestionCount: 2,
+				},
+			],
+		});
+
+		expect(sessionState.rootSessions).toEqual([
+			{
+				id: "rpc-root",
+				title: "RPC Root",
+				updatedAt: 123,
+				pendingQuestionCount: 2,
+			},
+		]);
+		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
 	});
 
 	it("ignores non-array sessions payload", () => {

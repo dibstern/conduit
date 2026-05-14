@@ -4,22 +4,18 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { ClientMessageSerializationLive } from "../../../src/lib/effect/client-message-serialization.js";
-import { RateLimiterTag } from "../../../src/lib/effect/rate-limiter-layer.js";
 import {
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	handleGetCommands,
 	handleGetProjects,
 } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import { handleRelayWsMessage } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import {
 	makeMockConfig,
-	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
@@ -62,18 +58,6 @@ const runSettingsHandler = async (
 	const layer = makeTestHandlerLayer({ api, wsHandler });
 	await Effect.runPromise(effect.pipe(Effect.provide(layer)));
 };
-
-const makeDispatchLayer = (
-	api: OpenCodeAPI,
-	wsHandler: WebSocketHandlerShape,
-) =>
-	Layer.mergeAll(
-		makeTestHandlerLayer({ api, wsHandler }),
-		ClientMessageSerializationLive,
-		Layer.succeed(RateLimiterTag, {
-			checkLimit: vi.fn(() => Effect.succeed({ allowed: true })),
-		}),
-	);
 
 describe("settings handler wire snapshots", () => {
 	it("keeps the OpenCode get_commands envelope stable", async () => {
@@ -126,27 +110,6 @@ describe("settings handler wire snapshots", () => {
 		expect(calls).toEqual(readSnapshots()["get_commands_claude_success"]);
 	});
 
-	it("keeps the top-level get_commands error envelope stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const api = makeSettingsApi({
-			commands: vi.fn(async () => {
-				throw new Error("commands failed");
-			}),
-		});
-
-		await Effect.runPromise(
-			handleRelayWsMessage({
-				clientId: "client-1",
-				handler: "get_commands",
-				payload: {},
-				sendTo: wsHandler.sendTo,
-				log: makeMockLogger(),
-			}).pipe(Effect.provide(makeDispatchLayer(api, wsHandler))),
-		);
-
-		expect(calls).toEqual(readSnapshots()["get_commands_opencode_error"]);
-	});
-
 	it("keeps the config-backed get_projects envelope stable", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const api = makeSettingsApi({});
@@ -188,26 +151,5 @@ describe("settings handler wire snapshots", () => {
 		expect(calls).toEqual(
 			readSnapshots()["get_projects_opencode_fallback_success"],
 		);
-	});
-
-	it("keeps the top-level get_projects error envelope stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const api = makeSettingsApi({
-			projects: vi.fn(async () => {
-				throw new Error("projects failed");
-			}),
-		});
-
-		await Effect.runPromise(
-			handleRelayWsMessage({
-				clientId: "client-1",
-				handler: "get_projects",
-				payload: {},
-				sendTo: wsHandler.sendTo,
-				log: makeMockLogger(),
-			}).pipe(Effect.provide(makeDispatchLayer(api, wsHandler))),
-		);
-
-		expect(calls).toEqual(readSnapshots()["get_projects_opencode_error"]);
 	});
 });

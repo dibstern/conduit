@@ -4,10 +4,10 @@
 // broadcasts updated instance_list to all connected clients after mutations.
 
 import { Effect } from "effect";
-import { InstanceManagementServiceTag } from "../effect/instance-management-service.js";
-import { ProjectManagementServiceTag } from "../effect/project-management-service.js";
-import { ScanServiceTag } from "../effect/scan-service.js";
-import { WebSocketHandlerTag } from "../effect/services.js";
+import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
+import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
+import { ScanServiceTag } from "../domain/relay/Services/scan-service.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { formatErrorDetail } from "../errors.js";
 import type { OpenCodeInstance, ProjectInfo } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";

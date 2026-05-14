@@ -1,20 +1,20 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceLive,
 	AgentServiceTag,
-} from "../../../src/lib/effect/agent-service.js";
+} from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getAgent,
 	makeOverridesStateLive,
 	setAgent,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
@@ -191,7 +191,7 @@ describe("AgentService", () => {
 			expect(yield* getAgent("session-1")).toBe("plan");
 			expect(yield* getAgent("session-3")).toBeUndefined();
 			expect(log.warn).toHaveBeenCalledWith(
-				"client=client-2 switch_agent with no session - ignoring",
+				"client=client-2 agent switch with no session - ignoring",
 			);
 			expect(log.info).toHaveBeenCalledTimes(2);
 		}).pipe(Effect.provide(makeLayer({ log })));

@@ -33,17 +33,6 @@
 			}
 		}
 	],
-	"get_commands_opencode_error": [
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
-				"type": "system_error",
-				"code": "HANDLER_ERROR",
-				"message": "An unknown error occurred in Effect.tryPromise"
-			}
-		}
-	],
 	"get_projects_config_success": [
 		{
 			"channel": "sendTo",
@@ -76,17 +65,6 @@
 					}
 				],
 				"current": "test-project"
-			}
-		}
-	],
-	"get_projects_opencode_error": [
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
-				"type": "system_error",
-				"code": "HANDLER_ERROR",
-				"message": "An unknown error occurred in Effect.tryPromise"
 			}
 		}
 	]

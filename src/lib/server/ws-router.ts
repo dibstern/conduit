@@ -8,40 +8,22 @@ import type { RelayMessage } from "../types.js";
 // ─── Message types from browser ──────────────────────────────────────────────
 
 export type IncomingMessageType =
-	| "message"
 	| "permission_response"
 	| "ask_user_response"
 	| "question_reject"
 	| "new_session"
 	| "switch_session"
 	| "delete_session"
-	| "rename_session"
 	| "fork_session"
-	| "list_sessions"
-	| "search_sessions"
-	| "load_more_history"
 	| "terminal_command"
 	| "input_sync"
-	| "switch_agent"
-	| "switch_model"
-	| "get_todo"
-	| "get_agents"
-	| "get_models"
-	| "get_commands"
-	| "get_projects"
 	| "add_project"
-	| "list_directories"
 	| "remove_project"
 	| "rename_project"
-	| "get_file_list"
-	| "get_file_content"
-	| "get_file_tree"
-	| "get_tool_content"
 	| "pty_create"
 	| "pty_input"
 	| "pty_resize"
 	| "pty_close"
-	| "cancel"
 	| "rewind"
 	| "instance_add"
 	| "instance_remove"
@@ -50,50 +32,28 @@ export type IncomingMessageType =
 	| "instance_update"
 	| "instance_rename"
 	| "set_project_instance"
-	| "set_default_model"
-	| "switch_variant"
-	| "switch_context_window"
 	| "view_session"
 	| "proxy_detect"
 	| "scan_now"
-	| "set_log_level"
-	| "reload_provider_session";
+	| "set_log_level";
 
 const VALID_MESSAGE_TYPES = new Set<string>([
-	"message",
 	"permission_response",
 	"ask_user_response",
 	"question_reject",
 	"new_session",
 	"switch_session",
 	"delete_session",
-	"rename_session",
 	"fork_session",
-	"list_sessions",
-	"search_sessions",
-	"load_more_history",
 	"terminal_command",
 	"input_sync",
-	"switch_agent",
-	"switch_model",
-	"get_todo",
-	"get_agents",
-	"get_models",
-	"get_commands",
-	"get_projects",
 	"add_project",
-	"list_directories",
 	"remove_project",
 	"rename_project",
-	"get_file_list",
-	"get_file_content",
-	"get_file_tree",
-	"get_tool_content",
 	"pty_create",
 	"pty_input",
 	"pty_resize",
 	"pty_close",
-	"cancel",
 	"rewind",
 	"instance_add",
 	"instance_remove",
@@ -102,14 +62,10 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"instance_update",
 	"instance_rename",
 	"set_project_instance",
-	"set_default_model",
-	"switch_variant",
-	"switch_context_window",
 	"view_session",
 	"proxy_detect",
 	"scan_now",
 	"set_log_level",
-	"reload_provider_session",
 ]);
 
 export interface IncomingMessage {

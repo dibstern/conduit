@@ -39,7 +39,7 @@ import {
 	setModelDefault,
 	setVariant,
 	startProcessingTimeout,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 
 const TIMEOUT_MS = 120_000;
 

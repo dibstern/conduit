@@ -4,8 +4,8 @@
 import type {
 	PollerManagerShape,
 	SessionManagerShape,
-} from "../effect/services.js";
-import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
+} from "../domain/relay/Services/services.js";
+import type { SessionStatusPollerService } from "../domain/relay/Services/session-status-poller.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";

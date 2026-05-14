@@ -5,8 +5,8 @@
 // Fiber is automatically interrupted on scope close (ManagedRuntime.dispose).
 
 import { Duration, Effect, Layer, Schedule } from "effect";
-import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
-import { WebSocketHandlerTag } from "../effect/services.js";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import type { PermissionId } from "../shared-types.js";
 
 // ─── Effect Layer ───────────────────────────────────────────────────────────

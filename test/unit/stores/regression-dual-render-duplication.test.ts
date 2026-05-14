@@ -4,7 +4,7 @@
 //
 // Root cause (pre-fix): HistoryView and the live {#each} in MessageList
 // were two independent rendering surfaces. After replayEvents() populated
-// chatState.messages, the IntersectionObserver triggered load_more_history.
+// chatState.messages, the IntersectionObserver requested older history.
 // The server responded with history_page containing the same messages,
 // causing HistoryView to also render the full conversation → duplicates.
 //

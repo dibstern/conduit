@@ -1,28 +1,35 @@
+import { PersistencePathTag } from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+} from "../../../src/lib/domain/daemon/Services/management-service.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 // ─── Daemon Main Tests ──────────────────────────────────────────────────────
 // TDD tests for daemon-main.ts: the top-level Effect entry point that replaces
 // the Daemon class's start() method. Tests exercise runStartupSequence
 // composition and background task supervision, NOT makeDaemonProgramLayer
 // (which blocks on Effect.never).
 
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { projectDiscovery } from "../../../src/lib/effect/daemon-main.js";
+import {
+	projectDiscovery,
+	resolveDefaultStaticDir,
+} from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import {
 	type CrashCounter,
 	CrashCounterTag,
 	CrashLimitExceeded,
 	runStartupSequence,
-} from "../../../src/lib/effect/daemon-startup.js";
-import { makeDaemonStateLive } from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	ConfigTag,
-	InstanceMgmtTag,
 	LoggerTag,
-	PersistencePathTag,
-	ProjectMgmtTag,
-	RelayCacheTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 
 // ─── Mock helpers ──────────────────────────────────────────────────────────
@@ -110,6 +117,51 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe("daemon-main", () => {
+	describe("resolveDefaultStaticDir", () => {
+		it("resolves packaged frontend assets from the moved domain layer path", () => {
+			const moduleUrl = pathToFileURL(
+				join(
+					"/pkg",
+					"dist",
+					"src",
+					"lib",
+					"domain",
+					"daemon",
+					"Layers",
+					"daemon-main.js",
+				),
+			).href;
+
+			expect(
+				resolveDefaultStaticDir({
+					moduleUrl,
+					cwd: "/not-the-package",
+					exists: (path) => path === join("/pkg", "dist", "frontend"),
+				}),
+			).toBe(join("/pkg", "dist", "frontend"));
+		});
+
+		it("falls back to cwd dist/frontend when running from source", () => {
+			expect(
+				resolveDefaultStaticDir({
+					moduleUrl: pathToFileURL(
+						join(
+							"/repo",
+							"src",
+							"lib",
+							"domain",
+							"daemon",
+							"Layers",
+							"daemon-main.ts",
+						),
+					).href,
+					cwd: "/repo",
+					exists: () => false,
+				}),
+			).toBe(join("/repo", "dist", "frontend"));
+		});
+	});
+
 	describe("runStartupSequence via daemon-main layer", () => {
 		it.effect("completes startup and leaves state unchanged", () =>
 			Effect.gen(function* () {

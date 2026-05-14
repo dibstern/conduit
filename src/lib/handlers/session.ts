@@ -1,21 +1,21 @@
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Session Handlers ────────────────────────────────────────────────────────
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
-import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
-import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+} from "../domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearSession as clearEffectOverrideSession,
 	hasActiveProcessingTimeout,
-} from "../effect/session-overrides-state.js";
+} from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	buildSessionSwitchedMessage,
@@ -407,16 +407,21 @@ export const handleDeleteSession = (
 		log.info(`client=${clientId} Deleted: ${id}`);
 	});
 
-export const handleRenameSession = (
-	clientId: string,
-	payload: PayloadMap["rename_session"],
-) =>
+export const renameSessionForClient = ({
+	clientId,
+	sessionId,
+	title,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly title: string;
+}) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const { sessionId: id, title } = payload;
+		const id = sessionId;
 		if (id && title) {
 			yield* sessionManagerService.renameSession(id, title);
 			yield* sessionManagerService.sendDualSessionLists((msg) =>
@@ -426,68 +431,26 @@ export const handleRenameSession = (
 		}
 	});
 
-export const handleListSessions = (
-	clientId: string,
-	_payload: PayloadMap["list_sessions"],
-) =>
+export const loadMoreHistoryForSession = ({
+	sessionId,
+	offset,
+}: {
+	readonly sessionId: string;
+	readonly offset: number;
+}) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
-		yield* sessionManagerService.sendDualSessionLists((msg) =>
-			wsHandler.sendTo(clientId, msg),
+		const page = yield* sessionManagerService.loadPreRenderedHistory(
+			sessionId,
+			offset,
 		);
-	});
-
-export const handleSearchSessions = (
-	clientId: string,
-	payload: PayloadMap["search_sessions"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
-
-		const { query, roots } = payload;
-		const sessions = yield* sessionManagerService.listSessions(
-			roots !== undefined ? { roots } : undefined,
-		);
-		const q = query.toLowerCase();
-		const results = sessions.filter(
-			(s) =>
-				(s.title ?? "").toLowerCase().includes(q) ||
-				s.id.toLowerCase().includes(q),
-		);
-		wsHandler.sendTo(clientId, {
-			type: "session_list",
-			sessions: results,
-			roots: roots ?? false,
-			search: true,
-		});
-	});
-
-export const handleLoadMoreHistory = (
-	clientId: string,
-	payload: PayloadMap["load_more_history"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
-
-		const sid = payload.sessionId ?? wsHandler.getClientSession(clientId) ?? "";
-		const { offset } = payload;
-		if (sid) {
-			const page = yield* sessionManagerService.loadPreRenderedHistory(
-				sid,
-				offset,
-			);
-			wsHandler.sendTo(clientId, {
-				type: "history_page",
-				sessionId: sid,
-				messages: page.messages,
-				hasMore: page.hasMore,
-				...(page.total != null && { total: page.total }),
-			});
-		}
+		return {
+			sessionId,
+			messages: page.messages,
+			hasMore: page.hasMore,
+			...(page.total != null && { total: page.total }),
+		};
 	});
 
 /** Fork a session at a specific message point (ticket 5.3). */

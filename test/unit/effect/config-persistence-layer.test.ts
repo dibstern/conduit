@@ -18,21 +18,21 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	ConfigSnapshotTag,
 	ConfigWriterTag,
-} from "../../../src/lib/effect/config-persistence-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addInstance,
 	makeInstanceManagerStateLive,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	addWithoutRelay,
 	makeProjectRegistryLive,
-} from "../../../src/lib/effect/project-registry-service.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 
 describe("ConfigPersistenceLive", () => {
 	const defaults: DaemonRuntimeConfig = {

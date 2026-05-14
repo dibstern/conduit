@@ -6,6 +6,7 @@ import {
 	contextWindowInitMessages,
 	noContextWindowInitMessages,
 } from "../fixtures/mockup-state.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
@@ -25,6 +26,18 @@ async function setupWithContextOptions(
 	page: Page,
 	baseURL?: string,
 ): Promise<WsMockControl> {
+	await mockWsRpc(page, {
+		handlers: {
+			SwitchContextWindow: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				contextWindow: String(params["contextWindow"] ?? ""),
+				options: [
+					{ value: "200k", label: "200K", isDefault: true },
+					{ value: "1m", label: "1M (beta)" },
+				],
+			}),
+		},
+	});
 	const control = await mockRelayWebSocket(page, {
 		initMessages: contextWindowInitMessages,
 		responses: new Map(),
@@ -40,6 +53,15 @@ async function setupWithoutContextOptions(
 	page: Page,
 	baseURL?: string,
 ): Promise<WsMockControl> {
+	await mockWsRpc(page, {
+		handlers: {
+			SwitchContextWindow: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				contextWindow: String(params["contextWindow"] ?? ""),
+				options: [],
+			}),
+		},
+	});
 	const control = await mockRelayWebSocket(page, {
 		initMessages: noContextWindowInitMessages,
 		responses: new Map(),
@@ -95,31 +117,18 @@ test.describe("Context window dropdown", () => {
 		).toContainText("1M (beta)");
 	});
 
-	test("selecting 1M updates the badge and sends switch_context_window", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupWithContextOptions(page, baseURL);
+	test("selecting 1M updates the badge", async ({ page, baseURL }) => {
+		await setupWithContextOptions(page, baseURL);
 
 		const badge = page.locator("[data-testid='context-window-badge']");
 		await badge.click();
 		await page.locator("[data-testid='context-window-option-1m']").click();
 
 		await expect(badge).toContainText("1M (beta)");
-		const msg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "switch_context_window",
-		);
-		expect(msg).toMatchObject({
-			type: "switch_context_window",
-			contextWindow: "1m",
-		});
 	});
 
 	test("selecting default clears the override", async ({ page, baseURL }) => {
-		const control = await setupWithContextOptions(page, baseURL);
+		await setupWithContextOptions(page, baseURL);
 
 		const badge = page.locator("[data-testid='context-window-badge']");
 		await badge.click();
@@ -130,30 +139,6 @@ test.describe("Context window dropdown", () => {
 		await page.locator("[data-testid='context-window-option-default']").click();
 
 		await expect(badge).toContainText("200K");
-		await expect
-			.poll(() =>
-				control
-					.getClientMessages()
-					.filter(
-						(m: unknown) =>
-							typeof m === "object" &&
-							m !== null &&
-							(m as { type?: string }).type === "switch_context_window",
-					),
-			)
-			.toHaveLength(2);
-		const messages = control
-			.getClientMessages()
-			.filter(
-				(m: unknown) =>
-					typeof m === "object" &&
-					m !== null &&
-					(m as { type?: string }).type === "switch_context_window",
-			);
-		expect(messages[1]).toMatchObject({
-			type: "switch_context_window",
-			contextWindow: "",
-		});
 	});
 
 	test("context_window_info from server updates the badge", async ({

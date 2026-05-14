@@ -8,12 +8,12 @@ import { expect, vi } from "vitest";
 import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
 	ToolContentServiceTag,
-} from "../../../src/lib/effect/tool-content-service.js";
+} from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 

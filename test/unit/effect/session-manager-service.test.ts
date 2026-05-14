@@ -12,13 +12,13 @@ import {
 import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	StatusPollerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	addToParentMap,
 	clearPaginationCursor,
@@ -36,11 +36,11 @@ import {
 	sendDualSessionLists,
 	setForkEntry,
 	setPendingQuestionCounts,
-} from "../../../src/lib/effect/session-manager-service.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../../src/lib/effect/session-manager-state.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
@@ -51,6 +51,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
 
 function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
@@ -864,13 +865,16 @@ describe("SessionManagerService", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag, api),
 					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(StatusPollerTag, {
-						isProcessing: vi.fn(() => true),
-						clearMessageActivity: vi.fn(),
-						getCurrentStatuses: vi.fn(() => ({
-							"session-1": { type: "busy" } as SessionStatus,
-						})),
-					}),
+					Layer.succeed(
+						StatusPollerTag,
+						makeMockStatusPoller({
+							isProcessing: vi.fn(() => true),
+							clearMessageActivity: vi.fn(),
+							getCurrentStatuses: vi.fn(() => ({
+								"session-1": { type: "busy" } as SessionStatus,
+							})),
+						}),
+					),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 				),

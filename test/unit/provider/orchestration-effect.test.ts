@@ -6,7 +6,7 @@ import {
 	makeIdempotencySetLive,
 	type Provider,
 	routeCommand,
-} from "../../../src/lib/effect/orchestration-service.js";
+} from "../../../src/lib/domain/provider/Services/orchestration-service.js";
 
 describe("OrchestrationEngine Effect", () => {
 	it.scoped("routes command to provider", () =>

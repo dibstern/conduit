@@ -341,7 +341,7 @@ test.describe("Unified Rendering: Paginated History", () => {
 		const msgsBefore = await page.locator(".msg-user").count();
 
 		// Scroll to the very top to trigger the IntersectionObserver on
-		// #history-sentinel, which fires load_more_history
+		// #history-sentinel, which requests older history.
 		const messagesEl = page.locator("#messages");
 		await messagesEl.evaluate((el) => {
 			el.scrollTop = 0;

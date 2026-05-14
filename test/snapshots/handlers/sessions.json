@@ -45,39 +45,6 @@
 			}
 		}
 	],
-	"rename_session_success": [
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_list",
-				"sessions": [
-					{
-						"id": "root-1",
-						"title": "Renamed Root",
-						"updatedAt": 100,
-						"messageCount": 2
-					}
-				],
-				"roots": true
-			}
-		},
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_list",
-				"sessions": [
-					{
-						"id": "child-1",
-						"title": "Child Session",
-						"updatedAt": 200,
-						"messageCount": 4,
-						"parentID": "root-1"
-					}
-				],
-				"roots": false
-			}
-		}
-	],
 	"new_session_success": [
 		{
 			"channel": "sendTo",
@@ -151,32 +118,6 @@
 				"type": "session_list",
 				"sessions": [],
 				"roots": false
-			}
-		}
-	],
-	"load_more_history_success": [
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
-				"type": "history_page",
-				"sessionId": "session-1",
-				"messages": [
-					{
-						"id": "msg-1",
-						"role": "assistant",
-						"parts": [
-							{
-								"id": "part-1",
-								"type": "text",
-								"text": "Rendered",
-								"renderedHtml": "<p>Rendered</p>"
-							}
-						]
-					}
-				],
-				"hasMore": true,
-				"total": 12
 			}
 		}
 	]

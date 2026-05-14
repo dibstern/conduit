@@ -1,25 +1,25 @@
 import { describe, it } from "@effect/vitest";
 import { Context, Effect } from "effect";
 import { expect } from "vitest";
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+} from "../../../src/lib/domain/daemon/Services/management-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 
 import {
 	// Per-request Tags
 	ClientIdTag,
 	ConfigTag,
 	ConnectPtyUpstreamTag,
-	// Daemon-only Tags
-	InstanceMgmtTag,
 	LoggerTag,
-	// Core Tags
-	OpenCodeAPITag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	PollerManagerTag,
-	ProjectMgmtTag,
 	PtyManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 
 // ─── Tag key uniqueness ────────────────────────────────────────────────────
 

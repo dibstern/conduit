@@ -1,3 +1,4 @@
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Relay Stack ─────────────────────────────────────────────────────────────
 // The complete relay wiring: OpenCode client, SSE consumer, event translator,
 // WebSocket handler, session manager, and Effect-owned relay services.
@@ -17,35 +18,44 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-	NodeFileSystem,
-	NodeHttpServer,
-	NodePath,
-} from "@effect/platform-node";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
 import {
 	type ClientInitDeps,
 	handleClientConnected,
 } from "../bridges/client-init.js";
-import { AgentServiceLive, AgentServiceTag } from "../effect/agent-service.js";
-import { makeAuthManagerLive } from "../effect/auth-middleware.js";
-import { ClientMessageSerializationTag } from "../effect/client-message-serialization.js";
-import { InstanceManagementServiceLive } from "../effect/instance-management-service.js";
-import { makeMessagePollerManagerLive } from "../effect/message-poller-manager-layer.js";
+import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
+import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
+import {
+	makeProjectRelayConfigLive,
+	OpenCodeAPILive,
+	ProjectRelayLoggerLive,
+} from "../domain/relay/Layers/relay-core-layers.js";
+import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
+import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
+import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
+import {
+	AgentServiceLive,
+	AgentServiceTag,
+} from "../domain/relay/Services/agent-service.js";
+import { ClientMessageSerializationTag } from "../domain/relay/Services/client-message-serialization.js";
+import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
+import {
+	hasInstanceManagementConfig,
+	InstanceManagementServiceFromConfigLive,
+} from "../domain/relay/Services/instance-management-service.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../effect/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../effect/project-management-service.js";
-import { makePtyRuntimeLive } from "../effect/pty-manager-layer.js";
-import { RelayStateLive } from "../effect/relay-layer.js";
-import { ScanServiceLive } from "../effect/scan-service.js";
+} from "../domain/relay/Services/pending-interaction-service.js";
+import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
 import {
-	ConfigTag,
-	InstanceMgmtTag,
+	makeRelayCommandGateLive,
+	RelayCommandGateTag,
+} from "../domain/relay/Services/relay-command-gate.js";
+import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
+import {
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
@@ -54,8 +64,8 @@ import {
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
-import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+} from "../domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearProcessingTimeout,
 	getContextWindow,
@@ -69,68 +79,49 @@ import {
 	resetProcessingTimeout,
 	setDefaultModel,
 	setDefaultVariant,
-} from "../effect/session-overrides-state.js";
+} from "../domain/relay/Services/session-overrides-state.js";
 import {
-	createStatusPollerService,
-	makeDeferredStatusPollerRuntime,
-	type PollDeps,
 	PollerPubSubTag,
 	PollerStateTag,
 	type SessionStatusPollerService,
-} from "../effect/session-status-poller.js";
-import { StaticDirTag } from "../effect/static-file-handler.js";
+} from "../domain/relay/Services/session-status-poller.js";
 import {
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
-} from "../effect/terminal-service.js";
+} from "../domain/relay/Services/terminal-service.js";
 import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
-} from "../effect/tool-content-service.js";
+} from "../domain/relay/Services/tool-content-service.js";
+import {
+	makeStandaloneHttpRouterRequestHandler,
+	type RouterProjectInfo,
+} from "../domain/server/Layers/http-router-layer.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
-import { GapEndpoints } from "../instance/gap-endpoints.js";
-import { OpenCodeAPI } from "../instance/opencode-api.js";
-// OpenCodeClient import removed — SSEStream uses the SDK-based api object directly.
-import { createSdkClient } from "../instance/sdk-factory.js";
+import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";
 import { EffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
-import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
 	type PersistenceEffectRuntime,
 } from "../persistence/effect/live.js";
-import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import {
-	canonicalEvent,
-	type SessionStatusValue,
-} from "../persistence/events.js";
 import {
 	getOrchestrationLayer,
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationLayer,
 } from "../provider/orchestration-wiring.js";
-import {
-	CaCertProvider,
-	effectRouterWithCors,
-	ProjectApiDelegateProvider,
-	ProjectsProvider,
-	PushProvider,
-	RemoveProjectProvider,
-	type RouterProjectInfo,
-	SetupInfoProvider,
-	ThemeProvider,
-} from "../server/effect-http-router.js";
-import { EffectWsHandler } from "../server/effect-ws-handler.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationManager } from "../server/push.js";
 import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
-import { SessionRegistry } from "../session/session-registry.js";
-import { readSessionStatusesFromEffect } from "../session/session-status-effect.js";
+import {
+	type RpcWebSocketHandlerShape,
+	WsRpcWebSocketHandler,
+} from "../server/ws-rpc-handler.js";
 import {
 	resolveSessionHistoryFromRows,
 	type SessionHistorySource,
@@ -161,7 +152,7 @@ import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { SSEStream, type SSEStreamPort } from "./sse-stream.js";
 import { wireSSEConsumer } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
-import { handleRelayWsMessage } from "./ws-message-dispatch-effect.js";
+import { handleRelayWsMessageThroughGate } from "./ws-message-dispatch-effect.js";
 
 const _staticCandidate = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -272,66 +263,21 @@ export class EffectRelayServer {
 				isProcessing: p.getIsProcessing?.() ?? false,
 			}));
 
-		// biome-ignore lint/suspicious/noExplicitAny: optional standalone providers are merged conditionally.
-		let routerLayer: Layer.Layer<any, never, never> = Layer.mergeAll(
-			makeAuthManagerLive(this.auth),
-			Layer.succeed(StaticDirTag, this.staticDir),
-			Layer.succeed(ProjectsProvider, { getProjects }),
-			Layer.succeed(RemoveProjectProvider, {
-				removeProject: (slug: string) =>
-					Effect.sync(() => {
-						if (!this.removeProject(slug)) throw new Error("Project not found");
-					}),
-			}),
-			Layer.succeed(ProjectApiDelegateProvider, {
-				delegateApiRequest: () =>
-					Effect.fail(new Error("Project API route not found")),
-			}),
-			Layer.succeed(SetupInfoProvider, {
-				getPort: () => this.actualPort,
-				getIsTls: () => this.protocol === "https",
-			}),
-			Layer.succeed(ThemeProvider, { loadThemes: loadThemeFiles }),
-			NodeFileSystem.layer,
-			NodePath.layer,
-		);
-		if (this.options.pushManager != null) {
-			routerLayer = Layer.merge(
-				routerLayer,
-				Layer.succeed(PushProvider, {
-					getPublicKey: () =>
-						this.options.pushManager?.getPublicKey() ?? undefined,
-					addSubscription: (endpoint, subscription) =>
-						this.options.pushManager?.addSubscription(
-							endpoint,
-							subscription as Parameters<
-								PushNotificationManager["addSubscription"]
-							>[1],
-						),
-					removeSubscription: (endpoint) =>
-						this.options.pushManager?.removeSubscription(endpoint),
-				}),
-			);
-		}
-		if (this.options.tls?.caRoot != null) {
-			routerLayer = Layer.merge(
-				routerLayer,
-				Layer.succeed(CaCertProvider, {
-					caCertDer: undefined,
-					caRootPath: this.options.tls.caRoot,
-				}),
-			);
-		}
-
-		const effectHandler = Effect.runSync(
-			NodeHttpServer.makeHandler(
-				effectRouterWithCors.pipe(Effect.provide(routerLayer)),
-			),
-		);
+		const requestHandler = makeStandaloneHttpRouterRequestHandler({
+			auth: this.auth,
+			staticDir: this.staticDir,
+			getProjects,
+			removeProject: (slug) => this.removeProject(slug),
+			getPort: () => this.actualPort,
+			getIsTls: () => this.protocol === "https",
+			loadThemes: loadThemeFiles,
+			pushManager: this.options.pushManager,
+			caRootPath: this.options.tls?.caRoot,
+		});
 
 		await new Promise<void>((resolveStart, rejectStart) => {
 			const handler = (req: IncomingMessage, res: ServerResponse) =>
-				effectHandler(req, res);
+				void requestHandler.handleRequest(req, res);
 
 			this.server = this.options.tls
 				? createHttpsServer(
@@ -369,6 +315,7 @@ export class EffectRelayServer {
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
 	wsHandler: WebSocketHandlerShape;
+	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
@@ -422,6 +369,7 @@ export interface RelayStackConfig {
 export interface RelayStack {
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
+	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
@@ -460,46 +408,20 @@ export async function createProjectRelay(
 
 	// ── Components ──────────────────────────────────────────────────────────
 
-	// ── SDK-based client (Tasks 3–6, Effect-based from Task 4) ──────────────
-	const {
-		client: sdkClient,
-		fetch: sdkFetch,
-		authHeaders,
-	} = createSdkClient({
-		baseUrl: config.opencodeUrl,
-		...(config.noServer &&
-			config.projectDir != null && {
-				directory: config.projectDir,
-			}),
-	});
-
-	const gapEndpoints = new GapEndpoints({
-		baseUrl: config.opencodeUrl,
-		fetch: sdkFetch,
-		headers: authHeaders,
-	});
-
-	const api = new OpenCodeAPI({
-		sdk: sdkClient,
-		gapEndpoints,
-		baseUrl: config.opencodeUrl,
-		authHeaders,
-	});
-
 	// ── Orchestration runtime layer (provider adapter routing) ──────────────
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
-		client: api,
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 	});
 
 	const translator = createTranslator();
+	let api: OpenCodeAPI;
 	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
 		RelayRuntimeContext,
 		PersistenceEffectError
 	>;
 	const runSessionServiceSync = <A>(
 		run: (
-			service: import("../effect/session-manager-service.js").SessionManagerService,
+			service: import("../domain/relay/Services/session-manager-service.js").SessionManagerService,
 		) => Effect.Effect<A, unknown>,
 	): A =>
 		relayManagedRuntime.runSync(
@@ -510,7 +432,7 @@ export async function createProjectRelay(
 		);
 	const runSessionServicePromise = <A>(
 		run: (
-			service: import("../effect/session-manager-service.js").SessionManagerService,
+			service: import("../domain/relay/Services/session-manager-service.js").SessionManagerService,
 		) => Effect.Effect<A, unknown>,
 	): Promise<A> =>
 		relayManagedRuntime.runPromise(
@@ -583,131 +505,9 @@ export async function createProjectRelay(
 		}
 	}
 
-	// ── Session status reconciliation loop (Effect-native) ─────────────────
-	// Background job that detects and corrects status mismatches between
-	// the projected SQLite state and OpenCode's REST API. Default interval
-	// is 7s (was 500ms when this was a real-time polling source).
-	//
-	// Uses the Effect-native PollerStateTag + PollerPubSubTag for state and
-	// event broadcasting, with a thin imperative facade for wiring code.
-
-	const pollerPollDeps: PollDeps = {
-		getRawStatuses: () =>
-			config.persistenceDbPath != null
-				? readSessionStatusesFromEffect
-				: Effect.tryPromise(() => api.session.statuses()),
-		getSessionParentMap: (): Map<string, string> =>
-			sessionServiceBridge.getSessionParentMap(),
-		resolveParent: (sessionId: string) =>
-			Effect.tryPromise(async () => {
-				const session = await api.session.get(sessionId);
-				return session.parentID;
-			}).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
-		...(config.persistenceDbPath != null
-			? {
-					reconciliation: {
-						getRestStatuses: () =>
-							Effect.tryPromise(() => api.session.statuses()),
-						getProjectedSessions: () =>
-							Effect.gen(function* () {
-								const readQueryEffect = yield* ReadQueryEffectTag;
-								return yield* readQueryEffect.listSessions();
-							}),
-						injectCorrectiveEvent: (sessionId: string, status: string) =>
-							Effect.gen(function* () {
-								const eventStore = yield* EventStoreEffectTag;
-								const projectionRunner = yield* ProjectionRunnerEffectTag;
-								const event = canonicalEvent(
-									"session.status",
-									sessionId,
-									{
-										sessionId,
-										status: status as SessionStatusValue,
-									},
-									{
-										metadata: {
-											synthetic: true,
-											source: "reconciliation-loop",
-										},
-									},
-								);
-								const stored = yield* eventStore.append(event);
-								yield* projectionRunner.projectEvent(stored);
-							}),
-					},
-				}
-			: {}),
-	};
-
-	const statusPollerRuntime = makeDeferredStatusPollerRuntime();
-
-	const statusPoller: SessionStatusPollerService = createStatusPollerService({
-		pollDeps: pollerPollDeps,
-		...(pollerPollDeps.reconciliation != null && {
-			reconciliationDeps: pollerPollDeps.reconciliation,
-		}),
-		...(config.statusPollerInterval != null && {
-			interval: config.statusPollerInterval,
-		}),
-		runtime: statusPollerRuntime,
-		onSubscriptionFailure: (error) =>
-			statusLog.warn(
-				`Status poller subscription failed: ${formatErrorDetail(error)}`,
-			),
-	});
-
-	// ── Shared session registry (single source of truth for client→session tracking) ──
-	const registry = new SessionRegistry(log.child("session-registry"));
-
-	// ── Health check ────────────────────────────────────────────────────────
-
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	// Health check — use /path endpoint as a lightweight reachability probe
-	await api.app.path();
-	log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`);
-
-	// Seed defaultModel from OpenCode's project config (opencode.jsonc) if no
-	// relay-persisted default was loaded.  This ensures the UI shows the correct
-	// model (e.g. Opus) on first startup rather than falling back to the
-	// provider-level default (e.g. Sonnet).
-	if (!initialDefaultModel) {
-		try {
-			if (config.signal?.aborted) throw new Error("Relay creation aborted");
-			const ocConfig = await api.config.get();
-			const configModel =
-				typeof ocConfig?.["model"] === "string" ? ocConfig["model"] : "";
-			if (configModel) {
-				const slashIdx = configModel.indexOf("/");
-				const provider = slashIdx > 0 ? configModel.slice(0, slashIdx) : "";
-				const modelId =
-					slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
-				if (provider && modelId) {
-					initialDefaultModel = {
-						providerID: provider,
-						modelID: modelId,
-					};
-					log.info(`✓ Default model from project config: ${configModel}`);
-				}
-			}
-		} catch (err) {
-			log.warn(
-				`Config API unavailable: ${err instanceof Error ? err.message : err}`,
-			);
-		}
-	}
-
 	// ── WebSocket handler ───────────────────────────────────────────────────
 
-	// ws-handler-service effects must remain synchronous for bridge read calls
-	// (`getClientCount`, `getClientsForSession`, etc.); mutations run as
-	// promises at the transport edge.
-	const wsHandler = new EffectWsHandler({
-		registry,
-		...(!config.noServer && {
-			server: config.httpServer,
-			...(config.verifyClient != null && { verifyClient: config.verifyClient }),
-		}),
-	});
+	let wsHandler: WebSocketHandlerShape;
 
 	// Late-binding runtime: callbacks fire after full relay initialization, but
 	// registering them here keeps the external WebSocket boundary thin.
@@ -755,8 +555,12 @@ export async function createProjectRelay(
 
 	// ── Client init deps + connection handlers ──────────────────────────────
 	const clientInitDeps: ClientInitDeps = {
-		wsHandler,
-		client: api,
+		get wsHandler() {
+			return wsHandler;
+		},
+		get client() {
+			return api;
+		},
 		sessionService: {
 			getDefaultSessionId: (title) =>
 				relayManagedRuntime.runPromise(
@@ -862,7 +666,9 @@ export async function createProjectRelay(
 					}),
 				),
 		},
-		statusPoller,
+		get statusPoller() {
+			return relayManagedRuntime.runSync(StatusPollerTag);
+		},
 		...(config.getInstances != null && { getInstances: config.getInstances }),
 		...(config.getCachedUpdate != null && {
 			getCachedUpdate: config.getCachedUpdate,
@@ -880,55 +686,18 @@ export async function createProjectRelay(
 		log: wsLog,
 	};
 
-	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
-		wsLog.info(
-			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
-		);
-		handleClientConnected(clientInitDeps, clientId, requestedSessionId).catch(
-			(err) =>
-				wsLog.error(
-					`Client init failed for ${clientId}: ${formatErrorDetail(err)}`,
-				),
-		);
-	});
-
-	wsHandler.on("client_disconnected", ({ clientId }) => {
-		relayManagedRuntime.runFork(
-			Effect.gen(function* () {
-				const serialization = yield* ClientMessageSerializationTag;
-				yield* serialization.removeClient(clientId);
-			}),
-		);
-		wsLog.info(`Client disconnected: ${clientId}`);
-	});
-
-	const instanceMgmt =
-		config.getInstances != null &&
-		config.addInstance != null &&
-		config.removeInstance != null &&
-		config.startInstance != null &&
-		config.stopInstance != null &&
-		config.updateInstance != null &&
-		config.persistConfig != null
-			? {
-					getInstances: config.getInstances,
-					addInstance: config.addInstance,
-					removeInstance: config.removeInstance,
-					startInstance: config.startInstance,
-					stopInstance: config.stopInstance,
-					updateInstance: config.updateInstance,
-					persistConfig: config.persistConfig,
-				}
-			: undefined;
+	const hasInstanceManagement = hasInstanceManagementConfig(config);
 
 	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
 	// RelayStateLive provides all self-constructing Effect-native state Layers.
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
-	// Required bridge layers (imperative instances → Effect Tags)
-	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
-	const configLayer = Layer.succeed(ConfigTag, config);
-	const loggerLayer = Layer.succeed(LoggerTag, log);
+	const configLayer = makeProjectRelayConfigLive(config);
+	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
+	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
+	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
@@ -942,9 +711,11 @@ export async function createProjectRelay(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
-	const webSocketHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
+		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+	);
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
-		hasViewers: (sid) => registry.hasViewers(sid),
+		hasViewers: (sid) => wsHandler.getClientsForSession(sid).length > 0,
 	}).pipe(
 		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
 	);
@@ -985,6 +756,7 @@ export async function createProjectRelay(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
+		DirectoryListingServiceLive,
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,
@@ -994,22 +766,17 @@ export async function createProjectRelay(
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
-		Layer.succeed(StatusPollerTag, statusPoller),
-		orchestrationRuntimeLayer,
+		providerOrchestrationLayer,
 	);
 
 	// Optional bridge layers (only included when deps are present)
 	// biome-ignore lint/suspicious/noExplicitAny: Layer output union is broad; callers infer correctly.
 	let bridgeLayers: Layer.Layer<any, PersistenceEffectError, never> =
 		coreBridgeLayers;
-	if (instanceMgmt != null) {
-		const instanceMgmtLayer = Layer.succeed(InstanceMgmtTag, instanceMgmt);
-		const instanceManagementServiceLayer = InstanceManagementServiceLive.pipe(
-			Layer.provide(instanceMgmtLayer),
-		);
+	if (hasInstanceManagement) {
 		bridgeLayers = Layer.merge(
 			bridgeLayers,
-			Layer.merge(instanceMgmtLayer, instanceManagementServiceLayer),
+			InstanceManagementServiceFromConfigLive.pipe(Layer.provide(configLayer)),
 		);
 	}
 	// Compose: self-constructing state layers + imperative bridge layers.
@@ -1017,9 +784,13 @@ export async function createProjectRelay(
 	// SessionLifecycleWiringLive) are added after wireMonitoring() returns
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(RelayStateLive, bridgeLayers);
+	const relayStateBridgesAndStatus = Layer.provideMerge(
+		StatusPollerLive,
+		relayStateAndBridges,
+	);
 	const relayStateServicesAndBridges = Layer.provideMerge(
 		AgentServiceLive,
-		relayStateAndBridges,
+		relayStateBridgesAndStatus,
 	);
 	const baseLayers = relayStateServicesAndBridges;
 
@@ -1029,27 +800,6 @@ export async function createProjectRelay(
 		},
 		dispose: () => relayManagedRuntime.dispose(),
 	};
-
-	// ── WebSocket message handler ───────────────────────────────────────────
-	wsHandler.on("message", ({ clientId, handler, payload }) => {
-		relayManagedRuntime.runFork(
-			handleRelayWsMessage({
-				clientId,
-				handler,
-				payload,
-				sendTo: (targetClientId, message) =>
-					wsHandler.sendTo(targetClientId, message),
-				log: wsLog,
-			}),
-		);
-	});
-
-	// ── SSE stream (SDK-backed, replaces legacy SSEConsumer) ────────────────
-
-	const sseStream = new SSEStream({
-		api,
-		log: sseLog,
-	});
 
 	// ── Dual-write hook (SSE → SQLite event store) ──────────────────────
 	let effectPersistenceRuntime: PersistenceEffectRuntime | undefined;
@@ -1068,13 +818,135 @@ export async function createProjectRelay(
 		}
 	}
 
-	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
-
-	// Late-binding: SSE wiring is set up before monitoring wiring, but SSE
-	// events arrive asynchronously (after connect). The ref is bound after
-	// wireMonitoring completes.
+	// Late-binding: SSE wiring is set up before the stream connects, but SSE
+	// events arrive asynchronously. The ref is bound after monitoring wiring
+	// completes.
 	const doneDeliveredRef = { fn: (_sid: string) => {} };
 
+	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
+	// Monitoring state is created before the runtime so lifecycle wiring and
+	// monitoring wiring share one view, while the poller manager itself remains
+	// runtime-owned by MessagePollerManagerLive.
+	const monitoringStateAccess = createMonitoringWiringState();
+	const sessionLifecycleWiringLayer = makeSessionLifecycleWiringLive({
+		translator,
+		sseTracker: monitoringStateAccess.sseTracker,
+		getMonitoringState: monitoringStateAccess.getMonitoringState,
+		setMonitoringState: monitoringStateAccess.setMonitoringState,
+	});
+	const wiringLayers = Layer.mergeAll(
+		PermissionTimeoutLive,
+		sessionLifecycleWiringLayer,
+		makeRelayCommandGateLive(config.slug),
+	).pipe(Layer.provide(baseLayers));
+	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
+	relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	try {
+		api = relayManagedRuntime.runSync(OpenCodeAPITag);
+		if (config.signal?.aborted) throw new Error("Relay creation aborted");
+		await api.app.path();
+		log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`);
+
+		if (!initialDefaultModel) {
+			try {
+				if (config.signal?.aborted) throw new Error("Relay creation aborted");
+				const ocConfig = await api.config.get();
+				const configModel =
+					typeof ocConfig?.["model"] === "string" ? ocConfig["model"] : "";
+				if (configModel) {
+					const slashIdx = configModel.indexOf("/");
+					const provider = slashIdx > 0 ? configModel.slice(0, slashIdx) : "";
+					const modelId =
+						slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
+					if (provider && modelId) {
+						initialDefaultModel = {
+							providerID: provider,
+							modelID: modelId,
+						};
+						log.info(`✓ Default model from project config: ${configModel}`);
+					}
+				}
+			} catch (err) {
+				log.warn(
+					`Config API unavailable: ${err instanceof Error ? err.message : err}`,
+				);
+			}
+		}
+	} catch (err) {
+		await relayManagedRuntime.dispose();
+		throw err;
+	}
+	const sseStream = new SSEStream({
+		api,
+		log: sseLog,
+	});
+	wsHandler = relayManagedRuntime.runSync(WebSocketHandlerTag);
+	wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
+		wsLog.info(
+			`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
+		);
+		handleClientConnected(clientInitDeps, clientId, requestedSessionId).catch(
+			(err) =>
+				wsLog.error(
+					`Client init failed for ${clientId}: ${formatErrorDetail(err)}`,
+				),
+		);
+	});
+	wsHandler.on("client_disconnected", ({ clientId }) => {
+		relayManagedRuntime.runFork(
+			Effect.gen(function* () {
+				const serialization = yield* ClientMessageSerializationTag;
+				yield* serialization.removeClient(clientId);
+			}),
+		);
+		wsLog.info(`Client disconnected: ${clientId}`);
+	});
+
+	let relayCommandSequence = 0;
+	wsHandler.on("message", ({ clientId, handler, payload }) => {
+		const commandId = `${clientId}:${++relayCommandSequence}`;
+		relayManagedRuntime.runFork(
+			handleRelayWsMessageThroughGate({
+				commandId,
+				clientId,
+				handler,
+				payload,
+				sendTo: (targetClientId, message) =>
+					wsHandler.sendTo(targetClientId, message),
+				log: wsLog,
+			}),
+		);
+	});
+	const rpcWsHandler = new WsRpcWebSocketHandler({
+		runtime: relayManagedRuntime,
+	});
+	if (config.signal?.aborted) throw new Error("Relay creation aborted");
+	const sessionId = await sessionServiceBridge.initialize(config.sessionTitle);
+	log.info(`✓ Using session: ${sessionId}`);
+	const orchestration = await relayManagedRuntime.runPromise(
+		Effect.gen(function* () {
+			const orchestrationView = yield* getOrchestrationLayer;
+			yield* PollerStateTag;
+			yield* PollerPubSubTag;
+			if (initialDefaultModel) {
+				yield* setDefaultModel(initialDefaultModel);
+			}
+			if (initialDefaultVariant) {
+				yield* setDefaultVariant(initialDefaultVariant);
+			}
+			return orchestrationView;
+		}),
+	);
+	const statusPoller: SessionStatusPollerService =
+		relayManagedRuntime.runSync(StatusPollerTag);
+
+	const pollerManager = await relayManagedRuntime.runPromise(
+		Effect.gen(function* () {
+			return yield* PollerManagerTag;
+		}),
+	);
+
+	// ── SSE event wiring (translate → filter → cache → broadcast) ──────────
 	wireSSEConsumer(
 		{
 			translator,
@@ -1137,48 +1009,6 @@ export async function createProjectRelay(
 		sseStream,
 	);
 
-	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
-	// Monitoring state is created before the runtime so lifecycle wiring and
-	// monitoring wiring share one view, while the poller manager itself remains
-	// runtime-owned by MessagePollerManagerLive.
-	const monitoringStateAccess = createMonitoringWiringState();
-	const sessionLifecycleWiringLayer = makeSessionLifecycleWiringLive({
-		translator,
-		sseTracker: monitoringStateAccess.sseTracker,
-		getMonitoringState: monitoringStateAccess.getMonitoringState,
-		setMonitoringState: monitoringStateAccess.setMonitoringState,
-	});
-	const wiringLayers = Layer.mergeAll(
-		PermissionTimeoutLive,
-		sessionLifecycleWiringLayer,
-	).pipe(Layer.provide(baseLayers));
-	const fullLayer = Layer.provideMerge(wiringLayers, baseLayers);
-	relayManagedRuntime = ManagedRuntime.make(fullLayer);
-	if (config.signal?.aborted) throw new Error("Relay creation aborted");
-	const sessionId = await sessionServiceBridge.initialize(config.sessionTitle);
-	log.info(`✓ Using session: ${sessionId}`);
-	const orchestration = await relayManagedRuntime.runPromise(
-		Effect.gen(function* () {
-			const orchestrationView = yield* getOrchestrationLayer;
-			yield* PollerStateTag;
-			yield* PollerPubSubTag;
-			if (initialDefaultModel) {
-				yield* setDefaultModel(initialDefaultModel);
-			}
-			if (initialDefaultVariant) {
-				yield* setDefaultVariant(initialDefaultVariant);
-			}
-			return orchestrationView;
-		}),
-	);
-	statusPollerRuntime.attach(relayManagedRuntime);
-
-	const pollerManager = await relayManagedRuntime.runPromise(
-		Effect.gen(function* () {
-			return yield* PollerManagerTag;
-		}),
-	);
-
 	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
 	const {
 		pipelineDeps,
@@ -1191,7 +1021,6 @@ export async function createProjectRelay(
 		processingTimeouts,
 		statusPoller,
 		pollerManager,
-		registry,
 		sseStream,
 		config: {
 			...(config.pollerGatingConfig != null && {
@@ -1236,8 +1065,15 @@ export async function createProjectRelay(
 	if (config.signal?.aborted) throw new Error("Relay creation aborted");
 	try {
 		await relayManagedRuntime.runPromise(sseStream.connectEffect());
+		await relayManagedRuntime.runPromise(
+			Effect.gen(function* () {
+				const gate = yield* RelayCommandGateTag;
+				yield* gate.markReady();
+			}),
+		);
 	} catch (err) {
 		stopMonitoring();
+		await rpcWsHandler.drain();
 		await effectRuntime.dispose();
 		await effectPersistenceRuntime?.dispose();
 		throw err;
@@ -1251,6 +1087,7 @@ export async function createProjectRelay(
 
 	return {
 		wsHandler,
+		rpcWsHandler,
 		sseStream,
 		client: api,
 		translator,
@@ -1278,14 +1115,13 @@ export async function createProjectRelay(
 			stopMonitoring();
 			// 2. Drain event sources (stop + await pending work)
 			await relayManagedRuntime.runPromise(sseStream.drainEffect());
-			await statusPoller.drain();
 			// 3. Dispose Effect ManagedRuntimes. Scoped finalizers own provider
-			// adapter shutdown and other Effect-managed resources.
+			// adapter shutdown, status poller drain, and other Effect-managed resources.
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();
 			// 4. Clean up remaining resources
-			// Permission, processing timeout, message poller, and PTY resources are managed by scoped Effect layers.
-			await wsHandler.drain();
+			// Permission, processing timeout, message poller, websocket, and PTY resources are managed by scoped Effect layers.
+			await rpcWsHandler.drain();
 		},
 	};
 }
@@ -1462,7 +1298,8 @@ export async function createRelayStack(
 	relays.set(config.slug, relay);
 
 	// ── WebSocket upgrade handler ───────────────────────────────────────────
-	// Routes connections by URL: /p/{slug}/ws → project relay, /ws → initial relay.
+	// Routes connections by URL: /p/{slug}/ws → project relay, /p/{slug}/rpc
+	// → project RPC, /ws → initial relay, /rpc → initial RPC.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where
 	// standalone WS connections bypassed PIN auth).
 
@@ -1487,13 +1324,17 @@ export async function createRelayStack(
 			}
 		}
 
-		// Route /p/{slug}/ws → project relay
-		const projectMatch = req.url?.match(/^\/p\/([^/]+)\/ws(?:\?|$)/);
+		// Route /p/{slug}/ws or /p/{slug}/rpc → project relay endpoint
+		const projectMatch = req.url?.match(/^\/p\/([^/]+)\/(ws|rpc)(?:\?|$)/);
 		if (projectMatch) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
 			const target = relays.get(projectMatch[1]!);
 			if (target) {
-				target.wsHandler.handleUpgrade(req, socket, head);
+				if (projectMatch[2] === "rpc") {
+					target.rpcWsHandler.handleUpgrade(req, socket, head);
+				} else {
+					target.wsHandler.handleUpgrade(req, socket, head);
+				}
 			} else {
 				socket.destroy();
 			}
@@ -1503,6 +1344,10 @@ export async function createRelayStack(
 		// Route /ws → initial relay
 		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
 			relay.wsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
+			relay.rpcWsHandler.handleUpgrade(req, socket, head);
 			return;
 		}
 
@@ -1515,6 +1360,7 @@ export async function createRelayStack(
 	return {
 		server,
 		wsHandler: relay.wsHandler,
+		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,
 		client: relay.client,
 		translator: relay.translator,

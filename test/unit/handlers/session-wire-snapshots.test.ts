@@ -6,10 +6,7 @@ import { Effect, Schema } from "effect";
 import { expect, vi } from "vitest";
 import {
 	handleDeleteSession,
-	handleListSessions,
-	handleLoadMoreHistory,
 	handleNewSession,
-	handleRenameSession,
 	handleViewSession,
 } from "../../../src/lib/handlers/session.js";
 import { RequestId } from "../../../src/lib/shared-types.js";
@@ -70,100 +67,6 @@ describe("session handler wire snapshots", () => {
 		expect(modelInfoCalls).toEqual(
 			readSnapshots()["view_session_model_info_success"],
 		);
-	});
-
-	it("keeps the list_sessions envelopes stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const sessionManagerService = makeMockSessionManagerService({
-			sendDualSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root Session",
-								updatedAt: 100,
-								messageCount: 2,
-							},
-						],
-						roots: true,
-					});
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "child-1",
-								title: "Child Session",
-								updatedAt: 200,
-								messageCount: 4,
-								parentID: "root-1",
-							},
-						],
-						roots: false,
-					});
-				}),
-			),
-		});
-
-		await Effect.runPromise(
-			handleListSessions("client-1", {}).pipe(
-				Effect.provide(
-					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-				),
-			),
-		);
-
-		expect(calls).toEqual(readSnapshots()["list_sessions_success"]);
-	});
-
-	it("keeps the rename_session broadcast envelopes stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const sessionManagerService = makeMockSessionManagerService({
-			renameSession: vi.fn(() => Effect.void),
-			sendDualSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Renamed Root",
-								updatedAt: 100,
-								messageCount: 2,
-							},
-						],
-						roots: true,
-					});
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "child-1",
-								title: "Child Session",
-								updatedAt: 200,
-								messageCount: 4,
-								parentID: "root-1",
-							},
-						],
-						roots: false,
-					});
-				}),
-			),
-		});
-
-		await Effect.runPromise(
-			handleRenameSession("client-1", {
-				sessionId: "root-1",
-				title: "Renamed Root",
-			}).pipe(
-				Effect.provide(
-					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-				),
-			),
-		);
-
-		expect(calls).toEqual(readSnapshots()["rename_session_success"]);
 	});
 
 	it("keeps the new_session switch and broadcast envelopes stable", async () => {
@@ -252,43 +155,5 @@ describe("session handler wire snapshots", () => {
 		);
 
 		expect(calls).toEqual(readSnapshots()["delete_session_success"]);
-	});
-
-	it("keeps the load_more_history response envelope stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory: vi.fn(() =>
-				Effect.succeed({
-					messages: [
-						{
-							id: "msg-1",
-							role: "assistant" as const,
-							parts: [
-								{
-									id: "part-1",
-									type: "text" as const,
-									text: "Rendered",
-									renderedHtml: "<p>Rendered</p>",
-								},
-							],
-						},
-					],
-					hasMore: true,
-					total: 12,
-				}),
-			),
-		});
-
-		await Effect.runPromise(
-			handleLoadMoreHistory("client-1", { offset: 50 }).pipe(
-				Effect.provide(
-					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-				),
-			),
-		);
-
-		expect(calls).toEqual(readSnapshots()["load_more_history_success"]);
 	});
 });

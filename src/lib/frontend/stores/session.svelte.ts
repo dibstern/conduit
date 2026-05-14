@@ -2,6 +2,8 @@
 // Manages session list, active session, search, and date grouping.
 
 import { SvelteMap } from "svelte/reactivity";
+import type { ListSessionsResponse } from "../transport/ws-rpc.js";
+import { getAgentsRpc, getCommandsRpc } from "../transport/ws-rpc-client.js";
 import type {
 	DateGroups,
 	RelayMessage,
@@ -9,6 +11,10 @@ import type {
 	SessionInfo,
 } from "../types.js";
 import { clearMessages, clearSessionChatState } from "./chat.svelte.js";
+import {
+	applyGetAgentsResponse,
+	applyGetCommandsResponse,
+} from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { uiState } from "./ui.svelte.js";
 
@@ -295,6 +301,40 @@ export function handleSessionList(
 	}
 }
 
+const sessionInfoFromRpc = (
+	session: ListSessionsResponse["sessions"][number],
+): SessionInfo => ({
+	id: session.id,
+	title: session.title,
+	...(session.createdAt != null ? { createdAt: session.createdAt } : {}),
+	...(session.updatedAt != null ? { updatedAt: session.updatedAt } : {}),
+	...(session.messageCount != null
+		? { messageCount: session.messageCount }
+		: {}),
+	...(session.processing != null ? { processing: session.processing } : {}),
+	...(session.parentID != null ? { parentID: session.parentID } : {}),
+	...(session.forkMessageId != null
+		? { forkMessageId: session.forkMessageId }
+		: {}),
+	...(session.forkPointTimestamp != null
+		? { forkPointTimestamp: session.forkPointTimestamp }
+		: {}),
+	...(session.pendingQuestionCount != null
+		? { pendingQuestionCount: session.pendingQuestionCount }
+		: {}),
+});
+
+export function applyListSessionsResponse(
+	response: ListSessionsResponse,
+): void {
+	handleSessionList({
+		type: "session_list",
+		sessions: response.sessions.map(sessionInfoFromRpc),
+		roots: response.roots,
+		...(response.search ? { search: true } : {}),
+	});
+}
+
 export function handleSessionSwitched(
 	msg: Extract<RelayMessage, { type: "session_switched" }>,
 ): void {
@@ -380,8 +420,14 @@ export function switchToSession(
 	const slug = getCurrentSlug();
 	if (slug) navigate(`/p/${slug}/s/${sessionId}`);
 	sendWs({ type: "view_session", sessionId });
-	sendWs({ type: "get_agents" });
-	sendWs({ type: "get_commands" });
+	if (slug) {
+		void getAgentsRpc({ projectSlug: slug, sessionId })
+			.then(applyGetAgentsResponse)
+			.catch(() => undefined);
+		void getCommandsRpc({ projectSlug: slug, sessionId })
+			.then(applyGetCommandsResponse)
+			.catch(() => undefined);
+	}
 }
 
 /** Clear all session state (for project switch). */

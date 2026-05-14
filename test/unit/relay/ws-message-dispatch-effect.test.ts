@@ -1,19 +1,22 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { ClientMessageSerializationLive } from "../../../src/lib/effect/client-message-serialization.js";
-import type { RateLimitResult } from "../../../src/lib/effect/rate-limiter-layer.js";
-import { RateLimiterTag } from "../../../src/lib/effect/rate-limiter-layer.js";
-import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
-import { filterAgents } from "../../../src/lib/handlers/index.js";
-import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { ClientMessageSerializationLive } from "../../../src/lib/domain/relay/Services/client-message-serialization.js";
+import {
+	makeRelayCommandGateLive,
+	RelayCommandGateTag,
+} from "../../../src/lib/domain/relay/Services/relay-command-gate.js";
+import type { WebSocketHandlerShape } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getLogLevel,
 	type Logger,
 	setLogLevel,
 } from "../../../src/lib/logger.js";
 import type { RelayWsDispatch } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
-import { handleRelayWsMessage } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
+import {
+	handleRelayWsMessage,
+	handleRelayWsMessageThroughGate,
+} from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
@@ -29,17 +32,12 @@ function mockLogger(): Logger {
 	return logger;
 }
 
-function makeRateLimiterLayer(result: RateLimitResult) {
-	return Layer.succeed(RateLimiterTag, {
-		checkLimit: vi.fn(() => Effect.succeed(result)),
-	});
+function makeBaseLayer() {
+	return ClientMessageSerializationLive;
 }
 
-function makeBaseLayer(rateLimit: RateLimitResult = { allowed: true }) {
-	return Layer.mergeAll(
-		ClientMessageSerializationLive,
-		makeRateLimiterLayer(rateLimit),
-	);
+function makeGatedLayer() {
+	return Layer.merge(makeBaseLayer(), makeRelayCommandGateLive("test"));
 }
 
 function mockWsHandler(
@@ -66,31 +64,37 @@ function mockWsHandler(
 }
 
 describe("handleRelayWsMessage", () => {
-	it.effect(
-		"sends a system error without dispatching when message rate limit is denied",
-		() => {
+	it.effect("queues gated dispatch until the relay command gate is ready", () =>
+		Effect.gen(function* () {
 			const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
-			const dispatch: RelayWsDispatch<never> = vi.fn(() => Effect.void);
+			const order: string[] = [];
+			const dispatch: RelayWsDispatch<never> = vi.fn(() =>
+				Effect.sync(() => {
+					order.push("dispatched");
+				}),
+			);
 
-			return handleRelayWsMessage({
+			const fiber = yield* handleRelayWsMessageThroughGate({
+				commandId: "cmd-a",
+				receivedAt: 1000,
 				clientId: "client-1",
-				handler: "message",
-				payload: { text: "hello" },
+				handler: "input_sync",
+				payload: { text: "draft" },
 				sendTo,
 				log: mockLogger(),
 				dispatch,
-			}).pipe(
-				Effect.provide(makeBaseLayer({ allowed: false, retryAfterMs: 2_500 })),
-				Effect.tap(() => {
-					expect(dispatch).not.toHaveBeenCalled();
-					expect(sendTo).toHaveBeenCalledWith("client-1", {
-						type: "system_error",
-						code: "RATE_LIMITED",
-						message: "Rate limited. Try again in 3s",
-					});
-				}),
-			);
-		},
+			}).pipe(Effect.fork);
+
+			yield* Effect.yieldNow();
+			expect(order).toEqual([]);
+
+			const gate = yield* RelayCommandGateTag;
+			yield* gate.markReady(2000);
+			yield* Fiber.join(fiber);
+
+			expect(order).toEqual(["dispatched"]);
+			expect(sendTo).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(makeGatedLayer()), Effect.scoped),
 	);
 
 	it.effect(
@@ -146,7 +150,6 @@ describe("handleRelayWsMessage", () => {
 				},
 			);
 
-			const layer = makeBaseLayer();
 			const firstFiber = yield* handleRelayWsMessage({
 				clientId: "client-1",
 				handler: "first",
@@ -154,7 +157,7 @@ describe("handleRelayWsMessage", () => {
 				sendTo,
 				log: mockLogger(),
 				dispatch,
-			}).pipe(Effect.provide(layer), Effect.fork);
+			}).pipe(Effect.fork);
 
 			yield* Deferred.await(firstStarted);
 
@@ -165,7 +168,7 @@ describe("handleRelayWsMessage", () => {
 				sendTo,
 				log: mockLogger(),
 				dispatch,
-			}).pipe(Effect.provide(layer), Effect.fork);
+			}).pipe(Effect.fork);
 
 			yield* Effect.yieldNow();
 			expect(order).toEqual(["first-start"]);
@@ -176,7 +179,7 @@ describe("handleRelayWsMessage", () => {
 
 			expect(order).toEqual(["first-start", "first-end", "second"]);
 			expect(sendTo).not.toHaveBeenCalled();
-		}),
+		}).pipe(Effect.provide(makeBaseLayer())),
 	);
 
 	it.effect("renders dispatch failures as system errors", () => {
@@ -231,34 +234,29 @@ describe("handleRelayWsMessage", () => {
 	);
 
 	it.effect("uses dispatchMessageEffect by default", () => {
-		const agents = [
-			{ name: "build", id: "build", mode: "primary" as const },
-			{ name: "hidden", id: "hidden", mode: "subagent" as const, hidden: true },
-		];
-		const client = {
-			app: { agents: vi.fn(async () => agents) },
-		} as unknown as OpenCodeAPI;
-		const wsHandler = mockWsHandler();
+		const wsHandler = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
+		});
 		const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
 		const layer = Layer.mergeAll(
 			makeBaseLayer(),
-			makeTestHandlerLayer({ api: client, wsHandler }),
+			makeTestHandlerLayer({ wsHandler }),
 		);
 
 		return handleRelayWsMessage({
 			clientId: "client-1",
-			handler: "get_agents",
-			payload: {},
+			handler: "input_sync",
+			payload: { text: "draft" },
 			sendTo,
 			log: mockLogger(),
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(client.app.agents).toHaveBeenCalledOnce();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "agent_list",
-					agents: filterAgents(agents),
-				});
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-2",
+					expect.objectContaining({ type: "input_sync", text: "draft" }),
+				);
 				expect(sendTo).not.toHaveBeenCalled();
 			}),
 		);

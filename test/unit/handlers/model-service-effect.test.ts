@@ -5,26 +5,27 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getDefaultModel,
 	getDefaultVariant,
 	getVariant,
 	makeOverridesStateLive,
 	setModel,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
-	handleGetModels,
-	handleSetDefaultModel,
-	handleSwitchModel,
-	handleSwitchVariant,
+	sendModelsStateToClient,
+	setDefaultModelForRelay,
+	switchModelForSession,
+	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
@@ -32,6 +33,7 @@ import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
@@ -80,10 +82,14 @@ describe("model handlers with Effect-native model service", () => {
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
 				Layer.succeed(LoggerTag, logger),
+				Layer.succeed(
+					OrchestrationEngineTag,
+					withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
+				),
 				makeOverridesStateLive(),
 			);
 
-			return handleGetModels("client-1", {}).pipe(
+			return sendModelsStateToClient("client-1").pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
@@ -152,7 +158,11 @@ describe("model handlers with Effect-native model service", () => {
 					providerID: "openai",
 					modelID: "gpt-4",
 				});
-				yield* handleSwitchVariant("client-1", { variant: "fast" });
+				yield* switchVariantForSession({
+					clientId: "client-1",
+					sessionId: "session-1",
+					variant: "fast",
+				});
 				expect(yield* getVariant("session-1")).toBe("fast");
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
 				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
@@ -208,7 +218,8 @@ describe("model handlers with Effect-native model service", () => {
 				makeOverridesStateLive(),
 			);
 
-			return handleSwitchModel("client-1", {
+			return switchModelForSession({
+				clientId: "client-1",
 				modelId: "gpt-4",
 				providerId: "openai",
 			}).pipe(
@@ -274,7 +285,8 @@ describe("model handlers with Effect-native model service", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleSetDefaultModel("client-1", {
+				yield* setDefaultModelForRelay({
+					clientId: "client-1",
 					model: "gpt-4",
 					provider: "openai",
 				});

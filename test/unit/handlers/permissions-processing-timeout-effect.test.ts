@@ -1,16 +1,16 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/effect/session-manager-service.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	handleAskUserResponse,
 	handleQuestionReject,

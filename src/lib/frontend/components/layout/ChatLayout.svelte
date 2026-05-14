@@ -6,6 +6,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
+	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
@@ -46,14 +47,15 @@
 		onRewind,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
-	import { slugState } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { clearSessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
-	import { clearDiscoveryState } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
-	import { requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
+	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
+	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
@@ -339,13 +341,52 @@
 				// Fetch current version for sidebar footer
 				fetchCurrentVersion();
 				// Request initial state from server
-				wsSend({ type: "list_sessions" });
-				wsSend({ type: "get_agents" });
-				wsSend({ type: "get_models" });
-				wsSend({ type: "get_commands" });
-				wsSend({ type: "get_projects" });
+				void Promise.all([
+					listSessionsRpc({ projectSlug: slug, roots: true }),
+					listSessionsRpc({ projectSlug: slug, roots: false }),
+				])
+					.then((responses) => {
+						for (const response of responses) applyListSessionsResponse(response);
+					})
+					.catch(() => {
+						showToast("Failed to load sessions", { variant: "error" });
+					});
+				const routeSessionId = getCurrentSessionId();
+				void getAgentsRpc({
+					projectSlug: slug,
+					...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				})
+					.then(applyGetAgentsResponse)
+					.catch(() => {
+						showToast("Failed to load agents", { variant: "error" });
+					});
+				void getModelsRpc({
+					projectSlug: slug,
+					...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				})
+					.then(applyGetModelsResponse)
+					.catch(() => {
+						showToast("Failed to load models", { variant: "error" });
+					});
+				void getCommandsRpc({
+					projectSlug: slug,
+					...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				})
+					.then(applyGetCommandsResponse)
+					.catch(() => {
+						showToast("Failed to load commands", { variant: "error" });
+					});
+				void getProjectsRpc({ projectSlug: slug })
+					.then(applyGetProjectsResponse)
+					.catch(() => {
+						showToast("Failed to load projects", { variant: "error" });
+					});
 				requestFileTree();
-				wsSend({ type: "get_file_tree" });
+				void getFileTreeRpc({ projectSlug: slug })
+					.then(applyGetFileTreeResponse)
+					.catch(() => {
+						showToast("Failed to load file tree", { variant: "error" });
+					});
 				// Request existing terminal sessions so the panel can show them
 				wsSend({ type: "terminal_command", action: "list" });
 			});
@@ -616,4 +657,3 @@
 {#if featureFlags.debug}
 	<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
 {/if}
-

@@ -2,13 +2,13 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
-import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	addInstance,
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 	removeInstance,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 
 const testLayer = makeInstanceManagerStateLive().pipe(
 	Layer.provideMerge(ConfigPersistenceNoopLive),

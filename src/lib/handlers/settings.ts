@@ -1,25 +1,22 @@
 // ─── Settings Handlers ───────────────────────────────────────────────────────
 
-import { readdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname } from "node:path";
 import { Effect } from "effect";
 import {
 	type ProjectManagementNotSupported,
 	type ProjectManagementServiceError,
 	ProjectManagementServiceTag,
-} from "../effect/project-management-service.js";
+} from "../domain/relay/Services/project-management-service.js";
 import {
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
+} from "../domain/relay/Services/services.js";
 import { type ErrorCode, RelayError } from "../errors.js";
+import type { TodoItem } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 
 const MAX_PROJECT_TITLE_LENGTH = 100;
-const MAX_DIR_ENTRIES = 50;
 
 const toProjectSystemError = (
 	error: ProjectManagementServiceError | ProjectManagementNotSupported,
@@ -35,11 +32,17 @@ const toProjectSystemError = (
 
 export const handleGetCommands = (
 	clientId: string,
-	_payload: PayloadMap["get_commands"],
+	_payload: Record<string, never>,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const activeSessionId = wsHandler.getClientSession(clientId);
+		const commands = yield* getCommandsForSession(activeSessionId);
+		wsHandler.sendTo(clientId, { type: "command_list", commands });
+	});
+
+export const getCommandsForSession = (activeSessionId: string | undefined) =>
+	Effect.gen(function* () {
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const activeProviderId =
 			activeSessionId &&
@@ -62,26 +65,22 @@ export const handleGetCommands = (
 						`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
 					);
 				}
-				wsHandler.sendTo(clientId, { type: "command_list", commands: [] });
-				return;
+				return [];
 			}
-			const commands = result.right.commands.map((command) => ({
+			return result.right.commands.map((command) => ({
 				name: command.name,
 				...(command.description ? { description: command.description } : {}),
 				...(command.args ? { args: command.args } : {}),
 			}));
-			wsHandler.sendTo(clientId, { type: "command_list", commands });
-			return;
 		}
 
 		const settingsService = yield* OpenCodeSettingsServiceTag;
-		const commands = yield* settingsService.listCommands();
-		wsHandler.sendTo(clientId, { type: "command_list", commands });
+		return yield* settingsService.listCommands();
 	});
 
 export const handleGetProjects = (
 	clientId: string,
-	_payload: PayloadMap["get_projects"],
+	_payload: Record<string, never>,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -134,14 +133,8 @@ export const handleAddProject = (
 		});
 	});
 
-export const handleGetTodo = (
-	clientId: string,
-	_payload: PayloadMap["get_todo"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		wsHandler.sendTo(clientId, { type: "todo_state", items: [] });
-	});
+export const getTodoState = (): Effect.Effect<readonly TodoItem[]> =>
+	Effect.succeed([]);
 
 export const handleRemoveProject = (
 	clientId: string,
@@ -221,52 +214,5 @@ export const handleRenameProject = (
 			type: "project_list",
 			projects: renameResult.right,
 			current,
-		});
-	});
-
-export const handleListDirectories = (
-	clientId: string,
-	payload: PayloadMap["list_directories"],
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		const rawPath = payload.path ?? "";
-
-		// Resolve ~ to home directory
-		let expandedPath = rawPath;
-		if (expandedPath.startsWith("~/") || expandedPath === "~") {
-			expandedPath = homedir() + expandedPath.slice(1);
-		}
-
-		const endsWithSlash = expandedPath.endsWith("/");
-		const parentDir = endsWithSlash ? expandedPath : dirname(expandedPath);
-		const prefix = endsWithSlash ? "" : basename(expandedPath);
-		const showHidden = prefix.startsWith(".");
-
-		let entries: string[] = [];
-		const readResult = yield* Effect.either(
-			Effect.tryPromise(() => readdir(parentDir, { withFileTypes: true })),
-		);
-		if (readResult._tag === "Right") {
-			const normalizedParent = parentDir.endsWith("/")
-				? parentDir
-				: `${parentDir}/`;
-			entries = readResult.right
-				.filter((d) => {
-					if (!d.isDirectory()) return false;
-					if (!showHidden && d.name.startsWith(".")) return false;
-					if (prefix && !d.name.toLowerCase().startsWith(prefix.toLowerCase()))
-						return false;
-					return true;
-				})
-				.slice(0, MAX_DIR_ENTRIES)
-				.map((d) => `${normalizedParent}${d.name}/`);
-		}
-
-		wsHandler.sendTo(clientId, {
-			type: "directory_list",
-			path: rawPath,
-			entries,
 		});
 	});

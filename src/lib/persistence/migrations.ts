@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect } from "effect";
 import { SqliteClient } from "./sqlite-client.js";
 
 export interface Migration {
@@ -301,49 +299,4 @@ export function runMigrations(
 	}
 
 	return applied;
-}
-
-export function runMigrationsEffect(
-	migrations: readonly Migration[],
-): Effect.Effect<
-	readonly AppliedMigration[],
-	MigrationError,
-	SqliteNode.SqliteClient
-> {
-	return Effect.gen(function* () {
-		const sqlite = yield* SqliteNode.SqliteClient;
-		if (sqlite.config.filename === ":memory:") {
-			return yield* Effect.fail(
-				new MigrationError({
-					reason:
-						"Effect SQL migrations require a file-backed SQLite database; :memory: opens a separate database per connection",
-				}),
-			);
-		}
-		if (sqlite.config.readonly === true) {
-			return yield* Effect.fail(
-				new MigrationError({
-					reason:
-						"Effect SQL migrations require a writable SQLite database; readonly clients cannot be migrated",
-				}),
-			);
-		}
-		return yield* Effect.try({
-			try: () => {
-				const db = SqliteClient.open(sqlite.config.filename);
-				try {
-					return runMigrations(db, migrations);
-				} finally {
-					db.close();
-				}
-			},
-			catch: (cause) =>
-				cause instanceof MigrationError
-					? cause
-					: new MigrationError({
-							reason: "Failed to run migrations",
-							cause,
-						}),
-		});
-	});
 }

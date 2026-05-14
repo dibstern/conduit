@@ -72,6 +72,7 @@ import {
 	_resetRateLimit,
 	connect,
 	disconnect,
+	rateLimitChatSend,
 	wsSend,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
@@ -81,6 +82,12 @@ import {
 function lastSent(): Record<string, unknown> | undefined {
 	const raw = sentMessages[sentMessages.length - 1];
 	return raw ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
+}
+
+function sendChat(text: string): void {
+	rateLimitChatSend(() => {
+		sentMessages.push(JSON.stringify({ type: "message", text }));
+	});
 }
 
 let clock: number;
@@ -142,7 +149,7 @@ describe("wsSend client-side rate limiting", () => {
 	describe("under rate limit", () => {
 		it("sends up to MAX_MESSAGES immediately", () => {
 			for (let i = 0; i < 5; i++) {
-				wsSend({ type: "message", text: `msg ${i}` });
+				sendChat(`msg ${i}`);
 				clock += 100;
 			}
 			expect(sentMessages).toHaveLength(5);
@@ -150,9 +157,9 @@ describe("wsSend client-side rate limiting", () => {
 		});
 
 		it("records timestamps for sent messages", () => {
-			wsSend({ type: "message", text: "a" });
+			sendChat("a");
 			clock += 100;
-			wsSend({ type: "message", text: "b" });
+			sendChat("b");
 			expect(sentMessages).toHaveLength(2);
 		});
 	});
@@ -162,7 +169,7 @@ describe("wsSend client-side rate limiting", () => {
 	describe("at rate limit", () => {
 		function fillLimit(): void {
 			for (let i = 0; i < 5; i++) {
-				wsSend({ type: "message", text: `msg ${i}` });
+				sendChat(`msg ${i}`);
 				clock += 100;
 			}
 		}
@@ -171,7 +178,7 @@ describe("wsSend client-side rate limiting", () => {
 			fillLimit();
 			sentMessages.length = 0; // clear to see only queued sends
 
-			wsSend({ type: "message", text: "queued" });
+			sendChat("queued");
 			// Should NOT have been sent yet
 			expect(sentMessages).toHaveLength(0);
 			expect(showToastMock).toHaveBeenCalledWith(
@@ -185,7 +192,7 @@ describe("wsSend client-side rate limiting", () => {
 			// Messages sent at t=0, 100, 200, 300, 400; clock is now 500
 			sentMessages.length = 0;
 
-			wsSend({ type: "message", text: "queued" });
+			sendChat("queued");
 			expect(sentMessages).toHaveLength(0);
 
 			// Oldest timestamp is 0. Window expires at 0 + 10_000 = 10_000.
@@ -202,8 +209,8 @@ describe("wsSend client-side rate limiting", () => {
 			fillLimit();
 			sentMessages.length = 0;
 
-			wsSend({ type: "message", text: "first queued" });
-			wsSend({ type: "message", text: "corrected" });
+			sendChat("first queued");
+			sendChat("corrected");
 
 			// Two toast calls (one per queue attempt)
 			expect(showToastMock).toHaveBeenCalledTimes(2);
@@ -221,9 +228,9 @@ describe("wsSend client-side rate limiting", () => {
 			fillLimit();
 			sentMessages.length = 0;
 
-			wsSend({ type: "message", text: "a" });
-			wsSend({ type: "message", text: "b" });
-			wsSend({ type: "message", text: "c" });
+			sendChat("a");
+			sendChat("b");
+			sendChat("c");
 
 			// Advance past window — only "c" should be sent
 			clock = 10_001;
@@ -240,20 +247,20 @@ describe("wsSend client-side rate limiting", () => {
 		it("allows a new message once the oldest expires", () => {
 			// Send 5 at t=0
 			for (let i = 0; i < 5; i++) {
-				wsSend({ type: "message", text: `msg ${i}` });
+				sendChat(`msg ${i}`);
 			}
 			expect(sentMessages).toHaveLength(5);
 
 			// At t=10_001, oldest (t=0) expires — one slot opens
 			clock = 10_001;
-			wsSend({ type: "message", text: "after window" });
+			sendChat("after window");
 			expect(sentMessages).toHaveLength(6);
 			expect(lastSent()).toEqual({ type: "message", text: "after window" });
 		});
 
 		it("mixed message types: control messages don't count against limit", () => {
 			for (let i = 0; i < 5; i++) {
-				wsSend({ type: "message", text: `msg ${i}` });
+				sendChat(`msg ${i}`);
 				wsSend({ type: "subscribe", channel: "foo" });
 				clock += 100;
 			}
@@ -262,7 +269,7 @@ describe("wsSend client-side rate limiting", () => {
 
 			// Next chat message should be queued (limit reached)
 			const before = sentMessages.length;
-			wsSend({ type: "message", text: "over limit" });
+			sendChat("over limit");
 			expect(sentMessages).toHaveLength(before); // no new send
 			expect(showToastMock).toHaveBeenCalled();
 		});
@@ -276,7 +283,7 @@ describe("wsSend client-side rate limiting", () => {
 		it("sends first 5 messages in order, then drains queued 6th in sequence", () => {
 			// Send 7 messages in rapid succession
 			for (let i = 1; i <= 7; i++) {
-				wsSend({ type: "message", text: `msg-${i}` });
+				sendChat(`msg-${i}`);
 				clock += 50;
 			}
 
@@ -313,15 +320,15 @@ describe("wsSend client-side rate limiting", () => {
 
 		it("preserves order when interleaving chat and control messages", () => {
 			// Alternate chat and control messages
-			wsSend({ type: "message", text: "chat-1" });
+			sendChat("chat-1");
 			clock += 10;
 			wsSend({ type: "subscribe", channel: "a" });
 			clock += 10;
-			wsSend({ type: "message", text: "chat-2" });
+			sendChat("chat-2");
 			clock += 10;
 			wsSend({ type: "subscribe", channel: "b" });
 			clock += 10;
-			wsSend({ type: "message", text: "chat-3" });
+			sendChat("chat-3");
 
 			// All should be sent (3 chat + 2 control = under limit)
 			expect(sentMessages).toHaveLength(5);
@@ -341,23 +348,23 @@ describe("wsSend client-side rate limiting", () => {
 		it("clears all rate-limit state", () => {
 			// Fill limit and queue
 			for (let i = 0; i < 5; i++) {
-				wsSend({ type: "message", text: `msg ${i}` });
+				sendChat(`msg ${i}`);
 			}
-			wsSend({ type: "message", text: "queued" });
+			sendChat("queued");
 
 			_resetRateLimit({ now: () => clock });
 
 			// After reset, should be able to send immediately
 			sentMessages.length = 0;
-			wsSend({ type: "message", text: "fresh" });
+			sendChat("fresh");
 			expect(sentMessages).toHaveLength(1);
 		});
 
 		it("cancels pending drain timer", () => {
 			for (let i = 0; i < 5; i++) {
-				wsSend({ type: "message", text: `msg ${i}` });
+				sendChat(`msg ${i}`);
 			}
-			wsSend({ type: "message", text: "queued" });
+			sendChat("queued");
 			sentMessages.length = 0;
 
 			_resetRateLimit({ now: () => clock });

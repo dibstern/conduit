@@ -17,7 +17,7 @@ import {
 	sendTo,
 	sendToSession,
 	type WsConn,
-} from "../../../src/lib/effect/ws-handler-service.js";
+} from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

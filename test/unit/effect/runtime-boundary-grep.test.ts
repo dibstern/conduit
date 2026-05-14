@@ -13,15 +13,9 @@ interface AllowedRuntimeBoundary {
 
 const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	{
-		path: "src/lib/daemon/daemon-lifecycle.ts",
-		linePattern: /Effect\.runPromise\($/,
-		reason:
-			"Unix socket callback dispatches decoded tagged IPC into Effect RPC",
-	},
-	{
-		path: "src/lib/effect/daemon-main.ts",
+		path: "src/lib/domain/server/Layers/http-router-layer.ts",
 		linePattern: /Effect\.runSync\($/,
-		reason: "transitional Node HTTP callback from NodeHttpServer.makeHandler",
+		reason: "server-owned Node HTTP callback from NodeHttpServer.makeHandler",
 	},
 	{
 		path: "src/lib/provider/claude/claude-permission-bridge.ts",
@@ -32,12 +26,6 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 		path: "src/lib/instance/sdk-factory.ts",
 		linePattern: /Effect\.runPromise\(fetchWithRetry\(/,
 		reason: "OpenCode SDK and GapEndpoints require a Promise-shaped fetch",
-	},
-	{
-		path: "src/lib/relay/relay-stack.ts",
-		linePattern: /Effect\.runSync\($/,
-		reason:
-			"transitional standalone Node HTTP callback from NodeHttpServer.makeHandler",
 	},
 ];
 
@@ -87,7 +75,7 @@ describe("Effect runtime boundary grep", () => {
 				pattern: /Layer\.succeed\(SessionRegistryTag,/,
 			},
 			{
-				path: "src/lib/effect/services.ts",
+				path: "src/lib/domain/relay/Services/services.ts",
 				pattern: /class SessionRegistryTag\b/,
 			},
 			{
@@ -177,24 +165,24 @@ describe("Effect runtime boundary grep", () => {
 	it("does not inject daemon websocket routing bridges from imperative options", () => {
 		const retiredBridgePatterns = [
 			{
-				path: "src/lib/effect/daemon-layers.ts",
+				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
 				pattern: /Layer\.succeed\(\s*WebSocketRelayRouterTag,/,
 				reason:
 					"WebSocketRelayRouterTag must be built from daemon Effect services",
 			},
 			{
-				path: "src/lib/effect/daemon-layers.ts",
+				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
 				pattern: /\bwsRelayRouter:\s*WebSocketRelayRouter\b/,
 				reason: "DaemonLiveOptions must not accept a prebuilt WebSocket router",
 			},
 			{
-				path: "src/lib/effect/daemon-main.ts",
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
 				pattern: /\bwsRelayRouter:\s*\{/,
 				reason:
 					"daemon-main must not bridge legacy project registry callbacks into WebSocket routing",
 			},
 			{
-				path: "src/lib/effect/daemon-main.ts",
+				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
 				pattern: /wsHandler:\s*\{\s*handleUpgrade:\s*\(\)\s*=>\s*\{\s*\}\s*\}/,
 				reason: "daemon-main must not install a no-op relay fallback",
 			},
@@ -209,6 +197,33 @@ describe("Effect runtime boundary grep", () => {
 				{ path, line, source: source.split("\n")[line - 1]?.trim(), reason },
 			];
 		});
+
+		expect(hits).toEqual([]);
+	});
+
+	it("keeps daemon HTTP router ownership out of daemon-main", () => {
+		const retiredBridgePatterns = [
+			/effectRouterWithCors/,
+			/NodeHttpServer\.makeHandler/,
+			/\bctx\.router\s*=/,
+			/\bProjectsProvider\b/,
+			/\bHealthProvider\b/,
+			/\bPushProvider\b/,
+			/\bRemoveProjectProvider\b/,
+			/\bSetupInfoProvider\b/,
+			/\bThemeProvider\b/,
+		] as const;
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = retiredBridgePatterns.flatMap((pattern) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim() }]
+						: [],
+				),
+		);
 
 		expect(hits).toEqual([]);
 	});
@@ -280,7 +295,7 @@ describe("Effect runtime boundary grep", () => {
 				reason: "prompt dispatch must use Effect persistence services only",
 			},
 			{
-				path: "src/lib/effect/session-manager-service.ts",
+				path: "src/lib/domain/relay/Services/session-manager-service.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
@@ -313,7 +328,7 @@ describe("Effect runtime boundary grep", () => {
 				optional: true,
 			},
 			{
-				path: "src/lib/effect/services.ts",
+				path: "src/lib/domain/relay/Services/services.ts",
 				pattern:
 					/\b(?:ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag|LegacyRelayEventSinkPersist)\b/,
 				reason: "legacy persistence Tags must be deleted",
@@ -371,7 +386,7 @@ describe("Effect runtime boundary grep", () => {
 					"session lifecycle wiring should consume DaemonEventBus, not legacy SessionManager EventEmitter callbacks",
 			},
 			{
-				path: "src/lib/effect/services.ts",
+				path: "src/lib/domain/relay/Services/services.ts",
 				pattern: /\b(?:on|off)\(event: "(?:broadcast|session_lifecycle)"/,
 				reason:
 					"SessionManagerShape should not expose EventEmitter bridge methods",
@@ -403,13 +418,13 @@ describe("Effect runtime boundary grep", () => {
 					"relay runtime should use SessionManagerServiceTag/SessionManagerStateTag instead of injecting a legacy SessionManager",
 			},
 			{
-				path: "src/lib/effect/session-manager-service.ts",
+				path: "src/lib/domain/relay/Services/session-manager-service.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/effect/services.ts",
+				path: "src/lib/domain/relay/Services/services.ts",
 				pattern: /class SessionManagerTag\b/,
 				reason:
 					"SessionManagerTag should stay deleted after session state moves behind SessionManagerService",
@@ -446,6 +461,131 @@ describe("Effect runtime boundary grep", () => {
 						: [],
 				);
 		});
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not inject daemon instance management into relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bInstanceMgmtTag\b/,
+				reason:
+					"relay instance management must be derived from relay config, not a daemon tag bridge",
+			},
+			{
+				pattern: /Layer\.succeed\(InstanceMgmtTag,/,
+				reason:
+					"InstanceMgmtTag must not wrap prebuilt daemon callbacks in relay composition",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not inject status poller into relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /Layer\.succeed\(StatusPollerTag,/,
+				reason: "StatusPollerTag must be constructed by a relay-owned Layer",
+			},
+			{
+				pattern: /\bmakeDeferredStatusPollerRuntime\b/,
+				reason:
+					"relay-stack must not late-attach a status poller runtime facade",
+			},
+			{
+				pattern: /\bcreateStatusPollerService\b/,
+				reason:
+					"status poller service construction belongs to the status poller Layer",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not construct websocket handler bridge services in relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bnew EffectWsHandler\b/,
+				reason: "WebSocketHandlerTag must be constructed by a scoped Layer",
+			},
+			{
+				pattern: /\bnew SessionRegistry\b/,
+				reason:
+					"viewer tracking must use the Effect websocket handler state, not a relay-stack registry",
+			},
+			{
+				pattern: /Layer\.succeed\(WebSocketHandlerTag,/,
+				reason: "WebSocketHandlerTag must not wrap a prebuilt handler",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not inject core relay ports into relay-stack", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /Layer\.succeed\(OpenCodeAPITag,/,
+				reason: "OpenCodeAPITag must be constructed by a relay-owned Layer",
+			},
+			{
+				pattern: /Layer\.succeed\(ConfigTag,/,
+				reason: "ConfigTag must be provided by the relay config Layer",
+			},
+			{
+				pattern: /Layer\.succeed\(LoggerTag,/,
+				reason: "LoggerTag must be derived by the relay logger Layer",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
 
 		expect(hits).toEqual([]);
 	});

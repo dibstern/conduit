@@ -8,7 +8,7 @@
  * ## Effect Layer helpers
  *
  * Effect-based test helpers live at the bottom of this file. They compose
- * the service Tags from `src/lib/effect/services.ts` into reusable Layers
+ * the service Tags from `src/lib/domain/relay/Services/services.ts` into reusable Layers
  * that can be used with `@effect/vitest`'s `it.effect` / `it.scoped`.
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
@@ -16,29 +16,30 @@
 import { Effect, Layer } from "effect";
 import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
-import { AgentServiceLive } from "../../src/lib/effect/agent-service.js";
-import { DaemonEventBusLive } from "../../src/lib/effect/daemon-pubsub.js";
+import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type DaemonState,
 	makeDaemonStateLive,
-} from "../../src/lib/effect/daemon-state.js";
-import { InstanceManagementServiceLive } from "../../src/lib/effect/instance-management-service.js";
+} from "../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	type InstanceManagerConfig,
 	makeInstanceManagerStateLive,
-} from "../../src/lib/effect/instance-manager-service.js";
-import { makePollerManagerStateLive } from "../../src/lib/effect/message-poller.js";
-import { PendingInteractionServiceLive } from "../../src/lib/effect/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../../src/lib/effect/project-management-service.js";
-import { RateLimiterLive } from "../../src/lib/effect/rate-limiter-layer.js";
-import { ScanServiceLive } from "../../src/lib/effect/scan-service.js";
+} from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { InstanceMgmtTag } from "../../src/lib/domain/daemon/Services/management-service.js";
+import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import { AgentServiceLive } from "../../src/lib/domain/relay/Services/agent-service.js";
+import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
+import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
+import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
+import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
-	InstanceMgmtTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
@@ -51,21 +52,21 @@ import {
 	StatusPollerTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../src/lib/effect/services.js";
+} from "../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
-} from "../../src/lib/effect/session-manager-service.js";
+} from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	type SessionManagerState,
-} from "../../src/lib/effect/session-manager-state.js";
-import { makeOverridesStateLive } from "../../src/lib/effect/session-overrides-state.js";
-import { makeSessionRegistryStateLive } from "../../src/lib/effect/session-registry-state.js";
-import { makePollerStateLive } from "../../src/lib/effect/session-status-poller.js";
-import { OpenCodeTerminalServiceLive } from "../../src/lib/effect/terminal-service.js";
-import { ToolContentServiceNoop } from "../../src/lib/effect/tool-content-service.js";
+} from "../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
+import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
+import { OpenCodeTerminalServiceLive } from "../../src/lib/domain/relay/Services/terminal-service.js";
+import { ToolContentServiceNoop } from "../../src/lib/domain/relay/Services/tool-content-service.js";
 import type {
 	HandlerDeps,
 	InstanceManagementDeps,
@@ -424,6 +425,10 @@ export function createMockProjectRelay(
 	return {
 		wsHandler:
 			createMockWsHandlerFull() as unknown as ProjectRelay["wsHandler"],
+		rpcWsHandler: {
+			handleUpgrade: vi.fn(),
+			drain: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ProjectRelay["rpcWsHandler"],
 		sseStream: {
 			connectEffect: vi.fn(),
 			disconnectEffect: vi.fn(),
@@ -515,7 +520,7 @@ export function deferredRelayFactory(): DeferredRelay {
 // Effect Layer Test Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// These helpers compose the Effect service Tags from src/lib/effect/services.ts
+// These helpers compose the Effect service Tags from src/lib/domain/relay/Services/services.ts
 // into reusable Layers for @effect/vitest tests. They complement (not replace)
 // the imperative factories above.
 //
@@ -848,6 +853,25 @@ export function makeMockPtyManager(
 	} as unknown as PtyManager;
 }
 
+/** Create a mock StatusPoller service for Effect tests. */
+export function makeMockStatusPoller(
+	overrides?: Partial<StatusPollerShape>,
+): StatusPollerShape {
+	return {
+		on: vi.fn(),
+		start: vi.fn(),
+		stop: vi.fn(),
+		drain: vi.fn(async () => undefined),
+		getCurrentStatuses: vi.fn(() => ({})),
+		isProcessing: vi.fn(() => false),
+		markMessageActivity: vi.fn(),
+		clearMessageActivity: vi.fn(),
+		notifySSEIdle: vi.fn(),
+		reconcileNow: vi.fn(async () => undefined),
+		...overrides,
+	};
+}
+
 /** Create a mock ProjectRelayConfig for Effect tests. */
 export function makeMockConfig(
 	overrides?: Partial<ProjectRelayConfig>,
@@ -901,11 +925,8 @@ export function makeTestHandlerLayer(
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
 	const config = opts?.config ?? makeMockConfig();
 	const log = opts?.log ?? makeMockLogger();
-	const statusPoller: StatusPollerShape = opts?.statusPoller ?? {
-		isProcessing: vi.fn(() => false),
-		clearMessageActivity: vi.fn(),
-		getCurrentStatuses: vi.fn(() => ({})),
-	};
+	const statusPoller: StatusPollerShape =
+		opts?.statusPoller ?? makeMockStatusPoller();
 	const pollerManager: PollerManagerShape = opts?.pollerManager ?? {
 		on: vi.fn(),
 		isPolling: vi.fn(() => true),
@@ -992,6 +1013,7 @@ export function makeTestHandlerLayer(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
+		DirectoryListingServiceLive,
 		scanServiceLayer,
 		agentServiceLayer,
 		toolContentServiceLayer,
@@ -1016,7 +1038,7 @@ export function makeTestHandlerLayer(
 
 // ─── State-layer test helpers ──────────────────────────────────────────────
 // Convenience wrappers around the Effect state Layer factories from
-// src/lib/effect/. They provide zero-config defaults suitable for tests.
+// src/lib/domain/. They provide zero-config defaults suitable for tests.
 
 /**
  * Options for building the daemon-level state test Layer.

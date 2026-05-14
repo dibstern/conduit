@@ -705,12 +705,6 @@ const ProjectListSchema = Schema.Struct({
 	addedSlug: Schema.optional(Schema.String),
 });
 
-const DirectoryListSchema = Schema.Struct({
-	type: Schema.Literal("directory_list"),
-	path: Schema.String,
-	entries: Schema.Array(Schema.String),
-});
-
 // ── File browser ───────────────────────────────────────────────────────
 const FileListSchema = Schema.Struct({
 	type: Schema.Literal("file_list"),
@@ -841,6 +835,7 @@ const UserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user_message"),
 	sessionId: Schema.String,
 	text: Schema.String,
+	originId: Schema.optional(Schema.String),
 });
 
 // ── Session deletion ──────────────────────────────────────────────────
@@ -984,7 +979,6 @@ export const RelayMessageSchema = Schema.Union(
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
-	DirectoryListSchema,
 	// File browser
 	FileListSchema,
 	FileContentSchema,
@@ -1066,7 +1060,6 @@ export const RELAY_MESSAGE_TYPES = [
 	"agent_list",
 	"command_list",
 	"project_list",
-	"directory_list",
 	"file_list",
 	"file_content",
 	"file_tree",
@@ -1267,7 +1260,6 @@ export type RelayMessage =
 			current?: string;
 			addedSlug?: string;
 	  }
-	| { type: "directory_list"; path: string; entries: string[] }
 	// ── File browser ───────────────────────────────────────────────────────
 	| { type: "file_list"; path: string; entries: FileEntry[] }
 	| { type: "file_content"; path: string; content: string; binary?: boolean }
@@ -1315,7 +1307,7 @@ export type RelayMessage =
 	| { type: "file_history_result"; path: string; versions: FileVersion[] }
 	| { type: "rewind_result"; mode: string }
 	// ── Cache / Replay ────────────────────────────────────────────────────
-	| { type: "user_message"; sessionId: string; text: string }
+	| { type: "user_message"; sessionId: string; text: string; originId?: string }
 	// ── Session deletion ──────────────────────────────────────────────────
 	| { type: "session_deleted"; sessionId: string }
 	// ── Misc ────────────────────────────────────────────────────────────────

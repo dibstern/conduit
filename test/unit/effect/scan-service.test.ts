@@ -6,8 +6,8 @@ import {
 	ScanServiceLive,
 	ScanServiceNotAvailable,
 	ScanServiceTag,
-} from "../../../src/lib/effect/scan-service.js";
-import { ConfigTag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/scan-service.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 describe("ScanServiceLive", () => {

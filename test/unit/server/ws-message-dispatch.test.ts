@@ -81,6 +81,7 @@ import {
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -162,6 +163,25 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		expect(toolMsg).toBeDefined();
 		expect(toolMsg.result).toBe("full output here — all 50,000 chars");
+		expect(toolMsg.isTruncated).toBe(false);
+		expect(toolMsg.fullContentLength).toBeUndefined();
+	});
+
+	it("applies RPC tool content to the current session", () => {
+		seedTruncatedTool("tool-rpc", "bash");
+		sessionState.currentId = "s1";
+
+		applyToolContentResponse({
+			projectSlug: "demo",
+			toolId: "tool-rpc",
+			content: "full rpc output",
+		});
+
+		const toolMsg = chatState.messages.find(
+			(m) => m.type === "tool" && (m as ToolMessage).id === "tool-rpc",
+		) as ToolMessage;
+
+		expect(toolMsg.result).toBe("full rpc output");
 		expect(toolMsg.isTruncated).toBe(false);
 		expect(toolMsg.fullContentLength).toBeUndefined();
 	});

@@ -18,39 +18,39 @@ import {
 } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
-import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import {
+	discoverProjectsEffect,
+	ProjectDiscoveryLive,
+} from "../../../src/lib/domain/daemon/Layers/project-discovery-layer.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import {
+	prefetchSessionCounts,
+	SessionPrefetchLive,
+} from "../../../src/lib/domain/daemon/Layers/session-prefetch-layer.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type InstanceManagerState,
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 	PollerFibersTag,
-} from "../../../src/lib/effect/instance-manager-service.js";
-import {
-	discoverProjectsEffect,
-	ProjectDiscoveryLive,
-} from "../../../src/lib/effect/project-discovery-layer.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
 	type ProjectState,
-} from "../../../src/lib/effect/project-registry-service.js";
-import { HttpServerRefTag } from "../../../src/lib/effect/relay-factory-layer.js";
-import {
-	prefetchSessionCounts,
-	SessionPrefetchLive,
-} from "../../../src/lib/effect/session-prefetch-layer.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
-} from "../../../src/lib/effect/ws-routing-layer.js";
+} from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
 // ─── Shared test layers ────────────────────────────────────────────────────

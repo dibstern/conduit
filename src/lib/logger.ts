@@ -259,7 +259,7 @@ export function _getOutputStream(): Writable {
  * project's `Logger` interface — callers get the native pino API whose
  * `.child(bindings)` accepts `Record<string, unknown>`.
  *
- * Primary consumer: `PinoLoggerLive` in `src/lib/effect/pino-logger-layer.ts`.
+ * Primary consumer: `PinoLoggerLive` in `src/lib/domain/daemon/Layers/pino-logger-layer.ts`.
  * @internal
  */
 export function _getRawPinoChild(tag: string): PinoInstance {

@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit } from "effect";
 import { expect } from "vitest";
 
-import { fetchWithRetry } from "../../../src/lib/effect/retry-fetch.js";
+import { fetchWithRetry } from "../../../src/lib/domain/relay/Services/retry-fetch.js";
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
 
 describe("Effect-based retry fetch", () => {

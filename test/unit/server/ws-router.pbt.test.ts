@@ -35,7 +35,6 @@ const NUM_RUNS = 300;
 // ─── Generators ─────────────────────────────────────────────────────────────
 
 const validMessageTypes: IncomingMessageType[] = [
-	"message",
 	"permission_response",
 	"ask_user_response",
 	"question_reject",
@@ -43,36 +42,16 @@ const validMessageTypes: IncomingMessageType[] = [
 	"switch_session",
 	"view_session",
 	"delete_session",
-	"rename_session",
 	"fork_session",
-	"list_sessions",
-	"search_sessions",
-	"load_more_history",
 	"terminal_command",
 	"input_sync",
-	"switch_agent",
-	"switch_model",
-	"set_default_model",
-	"switch_variant",
-	"switch_context_window",
-	"get_todo",
-	"get_agents",
-	"get_models",
-	"get_commands",
-	"get_projects",
 	"add_project",
-	"list_directories",
 	"remove_project",
 	"rename_project",
-	"get_file_list",
-	"get_file_content",
-	"get_file_tree",
-	"get_tool_content",
 	"pty_create",
 	"pty_input",
 	"pty_resize",
 	"pty_close",
-	"cancel",
 	"rewind",
 	"instance_add",
 	"instance_remove",
@@ -83,7 +62,6 @@ const validMessageTypes: IncomingMessageType[] = [
 	"set_project_instance",
 	"proxy_detect",
 	"scan_now",
-	"reload_provider_session",
 ];
 
 const arbValidMessageType: fc.Arbitrary<IncomingMessageType> = fc.constantFrom(
@@ -430,8 +408,8 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			const invalidResult = routeMessage({ type: "__definitely_not_valid__" });
 			expect(isRouteError(invalidResult)).toBe(true);
 
-			// Verify our test list has exactly the right number (49 routed types).
-			expect(validMessageTypes).toHaveLength(49);
+			// Verify our test list has exactly the right number of routed types.
+			expect(validMessageTypes).toHaveLength(27);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

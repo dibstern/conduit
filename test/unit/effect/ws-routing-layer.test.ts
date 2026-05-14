@@ -4,26 +4,26 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
-import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
-import { ConfigPersistenceNoopLive } from "../../../src/lib/effect/config-persistence-service.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	getEntry,
 	makeProjectRegistryLive,
-} from "../../../src/lib/effect/project-registry-service.js";
-import { makeRelayCacheLive } from "../../../src/lib/effect/relay-cache.js";
-import { HttpServerRefTag } from "../../../src/lib/effect/relay-factory-layer.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { makeRelayCacheLive } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	type WebSocketRelay,
 	WebSocketRelayRouterLive,
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
-} from "../../../src/lib/effect/ws-routing-layer.js";
+} from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
 type TestSocket = Socket & {
@@ -56,6 +56,11 @@ const makeRequest = (
 		socket: { remoteAddress: "127.0.0.1" },
 	}) as IncomingMessage;
 
+const makeWebSocketRelay = (): WebSocketRelay => ({
+	wsHandler: { handleUpgrade: vi.fn() },
+	rpcWsHandler: { handleUpgrade: vi.fn() },
+});
+
 const makeLayer = (
 	server: Server,
 	options?: {
@@ -70,11 +75,7 @@ const makeLayer = (
 		shuttingDown?: boolean;
 	},
 ) => {
-	const relay =
-		options?.relay ??
-		({
-			wsHandler: { handleUpgrade: vi.fn() },
-		} satisfies WebSocketRelay);
+	const relay = options?.relay ?? makeWebSocketRelay();
 	const ensureRelayStarted = options?.ensureRelayStarted ?? vi.fn();
 	const touchLastUsed = options?.touchLastUsed ?? vi.fn();
 	const waitForRelay =
@@ -136,13 +137,12 @@ const makeRouterLayer = (
 
 describe("WebSocketRelayRouterLive", () => {
 	it.effect("returns a cached relay and does not create duplicates", () => {
-		const relay = {
-			wsHandler: { handleUpgrade: vi.fn() },
-		} satisfies WebSocketRelay;
+		const relay = makeWebSocketRelay();
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
 				wsHandler: relay.wsHandler,
+				rpcWsHandler: relay.rpcWsHandler,
 				stop: vi.fn(),
 			}),
 		);
@@ -167,6 +167,7 @@ describe("WebSocketRelayRouterLive", () => {
 			Effect.succeed({
 				slug,
 				wsHandler: { handleUpgrade: vi.fn() },
+				rpcWsHandler: { handleUpgrade: vi.fn() },
 				stop: vi.fn(),
 			}),
 		);
@@ -220,9 +221,7 @@ describe("WebSocketRoutingLive", () => {
 	it.scoped("routes project websocket upgrades through the relay", () =>
 		Effect.gen(function* () {
 			const server = createServer();
-			const relay = {
-				wsHandler: { handleUpgrade: vi.fn() },
-			} satisfies WebSocketRelay;
+			const relay = makeWebSocketRelay();
 			const ensureRelayStarted = vi.fn();
 			const touchLastUsed = vi.fn();
 			const layer = makeLayer(server, {
@@ -249,12 +248,43 @@ describe("WebSocketRoutingLive", () => {
 		}),
 	);
 
+	it.scoped(
+		"routes project RPC websocket upgrades through the RPC handler",
+		() =>
+			Effect.gen(function* () {
+				const server = createServer();
+				const relay = makeWebSocketRelay();
+				const ensureRelayStarted = vi.fn();
+				const touchLastUsed = vi.fn();
+				const layer = makeLayer(server, {
+					relay,
+					ensureRelayStarted,
+					touchLastUsed,
+				});
+
+				yield* Effect.gen(function* () {
+					const socket = makeSocket();
+					const req = makeRequest("/p/test-project/rpc");
+					server.emit("upgrade", req, socket, Buffer.alloc(0));
+
+					yield* waitForAssertion(() => {
+						expect(ensureRelayStarted).toHaveBeenCalledWith("test-project");
+						expect(touchLastUsed).toHaveBeenCalledWith("test-project");
+						expect(relay.rpcWsHandler.handleUpgrade).toHaveBeenCalledWith(
+							req,
+							socket,
+							expect.any(Buffer),
+						);
+						expect(relay.wsHandler.handleUpgrade).not.toHaveBeenCalled();
+					});
+				}).pipe(Effect.provide(Layer.fresh(layer)));
+			}),
+	);
+
 	it.scoped("destroys sockets for non-project websocket paths", () =>
 		Effect.gen(function* () {
 			const server = createServer();
-			const relay = {
-				wsHandler: { handleUpgrade: vi.fn() },
-			} satisfies WebSocketRelay;
+			const relay = makeWebSocketRelay();
 			const layer = makeLayer(server, { relay });
 
 			yield* Effect.gen(function* () {
@@ -283,9 +313,7 @@ describe("WebSocketRoutingLive", () => {
 				const auth = new AuthManager({
 					getPinHash: () => hashPin("1234"),
 				});
-				const relay = {
-					wsHandler: { handleUpgrade: vi.fn() },
-				} satisfies WebSocketRelay;
+				const relay = makeWebSocketRelay();
 				const layer = makeLayer(server, { auth, relay, ensureRelayStarted });
 
 				yield* Effect.gen(function* () {
@@ -309,9 +337,7 @@ describe("WebSocketRoutingLive", () => {
 	it.scoped("writes 503 when the relay cannot become ready", () =>
 		Effect.gen(function* () {
 			const server = createServer();
-			const relay = {
-				wsHandler: { handleUpgrade: vi.fn() },
-			} satisfies WebSocketRelay;
+			const relay = makeWebSocketRelay();
 			const layer = makeLayer(server, {
 				relay,
 				waitForRelay: (slug) =>
@@ -362,9 +388,7 @@ describe("WebSocketRoutingLive", () => {
 			const server = createServer();
 			const ensureRelayStarted = vi.fn();
 			const touchLastUsed = vi.fn();
-			const relay = {
-				wsHandler: { handleUpgrade: vi.fn() },
-			} satisfies WebSocketRelay;
+			const relay = makeWebSocketRelay();
 			const layer = makeLayer(server, {
 				relay,
 				ensureRelayStarted,

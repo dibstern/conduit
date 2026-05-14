@@ -1,13 +1,13 @@
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeMessagePollerManagerLive } from "../../../src/lib/effect/message-poller-manager-layer.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { makeMessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	type PollerManagerShape,
 	PollerManagerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";

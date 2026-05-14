@@ -31,10 +31,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		client.clearReceived();
 
 		// Send a prompt that will take a moment to process
-		client.send({
-			type: "message",
-			text: "Write a short paragraph about the weather.",
-		});
+		await client.sendMessage("Write a short paragraph about the weather.");
 
 		// Wait for processing to start
 		await client.waitFor("status", {
@@ -42,7 +39,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		});
 
 		// Send cancel while processing
-		client.send({ type: "cancel" });
+		await client.cancelSession();
 
 		// Should receive done (code 0 from OpenCode idle, or code 1 from relay cancel)
 		const done = await client.waitFor("done", { timeout: 15_000 });
@@ -57,16 +54,13 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		client.clearReceived();
 
 		// First: send + cancel
-		client.send({
-			type: "message",
-			text: "Write a long essay about oceans.",
-		});
+		await client.sendMessage("Write a long essay about oceans.");
 
 		await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		client.send({ type: "cancel" });
+		await client.cancelSession();
 		await client.waitFor("done", { timeout: 15_000 });
 
 		// Let SSE stream settle — stale events from the cancelled message may
@@ -77,10 +71,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		client.clearReceived();
 
 		// Second: send a new message — should work (not stuck)
-		client.send({
-			type: "message",
-			text: "Reply with just 'ok'.",
-		});
+		await client.sendMessage("Reply with just 'ok'.");
 
 		// Should enter processing again
 		const status = await client.waitFor("status", {
@@ -102,7 +93,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		client.clearReceived();
 
 		// Send cancel without having sent a message
-		client.send({ type: "cancel" });
+		await client.cancelSession();
 
 		// Wait a moment — should not crash or produce unexpected messages
 		await new Promise((r) => setTimeout(r, 1000));
@@ -127,10 +118,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		expect(cancelErrors).toHaveLength(0);
 
 		// Should still be able to send a message (relay not crashed)
-		client.send({
-			type: "message",
-			text: "Reply with just 'ok'.",
-		});
+		await client.sendMessage("Reply with just 'ok'.");
 
 		const status = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",

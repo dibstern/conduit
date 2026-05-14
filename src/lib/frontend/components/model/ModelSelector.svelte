@@ -11,14 +11,22 @@
 	import ModelVariant from "./ModelVariant.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 	import {
+		applyGetAgentsResponse,
 		discoveryState,
 		getActiveModel,
 		getProviderGroups,
 		formatModelName,
 		isProviderConfigured,
 	} from "../../stores/discovery.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import {
+		getAgentsRpc,
+		reloadProviderSessionRpc,
+		setDefaultModelRpc,
+		switchModelRpc,
+	} from "../../transport/ws-rpc-client.js";
 	import type { ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 
 	// ─── State ──────────────────────────────────────────────────────────────────
@@ -109,31 +117,76 @@
 
 	function handleModelClick(model: ModelInfo, e: MouseEvent) {
 		e.stopPropagation();
-		wsSend({
-			type: "switch_model",
-			modelId: model.id,
-			providerId: model.provider,
-		});
-		wsSend({ type: "get_agents" });
+		const previousModelId = discoveryState.currentModelId;
+		const previousProviderId = discoveryState.currentProviderId;
+		const previousVariant = discoveryState.currentVariant;
+		const previousVariants = discoveryState.availableVariants;
 		discoveryState.currentModelId = model.id;
 		discoveryState.currentProviderId = model.provider;
+		const projectSlug = getCurrentSlug();
+		const sessionId = sessionState.currentId;
+		if (projectSlug && sessionId) {
+			void switchModelRpc({
+				projectSlug,
+				sessionId,
+				modelId: model.id,
+				providerId: model.provider,
+			})
+				.then((response) => {
+					discoveryState.currentModelId = response.model;
+					discoveryState.currentProviderId = response.provider;
+					discoveryState.currentVariant = response.variant;
+					discoveryState.availableVariants = response.variants;
+					return getAgentsRpc({ projectSlug, sessionId });
+				})
+				.then(applyGetAgentsResponse)
+				.catch(() => {
+					discoveryState.currentModelId = previousModelId;
+					discoveryState.currentProviderId = previousProviderId;
+					discoveryState.currentVariant = previousVariant;
+					discoveryState.availableVariants = previousVariants;
+				});
+		}
 		dropdownOpen = false;
 	}
 
 	function handleSetDefault(model: ModelInfo, e: MouseEvent) {
 		e.stopPropagation();
-		wsSend({
-			type: "set_default_model",
-			provider: model.provider,
-			model: model.id,
-		});
+		const previousDefaultModelId = discoveryState.defaultModelId;
+		const previousDefaultProviderId = discoveryState.defaultProviderId;
+		const previousVariant = discoveryState.currentVariant;
+		const previousVariants = discoveryState.availableVariants;
 		discoveryState.defaultModelId = model.id;
 		discoveryState.defaultProviderId = model.provider;
+		const projectSlug = getCurrentSlug();
+		if (projectSlug) {
+			void setDefaultModelRpc({
+				projectSlug,
+				model: model.id,
+				provider: model.provider,
+			})
+				.then((response) => {
+					discoveryState.defaultModelId = response.model;
+					discoveryState.defaultProviderId = response.provider;
+					discoveryState.currentVariant = response.variant;
+					discoveryState.availableVariants = response.variants;
+				})
+				.catch(() => {
+					discoveryState.defaultModelId = previousDefaultModelId;
+					discoveryState.defaultProviderId = previousDefaultProviderId;
+					discoveryState.currentVariant = previousVariant;
+					discoveryState.availableVariants = previousVariants;
+				});
+		}
 	}
 
 	function handleReload(e: MouseEvent) {
 		e.stopPropagation();
-		wsSend({ type: "reload_provider_session" });
+		const projectSlug = getCurrentSlug();
+		const sessionId = sessionState.currentId;
+		if (projectSlug && sessionId) {
+			void reloadProviderSessionRpc({ projectSlug, sessionId });
+		}
 		showToast("Reloading skills…");
 		dropdownOpen = false;
 	}

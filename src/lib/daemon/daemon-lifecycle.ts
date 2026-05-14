@@ -18,7 +18,7 @@ import {
 } from "node:net";
 
 import * as Headers from "@effect/platform/Headers";
-import { Effect, Either, Schema } from "effect";
+import { Effect, Either, Runtime, Schema } from "effect";
 import {
 	IpcError,
 	IpcInstancesResponseSchema,
@@ -28,12 +28,13 @@ import {
 	IpcStatusResponseSchema,
 	type IpcTaggedRequest,
 	IpcTaggedRequestSchema,
-} from "../effect/ipc-requests.js";
-import { IpcRpcGroup } from "../effect/ipc-rpc-group.js";
+} from "../contracts/ipc-requests.js";
+import { IpcRpcGroup } from "../domain/daemon/Services/ipc-rpc-group.js";
 import { formatErrorDetail } from "../errors.js";
 import { createLogger } from "../logger.js";
 import { serveStaticFile, tryServeStatic } from "../server/static-files.js";
 import type { SetupInfoResponse } from "../shared-types.js";
+import type { IPCResponse } from "../types.js";
 import { buildIPCHandlers, type DaemonIPCContext } from "./daemon-ipc.js";
 import type { DaemonStatus } from "./daemon-types.js";
 import {
@@ -345,25 +346,32 @@ function isTaggedPayload(value: unknown): value is { _tag: string } {
 	);
 }
 
-async function dispatchTaggedRequest(
+export const dispatchTaggedRequestEffect = (
 	request: IpcTaggedRequest,
 	rpcLayer: ReturnType<typeof makeRpcHandlerLayer>,
-) {
-	return Effect.runPromise(
-		Effect.gen(function* () {
-			const handler = yield* IpcRpcGroup.accessHandler(request._tag);
-			return yield* handler(request, Headers.empty);
-		}).pipe(
-			Effect.provide(rpcLayer),
-			Effect.catchAll((error) =>
-				Effect.succeed({
-					ok: false,
-					error: formatErrorDetail(error),
-				}),
-			),
+) =>
+	Effect.gen(function* () {
+		const handler = yield* IpcRpcGroup.accessHandler(request._tag);
+		return yield* handler(request, Headers.empty);
+	}).pipe(
+		Effect.provide(rpcLayer),
+		Effect.catchAll((error) =>
+			Effect.succeed({
+				ok: false,
+				error: formatErrorDetail(error),
+			}),
 		),
 	);
-}
+
+export type TaggedIpcDispatcher = (
+	request: IpcTaggedRequest,
+	rpcLayer: ReturnType<typeof makeRpcHandlerLayer>,
+) => Promise<IPCResponse>;
+
+const defaultTaggedIpcDispatcher: TaggedIpcDispatcher = (request, rpcLayer) =>
+	Runtime.runPromise(Runtime.defaultRuntime)(
+		dispatchTaggedRequestEffect(request, rpcLayer),
+	);
 
 // ─── Context interface ──────────────────────────────────────────────────────
 // Mutable context so lifecycle functions can store server references back.
@@ -737,6 +745,7 @@ export function startIPCServer(
 	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
 	getStatus: () => DaemonStatus,
+	dispatchTaggedRequest: TaggedIpcDispatcher = defaultTaggedIpcDispatcher,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		// Remove stale socket file if it exists

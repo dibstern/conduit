@@ -1,14 +1,14 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { handleGetCommands } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";

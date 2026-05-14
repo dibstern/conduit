@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	getDefaultModel,
 	getDefaultVariant,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {

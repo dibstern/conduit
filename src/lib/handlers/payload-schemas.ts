@@ -22,13 +22,6 @@ export const PayloadSchemas: {
 	// biome-ignore lint/suspicious/noExplicitAny: Schema Struct produces readonly/undefined-widened types that differ structurally from PayloadMap; `any` avoids a fight with exactOptionalPropertyTypes while keeping the key-exhaustiveness constraint
 	[K in keyof PayloadMap]: Schema.Schema<any, any>;
 } = {
-	message: Schema.Struct({
-		text: Schema.String,
-		images: Schema.optional(Schema.Array(Schema.String)),
-	}),
-
-	cancel: Schema.Struct({}),
-
 	rewind: Schema.Struct({
 		messageId: Schema.optional(Schema.String),
 		uuid: Schema.optional(Schema.String),
@@ -71,65 +64,14 @@ export const PayloadSchemas: {
 		sessionId: Schema.String,
 	}),
 
-	rename_session: Schema.Struct({
-		sessionId: Schema.String,
-		title: Schema.String,
-	}),
-
 	fork_session: Schema.Struct({
 		sessionId: Schema.optional(Schema.String),
 		messageId: Schema.optional(Schema.String),
 	}),
 
-	list_sessions: Schema.Struct({}),
-
-	search_sessions: Schema.Struct({
-		query: Schema.String,
-		roots: Schema.optional(Schema.Boolean),
-	}),
-
-	load_more_history: Schema.Struct({
-		sessionId: Schema.optional(Schema.String),
-		offset: Schema.Number,
-	}),
-
-	get_agents: Schema.Struct({}),
-
-	switch_agent: Schema.Struct({
-		agentId: Schema.String,
-	}),
-
-	get_models: Schema.Struct({}),
-
-	switch_model: Schema.Struct({
-		modelId: Schema.String,
-		providerId: Schema.String,
-	}),
-
-	set_default_model: Schema.Struct({
-		provider: Schema.String,
-		model: Schema.String,
-	}),
-
-	switch_variant: Schema.Struct({
-		variant: Schema.String,
-	}),
-
-	switch_context_window: Schema.Struct({
-		contextWindow: Schema.String,
-	}),
-
-	get_commands: Schema.Struct({}),
-
-	get_projects: Schema.Struct({}),
-
 	add_project: Schema.Struct({
 		directory: Schema.String,
 		instanceId: Schema.optional(Schema.String),
-	}),
-
-	list_directories: Schema.Struct({
-		path: Schema.String,
 	}),
 
 	remove_project: Schema.Struct({
@@ -139,22 +81,6 @@ export const PayloadSchemas: {
 	rename_project: Schema.Struct({
 		slug: Schema.String,
 		title: Schema.String,
-	}),
-
-	get_todo: Schema.Struct({}),
-
-	get_file_list: Schema.Struct({
-		path: Schema.optional(Schema.String),
-	}),
-
-	get_file_content: Schema.Struct({
-		path: Schema.String,
-	}),
-
-	get_file_tree: Schema.Struct({}),
-
-	get_tool_content: Schema.Struct({
-		toolId: Schema.String,
 	}),
 
 	terminal_command: Schema.Struct({
@@ -223,6 +149,4 @@ export const PayloadSchemas: {
 	proxy_detect: Schema.Struct({}),
 
 	scan_now: Schema.Struct({}),
-
-	reload_provider_session: Schema.Struct({}),
 };

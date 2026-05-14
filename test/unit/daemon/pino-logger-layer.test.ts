@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Cause, Effect, type Layer, Logger, LogLevel } from "effect";
 import { expect, vi } from "vitest";
-import { makePinoLoggerLive } from "../../../src/lib/effect/pino-logger-layer.js";
+import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
 
 /** Create a separate set of spies (used for child loggers). */
 function makePinoSpies() {

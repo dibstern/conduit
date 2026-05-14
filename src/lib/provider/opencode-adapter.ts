@@ -15,6 +15,7 @@ import type {
 	ModelInfo,
 	PermissionDecision,
 	ProviderAdapter,
+	ProviderDriver,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -318,3 +319,8 @@ export class OpenCodeAdapter implements ProviderAdapter {
 		});
 	}
 }
+
+export const OpenCodeDriver: ProviderDriver<OpenCodeAdapterOptions> = {
+	providerId: "opencode",
+	create: (options) => Effect.sync(() => new OpenCodeAdapter(options)),
+};

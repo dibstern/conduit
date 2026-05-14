@@ -40,7 +40,7 @@ describe("Integration: Multi-Client", () => {
 		await client2.close();
 	});
 
-	it("model switch from one client broadcasts to another", async () => {
+	it("model switch from one client reaches another client on the same session", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -48,11 +48,7 @@ describe("Integration: Multi-Client", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({
-			type: "switch_model",
-			modelId: "multi-test-model",
-			providerId: "multi-test-provider",
-		});
+		await client1.switchModel("multi-test-model", "multi-test-provider");
 
 		const msg = await client2.waitFor("model_info", { timeout: 5000 });
 		expect(msg["model"]).toBe("multi-test-model");
@@ -132,9 +128,8 @@ describe("Integration: Multi-Client", () => {
 
 		// client2 should still be fully functional
 		client2.clearReceived();
-		client2.send({ type: "get_agents" });
-		const msg = await client2.waitFor("agent_list", { timeout: 5000 });
-		expect(Array.isArray(msg["agents"])).toBe(true);
+		const result = await client2.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
 
 		await client2.close();
 	});

@@ -23,7 +23,7 @@ import {
 	SessionListResponseSchema,
 	SessionSchema,
 	SessionStatusMapSchema,
-} from "../../../src/lib/effect/opencode-response-schemas.js";
+} from "../../../src/lib/domain/provider/Services/opencode-response-schemas.js";
 
 // ─── SessionSchema ──────────────────────────────────────────────────────────
 

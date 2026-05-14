@@ -28,8 +28,8 @@ import {
 	authRoute,
 	authStatusRoute,
 	withAuthGate,
-} from "../effect/auth-middleware.js";
-import { serveStaticFile } from "../effect/static-file-handler.js";
+} from "../domain/server/Layers/auth-middleware.js";
+import { serveStaticFile } from "../domain/server/Services/static-file-handler.js";
 import type {
 	ApiError,
 	DashboardProjectResponse,

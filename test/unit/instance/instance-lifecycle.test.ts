@@ -9,8 +9,8 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 import { buildIPCHandlers } from "../../../src/lib/daemon/daemon-ipc.js";
 import { createCommandRouter } from "../../../src/lib/daemon/ipc-protocol.js";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig, StoredProject } from "../../../src/lib/types.js";
 

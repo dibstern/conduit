@@ -8,7 +8,7 @@ import {
 	MIME_TYPES,
 	StaticDirTag,
 	serveStaticFile,
-} from "../../../src/lib/effect/static-file-handler.js";
+} from "../../../src/lib/domain/server/Services/static-file-handler.js";
 
 const nodeLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer);
 

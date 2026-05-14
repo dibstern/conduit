@@ -1,3 +1,4 @@
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Permission & Question Handlers ──────────────────────────────────────────
 //
 // Questions use a bridge-less design: the frontend receives the question's
@@ -6,19 +7,18 @@
 // bridge state is needed, so questions survive relay restarts.
 
 import { Effect, Option } from "effect";
-import { PendingInteractionServiceTag } from "../effect/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
-import { SessionManagerServiceTag } from "../effect/session-manager-service.js";
+} from "../domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
-} from "../effect/session-overrides-state.js";
+} from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import type { PayloadMap } from "./payloads.js";

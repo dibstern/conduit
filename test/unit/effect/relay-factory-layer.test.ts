@@ -2,16 +2,16 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import {
-	DaemonConfigRefLive,
-	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import {
 	HttpServerRefLive,
 	HttpServerRefTag,
 	RelayFactoryError,
 	RelayFactoryLive,
 	RelayFactoryTag,
-} from "../../../src/lib/effect/relay-factory-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 
 // ─── HttpServerRefTag tests ─────────────────────────────────────────────────
 

@@ -5,32 +5,33 @@ import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Either, Exit, Layer, Ref, Schema } from "effect";
 import type { Scope } from "effect/Scope";
 import { expect } from "vitest";
-import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
-import type { DaemonRuntimeConfig } from "../../../src/lib/effect/daemon-config-ref.js";
-import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
-import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
-import {
-	DaemonStateTag,
-	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
-import type { IpcHandlerDeps } from "../../../src/lib/effect/ipc-dispatch.js";
 import {
 	AddProject,
 	commandToTaggedRequestPayload,
 	decodeTaggedIpcCommand,
 	IpcError,
 	IpcTaggedRequestSchema,
-} from "../../../src/lib/effect/ipc-requests.js";
+} from "../../../src/lib/contracts/ipc-requests.js";
+import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { PersistencePathTag } from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
+import type { DaemonRuntimeConfig } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import {
+	DaemonStateTag,
+	makeDaemonStateLive,
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import type { IpcHandlerDeps } from "../../../src/lib/domain/daemon/Services/ipc-dispatch.js";
 import {
 	IpcHandlersLayer,
 	IpcRpcGroup,
-} from "../../../src/lib/effect/ipc-rpc-group.js";
-import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
+} from "../../../src/lib/domain/daemon/Services/ipc-rpc-group.js";
 import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-} from "../../../src/lib/effect/services.js";
-import { makeOverridesStateLive } from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/daemon/Services/management-service.js";
+
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 
 const makeTestFileSystem = () => {

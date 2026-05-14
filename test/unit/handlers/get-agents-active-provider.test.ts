@@ -1,19 +1,19 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { AgentServiceLive } from "../../../src/lib/effect/agent-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getAgent,
 	makeOverridesStateLive,
 	setAgent,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleGetAgents } from "../../../src/lib/handlers/agent.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";

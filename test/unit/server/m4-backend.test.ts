@@ -19,15 +19,7 @@ import type {
 // ─── ws-router: new message types ───────────────────────────────────────────
 
 describe("ws-router — new M4 message types", () => {
-	const newTypes = [
-		"switch_agent",
-		"switch_model",
-		"get_todo",
-		"get_agents",
-		"get_models",
-		"get_commands",
-		"question_reject",
-	];
+	const newTypes = ["question_reject"];
 
 	for (const type of newTypes) {
 		it(`routes ${type} messages`, () => {
@@ -50,37 +42,6 @@ describe("ws-router — new M4 message types", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		const result = routeMessage(msg!);
 		expect(isRouteError(result)).toBe(true);
-	});
-
-	it("routes switch_agent with agentId payload", () => {
-		const msg = parseIncomingMessage(
-			JSON.stringify({ type: "switch_agent", agentId: "plan" }),
-		);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const result = routeMessage(msg!);
-		expect(isRouteError(result)).toBe(false);
-		if (!isRouteError(result)) {
-			expect(result.handler).toBe("switch_agent");
-			expect(result.payload["agentId"]).toBe("plan");
-		}
-	});
-
-	it("routes switch_model with modelId and providerId payload", () => {
-		const msg = parseIncomingMessage(
-			JSON.stringify({
-				type: "switch_model",
-				modelId: "gpt-4o",
-				providerId: "openai",
-			}),
-		);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const result = routeMessage(msg!);
-		expect(isRouteError(result)).toBe(false);
-		if (!isRouteError(result)) {
-			expect(result.handler).toBe("switch_model");
-			expect(result.payload["modelId"]).toBe("gpt-4o");
-			expect(result.payload["providerId"]).toBe("openai");
-		}
 	});
 });
 

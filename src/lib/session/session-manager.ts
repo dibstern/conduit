@@ -170,7 +170,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 		// Use explicit statuses if provided, otherwise fall back to injected getter.
 		// This ensures processing flags are always included, even when callers
-		// (e.g. broadcastSessionList, handleListSessions) don't pass statuses.
+		// (e.g. broadcastSessionList) don't pass statuses.
 		const resolvedStatuses = options?.statuses ?? this.getStatuses?.();
 		this.log.verbose(
 			`listSessions: directory=${this.directory ?? "none"} roots=${options?.roots ?? "all"} returned=${sessions.length} ids=[${sessions
@@ -202,7 +202,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 * When a session is served via cached SSE events (not REST history),
 	 * no initial loadHistory() call occurs so no cursor is set. This method
 	 * pre-seeds the cursor from the oldest messageId found in the events so
-	 * that subsequent load_more_history requests can paginate correctly.
+	 * that subsequent LoadMoreHistory RPC requests can paginate correctly.
 	 *
 	 * Only seeds if no cursor already exists (avoids overwriting a cursor
 	 * from a client that has already paginated further back).

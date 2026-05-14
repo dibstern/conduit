@@ -11,8 +11,8 @@ import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { makeAuthManagerLive } from "../../../src/lib/effect/auth-middleware.js";
-import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	CaCertProvider,
 	effectRouter,

@@ -16,8 +16,8 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

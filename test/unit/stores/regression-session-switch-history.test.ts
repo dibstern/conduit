@@ -51,6 +51,7 @@ import {
 	addUserMessage,
 	chatState,
 	clearMessages,
+	getOrCreateSessionMessages,
 	handleDelta,
 	handleDone,
 	historyState,
@@ -524,13 +525,18 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		});
 		await vi.runAllTimersAsync();
 
+		const messages = getOrCreateSessionMessages("session-w");
 		expect(historyState.hasMore).toBe(true);
+		expect(historyState.messageCount).toBe(1);
+		expect(messages.historyHasMore).toBe(true);
+		expect(messages.historyMessageCount).toBe(1);
+		expect(messages.historyLoading).toBe(false);
 	});
 });
 
-// ─── history_page handling (load_more_history) ──────────────────────────────
+// ─── history_page handling (history pagination) ─────────────────────────────
 
-describe("history_page for load_more_history pagination", () => {
+describe("history_page for history pagination", () => {
 	it("history_page converts and prepends to chatState.messages", async () => {
 		sessionState.currentId = "test-session";
 		// Seed with a live message so we can verify prepend ordering
@@ -555,6 +561,32 @@ describe("history_page for load_more_history pagination", () => {
 		expect(userMsgs).toHaveLength(2);
 		expect((userMsgs[0] as { text: string }).text).toBe("older");
 		expect((userMsgs[1] as { text: string }).text).toBe("live message");
+	});
+
+	it("history_page clears per-session loading and advances pagination state", async () => {
+		sessionState.currentId = "session-c";
+		const messages = getOrCreateSessionMessages("session-c");
+		messages.historyLoading = true;
+		messages.historyHasMore = true;
+		messages.historyMessageCount = 50;
+
+		handleMessage({
+			type: "history_page",
+			sessionId: "session-c",
+			messages: [
+				{
+					id: "mc1",
+					role: "user",
+					parts: [{ id: "p1", type: "text", text: "from C" }],
+				},
+			],
+			hasMore: false,
+		});
+		await vi.runAllTimersAsync();
+
+		expect(messages.historyLoading).toBe(false);
+		expect(messages.historyHasMore).toBe(false);
+		expect(messages.historyMessageCount).toBe(51);
 	});
 
 	it("multiple rapid session switches only keep last session's state", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SessionStatusPollerService } from "../../../src/lib/effect/session-status-poller.js";
+import type { SessionStatusPollerService } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { wireMonitoring } from "../../../src/lib/relay/monitoring-wiring.js";
 
@@ -53,9 +53,6 @@ function createHarness() {
 		pollerManager: {
 			startPolling,
 			stopPolling: vi.fn(),
-		},
-		registry: {
-			hasViewers: () => false,
 		},
 		sseStream: {
 			isConnected: () => false,

@@ -42,10 +42,7 @@ describe("Integration: Switch to Streaming Session", () => {
 
 		// ── Step 1: Start a prompt on Session A ────────────────────
 		client.clearReceived();
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Wait for streaming to start — proof that deltas arrive.
 		const firstDelta = await client.waitForAny(["delta", "thinking_delta"]);
@@ -108,10 +105,7 @@ describe("Integration: Switch to Streaming Session", () => {
 
 		// ── Start streaming on Session A ────────────────────────────
 		client.clearReceived();
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Wait for streaming to start
 		await client.waitForAny(["delta", "thinking_delta"]);

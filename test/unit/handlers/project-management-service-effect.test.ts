@@ -6,8 +6,8 @@ import {
 	type ProjectManagementService,
 	ProjectManagementServiceError,
 	ProjectManagementServiceTag,
-} from "../../../src/lib/effect/project-management-service.js";
-import { WebSocketHandlerTag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { handleSetProjectInstance } from "../../../src/lib/handlers/instance.js";
 import {
 	handleAddProject,

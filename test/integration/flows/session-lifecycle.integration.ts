@@ -46,10 +46,7 @@ describe("Integration: Session Lifecycle", () => {
 			timeout: 5000,
 		});
 		const newId = switched["id"] as string;
-		client.clearReceived();
-
-		// List sessions and verify the new one is present
-		client.send({ type: "list_sessions" });
+		// Verify the broadcast session list includes the new session.
 		const list = await client.waitFor("session_list", { timeout: 5000 });
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		expect(Array.isArray(sessions)).toBe(true);
@@ -106,15 +103,21 @@ describe("Integration: Session Lifecycle", () => {
 
 		// Rename it
 		const newTitle = "Renamed-Session-Test";
-		client.send({ type: "rename_session", sessionId, title: newTitle });
+		await client.renameSession(sessionId, newTitle);
 
-		// Give the rename a moment to take effect
-		await new Promise((r) => setTimeout(r, 500));
-		client.clearReceived();
-
-		// List sessions and verify the title changed
-		client.send({ type: "list_sessions" });
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		// Verify the broadcast session list includes the new title.
+		const list = await client.waitFor("session_list", {
+			timeout: 5000,
+			predicate: (msg) => {
+				const sessions = msg["sessions"] as
+					| Array<{ id: string; title?: string }>
+					| undefined;
+				return (
+					Array.isArray(sessions) &&
+					sessions.some((s) => s.id === sessionId && s.title === newTitle)
+				);
+			},
+		});
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		const found = sessions.find((s) => s.id === sessionId);
 		expect(found).toBeTruthy();
@@ -142,13 +145,16 @@ describe("Integration: Session Lifecycle", () => {
 		// Delete it
 		client.send({ type: "delete_session", sessionId });
 
-		// Give the delete a moment to propagate
-		await new Promise((r) => setTimeout(r, 500));
-		client.clearReceived();
-
-		// List sessions and verify it is gone
-		client.send({ type: "list_sessions" });
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		// Verify the broadcast session list no longer includes it.
+		const list = await client.waitFor("session_list", {
+			timeout: 5000,
+			predicate: (msg) => {
+				const sessions = msg["sessions"] as Array<{ id: string }> | undefined;
+				return (
+					Array.isArray(sessions) && !sessions.some((s) => s.id === sessionId)
+				);
+			},
+		});
 		const sessions = list["sessions"] as Array<{ id: string }>;
 		const found = sessions.find((s) => s.id === sessionId);
 		expect(found).toBeUndefined();
@@ -173,9 +179,8 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 
 		// Search for it
-		client.send({ type: "search_sessions", query: uniqueTag });
-		const msg = await client.waitFor("session_list", { timeout: 5000 });
-		const sessions = msg["sessions"] as Array<{ id: string; title?: string }>;
+		const msg = await client.searchSessions(uniqueTag);
+		const sessions = msg.sessions;
 		expect(Array.isArray(sessions)).toBe(true);
 
 		const found = sessions.find((s) => s.title?.includes(uniqueTag));
@@ -190,12 +195,10 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 
 		// Search for something that should not match anything
-		client.send({
-			type: "search_sessions",
-			query: "NoMatchWillEverExist-zzz-integration",
-		});
-		const msg = await client.waitFor("session_list", { timeout: 5000 });
-		const sessions = msg["sessions"] as Array<{ id: string }>;
+		const msg = await client.searchSessions(
+			"NoMatchWillEverExist-zzz-integration",
+		);
+		const sessions = msg.sessions;
 		expect(Array.isArray(sessions)).toBe(true);
 		expect(sessions).toHaveLength(0);
 

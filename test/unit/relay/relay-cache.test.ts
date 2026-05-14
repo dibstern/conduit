@@ -17,13 +17,16 @@ import {
 	type Relay,
 	RelayCacheTag,
 	type RelayFactory,
-} from "../../../src/lib/effect/relay-cache.js";
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 const makeTestRelay = (slug: string): Relay => ({
 	slug,
 	wsHandler: {
 		handleUpgrade: vi.fn(),
 	} as unknown as Relay["wsHandler"],
+	rpcWsHandler: {
+		handleUpgrade: vi.fn(),
+	} as unknown as Relay["rpcWsHandler"],
 	stop: vi.fn(),
 });
 

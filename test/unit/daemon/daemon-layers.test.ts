@@ -10,15 +10,15 @@ import { expect } from "vitest";
 import {
 	makeDaemonStateFromDisk,
 	makeRelayCacheLayer,
-} from "../../../src/lib/effect/daemon-layers.js";
+} from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	type Relay,
 	RelayCacheTag,
-} from "../../../src/lib/effect/relay-cache.js";
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 // ─── In-memory test FileSystem ────────────────────────────────────────────────
 
@@ -112,6 +112,7 @@ describe("daemon-layers", () => {
 					Effect.succeed({
 						slug,
 						wsHandler: { handleUpgrade: () => {} },
+						rpcWsHandler: { handleUpgrade: () => {} },
 						stop: () => {},
 					} satisfies Relay),
 				),

@@ -1,13 +1,18 @@
+import { createServer } from "node:http";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/management-service.js";
 import {
+	InstanceManagementServiceFromConfigLive,
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
-} from "../../../src/lib/effect/instance-management-service.js";
-import { InstanceMgmtTag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/instance-management-service.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
 const makeInstance = (
 	overrides: Partial<OpenCodeInstance> = {},
@@ -58,6 +63,25 @@ const makeInstanceMgmt = (
 const makeLayer = (instanceMgmt: InstanceManagementDeps) =>
 	InstanceManagementServiceLive.pipe(
 		Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
+	);
+
+const makeConfigLayer = (instanceMgmt: InstanceManagementDeps) =>
+	InstanceManagementServiceFromConfigLive.pipe(
+		Layer.provide(
+			Layer.succeed(ConfigTag, {
+				httpServer: createServer(),
+				opencodeUrl: "http://127.0.0.1:4096",
+				projectDir: process.cwd(),
+				slug: "test-project",
+				getInstances: instanceMgmt.getInstances,
+				addInstance: instanceMgmt.addInstance,
+				removeInstance: instanceMgmt.removeInstance,
+				startInstance: instanceMgmt.startInstance,
+				stopInstance: instanceMgmt.stopInstance,
+				updateInstance: instanceMgmt.updateInstance,
+				persistConfig: instanceMgmt.persistConfig,
+			} satisfies ProjectRelayConfig),
+		),
 	);
 
 describe("InstanceManagementServiceLive", () => {
@@ -142,4 +166,30 @@ describe("InstanceManagementServiceLive", () => {
 			);
 		}).pipe(Effect.provide(makeLayer(instanceMgmt)));
 	});
+
+	it.effect(
+		"can derive the relay instance service from ProjectRelayConfig",
+		() => {
+			const instanceMgmt = makeInstanceMgmt();
+
+			return Effect.gen(function* () {
+				const service = yield* InstanceManagementServiceTag;
+				const instances = yield* service.add({ name: "Config Instance" });
+
+				expect(instanceMgmt.addInstance).toHaveBeenCalledWith(
+					"config-instance",
+					{
+						name: "Config Instance",
+						port: 0,
+						managed: true,
+					},
+				);
+				expect(instances).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ id: "config-instance" }),
+					]),
+				);
+			}).pipe(Effect.provide(makeConfigLayer(instanceMgmt)));
+		},
+	);
 });

@@ -30,8 +30,8 @@ const WINDOW_MS = 10_000;
 /** Timestamps of recent chat message sends (within the sliding window). */
 let _sendTimestamps: number[] = [];
 
-/** Queued message waiting to be sent after the window slides. */
-let _queuedMessage: Record<string, unknown> | null = null;
+/** Queued chat send waiting for the window to slide. */
+let _queuedSend: (() => void) | null = null;
 
 /** Timer for draining the queued message. */
 let _drainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -45,7 +45,7 @@ let _now: () => number = () => Date.now();
  */
 export function _resetRateLimit(opts?: { now?: () => number }): void {
 	_sendTimestamps = [];
-	_queuedMessage = null;
+	_queuedSend = null;
 	if (_drainTimer) {
 		clearTimeout(_drainTimer);
 		_drainTimer = null;
@@ -106,7 +106,7 @@ function scheduleDrain(): void {
 		clearTimeout(_drainTimer);
 		_drainTimer = null;
 	}
-	if (!_queuedMessage) return;
+	if (!_queuedSend) return;
 
 	pruneTimestamps();
 
@@ -118,13 +118,13 @@ function scheduleDrain(): void {
 
 	_drainTimer = setTimeout(() => {
 		_drainTimer = null;
-		if (!_queuedMessage) return;
+		if (!_queuedSend) return;
 
 		pruneTimestamps();
-		const msg = _queuedMessage;
-		_queuedMessage = null;
+		const send = _queuedSend;
+		_queuedSend = null;
 		_sendTimestamps.push(_now());
-		rawSend(msg);
+		send();
 	}, delay);
 }
 
@@ -148,6 +148,22 @@ export function wsSendTyped<T extends keyof PayloadMap>(
 	wsSend({ type, ...(payload as Record<string, unknown>) });
 }
 
+export function rateLimitChatSend(send: () => void): void {
+	pruneTimestamps();
+
+	if (_sendTimestamps.length < MAX_MESSAGES) {
+		// Under limit — send immediately.
+		_sendTimestamps.push(_now());
+		send();
+		return;
+	}
+
+	// At limit — queue and show feedback.
+	_queuedSend = send;
+	showToast("Message queued — sending shortly", { variant: "warn" });
+	scheduleDrain();
+}
+
 export function wsSend(data: Record<string, unknown>): void {
 	// Non-chat messages bypass rate limiting entirely.
 	if (data["type"] !== "message") {
@@ -155,19 +171,7 @@ export function wsSend(data: Record<string, unknown>): void {
 		return;
 	}
 
-	pruneTimestamps();
-
-	if (_sendTimestamps.length < MAX_MESSAGES) {
-		// Under limit — send immediately.
-		_sendTimestamps.push(_now());
-		rawSend(data);
-		return;
-	}
-
-	// At limit — queue and show feedback.
-	_queuedMessage = data;
-	showToast("Message queued — sending shortly", { variant: "warn" });
-	scheduleDrain();
+	rateLimitChatSend(() => rawSend(data));
 }
 
 /**

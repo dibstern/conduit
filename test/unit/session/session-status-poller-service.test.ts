@@ -5,7 +5,7 @@ import {
 	makeDeferredStatusPollerRuntime,
 	makePollerPubSubLive,
 	makePollerStateLive,
-} from "../../../src/lib/effect/session-status-poller.js";
+} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 
 const pollerLayer = () =>

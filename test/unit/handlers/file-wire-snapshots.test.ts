@@ -2,20 +2,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import { ClientMessageSerializationLive } from "../../../src/lib/effect/client-message-serialization.js";
-import { RateLimiterTag } from "../../../src/lib/effect/rate-limiter-layer.js";
-import type { WebSocketHandlerShape } from "../../../src/lib/effect/services.js";
 import {
 	handleGetFileContent,
 	handleGetFileList,
 	handleGetFileTree,
 } from "../../../src/lib/handlers/files.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { handleRelayWsMessage } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import {
-	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
@@ -58,18 +53,6 @@ const makeFileApi = (file: FileApiOverrides): OpenCodeAPI => {
 	if (file.status) vi.spyOn(api.file, "status").mockImplementation(file.status);
 	return api;
 };
-
-const makeDispatchLayer = (
-	api: OpenCodeAPI,
-	wsHandler: WebSocketHandlerShape,
-) =>
-	Layer.mergeAll(
-		makeTestHandlerLayer({ api, wsHandler }),
-		ClientMessageSerializationLive,
-		Layer.succeed(RateLimiterTag, {
-			checkLimit: vi.fn(() => Effect.succeed({ allowed: true })),
-		}),
-	);
 
 describe("file handler wire snapshots", () => {
 	it("keeps the get_file_list success envelope stable", async () => {
@@ -124,26 +107,5 @@ describe("file handler wire snapshots", () => {
 		const calls = await runFileHandler(handleGetFileTree("client-1", {}), api);
 
 		expect(calls).toEqual(readSnapshots()["get_file_tree_success"]);
-	});
-
-	it("keeps top-level handler errors stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const api = makeFileApi({
-			read: vi.fn(async () => {
-				throw new Error("read failed");
-			}),
-		});
-
-		await Effect.runPromise(
-			handleRelayWsMessage({
-				clientId: "client-1",
-				handler: "get_file_content",
-				payload: { path: "README.md" },
-				sendTo: wsHandler.sendTo,
-				log: makeMockLogger(),
-			}).pipe(Effect.provide(makeDispatchLayer(api, wsHandler))),
-		);
-
-		expect(calls).toEqual(readSnapshots()["get_file_content_error"]);
 	});
 });

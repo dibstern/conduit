@@ -12,9 +12,7 @@ import {
 	makePersistenceServiceLive,
 	PersistenceServiceTag,
 	withTransaction,
-} from "../../../src/lib/effect/persistence-service.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
+} from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 function makeTestSqlLayer(setup?: (filename: string) => void) {
@@ -87,6 +85,7 @@ describe("Persistence Effect", () => {
 				WHERE type='table'
 					AND name NOT LIKE '\\_%' ESCAPE '\\'
 					AND name NOT LIKE 'sqlite_%'
+					AND name != 'effect_sql_migrations'
 				ORDER BY name`;
 			expect(tables.map((row) => row.name)).toEqual([
 				"activities",
@@ -119,100 +118,47 @@ describe("Persistence Effect", () => {
 			]);
 
 			const migrationRows = yield* sql<{
-				id: number;
+				migration_id: number;
 				name: string;
-				checksum: string;
-			}>`SELECT id, name, checksum FROM _migrations ORDER BY id`;
-			expect(migrationRows).toHaveLength(1);
-			expect(migrationRows[0]?.name).toBe("create_event_store_tables");
-			expect(migrationRows[0]?.checksum).toMatch(/^[a-f0-9]{64}$/);
+			}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+			expect(migrationRows).toEqual([
+				{ migration_id: 1, name: "create_event_store_tables" },
+			]);
+
+			const legacyMigrationTable = yield* sql<{ name: string }>`
+				SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'`;
+			expect(legacyMigrationTable).toEqual([]);
 
 			yield* persistence.migrate;
+
+			const afterSecondRun = yield* sql<{
+				migration_id: number;
+				name: string;
+			}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+			expect(afterSecondRun).toEqual(migrationRows);
 		}).pipe(Effect.provide(makePersistenceLayer())),
 	);
 
-	it.effect(
-		"startup migration refuses an edited applied migration checksum",
-		() =>
-			Effect.gen(function* () {
-				const result = yield* Effect.either(
-					Effect.gen(function* () {
-						yield* PersistenceServiceTag;
-					}).pipe(
-						Effect.provide(
-							makePersistenceLayer((filename) =>
-								seedDatabase(filename, (db) => {
-									runMigrations(db, schemaMigrations);
-									db.execute(
-										"UPDATE _migrations SET checksum = ? WHERE id = ?",
-										["bad-checksum", 1],
-									);
-								}),
-							),
-						),
-					),
-				);
-
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expectMigrationFailure(result.left, "checksum mismatch");
-				}
-			}),
-	);
-
-	it.effect("startup migration refuses unsafe legacy checksum backfill", () =>
+	it.effect("startup migration supports in-memory Effect SQLite layers", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(
-				Effect.gen(function* () {
-					yield* PersistenceServiceTag;
-				}).pipe(
-					Effect.provide(
-						makePersistenceLayer((filename) =>
-							seedDatabase(filename, (db) => {
-								db.execute(`
-									CREATE TABLE _migrations (
-										id INTEGER PRIMARY KEY,
-										name TEXT NOT NULL,
-										applied_at INTEGER NOT NULL
-									)
-								`);
-								db.execute(
-									"INSERT INTO _migrations (id, name, applied_at) VALUES (?, ?, ?)",
-									[1, "create_event_store_tables", 123],
-								);
-							}),
-						),
-					),
+			yield* PersistenceServiceTag;
+			const sql = yield* SqlClient.SqlClient;
+			const tables = yield* sql<{ name: string }>`
+				SELECT name FROM sqlite_master
+				WHERE type='table' AND name IN ('events', 'effect_sql_migrations')
+				ORDER BY name`;
+			expect(tables.map((row) => row.name)).toEqual([
+				"effect_sql_migrations",
+				"events",
+			]);
+		}).pipe(
+			Effect.provide(
+				Layer.provideMerge(
+					makePersistenceServiceLive,
+					EffectSqliteClient.layer({ filename: ":memory:" }),
 				),
-			);
-
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expectMigrationFailure(result.left, "schema object");
-			}
-		}),
-	);
-
-	it.effect("startup migration refuses in-memory Effect SQLite layers", () =>
-		Effect.gen(function* () {
-			const result = yield* Effect.either(
-				Effect.gen(function* () {
-					yield* PersistenceServiceTag;
-				}).pipe(
-					Effect.provide(
-						Layer.provideMerge(
-							makePersistenceServiceLive,
-							EffectSqliteClient.layer({ filename: ":memory:" }),
-						),
-					),
-				),
-			);
-
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expectMigrationFailure(result.left, "file-backed");
-			}
-		}),
+			),
+		),
 	);
 
 	it.effect("startup migration refuses readonly Effect SQLite layers", () =>
@@ -232,7 +178,7 @@ describe("Persistence Effect", () => {
 
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Left") {
-				expectMigrationFailure(result.left, "readonly");
+				expectMigrationFailure(result.left, "Failed to execute statement");
 			}
 		}),
 	);

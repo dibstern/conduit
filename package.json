@@ -44,7 +44,7 @@
 		"test:e2e:headed": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --headed",
 		"test:e2e:debug": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --debug",
 		"test:multi-instance": "pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts",
-		"test:project-management": "pnpm exec playwright test --config test/e2e/playwright-project-management.config.ts",
+		"test:project-management": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-project-management.config.ts",
 		"test:subagent-e2e": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts",
 		"test:daemon": "pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts",
 		"test:e2e:live": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-live.config.ts",

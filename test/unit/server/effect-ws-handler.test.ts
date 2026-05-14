@@ -109,4 +109,21 @@ describe("Effect WS handler bridge", () => {
 		});
 		expect(handler.getClientCount()).toBe(1);
 	});
+
+	it("updates viewer state synchronously when binding a client to a session", async () => {
+		const handler = new EffectWsHandler({ heartbeatInterval: 300_000 });
+		cleanup.push(() => handler.drain());
+		const { url } = await startServer(handler);
+		const connected = onceConnected(handler);
+		const client = new WebSocket(url);
+		cleanup.push(() => client.close());
+
+		await waitOpen(client);
+		const { clientId } = await connected;
+
+		handler.setClientSession(clientId, "sess-1");
+
+		expect(handler.getClientSession(clientId)).toBe("sess-1");
+		expect(handler.getClientsForSession("sess-1")).toEqual([clientId]);
+	});
 });

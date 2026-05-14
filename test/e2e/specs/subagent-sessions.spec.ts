@@ -314,21 +314,9 @@ test.describe("Subagent navigation", () => {
 						}
 					}
 
-					if (parsed.type === "get_models") {
-						const ml = initMessages.find((m) => m.type === "model_list");
-						if (ml) sendMockMessage(ml);
-					}
 					if (parsed.type === "get_agents") {
 						const al = initMessages.find((m) => m.type === "agent_list");
 						if (al) sendMockMessage(al);
-					}
-					if (parsed.type === "load_more_history") {
-						sendMockMessage({
-							type: "history_page",
-							sessionId: parsed.sessionId ?? "",
-							messages: [],
-							hasMore: false,
-						});
 					}
 				} catch {
 					// ignore

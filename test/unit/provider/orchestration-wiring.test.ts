@@ -1,8 +1,12 @@
 // test/unit/provider/orchestration-wiring.test.ts
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import {
+	OpenCodeAdapter,
+	OpenCodeDriver,
+} from "../../../src/lib/provider/opencode-adapter.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	createOrchestrationLayer,
@@ -67,7 +71,9 @@ describe("Orchestration wiring", () => {
 	it("exposes orchestration services through the scoped runtime layer", async () => {
 		const client = makeStubClient();
 		const runtime = ManagedRuntime.make(
-			makeOrchestrationRuntimeLayer({ client }),
+			makeOrchestrationRuntimeLayer().pipe(
+				Layer.provide(Layer.succeed(OpenCodeAPITag, client)),
+			),
 		);
 
 		try {
@@ -80,6 +86,16 @@ describe("Orchestration wiring", () => {
 		} finally {
 			await runtime.dispose();
 		}
+	});
+
+	it("creates provider instances through plain drivers", async () => {
+		const client = makeStubClient();
+		const instance = await Effect.runPromise(
+			OpenCodeDriver.create({ client }).pipe(Effect.scoped),
+		);
+
+		expect(OpenCodeDriver.providerId).toBe("opencode");
+		expect(instance).toBeInstanceOf(OpenCodeAdapter);
 	});
 
 	it("engine can discover opencode capabilities", async () => {

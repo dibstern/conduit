@@ -2,13 +2,13 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	isPollerActive,
 	makePollerManagerStateLive,
 	startPoller,
 	stopPoller,
-} from "../../../src/lib/effect/message-poller.js";
-import { OpenCodeAPITag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/message-poller.js";
 
 describe("MessagePoller Effect", () => {
 	// Mock matches the real OpenCodeAPI shape: api.session.messages(sessionId)

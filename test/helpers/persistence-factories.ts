@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer } from "effect";
-import { makePersistenceServiceLive } from "../../src/lib/effect/persistence-service.js";
+import { makePersistenceServiceLive } from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { EventStore } from "../../src/lib/persistence/event-store.js";
 import {
 	type CanonicalEvent,

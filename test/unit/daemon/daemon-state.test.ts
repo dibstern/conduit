@@ -4,7 +4,7 @@ import { expect } from "vitest";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 
 describe("DaemonState", () => {
 	it.effect("initializes with empty defaults", () =>

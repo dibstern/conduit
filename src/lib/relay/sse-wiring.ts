@@ -7,7 +7,7 @@ import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingPermissionRequestInput,
-} from "../effect/pending-interaction-service.js";
+} from "../domain/relay/Services/pending-interaction-service.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { DualWriteHookPort } from "../persistence/dual-write-hook.js";

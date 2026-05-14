@@ -1,32 +1,31 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/effect/pending-interaction-service.js";
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
 	OpenCodeModelService,
 	PollerManagerShape,
 	SessionManagerShape,
-	StatusPollerShape,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
-} from "../../../src/lib/effect/session-manager-service.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
 	startProcessingTimeout,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
@@ -38,6 +37,7 @@ import {
 	makeMockLogger,
 	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
+	makeMockStatusPoller,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
@@ -83,10 +83,10 @@ function makeSessionMetadataLayer(options: {
 	const _sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
-	const statusPoller: StatusPollerShape = {
+	const statusPoller = makeMockStatusPoller({
 		isProcessing: vi.fn(() => false),
 		clearMessageActivity: vi.fn(),
-	};
+	});
 	const pollerManager: PollerManagerShape = {
 		on: vi.fn(),
 		isPolling: vi.fn(() => true),

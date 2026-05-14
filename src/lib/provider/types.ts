@@ -4,7 +4,7 @@
 // Adapters are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Adapters turn prompts into event streams.
 
-import type { Effect } from "effect";
+import type { Effect, Scope } from "effect";
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { ProviderAdapterFailure } from "./errors.js";
 
@@ -268,4 +268,13 @@ export interface ProviderAdapter {
 	endSessionEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderAdapterFailure>;
+}
+
+export type ProviderInstance = ProviderAdapter;
+
+export interface ProviderDriver<Input, R = never, E = never> {
+	readonly providerId: string;
+	readonly create: (
+		input: Input,
+	) => Effect.Effect<ProviderInstance, E, R | Scope.Scope>;
 }

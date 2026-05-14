@@ -34,16 +34,19 @@ const { mockAddProject, mockStartDaemonProcess, mockEnv } = vi.hoisted(() => {
 	return { mockAddProject, mockStartDaemonProcess, mockEnv };
 });
 
-vi.mock("../../../src/lib/effect/daemon-main.js", async (importOriginal) => {
-	const original =
-		await importOriginal<
-			typeof import("../../../src/lib/effect/daemon-main.js")
-		>();
-	return {
-		...original,
-		startDaemonProcess: mockStartDaemonProcess,
-	};
-});
+vi.mock(
+	"../../../src/lib/domain/daemon/Layers/daemon-main.js",
+	async (importOriginal) => {
+		const original =
+			await importOriginal<
+				typeof import("../../../src/lib/domain/daemon/Layers/daemon-main.js")
+			>();
+		return {
+			...original,
+			startDaemonProcess: mockStartDaemonProcess,
+		};
+	},
+);
 
 vi.mock("../../../src/lib/env.js", async (importOriginal) => {
 	const original =

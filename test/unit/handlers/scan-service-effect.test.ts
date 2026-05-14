@@ -6,8 +6,8 @@ import {
 	ScanServiceError,
 	ScanServiceNotAvailable,
 	ScanServiceTag,
-} from "../../../src/lib/effect/scan-service.js";
-import { WebSocketHandlerTag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/scan-service.js";
+import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { handleScanNow } from "../../../src/lib/handlers/instance.js";
 import { makeMockWebSocketHandler } from "../../helpers/mock-factories.js";
 

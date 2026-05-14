@@ -8,12 +8,11 @@ export type { PayloadMap } from "./payloads.js";
 
 // ─── Handler modules ─────────────────────────────────────────────────────────
 
-export { filterAgents, handleGetAgents, handleSwitchAgent } from "./agent.js";
+export { filterAgents, handleGetAgents } from "./agent.js";
 export { handleSwitchContextWindow } from "./context-window.js";
 export {
 	handleGetFileContent,
 	handleGetFileList,
-	handleGetFileTree,
 } from "./files.js";
 export {
 	handleInstanceAdd,
@@ -27,10 +26,9 @@ export {
 	handleSetProjectInstance,
 } from "./instance.js";
 export {
-	handleGetModels,
-	handleSetDefaultModel,
-	handleSwitchModel,
-	handleSwitchVariant,
+	setDefaultModelForRelay,
+	switchModelForSession,
+	switchVariantForSession,
 } from "./model.js";
 export {
 	handleAskUserResponse,
@@ -40,29 +38,24 @@ export {
 export {
 	clearSessionInputDraft,
 	getSessionInputDraft,
-	handleCancel,
 	handleInputSync,
 	handleMessage,
 	handleRewind,
 } from "./prompt.js";
-export { handleReloadProviderSession } from "./reload.js";
+export { reloadProviderSessionForClient } from "./reload.js";
 export {
 	handleDeleteSession,
 	handleForkSession,
-	handleListSessions,
-	handleLoadMoreHistory,
 	handleNewSession,
-	handleRenameSession,
-	handleSearchSessions,
 	handleSwitchSession,
 	handleViewSession,
+	loadMoreHistoryForSession,
+	renameSessionForClient,
 } from "./session.js";
 export {
 	handleAddProject,
 	handleGetCommands,
 	handleGetProjects,
-	handleGetTodo,
-	handleListDirectories,
 	handleRemoveProject,
 	handleRenameProject,
 } from "./settings.js";
@@ -81,16 +74,6 @@ export { handleGetToolContent } from "./tool-content.js";
 import { Effect, Schema } from "effect";
 import { WebSocketError } from "../errors.js";
 import {
-	handleGetAgents as handleGetAgentsImpl,
-	handleSwitchAgent as handleSwitchAgentImpl,
-} from "./agent.js";
-import { handleSwitchContextWindow as handleSwitchContextWindowImpl } from "./context-window.js";
-import {
-	handleGetFileContent as handleGetFileContentImpl,
-	handleGetFileList as handleGetFileListImpl,
-	handleGetFileTree as handleGetFileTreeImpl,
-} from "./files.js";
-import {
 	handleInstanceAdd as handleInstanceAddImpl,
 	handleInstanceRemove as handleInstanceRemoveImpl,
 	handleInstanceRename as handleInstanceRenameImpl,
@@ -101,12 +84,6 @@ import {
 	handleScanNow as handleScanNowImpl,
 	handleSetProjectInstance as handleSetProjectInstanceImpl,
 } from "./instance.js";
-import {
-	handleGetModels as handleGetModelsImpl,
-	handleSetDefaultModel as handleSetDefaultModelImpl,
-	handleSwitchModel as handleSwitchModelImpl,
-	handleSwitchVariant as handleSwitchVariantImpl,
-} from "./model.js";
 import { PayloadSchemas } from "./payload-schemas.js";
 import type { PayloadMap } from "./payloads.js";
 import {
@@ -115,29 +92,18 @@ import {
 	handleQuestionReject as handleQuestionRejectImpl,
 } from "./permissions.js";
 import {
-	handleCancel as handleCancelImpl,
 	handleInputSync as handleInputSyncImpl,
-	handleMessage as handleMessageImpl,
 	handleRewind as handleRewindImpl,
 } from "./prompt.js";
-import { handleReloadProviderSession as handleReloadProviderSessionImpl } from "./reload.js";
 import {
 	handleDeleteSession as handleDeleteSessionImpl,
 	handleForkSession as handleForkSessionImpl,
-	handleListSessions as handleListSessionsImpl,
-	handleLoadMoreHistory as handleLoadMoreHistoryImpl,
 	handleNewSession as handleNewSessionImpl,
-	handleRenameSession as handleRenameSessionImpl,
-	handleSearchSessions as handleSearchSessionsImpl,
 	handleSwitchSession as handleSwitchSessionImpl,
 	handleViewSession as handleViewSessionImpl,
 } from "./session.js";
 import {
 	handleAddProject as handleAddProjectImpl,
-	handleGetCommands as handleGetCommandsImpl,
-	handleGetProjects as handleGetProjectsImpl,
-	handleGetTodo as handleGetTodoImpl,
-	handleListDirectories as handleListDirectoriesImpl,
 	handleRemoveProject as handleRemoveProjectImpl,
 	handleRenameProject as handleRenameProjectImpl,
 } from "./settings.js";
@@ -148,7 +114,6 @@ import {
 	handlePtyResize as handlePtyResizeImpl,
 	handleTerminalCommand as handleTerminalCommandImpl,
 } from "./terminal.js";
-import { handleGetToolContent as handleGetToolContentImpl } from "./tool-content.js";
 
 type AnyEffectHandler = (
 	clientId: string,
@@ -167,8 +132,6 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	AnyEffectHandler
 > = {
 	// Prompt
-	message: handleMessageImpl,
-	cancel: handleCancelImpl,
 	rewind: handleRewindImpl,
 	input_sync: handleInputSyncImpl,
 	// Permissions
@@ -180,33 +143,11 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	switch_session: handleSwitchSessionImpl,
 	view_session: handleViewSessionImpl,
 	delete_session: handleDeleteSessionImpl,
-	rename_session: handleRenameSessionImpl,
 	fork_session: handleForkSessionImpl,
-	list_sessions: handleListSessionsImpl,
-	search_sessions: handleSearchSessionsImpl,
-	load_more_history: handleLoadMoreHistoryImpl,
-	// Agents
-	get_agents: handleGetAgentsImpl,
-	switch_agent: handleSwitchAgentImpl,
-	// Models
-	get_models: handleGetModelsImpl,
-	switch_model: handleSwitchModelImpl,
-	set_default_model: handleSetDefaultModelImpl,
-	switch_variant: handleSwitchVariantImpl,
-	switch_context_window: handleSwitchContextWindowImpl,
 	// Settings
-	get_commands: handleGetCommandsImpl,
-	get_projects: handleGetProjectsImpl,
 	add_project: handleAddProjectImpl,
-	list_directories: handleListDirectoriesImpl,
 	remove_project: handleRemoveProjectImpl,
 	rename_project: handleRenameProjectImpl,
-	get_todo: handleGetTodoImpl,
-	// Files
-	get_file_list: handleGetFileListImpl,
-	get_file_content: handleGetFileContentImpl,
-	get_file_tree: handleGetFileTreeImpl,
-	get_tool_content: handleGetToolContentImpl,
 	// Terminal
 	terminal_command: handleTerminalCommandImpl,
 	pty_create: handlePtyCreateImpl,
@@ -223,8 +164,6 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	set_project_instance: handleSetProjectInstanceImpl,
 	proxy_detect: handleProxyDetectImpl,
 	scan_now: handleScanNowImpl,
-	// Reload
-	reload_provider_session: handleReloadProviderSessionImpl,
 };
 
 /**

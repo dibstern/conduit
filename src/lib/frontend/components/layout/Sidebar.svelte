@@ -20,6 +20,8 @@
 	} from "../../stores/ui.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { navigate, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getFileListRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import { terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { sendNewSession, sessionCreation } from "../../stores/session.svelte.js";
@@ -52,7 +54,12 @@
 			setSidebarPanel("sessions");
 		} else {
 			setSidebarPanel("files");
-			wsSend({ type: "get_file_list", path: "." });
+			const slug = getCurrentSlug();
+			if (slug) {
+				void getFileListRpc({ projectSlug: slug, path: "." }).then(
+					applyGetFileListResponse,
+				);
+			}
 		}
 	}
 

@@ -1,7 +1,7 @@
 // ─── Terminal / PTY Handlers ─────────────────────────────────────────────────
 
 import { Effect } from "effect";
-import { OpenCodeTerminalServiceTag } from "../effect/terminal-service.js";
+import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import type { PayloadMap } from "./payloads.js";
 
 export const handleTerminalCommand = (

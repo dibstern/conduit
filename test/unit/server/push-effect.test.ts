@@ -4,7 +4,7 @@ import { expect, vi } from "vitest";
 import {
 	PushManagerLive,
 	PushManagerTag,
-} from "../../../src/lib/effect/push-service.js";
+} from "../../../src/lib/domain/server/Services/push-service.js";
 
 describe("Push Notifications Effect", () => {
 	it.scoped("subscribe adds subscription", () => {

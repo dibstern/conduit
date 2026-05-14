@@ -4,7 +4,7 @@ import { expect, vi } from "vitest";
 import {
 	OpenCodeFileServiceTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { handleGetFileList } from "../../../src/lib/handlers/files.js";
 import {
 	makeMockWebSocketHandler,

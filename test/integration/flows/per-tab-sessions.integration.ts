@@ -66,10 +66,8 @@ describe("Integration: Per-Tab Sessions", () => {
 	it("view_session sends status to the requesting client", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		client.clearReceived();
 
-		// Get any session ID
-		client.send({ type: "list_sessions" });
+		// Use the initial session list from the connect handshake.
 		const list = await client.waitFor("session_list");
 		const sessions = list["sessions"] as Array<{ id: string }>;
 		expect(sessions.length).toBeGreaterThan(0);
@@ -309,11 +307,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		// Switch model from client1
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({
-			type: "switch_model",
-			modelId: "per-tab-test-model",
-			providerId: "per-tab-test-provider",
-		});
+		await client1.switchModel("per-tab-test-model", "per-tab-test-provider");
 
 		// Client2 should receive model_info (same session)
 		const modelMsg = await client2.waitFor("model_info");

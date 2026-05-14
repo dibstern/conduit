@@ -50,7 +50,12 @@ export {
 	triggerNotifications,
 } from "./ws-notifications.js";
 // Re-export send module — consumers import wsSend from here.
-export { _resetRateLimit, wsSend, wsSendTyped } from "./ws-send.svelte.js";
+export {
+	_resetRateLimit,
+	rateLimitChatSend,
+	wsSend,
+	wsSendTyped,
+} from "./ws-send.svelte.js";
 
 import { handleMessage } from "./ws-dispatch.js";
 import { flushOfflineQueue, setWsGetter } from "./ws-send.svelte.js";
