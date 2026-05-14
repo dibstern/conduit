@@ -62,7 +62,6 @@ function makeIPCContext(
 		getProjects: () => [],
 		setProjectTitle: () => {},
 		persistConfig: () => {},
-		scheduleShutdown: () => {},
 		setProjectAgent: async () => {},
 		setProjectModel: async () => {},
 	};

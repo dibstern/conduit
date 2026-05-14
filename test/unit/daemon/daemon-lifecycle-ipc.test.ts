@@ -36,6 +36,7 @@ import {
 	closeIPCServer,
 	type DaemonLifecycleContext,
 	dispatchTaggedRequestEffect,
+	type IpcPostResponseActions,
 	startIPCServer,
 	type TaggedIpcDispatcher,
 } from "../../../src/lib/daemon/daemon-lifecycle.js";
@@ -53,7 +54,10 @@ import type {
 	StoredProject,
 } from "../../../src/lib/types.js";
 
-type TestDaemonIPCContext = Omit<DaemonIPCContext, "getStatus"> & {
+type TestDaemonIPCContext = Omit<
+	DaemonIPCContext,
+	"getStatus" | "scheduleShutdown"
+> & {
 	readonly getStatus?: () => DaemonStatus;
 };
 
@@ -80,6 +84,7 @@ const startTestIPCServer = (
 	ctx: DaemonLifecycleContext,
 	ipcContext: TestDaemonIPCContext,
 	getStatus: () => DaemonStatus = makeStatus,
+	postResponseActions?: IpcPostResponseActions,
 ) =>
 	startIPCServer(
 		ctx,
@@ -88,6 +93,7 @@ const startTestIPCServer = (
 			getStatus: ipcContext.getStatus ?? getStatus,
 		},
 		testTaggedDispatcher,
+		postResponseActions,
 	);
 
 const makeNativeIpcDispatcher = () => {
@@ -232,7 +238,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 				}
 			},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => Array.from(instances.values()),
@@ -296,7 +301,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel,
 			getInstances: () => [],
@@ -349,7 +353,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -408,7 +411,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -467,7 +469,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown,
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -493,6 +494,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 					getStatus: ipcContext.getStatus ?? makeStatus,
 				},
 				native.dispatch,
+				{ scheduleShutdown },
 			);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "Shutdown",
@@ -525,7 +527,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent,
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -577,7 +578,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -632,7 +632,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown,
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -658,6 +657,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 					getStatus: ipcContext.getStatus ?? makeStatus,
 				},
 				native.dispatch,
+				{ scheduleShutdown },
 			);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "RestartWithConfig",
@@ -691,7 +691,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],
@@ -767,7 +766,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			getProjects: () => [],
 			setProjectTitle: () => {},
 			persistConfig: () => {},
-			scheduleShutdown: () => {},
 			setProjectAgent: async () => {},
 			setProjectModel: async () => {},
 			getInstances: () => [],

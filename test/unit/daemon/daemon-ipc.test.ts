@@ -40,7 +40,6 @@ function makeContext(
 		getProjects: vi.fn().mockReturnValue([]),
 		setProjectTitle: vi.fn(),
 		persistConfig: vi.fn(),
-		scheduleShutdown: vi.fn(),
 		getInstances: vi.fn().mockReturnValue([]),
 		getInstance: vi.fn().mockImplementation((id: string) => instances.get(id)),
 		addInstance: vi

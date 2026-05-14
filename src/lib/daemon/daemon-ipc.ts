@@ -36,8 +36,6 @@ export interface DaemonIPCContext {
 	setProjectTitle(slug: string, title: string): void;
 	/** Persist daemon config to disk. */
 	persistConfig(): void;
-	/** Schedule a graceful daemon shutdown. */
-	scheduleShutdown(): void;
 	/** Return all registered OpenCode instances. */
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Look up a single instance by ID. */
@@ -190,9 +188,11 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 		},
 
 		shutdown: async (): Promise<IPCResponse> => {
-			// Schedule shutdown after response is sent
-			ctx.scheduleShutdown();
-			return { ok: true };
+			return {
+				ok: false,
+				error:
+					"shutdown is scheduled by the IPC socket post-response hook, not buildIPCHandlers",
+			};
 		},
 
 		setAgent: async (slug: string, agent: string): Promise<IPCResponse> => {
@@ -230,9 +230,11 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 						"restart_with_config is handled by Effect IPC dispatch, not buildIPCHandlers",
 				};
 			}
-			// Schedule shutdown and return ok
-			ctx.scheduleShutdown();
-			return { ok: true };
+			return {
+				ok: false,
+				error:
+					"restart_with_config shutdown is scheduled by the IPC socket post-response hook, not buildIPCHandlers",
+			};
 		},
 
 		instanceList: async (): Promise<IPCResponse> => {

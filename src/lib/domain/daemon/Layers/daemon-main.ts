@@ -1186,16 +1186,6 @@ export async function startDaemonProcess(
 			);
 		},
 		persistConfig: () => persistConfig(),
-		scheduleShutdown: () => {
-			shutdownTimer = setTimeout(() => {
-				void stop().catch((err) => {
-					log.warn(
-						{ err: formatErrorDetail(err) },
-						"Scheduled daemon shutdown failed",
-					);
-				});
-			}, DAEMON_SHUTDOWN_DELAY_MS);
-		},
 		getInstances: () => instanceManager.getInstances(),
 		getInstance: (id: string) => instanceManager.getInstance(id),
 		addInstance: (
@@ -1279,12 +1269,25 @@ export async function startDaemonProcess(
 
 	const initialRuntimeConfig = readRuntimeConfigSnapshot();
 	const firstProject = registry.allProjects()[0];
+	const scheduleLegacyPostResponseShutdown = () => {
+		shutdownTimer = setTimeout(() => {
+			void stop().catch((err) => {
+				log.warn(
+					{ err: formatErrorDetail(err) },
+					"Scheduled daemon shutdown failed",
+				);
+			});
+		}, DAEMON_SHUTDOWN_DELAY_MS);
+	};
 	const daemonLiveOptions: DaemonLiveOptions = {
 		configDir,
 		pidPath,
 		socketPath,
 		ctx,
 		ipcContext,
+		ipcPostResponseActions: {
+			scheduleShutdown: scheduleLegacyPostResponseShutdown,
+		},
 		onboarding: onboardingDeps,
 		httpRouter: {
 			auth,

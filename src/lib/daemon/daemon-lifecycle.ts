@@ -184,20 +184,6 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 			),
 		Shutdown: () =>
 			handleShutdown({ cmd: "shutdown" }).pipe(
-				Effect.zipRight(
-					Effect.tryPromise({
-						try: () => handlers.shutdown(),
-						catch: (error) =>
-							new IpcError({ message: formatErrorDetail(error) }),
-					}).pipe(
-						Effect.flatMap((shutdownResponse) =>
-							shutdownResponse.ok
-								? Effect.void
-								: Effect.fail(ipcFailure(shutdownResponse)),
-						),
-						Effect.orDie,
-					),
-				),
 				Effect.map(() => ({ ok: true as const })),
 			),
 		SetAgent: (request) =>
@@ -230,17 +216,7 @@ function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
 			}).pipe(
 				Effect.flatMap((response) => {
 					if (!response.ok) return Effect.fail(ipcFailure(response));
-					return Effect.tryPromise({
-						try: () => handlers.restartWithConfig(),
-						catch: (error) =>
-							new IpcError({ message: formatErrorDetail(error) }),
-					}).pipe(
-						Effect.flatMap((shutdownResponse) =>
-							shutdownResponse.ok
-								? Effect.succeed({ ok: true as const })
-								: Effect.fail(ipcFailure(shutdownResponse)),
-						),
-					);
+					return Effect.succeed({ ok: true as const });
 				}),
 			),
 		InstanceList: () =>
@@ -372,6 +348,18 @@ function isTaggedPayload(value: unknown): value is { _tag: string } {
 	);
 }
 
+function makeTaggedPostResponseAction(
+	request: IpcTaggedRequest | undefined,
+	response: IPCResponse,
+	actions: IpcPostResponseActions | undefined,
+): (() => void) | undefined {
+	if (!actions || !request || response.ok !== true) return undefined;
+	if (request._tag !== "Shutdown" && request._tag !== "RestartWithConfig") {
+		return undefined;
+	}
+	return actions.scheduleShutdown;
+}
+
 export const dispatchTaggedRequestEffect = (
 	request: IpcTaggedRequest,
 	rpcLayer: ReturnType<typeof makeRpcHandlerLayer>,
@@ -393,6 +381,10 @@ export type TaggedIpcDispatcher = (
 	request: IpcTaggedRequest,
 	rpcLayer: ReturnType<typeof makeRpcHandlerLayer>,
 ) => Promise<IPCResponse>;
+
+export interface IpcPostResponseActions {
+	readonly scheduleShutdown: () => void;
+}
 
 // ─── Context interface ──────────────────────────────────────────────────────
 // Mutable context so lifecycle functions can store server references back.
@@ -766,6 +758,7 @@ export function startIPCServer(
 	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
 	dispatchTaggedRequest: TaggedIpcDispatcher,
+	postResponseActions?: IpcPostResponseActions,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		// Remove stale socket file if it exists
@@ -821,7 +814,14 @@ export function startIPCServer(
 						} else {
 							log.debug(`[ipc] ${parsedLine._tag} ${ipcMs}ms`);
 						}
-						socket.write(serializeResponse(response));
+						socket.write(
+							serializeResponse(response),
+							makeTaggedPostResponseAction(
+								Either.isRight(decoded) ? decoded.right : undefined,
+								response,
+								postResponseActions,
+							),
+						);
 						continue;
 					}
 
@@ -844,12 +844,16 @@ export function startIPCServer(
 							cmd as Record<string, unknown> & { cmd: string },
 						);
 						let response: IPCResponse;
+						let decodedRequest: IpcTaggedRequest | undefined;
 						if (validationError) {
 							response = validationError;
 						} else {
 							const decoded = Schema.decodeUnknownEither(
 								IpcTaggedRequestSchema,
 							)(commandToTaggedRequestPayload(cmd));
+							decodedRequest = Either.isRight(decoded)
+								? decoded.right
+								: undefined;
 							response = Either.isRight(decoded)
 								? await dispatchTaggedRequest(decoded.right, rpcLayer)
 								: {
@@ -863,7 +867,14 @@ export function startIPCServer(
 						} else {
 							log.debug(`[ipc] ${cmd.cmd} ${ipcMs}ms`);
 						}
-						socket.write(serializeResponse(response));
+						socket.write(
+							serializeResponse(response),
+							makeTaggedPostResponseAction(
+								decodedRequest,
+								response,
+								postResponseActions,
+							),
+						);
 					} catch (err) {
 						const ipcMs = Date.now() - ipcT0;
 						log.warn(

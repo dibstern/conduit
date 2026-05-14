@@ -24,6 +24,7 @@ import {
 	type DaemonLifecycleContext,
 	dispatchTaggedRequestEffect,
 	type HttpServerStartConfig,
+	type IpcPostResponseActions,
 	type OnboardingServerDeps,
 	type OnboardingServerStartConfig,
 	startHttpServer,
@@ -358,6 +359,7 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 export const makeIpcServerLive = (
 	ctx: DaemonLifecycleContext,
 	ipcContext: DaemonIPCContext,
+	postResponseActions?: IpcPostResponseActions,
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
@@ -368,11 +370,21 @@ export const makeIpcServerLive = (
 				| KeepAwakeTag
 				| ShutdownSignalTag
 			>();
+			const shutdownSignal = yield* ShutdownSignalTag;
+			const resolvedPostResponseActions = postResponseActions ?? {
+				scheduleShutdown: () => {
+					Deferred.unsafeDone(shutdownSignal, Effect.void);
+				},
+			};
 			yield* startLifecycleServer("startIPCServer", () =>
-				startIPCServer(ctx, ipcContext, (request, rpcLayer) =>
-					Runtime.runPromise(runtime)(
-						dispatchTaggedRequestEffect(request, rpcLayer),
-					),
+				startIPCServer(
+					ctx,
+					ipcContext,
+					(request, rpcLayer) =>
+						Runtime.runPromise(runtime)(
+							dispatchTaggedRequestEffect(request, rpcLayer),
+						),
+					resolvedPostResponseActions,
 				),
 			);
 			yield* Effect.addFinalizer(() =>
@@ -460,6 +472,7 @@ export interface DaemonLiveOptions {
 	// Server lifecycle (still imperative — AP-38 deferred)
 	ctx: DaemonLifecycleContext;
 	ipcContext: DaemonIPCContext;
+	ipcPostResponseActions?: IpcPostResponseActions;
 	onboarding: OnboardingServerDeps;
 	httpRouter: DaemonHttpRouterOptions;
 
@@ -597,7 +610,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.httpRouter);
 	const httpAndIpc = Layer.mergeAll(
 		makeHttpServerLive(options.ctx),
-		makeIpcServerLive(options.ctx, options.ipcContext),
+		makeIpcServerLive(
+			options.ctx,
+			options.ipcContext,
+			options.ipcPostResponseActions,
+		),
 	).pipe(Layer.provideMerge(httpRequestHandler));
 
 	const servers = makeOnboardingServerLive(

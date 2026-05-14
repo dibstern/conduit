@@ -71,16 +71,18 @@ describe("Effect runtime boundary grep", () => {
 	it("does not schedule daemon shutdown by re-entering the daemon runtime", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
-		const scheduleShutdownIndex = source.indexOf("scheduleShutdown: () => {");
+		const scheduleShutdownIndex = source.indexOf(
+			"const scheduleLegacyPostResponseShutdown = () => {",
+		);
 		expect(scheduleShutdownIndex).toBeGreaterThanOrEqual(0);
-		const getInstancesIndex = source.indexOf(
-			"getInstances: () => instanceManager.getInstances()",
+		const daemonLiveOptionsIndex = source.indexOf(
+			"const daemonLiveOptions: DaemonLiveOptions = {",
 			scheduleShutdownIndex,
 		);
-		expect(getInstancesIndex).toBeGreaterThan(scheduleShutdownIndex);
+		expect(daemonLiveOptionsIndex).toBeGreaterThan(scheduleShutdownIndex);
 		const scheduleShutdownBlock = source.slice(
 			scheduleShutdownIndex,
-			getInstancesIndex,
+			daemonLiveOptionsIndex,
 		);
 		const retiredBridgePatterns = [
 			{
@@ -140,6 +142,35 @@ describe("Effect runtime boundary grep", () => {
 						: [],
 				);
 		});
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not carry post-response shutdown scheduling on DaemonIPCContext", () => {
+		const path = "src/lib/daemon/daemon-ipc.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const contextStart = source.indexOf("export interface DaemonIPCContext");
+		const contextEnd = source.indexOf(
+			"export interface IPCHandlerMap",
+			contextStart,
+		);
+		expect(contextStart).toBeGreaterThanOrEqual(0);
+		expect(contextEnd).toBeGreaterThan(contextStart);
+
+		const contextSource = source.slice(contextStart, contextEnd);
+		const hits = contextSource.split("\n").flatMap((line, index) =>
+			/\bscheduleShutdown\b/.test(line)
+				? [
+						{
+							path,
+							line: source.slice(0, contextStart).split("\n").length + index,
+							source: line.trim(),
+							reason:
+								"shutdown/restart scheduling belongs to the IPC socket post-response hook",
+						},
+					]
+				: [],
+		);
 
 		expect(hits).toEqual([]);
 	});
