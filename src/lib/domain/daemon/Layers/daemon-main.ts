@@ -1371,7 +1371,6 @@ export async function startDaemonProcess(
 		},
 		staticDir,
 		httpRouter: {
-			staticDir,
 			getProjects: getRouterProjects,
 			pushManager,
 		},

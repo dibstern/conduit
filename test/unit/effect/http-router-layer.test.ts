@@ -78,11 +78,13 @@ describe("makeDaemonHttpRouterLive", () => {
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
 			const caPayload = Buffer.from("daemon-router-ca-der");
-			const routerLayer = makeDaemonHttpRouterLive({
+			const routerLayer = makeDaemonHttpRouterLive(
+				{
+					getProjects: () => [],
+					pushManager: null,
+				},
 				staticDir,
-				getProjects: () => [],
-				pushManager: null,
-			}).pipe(
+			).pipe(
 				Layer.provideMerge(makeAuthManagerLive(new AuthManager())),
 				Layer.provideMerge(DaemonConfigRefLive(baseConfig)),
 				Layer.provideMerge(
@@ -140,11 +142,13 @@ describe("makeDaemonHttpRouterLive", () => {
 	it.scoped("serves daemon themes from the production theme loader", () =>
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
-			const routerLayer = makeDaemonHttpRouterLive({
+			const routerLayer = makeDaemonHttpRouterLive(
+				{
+					getProjects: () => [],
+					pushManager: null,
+				},
 				staticDir,
-				getProjects: () => [],
-				pushManager: null,
-			}).pipe(
+			).pipe(
 				Layer.provideMerge(makeAuthManagerLive(new AuthManager())),
 				Layer.provideMerge(DaemonConfigRefLive(baseConfig)),
 				Layer.provideMerge(

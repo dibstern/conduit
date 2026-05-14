@@ -55,7 +55,6 @@ export interface DaemonHttpRouterPushManager {
 }
 
 export interface DaemonHttpRouterOptions {
-	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 }
@@ -203,7 +202,10 @@ export const makeStandaloneHttpRouterRequestHandler = (
 		caCertDer: options.caCertDer,
 	});
 
-export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
+export const makeDaemonHttpRouterLive = (
+	options: DaemonHttpRouterOptions,
+	staticDir: string,
+) =>
 	Layer.effect(
 		DaemonHttpRequestHandlerTag,
 		Effect.gen(function* () {
@@ -219,7 +221,7 @@ export const makeDaemonHttpRouterLive = (options: DaemonHttpRouterOptions) =>
 					getIsTls: () =>
 						Ref.get(configRef).pipe(Effect.map((config) => config.tlsEnabled)),
 				}),
-				staticDir: options.staticDir,
+				staticDir,
 				getProjects: options.getProjects,
 				removeProject: (slug: string) => daemonHandle.removeProject(slug),
 				getHealthResponse: () => daemonHandle.getStatus(),

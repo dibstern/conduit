@@ -686,7 +686,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 
 	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
-	const httpRequestHandler = makeDaemonHttpRouterLive(options.httpRouter);
+	const httpRequestHandler = makeDaemonHttpRouterLive(
+		options.httpRouter,
+		options.staticDir,
+	);
 	const httpAndIpc = Layer.mergeAll(
 		HttpServerLive,
 		makeIpcServerLive(options.ipcContext, options.ipcPostResponseActions),

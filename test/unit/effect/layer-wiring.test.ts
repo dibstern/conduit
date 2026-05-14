@@ -93,7 +93,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		},
 		staticDir: process.cwd(),
 		httpRouter: {
-			staticDir: process.cwd(),
 			getProjects: () => [],
 			pushManager: null,
 		},
