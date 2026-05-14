@@ -21,7 +21,23 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
-import type { PayloadMap } from "./payloads.js";
+import type { PermissionId } from "../shared-types.js";
+
+interface PermissionResponsePayload {
+	readonly requestId: PermissionId;
+	readonly decision: string;
+	readonly persistScope?: "tool" | "pattern";
+	readonly persistPattern?: string;
+}
+
+interface AskUserResponsePayload {
+	readonly toolId: string;
+	readonly answers: Record<string, string>;
+}
+
+interface QuestionRejectPayload {
+	readonly toolId: string;
+}
 
 /**
  * Convert browser answer format `Record<string, string>` to OpenCode's
@@ -134,7 +150,7 @@ const persistPermissionRule = (
 
 export const handlePermissionResponse = (
 	clientId: string,
-	payload: PayloadMap["permission_response"],
+	payload: PermissionResponsePayload,
 ) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
@@ -195,7 +211,7 @@ export const handlePermissionResponse = (
 
 export const handleAskUserResponse = (
 	clientId: string,
-	payload: PayloadMap["ask_user_response"],
+	payload: AskUserResponsePayload,
 ) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
@@ -327,7 +343,7 @@ export const handleAskUserResponse = (
 
 export const handleQuestionReject = (
 	clientId: string,
-	payload: PayloadMap["question_reject"],
+	payload: QuestionRejectPayload,
 ) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;

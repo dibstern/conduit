@@ -8,9 +8,6 @@ import type { RelayMessage } from "../types.js";
 // ─── Message types from browser ──────────────────────────────────────────────
 
 export type IncomingMessageType =
-	| "permission_response"
-	| "ask_user_response"
-	| "question_reject"
 	| "new_session"
 	| "switch_session"
 	| "delete_session"
@@ -20,9 +17,6 @@ export type IncomingMessageType =
 	| "set_log_level";
 
 const VALID_MESSAGE_TYPES = new Set<string>([
-	"permission_response",
-	"ask_user_response",
-	"question_reject",
 	"new_session",
 	"switch_session",
 	"delete_session",

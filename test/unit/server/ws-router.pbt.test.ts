@@ -35,9 +35,6 @@ const NUM_RUNS = 300;
 // ─── Generators ─────────────────────────────────────────────────────────────
 
 const validMessageTypes: IncomingMessageType[] = [
-	"permission_response",
-	"ask_user_response",
-	"question_reject",
 	"new_session",
 	"switch_session",
 	"view_session",
@@ -391,7 +388,7 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			expect(isRouteError(invalidResult)).toBe(true);
 
 			// Verify our test list has exactly the right number of routed types.
-			expect(validMessageTypes).toHaveLength(9);
+			expect(validMessageTypes).toHaveLength(6);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);

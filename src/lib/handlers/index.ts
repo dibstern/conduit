@@ -20,11 +20,6 @@ export {
 	switchVariantForSession,
 } from "./model.js";
 export {
-	handleAskUserResponse,
-	handlePermissionResponse,
-	handleQuestionReject,
-} from "./permissions.js";
-export {
 	clearSessionInputDraft,
 	getSessionInputDraft,
 	handleMessage,
@@ -56,11 +51,6 @@ import { WebSocketError } from "../errors.js";
 import { PayloadSchemas } from "./payload-schemas.js";
 import type { PayloadMap } from "./payloads.js";
 import {
-	handleAskUserResponse as handleAskUserResponseImpl,
-	handlePermissionResponse as handlePermissionResponseImpl,
-	handleQuestionReject as handleQuestionRejectImpl,
-} from "./permissions.js";
-import {
 	handleDeleteSession as handleDeleteSessionImpl,
 	handleForkSession as handleForkSessionImpl,
 	handleNewSession as handleNewSessionImpl,
@@ -85,10 +75,6 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	keyof PayloadMap,
 	AnyEffectHandler
 > = {
-	// Permissions
-	permission_response: handlePermissionResponseImpl,
-	ask_user_response: handleAskUserResponseImpl,
-	question_reject: handleQuestionRejectImpl,
 	// Sessions
 	new_session: handleNewSessionImpl,
 	switch_session: handleSwitchSessionImpl,

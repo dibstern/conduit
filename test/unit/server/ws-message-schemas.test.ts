@@ -63,19 +63,6 @@ describe("decodeWsMessage", () => {
 			expect((decoded as any).level).toBe("debug");
 		}),
 	);
-
-	it.effect("decodes permission_response with branded requestId", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "permission_response",
-				requestId: "per_abc123",
-				decision: "allow",
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("permission_response");
-			expect((decoded as any).decision).toBe("allow");
-		}),
-	);
 });
 
 // ─── Schema rejection tests (synchronous Either-based) ──────────────────────
@@ -128,6 +115,9 @@ describe("IncomingWsMessage schema rejections", () => {
 		"set_project_instance",
 		"proxy_detect",
 		"scan_now",
+		"permission_response",
+		"ask_user_response",
+		"question_reject",
 	])("rejects retired incoming message %s", (type) => {
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)({ type });
 		expect(Either.isLeft(result)).toBe(true);
@@ -140,9 +130,6 @@ describe("IncomingWsMessage coverage", () => {
 	// Incoming message types from ws-router.ts (the source of truth).
 	// This test ensures IncomingWsMessage covers every one.
 	const ALL_INCOMING_TYPES = [
-		"permission_response",
-		"ask_user_response",
-		"question_reject",
 		"new_session",
 		"switch_session",
 		"delete_session",
@@ -155,9 +142,6 @@ describe("IncomingWsMessage coverage", () => {
 	// For each type, construct a minimal valid payload and verify it decodes.
 	// This catches missing union members at test time.
 	const MINIMAL_PAYLOADS: Record<string, Record<string, unknown>> = {
-		permission_response: { requestId: "per_x", decision: "allow" },
-		ask_user_response: { toolId: "t1", answers: {} },
-		question_reject: { toolId: "t1" },
 		new_session: {},
 		switch_session: { sessionId: "s1" },
 		delete_session: { sessionId: "s1" },

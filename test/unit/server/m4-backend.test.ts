@@ -18,21 +18,16 @@ import type {
 
 // ─── ws-router: new message types ───────────────────────────────────────────
 
-describe("ws-router — new M4 message types", () => {
-	const newTypes = ["question_reject"];
-
-	for (const type of newTypes) {
-		it(`routes ${type} messages`, () => {
-			const msg = parseIncomingMessage(JSON.stringify({ type }));
-			expect(msg).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const result = routeMessage(msg!);
-			expect(isRouteError(result)).toBe(false);
-			if (!isRouteError(result)) {
-				expect(result.handler).toBe(type);
-			}
-		});
-	}
+describe("ws-router — retired M4 browser commands", () => {
+	it("rejects question_reject after the RPC cutover", () => {
+		const msg = parseIncomingMessage(
+			JSON.stringify({ type: "question_reject" }),
+		);
+		expect(msg).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+		const result = routeMessage(msg!);
+		expect(isRouteError(result)).toBe(true);
+	});
 
 	it("still rejects unknown types", () => {
 		const msg = parseIncomingMessage(

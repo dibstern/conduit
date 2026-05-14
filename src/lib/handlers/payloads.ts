@@ -1,4 +1,4 @@
-import type { PermissionId, RequestId } from "../shared-types.js";
+import type { RequestId } from "../shared-types.js";
 
 // ─── Payload Type Map ────────────────────────────────────────────────────────
 
@@ -11,14 +11,6 @@ import type { PermissionId, RequestId } from "../shared-types.js";
  * Phase 2 (Valibot) will add runtime validation.
  */
 export interface PayloadMap {
-	permission_response: {
-		requestId: PermissionId;
-		decision: string;
-		persistScope?: "tool" | "pattern";
-		persistPattern?: string;
-	};
-	ask_user_response: { toolId: string; answers: Record<string, string> };
-	question_reject: { toolId: string };
 	new_session: { title?: string; requestId?: RequestId };
 	switch_session: { sessionId: string };
 	view_session: { sessionId: string };

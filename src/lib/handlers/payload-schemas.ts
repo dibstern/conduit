@@ -5,7 +5,7 @@
 
 import { Schema } from "effect";
 
-import { PermissionId, RequestId } from "../shared-types.js";
+import { RequestId } from "../shared-types.js";
 import type { PayloadMap } from "./payloads.js";
 
 /**
@@ -22,22 +22,6 @@ export const PayloadSchemas: {
 	// biome-ignore lint/suspicious/noExplicitAny: Schema Struct produces readonly/undefined-widened types that differ structurally from PayloadMap; `any` avoids a fight with exactOptionalPropertyTypes while keeping the key-exhaustiveness constraint
 	[K in keyof PayloadMap]: Schema.Schema<any, any>;
 } = {
-	permission_response: Schema.Struct({
-		requestId: PermissionId,
-		decision: Schema.String,
-		persistScope: Schema.optional(Schema.Literal("tool", "pattern")),
-		persistPattern: Schema.optional(Schema.String),
-	}),
-
-	ask_user_response: Schema.Struct({
-		toolId: Schema.String,
-		answers: Schema.Record({ key: Schema.String, value: Schema.String }),
-	}),
-
-	question_reject: Schema.Struct({
-		toolId: Schema.String,
-	}),
-
 	new_session: Schema.Struct({
 		title: Schema.optional(Schema.String),
 		requestId: Schema.optional(RequestId),

@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. RPC-over-WS is partly started: `AddProject`, `AnswerQuestion`, `CancelSession`, `ClosePty`, `CreatePty`, `CreateSession`, `DeleteSession`, `DetectProxy`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListPtys`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RemoveInstance`, `RemoveProject`, `RenameInstance`, `RenameProject`, `RenameSession`, `ResizePty`, `RespondPermission`, `RewindSession`, `ScanNow`, `SendMessage`, `SetDefaultModel`, `SetProjectInstance`, `StartInstance`, `StopInstance`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession` have moved through Effect RPC. Remaining production raw WS commands are session lifecycle and permission/question compatibility commands, `set_log_level`, and `pty_input`; `pty_input` intentionally stays on the high-throughput terminal data plane until the frontend has a persistent RPC stream/client.
+1. RPC-over-WS is partly started: `AddProject`, `AnswerQuestion`, `CancelSession`, `ClosePty`, `CreatePty`, `CreateSession`, `DeleteSession`, `DetectProxy`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListPtys`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RemoveInstance`, `RemoveProject`, `RenameInstance`, `RenameProject`, `RenameSession`, `ResizePty`, `RespondPermission`, `RewindSession`, `ScanNow`, `SendMessage`, `SetDefaultModel`, `SetProjectInstance`, `StartInstance`, `StopInstance`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession` have moved through Effect RPC. Remaining production raw WS commands are session lifecycle compatibility commands, `set_log_level`, and `pty_input`; `pty_input` intentionally stays on the high-throughput terminal data plane until the frontend has a persistent RPC stream/client.
 2. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
 3. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
 4. CLI still imports/calls `startDaemonProcess`.
@@ -297,3 +297,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Removed frontend raw-WS send helpers/offline queue for instance discovery and management; those flows now rely on the existing typed RPC clients.
 - Updated project-management and multi-instance Playwright mocks/assertions to record Effect RPC requests instead of raw browser WS command envelopes.
 - Verified locally with `pnpm check`, `pnpm lint`, targeted RPC/router/frontend unit tests, `pnpm build:frontend`, project-management Playwright, and multi-instance Playwright.
+
+2026-05-14, legacy permission/question WS cleanup:
+
+- Deleted the legacy incoming `permission_response`, `ask_user_response`, and `question_reject` browser WS commands from the production router, payload schemas, incoming-message schema, and dispatch table.
+- Kept the shared permission/question Effect helpers for `RespondPermission`, `AnswerQuestion`, and `RejectQuestion` RPC server handlers.
+- Updated question-flow Playwright coverage to drive user prompts through `SendMessage` RPC and assert `AnswerQuestion` / `RejectQuestion` RPC requests instead of raw browser WS command envelopes.
+- Verified locally with `pnpm check`, `pnpm lint`, targeted router/schema/store/RPC unit tests, `pnpm build:frontend`, question-flow Playwright, and `git diff --check`.

@@ -395,9 +395,6 @@ const arbClientId = fc.oneof(
 );
 
 const validMessageTypes: IncomingMessageType[] = [
-	"permission_response",
-	"ask_user_response",
-	"question_reject",
 	"new_session",
 	"switch_session",
 	"delete_session",

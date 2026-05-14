@@ -14,31 +14,10 @@
 // Source of truth for payload shapes: handlers/payloads.ts PayloadMap.
 
 import { Effect, Schema } from "effect";
-import { PermissionId, RequestId } from "../shared-types.js";
+import { RequestId } from "../shared-types.js";
 
 // ─── Individual message schemas ─────────────────────────────────────────────
 // Each schema includes `type: Schema.Literal(...)` as the discriminant.
-
-// ── Permissions / Questions ──────────────────────────────────────────────────
-
-const PermissionResponseMsg = Schema.Struct({
-	type: Schema.Literal("permission_response"),
-	requestId: PermissionId,
-	decision: Schema.String,
-	persistScope: Schema.optional(Schema.Literal("tool", "pattern")),
-	persistPattern: Schema.optional(Schema.String),
-});
-
-const AskUserResponseMsg = Schema.Struct({
-	type: Schema.Literal("ask_user_response"),
-	toolId: Schema.String,
-	answers: Schema.Record({ key: Schema.String, value: Schema.String }),
-});
-
-const QuestionRejectMsg = Schema.Struct({
-	type: Schema.Literal("question_reject"),
-	toolId: Schema.String,
-});
 
 // ── Session lifecycle ────────────────────────────────────────────────────────
 
@@ -88,10 +67,6 @@ const SetLogLevelMsg = Schema.Struct({
 // Covers all remaining legacy IncomingMessageType values from ws-router.ts.
 
 export const IncomingWsMessage = Schema.Union(
-	// Permissions / Questions
-	PermissionResponseMsg,
-	AskUserResponseMsg,
-	QuestionRejectMsg,
 	// Session lifecycle
 	NewSessionMsg,
 	SwitchSessionMsg,
