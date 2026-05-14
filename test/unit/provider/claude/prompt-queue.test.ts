@@ -2,7 +2,10 @@
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeEffectPromptQueue } from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
+import {
+	EffectPromptQueueAlreadyIterating,
+	makeEffectPromptQueue,
+} from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
 import type {
 	PromptQueueController,
 	SDKUserMessage,
@@ -132,7 +135,18 @@ describe("EffectPromptQueue", () => {
 	it("throws on second iteration attempt (single-consumer guard)", async () => {
 		const q = await makeQueue();
 		q[Symbol.asyncIterator]();
-		expect(() => q[Symbol.asyncIterator]()).toThrow("single-consumer");
+		let error: unknown;
+		try {
+			q[Symbol.asyncIterator]();
+		} catch (err) {
+			error = err;
+		}
+		expect(error).toBeInstanceOf(EffectPromptQueueAlreadyIterating);
+		expect(error).toMatchObject({
+			_tag: "EffectPromptQueueAlreadyIterating",
+			message:
+				"EffectPromptQueue is single-consumer. Cannot iterate more than once.",
+		});
 		await close(q);
 	});
 

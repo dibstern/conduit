@@ -39,7 +39,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 | `PersistenceLayer.open(...)` in daemon or relay production paths | Done | Recheck before final guardrail close. |
 | `Effect.promise(` on rejectable operations | Done | Recheck before final guardrail close. |
 | `concurrency: "unbounded"` on dynamic collections | Done | Recheck before final guardrail close. Fixed-size fanouts need inline justification. |
-| Throwing helpers called from Effect programs | Open | Broad grep triage started. Legacy `InstanceManager` expected add/remove/update/url/start/stop failures now throw shared tagged instance domain errors, and startup rehydration/auto-start classify by tag instead of `UnknownException` or message text. Gap endpoint REST failures now throw tagged `GapEndpointHttpError`. Instance IPC handlers convert legacy throws/rejections to typed `InstanceMgmtOperationFailed` before folding to `{ ok:false }`. PID write failures now map to `DaemonLifecycleLayerError`. Expected project-registry lifecycle failures and daemon ready-relay/not-found helper failures now use tagged registry domain errors. Remaining non-domain throw hits need reclassification or conversion. |
+| Throwing helpers called from Effect programs | Open | Broad grep triage started. Legacy `InstanceManager` expected add/remove/update/url/start/stop failures now throw shared tagged instance domain errors, and startup rehydration/auto-start classify by tag instead of `UnknownException` or message text. Gap endpoint REST failures now throw tagged `GapEndpointHttpError`. Claude prompt queue protocol failures now throw tagged `EffectPromptQueueAlreadyIterating`. Instance IPC handlers convert legacy throws/rejections to typed `InstanceMgmtOperationFailed` before folding to `{ ok:false }`. PID write failures now map to `DaemonLifecycleLayerError`. Expected project-registry lifecycle failures and daemon ready-relay/not-found helper failures now use tagged registry domain errors. Remaining non-domain throw hits need reclassification or conversion. |
 | App-internal `Effect.runPromise` / `Effect.runSync` | Open | Daemon HTTP handler construction moved to `src/lib/domain/server/Layers/http-router-layer.ts`; tagged and legacy-format IPC dispatch now use the daemon layer runtime callback boundary at the socket edge, daemon WebSocket upgrade routing uses the runtime callback boundary, and `daemon-lifecycle.ts` no longer owns a default runtime dispatcher. `daemon-main` no longer waits on project-registry sync or startup acquisition through `ManagedRuntime.runPromise`. Client-init, default-session startup state, relay session-count status, and SSE shutdown no longer build Promise/sync session-service bridges in `relay-stack.ts`; the sole relay-stack `runPromise` is explicitly reclassified as the public `createProjectRelay()` startup boundary. Remaining blockers are final grep hits outside accepted external boundaries. |
 
 ## Current Blockers
@@ -96,6 +96,11 @@ Detailed completed-slice notes moved to `docs/plans/2026-05-14-effect-ts-mainlin
 
 - Added tagged `GapEndpointHttpError` for OpenCode gap endpoint GET/POST HTTP failures.
 - Added behavior coverage and a static guard proving gap endpoint HTTP failures no longer reject with plain `Error`.
+
+2026-05-14, Claude prompt queue throw-helper cleanup:
+
+- Added tagged `EffectPromptQueueAlreadyIterating` for the SDK-facing single-consumer AsyncIterator protocol guard.
+- Added behavior coverage and a static guard proving the prompt queue no longer throws plain `Error` for that expected protocol failure.
 
 2026-05-14, shared instance domain errors:
 

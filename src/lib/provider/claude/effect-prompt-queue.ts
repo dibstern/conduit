@@ -6,7 +6,7 @@
  * from Effect programs. The queue keeps the producer side Effect-native and
  * leaves the Promise bridge at the SDK-facing AsyncIterator boundary.
  */
-import { Effect, Queue, Stream } from "effect";
+import { Data, Effect, Queue, Stream } from "effect";
 
 import type { PromptQueueController, SDKUserMessage } from "./types.js";
 
@@ -18,6 +18,16 @@ type PromptQueueMessage = Extract<
 	PromptQueueItem,
 	{ readonly _tag: "Message" }
 >;
+
+type NoPromptQueueErrorFields = Record<never, never>;
+
+export class EffectPromptQueueAlreadyIterating extends Data.TaggedError(
+	"EffectPromptQueueAlreadyIterating",
+)<NoPromptQueueErrorFields> {
+	override get message(): string {
+		return "EffectPromptQueue is single-consumer. Cannot iterate more than once.";
+	}
+}
 
 export class EffectPromptQueue implements PromptQueueController {
 	private _iterating = false;
@@ -62,9 +72,7 @@ export class EffectPromptQueue implements PromptQueueController {
 
 	[Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
 		if (this._iterating) {
-			throw new Error(
-				"EffectPromptQueue is single-consumer. Cannot iterate more than once.",
-			);
+			throw new EffectPromptQueueAlreadyIterating();
 		}
 		this._iterating = true;
 

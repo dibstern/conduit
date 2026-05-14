@@ -798,6 +798,23 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not throw plain Error for Claude prompt queue protocol failures", () => {
+		const path = "src/lib/provider/claude/effect-prompt-queue.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const hits = Array.from(
+			source.matchAll(
+				/throw new Error\(\s*"EffectPromptQueue is single-consumer/g,
+			),
+			(match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+			}),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not classify daemon startup instance errors by message text", () => {
 		const path = "src/lib/domain/daemon/Services/daemon-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
