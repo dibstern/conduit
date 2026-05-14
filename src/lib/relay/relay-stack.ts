@@ -116,7 +116,7 @@ interface RelayRuntime {
 import { createTranslator } from "./event-translator.js";
 import {
 	createMonitoringWiringState,
-	wireMonitoring,
+	wireMonitoringEffect,
 } from "./monitoring-wiring.js";
 import { wirePollersEffect } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
@@ -587,7 +587,7 @@ export async function createProjectRelay(
 	}
 	// Compose: self-constructing state layers + imperative bridge layers.
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
-	// SessionLifecycleWiringLive) are added after wireMonitoring() returns
+	// SessionLifecycleWiringLive) are added after monitoring state exists
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(RelayStateLive, bridgeLayers);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
@@ -788,34 +788,7 @@ export async function createProjectRelay(
 		...(dualWriteHook != null && { dualWriteHook }),
 	};
 
-	// ── Monitoring wiring (G2: pipeline deps, effect deps, status poller) ──
-	const {
-		pipelineDeps,
-		stopMonitoring,
-		recordDoneDelivered: bindDoneDelivered,
-	} = wireMonitoring({
-		client: api,
-		wsHandler,
-		sessionService: sessionServiceBridge,
-		processingTimeouts,
-		statusPoller,
-		pollerManager,
-		sseStream,
-		config: {
-			...(config.pollerGatingConfig != null && {
-				pollerGatingConfig: config.pollerGatingConfig,
-			}),
-			...(config.pushManager != null && { pushManager: config.pushManager }),
-			slug: config.slug,
-		},
-		statusLog,
-		sseLog,
-		pipelineLog,
-		state: monitoringStateAccess,
-	});
-
-	// Bind the late-binding done-dedup callback now that monitoring wiring exists.
-	doneDeliveredRef.fn = bindDoneDelivered;
+	let stopMonitoring = () => {};
 
 	// ── Wire SSE idle events → OpenCodeAdapter.notifyTurnCompleted() ────────
 	// Resolves the deferred promise in OpenCodeAdapter.sendTurnEffect() when a
@@ -828,14 +801,34 @@ export async function createProjectRelay(
 	try {
 		await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				const monitoring = yield* wireMonitoringEffect({
+					client: api,
+					wsHandler,
+					pollerManager,
+					sseStream,
+					config: {
+						...(config.pollerGatingConfig != null && {
+							pollerGatingConfig: config.pollerGatingConfig,
+						}),
+						...(config.pushManager != null && {
+							pushManager: config.pushManager,
+						}),
+						slug: config.slug,
+					},
+					statusLog,
+					sseLog,
+					pipelineLog,
+					state: monitoringStateAccess,
+				});
+				yield* Effect.sync(() => {
+					stopMonitoring = monitoring.stopMonitoring;
+					doneDeliveredRef.fn = monitoring.recordDoneDelivered;
+				});
 				yield* wirePollersEffect({
 					pollerManager,
 					sseStream,
 					wsHandler,
-					pipelineDeps: {
-						wsHandler: pipelineDeps.wsHandler,
-						log: pipelineDeps.log,
-					},
+					pipelineDeps: monitoring.pipelineDeps,
 					sseTracker: monitoringStateAccess.sseTracker,
 					config: {
 						...(config.pushManager != null && {

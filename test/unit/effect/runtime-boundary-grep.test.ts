@@ -860,4 +860,37 @@ describe("Effect runtime boundary grep", () => {
 
 		expect(hits).toEqual([]);
 	});
+
+	it("does not wire production monitoring through relay-stack bridge deps", () => {
+		const path = "src/lib/relay/relay-stack.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /import \{[^}]*\bwireMonitoring\b[^}]*\}/,
+				reason:
+					"production monitoring should use the Effect-owned status-poller callback handler",
+			},
+			{
+				pattern: /wireMonitoring\(\{/,
+				reason:
+					"production monitoring should not consume sessionServiceBridge or processingTimeouts directly",
+			},
+			{
+				pattern: /wireMonitoringEffect\([\s\S]*processingTimeouts/,
+				reason:
+					"monitoring timeout side effects should run through Effect services",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g"))).map((match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].trim(),
+				reason,
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
 });

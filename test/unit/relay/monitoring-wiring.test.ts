@@ -1,7 +1,17 @@
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionStatusPollerService } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	makePollerStateLive,
+	type SessionStatusPollerService,
+} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { wireMonitoring } from "../../../src/lib/relay/monitoring-wiring.js";
+import {
+	wireMonitoring,
+	wireMonitoringEffect,
+} from "../../../src/lib/relay/monitoring-wiring.js";
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
@@ -112,5 +122,79 @@ describe("wireMonitoring shutdown", () => {
 
 		expect(harness.messages).not.toHaveBeenCalled();
 		expect(harness.startPolling).not.toHaveBeenCalled();
+	});
+
+	it("effect-owned production wiring does not start a poller after monitoring has stopped", async () => {
+		let changed: ChangedCallback | undefined;
+		let resolveMessages: ((messages: []) => void) | undefined;
+		const messages = vi.fn(
+			() =>
+				new Promise<[]>((resolve) => {
+					resolveMessages = resolve;
+				}),
+		);
+		const startPolling = vi.fn();
+		const statusPoller = {
+			on: vi.fn((_event, callback) => {
+				changed = callback;
+			}),
+			start: vi.fn(),
+		};
+		const layer = Layer.mergeAll(
+			Layer.succeed(SessionManagerServiceTag, {
+				sendDualSessionLists: () => Effect.void,
+				getSessionParentMap: () => Effect.succeed(new Map()),
+			} as never),
+			Layer.succeed(StatusPollerTag, statusPoller as never),
+			makePollerStateLive(),
+			makeOverridesStateLive(),
+		);
+
+		const result = await Effect.runPromise(
+			wireMonitoringEffect({
+				client: {
+					session: { messages },
+				},
+				wsHandler: {
+					broadcast: vi.fn(),
+					sendToSession: vi.fn(),
+					getClientsForSession: () => [],
+					broadcastPerSessionEvent: vi.fn(),
+				},
+				pollerManager: {
+					startPolling,
+					stopPolling: vi.fn(),
+				},
+				sseStream: {
+					isConnected: () => false,
+				},
+				config: {
+					pollerGatingConfig: {
+						sseGracePeriodMs: 0,
+						sseActiveThresholdMs: 0,
+					},
+					slug: "test",
+				},
+				statusLog: createSilentLogger(),
+				sseLog: createSilentLogger(),
+				pipelineLog: createSilentLogger(),
+			}).pipe(Effect.provide(layer)),
+		);
+
+		result.setMonitoringState({
+			sessions: new Map([
+				["s1", { phase: "busy-sse-covered", busySince: 0, lastSSEAt: 0 }],
+			]),
+		});
+
+		changed?.({ s1: { type: "busy" } }, false);
+		await flushPromises();
+		expect(messages).toHaveBeenCalledWith("s1");
+
+		result.stopMonitoring();
+		resolveMessages?.([]);
+		await flushPromises();
+
+		expect(startPolling).not.toHaveBeenCalled();
 	});
 });
