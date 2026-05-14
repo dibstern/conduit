@@ -1,5 +1,5 @@
 // ─── Integration: Claude Adapter Full Lifecycle ──────────────────────────────
-// End-to-end lifecycle tests that exercise the full ClaudeAdapter flow with a
+// End-to-end lifecycle tests that exercise the full ClaudeProviderInstance flow with a
 // mock SDK query factory. These verify that the adapter, event translator,
 // and permission bridge work together correctly.
 
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
-import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type {
 	Query,
 	SDKMessage,
@@ -21,7 +21,7 @@ import {
 	makeSuccessResult,
 } from "../../helpers/mock-sdk.js";
 
-describe("Integration: ClaudeAdapter full lifecycle", () => {
+describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 	let workspace: string;
 
 	beforeEach(() => {
@@ -160,7 +160,7 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 		const mockQuery = createMockQuery(messages);
 		const queryFactory = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 		});
@@ -405,10 +405,10 @@ describe("Integration: ClaudeAdapter full lifecycle", () => {
 			},
 		);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactory as unknown as NonNullable<
-				ConstructorParameters<typeof ClaudeAdapter>[0]["queryFactory"]
+				ConstructorParameters<typeof ClaudeProviderInstance>[0]["queryFactory"]
 			>,
 		});
 

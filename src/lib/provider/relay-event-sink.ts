@@ -1,7 +1,7 @@
 // ─── Relay Event Sink ────────────────────────────────────────────────────────
-// Translates adapter-emitted CanonicalEvents into RelayMessages and pushes
+// Translates provider-emitted CanonicalEvents into RelayMessages and pushes
 // them straight to WebSocket clients. Used for the in-process Claude SDK path
-// (ClaudeAdapter) where there is no SSE stream to piggy-back on. Permissions
+// (ClaudeProviderInstance) where there is no SSE stream to piggy-back on. Permissions
 // and questions are routed through the same path so the UI receives the
 // familiar RelayMessage shapes.
 
@@ -280,7 +280,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 }
 
 // ─── Translation ────────────────────────────────────────────────────────────
-// Maps CanonicalEvent (adapter-emitted) → RelayMessage[] (client-facing).
+// Maps CanonicalEvent (provider-emitted) → RelayMessage[] (client-facing).
 // An event may produce zero, one, or many relay messages.
 
 function translateCanonicalEvent(event: CanonicalEvent): TranslationResult {

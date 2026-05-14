@@ -45,7 +45,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 ## Current Blockers
 
 1. Project relay construction no longer has hidden startup/session/shutdown bridges; the only relay-stack `runPromise` is the explicit `createProjectRelay()` Promise boundary.
-2. Provider architecture now has instance-first registry APIs and public instance-named type/error exports; remaining cleanup is class/file/test naming that still says adapter where it no longer reflects ownership.
+2. Provider architecture now has instance-first registry APIs, public instance-named type/error exports, and provider implementation classes/files; remaining cleanup is test filenames/local variable wording that still says adapter where it no longer reflects ownership.
 3. CLI still imports/calls `startDaemonProcess`.
 
 ## Remaining Order
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`, client init now forks one Effect-owned bootstrap at the WebSocket callback boundary, startup service acquisition and relay callback/monitoring/poller/SSE setup are consolidated into one Effect program, API/WebSocket handler acquisition no longer uses separate startup `runSync` calls, SSE connect/command-gate readiness runs inside startup, SSE shutdown drain and command-gate stop are scoped finalizers, SSE pending question writes use the owned session service surface, SSE pending permission writes run inside the Effect-owned SSE handler, message/status-poller callbacks now use Effect-owned paths, the standalone/E2E default-session API reads the startup snapshot instead of re-entering the session service, daemon/router session counts read a relay status snapshot instead of a sync runtime bridge, and the sole relay-stack `runPromise` is guarded as the public startup Promise boundary.
 8. RPC-over-WS vertical migration. Done locally for ordinary browser operations. `pty_input` is explicitly reclassified as the raw terminal data-plane command until a persistent RPC stream/client design replaces it.
-9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates OpenCode/Claude instances through plain driver values, and `ProviderRegistry` now exposes only instance-first APIs.
+9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, and `ProviderRegistry` now exposes only instance-first APIs.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise` or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
 11. Daemon composition readiness.
 12. Single-owner daemon cutover.
@@ -489,6 +489,13 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Renamed the public provider contract from `ProviderAdapter` / `AdapterCapabilities` / `ProviderAdapterFailure` to `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure`.
 - Added guard coverage so the old adapter-named provider type/error exports cannot return.
 - Verified locally with focused provider type, registry, orchestration, OpenCode, Claude, typecheck, lint, and diff hygiene checks.
+
+2026-05-14, provider implementation naming cleanup:
+
+- Renamed OpenCode/Claude provider implementation classes and source files from adapter naming to provider instance naming.
+- Renamed orchestration wiring's public OpenCode instance field and SSE wiring method to instance terminology.
+- Added production source guard so adapter-named provider implementation exports cannot return.
+- Verified locally with focused provider/orchestration tests, typecheck, lint, and diff hygiene checks.
 
 2026-05-14, relay startup boundary reclassification:
 

@@ -46,11 +46,11 @@ const saveRelaySettingsEffect = (
 	});
 
 /**
- * Determines if a provider ID refers to the in-process Claude SDK adapter
+ * Determines if a provider ID refers to the in-process Claude SDK provider.
  * (not OpenCode's "anthropic" provider which proxies to Anthropic via
  * OpenCode's own REST API). Only the literal "claude" provider ID
- * routes through the ClaudeAdapter — all other providers (including
- * "anthropic") route through OpenCodeAdapter.
+ * routes through the ClaudeProviderInstance — all other providers (including
+ * "anthropic") route through OpenCodeProviderInstance.
  */
 export function isClaudeProvider(providerId: string): boolean {
 	return providerId === "claude";
@@ -405,10 +405,10 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			});
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 			if (engineOption._tag === "Some") {
-				const providerAdapterId = isClaudeProvider(providerId)
+				const providerInstanceId = isClaudeProvider(providerId)
 					? "claude"
 					: "opencode";
-				engineOption.value.bindSession(sessionId, providerAdapterId);
+				engineOption.value.bindSession(sessionId, providerInstanceId);
 			}
 		} else {
 			log.warn(

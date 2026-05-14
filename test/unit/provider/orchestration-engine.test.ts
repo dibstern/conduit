@@ -54,7 +54,7 @@ vi.mock("../../../src/lib/logger.js", () => ({
 	}),
 }));
 
-import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	type DiscoverCommand,
@@ -545,9 +545,9 @@ describe("OrchestrationEngine", () => {
 	});
 
 	// ─── Claude adapter integration ─────────────────────────────────────────
-	// These tests use a real ClaudeAdapter with an injected queryFactory
+	// These tests use a real ClaudeProviderInstance with an injected queryFactory
 	// to verify the full dispatch path:
-	// OrchestrationEngine.dispatchEffect(SendTurnCommand) → ClaudeAdapter.sendTurnEffect()
+	// OrchestrationEngine.dispatchEffect(SendTurnCommand) → ClaudeProviderInstance.sendTurnEffect()
 	// → SDK query() → stream consumer → canonical events via EventSink.
 
 	describe("Claude adapter integration", () => {
@@ -562,13 +562,13 @@ describe("OrchestrationEngine", () => {
 			rmSync(claudeWorkspace, { recursive: true, force: true });
 		});
 
-		it("happy path: dispatch sendTurn through real ClaudeAdapter yields completed TurnResult", async () => {
+		it("happy path: dispatch sendTurn through real ClaudeProviderInstance yields completed TurnResult", async () => {
 			const resultMsg = makeSuccessResult();
 			const mockQuery = createMockQuery([resultMsg]);
 			const queryFactory = vi.fn(() => mockQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
@@ -604,7 +604,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => mockQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
@@ -667,7 +667,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => throwingQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
@@ -773,7 +773,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => throwingQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});

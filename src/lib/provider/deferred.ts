@@ -1,8 +1,8 @@
 // src/lib/provider/deferred.ts
 // ─── Shared Deferred Utility ────────────────────────────────────────────────
 // A Promise wrapper that exposes resolve/reject for external settlement.
-// Used by adapters and EventSink to bridge callback-based and Promise-based
-// control flow (e.g., SSE turn completion, permission requests).
+// Used by provider instances and EventSink to bridge callback-based and
+// Promise-based control flow (e.g., SSE turn completion, permission requests).
 
 export interface Deferred<T> {
 	readonly promise: Promise<T>;

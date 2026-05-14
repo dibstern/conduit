@@ -1,6 +1,6 @@
 // test/e2e/provider/claude-adapter-real-sdk.test.ts
 /**
- * E2E test for ClaudeAdapter.sendTurnEffect() against the real Claude Agent SDK.
+ * E2E test for ClaudeProviderInstance.sendTurnEffect() against the real Claude Agent SDK.
  *
  * This test makes a real API call to Anthropic's API using your OAuth session.
  * It is gated behind the RUN_EXPENSIVE_E2E=1 environment variable and is
@@ -11,7 +11,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
-import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type { EventSink } from "../../../src/lib/provider/types.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
@@ -37,11 +37,11 @@ function createCollectingEventSink(): EventSink & {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-describe.skipIf(!RUN_EXPENSIVE)("ClaudeAdapter E2E (real SDK)", () => {
+describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 	it(
 		"full turn: sendTurnEffect() resolves with completed TurnResult and emits canonical events",
 		async () => {
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: process.cwd(),
 				// No queryFactory override — uses the real SDK
 			});

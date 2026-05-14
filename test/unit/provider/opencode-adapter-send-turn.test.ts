@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import type {
 	EventSink,
 	SendTurnInput,
@@ -77,13 +77,13 @@ function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 	};
 }
 
-describe("OpenCodeAdapter.sendTurn()", () => {
+describe("OpenCodeProviderInstance.sendTurn()", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeAdapter;
+	let adapter: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 	});
 
 	it("calls sendMessageAsync on the client", async () => {
@@ -163,7 +163,7 @@ describe("OpenCodeAdapter.sendTurn()", () => {
 				abort: vi.fn(async () => {}),
 			},
 		});
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 
 		const input = makeSendTurnInput();
 		const result = await Effect.runPromise(adapter.sendTurnEffect(input));

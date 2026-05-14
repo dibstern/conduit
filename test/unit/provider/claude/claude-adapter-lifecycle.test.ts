@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
-import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import type {
 	ClaudeSessionContext,
 	PendingApproval,
@@ -55,7 +55,7 @@ function makeFakeSessionContext(
 	};
 }
 
-describe("ClaudeAdapter lifecycle", () => {
+describe("ClaudeProviderInstance lifecycle", () => {
 	let workspace: string;
 
 	beforeEach(() => {
@@ -69,7 +69,7 @@ describe("ClaudeAdapter lifecycle", () => {
 
 	describe("shutdown()", () => {
 		it("closes all active sessions", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -86,7 +86,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("marks sessions as stopped", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -98,7 +98,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("resolves pending approvals with reject on shutdown", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const resolvedWith: string[] = [];
 			const pending: PendingApproval = {
 				requestId: "perm-1",
@@ -123,7 +123,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("rejects pending questions on shutdown", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const rejected: Error[] = [];
 			const pending: PendingQuestion = {
 				requestId: "q-1",
@@ -147,7 +147,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("is idempotent for already-stopped sessions", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1", { stopped: true });
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -166,7 +166,7 @@ describe("ClaudeAdapter lifecycle", () => {
 
 	describe("interruptTurnEffect()", () => {
 		it("closes prompt queue and interrupts query", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -180,7 +180,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("resolves pending approvals with reject", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const resolvedWith: string[] = [];
 			const pending: PendingApproval = {
 				requestId: "perm-1",
@@ -206,7 +206,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("rejects all queued turn deferreds with interrupt reason", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-interrupt-reject");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -243,7 +243,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("rejects pending questions", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const rejected: Error[] = [];
 			const pending: PendingQuestion = {
 				requestId: "q-1",
@@ -267,13 +267,13 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("is a no-op when session does not exist", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			// Should not throw
 			await Effect.runPromise(adapter.interruptTurnEffect("nonexistent"));
 		});
 
 		it("clears in-flight tools", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.inFlightTools.set(0, {
 				itemId: "tool-1",
@@ -292,7 +292,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("cleanupSession with no eventSink skips tool.completed emission", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1", {
 				eventSink: undefined,
 			});
@@ -323,7 +323,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("emits tool.completed events via EventSink for in-flight tools on interrupt", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const sink = createMockEventSink();
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.eventSink = sink;
@@ -365,7 +365,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("treats cancelSessionInteractions as best-effort when it throws synchronously", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const sink = createMockEventSink();
 			sink.cancelSessionInteractions = vi.fn(() => {
 				throw new Error("interaction cancel failed");
@@ -390,7 +390,7 @@ describe("ClaudeAdapter lifecycle", () => {
 
 	describe("resolvePermission()", () => {
 		it("resolves the pending approval's deferred", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const resolvedWith: string[] = [];
 			const pending: PendingApproval = {
 				requestId: "perm-1",
@@ -417,7 +417,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("is a no-op for unknown session", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			// Should not throw
 			await Effect.runPromise(
 				adapter.resolvePermissionEffect("nonexistent", "perm-1", "once"),
@@ -425,7 +425,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("is a no-op for unknown requestId", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -440,7 +440,7 @@ describe("ClaudeAdapter lifecycle", () => {
 
 	describe("endSessionEffect()", () => {
 		it("closes query and removes session from map", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-end");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -458,13 +458,13 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("is a no-op for unknown session", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			// Should not throw
 			await Effect.runPromise(adapter.endSessionEffect("nonexistent"));
 		});
 
 		it("rejects queued turn deferreds with reload reason", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-reject");
 			(
 				adapter as unknown as { sessions: Map<string, ClaudeSessionContext> }
@@ -519,7 +519,7 @@ describe("ClaudeAdapter lifecycle", () => {
 				return calls === 1 ? queryA : queryB;
 			});
 
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: workspace,
 				queryFactory: factory,
 			});
@@ -561,7 +561,7 @@ describe("ClaudeAdapter lifecycle", () => {
 
 	describe("resolveQuestion()", () => {
 		it("resolves the pending question's deferred", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			let resolvedAnswers: Record<string, unknown> | undefined;
 			const pending: PendingQuestion = {
 				requestId: "q-1",
@@ -587,7 +587,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		});
 
 		it("is a no-op for unknown session", async () => {
-			const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+			const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			await Effect.runPromise(
 				adapter.resolveQuestionEffect("nonexistent", "q-1", {}),
 			);

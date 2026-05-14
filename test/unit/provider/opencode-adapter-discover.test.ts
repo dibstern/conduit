@@ -3,7 +3,7 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
@@ -63,13 +63,13 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
-describe("OpenCodeAdapter.discoverEffect()", () => {
+describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeAdapter;
+	let adapter: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 	});
 
 	it("returns providerId = 'opencode'", () => {
@@ -130,7 +130,7 @@ describe("OpenCodeAdapter.discoverEffect()", () => {
 				})),
 			},
 		});
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 
 		const caps = await Effect.runPromise(adapter.discoverEffect());
 		expect(caps.models).toEqual([]);
@@ -144,7 +144,7 @@ describe("OpenCodeAdapter.discoverEffect()", () => {
 				skills: vi.fn(async () => []),
 			},
 		});
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 
 		const caps = await Effect.runPromise(adapter.discoverEffect());
 		expect(caps.commands).toEqual([]);
@@ -158,7 +158,7 @@ describe("OpenCodeAdapter.discoverEffect()", () => {
 				}),
 			},
 		});
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 
 		const result = await Effect.runPromise(
 			Effect.either(adapter.discoverEffect()),
@@ -176,7 +176,7 @@ describe("OpenCodeAdapter.discoverEffect()", () => {
 	});
 
 	it("passes workspace directory for command/skill discovery", async () => {
-		adapter = new OpenCodeAdapter({
+		adapter = new OpenCodeProviderInstance({
 			client,
 			workspaceRoot: "/my/project",
 		});
@@ -188,7 +188,7 @@ describe("OpenCodeAdapter.discoverEffect()", () => {
 	});
 
 	it("omits directory for commands when no workspace", async () => {
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 
 		await Effect.runPromise(adapter.discoverEffect());
 

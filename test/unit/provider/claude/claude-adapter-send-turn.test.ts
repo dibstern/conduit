@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
-import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import type {
 	Query,
 	SDKMessage,
@@ -33,7 +33,7 @@ async function readFirstPromptText(callArgs: unknown): Promise<string> {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-describe("ClaudeAdapter.sendTurn()", () => {
+describe("ClaudeProviderInstance.sendTurn()", () => {
 	let workspace: string;
 	let queryFactorySpy: ReturnType<typeof vi.fn>;
 
@@ -53,7 +53,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -101,7 +101,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			.mockReturnValueOnce(firstQuery)
 			.mockReturnValueOnce(secondQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -203,7 +203,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -300,7 +300,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			.mockReturnValueOnce(oldQuery)
 			.mockReturnValueOnce(newQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -372,7 +372,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			.mockReturnValueOnce(oldQuery)
 			.mockReturnValueOnce(newQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -474,7 +474,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			.mockReturnValueOnce(oldQuery)
 			.mockReturnValueOnce(newQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -553,7 +553,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 		queryFactorySpy = vi.fn(() => query);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -599,7 +599,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -627,7 +627,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -657,7 +657,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -683,7 +683,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -708,7 +708,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -741,7 +741,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			const mockQuery = createMockQuery([resultMsg]);
 			queryFactorySpy = vi.fn(() => mockQuery);
 
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
@@ -772,7 +772,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			const mockQuery = createMockQuery([resultMsg]);
 			queryFactorySpy = vi.fn(() => mockQuery);
 
-			const adapter = new ClaudeAdapter({
+			const adapter = new ClaudeProviderInstance({
 				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
@@ -857,7 +857,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -933,7 +933,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([systemMsg, assistantMsg, resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -993,7 +993,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1023,7 +1023,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([errorResult]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1096,7 +1096,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1133,7 +1133,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 	});
 
 	it("does not leave concurrent callers blocked when session setup fails", async () => {
-		let adapter!: ClaudeAdapter;
+		let adapter!: ClaudeProviderInstance;
 		let secondPromise: Promise<unknown> | undefined;
 
 		const input1 = makeBaseSendTurnInput({
@@ -1153,7 +1153,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			);
 			throw new Error("query setup failed");
 		});
-		adapter = new ClaudeAdapter({
+		adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1180,7 +1180,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1212,7 +1212,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([systemMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1233,7 +1233,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1317,7 +1317,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1402,7 +1402,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1500,7 +1500,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1561,7 +1561,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			return callCount === 1 ? mockQueryA : mockQueryB;
 		});
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1632,7 +1632,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1714,7 +1714,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1760,7 +1760,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 			return callCount === 1 ? queryA : queryB;
 		});
 
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1836,7 +1836,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1897,7 +1897,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -1957,7 +1957,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -2018,7 +2018,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
@@ -2083,7 +2083,7 @@ describe("ClaudeAdapter.sendTurn()", () => {
 		}) as unknown as Query;
 
 		queryFactorySpy = vi.fn(() => mockQuery);
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});

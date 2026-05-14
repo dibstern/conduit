@@ -1,6 +1,6 @@
 // src/lib/provider/claude/types.ts
 /**
- * Types used by the Claude Agent SDK adapter.
+ * Types used by the Claude Agent SDK provider instance.
  *
  * The SDK's `query()` returns a long-lived session: you feed it an
  * AsyncIterable of user messages and read back an AsyncIterable of SDK
@@ -118,7 +118,7 @@ export interface ToolInFlight {
 // ─── Session Context ───────────────────────────────────────────────────────
 
 /**
- * All state for a single Claude session. Owned by ClaudeAdapter and keyed
+ * All state for a single Claude session. Owned by ClaudeProviderInstance and keyed
  * by conduit sessionId. One instance per live SDK `query()`.
  */
 export interface ClaudeSessionContext {

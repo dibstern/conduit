@@ -1,6 +1,6 @@
-// src/lib/provider/claude/claude-adapter.ts
+// src/lib/provider/claude/claude-provider-instance.ts
 /**
- * ClaudeAdapter -- ProviderInstance implementation wrapping the Claude
+ * ClaudeProviderInstance -- ProviderInstance implementation wrapping the Claude
  * Agent SDK (`@anthropic-ai/claude-agent-sdk`).
  *
  * Architectural notes:
@@ -9,7 +9,7 @@
  *   + calls query() + starts a background stream consumer. Subsequent
  *   turns enqueue into the existing queue.
  * - Discovery reads the live model list from a 5-minute TTL cache shared
- *   across adapter instances (see claude-capabilities-probe.ts). The probe
+ *   across provider instances (see claude-capabilities-probe.ts). The probe
  *   spawns a throwaway SDK query, reads initializationResult(), and aborts
  *   before any API call. Nothing persists to disk. Commands and skills are
  *   enumerated from ~/.claude/ and <workspace>/.claude/.
@@ -53,7 +53,7 @@ import type {
 	SDKUserMessage,
 } from "./types.js";
 
-const log = createLogger("claude-adapter");
+const log = createLogger("claude-provider-instance");
 
 function supportsMillionTokenContext(modelId: string): boolean {
 	const normalized = modelId.toLowerCase();
@@ -198,9 +198,9 @@ function enumerateSkills(
 // ─── Turn deferred ─────────────────────────────────────────────────────────
 // Uses the shared Deferred<TurnResult> from the provider utility module.
 
-// ─── Adapter Config ────────────────────────────────────────────────────────
+// ─── Provider Instance Config ──────────────────────────────────────────────
 
-export interface ClaudeAdapterDeps {
+export interface ClaudeProviderInstanceDeps {
 	readonly workspaceRoot: string;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
@@ -209,9 +209,9 @@ export interface ClaudeAdapterDeps {
 	}) => Query;
 }
 
-// ─── ClaudeAdapter ─────────────────────────────────────────────────────────
+// ─── ClaudeProviderInstance ────────────────────────────────────────────────
 
-export class ClaudeAdapter implements ProviderInstance {
+export class ClaudeProviderInstance implements ProviderInstance {
 	readonly providerId = "claude";
 
 	/** Active SDK sessions, keyed by conduit sessionId. */
@@ -238,12 +238,14 @@ export class ClaudeAdapter implements ProviderInstance {
 		new ClaudePermissionBridge();
 
 	/** Injectable query factory (defaults to real SDK). */
-	private readonly queryFactory: NonNullable<ClaudeAdapterDeps["queryFactory"]>;
+	private readonly queryFactory: NonNullable<
+		ClaudeProviderInstanceDeps["queryFactory"]
+	>;
 
-	constructor(private readonly deps: ClaudeAdapterDeps) {
+	constructor(private readonly deps: ClaudeProviderInstanceDeps) {
 		this.queryFactory =
 			deps.queryFactory ??
-			(sdkQuery as NonNullable<ClaudeAdapterDeps["queryFactory"]>);
+			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
 	}
 
 	private mapProviderFailure<A>(
@@ -1049,9 +1051,12 @@ export class ClaudeAdapter implements ProviderInstance {
 
 	private shutdownLocalEffect(): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
-			log.info("ClaudeAdapter shutting down");
+			log.info("ClaudeProviderInstance shutting down");
 			for (const ctx of [...this.sessions.values()]) {
-				yield* this.disposeSessionEffect(ctx, "Adapter shutting down");
+				yield* this.disposeSessionEffect(
+					ctx,
+					"Provider instance shutting down",
+				);
 			}
 			this.sessions.clear(); // safety net
 		});
@@ -1075,7 +1080,7 @@ export class ClaudeAdapter implements ProviderInstance {
 	}
 }
 
-export const ClaudeDriver: ProviderDriver<ClaudeAdapterDeps> = {
+export const ClaudeDriver: ProviderDriver<ClaudeProviderInstanceDeps> = {
 	providerId: "claude",
-	create: (deps) => Effect.sync(() => new ClaudeAdapter(deps)),
+	create: (deps) => Effect.sync(() => new ClaudeProviderInstance(deps)),
 };

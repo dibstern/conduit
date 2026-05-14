@@ -2,7 +2,7 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
@@ -38,13 +38,13 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
-describe("OpenCodeAdapter action methods", () => {
+describe("OpenCodeProviderInstance action methods", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeAdapter;
+	let adapter: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 	});
 
 	describe("interruptTurnEffect", () => {
@@ -63,7 +63,7 @@ describe("OpenCodeAdapter action methods", () => {
 					prompt: vi.fn(async () => {}),
 				},
 			});
-			adapter = new OpenCodeAdapter({ client });
+			adapter = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
 				Effect.either(adapter.interruptTurnEffect("bad-session")),
@@ -127,7 +127,7 @@ describe("OpenCodeAdapter action methods", () => {
 					list: vi.fn(async () => []),
 				},
 			});
-			adapter = new OpenCodeAdapter({ client });
+			adapter = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
 				adapter
@@ -194,7 +194,7 @@ describe("OpenCodeAdapter action methods", () => {
 					list: vi.fn(async () => []),
 				},
 			});
-			adapter = new OpenCodeAdapter({ client });
+			adapter = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
 				adapter

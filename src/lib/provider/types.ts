@@ -160,7 +160,7 @@ export interface SendTurnInput {
 	readonly providerState: Readonly<Record<string, unknown>>;
 	/**
 	 * Optional model selection. If absent, the provider uses its default.
-	 * OpenCodeAdapter skips the model field in the REST call when absent.
+	 * OpenCodeProviderInstance skips the model field in the REST call when absent.
 	 */
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;

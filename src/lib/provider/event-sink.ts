@@ -1,8 +1,8 @@
 // src/lib/provider/event-sink.ts
 // ─── Event Sink Implementation ──────────────────────────────────────────────
-// Wraps EventStore + ProjectionRunner so adapters can push canonical events
+// Wraps EventStore + ProjectionRunner so provider instances can push canonical events
 // without knowing about SQLite internals. Permission and question requests
-// block the adapter's turn loop until the user resolves them.
+// block the provider instance's turn loop until the user resolves them.
 
 import { Effect } from "effect";
 import { createLogger } from "../logger.js";
@@ -145,7 +145,7 @@ export class EventSinkImpl implements EventSink {
 			const stored = this.eventStore.append(event);
 			this.projectionRunner.projectEvent(stored);
 
-			// Unblock the waiting adapter
+			// Unblock the waiting provider instance
 			const deferred = this.pendingPermissions.get(requestId);
 			if (deferred) {
 				this.pendingPermissions.delete(requestId);
@@ -180,7 +180,7 @@ export class EventSinkImpl implements EventSink {
 			const stored = this.eventStore.append(event);
 			this.projectionRunner.projectEvent(stored);
 
-			// Unblock the waiting adapter
+			// Unblock the waiting provider instance
 			const deferred = this.pendingQuestions.get(requestId);
 			if (deferred) {
 				this.pendingQuestions.delete(requestId);

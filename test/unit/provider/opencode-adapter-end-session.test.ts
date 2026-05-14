@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createDeferred } from "../../../src/lib/provider/deferred.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
@@ -38,13 +38,13 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
-describe("OpenCodeAdapter.endSessionEffect()", () => {
+describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 	let client: OpenCodeAPI;
-	let adapter: OpenCodeAdapter;
+	let adapter: OpenCodeProviderInstance;
 
 	beforeEach(() => {
 		client = makeStubClient();
-		adapter = new OpenCodeAdapter({ client });
+		adapter = new OpenCodeProviderInstance({ client });
 	});
 
 	it("is a no-op when there is no pending turn", async () => {

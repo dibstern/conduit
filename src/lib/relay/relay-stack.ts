@@ -294,7 +294,7 @@ export interface ProjectRelay {
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
-	/** Phase 5: Orchestration layer — provider registry, adapter, and engine. */
+	/** Phase 5: Orchestration layer: provider registry, instances, and engine. */
 	orchestration: OrchestrationLayer;
 	/** Effect ManagedRuntime for dispatching through the Effect handler pipeline. */
 	effectRuntime: RelayRuntime;
@@ -389,7 +389,7 @@ export async function createProjectRelay(
 
 	// ── Components ──────────────────────────────────────────────────────────
 
-	// ── Orchestration runtime layer (provider adapter routing) ──────────────
+	// ── Orchestration runtime layer (provider instance routing) ─────────────
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 	});
@@ -658,7 +658,7 @@ export async function createProjectRelay(
 					return yield* Effect.fail(new Error("Relay creation aborted"));
 				}
 				yield* Effect.sync(() => {
-					orchestration.wireSSEToAdapter((event, handler) => {
+					orchestration.wireSSEToInstance((event, handler) => {
 						sseStream.on(event, handler);
 					});
 				});
@@ -794,7 +794,7 @@ export async function createProjectRelay(
 			// Quiesce monitoring before runtime disposal so late status changes
 			// cannot restart message pollers during scoped shutdown.
 			stopMonitoring();
-			// Scoped finalizers own SSE drain, command-gate stop, provider adapter
+			// Scoped finalizers own SSE drain, command-gate stop, provider instance
 			// shutdown, status-poller drain, and other Effect-managed resources.
 			await effectRuntime.dispose();
 			await effectPersistenceRuntime?.dispose();

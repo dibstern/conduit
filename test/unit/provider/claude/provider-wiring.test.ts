@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import {
@@ -28,7 +28,7 @@ describe("Provider wiring with Claude adapter", () => {
 
 	it("registers Claude adapter in ProviderRegistry", () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+		const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 
 		registry.registerInstance(adapter);
 
@@ -38,7 +38,7 @@ describe("Provider wiring with Claude adapter", () => {
 
 	it("lists both providers when both registered", () => {
 		const registry = new ProviderRegistry();
-		const claude = new ClaudeAdapter({ workspaceRoot: workspace });
+		const claude = new ClaudeProviderInstance({ workspaceRoot: workspace });
 
 		// Create a minimal mock for opencode adapter
 		const opencode = {
@@ -74,7 +74,7 @@ describe("Provider wiring with Claude adapter", () => {
 
 	it("OrchestrationEngine dispatches discover to Claude adapter", async () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+		const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 		registry.registerInstance(adapter);
 
 		const engine = new OrchestrationEngine({ registry });
@@ -103,7 +103,7 @@ describe("Provider wiring with Claude adapter", () => {
 
 	it("shutdownAllEffect shuts down Claude adapter", async () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+		const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 		registry.registerInstance(adapter);
 
 		// Should not throw
@@ -112,7 +112,7 @@ describe("Provider wiring with Claude adapter", () => {
 
 	it("session binding tracks provider for session", () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+		const adapter = new ClaudeProviderInstance({ workspaceRoot: workspace });
 		registry.registerInstance(adapter);
 
 		const engine = new OrchestrationEngine({ registry });
@@ -149,7 +149,7 @@ describe("Provider wiring with Claude adapter", () => {
 		);
 	});
 
-	it("end-to-end: dispatch sendTurn through full ProviderRegistry → ClaudeAdapter → mock SDK stack", async () => {
+	it("end-to-end: dispatch sendTurn through full ProviderRegistry → ClaudeProviderInstance → mock SDK stack", async () => {
 		const resultMsg = makeSuccessResult({ total_cost_usd: 0.03 } as Record<
 			string,
 			unknown
@@ -157,9 +157,9 @@ describe("Provider wiring with Claude adapter", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		const queryFactory = vi.fn(() => mockQuery);
 
-		// Wire up the full stack: ProviderRegistry + ClaudeAdapter + OrchestrationEngine
+		// Wire up the full stack: ProviderRegistry + ClaudeProviderInstance + OrchestrationEngine
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({
+		const adapter = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 		});

@@ -10,8 +10,11 @@ import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
-import { ClaudeAdapter, ClaudeDriver } from "./claude/index.js";
-import { OpenCodeAdapter, OpenCodeDriver } from "./opencode-adapter.js";
+import { ClaudeDriver, ClaudeProviderInstance } from "./claude/index.js";
+import {
+	OpenCodeDriver,
+	OpenCodeProviderInstance,
+} from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import type { TurnResult } from "./types.js";
@@ -30,14 +33,14 @@ export interface OrchestrationRuntimeLayerOptions {
 export interface OrchestrationLayer {
 	readonly engine: OrchestrationEngine;
 	readonly registry: ProviderRegistry;
-	readonly adapter: OpenCodeAdapter;
+	readonly openCodeInstance: OpenCodeProviderInstance;
 	/**
 	 * Wire SSE session.status idle events to notifyTurnCompleted().
 	 * Must be called once after the SSEStream is created so that
-	 * OpenCodeAdapter.sendTurnEffect() deferred promises can resolve when
+	 * OpenCodeProviderInstance.sendTurnEffect() deferred promises can resolve when
 	 * the session transitions to idle.
 	 */
-	wireSSEToAdapter(
+	wireSSEToInstance(
 		sseOn: (event: "event", handler: (e: unknown) => void) => void,
 	): void;
 }
@@ -56,7 +59,7 @@ const TURN_COMPLETE_RESULT: TurnResult = {
 interface OrchestrationComponents {
 	readonly engine: OrchestrationEngine;
 	readonly registry: ProviderRegistry;
-	readonly adapter: OpenCodeAdapter;
+	readonly openCodeInstance: OpenCodeProviderInstance;
 }
 
 class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
@@ -69,23 +72,23 @@ function createOrchestrationComponents(
 ): OrchestrationComponents {
 	const registry = new ProviderRegistry();
 
-	const adapter = new OpenCodeAdapter({
+	const openCodeInstance = new OpenCodeProviderInstance({
 		client: options.client,
 		...(options.workspaceRoot != null
 			? { workspaceRoot: options.workspaceRoot }
 			: {}),
 	});
 
-	registry.registerInstance(adapter);
+	registry.registerInstance(openCodeInstance);
 
-	const claudeAdapter = new ClaudeAdapter({
+	const claudeInstance = new ClaudeProviderInstance({
 		workspaceRoot: options.workspaceRoot ?? process.cwd(),
 	});
-	registry.registerInstance(claudeAdapter);
+	registry.registerInstance(claudeInstance);
 
 	const engine = new OrchestrationEngine({ registry });
 
-	return { engine, registry, adapter };
+	return { engine, registry, openCodeInstance };
 }
 
 const createOrchestrationComponentsEffect = (
@@ -93,29 +96,29 @@ const createOrchestrationComponentsEffect = (
 ): Effect.Effect<OrchestrationComponents, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
-		const adapter = (yield* OpenCodeDriver.create({
+		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
 			...(options.workspaceRoot != null
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
-		})) as OpenCodeAdapter;
-		registry.registerInstance(adapter);
+		})) as OpenCodeProviderInstance;
+		registry.registerInstance(openCodeInstance);
 
-		const claudeAdapter = yield* ClaudeDriver.create({
+		const claudeInstance = yield* ClaudeDriver.create({
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
 		});
-		registry.registerInstance(claudeAdapter);
+		registry.registerInstance(claudeInstance);
 
 		const engine = new OrchestrationEngine({ registry });
-		return { engine, registry, adapter };
+		return { engine, registry, openCodeInstance };
 	});
 
 function createOrchestrationView(
 	components: OrchestrationComponents,
 ): OrchestrationLayer {
-	const { adapter, engine, registry } = components;
+	const { openCodeInstance, engine, registry } = components;
 
-	function wireSSEToAdapter(
+	function wireSSEToInstance(
 		sseOn: (event: "event", handler: (e: unknown) => void) => void,
 	): void {
 		sseOn("event", (raw) => {
@@ -130,7 +133,7 @@ function createOrchestrationView(
 				(event as { sessionId?: string }).sessionId;
 			if (sessionId) {
 				try {
-					adapter.notifyTurnCompleted(sessionId, TURN_COMPLETE_RESULT);
+					openCodeInstance.notifyTurnCompleted(sessionId, TURN_COMPLETE_RESULT);
 				} catch (err) {
 					log.error(
 						`notifyTurnCompleted failed for session ${sessionId}: ${err instanceof Error ? err.message : err}`,
@@ -140,7 +143,7 @@ function createOrchestrationView(
 		});
 	}
 
-	return { engine, registry, adapter, wireSSEToAdapter };
+	return { engine, registry, openCodeInstance, wireSSEToInstance };
 }
 
 /**
@@ -194,11 +197,11 @@ export const makeOrchestrationRuntimeLayer = (
 export const getOrchestrationLayer = Effect.gen(function* () {
 	const engine = yield* OrchestrationEngineTag;
 	const registry = yield* ProviderRegistryTag;
-	const adapter = yield* registry.getInstanceEffect("opencode");
-	if (!(adapter instanceof OpenCodeAdapter)) {
+	const openCodeInstance = yield* registry.getInstanceEffect("opencode");
+	if (!(openCodeInstance instanceof OpenCodeProviderInstance)) {
 		return yield* Effect.dieMessage(
-			"opencode provider is not an OpenCodeAdapter",
+			"opencode provider is not an OpenCodeProviderInstance",
 		);
 	}
-	return createOrchestrationView({ engine, registry, adapter });
+	return createOrchestrationView({ engine, registry, openCodeInstance });
 });

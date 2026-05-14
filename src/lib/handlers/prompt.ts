@@ -42,8 +42,8 @@ import type { SendTurnInput, TurnResult } from "../provider/types.js";
 import { isClaudeProvider } from "./model.js";
 import type { PromptOptions } from "./types.js";
 
-// ─── Minimal no-op EventSink for OpenCodeAdapter (which ignores it) ──────────
-// OpenCodeAdapter routes messages via REST + SSE, not EventSink. The sink is
+// ─── Minimal no-op EventSink for OpenCodeProviderInstance (which ignores it) ──────────
+// OpenCodeProviderInstance routes messages via REST + SSE, not EventSink. The sink is
 // required by the SendTurnInput interface but unused on the OpenCode path.
 const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	push: () => Effect.void,

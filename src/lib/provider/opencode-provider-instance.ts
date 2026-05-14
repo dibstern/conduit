@@ -1,5 +1,5 @@
-// src/lib/provider/opencode-adapter.ts
-// ─── OpenCode Provider Adapter ──────────────────────────────────────────────
+// src/lib/provider/opencode-provider-instance.ts
+// ─── OpenCode Provider Instance ─────────────────────────────────────────────
 // Wraps the existing OpenCodeClient REST API behind the ProviderInstance
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
@@ -20,25 +20,25 @@ import type {
 	TurnResult,
 } from "./types.js";
 
-const log = createLogger("opencode-adapter");
+const log = createLogger("opencode-provider-instance");
 
 // ─── Options ────────────────────────────────────────────────────────────────
 
-export interface OpenCodeAdapterOptions {
+export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 }
 
-// ─── OpenCodeAdapter ────────────────────────────────────────────────────────
+// ─── OpenCodeProviderInstance ──────────────────────────────────────────────
 
-export class OpenCodeAdapter implements ProviderInstance {
+export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;
 	private readonly pendingTurns = new Map<string, Deferred<TurnResult>>();
 
-	constructor(options: OpenCodeAdapterOptions) {
+	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
 	}
@@ -197,8 +197,8 @@ export class OpenCodeAdapter implements ProviderInstance {
 	 * is interrupted. Resolves the pending sendTurnEffect() promise.
 	 *
 	 * This is the bridge between the existing SSE-based event flow and the
-	 * new adapter interface. The SSE pipeline continues to own the connection;
-	 * the adapter just waits for notification.
+	 * ProviderInstance interface. The SSE pipeline continues to own the
+	 * connection; the provider instance just waits for notification.
 	 */
 	notifyTurnCompleted(sessionId: string, result: TurnResult): void {
 		const deferred = this.pendingTurns.get(sessionId);
@@ -292,10 +292,10 @@ export class OpenCodeAdapter implements ProviderInstance {
 	}
 
 	private endLocalSession(sessionId: string): void {
-		// OpenCode owns session state server-side. The adapter's only
+		// OpenCode owns session state server-side. The provider instance's only
 		// per-session state is the pending turn deferred; reject it so the
 		// caller unblocks. We do NOT call client.session.abort -- reload is
-		// an adapter-state reset, not a turn cancellation (that's what
+		// a provider-instance state reset, not a turn cancellation (that's what
 		// interruptTurn / "cancel" is for).
 		const deferred = this.pendingTurns.get(sessionId);
 		if (deferred) {
@@ -308,13 +308,13 @@ export class OpenCodeAdapter implements ProviderInstance {
 
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.sync(() => {
-			log.info("OpenCodeAdapter shutting down");
+			log.info("OpenCodeProviderInstance shutting down");
 
 			// Reject all pending turns
 			for (const [sessionId, deferred] of this.pendingTurns) {
 				deferred.reject(
 					new Error(
-						`Adapter shutdown -- turn for session ${sessionId} cancelled`,
+						`Provider instance shutdown -- turn for session ${sessionId} cancelled`,
 					),
 				);
 			}
@@ -323,7 +323,7 @@ export class OpenCodeAdapter implements ProviderInstance {
 	}
 }
 
-export const OpenCodeDriver: ProviderDriver<OpenCodeAdapterOptions> = {
+export const OpenCodeDriver: ProviderDriver<OpenCodeProviderInstanceOptions> = {
 	providerId: "opencode",
-	create: (options) => Effect.sync(() => new OpenCodeAdapter(options)),
+	create: (options) => Effect.sync(() => new OpenCodeProviderInstance(options)),
 };

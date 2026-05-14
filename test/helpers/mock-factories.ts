@@ -451,8 +451,8 @@ export function createMockProjectRelay(
 				shutdown: vi.fn().mockResolvedValue(undefined),
 			},
 			registry: {} as OrchestrationLayer["registry"],
-			adapter: {} as OrchestrationLayer["adapter"],
-			wireSSEToAdapter: vi.fn(),
+			openCodeInstance: {} as OrchestrationLayer["openCodeInstance"],
+			wireSSEToInstance: vi.fn(),
 		} as unknown as OrchestrationLayer,
 		effectRuntime: {
 			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],

@@ -12,7 +12,7 @@
  *   4. Bridge awaits either the sink promise or the abort signal
  *   5. Bridge returns the SDK PermissionResult
  *
- * The bridge exposes `resolvePermission()` so the adapter can route the
+ * The bridge exposes `resolvePermission()` so the provider instance can route the
  * UI's decision back to the bridge. Internally this just completes the
  * pending entry -- the actual SDK callback is unblocked by the EventSink's
  * requestPermission() Effect resolution.
@@ -168,7 +168,7 @@ export class ClaudePermissionBridge {
 	}
 
 	/**
-	 * Called by the adapter's resolvePermission() to deliver a UI decision
+	 * Called by the provider instance's resolvePermission() to deliver a UI decision
 	 * into the pending canUseTool callback. This resolves the PendingApproval's
 	 * deferred, but the primary resolution path is through the EventSink.
 	 */

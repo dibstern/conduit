@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { ClaudeAdapter } from "../../../src/lib/provider/claude/claude-adapter.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 
 function makeStubClient(): OpenCodeAPI {
@@ -32,10 +32,10 @@ describe("orchestration scoped layer", () => {
 
 	it("shuts down registered adapters when the runtime is disposed", async () => {
 		const opencodeShutdown = vi
-			.spyOn(OpenCodeAdapter.prototype, "shutdownEffect")
+			.spyOn(OpenCodeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
 		const claudeShutdown = vi
-			.spyOn(ClaudeAdapter.prototype, "shutdownEffect")
+			.spyOn(ClaudeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
