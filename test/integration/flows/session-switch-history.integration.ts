@@ -33,7 +33,7 @@ describe("Integration: Session Switch History", () => {
 
 		// Create a fresh session to avoid cross-test cache contamination
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Test1 Session A" });
+		await client.createSession("Test1 Session A");
 		const freshSession = await client.waitFor("session_switched");
 		const sessionA = freshSession["id"] as string;
 
@@ -59,13 +59,13 @@ describe("Integration: Session Switch History", () => {
 		client.clearReceived();
 
 		// Create a new session (auto-switches away from session A)
-		client.send({ type: "new_session", title: "Switch Away Target" });
+		await client.createSession("Switch Away Target");
 		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 		client.clearReceived();
 
 		// Switch back to session A
-		client.send({ type: "switch_session", sessionId: sessionA });
+		await client.switchSession(sessionA);
 
 		// Should receive session_switched for session A
 		const switchedBack = await client.waitFor("session_switched");
@@ -104,7 +104,7 @@ describe("Integration: Session Switch History", () => {
 
 		// Create a fresh session to avoid cross-test cache contamination
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Test2 Session A" });
+		await client.createSession("Test2 Session A");
 		const freshSession = await client.waitFor("session_switched");
 		const sessionA = freshSession["id"] as string;
 
@@ -133,10 +133,7 @@ describe("Integration: Session Switch History", () => {
 		await new Promise((r) => setTimeout(r, 200));
 
 		// ── Switch away mid-stream ──────────────────────────────────────
-		client.send({
-			type: "new_session",
-			title: "Mid-Stream Switch Target",
-		});
+		await client.createSession("Mid-Stream Switch Target");
 		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 
@@ -147,7 +144,7 @@ describe("Integration: Session Switch History", () => {
 
 		// ── Switch back ─────────────────────────────────────────────────
 		client.clearReceived();
-		client.send({ type: "switch_session", sessionId: sessionA });
+		await client.switchSession(sessionA);
 
 		const switchedBack = await client.waitFor("session_switched", {
 			predicate: (m) => m["id"] === sessionA,
@@ -254,18 +251,18 @@ describe("Integration: Session Switch History", () => {
 
 		// Create session B (no messages sent to it)
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Empty Session B" });
+		await client.createSession("Empty Session B");
 		const switchedB = await client.waitFor("session_switched");
 		const sessionB = switchedB["id"] as string;
 
 		// Create session C to switch away from B
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Empty Session C" });
+		await client.createSession("Empty Session C");
 		await client.waitFor("session_switched");
 		client.clearReceived();
 
 		// Switch back to session B
-		client.send({ type: "switch_session", sessionId: sessionB });
+		await client.switchSession(sessionB);
 		const switchedBack = await client.waitFor("session_switched", {
 			predicate: (m) => m["id"] === sessionB,
 		});
@@ -304,10 +301,7 @@ describe("Integration: Session Switch History", () => {
 		// both get session_list broadcast)
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({
-			type: "new_session",
-			title: "Multi-Client History Test",
-		});
+		await client1.createSession("Multi-Client History Test");
 		const switchedB = await client1.waitFor("session_switched");
 		// client2 receives session_list (not session_switched)
 		await client2.waitFor("session_list");
@@ -316,7 +310,7 @@ describe("Integration: Session Switch History", () => {
 		client2.clearReceived();
 
 		// client1 switches back to session A — per-tab, only client1 gets the switch
-		client1.send({ type: "switch_session", sessionId: sessionA });
+		await client1.switchSession(sessionA);
 
 		const switched1 = await client1.waitFor("session_switched", {
 			predicate: (m) => m["id"] === sessionA,
@@ -348,20 +342,20 @@ describe("Integration: Session Switch History", () => {
 
 		// Create sessions B and C
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Rapid B" });
+		await client.createSession("Rapid B");
 		const switchedB = await client.waitFor("session_switched");
 		const sessionB = switchedB["id"] as string;
 
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Rapid C" });
+		await client.createSession("Rapid C");
 		const switchedC = await client.waitFor("session_switched");
 		const sessionC = switchedC["id"] as string;
 
 		// Fire 3 rapid switch_session commands without awaiting between sends
 		client.clearReceived();
-		client.send({ type: "switch_session", sessionId: sessionB });
-		client.send({ type: "switch_session", sessionId: sessionA });
-		client.send({ type: "switch_session", sessionId: sessionC });
+		await client.switchSession(sessionB);
+		await client.switchSession(sessionA);
+		await client.switchSession(sessionC);
 
 		// Wait for the final switch to complete (sessionC)
 		await client.waitFor("session_switched", {

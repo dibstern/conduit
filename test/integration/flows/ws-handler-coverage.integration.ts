@@ -70,7 +70,7 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({ type: "new_session", title: "Integration Test New" });
+		await client.createSession("Integration Test New");
 		const msg = await client.waitFor("session_switched", { timeout: 5000 });
 		expect(msg["id"]).toBeTruthy();
 		await client.close();
@@ -147,11 +147,7 @@ describe("Integration: WS Handler Coverage", () => {
 		await client2.waitForInitialState();
 		const sessionId = client1.getActiveSessionId();
 		if (!sessionId) throw new Error("Expected active session after init");
-		client2.send({ type: "view_session", sessionId });
-		await client2.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (msg) => msg["id"] === sessionId,
-		});
+		await client2.viewSession(sessionId);
 		client1.clearReceived();
 		client2.clearReceived();
 

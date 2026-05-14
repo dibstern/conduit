@@ -169,7 +169,7 @@ describe("Integration: Model Selection", () => {
 		await client.waitFor("model_info");
 
 		// Create a new session — should reset model selection
-		client.send({ type: "new_session", title: "Model Reset Test" });
+		await client.createSession("Model Reset Test");
 		await client.waitFor("session_switched");
 
 		// Let the session fully initialize before sending a message

@@ -66,7 +66,7 @@ describe("Integration: Multi-Client", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({ type: "new_session", title: "Multi-Client Test Session" });
+		await client1.createSession("Multi-Client Test Session");
 
 		// The creating client should get session_switched
 		const switched1 = await client1.waitFor("session_switched", {

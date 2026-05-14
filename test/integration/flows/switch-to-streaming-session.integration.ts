@@ -53,10 +53,7 @@ describe("Integration: Switch to Streaming Session", () => {
 
 		// ── Step 2: Switch away to a new Session B ──────────────────
 		client.clearReceived();
-		client.send({
-			type: "new_session",
-			title: "Streaming Bug Test - Session B",
-		});
+		await client.createSession("Streaming Bug Test - Session B");
 		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 
@@ -66,7 +63,7 @@ describe("Integration: Switch to Streaming Session", () => {
 
 		// ── Step 3: Switch back to Session A ────────────────────────
 		client.clearReceived();
-		client.send({ type: "switch_session", sessionId: sessionA });
+		await client.switchSession(sessionA);
 
 		// Should receive session_switched for Session A
 		const switchedBack = await client.waitFor("session_switched");
@@ -120,16 +117,13 @@ describe("Integration: Switch to Streaming Session", () => {
 
 		// ── Switch away briefly ─────────────────────────────────────
 		client.clearReceived();
-		client.send({
-			type: "new_session",
-			title: "Cache+Live Test - Session B",
-		});
+		await client.createSession("Cache+Live Test - Session B");
 		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 
 		// ── Switch back ─────────────────────────────────────────────
 		client.clearReceived();
-		client.send({ type: "switch_session", sessionId: sessionA });
+		await client.switchSession(sessionA);
 
 		const switchedBack = await client.waitFor("session_switched");
 		expect(switchedBack["id"]).toBe(sessionA);

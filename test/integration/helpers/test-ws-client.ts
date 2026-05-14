@@ -143,6 +143,130 @@ export class TestWsClient {
 		}
 	}
 
+	async createSession(title?: string): Promise<ReceivedMessage> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			const result = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						return yield* client.CreateSession({
+							projectSlug: "integration-test",
+							originId: clientId,
+							...(title != null ? { title } : {}),
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+			return await this.waitFor("session_switched", {
+				predicate: (msg) => msg["id"] === result.sessionId,
+			});
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async viewSession(sessionId: string): Promise<ReceivedMessage> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.ViewSession({
+							projectSlug: "integration-test",
+							sessionId,
+							originId: clientId,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+			return await this.waitFor("session_switched", {
+				predicate: (msg) => msg["id"] === sessionId,
+			});
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async switchSession(sessionId: string): Promise<ReceivedMessage> {
+		return await this.viewSession(sessionId);
+	}
+
+	async deleteSession(sessionId: string): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.DeleteSession({
+							projectSlug: "integration-test",
+							sessionId,
+							originId: clientId,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async forkSession(
+		opts: { readonly sessionId?: string; readonly messageId?: string } = {},
+	): Promise<ReceivedMessage> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			const result = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						return yield* client.ForkSession({
+							projectSlug: "integration-test",
+							originId: clientId,
+							...(opts.sessionId != null ? { sessionId: opts.sessionId } : {}),
+							...(opts.messageId != null ? { messageId: opts.messageId } : {}),
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+			return await this.waitFor("session_switched", {
+				predicate: (msg) => msg["id"] === result.sessionId,
+			});
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
 	async syncInputDraft(
 		text: string,
 		opts: {

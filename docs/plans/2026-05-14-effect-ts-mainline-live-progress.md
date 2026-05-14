@@ -304,3 +304,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Kept the shared permission/question Effect helpers for `RespondPermission`, `AnswerQuestion`, and `RejectQuestion` RPC server handlers.
 - Updated question-flow Playwright coverage to drive user prompts through `SendMessage` RPC and assert `AnswerQuestion` / `RejectQuestion` RPC requests instead of raw browser WS command envelopes.
 - Verified locally with `pnpm check`, `pnpm lint`, targeted router/schema/store/RPC unit tests, `pnpm build:frontend`, question-flow Playwright, and `git diff --check`.
+
+2026-05-14, session lifecycle integration RPC migration:
+
+- Added `TestWsClient` helpers for `CreateSession`, `ViewSession` / `SwitchSession`, `DeleteSession`, and `ForkSession` over the existing Effect RPC socket.
+- Moved the main relay integration flows off raw `new_session`, `switch_session`, `view_session`, and `delete_session` browser WS sends while preserving event-WS assertions for pushed `session_switched`, status, history, and session-list messages.
+- Left `test/integration/relay/sse-aware-poller-gating.test.ts` on raw `view_session` for now; its custom accelerated relay harness timed out when moved to the generic RPC helper and needs a separate harness-specific RPC pass.
+- Verified locally with `pnpm check`, `pnpm lint`, `git diff --check`, and the targeted 7-file relay integration subset. The attempted `sse-aware-poller-gating` RPC conversion failed by timeout and was reverted.
