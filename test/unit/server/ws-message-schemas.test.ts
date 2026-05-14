@@ -16,15 +16,6 @@ import {
 // ─── Decode helper (Effect-based) ──────────────────────────────────────────
 
 describe("decodeWsMessage", () => {
-	it.effect("decodes terminal_command with action", () =>
-		Effect.gen(function* () {
-			const raw = { type: "terminal_command", action: "list" };
-			const decoded = yield* decodeWsMessage(raw);
-			expect(decoded.type).toBe("terminal_command");
-			expect((decoded as any).action).toBe("list");
-		}),
-	);
-
 	it.effect("decodes switch_session with sessionId", () =>
 		Effect.gen(function* () {
 			const raw = { type: "switch_session", sessionId: "sess-123" };
@@ -76,20 +67,6 @@ describe("decodeWsMessage", () => {
 			const decoded = yield* decodeWsMessage(raw);
 			expect(decoded.type).toBe("pty_input");
 			expect((decoded as any).data).toBe("ls\n");
-		}),
-	);
-
-	it.effect("decodes pty_resize with optional cols/rows", () =>
-		Effect.gen(function* () {
-			const raw = {
-				type: "pty_resize",
-				ptyId: "pty-1",
-				cols: 120,
-				rows: 40,
-			};
-			const decoded = yield* decodeWsMessage(raw);
-			expect((decoded as any).cols).toBe(120);
-			expect((decoded as any).rows).toBe(40);
 		}),
 	);
 
@@ -151,15 +128,19 @@ describe("IncomingWsMessage schema rejections", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("rejects terminal_command missing action", () => {
-		const raw = { type: "terminal_command" };
+	it("rejects pty_input missing ptyId", () => {
+		const raw = { type: "pty_input", data: "ls\n" };
 		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("rejects pty_input missing ptyId", () => {
-		const raw = { type: "pty_input", data: "ls\n" };
-		const result = Schema.decodeUnknownEither(IncomingWsMessage)(raw);
+	it.each([
+		"terminal_command",
+		"pty_create",
+		"pty_resize",
+		"pty_close",
+	])("rejects retired terminal control message %s", (type) => {
+		const result = Schema.decodeUnknownEither(IncomingWsMessage)({ type });
 		expect(Either.isLeft(result)).toBe(true);
 	});
 });
@@ -177,14 +158,10 @@ describe("IncomingWsMessage coverage", () => {
 		"switch_session",
 		"delete_session",
 		"fork_session",
-		"terminal_command",
 		"add_project",
 		"remove_project",
 		"rename_project",
-		"pty_create",
 		"pty_input",
-		"pty_resize",
-		"pty_close",
 		"instance_add",
 		"instance_remove",
 		"instance_start",
@@ -208,14 +185,10 @@ describe("IncomingWsMessage coverage", () => {
 		switch_session: { sessionId: "s1" },
 		delete_session: { sessionId: "s1" },
 		fork_session: {},
-		terminal_command: { action: "list" },
 		add_project: { directory: "/tmp" },
 		remove_project: { slug: "s" },
 		rename_project: { slug: "s", title: "t" },
-		pty_create: {},
 		pty_input: { ptyId: "p1", data: "x" },
-		pty_resize: { ptyId: "p1" },
-		pty_close: { ptyId: "p1" },
 		instance_add: { name: "n" },
 		instance_remove: { instanceId: "i1" },
 		instance_start: { instanceId: "i1" },

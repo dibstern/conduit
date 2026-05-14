@@ -2,6 +2,7 @@
 // Terminal tabs, PTY state, scrollback buffers.
 // Uses callback pattern for high-throughput PTY output (not reactive).
 
+import type { PtyListResponse } from "../transport/ws-rpc.js";
 import type { RelayMessage, TabEntry } from "../types.js";
 import { STATUS_MESSAGE_MS } from "../ui-constants.js";
 
@@ -159,6 +160,20 @@ export function handlePtyList(
 	}
 }
 
+export function applyPtyListResponse(response: PtyListResponse): void {
+	handlePtyList({
+		type: "pty_list",
+		ptys: response.ptys.map((pty) => ({
+			id: pty.id,
+			title: pty.title,
+			command: pty.command,
+			cwd: pty.cwd,
+			status: pty.status,
+			pid: pty.pid,
+		})),
+	});
+}
+
 export function handlePtyCreated(
 	msg: Extract<RelayMessage, { type: "pty_created" }>,
 ): void {
@@ -288,18 +303,13 @@ export function handlePtyError(
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-/** Request a new terminal tab (sends pty_create). */
-export function requestCreateTab(
-	sendFn: (data: Record<string, unknown>) => void,
-): void {
-	if (terminalState.pendingCreate) return;
-	if (terminalState.tabs.size >= terminalState.maxTabs) return;
+export function beginCreateTab(): boolean {
+	if (terminalState.pendingCreate) return false;
+	if (terminalState.tabs.size >= terminalState.maxTabs) return false;
 
 	terminalState.pendingCreate = true;
 	terminalState.statusMessage = "Creating terminal...";
-	sendFn({ type: "pty_create" });
 
-	// Timeout for creation
 	pendingCreateTimer = setTimeout(() => {
 		if (terminalState.pendingCreate) {
 			terminalState.pendingCreate = false;
@@ -309,16 +319,17 @@ export function requestCreateTab(
 			}, STATUS_MESSAGE_MS);
 		}
 	}, PENDING_CREATE_TIMEOUT_MS);
+
+	return true;
 }
 
-/** Close a terminal tab (sends pty_close). */
-export function requestCloseTab(
-	ptyId: string,
-	sendFn: (data: Record<string, unknown>) => void,
-): void {
-	sendFn({ type: "pty_close", ptyId });
-	// Optimistic removal
-	handlePtyDeleted({ type: "pty_deleted", ptyId });
+export function failCreateTab(message = "Terminal creation failed"): void {
+	handlePtyError({
+		type: "error",
+		sessionId: "",
+		code: "PTY_CREATE_FAILED",
+		message,
+	});
 }
 
 /** Switch to a different tab. */
@@ -340,20 +351,12 @@ export function renameTab(ptyId: string, title: string): void {
 
 /**
  * Toggle terminal panel open/closed.
- * When opening with no tabs, auto-creates a terminal (like claude-relay).
- * Requires a sendFn to send pty_create if needed.
  */
-export function togglePanel(
-	sendFn?: (data: Record<string, unknown>) => void,
-): void {
+export function togglePanel(): void {
 	if (terminalState.panelOpen) {
 		terminalState.panelOpen = false;
 	} else {
 		terminalState.panelOpen = true;
-		// Auto-create a terminal if no tabs exist
-		if (terminalState.tabs.size === 0 && sendFn) {
-			requestCreateTab(sendFn);
-		}
 	}
 }
 

@@ -111,6 +111,15 @@ export const TodoItemSchema = Schema.Struct({
 	status: Schema.Literal("pending", "in_progress", "completed", "cancelled"),
 });
 
+export const PtyInfoSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	command: Schema.String,
+	cwd: Schema.String,
+	status: Schema.Literal("running", "exited"),
+	pid: Schema.Number,
+});
+
 const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
@@ -271,6 +280,11 @@ export const DetectProxyResponseSchema = Schema.Struct({
 	port: Schema.Number,
 });
 
+export const PtyListResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	ptys: Schema.Array(PtyInfoSchema),
+});
+
 export const ListDirectoriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	path: Schema.String,
@@ -317,6 +331,8 @@ export type OpenCodeInstance = typeof OpenCodeInstanceSchema.Type;
 export type InstanceListResponse = typeof InstanceListResponseSchema.Type;
 export type ScanNowResponse = typeof ScanNowResponseSchema.Type;
 export type DetectProxyResponse = typeof DetectProxyResponseSchema.Type;
+export type PtyInfo = typeof PtyInfoSchema.Type;
+export type PtyListResponse = typeof PtyListResponseSchema.Type;
 export type ListDirectoriesResponse = typeof ListDirectoriesResponseSchema.Type;
 export type TodoItem = typeof TodoItemSchema.Type;
 export type GetTodoResponse = typeof GetTodoResponseSchema.Type;
@@ -498,6 +514,45 @@ export class DetectProxy extends Schema.TaggedRequest<DetectProxy>()(
 		},
 	},
 ) {}
+
+export class ListPtys extends Schema.TaggedRequest<ListPtys>()("ListPtys", {
+	failure: WsRpcError,
+	success: PtyListResponseSchema,
+	payload: {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+	},
+}) {}
+
+export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+	},
+}) {}
+
+export class ResizePty extends Schema.TaggedRequest<ResizePty>()("ResizePty", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {
+		projectSlug: NonEmptyString,
+		ptyId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+		cols: Schema.optional(Schema.Number),
+		rows: Schema.optional(Schema.Number),
+	},
+}) {}
+
+export class ClosePty extends Schema.TaggedRequest<ClosePty>()("ClosePty", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {
+		projectSlug: NonEmptyString,
+		ptyId: NonEmptyString,
+	},
+}) {}
 
 export class ListDirectories extends Schema.TaggedRequest<ListDirectories>()(
 	"ListDirectories",
@@ -878,6 +933,10 @@ export const WsRpcRequest = Schema.Union(
 	RenameInstance,
 	ScanNow,
 	DetectProxy,
+	ListPtys,
+	CreatePty,
+	ResizePty,
+	ClosePty,
 	ListSessions,
 	CreateSession,
 	ViewSession,
@@ -923,6 +982,10 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameInstance),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
+	Rpc.fromTaggedRequest(ListPtys),
+	Rpc.fromTaggedRequest(CreatePty),
+	Rpc.fromTaggedRequest(ResizePty),
+	Rpc.fromTaggedRequest(ClosePty),
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),

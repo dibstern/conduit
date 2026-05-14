@@ -2,28 +2,16 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
-	LoggerTag,
-	WebSocketHandlerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import {
-	handlePtyClose,
-	handlePtyInput,
-	handlePtyResize,
-} from "../../../src/lib/handlers/terminal.js";
-import {
-	makeMockLogger,
-	makeMockWebSocketHandler,
-} from "../../helpers/mock-factories.js";
+import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 
 const makeTerminalService = (
 	overrides?: Partial<OpenCodeTerminalService>,
 ): OpenCodeTerminalService => ({
 	create: vi.fn(() => Effect.void),
-	list: vi.fn(() => Effect.void),
+	list: vi.fn(() => Effect.succeed([])),
 	replay: vi.fn(() => Effect.void),
 	sendInput: vi.fn(() => Effect.void),
 	close: vi.fn(() => Effect.void),
@@ -45,53 +33,6 @@ describe("terminal handlers with Effect-native terminal service", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(terminal.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"closes PTYs through the terminal service without requiring the OpenCode API tag",
-		() => {
-			const terminal = makeTerminalService();
-			const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-			return handlePtyClose("client-1", { ptyId: "pty-1" }).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(terminal.close).toHaveBeenCalledWith("pty-1");
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"resizes PTYs through the terminal service without requiring the OpenCode API tag",
-		() => {
-			const terminal = makeTerminalService();
-			const ws = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
-			const log = makeMockLogger();
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeTerminalServiceTag, terminal),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-			);
-
-			return handlePtyResize("client-1", {
-				ptyId: "pty-1",
-				rows: 40,
-				cols: 120,
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(terminal.resize).toHaveBeenCalledWith(
-						"client-1",
-						"pty-1",
-						40,
-						120,
-					);
 				}),
 			);
 		},

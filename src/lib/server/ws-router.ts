@@ -15,14 +15,10 @@ export type IncomingMessageType =
 	| "switch_session"
 	| "delete_session"
 	| "fork_session"
-	| "terminal_command"
 	| "add_project"
 	| "remove_project"
 	| "rename_project"
-	| "pty_create"
 	| "pty_input"
-	| "pty_resize"
-	| "pty_close"
 	| "instance_add"
 	| "instance_remove"
 	| "instance_start"
@@ -43,14 +39,10 @@ const VALID_MESSAGE_TYPES = new Set<string>([
 	"switch_session",
 	"delete_session",
 	"fork_session",
-	"terminal_command",
 	"add_project",
 	"remove_project",
 	"rename_project",
-	"pty_create",
 	"pty_input",
-	"pty_resize",
-	"pty_close",
 	"instance_add",
 	"instance_remove",
 	"instance_start",

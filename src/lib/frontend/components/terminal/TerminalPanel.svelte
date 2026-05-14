@@ -10,13 +10,16 @@
 		terminalState,
 		getTabList,
 		getCanCreateTab,
-		requestCreateTab,
-		requestCloseTab,
+		beginCreateTab,
+		failCreateTab,
+		handlePtyDeleted,
 		switchTab,
 		renameTab,
 		closePanel,
 	} from "../../stores/terminal.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import TerminalTab from "./TerminalTab.svelte";
 
 	// ─── Props ────────────────────────────────────────────────────────────────
@@ -77,21 +80,38 @@
 	}
 
 	function handleFontSizeResize(size: { cols: number; rows: number }) {
-		// When font size changes the active tab's dimensions, inform the server
-		if (activeTabId) {
-			wsSend({ type: "pty_resize", ptyId: activeTabId, cols: size.cols, rows: size.rows });
+		const projectSlug = getCurrentSlug();
+		if (activeTabId && projectSlug) {
+			void resizePtyRpc({
+				projectSlug,
+				ptyId: activeTabId,
+				originId: getBrowserClientId(),
+				cols: size.cols,
+				rows: size.rows,
+			}).catch(() => undefined);
 		}
 	}
 
 	// ─── Actions ───────────────────────────────────────────────────────────────
 
 	function handleNewTab() {
-		requestCreateTab(wsSend);
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug || !beginCreateTab()) return;
+		void createPtyRpc({
+			projectSlug,
+			originId: getBrowserClientId(),
+		}).catch(() => {
+			failCreateTab("Failed to create terminal");
+		});
 	}
 
 	function handleCloseTab(e: MouseEvent, ptyId: string) {
 		e.stopPropagation();
-		requestCloseTab(ptyId, wsSend);
+		const projectSlug = getCurrentSlug();
+		if (projectSlug) {
+			void closePtyRpc({ projectSlug, ptyId }).catch(() => undefined);
+		}
+		handlePtyDeleted({ type: "pty_deleted", ptyId });
 	}
 
 	function handleSwitchTab(ptyId: string) {

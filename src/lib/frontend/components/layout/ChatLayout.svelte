@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
@@ -49,13 +49,14 @@
 	} from "../../stores/ws.svelte.js";
 	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
-	import { terminalState, destroyAll } from "../../stores/terminal.svelte.js";
+	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
@@ -386,8 +387,12 @@
 					.catch(() => {
 						showToast("Failed to load file tree", { variant: "error" });
 					});
-				// Request existing terminal sessions so the panel can show them
-				wsSend({ type: "terminal_command", action: "list" });
+				void listPtysRpc({
+					projectSlug: slug,
+					originId: getBrowserClientId(),
+				})
+					.then(applyPtyListResponse)
+					.catch(() => undefined);
 			});
 
 			connect(slug);

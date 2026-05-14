@@ -6,6 +6,8 @@ import {
 	AddProject,
 	AnswerQuestion,
 	CancelSession,
+	ClosePty,
+	CreatePty,
 	CreateSession,
 	DeleteSession,
 	DetectProxy,
@@ -20,6 +22,7 @@ import {
 	GetTodo,
 	GetToolContent,
 	ListDirectories,
+	ListPtys,
 	ListSessions,
 	LoadMoreHistory,
 	RejectQuestion,
@@ -29,6 +32,7 @@ import {
 	RenameInstance,
 	RenameProject,
 	RenameSession,
+	ResizePty,
 	RespondPermission,
 	RewindSession,
 	ScanNow,
@@ -218,6 +222,23 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						found: true,
 						port: 8317,
 					}),
+				ListPtys: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						ptys: [
+							{
+								id: "pty-1",
+								title: "Shell",
+								command: "zsh",
+								cwd: "/tmp/demo",
+								status: "running" as const,
+								pid: 123,
+							},
+						],
+					}),
+				CreatePty: () => Effect.succeed({ ok: true as const }),
+				ResizePty: () => Effect.succeed({ ok: true as const }),
+				ClosePty: () => Effect.succeed({ ok: true as const }),
 				CreateSession: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -347,6 +368,10 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("RenameInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("ScanNow")).toBe(true);
 		expect(WsRpcGroup.requests.has("DetectProxy")).toBe(true);
+		expect(WsRpcGroup.requests.has("ListPtys")).toBe(true);
+		expect(WsRpcGroup.requests.has("CreatePty")).toBe(true);
+		expect(WsRpcGroup.requests.has("ResizePty")).toBe(true);
+		expect(WsRpcGroup.requests.has("ClosePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
@@ -492,6 +517,49 @@ describe("browser WebSocket RPC contract", () => {
 					found: true,
 					port: 8317,
 				});
+
+				expect(
+					yield* client.ListPtys({
+						projectSlug: "demo",
+						originId: "browser-tab-a",
+					}),
+				).toEqual({
+					projectSlug: "demo",
+					ptys: [
+						{
+							id: "pty-1",
+							title: "Shell",
+							command: "zsh",
+							cwd: "/tmp/demo",
+							status: "running",
+							pid: 123,
+						},
+					],
+				});
+
+				expect(
+					yield* client.CreatePty({
+						projectSlug: "demo",
+						originId: "browser-tab-a",
+					}),
+				).toEqual({ ok: true });
+
+				expect(
+					yield* client.ResizePty({
+						projectSlug: "demo",
+						originId: "browser-tab-a",
+						ptyId: "pty-1",
+						cols: 120,
+						rows: 40,
+					}),
+				).toEqual({ ok: true });
+
+				expect(
+					yield* client.ClosePty({
+						projectSlug: "demo",
+						ptyId: "pty-1",
+					}),
+				).toEqual({ ok: true });
 
 				const directories = yield* client.ListDirectories({
 					projectSlug: "demo",
@@ -790,6 +858,30 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("RenameInstance");
 		expect(new ScanNow({ projectSlug: "demo" })._tag).toBe("ScanNow");
 		expect(new DetectProxy({ projectSlug: "demo" })._tag).toBe("DetectProxy");
+		expect(
+			new ListPtys({
+				projectSlug: "demo",
+				originId: "browser-tab-a",
+			})._tag,
+		).toBe("ListPtys");
+		expect(
+			new CreatePty({
+				projectSlug: "demo",
+				originId: "browser-tab-a",
+			})._tag,
+		).toBe("CreatePty");
+		expect(
+			new ResizePty({
+				projectSlug: "demo",
+				ptyId: "pty-1",
+			})._tag,
+		).toBe("ResizePty");
+		expect(
+			new ClosePty({
+				projectSlug: "demo",
+				ptyId: "pty-1",
+			})._tag,
+		).toBe("ClosePty");
 		expect(
 			new CreateSession({
 				projectSlug: "demo",

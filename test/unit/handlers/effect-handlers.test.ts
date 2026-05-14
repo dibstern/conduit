@@ -104,11 +104,7 @@ import {
 	handleGetCommands,
 	handleGetProjects,
 } from "../../../src/lib/handlers/settings.js";
-import {
-	handlePtyClose,
-	handlePtyInput,
-	handlePtyResize,
-} from "../../../src/lib/handlers/terminal.js";
+import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -1036,7 +1032,7 @@ function mockTerminalService(
 ): OpenCodeTerminalService {
 	return {
 		create: vi.fn(() => Effect.void),
-		list: vi.fn(() => Effect.void),
+		list: vi.fn(() => Effect.succeed([])),
 		replay: vi.fn(() => Effect.void),
 		sendInput: vi.fn(() => Effect.void),
 		close: vi.fn(() => Effect.void),
@@ -1469,68 +1465,6 @@ describe("handlePtyInput", () => {
 			}),
 		);
 	});
-});
-
-describe("handlePtyClose", () => {
-	it.effect("closes PTY through terminal service", () => {
-		const terminal = mockTerminalService();
-
-		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-		return handlePtyClose("client-1", { ptyId: "pty-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(terminal.close).toHaveBeenCalledWith("pty-1");
-			}),
-		);
-	});
-});
-
-describe("handlePtyResize", () => {
-	it.effect("resizes PTY through terminal service", () => {
-		const terminal = mockTerminalService();
-
-		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-		return handlePtyResize("client-1", {
-			ptyId: "pty-1",
-			cols: 120,
-			rows: 40,
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(terminal.resize).toHaveBeenCalledWith(
-					"client-1",
-					"pty-1",
-					40,
-					120,
-				);
-			}),
-		);
-	});
-
-	it.effect(
-		"defaults resize dimensions before calling terminal service",
-		() => {
-			const terminal = mockTerminalService();
-
-			const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-			return handlePtyResize("client-1", {
-				ptyId: "pty-1",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(terminal.resize).toHaveBeenCalledWith(
-						"client-1",
-						"pty-1",
-						24,
-						80,
-					);
-				}),
-			);
-		},
-	);
 });
 
 // ─── Instance handler tests ───────────────────────────────────────────────

@@ -10,7 +10,10 @@
 		onOutput,
 		getScrollback,
 	} from "../../stores/terminal.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
+	import { resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import { XtermAdapter, ANSI_THEME } from "../../utils/xterm-adapter.js";
 	import {
 		themeState,
@@ -33,6 +36,18 @@
 	let containerEl: HTMLDivElement;
 	let adapter = $state<XtermAdapter | null>(null);
 
+	function sendResize(size: { cols: number; rows: number }) {
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		void resizePtyRpc({
+			projectSlug,
+			ptyId,
+			originId: getBrowserClientId(),
+			cols: size.cols,
+			rows: size.rows,
+		}).catch(() => undefined);
+	}
+
 	onMount(() => {
 		const xterm = new XtermAdapter(fontSize ? { fontSize } : undefined);
 		adapter = xterm;
@@ -51,7 +66,7 @@
 
 		// Wire resize → server
 		xterm.onResize((size: { cols: number; rows: number }) => {
-			wsSend({ type: "pty_resize", ptyId, cols: size.cols, rows: size.rows });
+			sendResize(size);
 		});
 
 		// Replay scrollback buffer (reconnection / tab remount)
@@ -66,12 +81,7 @@
 		});
 
 		// Send initial dimensions to server
-		wsSend({
-			type: "pty_resize",
-			ptyId,
-			cols: xterm.cols,
-			rows: xterm.rows,
-		});
+		sendResize({ cols: xterm.cols, rows: xterm.rows });
 
 		// Focus if this is the active tab
 		if (active) xterm.focus();

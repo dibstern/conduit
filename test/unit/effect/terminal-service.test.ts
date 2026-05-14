@@ -150,13 +150,46 @@ describe("OpenCodeTerminalServiceLive", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* OpenCodeTerminalServiceTag;
-				yield* service.list("client-1");
+				const ptys = yield* service.list("client-1");
+
+				expect(ptys).toEqual([
+					{
+						id: "pty-1",
+						title: "Terminal",
+						command: "bash",
+						cwd: "/project",
+						status: "running",
+						pid: 0,
+					},
+					{
+						id: "pty-2",
+						title: "Terminal",
+						command: "bash",
+						cwd: "/project",
+						status: "exited",
+						pid: 0,
+					},
+				]);
 
 				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "pty_list",
 					ptys: [
-						{ id: "pty-1", status: "running" },
-						{ id: "pty-2", status: "exited" },
+						{
+							id: "pty-1",
+							title: "Terminal",
+							command: "bash",
+							cwd: "/project",
+							status: "running",
+							pid: 0,
+						},
+						{
+							id: "pty-2",
+							title: "Terminal",
+							command: "bash",
+							cwd: "/project",
+							status: "exited",
+							pid: 0,
+						},
 					],
 				});
 				expect(connectPtyUpstream).toHaveBeenCalledWith("pty-1", -1);
@@ -225,8 +258,22 @@ describe("OpenCodeTerminalServiceLive", () => {
 			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 				type: "pty_list",
 				ptys: [
-					{ id: "pty-running", status: "running" },
-					{ id: "pty-exited", status: "exited" },
+					{
+						id: "pty-running",
+						title: "Terminal",
+						command: "bash",
+						cwd: "/project",
+						status: "running",
+						pid: 0,
+					},
+					{
+						id: "pty-exited",
+						title: "Terminal",
+						command: "bash",
+						cwd: "/project",
+						status: "exited",
+						pid: 0,
+					},
 				],
 			});
 			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {

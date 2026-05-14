@@ -27,11 +27,7 @@ export interface PayloadMap {
 	add_project: { directory: string; instanceId?: string };
 	remove_project: { slug: string };
 	rename_project: { slug: string; title: string };
-	terminal_command: { action: string; ptyId?: string };
-	pty_create: Record<string, never>;
 	pty_input: { ptyId: string; data: string };
-	pty_resize: { ptyId: string; cols?: number; rows?: number };
-	pty_close: { ptyId: string };
 	instance_add: {
 		name: string;
 		url?: string;

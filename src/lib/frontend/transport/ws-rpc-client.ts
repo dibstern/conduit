@@ -22,6 +22,7 @@ import {
 	type PermissionDecision,
 	type PermissionPersistScope,
 	type ProjectMutationResponse,
+	type PtyListResponse,
 	type ReloadProviderSessionResponse,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
@@ -95,6 +96,29 @@ export interface ScanNowRpcInput {
 
 export interface DetectProxyRpcInput {
 	readonly projectSlug: string;
+}
+
+export interface ListPtysRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+}
+
+export interface CreatePtyRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+}
+
+export interface ResizePtyRpcInput {
+	readonly projectSlug: string;
+	readonly ptyId: string;
+	readonly originId?: string;
+	readonly cols?: number;
+	readonly rows?: number;
+}
+
+export interface ClosePtyRpcInput {
+	readonly projectSlug: string;
+	readonly ptyId: string;
 }
 
 export interface CreateSessionRpcInput {
@@ -459,6 +483,64 @@ const callDetectProxy = (input: DetectProxyRpcInput) =>
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
 			return yield* client.DetectProxy(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callListPtys = (input: ListPtysRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.ListPtys(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callCreatePty = (input: CreatePtyRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.CreatePty(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callResizePty = (input: ResizePtyRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.ResizePty({
+				projectSlug: input.projectSlug,
+				ptyId: input.ptyId,
+				...(input.originId != null ? { originId: input.originId } : {}),
+				...(input.cols != null ? { cols: input.cols } : {}),
+				...(input.rows != null ? { rows: input.rows } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callClosePty = (input: ClosePtyRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.ClosePty(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -971,6 +1053,28 @@ export async function detectProxyRpc(
 ): Promise<DetectProxyResponse> {
 	const runtime = await getRuntime();
 	return await runtime.runPromise(callDetectProxy(input));
+}
+
+export async function listPtysRpc(
+	input: ListPtysRpcInput,
+): Promise<PtyListResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callListPtys(input));
+}
+
+export async function createPtyRpc(input: CreatePtyRpcInput): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callCreatePty(input));
+}
+
+export async function resizePtyRpc(input: ResizePtyRpcInput): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callResizePty(input));
+}
+
+export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
+	const runtime = await getRuntime();
+	await runtime.runPromise(callClosePty(input));
 }
 
 export async function createSessionRpc(

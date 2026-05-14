@@ -74,26 +74,9 @@ export const PayloadSchemas: {
 		title: Schema.String,
 	}),
 
-	terminal_command: Schema.Struct({
-		action: Schema.String,
-		ptyId: Schema.optional(Schema.String),
-	}),
-
-	pty_create: Schema.Struct({}),
-
 	pty_input: Schema.Struct({
 		ptyId: Schema.String,
 		data: Schema.String,
-	}),
-
-	pty_resize: Schema.Struct({
-		ptyId: Schema.String,
-		cols: Schema.optional(Schema.Number),
-		rows: Schema.optional(Schema.Number),
-	}),
-
-	pty_close: Schema.Struct({
-		ptyId: Schema.String,
 	}),
 
 	instance_add: Schema.Struct({

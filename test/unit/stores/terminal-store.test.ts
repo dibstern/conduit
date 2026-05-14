@@ -1,6 +1,8 @@
 // ─── Terminal Store Tests ────────────────────────────────────────────────────
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	applyPtyListResponse,
+	beginCreateTab,
 	closePanel,
 	destroyAll,
 	getScrollback,
@@ -14,8 +16,6 @@ import {
 	onOutput,
 	openPanel,
 	renameTab,
-	requestCloseTab,
-	requestCreateTab,
 	switchTab,
 	terminalState,
 	togglePanel,
@@ -252,36 +252,30 @@ describe("handlePtyError", () => {
 	});
 });
 
-// ─── requestCreateTab ───────────────────────────────────────────────────────
+// ─── beginCreateTab ─────────────────────────────────────────────────────────
 
-describe("requestCreateTab", () => {
-	it("sends pty_create and sets pending state", () => {
-		const sent: Record<string, unknown>[] = [];
-		requestCreateTab((data) => sent.push(data));
-		expect(sent).toEqual([{ type: "pty_create" }]);
+describe("beginCreateTab", () => {
+	it("sets pending create state", () => {
+		expect(beginCreateTab()).toBe(true);
 		expect(terminalState.pendingCreate).toBe(true);
 		expect(terminalState.statusMessage).toBe("Creating terminal...");
 	});
 
-	it("does not send if already pending", () => {
-		const sent: Record<string, unknown>[] = [];
-		requestCreateTab((data) => sent.push(data));
-		requestCreateTab((data) => sent.push(data));
-		expect(sent).toHaveLength(1);
+	it("returns false if already pending", () => {
+		expect(beginCreateTab()).toBe(true);
+		expect(beginCreateTab()).toBe(false);
 	});
 
-	it("does not send if max tabs reached", () => {
+	it("returns false if max tabs reached", () => {
 		// Create max tabs
 		for (let i = 0; i < terminalState.maxTabs; i++) {
 			handlePtyCreated(ptyCreatedMsg(`pty${i}`));
 		}
-		const sent: Record<string, unknown>[] = [];
-		requestCreateTab((data) => sent.push(data));
-		expect(sent).toHaveLength(0);
+		expect(beginCreateTab()).toBe(false);
 	});
 
 	it("times out after 15 seconds", () => {
-		requestCreateTab(() => {});
+		beginCreateTab();
 		expect(terminalState.pendingCreate).toBe(true);
 		vi.advanceTimersByTime(15_000);
 		expect(terminalState.pendingCreate).toBe(false);
@@ -289,19 +283,6 @@ describe("requestCreateTab", () => {
 		// Message clears after another 3 seconds
 		vi.advanceTimersByTime(3000);
 		expect(terminalState.statusMessage).toBeNull();
-	});
-});
-
-// ─── requestCloseTab ────────────────────────────────────────────────────────
-
-describe("requestCloseTab", () => {
-	it("sends pty_close and removes the tab optimistically", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		const sent: Record<string, unknown>[] = [];
-		requestCloseTab("pty1", (data) => sent.push(data));
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(sent[0]!["type"]).toBe("pty_close");
-		expect(terminalState.tabs.size).toBe(0);
 	});
 });
 
@@ -444,14 +425,13 @@ describe("tab number reuse", () => {
 		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 1");
 	});
 
-	it("requestCloseTab releases tab number via optimistic deletion", () => {
+	it("handlePtyDeleted releases tab number", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
 		handlePtyCreated(ptyCreatedMsg("pty2"));
 
-		const sent: Record<string, unknown>[] = [];
-		requestCloseTab("pty1", (data) => sent.push(data));
+		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
 
-		// Optimistically deleted — number 1 should be reusable
+		// Deleted tab number should be reusable
 		handlePtyCreated(ptyCreatedMsg("pty3"));
 		expect(terminalState.tabs.get("pty3")?.title).toBe("Terminal 1");
 	});
@@ -547,6 +527,25 @@ describe("handlePtyList", () => {
 		});
 		expect(terminalState.tabs.get("pty1")?.exited).toBe(true);
 	});
+
+	it("applies RPC list responses through the terminal list reducer", () => {
+		applyPtyListResponse({
+			projectSlug: "demo",
+			ptys: [
+				{
+					id: "pty-rpc",
+					title: "Shell",
+					command: "zsh",
+					cwd: "/repo",
+					status: "running",
+					pid: 123,
+				},
+			],
+		});
+
+		expect(terminalState.tabs.size).toBe(1);
+		expect(terminalState.tabs.get("pty-rpc")?.title).toBe("Terminal 1");
+	});
 });
 
 // ─── togglePanel ─────────────────────────────────────────────────────────────
@@ -564,23 +563,9 @@ describe("togglePanel", () => {
 		expect(terminalState.panelOpen).toBe(false);
 	});
 
-	it("auto-creates a tab when opening with no tabs", () => {
-		const sent: Record<string, unknown>[] = [];
-		togglePanel((data) => sent.push(data));
-		expect(terminalState.panelOpen).toBe(true);
-		expect(sent).toEqual([{ type: "pty_create" }]);
-		expect(terminalState.pendingCreate).toBe(true);
-	});
-
-	it("does not auto-create when tabs already exist", () => {
+	it("does not mutate tab create state when opening", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
 		terminalState.panelOpen = false; // simulate closed panel with existing tab
-		const sent: Record<string, unknown>[] = [];
-		togglePanel((data) => sent.push(data));
-		expect(sent).toHaveLength(0);
-	});
-
-	it("does not auto-create when no sendFn provided", () => {
 		togglePanel();
 		expect(terminalState.panelOpen).toBe(true);
 		expect(terminalState.pendingCreate).toBe(false);

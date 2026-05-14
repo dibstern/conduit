@@ -92,32 +92,10 @@ const RenameProjectMsg = Schema.Struct({
 
 // ── Terminal / PTY ───────────────────────────────────────────────────────────
 
-const TerminalCommandMsg = Schema.Struct({
-	type: Schema.Literal("terminal_command"),
-	action: Schema.String,
-	ptyId: Schema.optional(Schema.String),
-});
-
-const PtyCreateMsg = Schema.Struct({
-	type: Schema.Literal("pty_create"),
-});
-
 const PtyInputMsg = Schema.Struct({
 	type: Schema.Literal("pty_input"),
 	ptyId: Schema.String,
 	data: Schema.String,
-});
-
-const PtyResizeMsg = Schema.Struct({
-	type: Schema.Literal("pty_resize"),
-	ptyId: Schema.String,
-	cols: Schema.optional(Schema.Number),
-	rows: Schema.optional(Schema.Number),
-});
-
-const PtyCloseMsg = Schema.Struct({
-	type: Schema.Literal("pty_close"),
-	ptyId: Schema.String,
 });
 
 // ── Instance management ──────────────────────────────────────────────────────
@@ -206,11 +184,7 @@ export const IncomingWsMessage = Schema.Union(
 	RemoveProjectMsg,
 	RenameProjectMsg,
 	// Terminal / PTY
-	TerminalCommandMsg,
-	PtyCreateMsg,
 	PtyInputMsg,
-	PtyResizeMsg,
-	PtyCloseMsg,
 	// Instance management
 	InstanceAddMsg,
 	InstanceRemoveMsg,

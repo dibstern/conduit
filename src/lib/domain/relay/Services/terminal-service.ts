@@ -22,7 +22,7 @@ export class TerminalServiceError extends Data.TaggedError(
 
 export interface OpenCodeTerminalService {
 	create(clientId: string): Effect.Effect<void>;
-	list(clientId: string): Effect.Effect<void, TerminalServiceError>;
+	list(clientId: string): Effect.Effect<PtyInfo[], TerminalServiceError>;
 	replay(clientId: string): Effect.Effect<void>;
 	sendInput(ptyId: string, data: string): Effect.Effect<void>;
 	close(ptyId: string): Effect.Effect<void, TerminalServiceError>;
@@ -46,7 +46,7 @@ type PtyInfoResult =
 	  };
 
 const toPtyInfo = (
-	rawResult: Record<string, unknown>,
+	rawResult: { readonly [key: string]: unknown },
 	projectDir: string,
 ): PtyInfoResult => {
 	const ptyId = String(rawResult["id"] ?? "");
@@ -67,6 +67,18 @@ const toPtyInfo = (
 		},
 	};
 };
+
+const toTrackedPtyInfo = (
+	pty: { readonly id: string; readonly status: PtyStatus },
+	projectDir: string,
+): PtyInfo => ({
+	id: pty.id,
+	title: "Terminal",
+	command: "bash",
+	cwd: projectDir,
+	status: pty.status,
+	pid: 0,
+});
 
 export const OpenCodeTerminalServiceLive: Layer.Layer<
 	OpenCodeTerminalServiceTag,
@@ -113,11 +125,10 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						return;
 					}
 
-					const rawResult = createResult.right as Record<string, unknown>;
-					const ptyResult = toPtyInfo(rawResult, config.projectDir);
+					const ptyResult = toPtyInfo(createResult.right, config.projectDir);
 					if (ptyResult._tag === "MissingId") {
 						log.warn(
-							`client=${clientId} session=${session} Create returned no id: ${JSON.stringify(rawResult)}`,
+							`client=${clientId} session=${session} Create returned no id: ${JSON.stringify(ptyResult.raw)}`,
 						);
 						wsHandler.sendTo(
 							clientId,
@@ -167,22 +178,29 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			list: (clientId: string) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
-					const ptys = yield* Effect.tryPromise({
+					const rawPtys = yield* Effect.tryPromise({
 						try: () => client.pty.list(),
 						catch: (cause) =>
 							new TerminalServiceError({ operation: "list", cause }),
 					});
+					const ptys: PtyInfo[] = [];
+					for (const rawPty of rawPtys) {
+						const ptyResult = toPtyInfo(rawPty, config.projectDir);
+						if (ptyResult._tag === "Created") {
+							ptys.push(ptyResult.pty);
+						} else {
+							log.warn(
+								`client=${clientId} session=${session} List returned PTY with no id: ${JSON.stringify(ptyResult.raw)}`,
+							);
+						}
+					}
 					wsHandler.sendTo(clientId, {
 						type: "pty_list",
-						ptys: ptys as unknown as PtyInfo[],
+						ptys,
 					});
 					for (const pty of ptys) {
-						const ptyId = String(pty.id ?? "");
-						if (
-							ptyId &&
-							!ptyManager.hasSession(ptyId) &&
-							(pty as Record<string, unknown>)["status"] === "running"
-						) {
+						const ptyId = pty.id;
+						if (!ptyManager.hasSession(ptyId) && pty.status === "running") {
 							const reconnectResult = yield* Effect.either(
 								Effect.tryPromise({
 									try: () => connectPtyUpstream(ptyId, -1),
@@ -205,14 +223,17 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 							}
 						}
 					}
+					return ptys;
 				}),
 			replay: (clientId: string) =>
 				Effect.sync(() => {
 					if (ptyManager.sessionCount === 0) return;
-					const ptys = ptyManager.listSessions();
+					const ptys = ptyManager
+						.listSessions()
+						.map((pty) => toTrackedPtyInfo(pty, config.projectDir));
 					wsHandler.sendTo(clientId, {
 						type: "pty_list",
-						ptys: ptys as unknown as PtyInfo[],
+						ptys,
 					});
 					for (const { id: ptyId } of ptys) {
 						const scrollback = ptyManager.getScrollback(ptyId);

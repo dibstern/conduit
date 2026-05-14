@@ -59,13 +59,7 @@ export {
 	handleRemoveProject,
 	handleRenameProject,
 } from "./settings.js";
-export {
-	handlePtyClose,
-	handlePtyCreate,
-	handlePtyInput,
-	handlePtyResize,
-	handleTerminalCommand,
-} from "./terminal.js";
+export { handlePtyInput } from "./terminal.js";
 export { handleGetToolContent } from "./tool-content.js";
 
 // ─── Effect-based Dispatch ──────────────────────────────────────────────────
@@ -103,13 +97,7 @@ import {
 	handleRemoveProject as handleRemoveProjectImpl,
 	handleRenameProject as handleRenameProjectImpl,
 } from "./settings.js";
-import {
-	handlePtyClose as handlePtyCloseImpl,
-	handlePtyCreate as handlePtyCreateImpl,
-	handlePtyInput as handlePtyInputImpl,
-	handlePtyResize as handlePtyResizeImpl,
-	handleTerminalCommand as handleTerminalCommandImpl,
-} from "./terminal.js";
+import { handlePtyInput as handlePtyInputImpl } from "./terminal.js";
 
 type AnyEffectHandler = (
 	clientId: string,
@@ -142,11 +130,7 @@ export const EFFECT_MESSAGE_HANDLERS: Record<
 	remove_project: handleRemoveProjectImpl,
 	rename_project: handleRenameProjectImpl,
 	// Terminal
-	terminal_command: handleTerminalCommandImpl,
-	pty_create: handlePtyCreateImpl,
 	pty_input: handlePtyInputImpl,
-	pty_resize: handlePtyResizeImpl,
-	pty_close: handlePtyCloseImpl,
 	// Instance management
 	instance_add: handleInstanceAddImpl,
 	instance_remove: handleInstanceRemoveImpl,

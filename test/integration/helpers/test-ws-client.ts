@@ -3,6 +3,7 @@
 // sending messages, waiting for specific response types, and inspecting
 // everything received. Used by integration tests.
 
+import { randomUUID } from "node:crypto";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
@@ -16,6 +17,7 @@ import {
 	type GetProjectsResponse,
 	type GetTodoResponse,
 	type ListSessionsResponse,
+	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 
@@ -27,6 +29,7 @@ export interface ReceivedMessage {
 export class TestWsClient {
 	private ws: WebSocket;
 	private readonly rpcUrl: string;
+	private readonly clientId = `test-${randomUUID()}`;
 	private received: ReceivedMessage[] = [];
 	private activeSessionId: string | undefined;
 	private waiters: Array<{
@@ -38,8 +41,10 @@ export class TestWsClient {
 	private openPromise: Promise<void>;
 
 	constructor(url: string) {
-		this.rpcUrl = url.replace(/\/ws(\?.*)?$/, "/rpc");
-		this.ws = new WebSocket(url);
+		const wsUrl = new URL(url);
+		wsUrl.searchParams.set("client", this.clientId);
+		this.rpcUrl = `${wsUrl.protocol}//${wsUrl.host}${wsUrl.pathname.replace(/\/ws$/, "/rpc")}`;
+		this.ws = new WebSocket(wsUrl);
 
 		this.openPromise = new Promise<void>((resolve, reject) => {
 			this.ws.once("open", () => resolve());
@@ -81,6 +86,10 @@ export class TestWsClient {
 	/** Send a typed message to the relay */
 	send(msg: Record<string, unknown>): void {
 		this.ws.send(JSON.stringify(msg));
+	}
+
+	getClientId(): string {
+		return this.clientId;
 	}
 
 	getActiveSessionId(): string | undefined {
@@ -353,6 +362,115 @@ export class TestWsClient {
 						const client = yield* RpcClient.make(WsRpcGroup);
 						return yield* client.GetTodo({
 							projectSlug: "integration-test",
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async createPty(): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.CreatePty({
+							projectSlug: "integration-test",
+							originId: clientId,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async closePty(ptyId: string): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.ClosePty({
+							projectSlug: "integration-test",
+							ptyId,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async resizePty(
+		ptyId: string,
+		size: { readonly cols?: number; readonly rows?: number },
+	): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.ResizePty({
+							projectSlug: "integration-test",
+							ptyId,
+							originId: clientId,
+							...(size.cols != null ? { cols: size.cols } : {}),
+							...(size.rows != null ? { rows: size.rows } : {}),
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async listPtys(): Promise<PtyListResponse> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			return await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						return yield* client.ListPtys({
+							projectSlug: "integration-test",
+							originId: clientId,
 						});
 					}),
 				).pipe(
