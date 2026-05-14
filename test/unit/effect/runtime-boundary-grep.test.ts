@@ -617,6 +617,40 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not keep the synchronous daemon runtime config update bridge", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredBridgePatterns = [
+			{
+				pattern: /\bfunction updateRuntimeConfigSync\b/,
+				reason:
+					"daemon config mutations should not re-enter the runtime synchronously",
+			},
+			{
+				pattern: /\bresolveRuntimeConfigUpdateSync\b/,
+				reason:
+					"the fallback helper existed only for the removed synchronous runtime config bridge",
+			},
+			{
+				pattern: /\bupdateRuntimeConfigSync\(/,
+				reason:
+					"daemon config mutations should use explicit local snapshots or Effect-owned updates",
+			},
+		] as const;
+
+		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{

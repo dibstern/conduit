@@ -339,19 +339,6 @@ export interface DaemonHandle {
 	readonly registry: import("../../../daemon/project-registry.js").ProjectRegistry;
 }
 
-export function resolveRuntimeConfigUpdateSync(
-	current: DaemonRuntimeConfig,
-	update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
-	runRuntimeUpdate:
-		| ((
-				update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
-		  ) => DaemonRuntimeConfig)
-		| null,
-): DaemonRuntimeConfig {
-	if (!runRuntimeUpdate) return update(current);
-	return runRuntimeUpdate(update);
-}
-
 /**
  * Start the daemon process. Directly orchestrates the startup sequence
  * that was previously encapsulated in the Daemon class.
@@ -461,35 +448,6 @@ export async function startDaemonProcess(
 		return runtimeConfigSnapshot;
 	}
 
-	function updateRuntimeConfigSync(
-		update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
-	): void {
-		const runtime = shuttingDown ? null : daemonRuntime;
-		try {
-			runtimeConfigSnapshot = resolveRuntimeConfigUpdateSync(
-				runtimeConfigSnapshot,
-				update,
-				runtime
-					? (runtimeUpdate) =>
-							runtime.runSync(
-								Effect.gen(function* () {
-									const ref = yield* DaemonConfigRefTag;
-									yield* Ref.update(ref, runtimeUpdate);
-									return yield* Ref.get(ref);
-								}),
-							)
-					: null,
-			);
-			syncLegacyConfigLocals(runtimeConfigSnapshot);
-		} catch (err) {
-			log.error(
-				{ err: formatErrorDetail(err) },
-				"Runtime config update failed",
-			);
-			throw err;
-		}
-	}
-
 	function syncEffectProjectRegistry<R>(
 		operation: string,
 		effect: Effect.Effect<void, unknown, R>,
@@ -528,6 +486,14 @@ export async function startDaemonProcess(
 		Effect.gen(function* () {
 			const relayCache = yield* EffectRelayCacheTag;
 			yield* relayCache.invalidate(slug);
+		});
+
+	const updateEffectRuntimeConfig = (
+		update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
+	) =>
+		Effect.gen(function* () {
+			const ref = yield* DaemonConfigRefTag;
+			yield* Ref.update(ref, update);
 		});
 
 	// ── Core services ─────────────────────────────────────────────────────
@@ -822,7 +788,11 @@ export async function startDaemonProcess(
 		}
 		dir = resolve(dir);
 		dismissedPaths.delete(dir);
-		updateRuntimeConfigSync((c) => ({
+		updateLocalRuntimeConfigSnapshot((c) => ({
+			...c,
+			dismissedPaths: new Set(dismissedPaths),
+		}));
+		const syncDismissedPaths = updateEffectRuntimeConfig((c) => ({
 			...c,
 			dismissedPaths: new Set(dismissedPaths),
 		}));
@@ -830,7 +800,9 @@ export async function startDaemonProcess(
 		if (existing) {
 			await syncEffectProjectRegistry(
 				"refresh existing project",
-				syncEffectProjectAdd(existing.project),
+				syncDismissedPaths.pipe(
+					Effect.zipRight(syncEffectProjectAdd(existing.project)),
+				),
 			);
 			return existing.project;
 		}
@@ -856,7 +828,7 @@ export async function startDaemonProcess(
 		registry.addWithoutRelay(project);
 		await syncEffectProjectRegistry(
 			"add project",
-			syncEffectProjectAdd(project),
+			syncDismissedPaths.pipe(Effect.zipRight(syncEffectProjectAdd(project))),
 		);
 		syncRecentProjects(
 			registry.allProjects().map((p) => ({
@@ -875,14 +847,18 @@ export async function startDaemonProcess(
 		const entry = registry.get(slug);
 		if (!entry) throw new Error(`Project "${slug}" not found`);
 		dismissedPaths.add(entry.project.directory);
-		updateRuntimeConfigSync((c) => ({
+		updateLocalRuntimeConfigSnapshot((c) => ({
+			...c,
+			dismissedPaths: new Set(dismissedPaths),
+		}));
+		const syncDismissedPaths = updateEffectRuntimeConfig((c) => ({
 			...c,
 			dismissedPaths: new Set(dismissedPaths),
 		}));
 		await registry.remove(slug);
 		await syncEffectProjectRegistry(
 			"remove project",
-			removeEffectProject(slug),
+			syncDismissedPaths.pipe(Effect.zipRight(removeEffectProject(slug))),
 		);
 		syncRecentProjects(
 			registry.allProjects().map((p) => ({

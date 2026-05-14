@@ -9,8 +9,6 @@ import {
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { resolveRuntimeConfigUpdateSync } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
 const ensureCertsMock = vi.hoisted(() => vi.fn());
@@ -254,40 +252,5 @@ describe("daemon main runtime config status", () => {
 				sessionCount: 7,
 			}),
 		);
-	});
-
-	it("does not apply a local runtime config fallback when the runtime update fails", () => {
-		const initial = makeDaemonConfigFromOptions({
-			port: 2633,
-			host: "127.0.0.1",
-			keepAwake: false,
-		});
-
-		expect(() =>
-			resolveRuntimeConfigUpdateSync(
-				initial,
-				(config) => ({ ...config, keepAwake: true }),
-				() => {
-					throw new Error("ref update failed");
-				},
-			),
-		).toThrow("ref update failed");
-		expect(initial.keepAwake).toBe(false);
-	});
-
-	it("still applies local runtime config updates before the runtime exists", () => {
-		const initial = makeDaemonConfigFromOptions({
-			port: 2633,
-			host: "127.0.0.1",
-			keepAwake: false,
-		});
-
-		const updated = resolveRuntimeConfigUpdateSync(
-			initial,
-			(config) => ({ ...config, keepAwake: true }),
-			null,
-		);
-
-		expect(updated.keepAwake).toBe(true);
 	});
 });
