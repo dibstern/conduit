@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { getRuntime } from "./runtime.js";
 import {
 	type CreateSessionResponse,
+	type DetectProxyResponse,
 	type ForkSessionResponse,
 	type GetAgentsResponse,
 	type GetCommandsResponse,
@@ -14,6 +15,7 @@ import {
 	type GetProjectsResponse,
 	type GetTodoResponse,
 	type GetToolContentResponse,
+	type InstanceListResponse,
 	type ListDirectoriesResponse,
 	type ListSessionsResponse,
 	type LoadMoreHistoryResponse,
@@ -21,6 +23,7 @@ import {
 	type PermissionPersistScope,
 	type ProjectMutationResponse,
 	type ReloadProviderSessionResponse,
+	type ScanNowResponse,
 	type SetDefaultModelResponse,
 	type SwitchContextWindowResponse,
 	type SwitchModelResponse,
@@ -73,6 +76,25 @@ export interface SetProjectInstanceRpcInput {
 	readonly projectSlug: string;
 	readonly slug: string;
 	readonly instanceId: string;
+}
+
+export interface InstanceMutationRpcInput {
+	readonly projectSlug: string;
+	readonly instanceId: string;
+}
+
+export interface RenameInstanceRpcInput {
+	readonly projectSlug: string;
+	readonly instanceId: string;
+	readonly name: string;
+}
+
+export interface ScanNowRpcInput {
+	readonly projectSlug: string;
+}
+
+export interface DetectProxyRpcInput {
+	readonly projectSlug: string;
 }
 
 export interface CreateSessionRpcInput {
@@ -359,6 +381,84 @@ const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
 			return yield* client.SetProjectInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callStartInstance = (input: InstanceMutationRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.StartInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callStopInstance = (input: InstanceMutationRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.StopInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callRemoveInstance = (input: InstanceMutationRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.RemoveInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callRenameInstance = (input: RenameInstanceRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.RenameInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callScanNow = (input: ScanNowRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.ScanNow(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callDetectProxy = (input: DetectProxyRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.DetectProxy(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -829,6 +929,48 @@ export async function setProjectInstanceRpc(
 ): Promise<ProjectMutationResponse> {
 	const runtime = await getRuntime();
 	return await runtime.runPromise(callSetProjectInstance(input));
+}
+
+export async function startInstanceRpc(
+	input: InstanceMutationRpcInput,
+): Promise<InstanceListResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callStartInstance(input));
+}
+
+export async function stopInstanceRpc(
+	input: InstanceMutationRpcInput,
+): Promise<InstanceListResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callStopInstance(input));
+}
+
+export async function removeInstanceRpc(
+	input: InstanceMutationRpcInput,
+): Promise<InstanceListResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callRemoveInstance(input));
+}
+
+export async function renameInstanceRpc(
+	input: RenameInstanceRpcInput,
+): Promise<InstanceListResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callRenameInstance(input));
+}
+
+export async function scanNowRpc(
+	input: ScanNowRpcInput,
+): Promise<ScanNowResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callScanNow(input));
+}
+
+export async function detectProxyRpc(
+	input: DetectProxyRpcInput,
+): Promise<DetectProxyResponse> {
+	const runtime = await getRuntime();
+	return await runtime.runPromise(callDetectProxy(input));
 }
 
 export async function createSessionRpc(

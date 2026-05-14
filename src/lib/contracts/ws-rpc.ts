@@ -74,6 +74,30 @@ export const ProjectInfoSchema = Schema.Struct({
 	instanceId: Schema.optional(Schema.String),
 });
 
+export const InstanceStatusSchema = Schema.Literal(
+	"starting",
+	"healthy",
+	"unhealthy",
+	"stopped",
+);
+
+export const OpenCodeInstanceSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	port: Schema.Number,
+	managed: Schema.Boolean,
+	status: InstanceStatusSchema,
+	pid: Schema.optional(Schema.Number),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	needsRestart: Schema.optional(Schema.Boolean),
+	exitCode: Schema.optional(Schema.Number),
+	lastHealthCheck: Schema.optional(Schema.Number),
+	restartCount: Schema.Number,
+	createdAt: Schema.Number,
+});
+
 export const FileEntrySchema = Schema.Struct({
 	name: Schema.String,
 	type: Schema.Literal("file", "directory"),
@@ -229,6 +253,24 @@ export const ProjectMutationResponseSchema = Schema.Struct({
 	addedSlug: Schema.optional(Schema.String),
 });
 
+export const InstanceListResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	instances: Schema.Array(OpenCodeInstanceSchema),
+});
+
+export const ScanNowResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	discovered: Schema.Array(Schema.Number),
+	lost: Schema.Array(Schema.Number),
+	active: Schema.Array(Schema.Number),
+});
+
+export const DetectProxyResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	found: Schema.Boolean,
+	port: Schema.Number,
+});
+
 export const ListDirectoriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	path: Schema.String,
@@ -271,6 +313,10 @@ export type GetCommandsResponse = typeof GetCommandsResponseSchema.Type;
 export type ProjectInfo = typeof ProjectInfoSchema.Type;
 export type GetProjectsResponse = typeof GetProjectsResponseSchema.Type;
 export type ProjectMutationResponse = typeof ProjectMutationResponseSchema.Type;
+export type OpenCodeInstance = typeof OpenCodeInstanceSchema.Type;
+export type InstanceListResponse = typeof InstanceListResponseSchema.Type;
+export type ScanNowResponse = typeof ScanNowResponseSchema.Type;
+export type DetectProxyResponse = typeof DetectProxyResponseSchema.Type;
 export type ListDirectoriesResponse = typeof ListDirectoriesResponseSchema.Type;
 export type TodoItem = typeof TodoItemSchema.Type;
 export type GetTodoResponse = typeof GetTodoResponseSchema.Type;
@@ -381,6 +427,74 @@ export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>
 			projectSlug: NonEmptyString,
 			slug: NonEmptyString,
 			instanceId: NonEmptyString,
+		},
+	},
+) {}
+
+export class StartInstance extends Schema.TaggedRequest<StartInstance>()(
+	"StartInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+		},
+	},
+) {}
+
+export class StopInstance extends Schema.TaggedRequest<StopInstance>()(
+	"StopInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+		},
+	},
+) {}
+
+export class RemoveInstance extends Schema.TaggedRequest<RemoveInstance>()(
+	"RemoveInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+		},
+	},
+) {}
+
+export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
+	"RenameInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+			name: NonEmptyString,
+		},
+	},
+) {}
+
+export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
+	failure: WsRpcError,
+	success: ScanNowResponseSchema,
+	payload: {
+		projectSlug: NonEmptyString,
+	},
+}) {}
+
+export class DetectProxy extends Schema.TaggedRequest<DetectProxy>()(
+	"DetectProxy",
+	{
+		failure: WsRpcError,
+		success: DetectProxyResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
 		},
 	},
 ) {}
@@ -758,6 +872,12 @@ export const WsRpcRequest = Schema.Union(
 	RemoveProject,
 	RenameProject,
 	SetProjectInstance,
+	StartInstance,
+	StopInstance,
+	RemoveInstance,
+	RenameInstance,
+	ScanNow,
+	DetectProxy,
 	ListSessions,
 	CreateSession,
 	ViewSession,
@@ -797,6 +917,12 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RemoveProject),
 	Rpc.fromTaggedRequest(RenameProject),
 	Rpc.fromTaggedRequest(SetProjectInstance),
+	Rpc.fromTaggedRequest(StartInstance),
+	Rpc.fromTaggedRequest(StopInstance),
+	Rpc.fromTaggedRequest(RemoveInstance),
+	Rpc.fromTaggedRequest(RenameInstance),
+	Rpc.fromTaggedRequest(ScanNow),
+	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),

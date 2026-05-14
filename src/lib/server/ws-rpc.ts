@@ -2,7 +2,9 @@ import { Effect } from "effect";
 import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-listing-service.js";
+import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
+import { ScanServiceTag } from "../domain/relay/Services/scan-service.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { switchContextWindowForSession } from "../handlers/context-window.js";
@@ -37,7 +39,7 @@ import {
 	getTodoState,
 	normalizeProjectTitle,
 } from "../handlers/settings.js";
-import type { PermissionId } from "../shared-types.js";
+import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 
 export {
 	AddProject,
@@ -46,6 +48,8 @@ export {
 	CreateSession,
 	type CreateSessionResponse,
 	DeleteSession,
+	DetectProxy,
+	type DetectProxyResponse,
 	ForkSession,
 	type ForkSessionResponse,
 	GetAgents,
@@ -66,6 +70,7 @@ export {
 	type GetTodoResponse,
 	GetToolContent,
 	type GetToolContentResponse,
+	type InstanceListResponse,
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListSessions,
@@ -78,16 +83,22 @@ export {
 	RejectQuestion,
 	ReloadProviderSession,
 	type ReloadProviderSessionResponse,
+	RemoveInstance,
 	RemoveProject,
+	RenameInstance,
 	RenameProject,
 	RenameSession,
 	RespondPermission,
 	RewindSession,
+	ScanNow,
+	type ScanNowResponse,
 	SendMessage,
 	type SessionInfo,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
 	SetProjectInstance,
+	StartInstance,
+	StopInstance,
 	SwitchAgent,
 	SwitchContextWindow,
 	type SwitchContextWindowResponse,
@@ -109,6 +120,40 @@ import {
 	getFileTreeEntries,
 } from "../handlers/files.js";
 import { getToolContentValue } from "../handlers/tool-content.js";
+
+const CCS_DEFAULT_PORT = 8317;
+
+const instanceServiceOrFail = (operation: string) =>
+	Effect.gen(function* () {
+		const serviceOption = yield* Effect.serviceOption(
+			InstanceManagementServiceTag,
+		);
+		if (serviceOption._tag === "None") {
+			return yield* Effect.fail(
+				new WsRpcError({
+					message: `${operation} failed: Instance management not available`,
+				}),
+			);
+		}
+		return serviceOption.value;
+	});
+
+const mapRpcFailure =
+	(operation: string) =>
+	(error: unknown): Effect.Effect<never, WsRpcError> =>
+		error instanceof WsRpcError
+			? Effect.fail(error)
+			: Effect.fail(
+					new WsRpcError({
+						message: `${operation} failed: ${String(error)}`,
+					}),
+				);
+
+const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		wsHandler.broadcast({ type: "instance_list", instances });
+	});
 
 export const WsRpcServerLayer = WsRpcGroup.toLayer({
 	GetAgents: (request) =>
@@ -278,6 +323,80 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	StartInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("StartInstance");
+			const instances = yield* instanceService.start(request.instanceId);
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("StartInstance"))),
+	StopInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("StopInstance");
+			const instances = yield* instanceService.stop(request.instanceId);
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("StopInstance"))),
+	RemoveInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("RemoveInstance");
+			const instances = yield* instanceService.remove(request.instanceId);
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("RemoveInstance"))),
+	RenameInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("RenameInstance");
+			const name = request.name.trim();
+			if (!name) {
+				return yield* Effect.fail(
+					new WsRpcError({
+						message: "RenameInstance failed: name is required",
+					}),
+				);
+			}
+			const instances = yield* instanceService.rename(request.instanceId, name);
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("RenameInstance"))),
+	ScanNow: (request) =>
+		Effect.gen(function* () {
+			const scanService = yield* ScanServiceTag;
+			const result = yield* scanService.scanNow();
+			return {
+				projectSlug: request.projectSlug,
+				discovered: result.discovered,
+				lost: result.lost,
+				active: result.active,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("ScanNow"))),
+	DetectProxy: (request) =>
+		Effect.gen(function* () {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${CCS_DEFAULT_PORT}/health`, {
+						signal: AbortSignal.timeout(3_000),
+					}),
+				),
+			);
+			return {
+				projectSlug: request.projectSlug,
+				found: result._tag === "Right" && result.right.ok,
+				port: CCS_DEFAULT_PORT,
+			};
+		}),
 	ListDirectories: (request) =>
 		Effect.gen(function* () {
 			const directoryListing = yield* DirectoryListingServiceTag;

@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. RPC-over-WS is partly started: `AddProject`, `AnswerQuestion`, `CancelSession`, `CreateSession`, `DeleteSession`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RemoveProject`, `RenameProject`, `RenameSession`, `RespondPermission`, `RewindSession`, `SendMessage`, `SetDefaultModel`, `SetProjectInstance`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession` have moved through Effect RPC, but the remaining browser operations still use the legacy WS protocol.
+1. RPC-over-WS is partly started: `AddProject`, `AnswerQuestion`, `CancelSession`, `CreateSession`, `DeleteSession`, `DetectProxy`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RemoveInstance`, `RemoveProject`, `RenameInstance`, `RenameProject`, `RenameSession`, `RespondPermission`, `RewindSession`, `ScanNow`, `SendMessage`, `SetDefaultModel`, `SetProjectInstance`, `StartInstance`, `StopInstance`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession` have moved through Effect RPC, but the remaining browser operations still use the legacy WS protocol.
 2. Project relay construction still has transitional app-internal runtime bridge calls in `relay-stack.ts`.
 3. Provider architecture has the first plain-driver cut, but downstream naming still says adapter in several compatibility APIs.
 4. CLI still imports/calls `startDaemonProcess`.
@@ -60,7 +60,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 5. Hybrid relay domain model. Started locally: pure relay command/event/read-model, bounded command gate, and bounded sliding relay event bus are in place.
 6. Router service ownership and HTTP runtime boundary. Done locally for daemon and standalone relay HTTP handler ownership.
 7. Scoped project relay ownership. Started locally: prebuilt relay object injection is gone from `relay-stack.ts`; runtime bridge cleanup remains.
-8. RPC-over-WS vertical migration. Started locally with end-to-end `AddProject`, `AnswerQuestion`, `CancelSession`, `CreateSession`, `DeleteSession`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RemoveProject`, `RenameProject`, `RenameSession`, `RespondPermission`, `RewindSession`, `SendMessage`, `SetDefaultModel`, `SetProjectInstance`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession`; broader browser operation slices remain.
+8. RPC-over-WS vertical migration. Started locally with end-to-end `AddProject`, `AnswerQuestion`, `CancelSession`, `CreateSession`, `DeleteSession`, `DetectProxy`, `ForkSession`, `GetAgents`, `GetCommands`, `GetFileContent`, `GetFileList`, `GetFileTree`, `GetModels`, `GetProjects`, `GetTodo`, `GetToolContent`, `ListDirectories`, `ListSessions` including search, `LoadMoreHistory`, `RejectQuestion`, `ReloadProviderSession`, `RemoveInstance`, `RemoveProject`, `RenameInstance`, `RenameProject`, `RenameSession`, `RespondPermission`, `RewindSession`, `ScanNow`, `SendMessage`, `SetDefaultModel`, `SetProjectInstance`, `StartInstance`, `StopInstance`, `SwitchAgent`, `SwitchContextWindow`, `SwitchModel`, `SwitchVariant`, `SyncInputDraft`, and `ViewSession`; broader browser operation slices remain.
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` exist and production orchestration runtime creates OpenCode/Claude instances through plain driver values.
 10. IPC socket ownership. Started locally: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`; legacy cmd-format IPC still uses the old promise router.
 11. Daemon composition readiness.
@@ -276,3 +276,10 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 - Switched the project switcher add/remove/rename flows and header instance rebinding to typed RPC, applying the typed response through the project store.
 - Kept the legacy raw project mutation handlers for integration/E2E helpers and old WS mock coverage until those move to RPC-aware project-management assertions.
 - Verified locally with targeted RPC contract/server tests and `pnpm check`.
+
+2026-05-14, RPC instance management and discovery slice:
+
+- Implemented `StartInstance`, `StopInstance`, `RemoveInstance`, `RenameInstance`, `ScanNow`, and `DetectProxy` in `WsRpcServerLayer`.
+- Switched SettingsPanel and ConnectOverlay instance lifecycle, scan, and proxy-detection callsites to typed RPC and applied responses through the instance store.
+- Kept legacy raw instance/discovery handlers and frontend store send helpers as compatibility surfaces for existing WS mock/tests until those are migrated.
+- Verified locally with targeted RPC contract/server/store tests, `pnpm check`, `pnpm lint`, and `git diff --check`.

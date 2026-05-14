@@ -11,15 +11,18 @@
 
 	const log = createFrontendLogger("push");
 	import {
+		applyDetectProxyResponse,
+		applyInstanceListResponse,
+		applyScanNowResponse,
+		beginProxyDetection,
+		beginScan,
+		clearScanInFlight,
 		getCachedInstances,
 		getProxyDetection,
 		getScanResult,
 		instanceStatusColor,
 		isScanInFlight,
-		startProxyDetection,
-		triggerScan,
 	} from "../../stores/instance.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { featureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
@@ -34,6 +37,15 @@
 		saveNotifSettings,
 	} from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import {
+		detectProxyRpc,
+		removeInstanceRpc,
+		renameInstanceRpc,
+		scanNowRpc,
+		startInstanceRpc,
+		stopInstanceRpc,
+	} from "../../transport/ws-rpc-client.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────
 
@@ -97,23 +109,74 @@
 			if (!untrack(() => pushBusy)) {
 				notifSettings = getNotifSettings();
 			}
-			startProxyDetection(wsSend);
+			const projectSlug = getCurrentSlug();
+			if (projectSlug) {
+				beginProxyDetection();
+				void detectProxyRpc({ projectSlug })
+					.then(applyDetectProxyResponse)
+					.catch(() =>
+						applyDetectProxyResponse({
+							projectSlug,
+							found: false,
+							port: 8317,
+						}),
+					);
+			}
 		}
 	});
 
 	// ─── Instance handlers ──────────────────────────────────────────────────
 
+	function getRpcProjectSlug(): string | null {
+		const slug = getCurrentSlug();
+		if (!slug) {
+			showToast("No active project connection", { variant: "warn" });
+			return null;
+		}
+		return slug;
+	}
+
 	function handleToggleInstance(instanceId: string) {
 		expandedInstanceId = expandedInstanceId === instanceId ? null : instanceId;
 		if (expandedInstanceId !== instanceId) renamingInstanceId = null;
 	}
-	function handleStart(instanceId: string) { wsSend({ type: "instance_start", instanceId }); }
-	function handleStop(instanceId: string) { wsSend({ type: "instance_stop", instanceId }); }
+	function handleStart(instanceId: string) {
+		const projectSlug = getRpcProjectSlug();
+		if (!projectSlug) return;
+		void startInstanceRpc({ projectSlug, instanceId })
+			.then(applyInstanceListResponse)
+			.catch(() => showToast("Failed to start instance", { variant: "warn" }));
+	}
+	function handleStop(instanceId: string) {
+		const projectSlug = getRpcProjectSlug();
+		if (!projectSlug) return;
+		void stopInstanceRpc({ projectSlug, instanceId })
+			.then(applyInstanceListResponse)
+			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
+	}
 	async function handleRemove(instanceId: string, instanceName: string) {
 		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
-		if (confirmed) wsSend({ type: "instance_remove", instanceId });
+		if (confirmed) {
+			const projectSlug = getRpcProjectSlug();
+			if (!projectSlug) return;
+			void removeInstanceRpc({ projectSlug, instanceId })
+				.then(applyInstanceListResponse)
+				.catch(() =>
+					showToast("Failed to remove instance", { variant: "warn" }),
+				);
+		}
 	}
-	function handleScanNow() { triggerScan(wsSend); }
+	function handleScanNow() {
+		const projectSlug = getRpcProjectSlug();
+		if (!projectSlug) return;
+		beginScan();
+		void scanNowRpc({ projectSlug })
+			.then(applyScanNowResponse)
+			.catch(() => {
+				clearScanInFlight();
+				showToast("Port scan failed", { variant: "warn" });
+			});
+	}
 	function startRename(instanceId: string, currentName: string) {
 		renamingInstanceId = instanceId;
 		renameValue = currentName;
@@ -122,7 +185,15 @@
 		if (!renamingInstanceId) return;
 		const trimmed = renameValue.trim();
 		if (!trimmed) { showToast("Instance name cannot be empty", { variant: "warn" }); return; }
-		wsSend({ type: "instance_rename", instanceId: renamingInstanceId, name: trimmed });
+		const projectSlug = getRpcProjectSlug();
+		if (!projectSlug) return;
+		void renameInstanceRpc({
+			projectSlug,
+			instanceId: renamingInstanceId,
+			name: trimmed,
+		})
+			.then(applyInstanceListResponse)
+			.catch(() => showToast("Failed to rename instance", { variant: "warn" }));
 		renamingInstanceId = null;
 	}
 	function cancelRename() { renamingInstanceId = null; }

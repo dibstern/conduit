@@ -8,6 +8,7 @@ import {
 	CancelSession,
 	CreateSession,
 	DeleteSession,
+	DetectProxy,
 	ForkSession,
 	GetAgents,
 	GetCommands,
@@ -23,14 +24,19 @@ import {
 	LoadMoreHistory,
 	RejectQuestion,
 	ReloadProviderSession,
+	RemoveInstance,
 	RemoveProject,
+	RenameInstance,
 	RenameProject,
 	RenameSession,
 	RespondPermission,
 	RewindSession,
+	ScanNow,
 	SendMessage,
 	SetDefaultModel,
 	SetProjectInstance,
+	StartInstance,
+	StopInstance,
 	SwitchAgent,
 	SwitchContextWindow,
 	SwitchModel,
@@ -148,6 +154,69 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							},
 						],
 						current: "demo",
+					}),
+				StartInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						instances: [
+							{
+								id: request.instanceId,
+								name: "Default",
+								port: 4096,
+								managed: true,
+								status: "healthy" as const,
+								restartCount: 0,
+								createdAt: 1,
+							},
+						],
+					}),
+				StopInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						instances: [
+							{
+								id: request.instanceId,
+								name: "Default",
+								port: 4096,
+								managed: true,
+								status: "stopped" as const,
+								restartCount: 0,
+								createdAt: 1,
+							},
+						],
+					}),
+				RemoveInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						instances: [],
+					}),
+				RenameInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						instances: [
+							{
+								id: request.instanceId,
+								name: request.name,
+								port: 4096,
+								managed: true,
+								status: "healthy" as const,
+								restartCount: 0,
+								createdAt: 1,
+							},
+						],
+					}),
+				ScanNow: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						discovered: [4097],
+						lost: [],
+						active: [4096, 4097],
+					}),
+				DetectProxy: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						found: true,
+						port: 8317,
 					}),
 				CreateSession: (request) =>
 					Effect.succeed({
@@ -272,6 +341,12 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("RemoveProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("StartInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("StopInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("RemoveInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("RenameInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("ScanNow")).toBe(true);
+		expect(WsRpcGroup.requests.has("DetectProxy")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
@@ -378,6 +453,45 @@ describe("browser WebSocket RPC contract", () => {
 					instanceId: "inst-2",
 				});
 				expect(reboundProject.projects[0]?.instanceId).toBe("inst-2");
+
+				const startedInstance = yield* client.StartInstance({
+					projectSlug: "demo",
+					instanceId: "inst-1",
+				});
+				expect(startedInstance.instances[0]?.status).toBe("healthy");
+
+				const stoppedInstance = yield* client.StopInstance({
+					projectSlug: "demo",
+					instanceId: "inst-1",
+				});
+				expect(stoppedInstance.instances[0]?.status).toBe("stopped");
+
+				expect(
+					yield* client.RemoveInstance({
+						projectSlug: "demo",
+						instanceId: "inst-1",
+					}),
+				).toEqual({ projectSlug: "demo", instances: [] });
+
+				const renamedInstance = yield* client.RenameInstance({
+					projectSlug: "demo",
+					instanceId: "inst-1",
+					name: "Primary",
+				});
+				expect(renamedInstance.instances[0]?.name).toBe("Primary");
+
+				expect(yield* client.ScanNow({ projectSlug: "demo" })).toEqual({
+					projectSlug: "demo",
+					discovered: [4097],
+					lost: [],
+					active: [4096, 4097],
+				});
+
+				expect(yield* client.DetectProxy({ projectSlug: "demo" })).toEqual({
+					projectSlug: "demo",
+					found: true,
+					port: 8317,
+				});
 
 				const directories = yield* client.ListDirectories({
 					projectSlug: "demo",
@@ -649,6 +763,33 @@ describe("browser WebSocket RPC contract", () => {
 				instanceId: "inst-1",
 			})._tag,
 		).toBe("SetProjectInstance");
+		expect(
+			new StartInstance({
+				projectSlug: "demo",
+				instanceId: "inst-1",
+			})._tag,
+		).toBe("StartInstance");
+		expect(
+			new StopInstance({
+				projectSlug: "demo",
+				instanceId: "inst-1",
+			})._tag,
+		).toBe("StopInstance");
+		expect(
+			new RemoveInstance({
+				projectSlug: "demo",
+				instanceId: "inst-1",
+			})._tag,
+		).toBe("RemoveInstance");
+		expect(
+			new RenameInstance({
+				projectSlug: "demo",
+				instanceId: "inst-1",
+				name: "Primary",
+			})._tag,
+		).toBe("RenameInstance");
+		expect(new ScanNow({ projectSlug: "demo" })._tag).toBe("ScanNow");
+		expect(new DetectProxy({ projectSlug: "demo" })._tag).toBe("DetectProxy");
 		expect(
 			new CreateSession({
 				projectSlug: "demo",

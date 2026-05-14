@@ -9,6 +9,11 @@
 // should use `getCachedInstances()` or `getCachedInstanceById()`.
 
 import type {
+	DetectProxyResponse,
+	InstanceListResponse,
+	ScanNowResponse,
+} from "../transport/ws-rpc.js";
+import type {
 	InstanceStatus,
 	OpenCodeInstance,
 	RelayMessage,
@@ -40,22 +45,22 @@ let proxyDetection: { found: boolean; port: number } | null = $state(null);
  */
 let proxyDetectTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function startProxyDetection(
-	sendFn: (msg: Record<string, unknown>) => void,
-): void {
-	// Clear any previous timer
+export function beginProxyDetection(): void {
 	if (proxyDetectTimer) clearTimeout(proxyDetectTimer);
-	proxyDetection = null; // Reset to loading state
-
-	sendFn({ type: "proxy_detect" });
-
-	// Timeout after 5s — assume not found
+	proxyDetection = null;
 	proxyDetectTimer = setTimeout(() => {
 		if (proxyDetection === null) {
 			proxyDetection = { found: false, port: 8317 };
 		}
 		proxyDetectTimer = null;
 	}, 5_000);
+}
+
+export function startProxyDetection(
+	sendFn: (msg: Record<string, unknown>) => void,
+): void {
+	beginProxyDetection();
+	sendFn({ type: "proxy_detect" });
 }
 
 export function handleProxyDetected(
@@ -70,6 +75,14 @@ export function handleProxyDetected(
 
 export function getProxyDetection(): { found: boolean; port: number } | null {
 	return proxyDetection;
+}
+
+export function applyDetectProxyResponse(response: DetectProxyResponse): void {
+	handleProxyDetected({
+		type: "proxy_detected",
+		found: response.found,
+		port: response.port,
+	});
 }
 
 // ─── Scan state ─────────────────────────────────────────────────────────────
@@ -91,6 +104,10 @@ export function isScanInFlight(): boolean {
 	return scanInFlight;
 }
 
+export function beginScan(): void {
+	scanInFlight = true;
+}
+
 /** Clear the scan-in-flight flag (e.g. when the server returns an error). */
 export function clearScanInFlight(): void {
 	scanInFlight = false;
@@ -103,7 +120,7 @@ export function clearScanInFlight(): void {
 export function triggerScan(
 	sendFn: (msg: Record<string, unknown>) => void,
 ): void {
-	scanInFlight = true;
+	beginScan();
 	sendFn({ type: "scan_now" });
 }
 
@@ -118,6 +135,15 @@ export function handleScanResult(
 	scanInFlight = false;
 }
 
+export function applyScanNowResponse(response: ScanNowResponse): void {
+	handleScanResult({
+		type: "scan_result",
+		discovered: [...response.discovered],
+		lost: [...response.lost],
+		active: [...response.active],
+	});
+}
+
 // ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handleInstanceList(
@@ -128,6 +154,32 @@ export function handleInstanceList(
 		// Keep a cached copy that survives disconnect
 		cachedInstances = [...msg.instances];
 	}
+}
+
+export function applyInstanceListResponse(
+	response: InstanceListResponse,
+): void {
+	handleInstanceList({
+		type: "instance_list",
+		instances: response.instances.map((instance) => ({
+			id: instance.id,
+			name: instance.name,
+			port: instance.port,
+			managed: instance.managed,
+			status: instance.status,
+			restartCount: instance.restartCount,
+			createdAt: instance.createdAt,
+			...(instance.pid != null ? { pid: instance.pid } : {}),
+			...(instance.env != null ? { env: { ...instance.env } } : {}),
+			...(instance.needsRestart != null
+				? { needsRestart: instance.needsRestart }
+				: {}),
+			...(instance.exitCode != null ? { exitCode: instance.exitCode } : {}),
+			...(instance.lastHealthCheck != null
+				? { lastHealthCheck: instance.lastHealthCheck }
+				: {}),
+		})),
+	});
 }
 
 export function handleInstanceStatus(
