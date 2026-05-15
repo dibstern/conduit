@@ -44,15 +44,27 @@ const FIXED_TS = 1_000_000_000_000;
 
 function makeSessionCreated(
 	sessionId: string,
-	opts?: { eventId?: EventId; metadata?: EventMetadata; createdAt?: number },
+	opts?: {
+		eventId?: EventId;
+		metadata?: EventMetadata;
+		createdAt?: number;
+		parentId?: string;
+		providerSessionId?: string;
+		title?: string;
+		provider?: string;
+	},
 ): CanonicalEvent {
 	return canonicalEvent(
 		"session.created",
 		sessionId,
 		{
 			sessionId,
-			title: "Test Session",
-			provider: "opencode",
+			title: opts?.title ?? "Test Session",
+			provider: opts?.provider ?? "opencode",
+			...(opts?.parentId !== undefined ? { parentId: opts.parentId } : {}),
+			...(opts?.providerSessionId !== undefined
+				? { providerSessionId: opts.providerSessionId }
+				: {}),
 		},
 		{
 			eventId: opts?.eventId ?? createEventId(),
@@ -892,6 +904,54 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				}>`SELECT id, title, status FROM sessions WHERE id = 's1'`;
 				expect(rows[0]?.title).toBe("Test Session");
 				expect(rows[0]?.status).toBe("idle");
+			}),
+		));
+
+	it("session.created writes parent and provider session ids, then preserves them when omitted", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("parent-session");
+				yield* seedSession("claude-subagent-abc");
+				const parent = yield* store.append(
+					makeSessionCreated("parent-session", {
+						provider: "claude",
+						title: "Parent",
+					}),
+				);
+				yield* runner.projectEvent(parent);
+				const child = yield* store.append(
+					makeSessionCreated("claude-subagent-abc", {
+						provider: "claude",
+						title: "Explore Agent",
+						parentId: "parent-session",
+						providerSessionId: "sdk-subagent-1",
+					}),
+				);
+				yield* runner.projectEvent(child);
+				const replayWithoutOptionals = yield* store.append(
+					makeSessionCreated("claude-subagent-abc", {
+						provider: "claude",
+						title: "Explore Agent Updated",
+					}),
+				);
+				yield* runner.projectEvent(replayWithoutOptionals);
+
+				const rows = yield* sql<{
+					title: string;
+					parent_id: string | null;
+					provider_sid: string | null;
+				}>`
+					SELECT title, parent_id, provider_sid FROM sessions WHERE id = 'claude-subagent-abc'`;
+				expect(rows[0]).toEqual({
+					title: "Explore Agent Updated",
+					parent_id: "parent-session",
+					provider_sid: "sdk-subagent-1",
+				});
 			}),
 		));
 

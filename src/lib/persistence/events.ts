@@ -181,6 +181,8 @@ export interface SessionCreatedPayload {
 	readonly sessionId: string;
 	readonly title: string;
 	readonly provider: string;
+	readonly parentId?: string;
+	readonly providerSessionId?: string;
 }
 
 export interface SessionRenamedPayload {
@@ -426,6 +428,8 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	title: Schema.String,
 	provider: Schema.String,
+	parentId: Schema.optionalWith(Schema.String, { exact: true }),
+	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const SessionRenamedPayloadSchema = Schema.Struct({

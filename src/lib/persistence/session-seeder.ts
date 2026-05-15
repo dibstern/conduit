@@ -10,14 +10,28 @@ export class SessionSeeder {
 		this.db = db;
 	}
 
-	ensureSession(sessionId: string, provider: string): boolean {
+	ensureSession(
+		sessionId: string,
+		provider: string,
+		opts?: { parentId?: string; providerSessionId?: string },
+	): boolean {
 		if (this.seenSessions.has(sessionId)) return false;
 
 		const now = Date.now();
 		this.db.execute(
-			`INSERT OR IGNORE INTO sessions (id, provider, title, status, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			[sessionId, provider, "Untitled", "idle", now, now],
+			`INSERT OR IGNORE INTO sessions
+			 (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				sessionId,
+				provider,
+				opts?.providerSessionId ?? null,
+				"Untitled",
+				"idle",
+				opts?.parentId ?? null,
+				now,
+				now,
+			],
 		);
 
 		this.seenSessions.add(sessionId);

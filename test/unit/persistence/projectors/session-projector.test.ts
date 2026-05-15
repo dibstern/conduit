@@ -113,6 +113,62 @@ describe("SessionProjector", () => {
 			]);
 			expect(rows).toHaveLength(1);
 		});
+
+		it("writes parent and provider session ids, then preserves them when omitted", () => {
+			projector.project(
+				makeStored(
+					"session.created",
+					"parent-session",
+					{
+						sessionId: "parent-session",
+						title: "Parent",
+						provider: "claude",
+					} satisfies SessionCreatedPayload,
+					1,
+					now,
+				),
+				db,
+			);
+
+			projector.project(
+				makeStored(
+					"session.created",
+					"claude-subagent-abc",
+					{
+						sessionId: "claude-subagent-abc",
+						title: "Explore Agent",
+						provider: "claude",
+						parentId: "parent-session",
+						providerSessionId: "sdk-subagent-1",
+					} satisfies SessionCreatedPayload,
+					2,
+					now + 1,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"session.created",
+					"claude-subagent-abc",
+					{
+						sessionId: "claude-subagent-abc",
+						title: "Explore Agent Updated",
+						provider: "claude",
+					} satisfies SessionCreatedPayload,
+					3,
+					now + 2,
+				),
+				db,
+			);
+
+			const row = db.queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = ?",
+				["claude-subagent-abc"],
+			);
+			expect(row?.title).toBe("Explore Agent Updated");
+			expect(row?.parent_id).toBe("parent-session");
+			expect(row?.provider_sid).toBe("sdk-subagent-1");
+		});
 	});
 
 	describe("session.renamed", () => {

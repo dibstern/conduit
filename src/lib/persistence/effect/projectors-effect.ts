@@ -86,11 +86,13 @@ export const makeSessionProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "session.created")) {
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.title}, 'idle', ${event.createdAt}, ${event.createdAt})
+					INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.providerSessionId ?? null}, ${event.data.title}, 'idle', ${event.data.parentId ?? null}, ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO UPDATE SET
 						provider = excluded.provider,
+						provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
 						title = excluded.title,
+						parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
 						updated_at = excluded.updated_at`;
 				return;
 			}
