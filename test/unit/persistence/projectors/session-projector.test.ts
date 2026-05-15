@@ -264,7 +264,7 @@ describe("SessionProjector", () => {
 				{
 					sessionId: "s1",
 					oldProvider: "opencode",
-					newProvider: "claude-sdk",
+					newProvider: "claude",
 				} satisfies SessionProviderChangedPayload,
 				2,
 				now + 2000,
@@ -275,7 +275,7 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row?.provider).toBe("claude-sdk");
+			expect(row?.provider).toBe("claude");
 			expect(row?.updated_at).toBe(now + 2000);
 		});
 	});

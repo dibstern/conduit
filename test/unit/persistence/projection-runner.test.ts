@@ -840,7 +840,7 @@ describe("ProjectionRunner", () => {
 					{
 						sessionId: "s1",
 						oldProvider: "opencode",
-						newProvider: "claude-sdk",
+						newProvider: "claude",
 					} satisfies SessionProviderChangedPayload,
 					now + 6000,
 				),
@@ -855,7 +855,7 @@ describe("ProjectionRunner", () => {
 				["s1"],
 			);
 			expect(session?.title).toBe("Full Lifecycle");
-			expect(session?.provider).toBe("claude-sdk");
+			expect(session?.provider).toBe("claude");
 
 			// Messages
 			const messages = db.query<{ id: string; role: string }>(
@@ -882,7 +882,7 @@ describe("ProjectionRunner", () => {
 			expect(providers).toHaveLength(2);
 			expect(providers[0]?.provider).toBe("opencode");
 			expect(providers[0]?.status).toBe("stopped");
-			expect(providers[1]?.provider).toBe("claude-sdk");
+			expect(providers[1]?.provider).toBe("claude");
 			expect(providers[1]?.status).toBe("active");
 
 			// Approvals

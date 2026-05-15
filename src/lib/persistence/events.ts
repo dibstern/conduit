@@ -22,7 +22,7 @@ export function createCommandId(): CommandId {
 
 // ─── Constrained String Unions ──────────────────────────────────────────────
 
-export const PROVIDER_TYPES = ["opencode", "claude-sdk"] as const;
+export const PROVIDER_TYPES = ["opencode", "claude"] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
 export const SESSION_STATUSES = ["idle", "busy", "retry", "error"] as const;
@@ -373,14 +373,84 @@ const ThinkingEndPayloadSchema = Schema.Struct({
 	partId: Schema.String,
 });
 
-// CanonicalToolInput is a complex discriminated union with 13 variants.
-// Use Schema.Unknown as a temporary escape hatch per task instructions.
+const CanonicalToolInputSchema = Schema.Union(
+	Schema.Struct({
+		tool: Schema.Literal("Read"),
+		filePath: Schema.String,
+		offset: Schema.optionalWith(Schema.Number, { exact: true }),
+		limit: Schema.optionalWith(Schema.Number, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Edit"),
+		filePath: Schema.String,
+		oldString: Schema.String,
+		newString: Schema.String,
+		replaceAll: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Write"),
+		filePath: Schema.String,
+		content: Schema.String,
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Bash"),
+		command: Schema.String,
+		description: Schema.optionalWith(Schema.String, { exact: true }),
+		timeoutMs: Schema.optionalWith(Schema.Number, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Grep"),
+		pattern: Schema.String,
+		path: Schema.optionalWith(Schema.String, { exact: true }),
+		include: Schema.optionalWith(Schema.String, { exact: true }),
+		fileType: Schema.optionalWith(Schema.String, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Glob"),
+		pattern: Schema.String,
+		path: Schema.optionalWith(Schema.String, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("WebFetch"),
+		url: Schema.String,
+		prompt: Schema.optionalWith(Schema.String, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("WebSearch"),
+		query: Schema.String,
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Task"),
+		description: Schema.String,
+		prompt: Schema.String,
+		subagentType: Schema.optionalWith(Schema.String, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("LSP"),
+		operation: Schema.String,
+		filePath: Schema.optionalWith(Schema.String, { exact: true }),
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Skill"),
+		name: Schema.String,
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("AskUserQuestion"),
+		questions: Schema.Unknown,
+	}),
+	Schema.Struct({
+		tool: Schema.Literal("Unknown"),
+		name: Schema.String,
+		raw: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	}),
+);
+
 const ToolStartedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	partId: Schema.String,
 	toolName: Schema.String,
 	callId: Schema.String,
-	input: Schema.Unknown,
+	input: CanonicalToolInputSchema,
 });
 
 const ToolRunningPayloadSchema = Schema.Struct({

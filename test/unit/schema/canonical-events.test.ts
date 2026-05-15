@@ -104,6 +104,26 @@ describe("Canonical event schemas", () => {
 			expect(Either.isRight(result)).toBe(true);
 		});
 
+		it("rejects non-canonical tool.started input", () => {
+			const raw = {
+				eventId: "evt_6b",
+				sessionId: "s1",
+				type: "tool.started",
+				data: {
+					messageId: "m1",
+					partId: "p1",
+					toolName: "Read",
+					callId: "c1",
+					input: { file_path: "/tmp/test" },
+				},
+				metadata: {},
+				provider: "opencode",
+				createdAt: Date.now(),
+			};
+			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			expect(Either.isLeft(result)).toBe(true);
+		});
+
 		it("decodes tool.running event", () => {
 			const raw = {
 				eventId: "evt_7",
@@ -254,7 +274,7 @@ describe("Canonical event schemas", () => {
 				data: {
 					sessionId: "s1",
 					oldProvider: "opencode",
-					newProvider: "claude-sdk",
+					newProvider: "claude",
 				},
 				metadata: {},
 				provider: "opencode",
