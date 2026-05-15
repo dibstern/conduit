@@ -17,6 +17,7 @@ import { ConfigPersistenceTag } from "../Services/config-persistence-service.js"
 import {
 	commitDaemonRuntimeConfig,
 	type DaemonConfigRefTag,
+	type DaemonRuntimeConfig,
 	makeDaemonConfigFromOptions,
 } from "../Services/daemon-config-ref.js";
 import {
@@ -196,6 +197,7 @@ export async function startForegroundDaemon(
 					shuttingDown: true,
 				}));
 				const persistence = yield* ConfigPersistenceTag;
+				yield* persistence.requestSave;
 				yield* persistence.flush;
 			}),
 		).catch((error: unknown) => {
@@ -207,12 +209,28 @@ export async function startForegroundDaemon(
 	};
 
 	const initialConfig = buildInitialRuntimeConfig(options, configDir);
+	const mirrorRuntimeConfig = (config: DaemonRuntimeConfig) => {
+		status = {
+			...status,
+			port: config.port,
+			host: config.host,
+			pinEnabled: config.pinHash !== null,
+			tlsEnabled: config.tlsEnabled,
+			keepAwake: config.keepAwake,
+		};
+	};
 	const liveOptions: DaemonLiveOptions = {
 		configDir,
 		pidPath: options.pidPath ?? join(configDir, "daemon.pid"),
 		socketPath: options.socketPath ?? join(configDir, "relay.sock"),
 		staticDir: options.staticDir ?? resolveDefaultStaticDir(),
 		initialConfig,
+		configMirror: {
+			set: (config) =>
+				Effect.sync(() => {
+					mirrorRuntimeConfig(config);
+				}),
+		},
 		ipcPostResponseActions: {
 			scheduleShutdown: () => {
 				void stop();

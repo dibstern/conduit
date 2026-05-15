@@ -8,7 +8,8 @@ import {
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import type { ForegroundDaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
 const ensureCertsMock = vi.hoisted(() => vi.fn());
@@ -72,7 +73,7 @@ async function sendRestartConfig(
 
 describe("daemon main runtime config status", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle | null;
+	let daemon: ForegroundDaemonHandle | null;
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "conduit-daemon-main-status-"));
@@ -91,11 +92,7 @@ describe("daemon main runtime config status", () => {
 	});
 
 	it("reports TLS success with 0.0.0.0 host and the actual bound port", async () => {
-		const { startDaemonProcess } = await import(
-			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
-		);
-
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -113,11 +110,7 @@ describe("daemon main runtime config status", () => {
 	});
 
 	it("reports TLS disabled with the explicit loopback host", async () => {
-		const { startDaemonProcess } = await import(
-			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
-		);
-
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -137,12 +130,9 @@ describe("daemon main runtime config status", () => {
 	});
 
 	it("applies restart TLS config before persistence and shutdown", async () => {
-		const { startDaemonProcess } = await import(
-			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
-		);
 		const socketPath = join(tmpDir, "relay.sock");
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath,
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -168,11 +158,7 @@ describe("daemon main runtime config status", () => {
 	});
 
 	it("keeps keep-awake startup config in the runtime-backed ref and persisted config", async () => {
-		const { startDaemonProcess } = await import(
-			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
-		);
-
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -198,9 +184,6 @@ describe("daemon main runtime config status", () => {
 	});
 
 	it("keeps rehydrated dismissed paths and session counts in runtime-backed reads and persistence", async () => {
-		const { startDaemonProcess } = await import(
-			"../../../src/lib/domain/daemon/Layers/daemon-main.js"
-		);
 		const projectPath = join(tmpDir, "persisted-project");
 		const dismissedPath = join(tmpDir, "dismissed-project");
 
@@ -228,7 +211,7 @@ describe("daemon main runtime config status", () => {
 			tmpDir,
 		);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
