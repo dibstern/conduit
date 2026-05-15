@@ -6,7 +6,7 @@ Historical log: `docs/plans/2026-05-11-effect-ts-mainline-completion-progress.md
 
 Plan: `docs/plans/2026-05-11-effect-ts-mainline-completion-plan.md`.
 
-Updated: 2026-05-14.
+Updated: 2026-05-15.
 
 ## Update Rules
 
@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. `DaemonLiveOptions` still requires a compatibility `DaemonIPCContext`; remove this after IPC handlers read Effect services directly.
+1. `DaemonLiveOptions` still requires a compatibility `DaemonIPCContext`; foreground instance mutators are now Effect-backed, and the next slice should remove the option entirely by letting IPC handlers read Effect services directly.
 2. The legacy `startDaemonProcess` bridge still exists for non-CLI parity harnesses until branch-local smoke parity is proven against the Effect-owned graph.
 
 ## Remaining Order
@@ -62,7 +62,7 @@ This mirrors the plan's authoritative order. Update this list only when an item 
 9. Provider driver and instance ownership. Started locally: `ProviderDriver` / `ProviderInstance` / `ProviderCapabilities` / `ProviderInstanceFailure` exist, production orchestration runtime creates `OpenCodeProviderInstance` / `ClaudeProviderInstance` through plain driver values, `ProviderRegistry` now exposes only instance-first APIs, provider implementation/test naming is instance-first, provider wait state now uses Effect `Deferred` for `EventSinkImpl`, OpenCode pending turns, Claude setup locks, and Claude turn queues, the old provider Promise-deferred helper is deleted, Claude translator sink writes no longer use `Runtime.runPromise`, and the remaining OpenCode/Claude SDK Promise adapters are named and statically guarded as external callback boundaries.
 10. IPC socket ownership. Done locally pending final recheck: tagged IPC dispatch no longer uses app-internal `Effect.runPromise`, `Runtime.runPromise`, or a `Runtime.defaultRuntime` fallback in `daemon-lifecycle.ts`; legacy cmd-format IPC validates with the old semantics, converts to tagged payloads, and dispatches through the same daemon runtime-owned RPC path.
 11. Daemon composition readiness. Started locally: IPC status reads now live on the IPC context instead of passing a separate `DaemonLiveOptions.getStatus` callback through the Layer graph, keep-awake/PIN/shutdown IPC now run through native Effect handlers, restart-config IPC now mutates `DaemonConfigRefTag` natively, legacy ManagedRuntime shutdown/restart scheduling is isolated to the IPC socket post-response hook instead of `DaemonIPCContext`, startup session-count prefetch is owned by `SessionPrefetchLive` instead of a daemon-main fetch loop, daemon startup time is seeded in the initial runtime config instead of a post-start runtime mutation, daemon-main derives the bound HTTP port from the owned server handle instead of reading the runtime config ref after startup, daemon HTTP auth uses the layer-owned `AuthManagerTag` instead of a daemon-main snapshot callback, daemon setup-info reads port/TLS from `DaemonConfigRefTag` inside the router layer instead of daemon-main callbacks, daemon HTTP health reads from `DaemonHandleTag` instead of a `daemon-main` callback, daemon HTTP project removal reads from `DaemonHandleTag` instead of a router options callback, daemon HTTP CA downloads read from `TlsCertTag` inside the router layer, daemon HTTP themes are loaded inside the router layer instead of passed from `daemon-main`, daemon router static-file root is supplied from top-level `DaemonLiveOptions.staticDir` instead of duplicated in router options, daemon HTTP project lists/status routing read `ProjectRegistryTag`, `DaemonConfigRefTag`, and non-starting `RelayCacheTag.peek` inside the router layer instead of a `daemon-main` callback, daemon push manager initialization/subscription routes are owned by `PushNotificationManagerLive(configDir)` and `DaemonLiveOptions.httpRouter` is gone, daemon config persistence snapshots are built from Effect-owned daemon/project/instance state and `DaemonLiveOptions.configSnapshot` is gone, `stop()` no longer performs a separate runtime-config read before applying shutdown state, `DaemonLive` is seeded from the local pre-runtime config snapshot instead of calling the runtime-read helper before the runtime exists, saved config rehydration now updates the local startup snapshot directly before the runtime exists, direct `DaemonHandle.stop()` marks shutdown in the local snapshot instead of re-entering the runtime before disposal, the synchronous daemon runtime-config update bridge is deleted, daemon-main config reads now use the local read model while Effect-owned writes mirror back into it, daemon-main project-registry sync/startup acquisition now waits through the ManagedRuntime callback/fiber exit API instead of `runPromise`, daemon port scanning is owned by `PortScannerLive` with manual scan requests entering through the daemon runtime, the CLI/default OpenCode URL is seeded into Effect-owned instance state, `DaemonHandleLive` now exposes a layer-owned handle backed by daemon config, lifecycle, project registry, instance manager, and relay cache state, onboarding CA deps are derived inside `makeOnboardingServerLive` from `TlsCertTag` instead of being placeholder-built in `daemon-main`, `DaemonLifecycleContext` is created by `DaemonLifecycleContextLive` instead of being required in `DaemonLiveOptions`, and `DaemonLiveOptions.relayFactory` is gone.
-12. Single-owner daemon cutover. Started locally: CLI foreground and internal `--daemon` child startup now use the Effect-backed daemon starter facade and no longer import/call `startDaemonProcess`; `DaemonLiveOptions.ipcContext` remains the next ownership blocker.
+12. Single-owner daemon cutover. Started locally: CLI foreground and internal `--daemon` child startup now use the Effect-backed daemon starter facade and no longer import/call `startDaemonProcess`; foreground daemon instance IPC now calls Effect-owned instance services through the managed runtime; `DaemonLiveOptions.ipcContext` remains the next ownership blocker.
 13. Final guardrail cleanup.
 14. Final docs and verification.
 
@@ -85,6 +85,12 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 ## Latest Update
 
 Detailed completed-slice notes moved to `docs/plans/2026-05-14-effect-ts-mainline-live-progress-archive.md`. Keep only live state and the last few current updates here.
+
+2026-05-15, foreground daemon instance IPC parity:
+
+- Changed `DaemonIPCContext` instance mutators to allow async implementations so Effect-backed contexts do not need sync compatibility throws.
+- Wired foreground daemon `instance_add`, `instance_update`, `instance_stop`, and `instance_remove` through Effect-owned instance services and refreshed the foreground read model after each mutation.
+- Added real socket coverage for foreground IPC instance add/update/stop/status/list/remove.
 
 2026-05-14, CLI daemon child Effect starter:
 

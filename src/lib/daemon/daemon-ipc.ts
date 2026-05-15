@@ -12,6 +12,8 @@ import type {
 } from "../types.js";
 import type { DaemonStatus } from "./daemon-types.js";
 
+type MaybePromise<T> = T | Promise<T>;
+
 // ─── Context interface ──────────────────────────────────────────────────────
 // Narrow surface the IPC handlers need from the Daemon instance.
 
@@ -33,26 +35,29 @@ export interface DaemonIPCContext {
 		>
 	>;
 	/** Set the project title via registry. */
-	setProjectTitle(slug: string, title: string): void;
+	setProjectTitle(slug: string, title: string): MaybePromise<void>;
 	/** Persist daemon config to disk. */
-	persistConfig(): void;
+	persistConfig(): MaybePromise<void>;
 	/** Return all registered OpenCode instances. */
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	/** Look up a single instance by ID. */
 	getInstance(id: string): Readonly<OpenCodeInstance> | undefined;
 	/** Register a new OpenCode instance. */
-	addInstance(id: string, config: InstanceConfig): Readonly<OpenCodeInstance>;
+	addInstance(
+		id: string,
+		config: InstanceConfig,
+	): MaybePromise<Readonly<OpenCodeInstance>>;
 	/** Remove an instance by ID. */
-	removeInstance(id: string): void;
+	removeInstance(id: string): MaybePromise<void>;
 	/** Start a managed instance. */
 	startInstance(id: string): Promise<void>;
 	/** Stop an instance. */
-	stopInstance(id: string): void;
+	stopInstance(id: string): MaybePromise<void>;
 	/** Update an instance's name, env, or port. */
 	updateInstance(
 		id: string,
 		updates: { name?: string; env?: Record<string, string>; port?: number },
-	): Readonly<OpenCodeInstance>;
+	): MaybePromise<Readonly<OpenCodeInstance>>;
 	/** Set the active/default agent for a registered project relay. */
 	setProjectAgent(slug: string, agent: string): Promise<void>;
 	/** Set the default model for a registered project relay. */
@@ -145,7 +150,7 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 			title: string,
 		): Promise<IPCResponse> => {
 			try {
-				ctx.setProjectTitle(slug, title);
+				await ctx.setProjectTitle(slug, title);
 				return { ok: true };
 			} catch (err) {
 				return { ok: false, error: formatErrorDetail(err) };
@@ -262,14 +267,14 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 					id = `${baseId}-${counter}`;
 					counter++;
 				}
-				const instance = ctx.addInstance(id, {
+				const instance = await ctx.addInstance(id, {
 					name,
 					port: port ?? 0,
 					managed,
 					...(env != null && { env }),
 					...(url != null && { url }),
 				});
-				ctx.persistConfig();
+				await ctx.persistConfig();
 				return { ok: true, instance };
 			} catch (err) {
 				return { ok: false, error: formatErrorDetail(err) };
@@ -278,8 +283,8 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 
 		instanceRemove: async (id: string): Promise<IPCResponse> => {
 			try {
-				ctx.removeInstance(id);
-				ctx.persistConfig();
+				await ctx.removeInstance(id);
+				await ctx.persistConfig();
 				return { ok: true };
 			} catch (err) {
 				return { ok: false, error: formatErrorDetail(err) };
@@ -297,7 +302,7 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 
 		instanceStop: async (id: string): Promise<IPCResponse> => {
 			try {
-				ctx.stopInstance(id);
+				await ctx.stopInstance(id);
 				return { ok: true };
 			} catch (err) {
 				return { ok: false, error: formatErrorDetail(err) };
@@ -320,8 +325,8 @@ export function buildIPCHandlers(ctx: DaemonIPCContext): IPCHandlerMap {
 				if (name !== undefined) updates.name = name;
 				if (env !== undefined) updates.env = env;
 				if (port !== undefined) updates.port = port;
-				const instance = ctx.updateInstance(instanceId, updates);
-				ctx.persistConfig();
+				const instance = await ctx.updateInstance(instanceId, updates);
+				await ctx.persistConfig();
 				return { ok: true, instance };
 			} catch (err) {
 				return { ok: false, error: formatErrorDetail(err) };
