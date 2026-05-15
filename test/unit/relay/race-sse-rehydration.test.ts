@@ -108,18 +108,19 @@ describe("race: SSE rehydration generation counter", () => {
 		});
 		delete (deps as Partial<SSEWiringDeps>).listPendingQuestions;
 
-		// Mock recoverPending to return recoverable permissions
-		vi.mocked(deps.permissionBridge.recoverPending).mockImplementation(
-			(input) =>
-				input.map((p) => ({
-					requestId:
-						p.id as unknown as import("../../../src/lib/shared-types.js").PermissionId,
-					sessionId: (p as Record<string, unknown>)["sessionId"] as string,
-					toolName: p.permission,
-					toolInput: {},
-					always: [],
-					timestamp: Date.now(),
-				})),
+		// Mock recovery to return recoverable permissions
+		vi.mocked(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).mockImplementation((input) =>
+			input.map((p) => ({
+				requestId:
+					p.id as unknown as import("../../../src/lib/shared-types.js").PermissionId,
+				sessionId: p.sessionId ?? "",
+				toolName: p.permission,
+				toolInput: {},
+				always: [],
+				timestamp: Date.now(),
+			})),
 		);
 
 		const { consumer, listeners } = createMockConsumer();

@@ -1230,9 +1230,11 @@ export const OrchestrationEngineLive: Layer.Layer<
 
 Replace Promise-based `sendTurn()` / `interruptTurn()` with Effect programs.
 
-**Step 3: ClaudeAdapter — already uses EffectPromptQueue**
+**Step 3: ClaudeAdapter — prompt queue boundary**
 
-`claude/effect-prompt-queue.ts` is already Effect-native. The adapter itself just needs its lifecycle managed by a Layer finalizer.
+Mainline Phase 6.43 made `claude/effect-prompt-queue.ts` genuinely Effect-native: queue construction and producer
+operations return Effects, and the Claude adapter yields those effects instead of calling a local runtime bridge.
+The remaining adapter work is lifecycle ownership by a Layer finalizer.
 
 **Step 4: Test**
 

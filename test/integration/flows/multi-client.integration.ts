@@ -40,7 +40,7 @@ describe("Integration: Multi-Client", () => {
 		await client2.close();
 	});
 
-	it("model switch from one client broadcasts to another", async () => {
+	it("model switch from one client reaches another client on the same session", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -48,11 +48,7 @@ describe("Integration: Multi-Client", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({
-			type: "switch_model",
-			modelId: "multi-test-model",
-			providerId: "multi-test-provider",
-		});
+		await client1.switchModel("multi-test-model", "multi-test-provider");
 
 		const msg = await client2.waitFor("model_info", { timeout: 5000 });
 		expect(msg["model"]).toBe("multi-test-model");
@@ -70,7 +66,7 @@ describe("Integration: Multi-Client", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({ type: "new_session", title: "Multi-Client Test Session" });
+		await client1.createSession("Multi-Client Test Session");
 
 		// The creating client should get session_switched
 		const switched1 = await client1.waitFor("session_switched", {
@@ -80,7 +76,7 @@ describe("Integration: Multi-Client", () => {
 		expect(newSessionId).toBeTruthy();
 
 		// The other client receives session_list broadcast (not session_switched)
-		// since new_session only switches the requesting client's tab.
+		// since CreateSession only switches the requesting client's tab.
 		// sendDualSessionLists sends roots then all — use a predicate to wait
 		// for the list that actually contains the new session ID.
 		const list2 = await client2.waitFor("session_list", {
@@ -109,10 +105,13 @@ describe("Integration: Multi-Client", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({ type: "input_sync", text: "hello from client1" });
+		await client1.syncInputDraft("hello from client1", {
+			originId: "browser-tab-a",
+		});
 
 		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
 		expect(msg["text"]).toBe("hello from client1");
+		expect(msg["from"]).toBe("browser-tab-a");
 
 		await client1.close();
 		await client2.close();
@@ -132,9 +131,8 @@ describe("Integration: Multi-Client", () => {
 
 		// client2 should still be fully functional
 		client2.clearReceived();
-		client2.send({ type: "get_agents" });
-		const msg = await client2.waitFor("agent_list", { timeout: 5000 });
-		expect(Array.isArray(msg["agents"])).toBe(true);
+		const result = await client2.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
 
 		await client2.close();
 	});

@@ -9,13 +9,13 @@ import {
 	loadConfig,
 	PersistencePathTag,
 	persistConfig,
-} from "../../../src/lib/effect/daemon-config-persistence.js";
-import type { DaemonState } from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
+import type { DaemonState } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	DaemonStateTag,
 	emptyDaemonState,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 
 // ─── In-memory test FileSystem ────────────────────────────────────────────────
 

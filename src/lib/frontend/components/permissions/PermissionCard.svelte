@@ -4,7 +4,12 @@
 
 <script lang="ts">
 	import type { PermissionRequest } from "../../types.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import {
+		respondPermissionRpc,
+		type RespondPermissionRpcInput,
+	} from "../../transport/ws-rpc-client.js";
 	let { request }: { request: PermissionRequest } = $props();
 
 	let resolved = $state<"allow" | "allow_always" | "deny" | null>(null);
@@ -52,10 +57,21 @@
 	const alwaysPatterns = $derived(request.always ?? []);
 	const hasPatterns = $derived(alwaysPatterns.length > 0);
 
+	function sendPermissionResponse(
+		input: Omit<RespondPermissionRpcInput, "projectSlug" | "originId">,
+	) {
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		void respondPermissionRpc({
+			projectSlug,
+			originId: getBrowserClientId(),
+			...input,
+		});
+	}
+
 	function handleAllow() {
 		if (resolved) return;
-		wsSend({
-			type: "permission_response",
+		sendPermissionResponse({
 			requestId: request.requestId,
 			decision: "allow",
 		});
@@ -64,8 +80,7 @@
 
 	function handleAlwaysAllowTool() {
 		if (resolved) return;
-		wsSend({
-			type: "permission_response",
+		sendPermissionResponse({
 			requestId: request.requestId,
 			decision: "allow_always",
 			persistScope: "tool",
@@ -76,8 +91,7 @@
 
 	function handleAlwaysAllowPattern(pattern: string) {
 		if (resolved) return;
-		wsSend({
-			type: "permission_response",
+		sendPermissionResponse({
 			requestId: request.requestId,
 			decision: "allow_always",
 			persistScope: "pattern",
@@ -99,8 +113,7 @@
 
 	function handleDeny() {
 		if (resolved) return;
-		wsSend({
-			type: "permission_response",
+		sendPermissionResponse({
 			requestId: request.requestId,
 			decision: "deny",
 		});

@@ -3,13 +3,25 @@
 // Ref<OverridesState> + Fiber timeout management.
 
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, Layer, Ref, TestClock } from "effect";
-import { expect } from "vitest";
 import {
+	Duration,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Ref,
+	TestClock,
+} from "effect";
+import { expect, it as vitestIt } from "vitest";
+import {
+	clearAgent,
 	clearProcessingTimeout,
 	clearSession,
 	getAgent,
 	getContextWindow,
+	getDefaultAgent,
+	getDefaultContextWindow,
+	getDefaultModel,
+	getDefaultVariant,
 	getModel,
 	getVariant,
 	hasActiveProcessingTimeout,
@@ -19,6 +31,7 @@ import {
 	resetProcessingTimeout,
 	setAgent,
 	setContextWindow,
+	setDefaultAgent,
 	setDefaultContextWindow,
 	setDefaultModel,
 	setDefaultVariant,
@@ -26,7 +39,7 @@ import {
 	setModelDefault,
 	setVariant,
 	startProcessingTimeout,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 
 const TIMEOUT_MS = 120_000;
 
@@ -144,6 +157,43 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
+	it.effect("getAgent falls back to the default agent", () =>
+		Effect.gen(function* () {
+			yield* setDefaultAgent("plan");
+
+			expect(yield* getDefaultAgent()).toBe("plan");
+			expect(yield* getAgent("sess-1")).toBe("plan");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("per-session agent overrides the default agent", () =>
+		Effect.gen(function* () {
+			yield* setDefaultAgent("plan");
+			yield* setAgent("sess-1", "build");
+
+			expect(yield* getAgent("sess-1")).toBe("build");
+			expect(yield* getAgent("sess-2")).toBe("plan");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("clearAgent removes agent without clearing other overrides", () =>
+		Effect.gen(function* () {
+			yield* setAgent("sess-1", "plan");
+			yield* setModel("sess-1", {
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			});
+
+			yield* clearAgent("sess-1");
+
+			expect(yield* getAgent("sess-1")).toBeUndefined();
+			expect(yield* getModel("sess-1")).toEqual({
+				providerID: "claude",
+				modelID: "claude-sonnet-4-7",
+			});
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
 	// ─── Per-Session Variant ────────────────────────────────────────────────
 
 	it.effect("setVariant/getVariant with fallback to defaultVariant", () =>
@@ -200,6 +250,29 @@ describe("SessionOverrides Effect", () => {
 		Effect.gen(function* () {
 			expect(yield* getContextWindow("sess-1")).toBe("");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect(
+		"default getters expose global model, variant, and context window",
+		() =>
+			Effect.gen(function* () {
+				yield* setDefaultModel({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				yield* setDefaultVariant("high");
+				yield* setDefaultContextWindow("1m");
+
+				const defaultModel = yield* getDefaultModel();
+				const defaultVariant = yield* getDefaultVariant();
+				const defaultContextWindow = yield* getDefaultContextWindow();
+				expect(defaultModel).toEqual({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				expect(defaultVariant).toBe("high");
+				expect(defaultContextWindow).toBe("1m");
+			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect("setting empty string clears context window", () =>
@@ -276,6 +349,37 @@ describe("SessionOverrides Effect", () => {
 	);
 
 	// ─── Processing Timeout ─────────────────────────────────────────────────
+
+	vitestIt(
+		"processing timeout runs in the managed overrides layer scope",
+		async () => {
+			const runtime = ManagedRuntime.make(makeOverridesStateLive());
+			let called = false;
+
+			try {
+				await runtime.runPromise(
+					startProcessingTimeout("sess-1", Duration.millis(10), () =>
+						Effect.sync(() => {
+							called = true;
+						}),
+					),
+				);
+
+				expect(
+					await runtime.runPromise(hasActiveProcessingTimeout("sess-1")),
+				).toBe(true);
+
+				await new Promise((resolve) => setTimeout(resolve, 50));
+
+				expect(called).toBe(true);
+				expect(
+					await runtime.runPromise(hasActiveProcessingTimeout("sess-1")),
+				).toBe(false);
+			} finally {
+				await runtime.dispose();
+			}
+		},
+	);
 
 	it.scoped("processing timeout fires after duration", () =>
 		Effect.gen(function* () {

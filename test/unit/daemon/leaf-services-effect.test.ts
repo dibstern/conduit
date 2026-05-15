@@ -16,23 +16,23 @@ import { expect, vi } from "vitest";
 import {
 	KeepAwakeLive,
 	KeepAwakeTag,
-} from "../../../src/lib/effect/keep-awake-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import {
 	PortScannerLive,
 	PortScannerTag,
-} from "../../../src/lib/effect/port-scanner-layer.js";
-import {
-	RateLimiterLive,
-	RateLimiterTag,
-} from "../../../src/lib/effect/rate-limiter-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	StorageMonitorLive,
 	StorageMonitorTag,
-} from "../../../src/lib/effect/storage-monitor-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/storage-monitor-layer.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
-} from "../../../src/lib/effect/version-checker-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
+import {
+	RateLimiterLive,
+	RateLimiterTag,
+} from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 
 /** Helper: build the layer, run the body, then close the scope. */
 const withMonitor = (
@@ -295,7 +295,13 @@ describe("Leaf service Layers", () => {
 				removalThreshold: number;
 				onDiscovered: (port: number) => Effect.Effect<void>;
 				onLost: (port: number) => Effect.Effect<void>;
+				onScan?: (result: {
+					discovered: number[];
+					lost: number[];
+					active: number[];
+				}) => Effect.Effect<void>;
 				excludedPorts?: Set<number>;
+				getExcludedPorts?: () => Effect.Effect<ReadonlySet<number>>;
 			},
 			body: (
 				svc: Context.Tag.Service<typeof PortScannerTag>,
@@ -440,6 +446,82 @@ describe("Leaf service Layers", () => {
 				expect(Exit.isSuccess(exit)).toBe(true);
 			}),
 		);
+
+		it.scoped("scanNow returns discovered, lost, and active ports", () => {
+			const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
+			const onLost = vi.fn().mockReturnValue(Effect.succeed(undefined));
+			const onScan = vi.fn().mockReturnValue(Effect.succeed(undefined));
+			const aliveRef = Ref.unsafeMake(true);
+
+			return withPortScanner(
+				{
+					probeFn: (port) =>
+						Ref.get(aliveRef).pipe(
+							Effect.map((alive) => port === 3000 && alive),
+						),
+					portRange: [3000, 3000],
+					scanInterval: Duration.hours(1),
+					removalThreshold: 1,
+					onDiscovered,
+					onLost,
+					onScan,
+				},
+				(svc) =>
+					Effect.gen(function* () {
+						const discovered = yield* svc.scanNow();
+						expect(discovered).toEqual({
+							discovered: [],
+							lost: [],
+							active: [3000],
+						});
+
+						yield* Ref.set(aliveRef, false);
+						const lost = yield* svc.scanNow();
+						expect(lost).toEqual({
+							discovered: [],
+							lost: [3000],
+							active: [],
+						});
+						expect(onDiscovered).toHaveBeenCalledWith(3000);
+						expect(onLost).toHaveBeenCalledWith(3000);
+						expect(onScan).toHaveBeenLastCalledWith(lost);
+					}),
+			);
+		});
+
+		it.scoped("reads excluded ports for each scan", () => {
+			const excludedRef = Ref.unsafeMake<ReadonlySet<number>>(new Set([3001]));
+			const probed: number[] = [];
+
+			return withPortScanner(
+				{
+					probeFn: (port) =>
+						Effect.sync(() => {
+							probed.push(port);
+							return true;
+						}),
+					portRange: [3000, 3001],
+					scanInterval: Duration.hours(1),
+					removalThreshold: 1,
+					onDiscovered: () => Effect.succeed(undefined),
+					onLost: () => Effect.succeed(undefined),
+					getExcludedPorts: () => Ref.get(excludedRef),
+				},
+				(svc) =>
+					Effect.gen(function* () {
+						probed.length = 0;
+						const first = yield* svc.scanNow();
+						expect(first.active).toEqual([3000]);
+						expect(probed).toEqual([3000]);
+
+						yield* Ref.set(excludedRef, new Set([3000]));
+						probed.length = 0;
+						const second = yield* svc.scanNow();
+						expect(second.active).toEqual([3001]);
+						expect(probed).toEqual([3001]);
+					}),
+			);
+		});
 	});
 
 	describe("KeepAwake", () => {

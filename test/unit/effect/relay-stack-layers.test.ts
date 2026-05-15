@@ -1,12 +1,27 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
-import { RelayStateLive } from "../../../src/lib/effect/relay-layer.js";
-import { SessionManagerStateTag } from "../../../src/lib/effect/session-manager-state.js";
-import { OverridesStateTag } from "../../../src/lib/effect/session-overrides-state.js";
-import { SessionRegistryStateTag } from "../../../src/lib/effect/session-registry-state.js";
-import { PollerStateTag } from "../../../src/lib/effect/session-status-poller.js";
-import { WsHandlerStateTag } from "../../../src/lib/effect/ws-handler-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
+import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { OverridesStateTag } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionRegistryStateTag } from "../../../src/lib/domain/relay/Services/session-registry-state.js";
+import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { WsHandlerStateTag } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
+import {
+	makeMockLogger,
+	makeMockOpenCodeAPI,
+} from "../../helpers/mock-factories.js";
+
+const relayStateTestLayer = RelayStateLive.pipe(
+	Layer.provide(
+		Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+		),
+	),
+);
 
 describe("Relay stack Layer composition", () => {
 	it.scoped("RelayStateLive constructs all Effect-native state services", () =>
@@ -31,14 +46,14 @@ describe("Relay stack Layer composition", () => {
 			const pollerRef = yield* PollerStateTag;
 			const pollerState = yield* Ref.get(pollerRef);
 			expect(Object.keys(pollerState.previousStatuses)).toHaveLength(0);
-		}).pipe(Effect.provide(Layer.fresh(RelayStateLive))),
+		}).pipe(Effect.provide(Layer.fresh(relayStateTestLayer))),
 	);
 
-	it.scoped("RelayStateLive composes independently of bridge layers", () =>
+	it.scoped("RelayStateLive composes with service dependencies provided", () =>
 		Effect.gen(function* () {
 			// Just verify construction succeeds — bridge layers not needed
 			const ref = yield* SessionRegistryStateTag;
 			expect(ref).toBeDefined();
-		}).pipe(Effect.provide(Layer.fresh(RelayStateLive))),
+		}).pipe(Effect.provide(Layer.fresh(relayStateTestLayer))),
 	);
 });

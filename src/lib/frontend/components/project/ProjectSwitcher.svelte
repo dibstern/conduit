@@ -8,9 +8,14 @@
 	import type { ProjectInfo } from "../../types.js";
 	import { ADD_PROJECT_TIMEOUT_MS } from "../../ui-constants.js";
 	import { navigate } from "../../stores/router.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
 	import { onProject } from "../../stores/ws.svelte.js";
 	import { closeMobileSidebar } from "../../stores/ui.svelte.js";
+	import { applyProjectMutationResponse } from "../../stores/project.svelte.js";
+	import {
+		addProjectRpc,
+		removeProjectRpc,
+		renameProjectRpc,
+	} from "../../transport/ws-rpc-client.js";
 	import {
 		instanceState,
 		getInstanceById,
@@ -116,29 +121,47 @@
 		addError = "";
 	}
 
+	function getRpcProjectSlug(fallbackSlug?: string): string | null {
+		return currentSlug ?? currentProject?.slug ?? fallbackSlug ?? null;
+	}
+
 	function handleSubmitAdd() {
 		const dir = addDirectory.trim();
 		if (!dir) {
 			addError = "Directory path is required";
 			return;
 		}
+		const projectSlug = getRpcProjectSlug();
+		if (projectSlug == null) {
+			addError = "No active project connection";
+			return;
+		}
 		adding = true;
 		addError = "";
-		const msg: Record<string, unknown> = { type: "add_project", directory: dir };
-		if (addInstanceId) {
-			msg["instanceId"] = addInstanceId;
-		}
-		wsSend(msg);
-		// The server responds with a project_list containing addedSlug,
-		// which triggers auto-navigation in the project store.
-		// The project listener below resets local form state on response.
-		// Safety timeout: if the server never responds, reset the adding state.
-		setTimeout(() => {
+		const timeout = window.setTimeout(() => {
 			if (adding) {
 				adding = false;
 				addError = "No response from server — please try again";
 			}
 		}, ADD_PROJECT_TIMEOUT_MS);
+		void addProjectRpc({
+			projectSlug,
+			directory: dir,
+			...(addInstanceId ? { instanceId: addInstanceId } : {}),
+		})
+			.then((response) => {
+				window.clearTimeout(timeout);
+				applyProjectMutationResponse(response);
+				adding = false;
+				showAddForm = false;
+				addDirectory = "";
+				open = false;
+			})
+			.catch(() => {
+				window.clearTimeout(timeout);
+				adding = false;
+				addError = "No response from server — please try again";
+			});
 	}
 
 	function handleProjectContextMenu(project: ProjectInfo, anchor: HTMLElement) {
@@ -163,7 +186,11 @@
 			"Remove",
 		);
 		if (confirmed) {
-			wsSend({ type: "remove_project", slug });
+			const projectSlug = getRpcProjectSlug(slug);
+			if (projectSlug == null) return;
+			void removeProjectRpc({ projectSlug, slug }).then(
+				applyProjectMutationResponse,
+			).catch(() => undefined);
 		}
 	}
 
@@ -176,7 +203,15 @@
 		if (newTitle && newTitle.length > 0) {
 			const proj = projects.find((p) => p.slug === slug);
 			if (proj && newTitle !== proj.title) {
-				wsSend({ type: "rename_project", slug, title: newTitle });
+				const projectSlug = getRpcProjectSlug(slug);
+				if (projectSlug == null) return;
+				void renameProjectRpc({
+					projectSlug,
+					slug,
+					title: newTitle,
+				})
+					.then(applyProjectMutationResponse)
+					.catch(() => undefined);
 			}
 		}
 	}

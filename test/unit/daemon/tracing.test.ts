@@ -6,7 +6,7 @@ import {
 import { Effect } from "effect";
 import { expect } from "vitest";
 
-import { makeTracingLive } from "../../../src/lib/effect/tracing.js";
+import { makeTracingLive } from "../../../src/lib/domain/daemon/Layers/tracing.js";
 
 describe("Tracing Layer", () => {
 	it.scoped("provides NodeSdk and captures spans via InMemoryExporter", () => {

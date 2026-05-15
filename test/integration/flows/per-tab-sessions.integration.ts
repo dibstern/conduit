@@ -1,7 +1,7 @@
 // ─── Integration: Per-Tab Sessions ────────────────────────────────────────────
 // Verifies that each WebSocket client (browser tab) can independently view
 // different sessions. Tests the per-tab session routing introduced by the
-// view_session / setClientSession / sendToSession system.
+// ViewSession / setClientSession / sendToSession system.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -36,12 +36,12 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create two sessions via client1
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "Tab-A Session" });
+		await client1.createSession("Tab-A Session");
 		const switchedA = await client1.waitFor("session_switched");
 		const sessionA = switchedA["id"] as string;
 
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "Tab-B Session" });
+		await client1.createSession("Tab-B Session");
 		const switchedB = await client1.waitFor("session_switched");
 		const sessionB = switchedB["id"] as string;
 
@@ -49,8 +49,8 @@ describe("Integration: Per-Tab Sessions", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		client1.send({ type: "view_session", sessionId: sessionA });
-		client2.send({ type: "view_session", sessionId: sessionB });
+		await client1.viewSession(sessionA);
+		await client2.viewSession(sessionB);
 
 		// Each client gets its own session_switched for the session it viewed
 		const view1 = await client1.waitFor("session_switched");
@@ -63,20 +63,18 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	it("view_session sends status to the requesting client", async () => {
+	it("ViewSession RPC sends status to the requesting client", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		client.clearReceived();
 
-		// Get any session ID
-		client.send({ type: "list_sessions" });
+		// Use the initial session list from the connect handshake.
 		const list = await client.waitFor("session_list");
 		const sessions = list["sessions"] as Array<{ id: string }>;
 		expect(sessions.length).toBeGreaterThan(0);
 
 		client.clearReceived();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		client.send({ type: "view_session", sessionId: sessions[0]!.id });
+		await client.viewSession(sessions[0]!.id);
 
 		// Should receive session_switched AND status
 		const switched = await client.waitFor("session_switched");
@@ -105,7 +103,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		client2.clearReceived();
 
 		// Client1 creates a new session
-		client1.send({ type: "new_session", title: "Per-Tab New Session" });
+		await client1.createSession("Per-Tab New Session");
 
 		// Client1 should get session_switched with the new ID
 		const switched1 = await client1.waitFor("session_switched");
@@ -134,17 +132,17 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Have them view different sessions first
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "List-Broadcast-A" });
+		await client1.createSession("List-Broadcast-A");
 		const a = await client1.waitFor("session_switched");
 
 		client2.clearReceived();
-		client2.send({ type: "view_session", sessionId: a["id"] as string });
+		await client2.viewSession(a["id"] as string);
 		await client2.waitFor("session_switched");
 
 		// Now create another session from client1 — both should get updated list
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({ type: "new_session", title: "List-Broadcast-B" });
+		await client1.createSession("List-Broadcast-B");
 		const b = await client1.waitFor("session_switched");
 
 		// Both clients should get session_list containing the new session.
@@ -178,23 +176,27 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create a shared session
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "Sync-Session" });
+		await client1.createSession("Sync-Session");
 		const switched = await client1.waitFor("session_switched");
 		const sharedId = switched["id"] as string;
 
 		// Both clients view the same session
 		client2.clearReceived();
-		client2.send({ type: "view_session", sessionId: sharedId });
+		await client2.viewSession(sharedId);
 		await client2.waitFor("session_switched");
 
 		// Clear and send input_sync from client1
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({ type: "input_sync", text: "typing from tab1" });
+		await client1.syncInputDraft("typing from tab1", {
+			sessionId: sharedId,
+			originId: "browser-tab-a",
+		});
 
 		// Client2 should receive it (same session)
 		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
 		expect(msg["text"]).toBe("typing from tab1");
+		expect(msg["from"]).toBe("browser-tab-a");
 
 		await client1.close();
 		await client2.close();
@@ -208,25 +210,28 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create two sessions
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "Input-Sync-A" });
+		await client1.createSession("Input-Sync-A");
 		const a = await client1.waitFor("session_switched");
 
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "Input-Sync-B" });
+		await client1.createSession("Input-Sync-B");
 		const b = await client1.waitFor("session_switched");
 
 		// Client1 views session A, Client2 views session B
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({ type: "view_session", sessionId: a["id"] as string });
-		client2.send({ type: "view_session", sessionId: b["id"] as string });
+		await client1.viewSession(a["id"] as string);
+		await client2.viewSession(b["id"] as string);
 		await client1.waitFor("session_switched");
 		await client2.waitFor("session_switched");
 
 		// Send input_sync from client1 (session A)
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({ type: "input_sync", text: "isolated input" });
+		await client1.syncInputDraft("isolated input", {
+			sessionId: a["id"] as string,
+			originId: "browser-tab-a",
+		});
 
 		// Wait and verify client2 (session B) does NOT receive it
 		await new Promise((r) => setTimeout(r, 1000));
@@ -250,13 +255,13 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create a session for client1 to delete
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "To-Delete-PerTab" });
+		await client1.createSession("To-Delete-PerTab");
 		const created = await client1.waitFor("session_switched");
 		const deleteId = created["id"] as string;
 
 		// Client1 views the session-to-delete
 		client1.clearReceived();
-		client1.send({ type: "view_session", sessionId: deleteId });
+		await client1.viewSession(deleteId);
 		await client1.waitFor("session_switched");
 
 		// Client2 views a different session (the initial one)
@@ -264,7 +269,7 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Delete from client1
 		client1.clearReceived();
-		client1.send({ type: "delete_session", sessionId: deleteId });
+		await client1.deleteSession(deleteId);
 
 		// Client1 should be redirected to another session
 		const redirected = await client1.waitFor("session_switched");
@@ -297,23 +302,19 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create a shared session
 		client1.clearReceived();
-		client1.send({ type: "new_session", title: "Model-Switch-PerTab" });
+		await client1.createSession("Model-Switch-PerTab");
 		const created = await client1.waitFor("session_switched");
 		const sharedId = created["id"] as string;
 
 		// Both clients view the same session
 		client2.clearReceived();
-		client2.send({ type: "view_session", sessionId: sharedId });
+		await client2.viewSession(sharedId);
 		await client2.waitFor("session_switched");
 
 		// Switch model from client1
 		client1.clearReceived();
 		client2.clearReceived();
-		client1.send({
-			type: "switch_model",
-			modelId: "per-tab-test-model",
-			providerId: "per-tab-test-provider",
-		});
+		await client1.switchModel("per-tab-test-model", "per-tab-test-provider");
 
 		// Client2 should receive model_info (same session)
 		const modelMsg = await client2.waitFor("model_info");

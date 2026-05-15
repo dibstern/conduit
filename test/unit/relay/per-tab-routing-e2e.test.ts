@@ -196,12 +196,25 @@ async function createTestHarness(): Promise<TestHarness> {
 		projectDir: process.cwd(),
 		slug: "test-project",
 		log: createSilentLogger(), // silence logs
+		noServer: true,
 		statusPollerInterval: 100,
 		messagePollerInterval: 150,
 		pollerGatingConfig: {
 			sseGracePeriodMs: 300,
 			sseActiveThresholdMs: 500,
 		},
+	});
+
+	relayServer.on("upgrade", (req, socket, head) => {
+		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
+			relay.wsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
+			relay.rpcWsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		socket.destroy();
 	});
 
 	// Wait for SSE to connect
@@ -212,7 +225,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		mock,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}`;
+			let url = `ws://127.0.0.1:${relayPort}/ws`;
 			if (opts?.session) {
 				url += `?session=${encodeURIComponent(opts.session)}`;
 			}
@@ -256,7 +269,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 
 	it("SSE chat events reach every client on the project (Phase 0b firehose)", async () => {
 		// Phase 0b: per-session chat events are broadcast to every client on
-		// the project's /p/<slug> regardless of view_session. The frontend
+		// the project's /p/<slug> regardless of viewed session. The frontend
 		// dispatcher routes into the correct per-session slot using each
 		// event's sessionId.
 		const client1 = await harness.connectClient();
@@ -266,17 +279,8 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 
 		// Client1 views session A, Client2 views session B — but this no
 		// longer gates event delivery under Phase 0b.
-		client1.send({ type: "view_session", sessionId: "sess-A" });
-		client2.send({ type: "view_session", sessionId: "sess-B" });
-
-		await client1.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
-		await client2.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await client1.viewSession("sess-A");
+		await client2.viewSession("sess-B");
 
 		client1.clearReceived();
 		client2.clearReceived();
@@ -310,17 +314,8 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		client1.send({ type: "view_session", sessionId: "sess-A" });
-		client2.send({ type: "view_session", sessionId: "sess-B" });
-
-		await client1.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
-		await client2.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await client1.viewSession("sess-A");
+		await client2.viewSession("sess-B");
 
 		client1.clearReceived();
 		client2.clearReceived();
@@ -353,17 +348,8 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client2.waitForInitialState();
 
 		// Both view session A
-		client1.send({ type: "view_session", sessionId: "sess-A" });
-		client2.send({ type: "view_session", sessionId: "sess-A" });
-
-		await client1.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
-		await client2.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
+		await client1.viewSession("sess-A");
+		await client2.viewSession("sess-A");
 
 		client1.clearReceived();
 		client2.clearReceived();
@@ -390,21 +376,17 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client2.close();
 	});
 
-	it("client that view_session's then reconnects gets correct session on init", async () => {
+	it("client that views a session then reconnects gets correct session on init", async () => {
 		// Bug: When client reconnects, handleClientConnected sends session_switched
 		// with the GLOBAL activeSessionId, overriding the client's intended session.
-		// After reconnect, if the client sends view_session, it should end up on
+		// After reconnect, if the client sends ViewSession, it should end up on
 		// the correct session without an intermediate session_switched for the wrong one.
 
 		const client1 = await harness.connectClient();
 		await client1.waitForInitialState();
 
 		// Client1 views session B (not the default session A)
-		client1.send({ type: "view_session", sessionId: "sess-B" });
-		await client1.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await client1.viewSession("sess-B");
 		client1.clearReceived();
 
 		// Disconnect and reconnect (simulates HMR or network blip)
@@ -415,14 +397,8 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		// Wait for initial state to settle first
 		await client2.waitForInitialState();
 
-		// On reconnect, client sends view_session (as ws.svelte.ts does)
-		client2.send({ type: "view_session", sessionId: "sess-B" });
-
-		// Wait specifically for the view_session response
-		const switched = await client2.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		// On reconnect, the frontend sends ViewSession RPC.
+		const switched = await client2.viewSession("sess-B");
 
 		expect(switched["id"]).toBe("sess-B");
 
@@ -440,11 +416,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		// First, ensure the global active session is sess-A (the default)
 		const setupClient = await harness.connectClient();
 		await setupClient.waitForInitialState();
-		setupClient.send({ type: "view_session", sessionId: "sess-A" });
-		await setupClient.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
+		await setupClient.viewSession("sess-A");
 		await setupClient.close();
 
 		// Now connect a NEW client requesting sess-B via query param

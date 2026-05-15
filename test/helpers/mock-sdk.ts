@@ -2,6 +2,7 @@
 // Shared mock helpers for the Claude Agent SDK used across adapter and
 // integration tests.
 
+import { Effect } from "effect";
 import { vi } from "vitest";
 import type {
 	Query,
@@ -54,11 +55,13 @@ export function createMockQuery(messages: SDKMessage[]): Query {
 /** Create a stub EventSink whose methods are `vi.fn()` spies. */
 export function createMockEventSink(): EventSink {
 	return {
-		push: vi.fn(async () => {}),
-		requestPermission: vi.fn(async () => ({ decision: "once" as const })),
-		requestQuestion: vi.fn(async () => ({})),
-		resolvePermission: vi.fn(),
-		resolveQuestion: vi.fn(),
+		push: vi.fn(() => Effect.void),
+		requestPermission: vi.fn(() =>
+			Effect.succeed({ decision: "once" as const }),
+		),
+		requestQuestion: vi.fn(() => Effect.succeed({})),
+		resolvePermission: vi.fn(() => Effect.void),
+		resolveQuestion: vi.fn(() => Effect.void),
 	};
 }
 

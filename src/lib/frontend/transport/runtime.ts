@@ -16,7 +16,11 @@ import {
 } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RelayMessage } from "../../shared-types.js";
-import { decodeMessage, preloadDecoder } from "../effect-boundary.js";
+import {
+	decodeMessage,
+	ProtocolDecodeError,
+	preloadDecoder,
+} from "../effect-boundary.js";
 
 // Frontend transport has no async service dependencies.
 // ManagedRuntime is needed for fiber lifecycle (interrupt stream on reconnect).
@@ -28,6 +32,15 @@ let activeStreamFiber: RuntimeFiber<void, unknown> | null = null;
 
 void preloadDecoder();
 
+export class TransportSocketError extends Error {
+	readonly _tag = "TransportSocketError";
+
+	constructor(message: string) {
+		super(message);
+		this.name = "TransportSocketError";
+	}
+}
+
 /** Get or create the long-lived runtime (app lifetime). */
 export async function getRuntime() {
 	if (!runtime) {
@@ -36,18 +49,51 @@ export async function getRuntime() {
 	return runtime;
 }
 
+/** Run transport-owned effects through the app-lifetime frontend runtime. */
+export async function runTransportEffect<A, E>(
+	effect: Effect.Effect<A, E, never>,
+): Promise<A> {
+	const rt = await getRuntime();
+	return await rt.runPromise(effect);
+}
+
 /** Interrupt the active stream fiber (connection lifetime). Called on disconnect/reconnect. */
 export async function interruptStream() {
 	if (activeStreamFiber) {
-		const rt = await getRuntime();
-		await rt.runPromise(Fiber.interrupt(activeStreamFiber));
-		activeStreamFiber = null;
+		const fiber = activeStreamFiber;
+		await runTransportEffect(Fiber.interrupt(fiber));
+		if (activeStreamFiber === fiber) {
+			activeStreamFiber = null;
+		}
 	}
+}
+
+/** Whether a WebSocket stream fiber is currently registered. */
+export function hasActiveStreamFiber(): boolean {
+	return activeStreamFiber !== null;
 }
 
 /** Set the active stream fiber (called after forking a new WS stream). */
 export function setActiveStreamFiber(fiber: RuntimeFiber<void, unknown>) {
 	activeStreamFiber = fiber;
+	fiber.addObserver(() => {
+		if (activeStreamFiber === fiber) {
+			activeStreamFiber = null;
+		}
+	});
+}
+
+export interface WsProtocolError {
+	kind: "invalid_json" | "invalid_message";
+	detail: string;
+	data?: string;
+	raw?: unknown;
+	messageType?: string;
+	cause?: unknown;
+}
+
+export interface WsMessageStreamOptions {
+	onProtocolError?: (error: WsProtocolError) => void;
 }
 
 /**
@@ -57,20 +103,48 @@ export function setActiveStreamFiber(fiber: RuntimeFiber<void, unknown>) {
  */
 export const wsMessageStream = (
 	ws: WebSocket,
-): Stream.Stream<RelayMessage, Error> =>
-	Stream.async<RelayMessage, Error>((emit) => {
+	options: WsMessageStreamOptions = {},
+): Stream.Stream<RelayMessage, TransportSocketError> =>
+	Stream.async<RelayMessage, TransportSocketError>((emit) => {
 		const onMessage = (evt: MessageEvent) => {
+			let raw: unknown;
 			try {
-				const raw = JSON.parse(evt.data);
+				raw = JSON.parse(evt.data);
 				const parsed = decodeMessage(raw) as RelayMessage;
 				emit(Effect.succeed(Chunk.of(parsed)));
-			} catch {
-				// Bad JSON — skip message, don't kill stream
+			} catch (err) {
+				if (err instanceof SyntaxError) {
+					options.onProtocolError?.({
+						kind: "invalid_json",
+						detail: "Invalid WebSocket JSON payload",
+						...(typeof evt.data === "string" ? { data: evt.data } : {}),
+						cause: err,
+					});
+					return;
+				}
+				if (err instanceof ProtocolDecodeError) {
+					options.onProtocolError?.({
+						kind: "invalid_message",
+						detail: err.message,
+						raw: err.raw,
+						messageType: err.messageType,
+						cause: err.cause,
+					});
+					return;
+				}
+				options.onProtocolError?.({
+					kind: "invalid_message",
+					detail: "Failed to decode WebSocket payload",
+					raw,
+					cause: err,
+				});
 			}
 		};
 		const onClose = () => emit(Effect.fail(Option.none()));
 		const onError = () =>
-			emit(Effect.fail(Option.some(new Error("WebSocket error"))));
+			emit(
+				Effect.fail(Option.some(new TransportSocketError("WebSocket error"))),
+			);
 
 		ws.addEventListener("message", onMessage);
 		ws.addEventListener("close", onClose);

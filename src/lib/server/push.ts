@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
+import { Data } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 
 // web-push is CJS-only — use createRequire (same pattern as ws in ws-handler.ts)
@@ -58,9 +59,36 @@ export interface PushPayload {
 	[key: string]: unknown;
 }
 
+export interface PushNotificationSender {
+	getPublicKey(): string | null;
+	addSubscription(clientId: string, subscription: PushSubscriptionData): void;
+	removeSubscription(clientId: string): void;
+	sendToAll(payload: PushPayload): Promise<void>;
+}
+
+export class PushNotificationManagerNotInitializedError extends Data.TaggedError(
+	"PushNotificationManagerNotInitializedError",
+)<{
+	readonly operation: "sendToAll" | "sendTo";
+}> {
+	override get message(): string {
+		return "PushNotificationManager not initialized — call init() first";
+	}
+}
+
+export class PushVapidKeysNotInitializedError extends Data.TaggedError(
+	"PushVapidKeysNotInitializedError",
+)<{
+	readonly operation: "getVapidDetails";
+}> {
+	override get message(): string {
+		return "VAPID keys not initialized";
+	}
+}
+
 // ─── PushNotificationManager ─────────────────────────────────────────────────
 
-export class PushNotificationManager {
+export class PushNotificationManager implements PushNotificationSender {
 	private readonly vapidSubject: string;
 	private readonly configDir: string;
 	private readonly webpush: WebPushModule;
@@ -113,9 +141,9 @@ export class PushNotificationManager {
 	/** Send push notification to all subscribed clients. */
 	async sendToAll(payload: PushPayload): Promise<void> {
 		if (!this.vapidKeys) {
-			throw new Error(
-				"PushNotificationManager not initialized — call init() first",
-			);
+			throw new PushNotificationManagerNotInitializedError({
+				operation: "sendToAll",
+			});
 		}
 
 		const json = JSON.stringify(payload);
@@ -150,9 +178,9 @@ export class PushNotificationManager {
 	/** Send push notification to a specific client. */
 	async sendTo(clientId: string, payload: PushPayload): Promise<void> {
 		if (!this.vapidKeys) {
-			throw new Error(
-				"PushNotificationManager not initialized — call init() first",
-			);
+			throw new PushNotificationManagerNotInitializedError({
+				operation: "sendTo",
+			});
 		}
 
 		const sub = this.subscriptions.get(clientId);
@@ -282,7 +310,9 @@ export class PushNotificationManager {
 
 	private getVapidDetails(): VapidDetails {
 		if (!this.vapidKeys) {
-			throw new Error("VAPID keys not initialized");
+			throw new PushVapidKeysNotInitializedError({
+				operation: "getVapidDetails",
+			});
 		}
 		return {
 			subject: this.vapidSubject,

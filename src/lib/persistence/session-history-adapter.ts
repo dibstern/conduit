@@ -8,7 +8,7 @@ import type {
 	HistoryMessagePart,
 	ToolStatus,
 } from "../shared-types.js";
-import type { MessagePartRow, MessageWithParts } from "./read-query-service.js";
+import type { MessagePartRow, MessageWithParts } from "./read-model-types.js";
 
 export interface HistoryResult {
 	messages: HistoryMessage[];

@@ -74,7 +74,7 @@ export function renderMarkdownServer(text: string): string {
  *
  * Used by all 3 history-sending call sites:
  * - handleViewSession (REST fallback path)
- * - handleLoadMoreHistory
+ * - LoadMoreHistory RPC
  * - client-init.ts (initial connection REST fallback)
  */
 export function preRenderHistoryMessages(messages: HistoryMessage[]): void {

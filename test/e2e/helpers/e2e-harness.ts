@@ -75,7 +75,7 @@ export async function createE2EHarness(opts?: {
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
 
 	const createdSessionIds: string[] = [];
-	const initialSessionId = await stack.sessionMgr.getDefaultSessionId();
+	const initialSessionId = stack.initialSessionId;
 	if (initialSessionId) createdSessionIds.push(initialSessionId);
 
 	await switchToFreeModel(relayPort);

@@ -36,6 +36,28 @@ export interface SSEStreamCallbacks {
 	heartbeat: () => void;
 }
 
+export interface SSEStreamEvents {
+	on<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		callback: SSEStreamCallbacks[K],
+	): void;
+}
+
+export interface SSEStreamHealth {
+	getHealth(): ConnectionHealth & { stale: boolean };
+	isConnected(): boolean;
+}
+
+export interface SSEStreamLifecycle {
+	connectEffect(): Effect.Effect<void>;
+	disconnectEffect(): Effect.Effect<void>;
+	drainEffect(): Effect.Effect<void>;
+}
+
+export type SSEStreamPort = SSEStreamEvents &
+	SSEStreamHealth &
+	SSEStreamLifecycle;
+
 // ─── Reconnect schedule factory ─────────────────────────────────────────────
 
 function makeReconnectSchedule(baseDelay: number, maxDelay: number) {
@@ -49,7 +71,7 @@ function makeReconnectSchedule(baseDelay: number, maxDelay: number) {
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
-export class SSEStream {
+export class SSEStream implements SSEStreamPort {
 	private readonly api: SSEStreamOptions["api"];
 	private readonly log: Logger;
 	private readonly baseDelay: number;
@@ -66,6 +88,10 @@ export class SSEStream {
 
 	/** Effect fiber running the consume loop. */
 	private fiber: Fiber.RuntimeFiber<void, never> | null = null;
+
+	private desiredRunning = false;
+	private lifecycleGeneration = 0;
+	private lifecycleQueue: Promise<void> = Promise.resolve();
 
 	/** Pending fire-and-forget promises — awaited in drain(). */
 	private readonly pendingPromises = new Set<Promise<unknown>>();
@@ -99,33 +125,32 @@ export class SSEStream {
 	}
 
 	/** Start consuming SSE events. Does not throw — errors are notified via callbacks. */
-	async connect(): Promise<void> {
-		if (this.running) return;
-		this.running = true;
-		this.reconnectCount = 0;
-
-		// Launch the Effect-based consume loop as a daemon fiber
-		const program = this.consumeLoop();
-
-		this.fiber = Effect.runFork(program);
+	connectEffect(): Effect.Effect<void> {
+		return Effect.flatMap(
+			Effect.sync(() => {
+				this.desiredRunning = true;
+				return ++this.lifecycleGeneration;
+			}),
+			(generation) =>
+				this.enqueueLifecycleEffect(() => {
+					if (!this.desiredRunning || generation !== this.lifecycleGeneration) {
+						return Effect.void;
+					}
+					return this.startConnectionEffect();
+				}),
+		);
 	}
 
 	/** Stop consuming and clean up. */
-	async disconnect(): Promise<void> {
-		this.running = false;
-		this.connected = false;
-
-		// Abort the SSE fetch/reader so the async generator terminates
-		if (this.sseAbort) {
-			this.sseAbort.abort();
-			this.sseAbort = null;
-		}
-
-		// Interrupt the Effect fiber
-		if (this.fiber) {
-			await Effect.runPromise(Fiber.interrupt(this.fiber)).catch(() => {});
-			this.fiber = null;
-		}
+	disconnectEffect(): Effect.Effect<void> {
+		return Effect.flatMap(
+			Effect.sync(() => {
+				this.desiredRunning = false;
+				this.lifecycleGeneration++;
+			}),
+			() =>
+				this.enqueueLifecycleEffect(() => this.stopCurrentConnectionEffect()),
+		);
 	}
 
 	/** Get connection health snapshot. */
@@ -144,10 +169,11 @@ export class SSEStream {
 	}
 
 	/** Kill SSE stream and drain tracked work. */
-	async drain(): Promise<void> {
-		await this.disconnect();
-		await Promise.allSettled([...this.pendingPromises]);
-		this.pendingPromises.clear();
+	drainEffect(): Effect.Effect<void> {
+		return Effect.zipRight(
+			this.disconnectEffect(),
+			this.awaitPendingPromisesEffect(),
+		);
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
@@ -156,6 +182,73 @@ export class SSEStream {
 		if (!this.connected) return false;
 		if (this.lastEventAt === null) return false;
 		return Date.now() - this.lastEventAt > this.staleThreshold;
+	}
+
+	private enqueueLifecycleEffect(
+		work: () => Effect.Effect<void>,
+	): Effect.Effect<void> {
+		return Effect.async<void>((resume) => {
+			let release!: () => void;
+			const completion = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const runWork = () => {
+				resume(
+					Effect.suspend(work).pipe(Effect.ensuring(Effect.sync(release))),
+				);
+				return completion;
+			};
+			const run = this.lifecycleQueue.then(runWork, runWork);
+			this.lifecycleQueue = run.catch(() => {});
+		});
+	}
+
+	private awaitPendingPromisesEffect(): Effect.Effect<void> {
+		return Effect.async<void>((resume) => {
+			Promise.allSettled([...this.pendingPromises]).then(
+				() => {
+					this.pendingPromises.clear();
+					resume(Effect.void);
+				},
+				() => {
+					this.pendingPromises.clear();
+					resume(Effect.void);
+				},
+			);
+		});
+	}
+
+	private startConnectionEffect(): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			if (this.running) return;
+			this.running = true;
+			this.reconnectCount = 0;
+
+			// Launch the Effect-based consume loop as a daemon fiber.
+			this.fiber = yield* Effect.forkDaemon(this.consumeLoop());
+		});
+	}
+
+	private stopCurrentConnectionEffect(): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			this.running = false;
+			this.connected = false;
+
+			const abort = this.sseAbort;
+			const fiber = this.fiber;
+
+			// Abort the SSE fetch/reader so the async generator terminates.
+			if (abort) {
+				abort.abort();
+				if (this.sseAbort === abort) this.sseAbort = null;
+			}
+
+			// Interrupt the Effect fiber and wait for its finalizers.
+			if (fiber) {
+				yield* Fiber.interrupt(fiber);
+				if (this.fiber === fiber) this.fiber = null;
+			}
+		});
 	}
 
 	/** Invoke all registered callbacks for a given event type. */
@@ -231,7 +324,7 @@ export class SSEStream {
 				}
 			};
 
-			run().catch((err) => {
+			const runPromise = run().catch((err) => {
 				if (!this.running) {
 					resume(Effect.void);
 					return;
@@ -246,6 +339,14 @@ export class SSEStream {
 				this.notify("error", error);
 				resume(Effect.fail(error));
 			});
+
+			return Effect.tryPromise({
+				try: async () => {
+					if (!abort.signal.aborted) abort.abort();
+					await runPromise;
+				},
+				catch: () => undefined,
+			}).pipe(Effect.catchAll(() => Effect.void));
 		});
 
 		// Wrap with retry using the Effect Schedule, notifying reconnection callbacks

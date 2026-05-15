@@ -4,18 +4,18 @@ import { Effect } from "effect";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
+} from "../domain/relay/Services/services.js";
+import {
+	getContextWindow,
+	getDefaultContextWindow,
+	getDefaultModel,
+	getModel,
+	setContextWindow,
+	setDefaultContextWindow,
+} from "../domain/relay/Services/session-overrides-state.js";
 import type { ContextWindowOption } from "../shared-types.js";
 import { isClaudeProvider } from "./model.js";
-import type { PayloadMap } from "./payloads.js";
-
-const resolveSessionFromContext = (clientId: string) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		return wsHandler.getClientSession(clientId);
-	});
 
 const loadContextWindowOptions = (modelId: string) =>
 	Effect.gen(function* () {
@@ -26,12 +26,10 @@ const loadContextWindowOptions = (modelId: string) =>
 		}
 
 		const capsResult = yield* Effect.either(
-			Effect.tryPromise(() =>
-				engineOption.value.dispatch({
-					type: "discover",
-					providerId: "claude",
-				}),
-			),
+			engineOption.value.dispatchEffect({
+				type: "discover",
+				providerId: "claude",
+			}),
 		);
 		if (capsResult._tag === "Left") {
 			log.warn(
@@ -48,40 +46,58 @@ const loadContextWindowOptions = (modelId: string) =>
 
 export const handleSwitchContextWindow = (
 	clientId: string,
-	payload: PayloadMap["switch_context_window"],
+	payload: { contextWindow: string },
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
+		const sessionId = wsHandler.getClientSession(clientId);
+		yield* switchContextWindowForSession({
+			clientId,
+			sessionId,
+			contextWindow: payload.contextWindow,
+		});
+	});
+
+export interface SwitchContextWindowInput {
+	readonly clientId: string;
+	readonly sessionId?: string | undefined;
+	readonly contextWindow: string;
+}
+
+export const switchContextWindowForSession = (
+	input: SwitchContextWindowInput,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
-		const sessionId = yield* resolveSessionFromContext(clientId);
+		const sessionId = input.sessionId;
 		const activeModel = sessionId
-			? overrides.getModel(sessionId)
-			: overrides.defaultModel;
+			? yield* getModel(sessionId)
+			: yield* getDefaultModel();
 		const currentContextWindow = sessionId
-			? overrides.getContextWindow(sessionId)
-			: overrides.defaultContextWindow;
+			? yield* getContextWindow(sessionId)
+			: yield* getDefaultContextWindow();
 
 		const options =
 			activeModel && isClaudeProvider(activeModel.providerID)
 				? yield* loadContextWindowOptions(activeModel.modelID)
 				: ([] as readonly ContextWindowOption[]);
 
-		const requested = payload.contextWindow;
+		const requested = input.contextWindow;
 		const supported =
 			requested === "" || options.some((option) => option.value === requested);
 		const nextContextWindow = supported ? requested : currentContextWindow;
 
 		if (supported) {
 			if (sessionId) {
-				overrides.setContextWindow(sessionId, requested);
+				yield* setContextWindow(sessionId, requested);
 			} else {
-				overrides.defaultContextWindow = requested;
+				yield* setDefaultContextWindow(requested);
 			}
 		} else {
 			log.warn(
-				`client=${clientId} session=${sessionId ?? "?"} Ignoring unsupported context window: ${requested}`,
+				`client=${input.clientId} session=${sessionId ?? "?"} Ignoring unsupported context window: ${requested}`,
 			);
 		}
 
@@ -93,10 +109,11 @@ export const handleSwitchContextWindow = (
 		if (sessionId) {
 			wsHandler.sendToSession(sessionId, message);
 		} else {
-			wsHandler.sendTo(clientId, message);
+			wsHandler.sendTo(input.clientId, message);
 		}
 
 		log.info(
-			`client=${clientId} session=${sessionId ?? "?"} Switched context window to: ${nextContextWindow || "default"}`,
+			`client=${input.clientId} session=${sessionId ?? "?"} Switched context window to: ${nextContextWindow || "default"}`,
 		);
+		return message;
 	});

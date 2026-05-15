@@ -25,13 +25,93 @@ export interface WsMockOptions {
 
 	/**
 	 * Optional callback invoked for every client message.
-	 * Use this to respond to messages like switch_session, view_session, etc.
+	 * Use this to respond to remaining raw WS commands or test-only probes.
 	 * The control object can be used to send responses back to the client.
 	 */
 	onClientMessage?: (
 		parsed: Record<string, unknown>,
 		control: WsMockControl,
 	) => void;
+}
+
+export interface MockRelayProtocolContext {
+	activeSessionId: string | null;
+}
+
+const SESSION_SCOPED_MESSAGE_TYPES = new Set([
+	"ask_user",
+	"ask_user_error",
+	"ask_user_resolved",
+	"delta",
+	"done",
+	"error",
+	"history_page",
+	"message_removed",
+	"part_removed",
+	"permission_request",
+	"permission_resolved",
+	"provider_session_reloaded",
+	"result",
+	"session_deleted",
+	"session_forked",
+	"session_switched",
+	"status",
+	"thinking_delta",
+	"thinking_start",
+	"thinking_stop",
+	"tool_content",
+	"tool_executing",
+	"tool_result",
+	"tool_start",
+	"user_message",
+]);
+
+export function createMockRelayProtocolContext(
+	activeSessionId: string | null = null,
+): MockRelayProtocolContext {
+	return { activeSessionId };
+}
+
+export function normalizeMockRelayMessage(
+	msg: MockMessage,
+	context: MockRelayProtocolContext,
+): MockMessage {
+	const normalized: MockMessage = { ...msg };
+	const explicitSessionId =
+		typeof normalized["sessionId"] === "string"
+			? normalized["sessionId"]
+			: null;
+	const switchedSessionId =
+		normalized.type === "session_switched" &&
+		typeof normalized["id"] === "string"
+			? normalized["id"]
+			: null;
+	const sessionId =
+		explicitSessionId ?? switchedSessionId ?? context.activeSessionId;
+
+	if (SESSION_SCOPED_MESSAGE_TYPES.has(normalized.type) && sessionId) {
+		normalized["sessionId"] = sessionId;
+	}
+
+	if (normalized.type === "session_switched" && sessionId) {
+		context.activeSessionId = sessionId;
+		const events = Array.isArray(normalized["events"])
+			? (normalized["events"] as MockMessage[])
+			: null;
+		if (events) {
+			const eventContext = createMockRelayProtocolContext(sessionId);
+			normalized["events"] = normalizeMockRelayMessages(events, eventContext);
+		}
+	}
+
+	return normalized;
+}
+
+export function normalizeMockRelayMessages(
+	messages: MockMessage[],
+	context: MockRelayProtocolContext,
+): MockMessage[] {
+	return messages.map((msg) => normalizeMockRelayMessage(msg, context));
 }
 
 /**
@@ -53,7 +133,7 @@ export async function mockRelayWebSocket(
 		control._setWs(ws);
 
 		// Send init messages on connect (instant by default)
-		void sendSequence(ws, options.initMessages, initDelay);
+		void sendSequence(ws, options.initMessages, initDelay, control._context);
 
 		// Listen for frontend messages and respond
 		ws.onMessage((data) => {
@@ -70,17 +150,7 @@ export async function mockRelayWebSocket(
 				if (parsed.type === "message" && typeof parsed.text === "string") {
 					const response = options.responses.get(parsed.text);
 					if (response) {
-						void sendSequence(ws, response, msgDelay);
-					}
-				}
-
-				// Respond to get_models, get_agents, etc. with cached data
-				if (parsed.type === "get_models") {
-					const modelList = options.initMessages.find(
-						(m) => m.type === "model_list",
-					);
-					if (modelList) {
-						ws.send(JSON.stringify(modelList));
+						void sendSequence(ws, response, msgDelay, control._context);
 					}
 				}
 
@@ -91,18 +161,6 @@ export async function mockRelayWebSocket(
 					if (agentList) {
 						ws.send(JSON.stringify(agentList));
 					}
-				}
-
-				if (parsed.type === "load_more_history") {
-					// Return empty history
-					ws.send(
-						JSON.stringify({
-							type: "history_page",
-							sessionId: parsed.sessionId ?? "",
-							messages: [],
-							hasMore: false,
-						}),
-					);
 				}
 			} catch {
 				// Ignore parse errors
@@ -118,9 +176,10 @@ async function sendSequence(
 	ws: WebSocketRoute,
 	messages: MockMessage[],
 	delay: number,
+	context: MockRelayProtocolContext,
 ): Promise<void> {
 	for (const msg of messages) {
-		ws.send(JSON.stringify(msg));
+		ws.send(JSON.stringify(normalizeMockRelayMessage(msg, context)));
 		if (delay > 0) {
 			await new Promise((r) => setTimeout(r, delay));
 		}
@@ -133,6 +192,7 @@ export class WsMockControl {
 	private _routedPromise: Promise<void>;
 	private _ws?: WebSocketRoute;
 	private _clientMessages: string[] = [];
+	readonly _context = createMockRelayProtocolContext();
 
 	constructor() {
 		this._routedPromise = new Promise((resolve) => {
@@ -163,7 +223,9 @@ export class WsMockControl {
 	/** Send a message to the connected client (for mid-test injections). */
 	sendMessage(msg: MockMessage): void {
 		if (!this._ws) throw new Error("WebSocket not connected yet");
-		this._ws.send(JSON.stringify(msg));
+		this._ws.send(
+			JSON.stringify(normalizeMockRelayMessage(msg, this._context)),
+		);
 	}
 
 	/** Send multiple messages with optional delay between them. */

@@ -623,6 +623,24 @@ describe("ProjectRegistry — Negative paths", () => {
 		}).toThrow('Project "alpha" is already registered');
 	});
 
+	it("addWithoutRelay() for duplicate slug classifies the domain failure", () => {
+		const reg = new ProjectRegistry();
+		reg.addWithoutRelay(makeProject("alpha"));
+
+		let caught: unknown;
+		try {
+			reg.addWithoutRelay(makeProject("alpha"));
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toMatchObject({
+			_tag: "ProjectRegistryAlreadyRegistered",
+			slug: "alpha",
+			message: 'Project "alpha" is already registered',
+		});
+	});
+
 	it("startRelay() on already-ready project throws", async () => {
 		const reg = new ProjectRegistry();
 		reg.add(makeProject("alpha"), immediateRelayFactory());
@@ -634,6 +652,28 @@ describe("ProjectRegistry — Negative paths", () => {
 		expect(() => {
 			reg.startRelay("alpha", immediateRelayFactory());
 		}).toThrow('Project "alpha" already has a relay');
+	});
+
+	it("startRelay() on already-ready project classifies the domain failure", async () => {
+		const reg = new ProjectRegistry();
+		reg.add(makeProject("alpha"), immediateRelayFactory());
+
+		await vi.waitFor(() => {
+			expect(reg.isReady("alpha")).toBe(true);
+		});
+
+		let caught: unknown;
+		try {
+			reg.startRelay("alpha", immediateRelayFactory());
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toMatchObject({
+			_tag: "ProjectRegistryAlreadyReady",
+			slug: "alpha",
+			message: 'Project "alpha" already has a relay',
+		});
 	});
 
 	it("startRelay() on non-existent slug throws", () => {
@@ -650,6 +690,18 @@ describe("ProjectRegistry — Negative paths", () => {
 		await expect(
 			reg.replaceRelay("ghost", immediateRelayFactory()),
 		).rejects.toThrow('Project "ghost" not found');
+	});
+
+	it("replaceRelay() on non-existent slug classifies the domain failure", async () => {
+		const reg = new ProjectRegistry();
+
+		await expect(
+			reg.replaceRelay("ghost", immediateRelayFactory()),
+		).rejects.toMatchObject({
+			_tag: "ProjectRegistryProjectNotFound",
+			slug: "ghost",
+			message: 'Project "ghost" not found',
+		});
 	});
 
 	it("updateProject() on non-existent slug throws", () => {

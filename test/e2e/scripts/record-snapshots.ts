@@ -11,10 +11,15 @@
 //   E2E_PROVIDER  — provider ID to use (default: opencode)
 //   E2E_ALLOW_PAID — set to "1" to allow non-opencode providers (paid models)
 
+import { randomUUID } from "node:crypto";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { Socket } from "@effect/platform";
+import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { Effect } from "effect";
 import WebSocket from "ws";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { createLogger, createSilentLogger } from "../../../src/lib/logger.js";
 import { createRelayStack } from "../../../src/lib/relay/relay-stack.js";
 import { switchModelViaWs } from "../../helpers/opencode-utils.js";
@@ -46,6 +51,17 @@ interface RecordedTurn {
 	/** Full sequence of WS messages from server in response */
 	events: MockMessage[];
 }
+
+const RECORD_PROJECT_SLUG = "e2e-record";
+
+interface RecordingWebSocket extends WebSocket {
+	readonly clientId: string;
+	readonly projectSlug: string;
+	readonly rpcUrl: string;
+	activeSessionId?: string;
+}
+
+type RecordingRpcClient = RpcClient.FromGroup<typeof WsRpcGroup, unknown>;
 
 // ─── Recording Post-Processing ──────────────────────────────────────────────
 
@@ -214,9 +230,17 @@ const SCENARIOS: ScenarioDefinition[] = [
 // ─── WS Helpers ──────────────────────────────────────────────────────────────
 
 /** Connect a WebSocket to the relay and return it once open. */
-function connectWs(relayPort: number): Promise<WebSocket> {
+function connectWs(relayPort: number): Promise<RecordingWebSocket> {
 	return new Promise((resolve, reject) => {
-		const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/ws`);
+		const clientId = `record-${randomUUID()}`;
+		const ws = new WebSocket(
+			`ws://127.0.0.1:${relayPort}/ws?client=${encodeURIComponent(clientId)}`,
+		) as RecordingWebSocket;
+		Object.defineProperties(ws, {
+			clientId: { value: clientId },
+			projectSlug: { value: RECORD_PROJECT_SLUG },
+			rpcUrl: { value: `ws://127.0.0.1:${relayPort}/rpc` },
+		});
 		const timer = setTimeout(() => {
 			ws.close();
 			reject(new Error("WS connect timeout"));
@@ -233,9 +257,73 @@ function connectWs(relayPort: number): Promise<WebSocket> {
 	});
 }
 
+function waitForWsMessage<T>(
+	ws: RecordingWebSocket,
+	predicate: (msg: MockMessage) => T | undefined,
+	timeoutMessage: string,
+	timeoutMs = 15_000,
+): Promise<T> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ws.off("message", handler);
+			reject(new Error(timeoutMessage));
+		}, timeoutMs);
+
+		const handler = (data: WebSocket.RawData) => {
+			try {
+				const msg = JSON.parse(String(data)) as MockMessage;
+				rememberActiveSession(ws, msg);
+				const result = predicate(msg);
+				if (result !== undefined) {
+					clearTimeout(timer);
+					ws.off("message", handler);
+					resolve(result);
+				}
+			} catch {
+				// Ignore
+			}
+		};
+
+		ws.on("message", handler);
+	});
+}
+
+async function runRecordingRpc<T>(
+	ws: RecordingWebSocket,
+	call: (client: RecordingRpcClient) => Effect.Effect<T, unknown>,
+): Promise<T> {
+	const previousWebSocket = globalThis.WebSocket;
+	globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+	try {
+		return await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const client = yield* RpcClient.make(WsRpcGroup);
+					return yield* call(client);
+				}),
+			).pipe(
+				Effect.provide(RpcClient.layerProtocolSocket()),
+				Effect.provide(Socket.layerWebSocket(ws.rpcUrl)),
+				Effect.provide(Socket.layerWebSocketConstructorGlobal),
+				Effect.provide(RpcSerialization.layerJson),
+			),
+		);
+	} finally {
+		globalThis.WebSocket = previousWebSocket;
+	}
+}
+
+function rememberActiveSession(ws: RecordingWebSocket, msg: MockMessage): void {
+	if (msg.type !== "session_switched") return;
+	const sessionId = msg["sessionId"] ?? msg["id"];
+	if (typeof sessionId === "string") {
+		ws.activeSessionId = sessionId;
+	}
+}
+
 /** Collect all WS messages arriving within a time window. */
 function collectMessages(
-	ws: WebSocket,
+	ws: RecordingWebSocket,
 	durationMs: number,
 ): Promise<MockMessage[]> {
 	return new Promise((resolve) => {
@@ -243,6 +331,7 @@ function collectMessages(
 		const handler = (data: WebSocket.RawData) => {
 			try {
 				const msg = JSON.parse(String(data)) as MockMessage;
+				rememberActiveSession(ws, msg);
 				messages.push(msg);
 			} catch {
 				// Ignore unparseable frames
@@ -263,7 +352,7 @@ function collectMessages(
  * `permission_request` or `ask_user` messages that arrive during the turn.
  */
 function recordTurn(
-	ws: WebSocket,
+	ws: RecordingWebSocket,
 	prompt: string,
 	autoApprovePermissions: boolean,
 ): Promise<RecordedTurn> {
@@ -287,6 +376,7 @@ function recordTurn(
 			if (resolved) return;
 			try {
 				const msg = JSON.parse(String(data)) as MockMessage;
+				rememberActiveSession(ws, msg);
 				events.push(msg);
 
 				// Auto-approve permission requests after a short delay.
@@ -295,13 +385,20 @@ function recordTurn(
 				if (autoApprovePermissions && msg.type === "permission_request") {
 					const requestId = msg["requestId"] as string;
 					setTimeout(() => {
-						ws.send(
-							JSON.stringify({
-								type: "permission_response",
+						void runRecordingRpc(ws, (client) =>
+							client.RespondPermission({
+								projectSlug: ws.projectSlug,
+								originId: ws.clientId,
 								requestId,
 								decision: "allow",
 							}),
-						);
+						).catch((error) => {
+							if (!resolved) {
+								resolved = true;
+								cleanup();
+								reject(error);
+							}
+						});
 					}, 3_000);
 				}
 
@@ -320,13 +417,20 @@ function recordTurn(
 					} else {
 						answers["0"] = "yes";
 					}
-					ws.send(
-						JSON.stringify({
-							type: "ask_user_response",
+					void runRecordingRpc(ws, (client) =>
+						client.AnswerQuestion({
+							projectSlug: ws.projectSlug,
+							originId: ws.clientId,
 							toolId,
 							answers,
 						}),
-					);
+					).catch((error) => {
+						if (!resolved) {
+							resolved = true;
+							cleanup();
+							reject(error);
+						}
+					});
 				}
 
 				// The relay signals turn completion with { type: "done" } (NOT
@@ -355,73 +459,76 @@ function recordTurn(
 
 		ws.on("message", handler);
 
-		// Send the prompt
-		ws.send(JSON.stringify({ type: "message", text: prompt }));
-	});
-}
+		const sessionId = ws.activeSessionId;
+		if (!sessionId) {
+			cleanup();
+			reject(new Error("Cannot record turn before session_switched"));
+			return;
+		}
 
-/**
- * Request a new session via WS and wait for session_switched confirmation.
- */
-function requestNewSession(ws: WebSocket): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ws.off("message", handler);
-			reject(new Error("Timeout waiting for new session"));
-		}, 15_000);
-
-		const handler = (data: WebSocket.RawData) => {
-			try {
-				const msg = JSON.parse(String(data)) as MockMessage;
-				if (msg.type === "session_switched") {
-					clearTimeout(timer);
-					ws.off("message", handler);
-					resolve();
-				}
-			} catch {
-				// Ignore
+		void runRecordingRpc(ws, (client) =>
+			client.SendMessage({
+				projectSlug: ws.projectSlug,
+				sessionId,
+				text: prompt,
+				originId: ws.clientId,
+			}),
+		).catch((error) => {
+			if (!resolved) {
+				resolved = true;
+				cleanup();
+				reject(error);
 			}
-		};
-
-		ws.on("message", handler);
-		ws.send(JSON.stringify({ type: "new_session" }));
+		});
 	});
 }
 
 /**
- * Fork the current session via WS and wait for session_forked + session_switched.
+ * Request a new session via RPC and wait for session_switched confirmation.
+ */
+async function requestNewSession(ws: RecordingWebSocket): Promise<void> {
+	const switched = waitForWsMessage(
+		ws,
+		(msg) => (msg.type === "session_switched" ? true : undefined),
+		"Timeout waiting for new session",
+	);
+	await runRecordingRpc(ws, (client) =>
+		client.CreateSession({
+			projectSlug: ws.projectSlug,
+			originId: ws.clientId,
+		}),
+	);
+	await switched;
+}
+
+/**
+ * Fork the current session via RPC and wait for session_forked + session_switched.
  * Returns the forked session's ID.
  */
-function requestForkSession(ws: WebSocket): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ws.off("message", handler);
-			reject(new Error("Timeout waiting for fork"));
-		}, 15_000);
+async function requestForkSession(ws: RecordingWebSocket): Promise<string> {
+	const forked = waitForWsMessage(
+		ws,
+		(msg) => {
+			const session = msg["session"] as { id?: string } | undefined;
+			return msg.type === "session_forked" ? session?.id : undefined;
+		},
+		"Timeout waiting for fork",
+	);
+	const switched = waitForWsMessage(
+		ws,
+		(msg) => (msg.type === "session_switched" ? true : undefined),
+		"Timeout waiting for fork switch",
+	);
 
-		let forkedId: string | undefined;
-
-		const handler = (data: WebSocket.RawData) => {
-			try {
-				const msg = JSON.parse(String(data)) as MockMessage;
-				if (msg.type === "session_forked") {
-					const session = msg["session"] as { id?: string } | undefined;
-					forkedId = session?.id;
-				}
-				if (msg.type === "session_switched" && forkedId) {
-					clearTimeout(timer);
-					ws.off("message", handler);
-					resolve(forkedId);
-				}
-			} catch {
-				// Ignore
-			}
-		};
-
-		ws.on("message", handler);
-		// Fork the current session (no messageId = whole-session fork)
-		ws.send(JSON.stringify({ type: "fork_session" }));
-	});
+	await runRecordingRpc(ws, (client) =>
+		client.ForkSession({
+			projectSlug: ws.projectSlug,
+			originId: ws.clientId,
+		}),
+	);
+	const forkedId = await forked;
+	await switched;
+	return forkedId;
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────

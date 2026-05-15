@@ -11,10 +11,15 @@
 		openMobileSidebar,
 		togglePanel,
 	} from "../../stores/ui.svelte.js";
-	import { wsState, wsSend } from "../../stores/ws.svelte.js";
-	import { terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
-	import { getCurrentSlug, navigate } from "../../stores/router.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
+	import { wsState } from "../../stores/ws.svelte.js";
+	import { beginCreateTab, failCreateTab, terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import {
+		applyProjectMutationResponse,
+		projectState,
+	} from "../../stores/project.svelte.js";
+	import { createPtyRpc, setProjectInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import {
 		instanceState,
 		getInstanceById,
@@ -83,7 +88,13 @@
 		// Rebind the current project to the selected instance
 		const slug = getCurrentSlug();
 		if (slug) {
-			wsSend({ type: "set_project_instance", slug, instanceId });
+			void setProjectInstanceRpc({
+				projectSlug: slug,
+				slug,
+				instanceId,
+			})
+				.then(applyProjectMutationResponse)
+				.catch(() => undefined);
 		}
 	}
 
@@ -92,9 +103,23 @@
 		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
 	}
 
+	function requestTerminalCreate() {
+		const slug = getCurrentSlug();
+		if (!slug || !beginCreateTab()) return;
+		void createPtyRpc({
+			projectSlug: slug,
+			originId: getBrowserClientId(),
+		}).catch(() => {
+			failCreateTab("Failed to create terminal");
+		});
+	}
+
 	function handleTerminalToggle() {
 		const wasOpen = terminalState.panelOpen;
-		toggleTerminalPanel(wsSend);
+		toggleTerminalPanel();
+		if (!wasOpen && terminalState.tabs.size === 0) {
+			requestTerminalCreate();
+		}
 		// On mobile: maximize terminal so it doesn't clash with chat content
 		if (!wasOpen && window.innerWidth <= 768) {
 			window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));

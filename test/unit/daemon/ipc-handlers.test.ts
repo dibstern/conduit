@@ -1,19 +1,23 @@
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+} from "../../../src/lib/domain/daemon/Services/management-service.js";
 // ─── IPC Effect Handlers Tests ────────────────────────────────────────────────
 // Verify that Effect-returning IPC handlers correctly interact with services.
 
-import { FileSystem } from "@effect/platform";
-import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer, Ref } from "effect";
-import { expect } from "vitest";
-import { PersistencePathTag } from "../../../src/lib/effect/daemon-config-persistence.js";
-import { DaemonConfigRefTag } from "../../../src/lib/effect/daemon-config-ref.js";
-import { ShutdownSignalTag } from "../../../src/lib/effect/daemon-layers.js";
-import type { DaemonState } from "../../../src/lib/effect/daemon-state.js";
+import { Deferred, Effect, Exit, Layer, Ref } from "effect";
+import { expect, vi } from "vitest";
+import { hashPin } from "../../../src/lib/auth.js";
+import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import type { DaemonState } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	handleAddProject,
 	handleGetStatus,
@@ -34,59 +38,16 @@ import {
 	handleSetPin,
 	handleSetProjectTitle,
 	handleShutdown,
-} from "../../../src/lib/effect/ipc-handlers.js";
-import { KeepAwakeTag } from "../../../src/lib/effect/keep-awake-layer.js";
+} from "../../../src/lib/domain/daemon/Services/ipc-handlers.js";
+
 import {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-	SessionOverridesTag,
-} from "../../../src/lib/effect/services.js";
+	getAgent,
+	getModel,
+	makeOverridesStateLive,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-import { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
-
-// ─── In-memory test FileSystem ────────────────────────────────────────────────
-
-const makeTestFileSystem = () => {
-	const files = new Map<string, string>();
-
-	const fs: FileSystem.FileSystem = FileSystem.makeNoop({
-		readFileString: (path: string) =>
-			Effect.gen(function* () {
-				const content = files.get(path);
-				if (content === undefined) {
-					return yield* Effect.fail(
-						new SystemError({
-							reason: "NotFound",
-							module: "FileSystem",
-							method: "readFileString",
-							description: `File not found: ${path}`,
-							pathOrDescriptor: path,
-						}),
-					);
-				}
-				return content;
-			}),
-		writeFileString: (path: string, data: string) =>
-			Effect.sync(() => {
-				files.set(path, data);
-			}),
-		rename: (oldPath: string, newPath: string) =>
-			Effect.sync(() => {
-				const content = files.get(oldPath);
-				if (content !== undefined) {
-					files.set(newPath, content);
-					files.delete(oldPath);
-				}
-			}),
-		makeDirectory: () => Effect.void,
-	});
-
-	return { files, layer: Layer.succeed(FileSystem.FileSystem, fs) };
-};
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
-
-const CONFIG_PATH = "/test-config/daemon.json";
 
 const makeMockProjectMgmt = () =>
 	Layer.succeed(ProjectMgmtTag, {
@@ -132,9 +93,6 @@ const makeMockInstanceMgmt = (overrides?: Partial<InstanceManagementDeps>) =>
 		...overrides,
 	});
 
-const makeMockSessionOverrides = () =>
-	Layer.succeed(SessionOverridesTag, new SessionOverrides());
-
 /** Mock KeepAwakeTag — tracks activate/deactivate calls. */
 const makeMockKeepAwake = () =>
 	Layer.effect(
@@ -152,7 +110,7 @@ const makeMockKeepAwake = () =>
 
 /** Mock DaemonConfigRefTag — Ref with sensible defaults. */
 const makeMockConfigRef = () => {
-	const initial: import("../../../src/lib/effect/daemon-config-ref.js").DaemonRuntimeConfig =
+	const initial: import("../../../src/lib/domain/daemon/Services/daemon-config-ref.js").DaemonRuntimeConfig =
 		{
 			port: 2633,
 			host: "127.0.0.1",
@@ -175,19 +133,37 @@ const makeMockShutdownSignal = () =>
 	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
 
 const makeTestLayers = (stateOverrides?: Partial<DaemonState>) => {
-	const testFs = makeTestFileSystem();
 	return Layer.mergeAll(
-		testFs.layer,
-		Layer.succeed(PersistencePathTag, CONFIG_PATH),
 		makeDaemonStateLive(stateOverrides),
 		makeMockProjectMgmt(),
 		makeMockInstanceMgmt(),
-		makeMockSessionOverrides(),
+		makeOverridesStateLive(),
 		makeMockKeepAwake(),
 		makeMockConfigRef(),
 		makeMockShutdownSignal(),
+		Layer.succeed(ConfigPersistenceTag, {
+			requestSave: Effect.void,
+			flush: Effect.void,
+		}),
 	);
 };
+
+const makeTestLayersWithInstanceMgmt = (
+	overrides?: Partial<InstanceManagementDeps>,
+) =>
+	Layer.mergeAll(
+		makeDaemonStateLive(),
+		makeMockProjectMgmt(),
+		makeMockInstanceMgmt(overrides),
+		makeOverridesStateLive(),
+		makeMockKeepAwake(),
+		makeMockConfigRef(),
+		makeMockShutdownSignal(),
+		Layer.succeed(ConfigPersistenceTag, {
+			requestSave: Effect.void,
+			flush: Effect.void,
+		}),
+	);
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -296,9 +272,7 @@ describe("IPC handlers", () => {
 
 				expect(result.ok).toBe(true);
 				const state = yield* Ref.get(ref);
-				expect(state.pinHash).not.toBeNull();
-				expect(state.pinHash).not.toBe("1234"); // Should be hashed
-				expect(state.pinHash?.length).toBe(64); // SHA-256 hex length
+				expect(state.pinHash).toBe(hashPin("1234"));
 
 				// AP-24: Verify DaemonConfigRef was also updated
 				const configRef = yield* DaemonConfigRefTag;
@@ -324,6 +298,9 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwake).toBe(true);
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.keepAwake).toBe(true);
 
 				// Verify KeepAwakeTag was activated
 				const ka = yield* KeepAwakeTag;
@@ -348,6 +325,9 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwake).toBe(false);
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.keepAwake).toBe(false);
 
 				// Verify KeepAwakeTag was deactivated
 				const isActive = yield* ka.isActive();
@@ -367,6 +347,10 @@ describe("IPC handlers", () => {
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.shuttingDown).toBe(true);
+
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.shuttingDown).toBe(true);
 
 				// AP-25: Verify ShutdownSignal Deferred was completed
 				const deferred = yield* ShutdownSignalTag;
@@ -454,6 +438,10 @@ describe("IPC handlers", () => {
 				const state = yield* Ref.get(ref);
 				expect(state.keepAwakeCommand).toBe("caffeinate");
 				expect(state.keepAwakeArgs).toEqual(["-d"]);
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.keepAwakeCommand).toBe("caffeinate");
+				expect(config.keepAwakeArgs).toEqual(["-d"]);
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
@@ -461,10 +449,8 @@ describe("IPC handlers", () => {
 	// ── handleSetAgent ───────────────────────────────────────────────────
 
 	describe("handleSetAgent", () => {
-		it.effect("sets agent via SessionOverrides using slug", () =>
+		it.effect("sets agent via Effect override state using slug", () =>
 			Effect.gen(function* () {
-				const overrides = yield* SessionOverridesTag;
-
 				const result = yield* handleSetAgent({
 					cmd: "set_agent",
 					slug: "my-project",
@@ -472,8 +458,8 @@ describe("IPC handlers", () => {
 				});
 
 				expect(result.ok).toBe(true);
-				// SessionOverrides.setAgent uses slug as the session identifier
-				expect(overrides.getAgent("my-project")).toBe("claude-3");
+				// IPC protocol uses slug as the override-state key.
+				expect(yield* getAgent("my-project")).toBe("claude-3");
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
@@ -481,10 +467,8 @@ describe("IPC handlers", () => {
 	// ── handleSetModel ───────────────────────────────────────────────────
 
 	describe("handleSetModel", () => {
-		it.effect("sets model via SessionOverrides using slug", () =>
+		it.effect("sets model via Effect override state using slug", () =>
 			Effect.gen(function* () {
-				const overrides = yield* SessionOverridesTag;
-
 				const result = yield* handleSetModel({
 					cmd: "set_model",
 					slug: "my-project",
@@ -493,7 +477,7 @@ describe("IPC handlers", () => {
 				});
 
 				expect(result.ok).toBe(true);
-				const model = overrides.getModel("my-project");
+				const model = yield* getModel("my-project");
 				expect(model).toBeDefined();
 				expect(model?.providerID).toBe("anthropic");
 				expect(model?.modelID).toBe("claude-3-opus");
@@ -508,12 +492,30 @@ describe("IPC handlers", () => {
 			Effect.gen(function* () {
 				const result = yield* handleRestartWithConfig({
 					cmd: "restart_with_config",
+					config: {
+						port: 2634,
+						tls: true,
+						pinHash: "next-pin-hash",
+						keepAwake: true,
+					},
 				});
 
 				expect(result.ok).toBe(true);
 				const ref = yield* DaemonStateTag;
 				const state = yield* Ref.get(ref);
 				expect(state.shuttingDown).toBe(true);
+				expect(state.port).toBe(2634);
+				expect(state.tls).toBe(true);
+				expect(state.pinHash).toBe("next-pin-hash");
+				expect(state.keepAwake).toBe(true);
+
+				const configRef = yield* DaemonConfigRefTag;
+				const config = yield* Ref.get(configRef);
+				expect(config.shuttingDown).toBe(true);
+				expect(config.port).toBe(2634);
+				expect(config.tlsEnabled).toBe(true);
+				expect(config.pinHash).toBe("next-pin-hash");
+				expect(config.keepAwake).toBe(true);
 
 				// AP-25: Verify ShutdownSignal Deferred was completed
 				const deferred = yield* ShutdownSignalTag;
@@ -551,6 +553,48 @@ describe("IPC handlers", () => {
 				expect(result.instance).toBeDefined();
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
+
+		it.effect("returns an IPC error when instance add rejects", () =>
+			Effect.gen(function* () {
+				const persistConfig = vi.fn();
+				const layers = Layer.mergeAll(
+					makeDaemonStateLive(),
+					makeMockProjectMgmt(),
+					makeMockInstanceMgmt({
+						addInstance: () => {
+							throw new Error("Max instances reached (5)");
+						},
+						persistConfig,
+					}),
+					makeOverridesStateLive(),
+					makeMockKeepAwake(),
+					makeMockConfigRef(),
+					makeMockShutdownSignal(),
+					Layer.succeed(ConfigPersistenceTag, {
+						requestSave: Effect.void,
+						flush: Effect.void,
+					}),
+				);
+
+				const exit = yield* Effect.exit(
+					handleInstanceAdd({
+						cmd: "instance_add",
+						name: "Overflow",
+						managed: true,
+						port: 5001,
+					}).pipe(Effect.provide(layers)),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: "Error: Max instances reached (5)",
+					});
+				}
+				expect(persistConfig).not.toHaveBeenCalled();
+			}),
+		);
 	});
 
 	describe("handleInstanceRemove", () => {
@@ -563,6 +607,36 @@ describe("IPC handlers", () => {
 
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns an IPC error when remove rejects", () =>
+			Effect.gen(function* () {
+				const persistConfig = vi.fn();
+				const exit = yield* Effect.exit(
+					handleInstanceRemove({
+						cmd: "instance_remove",
+						id: "missing",
+					}).pipe(
+						Effect.provide(
+							makeTestLayersWithInstanceMgmt({
+								removeInstance: () => {
+									throw new Error('Instance "missing" not found');
+								},
+								persistConfig,
+							}),
+						),
+					),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: 'Error: Instance "missing" not found',
+					});
+				}
+				expect(persistConfig).not.toHaveBeenCalled();
+			}),
 		);
 	});
 
@@ -577,6 +651,62 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
+
+		it.effect(
+			"returns an IPC error when start rejects for a missing instance",
+			() =>
+				Effect.gen(function* () {
+					const exit = yield* Effect.exit(
+						handleInstanceStart({
+							cmd: "instance_start",
+							id: "missing",
+						}).pipe(
+							Effect.provide(
+								makeTestLayersWithInstanceMgmt({
+									startInstance: () =>
+										Promise.reject(new Error('Instance "missing" not found')),
+								}),
+							),
+						),
+					);
+
+					expect(Exit.isSuccess(exit)).toBe(true);
+					if (Exit.isSuccess(exit)) {
+						expect(exit.value).toEqual({
+							ok: false,
+							error: 'Error: Instance "missing" not found',
+						});
+					}
+				}),
+		);
+
+		it.effect(
+			"returns an IPC error when start rejects for an external instance",
+			() =>
+				Effect.gen(function* () {
+					const exit = yield* Effect.exit(
+						handleInstanceStart({
+							cmd: "instance_start",
+							id: "external",
+						}).pipe(
+							Effect.provide(
+								makeTestLayersWithInstanceMgmt({
+									startInstance: () =>
+										Promise.reject(new Error("Cannot start external instance")),
+								}),
+							),
+						),
+					);
+
+					expect(Exit.isSuccess(exit)).toBe(true);
+					if (Exit.isSuccess(exit)) {
+						expect(exit.value).toEqual({
+							ok: false,
+							error: "Error: Cannot start external instance",
+						});
+					}
+				}),
+		);
 	});
 
 	describe("handleInstanceStop", () => {
@@ -589,6 +719,33 @@ describe("IPC handlers", () => {
 
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns an IPC error when stop rejects", () =>
+			Effect.gen(function* () {
+				const exit = yield* Effect.exit(
+					handleInstanceStop({
+						cmd: "instance_stop",
+						id: "missing",
+					}).pipe(
+						Effect.provide(
+							makeTestLayersWithInstanceMgmt({
+								stopInstance: () => {
+									throw new Error('Instance "missing" not found');
+								},
+							}),
+						),
+					),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: 'Error: Instance "missing" not found',
+					});
+				}
+			}),
 		);
 	});
 
@@ -619,6 +776,37 @@ describe("IPC handlers", () => {
 				expect(result.ok).toBe(true);
 				expect(result.instance).toBeDefined();
 			}).pipe(Effect.provide(makeTestLayers())),
+		);
+
+		it.effect("returns an IPC error when update rejects", () =>
+			Effect.gen(function* () {
+				const persistConfig = vi.fn();
+				const exit = yield* Effect.exit(
+					handleInstanceUpdate({
+						cmd: "instance_update",
+						id: "missing",
+						name: "Renamed",
+					}).pipe(
+						Effect.provide(
+							makeTestLayersWithInstanceMgmt({
+								updateInstance: () => {
+									throw new Error('Instance "missing" not found');
+								},
+								persistConfig,
+							}),
+						),
+					),
+				);
+
+				expect(Exit.isSuccess(exit)).toBe(true);
+				if (Exit.isSuccess(exit)) {
+					expect(exit.value).toEqual({
+						ok: false,
+						error: 'Error: Instance "missing" not found',
+					});
+				}
+				expect(persistConfig).not.toHaveBeenCalled();
+			}),
 		);
 	});
 });

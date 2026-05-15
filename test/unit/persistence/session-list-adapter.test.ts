@@ -61,6 +61,33 @@ describe("sessionRowsToSessionInfoList", () => {
 		expect(row?.forkMessageId).toBe("msg-42");
 	});
 
+	it("uses service fork metadata when SQLite row lacks fork details", () => {
+		const rows: SessionRow[] = [makeRow("fork-1")];
+
+		const result = sessionRowsToSessionInfoList(rows, {
+			forkMeta: new Map([
+				[
+					"fork-1",
+					{
+						parentID: "parent-1",
+						forkMessageId: "msg-42",
+						forkPointTimestamp: 1234,
+					},
+				],
+			]),
+		});
+
+		expect(result[0]).toEqual({
+			id: "fork-1",
+			title: "Untitled",
+			updatedAt: 2000,
+			messageCount: 0,
+			parentID: "parent-1",
+			forkMessageId: "msg-42",
+			forkPointTimestamp: 1234,
+		});
+	});
+
 	it("omits parentID and forkMessageId when not a fork", () => {
 		const rows: SessionRow[] = [makeRow("s1")];
 		const result = sessionRowsToSessionInfoList(rows);

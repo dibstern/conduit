@@ -1,7 +1,10 @@
 // ─── Effect Projectors + Event Store Tests ──────────────────────────────────
 // Tests the @effect/sql migration of projectors, event-store, cursor repo,
-// and projection runner using in-memory SQLite via @effect/sql-sqlite-node.
+// and projection runner using file-backed SQLite via @effect/sql-sqlite-node.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
@@ -9,17 +12,24 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	EventStoreEffectTag,
+	EventStoreError,
 	makeEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
 	makeProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
+	ProjectionRunnerError,
 } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	makeProjectorCursorEffect,
 	ProjectorCursorEffectTag,
 } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
-import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+	type ProjectionContext,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -182,155 +192,45 @@ function makePermissionResolved(
 	);
 }
 
-// ─── Schema setup SQL (mirrors schema.ts) ───────────────────────────────────
+// ─── Test layer: SQLite with fresh schema ───────────────────────────────────
 
-const SETUP_SQL = `
-CREATE TABLE sessions (
-	id TEXT PRIMARY KEY,
-	provider TEXT NOT NULL,
-	provider_sid TEXT,
-	title TEXT NOT NULL DEFAULT 'Untitled',
-	status TEXT NOT NULL DEFAULT 'idle' CHECK(status IN ('idle', 'busy', 'retry', 'error')),
-	parent_id TEXT,
-	fork_point_event TEXT,
-	last_message_at INTEGER,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-CREATE INDEX idx_sessions_updated ON sessions (updated_at DESC);
+function makeTestSqliteLayer() {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-projectors-effect-"));
+	const filename = join(dir, "events.db");
+	return SqliteNode.layer({ filename }).pipe(
+		Layer.provide(Reactivity.layer),
+		Layer.merge(
+			Layer.scopedDiscard(
+				Effect.addFinalizer(() =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			),
+		),
+	);
+}
 
-CREATE TABLE events (
-	sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-	event_id TEXT NOT NULL UNIQUE,
-	session_id TEXT NOT NULL,
-	stream_version INTEGER NOT NULL,
-	type TEXT NOT NULL,
-	data TEXT NOT NULL,
-	metadata TEXT NOT NULL DEFAULT '{}',
-	provider TEXT NOT NULL,
-	created_at INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE UNIQUE INDEX idx_events_session_version ON events (session_id, stream_version);
-CREATE INDEX idx_events_session_seq ON events (session_id, sequence);
-CREATE INDEX idx_events_type ON events (type);
+function makeFileSqliteLayer(filename: string) {
+	return SqliteNode.layer({ filename }).pipe(Layer.provide(Reactivity.layer));
+}
 
-CREATE TABLE turns (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'running', 'completed', 'interrupted', 'error')),
-	user_message_id TEXT,
-	assistant_message_id TEXT,
-	cost REAL,
-	tokens_in INTEGER,
-	tokens_out INTEGER,
-	requested_at INTEGER NOT NULL,
-	started_at INTEGER,
-	completed_at INTEGER,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE messages (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	turn_id TEXT,
-	role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-	text TEXT NOT NULL DEFAULT '',
-	cost REAL,
-	tokens_in INTEGER,
-	tokens_out INTEGER,
-	tokens_cache_read INTEGER,
-	tokens_cache_write INTEGER,
-	is_streaming INTEGER NOT NULL DEFAULT 0,
-	is_inherited INTEGER NOT NULL DEFAULT 0,
-	last_applied_seq INTEGER,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE message_parts (
-	id TEXT PRIMARY KEY,
-	message_id TEXT NOT NULL,
-	type TEXT NOT NULL CHECK(type IN ('text', 'thinking', 'tool')),
-	text TEXT NOT NULL DEFAULT '',
-	tool_name TEXT,
-	call_id TEXT,
-	input TEXT,
-	result TEXT,
-	duration REAL,
-	status TEXT,
-	sort_order INTEGER NOT NULL,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	FOREIGN KEY (message_id) REFERENCES messages(id)
-);
-
-CREATE TABLE session_providers (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	provider TEXT NOT NULL,
-	provider_sid TEXT,
-	status TEXT NOT NULL DEFAULT 'active',
-	activated_at INTEGER NOT NULL,
-	deactivated_at INTEGER,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE pending_approvals (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	turn_id TEXT,
-	type TEXT NOT NULL CHECK(type IN ('permission', 'question')),
-	status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'resolved')),
-	tool_name TEXT,
-	input TEXT,
-	decision TEXT,
-	always TEXT,
-	created_at INTEGER NOT NULL,
-	resolved_at INTEGER,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE activities (
-	id TEXT PRIMARY KEY,
-	session_id TEXT NOT NULL,
-	turn_id TEXT,
-	tone TEXT NOT NULL,
-	kind TEXT NOT NULL,
-	summary TEXT NOT NULL,
-	payload TEXT NOT NULL DEFAULT '{}',
-	sequence INTEGER,
-	created_at INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE projector_cursors (
-	projector_name TEXT PRIMARY KEY,
-	last_applied_seq INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-`;
-
-// ─── Test layer: in-memory SQLite with fresh schema ─────────────────────────
-
-const TestSqliteLayer = SqliteNode.layer({
-	filename: ":memory:",
-}).pipe(Layer.provide(Reactivity.layer));
-
-const SchemaLayer = Layer.effectDiscard(
-	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		// Run schema setup statements
-		for (const stmt of SETUP_SQL.split(";").filter((s) => s.trim())) {
-			yield* sql.unsafe(`${stmt.trim()}`);
-		}
-	}),
-).pipe(Layer.provide(TestSqliteLayer));
+function makeEventStoreLayerForFile(filename: string) {
+	const sqliteLayer = makeFileSqliteLayer(filename);
+	const eventStoreLayer = Layer.effect(
+		EventStoreEffectTag,
+		makeEventStoreEffect,
+	).pipe(Layer.provide(sqliteLayer));
+	return Layer.merge(sqliteLayer, eventStoreLayer);
+}
 
 // Combine: SQLite client + schema + service layers
-const makeTestLayer = () => {
-	const baseLayer = Layer.merge(TestSqliteLayer, SchemaLayer);
+const makeTestLayer = (
+	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
+) => {
+	const testSqliteLayer = makeTestSqliteLayer();
+	const schemaLayer = Layer.effectDiscard(makeEffectSqlMigrator()).pipe(
+		Layer.provide(testSqliteLayer),
+	);
+	const baseLayer = Layer.merge(testSqliteLayer, schemaLayer);
 
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
@@ -344,7 +244,7 @@ const makeTestLayer = () => {
 
 	const projectionRunnerLayer = Layer.effect(
 		ProjectionRunnerEffectTag,
-		makeProjectionRunnerEffect(createAllEffectProjectors()),
+		makeProjectionRunnerEffect(projectors),
 	).pipe(Layer.provide(Layer.merge(cursorLayer, baseLayer)));
 
 	return Layer.mergeAll(
@@ -370,12 +270,74 @@ function runTest<A, E>(
 	return Effect.runPromise(Effect.provide(effect, layer));
 }
 
+function runTestWithProjectors<A, E>(
+	projectors: readonly EffectProjector[],
+	effect: Effect.Effect<
+		A,
+		E,
+		| SqlClient.SqlClient
+		| EventStoreEffectTag
+		| ProjectorCursorEffectTag
+		| ProjectionRunnerEffectTag
+	>,
+): Promise<A> {
+	const layer = makeTestLayer(projectors);
+	return Effect.runPromise(Effect.provide(effect, layer));
+}
+
+function runWithSqliteFile<A, E>(
+	filename: string,
+	effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+): Promise<A> {
+	return Effect.runPromise(
+		Effect.provide(effect, makeFileSqliteLayer(filename)),
+	);
+}
+
+function appendWithIndependentStore(filename: string, event: CanonicalEvent) {
+	return Effect.provide(
+		Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			return yield* store.append(event);
+		}),
+		makeEventStoreLayerForFile(filename),
+	);
+}
+
 // Helper to seed a session row directly
 function seedSession(sessionId: string, createdAt: number = FIXED_TS) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 			VALUES (${sessionId}, 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
+	});
+}
+
+function insertRawEventRow(opts: {
+	sessionId: string;
+	type?: string;
+	data: string;
+	metadata?: string;
+	eventId?: EventId;
+	streamVersion?: number;
+	provider?: string;
+	createdAt?: number;
+}) {
+	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`
+			INSERT INTO events (
+				event_id, session_id, stream_version, type, data, metadata, provider, created_at
+			) VALUES (
+				${opts.eventId ?? createEventId()},
+				${opts.sessionId},
+				${opts.streamVersion ?? 0},
+				${opts.type ?? "session.created"},
+				${opts.data},
+				${opts.metadata ?? "{}"},
+				${opts.provider ?? "opencode"},
+				${opts.createdAt ?? FIXED_TS}
+			)`;
 	});
 }
 
@@ -394,6 +356,74 @@ describe("EventStoreEffect", () => {
 				expect(stored.eventId).toBe(event.eventId);
 				expect(stored.type).toBe("session.created");
 				expect(stored.sessionId).toBe("s1");
+			}),
+		));
+
+	it("append returns typed EventStoreError for schema-invalid payloads", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-append");
+				const event = {
+					...makeSessionCreated("s-invalid-append"),
+					data: {
+						sessionId: "s-invalid-append",
+						provider: "opencode",
+					},
+				} as unknown as CanonicalEvent;
+
+				const result = yield* Effect.either(store.append(event));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("validateCanonicalEvent");
+					}
+				}
+			}),
+		));
+
+	it("append preserves extra payload and metadata fields while validating required shape", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("s-preserve-extra");
+				const event = {
+					...makeSessionCreated("s-preserve-extra", {
+						metadata: { source: "test" },
+					}),
+					data: {
+						sessionId: "s-preserve-extra",
+						title: "Test Session",
+						provider: "opencode",
+						extraPayloadField: "kept",
+					},
+					metadata: {
+						source: "test",
+						extraMetadataField: "kept",
+					},
+				} as unknown as CanonicalEvent;
+
+				const stored = yield* store.append(event);
+				const rows = yield* sql<{ data: string; metadata: string }>`
+					SELECT data, metadata FROM events WHERE session_id = 's-preserve-extra'
+				`;
+
+				expect(stored.data).toMatchObject({
+					extraPayloadField: "kept",
+				});
+				expect(stored.metadata).toMatchObject({
+					extraMetadataField: "kept",
+				});
+				expect(JSON.parse(rows[0]?.data ?? "{}")).toMatchObject({
+					extraPayloadField: "kept",
+				});
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toMatchObject({
+					extraMetadataField: "kept",
+				});
 			}),
 		));
 
@@ -442,6 +472,110 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
+	it("decodes a valid row inserted directly into SQLite", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-raw");
+				yield* insertRawEventRow({
+					sessionId: "s-raw",
+					data: JSON.stringify({
+						sessionId: "s-raw",
+						title: "Raw Session",
+						provider: "opencode",
+					}),
+				});
+
+				const results = yield* store.readFromSequence(0);
+
+				expect(results).toHaveLength(1);
+				expect(results[0]?.type).toBe("session.created");
+				expect(results[0]?.sessionId).toBe("s-raw");
+				expect(results[0]?.data).toEqual({
+					sessionId: "s-raw",
+					title: "Raw Session",
+					provider: "opencode",
+				});
+			}),
+		));
+
+	it("returns typed EventStoreError for invalid JSON in a stored row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-json");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-json",
+					data: "{not json",
+				});
+
+				const result = yield* Effect.either(store.readFromSequence(0));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
+			}),
+		));
+
+	it("returns typed EventStoreError for invalid metadata JSON in a stored row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-metadata-json");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-metadata-json",
+					data: JSON.stringify({
+						sessionId: "s-invalid-metadata-json",
+						title: "Raw Session",
+						provider: "opencode",
+					}),
+					metadata: "{not json",
+				});
+
+				const result = yield* Effect.either(store.readFromSequence(0));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+						expect(error.cause).toMatchObject({ field: "metadata" });
+					}
+				}
+			}),
+		));
+
+	it("returns typed EventStoreError for schema-invalid stored payload", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-invalid-shape");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-shape",
+					data: JSON.stringify({
+						sessionId: "s-invalid-shape",
+					}),
+				});
+
+				const result = yield* Effect.either(store.readFromSequence(0));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(EventStoreError);
+					if (error instanceof EventStoreError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
+			}),
+		));
+
 	it("readBySession returns events for a specific session", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -474,6 +608,140 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
+	it("append observes stream versions advanced outside the service instance", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-external-writer");
+				yield* store.append(makeSessionCreated("s-external-writer"));
+				yield* insertRawEventRow({
+					sessionId: "s-external-writer",
+					type: "message.created",
+					data: JSON.stringify({
+						messageId: "external-message",
+						role: "assistant",
+						sessionId: "s-external-writer",
+					}),
+					streamVersion: 1,
+				});
+
+				const stored = yield* store.append(
+					makeTextDelta("s-external-writer", "external-message", "hello"),
+				);
+
+				expect(stored.streamVersion).toBe(2);
+			}),
+		));
+
+	it("concurrent appends to one session receive unique contiguous stream versions", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-concurrent-appends");
+				const events = Array.from({ length: 10 }, (_, index) =>
+					makeTextDelta("s-concurrent-appends", `m${index}`, `text ${index}`),
+				);
+
+				const stored = yield* Effect.forEach(
+					events,
+					(event) => store.append(event),
+					{ concurrency: "unbounded" },
+				);
+
+				expect(
+					stored.map((event) => event.streamVersion).sort((a, b) => a - b),
+				).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+			}),
+		));
+
+	it("concurrent appends from independent store instances receive unique contiguous stream versions", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-projectors-shared-"));
+		try {
+			const filename = join(dir, "events.db");
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator();
+					yield* seedSession("s-independent-concurrent-appends");
+				}),
+			);
+			const events = Array.from({ length: 10 }, (_, index) =>
+				makeTextDelta(
+					"s-independent-concurrent-appends",
+					`m${index}`,
+					`text ${index}`,
+				),
+			);
+
+			const stored = await Effect.runPromise(
+				Effect.forEach(
+					events,
+					(event) => appendWithIndependentStore(filename, event),
+					{ concurrency: "unbounded" },
+				),
+			);
+
+			expect(
+				stored.map((event) => event.streamVersion).sort((a, b) => a - b),
+			).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("appendBatch rolls back a schema-invalid batch", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-batch-validation-rollback");
+				const valid = makeSessionCreated("s-batch-validation-rollback");
+				const invalid = {
+					...makeTextDelta("s-batch-validation-rollback", "m1", "hello"),
+					data: {
+						messageId: "m1",
+						partId: "p1",
+					},
+				} as unknown as CanonicalEvent;
+
+				const batchResult = yield* Effect.either(
+					store.appendBatch([valid, invalid]),
+				);
+				expect(batchResult._tag).toBe("Left");
+
+				const stored = yield* store.append(
+					makeSessionCreated("s-batch-validation-rollback"),
+				);
+				expect(stored.streamVersion).toBe(0);
+			}),
+		));
+
+	it("appendBatch rolls back a serialization defect", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s-batch-defect-rollback");
+				const valid = makeSessionCreated("s-batch-defect-rollback");
+				const defect = {
+					...canonicalEvent("tool.completed", "s-batch-defect-rollback", {
+						messageId: "m1",
+						partId: "p1",
+						result: BigInt(1),
+						duration: 1,
+					}),
+				} as unknown as CanonicalEvent;
+
+				const batchExit = yield* Effect.exit(
+					store.appendBatch([valid, defect]),
+				);
+				expect(batchExit._tag).toBe("Failure");
+
+				const stored = yield* store.append(
+					makeSessionCreated("s-batch-defect-rollback"),
+				);
+				expect(stored.streamVersion).toBe(0);
+			}),
+		));
+
 	it("getNextStreamVersion returns 0 for new sessions", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -481,19 +749,6 @@ describe("EventStoreEffect", () => {
 				yield* seedSession("s1");
 				const version = yield* store.getNextStreamVersion("s1");
 				expect(version).toBe(0);
-			}),
-		));
-
-	it("resetVersionCache clears the internal cache", () =>
-		runTest(
-			Effect.gen(function* () {
-				const store = yield* EventStoreEffectTag;
-				yield* seedSession("s1");
-				yield* store.append(makeSessionCreated("s1"));
-				yield* store.resetVersionCache();
-				// After reset, should re-read from DB
-				const version = yield* store.getNextStreamVersion("s1");
-				expect(version).toBe(1);
 			}),
 		));
 });
@@ -772,6 +1027,92 @@ describe("ProjectionRunnerEffect", () => {
 				expect(rows[0]?.title).toBe("Test Session");
 			}),
 		));
+
+	it("recover returns typed ProjectionRunnerError for invalid replay row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-bad-replay");
+				yield* insertRawEventRow({
+					sessionId: "s-bad-replay",
+					data: "{not json",
+				});
+
+				const result = yield* Effect.either(runner.recover());
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(ProjectionRunnerError);
+					if (error instanceof ProjectionRunnerError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
+			}),
+		));
+
+	it("recover returns typed ProjectionRunnerError for schema-invalid replay row", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-invalid-shape-replay");
+				yield* insertRawEventRow({
+					sessionId: "s-invalid-shape-replay",
+					data: JSON.stringify({
+						sessionId: "s-invalid-shape-replay",
+					}),
+				});
+
+				const result = yield* Effect.either(runner.recover());
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					const error = result.left;
+					expect(error).toBeInstanceOf(ProjectionRunnerError);
+					if (error instanceof ProjectionRunnerError) {
+						expect(error.operation).toBe("decodeStoredEventRow");
+					}
+				}
+			}),
+		));
+
+	it("resets replaying state after typed replay decode failure", () => {
+		let observedContext: ProjectionContext | undefined;
+		const projector: EffectProjector = {
+			name: "replaying-state-test",
+			handles: ["session.created"],
+			project: (_event, ctx) =>
+				Effect.sync(() => {
+					observedContext = ctx;
+				}),
+		};
+
+		return runTestWithProjectors(
+			[projector],
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-replaying-reset");
+				yield* insertRawEventRow({
+					sessionId: "s-replaying-reset",
+					data: JSON.stringify({
+						sessionId: "s-replaying-reset",
+					}),
+				});
+
+				const result = yield* Effect.either(runner.recover());
+				expect(result._tag).toBe("Left");
+
+				yield* runner.markRecovered();
+				yield* runner.projectEvent({
+					...makeSessionCreated("s-replaying-reset"),
+					sequence: 2,
+					streamVersion: 1,
+				});
+
+				expect(observedContext?.replaying).toBe(false);
+			}),
+		);
+	});
 
 	it("recover is idempotent (no-op when caught up)", () =>
 		runTest(

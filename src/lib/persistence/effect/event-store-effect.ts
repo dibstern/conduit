@@ -4,13 +4,13 @@
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect } from "effect";
-import type {
-	CanonicalEvent,
-	CanonicalEventType,
-	StoredEvent,
-} from "../events.js";
-import { CANONICAL_EVENT_TYPES, validateEventPayload } from "../events.js";
+import { Context, Data, Effect, Schema } from "effect";
+import type { CanonicalEvent, StoredEvent } from "../events.js";
+import { CanonicalEventSchema } from "../events.js";
+import {
+	decodeStoredEventRow,
+	type StoredEventRow,
+} from "./stored-event-row.js";
 
 // ─── Error type ──────���───────────────────────────────────────────────────────
 
@@ -18,20 +18,6 @@ export class EventStoreError extends Data.TaggedError("EventStoreError")<{
 	readonly operation: string;
 	readonly cause: unknown;
 }> {}
-
-// ─── Row shape ──────────��───────────────────────────────��────────────────────
-
-interface EventRow {
-	readonly sequence: number;
-	readonly event_id: string;
-	readonly session_id: string;
-	readonly stream_version: number;
-	readonly type: string;
-	readonly data: string;
-	readonly metadata: string;
-	readonly provider: string;
-	readonly created_at: number;
-}
 
 // ─── Constants ────────────────────────────────────��──────────────────────────
 
@@ -67,8 +53,6 @@ export interface EventStoreEffect {
 	readonly getNextStreamVersion: (
 		sessionId: string,
 	) => Effect.Effect<number, EventStoreError | SqlError>;
-
-	readonly resetVersionCache: () => Effect.Effect<void>;
 }
 
 // ─── Service Tag ─────────���──────────────────────��────────────────────────────
@@ -80,51 +64,30 @@ export class EventStoreEffectTag extends Context.Tag("EventStoreEffect")<
 
 // ─── Row conversion ───────��──────────────────────────────────────────────────
 
-function rowToStoredEvent(row: EventRow): StoredEvent {
-	if (!CANONICAL_EVENT_TYPES.includes(row.type as CanonicalEventType)) {
-		throw new EventStoreError({
-			operation: "rowToStoredEvent",
-			cause: `Unknown event type in database: ${row.type}`,
-		});
-	}
+const decodeEventStoreRow = (
+	row: StoredEventRow,
+): Effect.Effect<StoredEvent, EventStoreError> =>
+	decodeStoredEventRow(
+		row,
+		(cause) =>
+			new EventStoreError({ operation: "decodeStoredEventRow", cause }),
+	);
 
-	let data: unknown;
-	let metadata: unknown;
-	try {
-		data = JSON.parse(row.data);
-	} catch (err) {
-		throw new EventStoreError({
-			operation: "rowToStoredEvent",
-			cause: `Failed to parse event data JSON: ${err instanceof Error ? err.message : String(err)}`,
-		});
-	}
-	try {
-		metadata = JSON.parse(row.metadata);
-	} catch (err) {
-		throw new EventStoreError({
-			operation: "rowToStoredEvent",
-			cause: `Failed to parse event metadata JSON: ${err instanceof Error ? err.message : String(err)}`,
-		});
-	}
-
-	return {
-		sequence: row.sequence,
-		eventId: row.event_id,
-		sessionId: row.session_id,
-		streamVersion: row.stream_version,
-		type: row.type,
-		data,
-		metadata,
-		provider: row.provider,
-		createdAt: row.created_at,
-	} as StoredEvent;
-}
+const validateCanonicalEvent = (
+	event: CanonicalEvent,
+): Effect.Effect<void, EventStoreError> =>
+	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(
+		Effect.asVoid,
+		Effect.mapError(
+			(cause) =>
+				new EventStoreError({ operation: "validateCanonicalEvent", cause }),
+		),
+	);
 
 // ─── Service implementation ───��─────────────────────────���────────────────────
 
 export const makeEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	const versionCache = new Map<string, number>();
 
 	const getNextStreamVersion = (
 		sessionId: string,
@@ -145,27 +108,30 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			),
 		);
 
-	const append = (
+	const appendInCurrentTransaction = (
 		event: CanonicalEvent,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
 		Effect.gen(function* () {
-			validateEventPayload(event);
-
-			let nextVersion = versionCache.get(event.sessionId);
-			if (nextVersion === undefined) {
-				nextVersion = yield* getNextStreamVersion(event.sessionId);
-			}
+			yield* validateCanonicalEvent(event);
 
 			const dataJson = JSON.stringify(event.data);
 			const metadataJson = JSON.stringify(event.metadata);
 
-			const rows = yield* sql<EventRow>`
+			const rows = yield* sql<StoredEventRow>`
 				INSERT INTO events (
 					event_id, session_id, stream_version, type, data, metadata, provider, created_at
-				) VALUES (
-					${event.eventId}, ${event.sessionId}, ${nextVersion}, ${event.type},
-					${dataJson}, ${metadataJson}, ${event.provider}, ${event.createdAt}
 				)
+				SELECT
+					${event.eventId},
+					${event.sessionId},
+					COALESCE(MAX(stream_version) + 1, 0),
+					${event.type},
+					${dataJson},
+					${metadataJson},
+					${event.provider},
+					${event.createdAt}
+				FROM events
+				WHERE session_id = ${event.sessionId}
 				RETURNING
 					sequence, event_id, session_id, stream_version,
 					type, data, metadata, provider, created_at`;
@@ -178,8 +144,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 				});
 			}
 
-			const stored = rowToStoredEvent(row);
-			versionCache.set(event.sessionId, nextVersion + 1);
+			const stored = yield* decodeEventStoreRow(row);
 			return stored;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -188,6 +153,11 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 					: new EventStoreError({ operation: "append", cause: e }),
 			),
 		);
+
+	const append = (
+		event: CanonicalEvent,
+	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
+		sql.withTransaction(appendInCurrentTransaction(event));
 
 	const appendBatch = (
 		events: readonly CanonicalEvent[],
@@ -198,7 +168,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const results: StoredEvent[] = [];
 				for (const event of events) {
-					results.push(yield* append(event));
+					results.push(yield* appendInCurrentTransaction(event));
 				}
 				return results;
 			}),
@@ -211,14 +181,14 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 	): Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError> =>
 		Effect.gen(function* () {
 			const effectiveLimit = limit ?? DEFAULT_READ_LIMIT;
-			const rows = yield* sql<EventRow>`
-				SELECT sequence, event_id, session_id, stream_version,
-					type, data, metadata, provider, created_at
-				FROM events
-				WHERE sequence > ${afterSequence}
-				ORDER BY sequence ASC
-				LIMIT ${effectiveLimit}`;
-			return rows.map((row) => rowToStoredEvent(row));
+			const rows = yield* sql<StoredEventRow>`
+					SELECT sequence, event_id, session_id, stream_version,
+						type, data, metadata, provider, created_at
+					FROM events
+					WHERE sequence > ${afterSequence}
+					ORDER BY sequence ASC
+					LIMIT ${effectiveLimit}`;
+			return yield* Effect.forEach(rows, decodeEventStoreRow);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof EventStoreError
@@ -235,22 +205,22 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const afterSeq = fromSequence ?? 0;
 			if (limit != null) {
-				const rows = yield* sql<EventRow>`
+				const rows = yield* sql<StoredEventRow>`
+						SELECT sequence, event_id, session_id, stream_version,
+							type, data, metadata, provider, created_at
+						FROM events
+						WHERE session_id = ${sessionId} AND sequence > ${afterSeq}
+						ORDER BY sequence ASC
+						LIMIT ${limit}`;
+				return yield* Effect.forEach(rows, decodeEventStoreRow);
+			}
+			const rows = yield* sql<StoredEventRow>`
 					SELECT sequence, event_id, session_id, stream_version,
 						type, data, metadata, provider, created_at
 					FROM events
 					WHERE session_id = ${sessionId} AND sequence > ${afterSeq}
-					ORDER BY sequence ASC
-					LIMIT ${limit}`;
-				return rows.map((row) => rowToStoredEvent(row));
-			}
-			const rows = yield* sql<EventRow>`
-				SELECT sequence, event_id, session_id, stream_version,
-					type, data, metadata, provider, created_at
-				FROM events
-				WHERE session_id = ${sessionId} AND sequence > ${afterSeq}
-				ORDER BY sequence ASC`;
-			return rows.map((row) => rowToStoredEvent(row));
+					ORDER BY sequence ASC`;
+			return yield* Effect.forEach(rows, decodeEventStoreRow);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof EventStoreError
@@ -265,11 +235,6 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 	): Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError> =>
 		readBySession(sessionId, fromSequence, undefined);
 
-	const resetVersionCache = (): Effect.Effect<void> =>
-		Effect.sync(() => {
-			versionCache.clear();
-		});
-
 	return {
 		append,
 		appendBatch,
@@ -277,6 +242,5 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		readBySession,
 		readAllBySession,
 		getNextStreamVersion,
-		resetVersionCache,
 	} satisfies EventStoreEffect;
 });

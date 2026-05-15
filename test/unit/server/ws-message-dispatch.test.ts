@@ -72,15 +72,18 @@ import {
 	chatState,
 	clearMessages,
 	handleToolStart,
+	inputSyncState,
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import {
 	clearInstanceState,
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -99,6 +102,9 @@ beforeEach(() => {
 	ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
+	inputSyncState.text = "";
+	inputSyncState.lastFrom = "";
+	inputSyncState.lastUpdated = 0;
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
@@ -109,6 +115,9 @@ afterEach(() => {
 	ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
+	inputSyncState.text = "";
+	inputSyncState.lastFrom = "";
+	inputSyncState.lastUpdated = 0;
 });
 
 // ─── Gap 1: handleToolContentResponse (AC5) ─────────────────────────────────
@@ -162,6 +171,25 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 
 		expect(toolMsg).toBeDefined();
 		expect(toolMsg.result).toBe("full output here — all 50,000 chars");
+		expect(toolMsg.isTruncated).toBe(false);
+		expect(toolMsg.fullContentLength).toBeUndefined();
+	});
+
+	it("applies RPC tool content to the current session", () => {
+		seedTruncatedTool("tool-rpc", "bash");
+		sessionState.currentId = "s1";
+
+		applyToolContentResponse({
+			projectSlug: "demo",
+			toolId: "tool-rpc",
+			content: "full rpc output",
+		});
+
+		const toolMsg = chatState.messages.find(
+			(m) => m.type === "tool" && (m as ToolMessage).id === "tool-rpc",
+		) as ToolMessage;
+
+		expect(toolMsg.result).toBe("full rpc output");
 		expect(toolMsg.isTruncated).toBe(false);
 		expect(toolMsg.fullContentLength).toBeUndefined();
 	});
@@ -234,6 +262,34 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		// tool-b should still be truncated
 		expect(toolB.result).toBe("truncated output…");
 		expect(toolB.isTruncated).toBe(true);
+	});
+});
+
+describe("input_sync dispatch", () => {
+	it("ignores draft echoes from this browser tab", () => {
+		inputSyncState.text = "before";
+		inputSyncState.lastUpdated = 10;
+
+		handleMessage({
+			type: "input_sync",
+			text: "self echo",
+			from: getBrowserClientId(),
+		});
+
+		expect(inputSyncState.text).toBe("before");
+		expect(inputSyncState.lastUpdated).toBe(10);
+	});
+
+	it("applies drafts from another browser tab", () => {
+		handleMessage({
+			type: "input_sync",
+			text: "other tab draft",
+			from: "browser-tab-b",
+		});
+
+		expect(inputSyncState.text).toBe("other tab draft");
+		expect(inputSyncState.lastFrom).toBe("browser-tab-b");
+		expect(inputSyncState.lastUpdated).toBeGreaterThan(0);
 	});
 });
 

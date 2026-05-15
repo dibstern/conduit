@@ -32,10 +32,7 @@ describe("Integration: Message Lifecycle", () => {
 		client.clearReceived();
 
 		// Send a minimal prompt
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// 1. Should receive processing status
 		const status = await client.waitFor("status", {
@@ -61,10 +58,7 @@ describe("Integration: Message Lifecycle", () => {
 		client.clearReceived();
 
 		// --- First message ---
-		client.send({
-			type: "message",
-			text: "Reply with just 'one'.",
-		});
+		await client.sendMessage("Reply with just 'one'.");
 
 		await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
@@ -78,10 +72,7 @@ describe("Integration: Message Lifecycle", () => {
 		harness.mock.resetQueues();
 
 		// --- Second message ---
-		client.send({
-			type: "message",
-			text: "Reply with just 'two'.",
-		});
+		await client.sendMessage("Reply with just 'two'.");
 
 		// Should enter processing again (not stuck from first turn)
 		const status2 = await client.waitFor("status", {
@@ -105,10 +96,7 @@ describe("Integration: Message Lifecycle", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({
-			type: "message",
-			text: "Reply with just 'ok'.",
-		});
+		await client.sendMessage("Reply with just 'ok'.");
 
 		// Wait for full cycle
 		await client.waitFor("done");

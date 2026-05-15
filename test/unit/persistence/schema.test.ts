@@ -34,6 +34,106 @@ describe("Schema Migration", () => {
 		]);
 	});
 
+	it("creates the full production index inventory", () => {
+		client = SqliteClient.memory();
+		runMigrations(client, schemaMigrations);
+		const indexes = client
+			.query<{ name: string; tbl_name: string; sql: string | null }>(
+				`SELECT name, tbl_name, sql
+				 FROM sqlite_master
+				 WHERE type='index' AND name NOT LIKE 'sqlite_%'
+				 ORDER BY name`,
+			)
+			.map((row) => ({
+				name: row.name,
+				table: row.tbl_name,
+				unique: row.sql?.startsWith("CREATE UNIQUE INDEX") ?? false,
+			}));
+		expect(indexes).toEqual([
+			{
+				name: "idx_activities_session_created",
+				table: "activities",
+				unique: false,
+			},
+			{
+				name: "idx_activities_session_kind",
+				table: "activities",
+				unique: false,
+			},
+			{ name: "idx_activities_tone", table: "activities", unique: false },
+			{ name: "idx_activities_turn", table: "activities", unique: false },
+			{
+				name: "idx_command_receipts_session",
+				table: "command_receipts",
+				unique: false,
+			},
+			{
+				name: "idx_events_session_seq",
+				table: "events",
+				unique: false,
+			},
+			{
+				name: "idx_events_session_version",
+				table: "events",
+				unique: true,
+			},
+			{ name: "idx_events_type", table: "events", unique: false },
+			{
+				name: "idx_message_parts_message",
+				table: "message_parts",
+				unique: false,
+			},
+			{
+				name: "idx_messages_session_created",
+				table: "messages",
+				unique: false,
+			},
+			{ name: "idx_messages_turn", table: "messages", unique: false },
+			{
+				name: "idx_pending_approvals_pending",
+				table: "pending_approvals",
+				unique: false,
+			},
+			{
+				name: "idx_pending_approvals_session_status",
+				table: "pending_approvals",
+				unique: false,
+			},
+			{
+				name: "idx_session_providers_active",
+				table: "session_providers",
+				unique: false,
+			},
+			{
+				name: "idx_session_providers_session",
+				table: "session_providers",
+				unique: false,
+			},
+			{ name: "idx_sessions_parent", table: "sessions", unique: false },
+			{
+				name: "idx_sessions_provider",
+				table: "sessions",
+				unique: false,
+			},
+			{ name: "idx_sessions_updated", table: "sessions", unique: false },
+			{
+				name: "idx_tool_content_session",
+				table: "tool_content",
+				unique: false,
+			},
+			{
+				name: "idx_turns_assistant_message",
+				table: "turns",
+				unique: false,
+			},
+			{
+				name: "idx_turns_session_requested",
+				table: "turns",
+				unique: false,
+			},
+		]);
+	});
+
 	it("creates events table with correct columns", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, schemaMigrations);

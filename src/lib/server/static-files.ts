@@ -5,7 +5,7 @@
 import { readFile, stat } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
-import { MIME_TYPES } from "../effect/static-file-handler.js";
+import { MIME_TYPES } from "../domain/server/Services/static-file-handler.js";
 
 // ─── Cache Control ──────────────────────────────────────────────────────────
 

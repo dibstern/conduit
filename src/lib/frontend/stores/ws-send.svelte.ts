@@ -1,13 +1,7 @@
 // ─── WebSocket Send Logic ────────────────────────────────────────────────────
-// Extracted from ws.svelte.ts — rate limiting, offline queue, and send helpers.
+// Extracted from ws.svelte.ts — rate limiting and send helpers.
 // The parent module provides the WebSocket reference via setWsGetter().
 
-import { Either, Schema } from "effect";
-import {
-	type OutboundMessage,
-	OutboundMessage as OutboundMessageSchema,
-} from "../transport/schemas.js";
-import type { PayloadMap } from "../types.js";
 import { showToast } from "./ui.svelte.js";
 
 // ─── WebSocket reference ────────────────────────────────────────────────────
@@ -30,8 +24,8 @@ const WINDOW_MS = 10_000;
 /** Timestamps of recent chat message sends (within the sliding window). */
 let _sendTimestamps: number[] = [];
 
-/** Queued message waiting to be sent after the window slides. */
-let _queuedMessage: Record<string, unknown> | null = null;
+/** Queued chat send waiting for the window to slide. */
+let _queuedSend: (() => void) | null = null;
 
 /** Timer for draining the queued message. */
 let _drainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -45,7 +39,7 @@ let _now: () => number = () => Date.now();
  */
 export function _resetRateLimit(opts?: { now?: () => number }): void {
 	_sendTimestamps = [];
-	_queuedMessage = null;
+	_queuedSend = null;
 	if (_drainTimer) {
 		clearTimeout(_drainTimer);
 		_drainTimer = null;
@@ -66,38 +60,7 @@ export function rawSend(data: Record<string, unknown>): void {
 		ws.send(JSON.stringify(data));
 		return;
 	}
-	// WS not open — queue instance management commands for send-on-reconnect.
-	// These are the commands that users trigger from the ConnectOverlay or
-	// SettingsPanel while the connection is down.
-	const type = data["type"] as string;
-	if (
-		type === "instance_start" ||
-		type === "instance_stop" ||
-		type === "instance_add" ||
-		type === "instance_remove" ||
-		type === "instance_update" ||
-		type === "set_project_instance" ||
-		type === "scan_now" ||
-		type === "instance_rename"
-	) {
-		_offlineQueue.push(data);
-	}
-}
-
-// ─── Offline message queue ──────────────────────────────────────────────────
-// Instance management commands sent while WS is closed are queued here
-// and flushed when the connection is re-established.
-
-let _offlineQueue: Record<string, unknown>[] = [];
-
-/** Flush any queued offline messages over the now-open WebSocket. */
-export function flushOfflineQueue(): void {
-	if (_offlineQueue.length === 0) return;
-	const queue = _offlineQueue;
-	_offlineQueue = [];
-	for (const msg of queue) {
-		rawSend(msg);
-	}
+	// WS not open — no current raw WS command is safe to replay offline.
 }
 
 /** Schedule the drain timer for the queued message. */
@@ -106,7 +69,7 @@ function scheduleDrain(): void {
 		clearTimeout(_drainTimer);
 		_drainTimer = null;
 	}
-	if (!_queuedMessage) return;
+	if (!_queuedSend) return;
 
 	pruneTimestamps();
 
@@ -118,13 +81,13 @@ function scheduleDrain(): void {
 
 	_drainTimer = setTimeout(() => {
 		_drainTimer = null;
-		if (!_queuedMessage) return;
+		if (!_queuedSend) return;
 
 		pruneTimestamps();
-		const msg = _queuedMessage;
-		_queuedMessage = null;
+		const send = _queuedSend;
+		_queuedSend = null;
 		_sendTimestamps.push(_now());
-		rawSend(msg);
+		send();
 	}, delay);
 }
 
@@ -136,16 +99,20 @@ function scheduleDrain(): void {
  * sliding window (MAX_MESSAGES per WINDOW_MS). Non-chat control messages
  * are sent immediately.
  */
-/**
- * Type-safe WebSocket send. Ensures the payload matches the expected shape
- * for the given message type at compile time.
- * Delegates to wsSend for rate limiting and offline queuing.
- */
-export function wsSendTyped<T extends keyof PayloadMap>(
-	type: T,
-	payload: PayloadMap[T],
-): void {
-	wsSend({ type, ...(payload as Record<string, unknown>) });
+export function rateLimitChatSend(send: () => void): void {
+	pruneTimestamps();
+
+	if (_sendTimestamps.length < MAX_MESSAGES) {
+		// Under limit — send immediately.
+		_sendTimestamps.push(_now());
+		send();
+		return;
+	}
+
+	// At limit — queue and show feedback.
+	_queuedSend = send;
+	showToast("Message queued — sending shortly", { variant: "warn" });
+	scheduleDrain();
 }
 
 export function wsSend(data: Record<string, unknown>): void {
@@ -155,36 +122,5 @@ export function wsSend(data: Record<string, unknown>): void {
 		return;
 	}
 
-	pruneTimestamps();
-
-	if (_sendTimestamps.length < MAX_MESSAGES) {
-		// Under limit — send immediately.
-		_sendTimestamps.push(_now());
-		rawSend(data);
-		return;
-	}
-
-	// At limit — queue and show feedback.
-	_queuedMessage = data;
-	showToast("Message queued — sending shortly", { variant: "warn" });
-	scheduleDrain();
-}
-
-/**
- * Schema-validated WebSocket send. Validates the message against
- * OutboundMessage schema before sending. Falls back to raw send
- * if validation fails (so the user's message isn't silently lost).
- *
- * Callers opt in as schemas are added to OutboundMessage.
- */
-export function wsSendValidated(msg: OutboundMessage): void {
-	const result = Either.getOrUndefined(
-		Schema.encodeEither(OutboundMessageSchema)(msg),
-	);
-	if (result === undefined) {
-		// Encode failed — fall back to raw send
-		rawSend(msg as unknown as Record<string, unknown>);
-		return;
-	}
-	wsSend(result as Record<string, unknown>);
+	rateLimitChatSend(() => rawSend(data));
 }

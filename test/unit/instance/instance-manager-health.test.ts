@@ -14,11 +14,13 @@ import {
 	TestClock,
 } from "effect";
 import { expect } from "vitest";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	type DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import {
 	type AddInstanceInput,
 	addInstance,
@@ -31,7 +33,7 @@ import {
 	scheduleRestart,
 	startHealthPoller,
 	stopHealthPoller,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -45,6 +47,8 @@ const testConfig = {
 const testLayer = Layer.mergeAll(
 	makeInstanceManagerStateLive(testConfig),
 	DaemonEventBusLive,
+	ConfigPersistenceNoopLive,
+	InstanceHealthCheckLive,
 );
 
 const mkInstance = (

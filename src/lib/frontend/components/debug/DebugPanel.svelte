@@ -6,14 +6,22 @@
 	import { wsState } from "../../stores/ws.svelte.js";
 	import { wsDebugState, getDebugEvents, clearDebugLog } from "../../stores/ws-debug.svelte.js";
 	import { confirm } from "../../stores/ui.svelte.js";
-	import { rawSend } from "../../stores/ws-send.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { setLogLevelRpc } from "../../transport/ws-rpc-client.js";
 
 	let copyFlash = $state(false);
 
 	function toggleVerbose() {
 		const newValue = !wsDebugState.verboseMessages;
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
 		wsDebugState.verboseMessages = newValue;
-		rawSend({ type: "set_log_level", level: newValue ? "verbose" : "info" });
+		void setLogLevelRpc({
+			projectSlug,
+			level: newValue ? "verbose" : "info",
+		}).catch(() => {
+			wsDebugState.verboseMessages = !newValue;
+		});
 	}
 
 	async function handleClear() {

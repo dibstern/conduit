@@ -1,9 +1,18 @@
 // test/unit/provider/orchestration-wiring.test.ts
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { OpenCodeAdapter } from "../../../src/lib/provider/opencode-adapter.js";
+import {
+	OpenCodeDriver,
+	OpenCodeProviderInstance,
+} from "../../../src/lib/provider/opencode-provider-instance.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import { createOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
+import {
+	createOrchestrationLayer,
+	getOrchestrationLayer,
+	makeOrchestrationRuntimeLayer,
+} from "../../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 
 function makeStubClient(): OpenCodeAPI {
@@ -43,30 +52,62 @@ function makeStubClient(): OpenCodeAPI {
 }
 
 describe("Orchestration wiring", () => {
-	it("createOrchestrationLayer returns engine, registry, and adapter", () => {
+	it("createOrchestrationLayer returns engine, registry, and OpenCode instance", () => {
 		const client = makeStubClient();
 		const layer = createOrchestrationLayer({ client });
 
 		expect(layer.engine).toBeInstanceOf(OrchestrationEngine);
 		expect(layer.registry).toBeInstanceOf(ProviderRegistry);
-		expect(layer.adapter).toBeInstanceOf(OpenCodeAdapter);
+		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);
 	});
 
-	it("registry has opencode adapter registered", () => {
+	it("registry has opencode provider instance registered", () => {
 		const client = makeStubClient();
 		const layer = createOrchestrationLayer({ client });
 
-		expect(layer.registry.hasAdapter("opencode")).toBe(true);
+		expect(layer.registry.hasInstance("opencode")).toBe(true);
+	});
+
+	it("exposes orchestration services through the scoped runtime layer", async () => {
+		const client = makeStubClient();
+		const runtime = ManagedRuntime.make(
+			makeOrchestrationRuntimeLayer().pipe(
+				Layer.provide(Layer.succeed(OpenCodeAPITag, client)),
+			),
+		);
+
+		try {
+			const layer = await runtime.runPromise(getOrchestrationLayer);
+
+			expect(layer.engine).toBeInstanceOf(OrchestrationEngine);
+			expect(layer.registry).toBeInstanceOf(ProviderRegistry);
+			expect(layer.registry.hasInstance("opencode")).toBe(true);
+			expect(layer.registry.hasInstance("claude")).toBe(true);
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it("creates provider instances through plain drivers", async () => {
+		const client = makeStubClient();
+		const instance = await Effect.runPromise(
+			OpenCodeDriver.create({ client }).pipe(Effect.scoped),
+		);
+
+		expect(OpenCodeDriver.providerId).toBe("opencode");
+		expect(instance).toBeInstanceOf(OpenCodeProviderInstance);
 	});
 
 	it("engine can discover opencode capabilities", async () => {
 		const client = makeStubClient();
 		const layer = createOrchestrationLayer({ client });
 
-		const caps = await layer.engine.dispatch({
-			type: "discover",
-			providerId: "opencode",
-		});
+		const caps = await Effect.runPromise(
+			layer.engine.dispatchEffect({
+				type: "discover",
+				providerId: "opencode",
+			}),
+		);
 
 		expect(caps).toMatchObject({ supportsTools: true });
 	});
@@ -76,7 +117,7 @@ describe("Orchestration wiring", () => {
 		const layer = createOrchestrationLayer({ client });
 
 		// Should not throw
-		await layer.engine.shutdown();
+		await Effect.runPromise(layer.engine.shutdownEffect());
 	});
 
 	it("accepts optional workspace root", () => {
@@ -86,17 +127,17 @@ describe("Orchestration wiring", () => {
 			workspaceRoot: "/my/project",
 		});
 
-		expect(layer.adapter).toBeInstanceOf(OpenCodeAdapter);
+		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);
 	});
 
-	// ─── wireSSEToAdapter ────────────────────────────────────────────────
+	// ─── wireSSEToInstance ────────────────────────────────────────────────
 
-	describe("wireSSEToAdapter", () => {
+	describe("wireSSEToInstance", () => {
 		it("calls notifyTurnCompleted when session.status idle event arrives", () => {
 			const client = makeStubClient();
 			const layer = createOrchestrationLayer({ client });
 
-			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			// Capture the handler registered via sseOn
 			type Handler = (e: unknown) => void;
@@ -104,7 +145,7 @@ describe("Orchestration wiring", () => {
 			const mockSseOn = (_event: "event", handler: Handler) => {
 				handlers.push(handler);
 			};
-			layer.wireSSEToAdapter(mockSseOn);
+			layer.wireSSEToInstance(mockSseOn);
 			expect(handlers.length).toBe(1);
 
 			// Fire a session.status idle event
@@ -126,11 +167,11 @@ describe("Orchestration wiring", () => {
 		it("ignores non-session.status events", () => {
 			const client = makeStubClient();
 			const layer = createOrchestrationLayer({ client });
-			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
 			const handlers: Handler[] = [];
-			layer.wireSSEToAdapter((_event, handler) => {
+			layer.wireSSEToInstance((_event, handler) => {
 				handlers.push(handler);
 			});
 
@@ -145,11 +186,11 @@ describe("Orchestration wiring", () => {
 		it("ignores session.status events with non-idle status", () => {
 			const client = makeStubClient();
 			const layer = createOrchestrationLayer({ client });
-			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
 			const handlers: Handler[] = [];
-			layer.wireSSEToAdapter((_event, handler) => {
+			layer.wireSSEToInstance((_event, handler) => {
 				handlers.push(handler);
 			});
 
@@ -167,11 +208,11 @@ describe("Orchestration wiring", () => {
 		it("does nothing when sessionId is not present in event", () => {
 			const client = makeStubClient();
 			const layer = createOrchestrationLayer({ client });
-			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
 			const handlers: Handler[] = [];
-			layer.wireSSEToAdapter((_event, handler) => {
+			layer.wireSSEToInstance((_event, handler) => {
 				handlers.push(handler);
 			});
 
@@ -189,11 +230,11 @@ describe("Orchestration wiring", () => {
 		it("falls back to event.sessionId when properties.sessionID is absent", () => {
 			const client = makeStubClient();
 			const layer = createOrchestrationLayer({ client });
-			const notifySpy = vi.spyOn(layer.adapter, "notifyTurnCompleted");
+			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
 			const handlers: Handler[] = [];
-			layer.wireSSEToAdapter((_event, handler) => {
+			layer.wireSSEToInstance((_event, handler) => {
 				handlers.push(handler);
 			});
 

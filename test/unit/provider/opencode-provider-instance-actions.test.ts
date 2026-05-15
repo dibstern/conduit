@@ -1,0 +1,254 @@
+// test/unit/provider/opencode-provider-instance-actions.test.ts
+import { Effect } from "effect";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
+
+function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
+	return {
+		session: {
+			abort: vi.fn(async () => {}),
+			prompt: vi.fn(async () => {}),
+			...(overrides?.["session"] as Record<string, unknown>),
+		},
+		permission: {
+			reply: vi.fn(async () => {}),
+			list: vi.fn(async () => []),
+			...(overrides?.["permission"] as Record<string, unknown>),
+		},
+		question: {
+			reply: vi.fn(async () => {}),
+			reject: vi.fn(async () => {}),
+			list: vi.fn(async () => []),
+			...(overrides?.["question"] as Record<string, unknown>),
+		},
+		provider: {
+			list: vi.fn(async () => ({
+				providers: [],
+				defaults: {},
+				connected: [],
+			})),
+		},
+		app: {
+			agents: vi.fn(async () => []),
+			commands: vi.fn(async () => []),
+			skills: vi.fn(async () => []),
+		},
+		...overrides,
+	} as unknown as OpenCodeAPI;
+}
+
+describe("OpenCodeProviderInstance action methods", () => {
+	let client: OpenCodeAPI;
+	let instance: OpenCodeProviderInstance;
+
+	beforeEach(() => {
+		client = makeStubClient();
+		instance = new OpenCodeProviderInstance({ client });
+	});
+
+	describe("interruptTurnEffect", () => {
+		it("calls client.session.abort with the session ID", async () => {
+			await Effect.runPromise(instance.interruptTurnEffect("session-123"));
+
+			expect(client.session.abort).toHaveBeenCalledWith("session-123");
+		});
+
+		it("returns typed failures from client abort errors", async () => {
+			client = makeStubClient({
+				session: {
+					abort: vi.fn(async () => {
+						throw new Error("session not found");
+					}),
+					prompt: vi.fn(async () => {}),
+				},
+			});
+			instance = new OpenCodeProviderInstance({ client });
+
+			const result = await Effect.runPromise(
+				Effect.either(instance.interruptTurnEffect("bad-session")),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderInstanceFailure",
+					providerId: "opencode",
+					operation: "interruptTurn",
+				});
+				expect(result.left.message).toContain("session not found");
+			}
+		});
+	});
+
+	describe("resolvePermission", () => {
+		it("calls client.permission.reply with sessionId, id and decision", async () => {
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("s1", "perm-1", "once"),
+			);
+
+			expect(client.permission.reply).toHaveBeenCalledWith(
+				"s1",
+				"perm-1",
+				"once",
+			);
+		});
+
+		it("handles 'always' decision", async () => {
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("s1", "perm-2", "always"),
+			);
+
+			expect(client.permission.reply).toHaveBeenCalledWith(
+				"s1",
+				"perm-2",
+				"always",
+			);
+		});
+
+		it("handles 'reject' decision", async () => {
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("s1", "perm-3", "reject"),
+			);
+
+			expect(client.permission.reply).toHaveBeenCalledWith(
+				"s1",
+				"perm-3",
+				"reject",
+			);
+		});
+
+		it("propagates errors from client", async () => {
+			client = makeStubClient({
+				permission: {
+					reply: vi.fn(async () => {
+						throw new Error("permission expired");
+					}),
+					list: vi.fn(async () => []),
+				},
+			});
+			instance = new OpenCodeProviderInstance({ client });
+
+			const result = await Effect.runPromise(
+				instance
+					.resolvePermissionEffect("s1", "bad-perm", "once")
+					.pipe(Effect.either),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderInstanceFailure",
+					providerId: "opencode",
+					operation: "resolvePermission",
+				});
+				expect(result.left.message).toContain("permission expired");
+			}
+		});
+	});
+
+	describe("resolveQuestion", () => {
+		it("calls client.question.reply with id and converted answers", async () => {
+			await Effect.runPromise(
+				instance.resolveQuestionEffect("s1", "q1", {
+					choice: "yes",
+				}),
+			);
+
+			expect(client.question.reply).toHaveBeenCalledWith("q1", [["yes"]]);
+		});
+
+		it("converts array answers to string arrays", async () => {
+			await Effect.runPromise(
+				instance.resolveQuestionEffect("s1", "q2", {
+					multi: ["a", "b", "c"],
+				}),
+			);
+
+			expect(client.question.reply).toHaveBeenCalledWith("q2", [
+				["a", "b", "c"],
+			]);
+		});
+
+		it("handles multiple answer fields", async () => {
+			await Effect.runPromise(
+				instance.resolveQuestionEffect("s1", "q3", {
+					field1: "value1",
+					field2: ["x", "y"],
+				}),
+			);
+
+			expect(client.question.reply).toHaveBeenCalledWith("q3", [
+				["value1"],
+				["x", "y"],
+			]);
+		});
+
+		it("propagates errors from client", async () => {
+			client = makeStubClient({
+				question: {
+					reply: vi.fn(async () => {
+						throw new Error("question expired");
+					}),
+					reject: vi.fn(async () => {}),
+					list: vi.fn(async () => []),
+				},
+			});
+			instance = new OpenCodeProviderInstance({ client });
+
+			const result = await Effect.runPromise(
+				instance
+					.resolveQuestionEffect("s1", "bad-q", { answer: "yes" })
+					.pipe(Effect.either),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderInstanceFailure",
+					providerId: "opencode",
+					operation: "resolveQuestion",
+				});
+				expect(result.left.message).toContain("question expired");
+			}
+		});
+	});
+
+	describe("shutdown", () => {
+		it("resolves cleanly when no pending turns", async () => {
+			await expect(
+				Effect.runPromise(instance.shutdownEffect()),
+			).resolves.not.toThrow();
+		});
+
+		it("rejects pending turns on shutdown", async () => {
+			// Start a turn that won't be completed
+			const turnPromise = Effect.runPromise(
+				instance.sendTurnEffect({
+					sessionId: "s1",
+					turnId: "t1",
+					prompt: "hello",
+					history: [],
+					providerState: {},
+					model: { providerId: "anthropic", modelId: "claude-sonnet" },
+					workspaceRoot: "/tmp",
+					eventSink: {
+						push: vi.fn(() => Effect.void),
+						requestPermission: vi.fn(() =>
+							Effect.succeed({ decision: "once" as const }),
+						),
+						requestQuestion: vi.fn(() => Effect.succeed({})),
+						resolvePermission: vi.fn(() => Effect.void),
+						resolveQuestion: vi.fn(() => Effect.void),
+					},
+					abortSignal: new AbortController().signal,
+				}),
+			);
+
+			// Shutdown while turn is pending
+			await Effect.runPromise(instance.shutdownEffect());
+
+			await expect(turnPromise).rejects.toThrow("shutdown");
+		});
+	});
+});

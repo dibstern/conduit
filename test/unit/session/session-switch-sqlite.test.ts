@@ -1,13 +1,13 @@
 // test/unit/session/session-switch-sqlite.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
-import { resolveSessionHistoryFromSqlite } from "../../../src/lib/session/session-switch.js";
+import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import {
 	createTestHarness,
 	type TestHarness,
 } from "../../helpers/persistence-factories.js";
 
-describe("resolveSessionHistoryFromSqlite", () => {
+describe("resolveSessionHistoryFromRows with SQLite rows", () => {
 	let harness: TestHarness;
 	let readQuery: ReadQueryService;
 
@@ -25,7 +25,8 @@ describe("resolveSessionHistoryFromSqlite", () => {
 		harness.seedMessage("m1", "s1", { role: "user", createdAt: 1000 });
 		harness.seedMessage("m2", "s1", { role: "assistant", createdAt: 2000 });
 
-		const source = resolveSessionHistoryFromSqlite("s1", readQuery, {
+		const rows = readQuery.getSessionMessagesWithParts("s1");
+		const source = resolveSessionHistoryFromRows(rows, {
 			pageSize: 50,
 		});
 
@@ -44,7 +45,8 @@ describe("resolveSessionHistoryFromSqlite", () => {
 	it("returns empty source for session with no messages", () => {
 		harness.seedSession("s1");
 
-		const source = resolveSessionHistoryFromSqlite("s1", readQuery, {
+		const rows = readQuery.getSessionMessagesWithParts("s1");
+		const source = resolveSessionHistoryFromRows(rows, {
 			pageSize: 50,
 		});
 
@@ -52,7 +54,8 @@ describe("resolveSessionHistoryFromSqlite", () => {
 	});
 
 	it("returns empty source for unknown session", () => {
-		const source = resolveSessionHistoryFromSqlite("unknown", readQuery, {
+		const rows = readQuery.getSessionMessagesWithParts("unknown");
+		const source = resolveSessionHistoryFromRows(rows, {
 			pageSize: 50,
 		});
 
@@ -65,7 +68,8 @@ describe("resolveSessionHistoryFromSqlite", () => {
 		harness.seedMessage("m2", "s1", { role: "assistant", createdAt: 2000 });
 		harness.seedMessage("m3", "s1", { role: "user", createdAt: 3000 });
 
-		const source = resolveSessionHistoryFromSqlite("s1", readQuery, {
+		const rows = readQuery.getSessionMessagesWithParts("s1");
+		const source = resolveSessionHistoryFromRows(rows, {
 			pageSize: 2,
 		});
 
@@ -83,7 +87,8 @@ describe("resolveSessionHistoryFromSqlite", () => {
 			parts: [{ id: "p1", type: "text", text: "Hello" }],
 		});
 
-		const source = resolveSessionHistoryFromSqlite("s1", readQuery, {
+		const rows = readQuery.getSessionMessagesWithParts("s1");
+		const source = resolveSessionHistoryFromRows(rows, {
 			pageSize: 50,
 		});
 
@@ -104,7 +109,8 @@ describe("resolveSessionHistoryFromSqlite", () => {
 		harness.seedMessage("m1", "s1", { role: "user", createdAt: 1000 });
 		harness.seedMessage("m2", "s1", { role: "assistant", createdAt: 2000 });
 
-		const source = resolveSessionHistoryFromSqlite("s1", readQuery, {
+		const rows = readQuery.getSessionMessagesWithParts("s1");
+		const source = resolveSessionHistoryFromRows(rows, {
 			pageSize: 50,
 		});
 

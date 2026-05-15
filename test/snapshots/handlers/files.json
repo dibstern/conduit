@@ -1,0 +1,45 @@
+{
+	"get_file_list_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "file_list",
+				"path": ".",
+				"entries": [
+					{
+						"name": "src",
+						"type": "directory"
+					},
+					{
+						"name": "README.md",
+						"type": "file",
+						"size": 42
+					}
+				]
+			}
+		}
+	],
+	"get_file_content_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "file_content",
+				"path": "README.md",
+				"content": "hello world",
+				"binary": false
+			}
+		}
+	],
+	"get_file_tree_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "file_tree",
+				"entries": ["src/", "README.md", "src/index.ts"]
+			}
+		}
+	]
+}

@@ -1,17 +1,23 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
-	OpenCodeAPITag,
+	LoggerTag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	getAgent,
+	makeOverridesStateLive,
+	setAgent,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleGetAgents } from "../../../src/lib/handlers/agent.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import type { SessionOverrides } from "../../../src/lib/session/session-overrides.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -36,15 +42,41 @@ function mockWsHandler(
 	};
 }
 
-function mockOverrides(
-	overrides?: Partial<SessionOverrides>,
-): SessionOverrides {
+function mockLogger(): Logger {
 	return {
-		getModel: vi.fn(() => undefined),
-		getAgent: vi.fn(() => undefined),
-		clearAgent: vi.fn(),
-		...overrides,
-	} as unknown as SessionOverrides;
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
+	} as unknown as Logger;
+}
+
+function agentHandlerLayer({
+	client,
+	ws,
+	engine,
+	log = mockLogger(),
+}: {
+	client: OpenCodeAPI;
+	ws: WebSocketHandlerShape;
+	engine?: OrchestrationEngine;
+	log?: Logger;
+}) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const wsLayer = Layer.succeed(WebSocketHandlerTag, ws);
+	const overridesLayer = makeOverridesStateLive();
+	const logLayer = Layer.succeed(LoggerTag, log);
+	const deps =
+		engine == null
+			? Layer.mergeAll(apiLayer, wsLayer, overridesLayer, logLayer)
+			: Layer.mergeAll(
+					apiLayer,
+					wsLayer,
+					overridesLayer,
+					logLayer,
+					Layer.succeed(OrchestrationEngineTag, engine),
+				);
+	return Layer.provideMerge(AgentServiceLive, deps);
 }
 
 describe("handleGetAgents active provider", () => {
@@ -55,50 +87,19 @@ describe("handleGetAgents active provider", () => {
 		const client = {
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides({
-			getAgent: vi.fn(() => "Explore"),
-			getModel: vi.fn(() => ({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-7",
-			})),
-		});
 		const engine = {
 			getProviderForSession: vi.fn(() => "claude"),
-			dispatch: vi.fn(async () => ({
-				models: [],
-				supportsTools: true,
-				supportsThinking: true,
-				supportsPermissions: true,
-				supportsQuestions: true,
-				supportsAttachments: true,
-				supportsFork: false,
-				supportsRevert: false,
-				commands: [],
-				agents: [
-					{ id: "Explore", name: "Explore", description: "Explorer" },
-					{
-						id: "Review",
-						name: "Review",
-						description: "Reviewer",
-						model: "opus",
-					},
-				],
-			})),
-		} as unknown as OrchestrationEngine;
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(SessionOverridesTag, overrides),
-		);
-
-		return handleGetAgents("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.app.agents).not.toHaveBeenCalled();
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "agent_list",
+			dispatchEffect: vi.fn(() =>
+				Effect.succeed({
+					models: [],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: false,
+					supportsRevert: false,
+					commands: [],
 					agents: [
 						{ id: "Explore", name: "Explore", description: "Explorer" },
 						{
@@ -108,10 +109,28 @@ describe("handleGetAgents active provider", () => {
 							model: "opus",
 						},
 					],
-					activeAgentId: "Explore",
-				});
-			}),
-		);
+				}),
+			),
+		} as unknown as OrchestrationEngine;
+
+		return Effect.gen(function* () {
+			yield* setAgent("session-1", "Explore");
+			yield* handleGetAgents("client-1", {});
+			expect(client.app.agents).not.toHaveBeenCalled();
+			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "agent_list",
+				agents: [
+					{ id: "Explore", name: "Explore", description: "Explorer" },
+					{
+						id: "Review",
+						name: "Review",
+						description: "Reviewer",
+						model: "opus",
+					},
+				],
+				activeAgentId: "Explore",
+			});
+		}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
 	});
 
 	it.effect(
@@ -123,42 +142,31 @@ describe("handleGetAgents active provider", () => {
 			const client = {
 				app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 			} as unknown as OpenCodeAPI;
-			const overrides = mockOverrides({
-				getModel: vi.fn(() => ({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-7",
-				})),
-			});
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
-				dispatch: vi.fn(async () => ({
-					models: [],
-					supportsTools: true,
-					supportsThinking: true,
-					supportsPermissions: true,
-					supportsQuestions: true,
-					supportsAttachments: true,
-					supportsFork: false,
-					supportsRevert: false,
-					commands: [],
-					agents: [
-						{ id: "Any", name: "Any" },
-						{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-						{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
-						{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
-					],
-				})),
+				dispatchEffect: vi.fn(() =>
+					Effect.succeed({
+						models: [],
+						supportsTools: true,
+						supportsThinking: true,
+						supportsPermissions: true,
+						supportsQuestions: true,
+						supportsAttachments: true,
+						supportsFork: false,
+						supportsRevert: false,
+						commands: [],
+						agents: [
+							{ id: "Any", name: "Any" },
+							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+							{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
+							{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
+						],
+					}),
+				),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(SessionOverridesTag, overrides),
-			);
-
 			return handleGetAgents("client-1", {}).pipe(
-				Effect.provide(layer),
+				Effect.provide(agentHandlerLayer({ client, ws, engine })),
 				Effect.tap(() => {
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "agent_list",
@@ -189,20 +197,13 @@ describe("handleGetAgents active provider", () => {
 			} as unknown as OpenCodeAPI;
 			const engine = {
 				getProviderForSession: vi.fn(() => "opencode"),
-				dispatch: vi.fn(),
+				dispatchEffect: vi.fn(),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(SessionOverridesTag, mockOverrides()),
-			);
-
 			return handleGetAgents("client-1", {}).pipe(
-				Effect.provide(layer),
+				Effect.provide(agentHandlerLayer({ client, ws, engine })),
 				Effect.tap(() => {
-					expect(engine.dispatch).not.toHaveBeenCalled();
+					expect(engine.dispatchEffect).not.toHaveBeenCalled();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "agent_list",
 						agents: [{ id: "build", name: "build" }],
@@ -224,13 +225,8 @@ describe("handleGetAgents active provider", () => {
 			},
 		} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
 		return handleGetAgents("client-1", {}).pipe(
-			Effect.provide(layer),
+			Effect.provide(agentHandlerLayer({ client, ws })),
 			Effect.tap(() => {
 				expect(client.app.agents).toHaveBeenCalledOnce();
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
@@ -248,45 +244,32 @@ describe("handleGetAgents active provider", () => {
 		const client = {
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		} as unknown as OpenCodeAPI;
-		const overrides = mockOverrides({
-			getAgent: vi.fn(() => "Missing"),
-			getModel: vi.fn(() => ({
-				providerID: "claude",
-				modelID: "claude-opus-4-7",
-			})),
-		});
 		const engine = {
 			getProviderForSession: vi.fn(() => "claude"),
-			dispatch: vi.fn(async () => ({
-				models: [],
-				supportsTools: true,
-				supportsThinking: true,
-				supportsPermissions: true,
-				supportsQuestions: true,
-				supportsAttachments: true,
-				supportsFork: false,
-				supportsRevert: false,
-				commands: [],
-				agents: [{ id: "Explore", name: "Explore" }],
-			})),
+			dispatchEffect: vi.fn(() =>
+				Effect.succeed({
+					models: [],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: false,
+					supportsRevert: false,
+					commands: [],
+					agents: [{ id: "Explore", name: "Explore" }],
+				}),
+			),
 		} as unknown as OrchestrationEngine;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(SessionOverridesTag, overrides),
-		);
-
-		return handleGetAgents("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(overrides.clearAgent).toHaveBeenCalledWith("session-1");
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "agent_list",
-					agents: [{ id: "Explore", name: "Explore" }],
-				});
-			}),
-		);
+		return Effect.gen(function* () {
+			yield* setAgent("session-1", "Missing");
+			yield* handleGetAgents("client-1", {});
+			expect(yield* getAgent("session-1")).toBeUndefined();
+			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "agent_list",
+				agents: [{ id: "Explore", name: "Explore" }],
+			});
+		}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
 	});
 });

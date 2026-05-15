@@ -4,10 +4,9 @@ import { Effect } from "effect";
 import ignore from "ignore";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
+	OpenCodeFileServiceTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
-import type { PayloadMap } from "./payloads.js";
+} from "../domain/relay/Services/services.js";
 
 // ─── Gitignore Helpers ──────────────────────────────────────────────────────
 
@@ -16,78 +15,99 @@ const ALWAYS_SKIP = new Set([".git", ".svn", ".hg"]);
 
 /** Load .gitignore rules via Effect. */
 const loadGitignore = Effect.gen(function* () {
-	const client = yield* OpenCodeAPITag;
+	const files = yield* OpenCodeFileServiceTag;
 	const ig = ignore();
-	const readResult = yield* Effect.either(
-		Effect.tryPromise(() => client.file.read(".gitignore")),
-	);
+	const readResult = yield* Effect.either(files.read(".gitignore"));
 	if (readResult._tag === "Right" && readResult.right.content) {
 		ig.add(readResult.right.content);
 	}
 	return ig;
 });
 
+const isIgnored = (
+	ig: ReturnType<typeof ignore>,
+	path: string,
+	type: string,
+): boolean =>
+	type === "directory"
+		? ig.ignores(path) || ig.ignores(`${path}/`)
+		: ig.ignores(path);
+
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
 export const handleGetFileList = (
 	clientId: string,
-	payload: PayloadMap["get_file_list"],
+	payload: { path?: string },
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
+		const result = yield* getFileListResponse(payload.path ?? ".");
 
-		const dirPath = payload.path ?? ".";
+		wsHandler.sendTo(clientId, {
+			type: "file_list",
+			path: result.path,
+			entries: result.entries,
+		});
+	});
+
+export const getFileListResponse = (dirPath = ".") =>
+	Effect.gen(function* () {
+		const fileService = yield* OpenCodeFileServiceTag;
 		const [files, ig] = yield* Effect.all([
-			Effect.tryPromise(() => client.file.list(dirPath)),
+			fileService.list(dirPath),
 			loadGitignore,
 		]);
 
 		const filtered = files.filter((f) => {
 			if (ALWAYS_SKIP.has(f.name)) return false;
 			const rel = dirPath === "." ? f.name : `${dirPath}/${f.name}`;
-			return !ig.ignores(rel);
+			return !isIgnored(ig, rel, f.type);
 		});
 
-		wsHandler.sendTo(clientId, {
-			type: "file_list",
+		return {
 			path: dirPath,
-			entries: filtered as Array<{
-				name: string;
-				type: "file" | "directory";
-				size?: number;
-			}>,
-		});
+			entries: filtered.map((entry) => ({
+				name: entry.name,
+				type: entry.type as "file" | "directory",
+				...(entry.size != null ? { size: entry.size } : {}),
+			})),
+		};
 	});
 
 export const handleGetFileContent = (
 	clientId: string,
-	payload: PayloadMap["get_file_content"],
+	payload: { path: string },
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 
 		const { path: filePath } = payload;
 		if (filePath) {
-			const result = yield* Effect.tryPromise(() => client.file.read(filePath));
-			const binary = (result as { binary?: boolean }).binary;
+			const result = yield* getFileContentResponse(filePath);
 			wsHandler.sendTo(clientId, {
 				type: "file_content",
-				path: filePath,
-				content: (result as { content: string }).content ?? "",
-				...(binary != null && { binary }),
+				path: result.path,
+				content: result.content,
+				...(result.binary != null && { binary: result.binary }),
 			});
 		}
 	});
 
-export const handleGetFileTree = (
-	clientId: string,
-	_payload: PayloadMap["get_file_tree"],
-) =>
+export const getFileContentResponse = (filePath: string) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
-		const wsHandler = yield* WebSocketHandlerTag;
+		const files = yield* OpenCodeFileServiceTag;
+		const result = yield* files.read(filePath);
+		const binary = (result as { binary?: boolean }).binary;
+		return {
+			path: filePath,
+			content: (result as { content: string }).content ?? "",
+			...(binary != null && { binary }),
+		};
+	});
+
+export const getFileTreeEntries = () =>
+	Effect.gen(function* () {
+		const files = yield* OpenCodeFileServiceTag;
 		const log = yield* LoggerTag;
 
 		const entries: string[] = [];
@@ -105,12 +125,12 @@ export const handleGetFileTree = (
 					const next = queue.shift();
 					if (next === undefined) break;
 					const { dir, depth } = next;
-					const items = yield* Effect.tryPromise(() => client.file.list(dir));
+					const items = yield* files.list(dir);
 
 					for (const item of items) {
 						if (ALWAYS_SKIP.has(item.name)) continue;
 						const path = dir === "." ? item.name : `${dir}/${item.name}`;
-						if (ig.ignores(path)) continue;
+						if (isIgnored(ig, path, item.type)) continue;
 
 						if (item.type === "directory") {
 							entries.push(`${path}/`);
@@ -129,5 +149,15 @@ export const handleGetFileTree = (
 			log.warn(`Error walking directory: ${walkResult.left}`);
 		}
 
+		return entries;
+	});
+
+export const handleGetFileTree = (
+	clientId: string,
+	_payload: Record<string, never>,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const entries = yield* getFileTreeEntries();
 		wsHandler.sendTo(clientId, { type: "file_tree", entries });
 	});

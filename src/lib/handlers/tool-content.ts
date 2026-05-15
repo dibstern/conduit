@@ -2,12 +2,18 @@
 // Returns full (pre-truncation) tool result content from the SQLite tool_content table.
 
 import { Effect } from "effect";
-import { ReadQueryTag, WebSocketHandlerTag } from "../effect/services.js";
-import type { PayloadMap } from "./payloads.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
+import { ToolContentServiceTag } from "../domain/relay/Services/tool-content-service.js";
+
+export const getToolContentValue = (toolId: string) =>
+	Effect.gen(function* () {
+		const toolContent = yield* ToolContentServiceTag;
+		return yield* toolContent.get(toolId);
+	});
 
 export const handleGetToolContent = (
 	clientId: string,
-	payload: PayloadMap["get_tool_content"],
+	payload: { toolId: string },
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -25,13 +31,7 @@ export const handleGetToolContent = (
 			return;
 		}
 
-		// ReadQuery is optional (persistence may not be configured).
-		// Use Effect.serviceOption to handle its absence gracefully.
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryTag);
-		const content =
-			readQueryOption._tag === "Some"
-				? readQueryOption.value.getToolContent(toolId)
-				: undefined;
+		const content = yield* getToolContentValue(toolId);
 
 		if (content !== undefined) {
 			wsHandler.sendTo(clientId, {

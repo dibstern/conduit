@@ -13,9 +13,16 @@
 		switchToSession,
 		sendNewSession,
 		sessionCreation,
+		handleSessionList,
 	} from "../../stores/session.svelte.js";
-	import { getSessionHref } from "../../stores/router.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import {
+		deleteSessionRpc,
+		forkSessionRpc,
+		listSessionsRpc,
+		renameSessionRpc,
+	} from "../../transport/ws-rpc-client.js";
 	import { closeMobileSidebar, confirm, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -80,21 +87,35 @@
 
 	// Re-send search when subagent toggle changes during active search
 	$effect(() => {
-		const _hide = uiState.hideSubagentSessions; // track dependency
+		const hide = uiState.hideSubagentSessions; // track dependency
 		if (localSearchValue.trim()) {
 			if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-			wsSend({
-				type: "search_sessions",
-				query: localSearchValue,
-				...(_hide && { roots: true }),
-			});
+			requestRemoteSearch(localSearchValue, hide);
 		}
 	});
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
+	function requestRemoteSearch(query: string, roots: boolean) {
+		const projectSlug = getCurrentSlug();
+		const trimmed = query.trim();
+		if (!projectSlug || !trimmed) return;
+		void listSessionsRpc({ projectSlug, query: trimmed, roots }).then(
+			(response) => {
+				if (localSearchValue.trim() !== trimmed) return;
+				if (uiState.hideSubagentSessions !== roots) return;
+				handleSessionList({
+					type: "session_list",
+					sessions: response.sessions,
+					roots: response.roots,
+					search: true,
+				});
+			},
+		);
+	}
+
 	function handleNewSession() {
-		if (!sendNewSession(wsSend)) return;
+		if (!sendNewSession()) return;
 		closeMobileSidebar();
 	}
 
@@ -123,11 +144,7 @@
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 		if (localSearchValue.trim()) {
 			debounceTimer = setTimeout(() => {
-				wsSend({
-					type: "search_sessions",
-					query: localSearchValue,
-					...(uiState.hideSubagentSessions && { roots: true }),
-				});
+				requestRemoteSearch(localSearchValue, uiState.hideSubagentSessions);
 			}, 300);
 		}
 	}
@@ -143,7 +160,7 @@
 
 	function handleSwitchSession(id: string) {
 		if (id !== sessionState.currentId) {
-			switchToSession(id, wsSend);
+			switchToSession(id);
 		}
 		closeMobileSidebar();
 	}
@@ -174,7 +191,13 @@
 			"Delete",
 		);
 		if (confirmed) {
-			wsSend({ type: "delete_session", sessionId: id });
+			const projectSlug = getCurrentSlug();
+			if (!projectSlug) return;
+			void deleteSessionRpc({
+				projectSlug,
+				sessionId: id,
+				originId: getBrowserClientId(),
+			});
 		}
 	}
 
@@ -183,7 +206,13 @@
 	}
 
 	function handleCtxFork(id: string) {
-		wsSend({ type: "fork_session", sessionId: id });
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		void forkSessionRpc({
+			projectSlug,
+			sessionId: id,
+			originId: getBrowserClientId(),
+		});
 	}
 
 	function resetCleanupMode() {
@@ -229,15 +258,23 @@
 			"Delete",
 		);
 		if (confirmed) {
+			const projectSlug = getCurrentSlug();
+			if (!projectSlug) return;
 			for (const id of selectedForDeletion) {
-				wsSend({ type: "delete_session", sessionId: id });
+				void deleteSessionRpc({
+					projectSlug,
+					sessionId: id,
+					originId: getBrowserClientId(),
+				});
 			}
 			resetCleanupMode();
 		}
 	}
 
 	function handleRename(id: string, title: string) {
-		wsSend({ type: "rename_session", sessionId: id, title });
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		void renameSessionRpc({ projectSlug, sessionId: id, title });
 	}
 
 	// ─── Actions ────────────────────────────────────────────────────────────────

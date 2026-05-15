@@ -31,15 +31,22 @@ Run this when changing browser-visible workflows, WebSocket behavior, mobile flo
 
 ```bash
 pnpm test:e2e                                    # full suite
-pnpm test:e2e -- test/e2e/specs/<spec>.ts         # single spec
-pnpm test:e2e -- --grep "<name>"                  # by test name
+pnpm test:e2e test/e2e/specs/<spec>.ts            # single spec
+pnpm test:e2e --grep "<name>"                     # by test name
 ```
 
 Prefer a single spec or grep filter over the full suite.
 
+If the frontend is already built or you need to avoid package-script argument forwarding, run Playwright directly:
+
+```bash
+pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --grep "<name>"
+pnpm exec playwright test --config test/e2e/playwright-replay.config.ts test/e2e/specs/<spec>.ts --project=desktop
+```
+
 ### Live E2E
 
-Run this for full-pipeline validation against a real, ephemeral OpenCode instance. Requires `opencode` on `$PATH` and valid API credentials.
+Run this for full-pipeline validation against a real, ephemeral OpenCode instance. Requires `opencode` on `$PATH` and valid API credentials. Do not assume the instance uses port `4096`; tests and logs report the active URL.
 
 ```bash
 pnpm test:e2e:live
@@ -84,3 +91,17 @@ pnpm test:storybook-visual
 - Do not run full E2E or visual suites for pure refactors, docs changes, or isolated backend logic.
 - If a change affects both runtime logic and UI, use the default path first, then add the narrowest relevant integration or E2E command.
 - If you need alternate modes or helper variants, check `package.json` rather than copying the full script inventory into AGENTS.md.
+
+## Effect Migration Guardrails
+
+Run the static guardrail suite when touching Effect ownership, daemon/relay composition, provider adapters, persistence, or transport boundaries:
+
+```bash
+pnpm exec vitest run test/unit/effect/runtime-boundary-grep.test.ts
+```
+
+Final guardrail expectations as of 2026-05-15:
+
+- `startDaemonProcess`, `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic `concurrency: "unbounded"` have zero production hits under `src`.
+- Runtime entry grep has exactly five accepted hits: standalone HTTP compatibility, OpenCode SDK fetch, Claude SDK permission callback, frontend transport, and relay startup.
+- `relay-stack.ts` has zero `Layer.succeed(...)` relay bridge composition hits.

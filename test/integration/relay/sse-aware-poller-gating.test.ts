@@ -236,6 +236,7 @@ async function createTestHarness(
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
 		slug: `test-sse-gating-${relayPort}`,
+		noServer: true,
 		log: createSilentLogger(),
 		pollerGatingConfig: {
 			sseGracePeriodMs: TEST_GRACE_MS,
@@ -243,6 +244,18 @@ async function createTestHarness(
 		},
 		statusPollerInterval: TEST_STATUS_POLL_MS,
 		messagePollerInterval: TEST_MSG_POLL_MS,
+	});
+
+	relayServer.on("upgrade", (req, socket, head) => {
+		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
+			relay.wsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
+			relay.rpcWsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		socket.destroy();
 	});
 
 	// Wait for SSE + status poller to initialize
@@ -253,7 +266,7 @@ async function createTestHarness(
 		mock,
 		relayPort,
 		async connectClient() {
-			const client = new TestWsClient(`ws://127.0.0.1:${relayPort}`);
+			const client = new TestWsClient(`ws://127.0.0.1:${relayPort}/ws`);
 			await client.waitForOpen();
 			return client;
 		},
@@ -275,11 +288,7 @@ async function connectAndView(
 ): Promise<TestWsClient> {
 	const client = await harness.connectClient();
 	await client.waitForInitialState();
-	client.send({ type: "view_session", sessionId });
-	await client.waitFor("session_switched", {
-		timeout: 3000,
-		predicate: (m) => m["id"] === sessionId,
-	});
+	await client.viewSession(sessionId);
 	client.clearReceived();
 	return client;
 }
@@ -735,11 +744,7 @@ describe("Group 4: Cross-session and lifecycle", () => {
 		// Connect a client and verify relay still works with sess-1
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
-		client.send({ type: "view_session", sessionId: "sess-1" });
-		const switched = await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-1",
-		});
+		const switched = await client.viewSession("sess-1");
 		expect(switched["id"]).toBe("sess-1");
 
 		await client.close();

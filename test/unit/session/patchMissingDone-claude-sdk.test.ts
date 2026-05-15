@@ -1,6 +1,6 @@
 // ─── patchMissingDone — Claude SDK processing timeout guard (F3 fix) ────────
 // Covers the widened guard in patchMissingDone that checks
-// overrides?.hasActiveProcessingTimeout(sessionId) in addition to
+// processingTimeouts?.hasActiveProcessingTimeout(sessionId) in addition to
 // statusPoller?.isProcessing().
 //
 // Server Task 1: F3 fix — Claude SDK sessions may be processing via the
@@ -49,11 +49,16 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		const statusPoller: SessionSwitchDeps["statusPoller"] = {
 			isProcessing: vi.fn().mockReturnValue(false),
 		};
-		const overrides: SessionSwitchDeps["overrides"] = {
+		const processingTimeouts = {
 			hasActiveProcessingTimeout: vi.fn().mockReturnValue(true),
 		};
 
-		const result = patchMissingDone(source, statusPoller, SID, overrides);
+		const result = patchMissingDone(
+			source,
+			statusPoller,
+			SID,
+			processingTimeouts,
+		);
 
 		// Source should be returned unchanged — no synthetic done appended
 		expect(result).toBe(source);
@@ -70,11 +75,16 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		const statusPoller: SessionSwitchDeps["statusPoller"] = {
 			isProcessing: vi.fn().mockReturnValue(false),
 		};
-		const overrides: SessionSwitchDeps["overrides"] = {
+		const processingTimeouts = {
 			hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 		};
 
-		const result = patchMissingDone(source, statusPoller, SID, overrides);
+		const result = patchMissingDone(
+			source,
+			statusPoller,
+			SID,
+			processingTimeouts,
+		);
 
 		// A new source should be returned with synthetic done appended
 		expect(result).not.toBe(source);
@@ -85,7 +95,7 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		}
 	});
 
-	it("applies patch when overrides is undefined (no Claude SDK)", () => {
+	it("applies patch when processing timeout state is undefined (no Claude SDK)", () => {
 		const source = makeActiveTurnSource(SID);
 		const statusPoller: SessionSwitchDeps["statusPoller"] = {
 			isProcessing: vi.fn().mockReturnValue(false),
@@ -101,7 +111,7 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		}
 	});
 
-	it("applies patch when both statusPoller and overrides are undefined", () => {
+	it("applies patch when both statusPoller and timeout state are undefined", () => {
 		const source = makeActiveTurnSource(SID);
 
 		const result = patchMissingDone(source, undefined, SID, undefined);
@@ -121,11 +131,16 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		const statusPoller: SessionSwitchDeps["statusPoller"] = {
 			isProcessing: vi.fn().mockReturnValue(true),
 		};
-		const overrides: SessionSwitchDeps["overrides"] = {
+		const processingTimeouts = {
 			hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
 		};
 
-		const result = patchMissingDone(source, statusPoller, SID, overrides);
+		const result = patchMissingDone(
+			source,
+			statusPoller,
+			SID,
+			processingTimeouts,
+		);
 
 		expect(result).toBe(source);
 		if (result.kind === "cached-events") {
@@ -139,11 +154,16 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		const statusPoller: SessionSwitchDeps["statusPoller"] = {
 			isProcessing: vi.fn().mockReturnValue(true),
 		};
-		const overrides: SessionSwitchDeps["overrides"] = {
+		const processingTimeouts = {
 			hasActiveProcessingTimeout: vi.fn().mockReturnValue(true),
 		};
 
-		const result = patchMissingDone(source, statusPoller, SID, overrides);
+		const result = patchMissingDone(
+			source,
+			statusPoller,
+			SID,
+			processingTimeouts,
+		);
 
 		expect(result).toBe(source);
 	});
@@ -212,17 +232,19 @@ describe("patchMissingDone — Claude SDK processing timeout guard", () => {
 		expect(result).toBe(source);
 	});
 
-	it("overrides.hasActiveProcessingTimeout is called with correct sessionId", () => {
+	it("processingTimeouts.hasActiveProcessingTimeout is called with correct sessionId", () => {
 		const source = makeActiveTurnSource(SID);
 		const statusPoller: SessionSwitchDeps["statusPoller"] = {
 			isProcessing: vi.fn().mockReturnValue(false),
 		};
-		const overrides: SessionSwitchDeps["overrides"] = {
+		const processingTimeouts = {
 			hasActiveProcessingTimeout: vi.fn().mockReturnValue(true),
 		};
 
-		patchMissingDone(source, statusPoller, SID, overrides);
+		patchMissingDone(source, statusPoller, SID, processingTimeouts);
 
-		expect(overrides.hasActiveProcessingTimeout).toHaveBeenCalledWith(SID);
+		expect(processingTimeouts.hasActiveProcessingTimeout).toHaveBeenCalledWith(
+			SID,
+		);
 	});
 });

@@ -7,7 +7,7 @@ import {
 	PtyConnectionError,
 	PtyConnectionTimeout,
 	type PtyEvent,
-} from "../../../src/lib/effect/pty-stream.js";
+} from "../../../src/lib/domain/relay/Services/pty-stream.js";
 
 describe("PTY Stream Effect", () => {
 	it("PtyConnectionTimeout has correct tag", () => {

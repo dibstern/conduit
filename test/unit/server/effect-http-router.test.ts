@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpApp } from "@effect/platform";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
-import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	CaCertProvider,
 	effectRouter,
@@ -38,11 +38,12 @@ const testProjects: RouterProjectInfo[] = [
 ];
 
 const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
-	getProjects: () => testProjects,
+	getProjects: () => Effect.succeed(testProjects),
 });
 
 const TestHealthLayer = Layer.succeed(HealthProvider, {
-	getHealthResponse: () => ({ ok: true, custom: "daemon-health" }),
+	getHealthResponse: () =>
+		Effect.succeed({ ok: true, custom: "daemon-health" }),
 });
 
 const TestPushLayer = Layer.succeed(PushProvider, {
@@ -64,7 +65,7 @@ beforeAll(async () => {
 
 const baseRouterLayer = () =>
 	Layer.mergeAll(
-		Layer.succeed(AuthManagerTag, new AuthManager()),
+		makeAuthManagerLive(new AuthManager()),
 		Layer.succeed(StaticDirTag, staticDir),
 		NodeFileSystem.layer,
 		NodePath.layer,

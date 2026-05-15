@@ -1,106 +1,93 @@
 // src/lib/provider/claude/effect-prompt-queue.ts
 /**
- * EffectPromptQueue -- Drop-in replacement for PromptQueue backed by an
- * Effect Queue.
+ * Effect-backed prompt queue for the Claude Agent SDK.
  *
- * The Claude Agent SDK's `query()` function requires an
- * `AsyncIterable<SDKUserMessage>`. Effect's Queue is NOT AsyncIterable,
- * so this bridge adapts between the two worlds:
- *
- * - Internally uses `Effect.Queue.unbounded<SDKUserMessage>()` for the
- *   buffer and blocking take semantics.
- * - Exposes the same `PromptQueueController` interface (`enqueue`, `close`,
- *   `Symbol.asyncIterator`) so the rest of the adapter is unchanged.
- * - Single-consumer guard: throws if iterated more than once, matching the
- *   original PromptQueue contract.
- *
- * Drain-before-close semantics:
- * Effect's `Queue.shutdown` discards all buffered items and interrupts
- * pending takes. The original PromptQueue drains buffered items first,
- * then signals end-of-stream. To preserve this contract:
- * - `close()` snapshots any remaining Effect Queue items into a local
- *   drain buffer, then shuts down the Effect Queue.
- * - `next()` serves from the drain buffer first, falling back to the
- *   Effect Queue for blocking takes while still open.
+ * The SDK consumes prompts as an AsyncIterable, while conduit produces prompts
+ * from Effect programs. The queue keeps the producer side Effect-native and
+ * leaves the Promise bridge at the SDK-facing AsyncIterator boundary.
  */
-import { Chunk, Effect, Exit, Queue } from "effect";
+import { Data, Effect, Queue, Stream } from "effect";
 
 import type { PromptQueueController, SDKUserMessage } from "./types.js";
 
-export class EffectPromptQueue
-	implements PromptQueueController, AsyncIterator<SDKUserMessage>
-{
-	private readonly queue: Queue.Queue<SDKUserMessage>;
+type PromptQueueItem =
+	| { readonly _tag: "Message"; readonly message: SDKUserMessage }
+	| { readonly _tag: "End" };
+
+type PromptQueueMessage = Extract<
+	PromptQueueItem,
+	{ readonly _tag: "Message" }
+>;
+
+type NoPromptQueueErrorFields = Record<never, never>;
+
+export class EffectPromptQueueAlreadyIterating extends Data.TaggedError(
+	"EffectPromptQueueAlreadyIterating",
+)<NoPromptQueueErrorFields> {
+	override get message(): string {
+		return "EffectPromptQueue is single-consumer. Cannot iterate more than once.";
+	}
+}
+
+export class EffectPromptQueue implements PromptQueueController {
 	private _iterating = false;
 	private _closed = false;
-	/** Items drained from the Effect Queue at close time, served first. */
-	private readonly drainBuffer: SDKUserMessage[] = [];
 
-	private constructor(queue: Queue.Queue<SDKUserMessage>) {
-		this.queue = queue;
+	private constructor(
+		private readonly queue: Queue.Queue<PromptQueueItem>,
+		private readonly iterable: AsyncIterable<SDKUserMessage>,
+	) {}
+
+	static make(): Effect.Effect<EffectPromptQueue> {
+		return Effect.gen(function* () {
+			const queue = yield* Queue.unbounded<PromptQueueItem>();
+			const iterable = yield* Stream.fromQueue(queue, { shutdown: true }).pipe(
+				Stream.takeWhile(
+					(item): item is PromptQueueMessage => item._tag === "Message",
+				),
+				Stream.map((item) => item.message),
+				Stream.toAsyncIterableEffect,
+			);
+			return new EffectPromptQueue(queue, iterable);
+		});
 	}
 
-	/**
-	 * Create a new EffectPromptQueue backed by an Effect unbounded Queue.
-	 */
-	static create(): EffectPromptQueue {
-		const queue = Effect.runSync(Queue.unbounded<SDKUserMessage>());
-		return new EffectPromptQueue(queue);
+	enqueue(message: SDKUserMessage): Effect.Effect<void> {
+		return Effect.suspend(() => {
+			if (this._closed) return Effect.void;
+			return Queue.offer(this.queue, {
+				_tag: "Message",
+				message,
+			}).pipe(Effect.asVoid);
+		});
 	}
 
-	enqueue(message: SDKUserMessage): void {
-		if (this._closed) return;
-		Effect.runSync(Queue.offer(this.queue, message));
-	}
-
-	close(): void {
-		if (this._closed) return;
-		this._closed = true;
-		// Snapshot remaining items before shutdown discards them.
-		const exit = Effect.runSyncExit(Queue.takeAll(this.queue));
-		if (Exit.isSuccess(exit)) {
-			this.drainBuffer.push(...Chunk.toArray(exit.value));
-		}
-		Effect.runSync(Queue.shutdown(this.queue));
-	}
-
-	async next(): Promise<IteratorResult<SDKUserMessage>> {
-		// 1. Serve from the drain buffer (populated by close()).
-		const buffered = this.drainBuffer.shift();
-		if (buffered !== undefined) {
-			return { value: buffered, done: false };
-		}
-		// 2. If already closed and drain buffer is empty, we are done.
-		if (this._closed) {
-			return {
-				value: undefined as unknown as SDKUserMessage,
-				done: true,
-			};
-		}
-		// 3. Block on the Effect Queue for the next item.
-		const exit = await Effect.runPromiseExit(Queue.take(this.queue));
-		if (Exit.isFailure(exit)) {
-			// Queue was shut down while we were waiting -- signal end-of-stream.
-			return {
-				value: undefined as unknown as SDKUserMessage,
-				done: true,
-			};
-		}
-		return { value: exit.value, done: false };
-	}
-
-	async return(): Promise<IteratorResult<SDKUserMessage>> {
-		this.close();
-		return { value: undefined as unknown as SDKUserMessage, done: true };
+	close(): Effect.Effect<void> {
+		return Effect.suspend(() => {
+			if (this._closed) return Effect.void;
+			this._closed = true;
+			return Queue.offer(this.queue, { _tag: "End" }).pipe(Effect.asVoid);
+		});
 	}
 
 	[Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
 		if (this._iterating) {
-			throw new Error(
-				"EffectPromptQueue is single-consumer. Cannot iterate more than once.",
-			);
+			throw new EffectPromptQueueAlreadyIterating();
 		}
 		this._iterating = true;
-		return this;
+
+		const iterator = this.iterable[Symbol.asyncIterator]();
+		return {
+			next: () => iterator.next(),
+			return: async () => {
+				this._closed = true;
+				return iterator.return
+					? iterator.return()
+					: { value: undefined as unknown as SDKUserMessage, done: true };
+			},
+		};
 	}
 }
+
+export const makeEffectPromptQueue = (): Effect.Effect<EffectPromptQueue> =>
+	EffectPromptQueue.make();

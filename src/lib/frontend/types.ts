@@ -18,8 +18,6 @@ import type {
 	ToolStatus,
 } from "../shared-types.js";
 
-export type { PayloadMap } from "../handlers/payloads.js";
-
 export type {
 	AgentInfo,
 	AskUserQuestion,

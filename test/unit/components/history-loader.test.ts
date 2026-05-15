@@ -1,14 +1,14 @@
 // ─── HistoryLoader Component Test ─────────────────────────────────────────────
 // Tests that HistoryLoader correctly:
 // 1. Sets up IntersectionObserver on mount and disconnects on destroy
-// 2. Calls wsSend with the right payload when sentinel becomes visible
+// 2. Calls LoadMoreHistory RPC with the right payload when sentinel becomes visible
 // 3. Guards against loading when historyState.hasMore is false
 // 4. Guards against double-loading when historyState.loading is true
 // 5. Guards against loading when there's no active session
 //
 // Uses @testing-library/svelte + jsdom (vitest "components" project).
 
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, render, waitFor } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,10 +42,10 @@ vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 
 // ─── Mock stores ─────────────────────────────────────────────────────────────
 
-const wsSendSpy = vi.fn();
+const loadMoreHistoryRpcSpy = vi.fn();
 
-vi.mock("../../../src/lib/frontend/stores/ws.svelte.ts", () => ({
-	wsSend: (...args: unknown[]) => wsSendSpy(...args),
+vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
+	loadMoreHistoryRpc: (...args: unknown[]) => loadMoreHistoryRpcSpy(...args),
 }));
 
 import HistoryLoader from "../../../src/lib/frontend/components/chat/HistoryLoader.svelte";
@@ -62,6 +62,10 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import {
+	routerState,
+	syncSlugState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 
@@ -76,6 +80,9 @@ describe("HistoryLoader component", () => {
 		vi.clearAllMocks();
 		observerCallback = null;
 		observedElements = [];
+		routerState.path = "/p/test-project/s/test-session";
+		syncSlugState(routerState.path);
+		loadMoreHistoryRpcSpy.mockImplementation(() => new Promise(() => {}));
 		// Reset state — use per-session slot (need both activity + messages for currentChat())
 		sessionState.currentId = "test-session";
 		const { messages: sm } = getOrCreateSessionSlot("test-session");
@@ -107,7 +114,7 @@ describe("HistoryLoader component", () => {
 		expect(disconnectSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it("sends load_more_history when sentinel intersects and hasMore is true", async () => {
+	it("calls LoadMoreHistory RPC when sentinel intersects and hasMore is true", async () => {
 		const sentinel = document.createElement("div");
 		const sm = getOrCreateSessionMessages("test-session");
 		sm.historyHasMore = true;
@@ -120,9 +127,9 @@ describe("HistoryLoader component", () => {
 		// Simulate sentinel becoming visible
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
-		expect(wsSendSpy).toHaveBeenCalledTimes(1);
-		expect(wsSendSpy).toHaveBeenCalledWith({
-			type: "load_more_history",
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledTimes(1);
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledWith({
+			projectSlug: "test-project",
 			sessionId: "test-session",
 			offset: 50,
 		});
@@ -139,7 +146,7 @@ describe("HistoryLoader component", () => {
 
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
-		expect(wsSendSpy).not.toHaveBeenCalled();
+		expect(loadMoreHistoryRpcSpy).not.toHaveBeenCalled();
 	});
 
 	it("does NOT send when already loading", async () => {
@@ -154,7 +161,7 @@ describe("HistoryLoader component", () => {
 
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
-		expect(wsSendSpy).not.toHaveBeenCalled();
+		expect(loadMoreHistoryRpcSpy).not.toHaveBeenCalled();
 	});
 
 	it("does NOT send when no active session", async () => {
@@ -168,7 +175,7 @@ describe("HistoryLoader component", () => {
 
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
-		expect(wsSendSpy).not.toHaveBeenCalled();
+		expect(loadMoreHistoryRpcSpy).not.toHaveBeenCalled();
 	});
 
 	it("does NOT send when entry is not intersecting", async () => {
@@ -183,7 +190,7 @@ describe("HistoryLoader component", () => {
 			{ isIntersecting: false } as IntersectionObserverEntry,
 		]);
 
-		expect(wsSendSpy).not.toHaveBeenCalled();
+		expect(loadMoreHistoryRpcSpy).not.toHaveBeenCalled();
 	});
 
 	it("does not observe when sentinelEl is undefined", () => {
@@ -204,9 +211,42 @@ describe("HistoryLoader component", () => {
 
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
-		expect(wsSendSpy).toHaveBeenCalledWith(
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledWith(
 			expect.objectContaining({ offset: 150 }),
 		);
+	});
+
+	it("applies LoadMoreHistory RPC responses through history_page handling", async () => {
+		const sentinel = document.createElement("div");
+		const sm = getOrCreateSessionMessages("test-session");
+		sm.historyHasMore = true;
+		sm.historyMessageCount = 50;
+		loadMoreHistoryRpcSpy.mockResolvedValueOnce({
+			projectSlug: "test-project",
+			sessionId: "test-session",
+			messages: [
+				{
+					id: "older-1",
+					role: "user",
+					parts: [{ id: "part-1", type: "text", text: "older message" }],
+				},
+			],
+			hasMore: false,
+			total: 51,
+		});
+
+		render(HistoryLoader, { props: { sentinelEl: sentinel } });
+		flushSync();
+		await tick();
+
+		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
+
+		await waitFor(() => expect(sm.historyLoading).toBe(false));
+		expect(sm.historyHasMore).toBe(false);
+		expect(sm.historyMessageCount).toBe(51);
+		expect(getMessages(sm)).toEqual([
+			expect.objectContaining({ type: "user", text: "older message" }),
+		]);
 	});
 });
 
@@ -230,6 +270,9 @@ describe("HistoryLoader buffer → server fallback", () => {
 		observerCallback = null;
 		observedElements = [];
 		clearMessages();
+		routerState.path = "/p/test-project/s/buf-session";
+		syncSlugState(routerState.path);
+		loadMoreHistoryRpcSpy.mockImplementation(() => new Promise(() => {}));
 		sessionState.currentId = "buf-session";
 		const slot = getOrCreateSessionSlot("buf-session");
 		ta = slot.activity;
@@ -247,7 +290,7 @@ describe("HistoryLoader buffer → server fallback", () => {
 	// Skipped: commitReplayFinal writes to chatState.messages (global coordination state),
 	// not per-session slot.messages. The full chatState internals migration is required
 	// to un-skip these. The replay buffer itself is per-session (Task 6 completed).
-	it.skip("sends load_more_history after replay buffer is fully consumed", async () => {
+	it.skip("calls LoadMoreHistory RPC after replay buffer is fully consumed", async () => {
 		// Setup: simulate commitReplayFinal with 100 messages.
 		// This puts 50 in the replay buffer and 50 in per-session messages.
 		beginReplayBatch(ta, tm);
@@ -277,13 +320,13 @@ describe("HistoryLoader buffer → server fallback", () => {
 		// All 100 messages should be displayed
 		expect(sm.messages).toHaveLength(100);
 
-		// KEY ASSERTION: After buffer exhaustion, HistoryLoader should send
-		// a server request (load_more_history) — NOT just set hasMore=false.
+		// KEY ASSERTION: After buffer exhaustion, HistoryLoader should make
+		// a server request — NOT just set hasMore=false.
 		// The event cache may not cover the full session.
-		expect(wsSendSpy).toHaveBeenCalledTimes(1);
-		expect(wsSendSpy).toHaveBeenCalledWith(
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledTimes(1);
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
-				type: "load_more_history",
+				projectSlug: "test-project",
 				sessionId: "buf-session",
 			}),
 		);
@@ -308,21 +351,21 @@ describe("HistoryLoader buffer → server fallback", () => {
 
 		// First intersection: consumes 50 from buffer (100 remaining)
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
-		expect(wsSendSpy).not.toHaveBeenCalled(); // still consuming buffer
+		expect(loadMoreHistoryRpcSpy).not.toHaveBeenCalled(); // still consuming buffer
 
 		// Second intersection: consumes 50 from buffer (50 remaining)
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
-		expect(wsSendSpy).not.toHaveBeenCalled(); // still consuming buffer
+		expect(loadMoreHistoryRpcSpy).not.toHaveBeenCalled(); // still consuming buffer
 
 		// Third intersection: consumes last 50 from buffer (exhausted)
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 		expect(getReplayBuffer(ta, tm, "buf-session")).toBeUndefined();
 
 		// NOW it should fall through to server
-		expect(wsSendSpy).toHaveBeenCalledTimes(1);
-		expect(wsSendSpy).toHaveBeenCalledWith(
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledTimes(1);
+		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
-				type: "load_more_history",
+				projectSlug: "test-project",
 				sessionId: "buf-session",
 			}),
 		);

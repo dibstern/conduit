@@ -7,6 +7,7 @@
 //
 // Uses replay fixture with MockOpenCodeServer — no real OpenCode needed.
 
+import { Effect } from "effect";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -284,7 +285,7 @@ test.describe("Unified Rendering: Paginated History", () => {
 		// the events cache so client-init falls through to REST history.
 		// Inject pre-built paginated message responses into the mock so the
 		// relay's getMessagesPage(limit=50) gets the correct page sequence.
-		await harness.stack.sseStream.disconnect();
+		await Effect.runPromise(harness.stack.sseStream.disconnectEffect());
 		const sessions = await harness.stack.client.session.list();
 		const sessionId = sessions[0]?.id;
 		expect(sessionId).toBeDefined();
@@ -340,7 +341,7 @@ test.describe("Unified Rendering: Paginated History", () => {
 		const msgsBefore = await page.locator(".msg-user").count();
 
 		// Scroll to the very top to trigger the IntersectionObserver on
-		// #history-sentinel, which fires load_more_history
+		// #history-sentinel, which requests older history.
 		const messagesEl = page.locator("#messages");
 		await messagesEl.evaluate((el) => {
 			el.scrollTop = 0;

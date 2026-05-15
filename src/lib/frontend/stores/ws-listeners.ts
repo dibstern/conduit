@@ -16,7 +16,6 @@ export const fileBrowserListeners = new Set<MessageListener>();
 export const fileHistoryListeners = new Set<MessageListener>();
 export const rewindListeners = new Set<MessageListener>();
 export const projectListeners = new Set<MessageListener>();
-export const directoryListeners = new Set<MessageListener>();
 
 // ─── Subscription functions ─────────────────────────────────────────────────
 
@@ -48,10 +47,4 @@ export function onRewind(fn: MessageListener): () => void {
 export function onProject(fn: MessageListener): () => void {
 	projectListeners.add(fn);
 	return () => projectListeners.delete(fn);
-}
-
-/** Subscribe to directory listing messages. Returns unsubscribe function. */
-export function onDirectoryList(fn: MessageListener): () => void {
-	directoryListeners.add(fn);
-	return () => directoryListeners.delete(fn);
 }

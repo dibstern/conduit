@@ -3,10 +3,16 @@
 
 <script lang="ts">
 	import { fade } from "svelte/transition";
-	import { wsState, getIsConnected, wsSend } from "../../stores/ws.svelte.js";
+	import { wsState, getIsConnected } from "../../stores/ws.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getInstanceById, getCachedInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import {
+		applyInstanceListResponse,
+		getInstanceById,
+		getCachedInstanceById,
+		instanceState,
+	} from "../../stores/instance.svelte.js";
 	import { navigate } from "../../stores/router.svelte.js";
+	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
 	import ConduitLogo from '../shared/ConduitLogo.svelte';
@@ -149,8 +155,14 @@
 
 	// ─── Instance action handlers ──────────────────────────────────────────────
 	function handleStartInstance() {
-		if (cachedInstanceId) {
-			wsSend({ type: "instance_start", instanceId: cachedInstanceId });
+		const projectSlug = projectState.currentSlug;
+		if (cachedInstanceId && projectSlug) {
+			void startInstanceRpc({
+				projectSlug,
+				instanceId: cachedInstanceId,
+			})
+				.then(applyInstanceListResponse)
+				.catch(() => undefined);
 		}
 	}
 

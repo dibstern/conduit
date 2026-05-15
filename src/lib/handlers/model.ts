@@ -1,30 +1,56 @@
 // ─── Model Handlers ──────────────────────────────────────────────────────────
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
+import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
+} from "../domain/relay/Services/services.js";
+import {
+	getContextWindow,
+	getDefaultContextWindow,
+	getDefaultModel,
+	getDefaultVariant,
+	getModel,
+	getVariant,
+	type ModelOverride,
+	type OverridesStateTag,
+	setDefaultModel,
+	setDefaultVariant,
+	setModel,
+	setVariant,
+} from "../domain/relay/Services/session-overrides-state.js";
+import { formatErrorDetail } from "../errors.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
 } from "../relay/relay-settings.js";
-import type { ModelOverride } from "../session/session-overrides.js";
-import type { ContextWindowOption } from "../shared-types.js";
-import { fixupConfigFile } from "./fixup-config-file.js";
-import type { PayloadMap } from "./payloads.js";
+import type { ContextWindowOption, ProviderInfo } from "../shared-types.js";
+
+class RelaySettingsSaveError extends Data.TaggedError(
+	"RelaySettingsSaveError",
+)<{
+	readonly cause: unknown;
+}> {}
+
+const saveRelaySettingsEffect = (
+	settings: Parameters<typeof saveRelaySettings>[0],
+	configDir?: string,
+) =>
+	Effect.try({
+		try: () => saveRelaySettings(settings, configDir),
+		catch: (cause) => new RelaySettingsSaveError({ cause }),
+	});
 
 /**
- * Determines if a provider ID refers to the in-process Claude SDK adapter
+ * Determines if a provider ID refers to the in-process Claude SDK provider.
  * (not OpenCode's "anthropic" provider which proxies to Anthropic via
  * OpenCode's own REST API). Only the literal "claude" provider ID
- * routes through the ClaudeAdapter — all other providers (including
- * "anthropic") route through OpenCodeAdapter.
+ * routes through the ClaudeProviderInstance — all other providers (including
+ * "anthropic") route through OpenCodeProviderInstance.
  */
 export function isClaudeProvider(providerId: string): boolean {
 	return providerId === "claude";
@@ -54,21 +80,137 @@ function findContextWindowOptions(
 	return [];
 }
 
-export const handleGetModels = (
-	clientId: string,
-	_payload: PayloadMap["get_models"],
-) =>
+const cloneContextWindowOptions = (
+	options:
+		| readonly {
+				readonly value: string;
+				readonly label: string;
+				readonly isDefault?: boolean | undefined;
+		  }[]
+		| undefined,
+): ContextWindowOption[] | undefined =>
+	options?.map((option) =>
+		option.isDefault == null
+			? { value: option.value, label: option.label }
+			: {
+					value: option.value,
+					label: option.label,
+					isDefault: option.isDefault,
+				},
+	);
+
+const loadVariantsForModel = (activeModel: ModelOverride | undefined) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
-		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
+		const log = yield* LoggerTag;
+		if (!activeModel) return [] as string[];
+
+		if (isClaudeProvider(activeModel.providerID)) {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "None") return [] as string[];
+
+			const capsResult = yield* Effect.either(
+				engineOption.value.dispatchEffect({
+					type: "discover",
+					providerId: "claude",
+				}),
+			);
+			if (capsResult._tag === "Left") {
+				log.warn(
+					`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
+				);
+				return [] as string[];
+			}
+
+			const model = capsResult.right.models.find(
+				(m) => m.id === activeModel.modelID,
+			);
+			return model?.variants ? Object.keys(model.variants) : [];
+		}
+
+		const modelService = yield* OpenCodeModelServiceTag;
+		const provListResult = yield* Effect.either(modelService.listProviders());
+		if (provListResult._tag === "Left") {
+			log.warn(
+				`Failed to fetch variant list: ${provListResult.left instanceof Error ? provListResult.left.message : provListResult.left}`,
+			);
+			return [] as string[];
+		}
+
+		for (const provider of provListResult.right.providers) {
+			const model = (provider.models ?? []).find(
+				(candidate) => candidate.id === activeModel.modelID,
+			);
+			if (model?.variants) return Object.keys(model.variants);
+		}
+
+		return [] as string[];
+	});
+
+const toSharedProviders = (
+	providers: GetModelsResponse["providers"],
+): ProviderInfo[] =>
+	providers.map((provider) => ({
+		id: provider.id,
+		name: provider.name,
+		configured: provider.configured,
+		models: provider.models.map((model) => ({
+			id: model.id,
+			name: model.name,
+			provider: model.provider,
+			...(model.cost
+				? {
+						cost: {
+							...(model.cost.input != null ? { input: model.cost.input } : {}),
+							...(model.cost.output != null
+								? { output: model.cost.output }
+								: {}),
+						},
+					}
+				: {}),
+			...(model.limit
+				? {
+						limit: {
+							...(model.limit.context != null
+								? { context: model.limit.context }
+								: {}),
+							...(model.limit.output != null
+								? { output: model.limit.output }
+								: {}),
+						},
+					}
+				: {}),
+			...(model.variants ? { variants: [...model.variants] } : {}),
+			...(model.contextWindowOptions
+				? {
+						contextWindowOptions:
+							cloneContextWindowOptions(model.contextWindowOptions) ?? [],
+					}
+				: {}),
+		})),
+	}));
+
+export const getModelsResponse = (
+	input: {
+		readonly projectSlug?: string;
+		readonly clientId?: string;
+		readonly sessionId?: string;
+	} = {},
+): Effect.Effect<
+	GetModelsResponse,
+	unknown,
+	| LoggerTag
+	| OpenCodeModelServiceTag
+	| OrchestrationEngineTag
+	| OverridesStateTag
+	| WebSocketHandlerTag
+> =>
+	Effect.gen(function* () {
+		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
 
-		const providerResult = yield* Effect.tryPromise(() =>
-			client.provider.list(),
-		);
+		const providerResult = yield* modelService.listProviders();
 		const connectedSet = new Set(providerResult.connected);
-		const providers = providerResult.providers
+		const providers: ProviderInfo[] = providerResult.providers
 			.map((p) => ({
 				id: p.id || p.name || "",
 				name: p.name || p.id || "",
@@ -77,7 +219,7 @@ export const handleGetModels = (
 					id: m.id,
 					name: m.name || m.id,
 					provider: p.id || p.name || "",
-					...(m.limit && { limit: m.limit }),
+					...(m.limit && { limit: { ...m.limit } }),
 					...(m.variants &&
 						Object.keys(m.variants).length > 0 && {
 							variants: Object.keys(m.variants),
@@ -86,18 +228,14 @@ export const handleGetModels = (
 			}))
 			.filter((p) => p.configured);
 
-		wsHandler.sendTo(clientId, { type: "model_list", providers });
-
 		// Merge Claude in-process models when the orchestration engine is available.
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (engineOption._tag === "Some") {
 			const engineResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engineOption.value.dispatch({
-						type: "discover",
-						providerId: "claude",
-					}),
-				),
+				engineOption.value.dispatchEffect({
+					type: "discover",
+					providerId: "claude",
+				}),
 			);
 			if (
 				engineResult._tag === "Right" &&
@@ -116,289 +254,258 @@ export const handleGetModels = (
 						id: m.id,
 						name: m.name,
 						provider: "claude",
-						...(m.limit ? { limit: m.limit } : {}),
+						...(m.limit ? { limit: { ...m.limit } } : {}),
 						...(m.variants && Object.keys(m.variants).length > 0
 							? { variants: Object.keys(m.variants) }
 							: {}),
 						...(m.contextWindowOptions && m.contextWindowOptions.length > 0
-							? { contextWindowOptions: m.contextWindowOptions }
+							? {
+									contextWindowOptions:
+										cloneContextWindowOptions(m.contextWindowOptions) ?? [],
+								}
 							: {}),
 					})),
 				});
-				wsHandler.sendTo(clientId, { type: "model_list", providers });
 			}
 		}
 
 		// Send model_info: prefer session's model, fall back to relay-side selection
-		let sentModelInfo = false;
-		const activeId = yield* resolveSessionFromContext(clientId);
+		const activeId =
+			input.sessionId ??
+			(input.clientId
+				? yield* resolveSessionFromContext(input.clientId)
+				: undefined);
 		let sessionModel: ModelOverride | undefined;
 		if (activeId) {
 			const sessionResult = yield* Effect.either(
-				Effect.tryPromise(() => client.session.get(activeId)),
+				modelService.getSession(activeId),
 			);
 			if (sessionResult._tag === "Right" && sessionResult.right.modelID) {
 				sessionModel = {
 					modelID: sessionResult.right.modelID,
 					providerID: sessionResult.right.providerID ?? "",
 				};
-				wsHandler.sendTo(clientId, {
-					type: "model_info",
-					model: sessionResult.right.modelID,
-					provider: sessionResult.right.providerID ?? "",
-				});
-				sentModelInfo = true;
 			} else if (sessionResult._tag === "Left") {
 				log.warn(
-					`client=${clientId} session=${activeId ?? "?"} Failed to get session model info: ${formatErrorDetail(sessionResult.left)}`,
-				);
-				wsHandler.sendTo(
-					clientId,
-					RelayError.fromCaught(
-						sessionResult.left,
-						"MODEL_ERROR",
-						"Failed to get session model info",
-					).toMessage(activeId),
+					`client=${input.clientId ?? "rpc"} session=${activeId ?? "?"} Failed to get session model info: ${formatErrorDetail(sessionResult.left)}`,
 				);
 			}
 		}
-		if (!sentModelInfo) {
-			const fallbackModel = activeId
-				? overrides.getModel(activeId)
-				: overrides.defaultModel;
-			if (fallbackModel) {
-				wsHandler.sendTo(clientId, {
-					type: "model_info",
-					model: fallbackModel.modelID,
-					provider: fallbackModel.providerID,
-				});
-			}
-		}
+		const fallbackModel =
+			activeId && sessionModel == null
+				? yield* getModel(activeId)
+				: yield* getDefaultModel();
+		const activeModel = sessionModel ?? fallbackModel;
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant = activeId
-			? overrides.getVariant(activeId)
-			: overrides.defaultVariant;
-		const activeModelForVariant = activeId
-			? (overrides.getModel(activeId) ?? sessionModel)
-			: overrides.defaultModel;
+			? yield* getVariant(activeId)
+			: yield* getDefaultVariant();
 		let variantList: string[] = [];
-		if (activeModelForVariant) {
+		if (activeModel) {
 			for (const p of providers) {
-				const m = p.models.find(
-					(mod) => mod.id === activeModelForVariant.modelID,
-				);
+				const m = p.models.find((mod) => mod.id === activeModel.modelID);
 				if (m?.variants) {
-					variantList = m.variants;
+					variantList = [...m.variants];
 					break;
 				}
 			}
 		}
+		const currentContextWindow = activeId
+			? yield* getContextWindow(activeId)
+			: yield* getDefaultContextWindow();
+
+		return {
+			projectSlug: input.projectSlug ?? "",
+			providers,
+			...(activeModel
+				? {
+						active: {
+							model: activeModel.modelID,
+							provider: activeModel.providerID,
+						},
+					}
+				: {}),
+			variant: {
+				variant: currentVariant,
+				variants: variantList,
+			},
+			contextWindow: {
+				contextWindow: currentContextWindow,
+				options: findContextWindowOptions(providers, activeModel?.modelID),
+			},
+		};
+	});
+
+export const sendModelsStateToClient = (
+	clientId: string,
+	sessionId?: string,
+): Effect.Effect<
+	void,
+	unknown,
+	| LoggerTag
+	| OpenCodeModelServiceTag
+	| OrchestrationEngineTag
+	| OverridesStateTag
+	| WebSocketHandlerTag
+> =>
+	Effect.gen(function* () {
+		const response = yield* getModelsResponse({
+			clientId,
+			...(sessionId ? { sessionId } : {}),
+		});
+		const wsHandler = yield* WebSocketHandlerTag;
+
+		wsHandler.sendTo(clientId, {
+			type: "model_list",
+			providers: toSharedProviders(response.providers),
+		});
+		if (response.active) {
+			wsHandler.sendTo(clientId, {
+				type: "model_info",
+				model: response.active.model,
+				provider: response.active.provider,
+			});
+		}
 		wsHandler.sendTo(clientId, {
 			type: "variant_info",
-			variant: currentVariant,
-			variants: variantList,
+			...(response.variant?.variant != null
+				? { variant: response.variant.variant }
+				: {}),
+			...(response.variant?.variants
+				? { variants: [...response.variant.variants] }
+				: {}),
 		});
 		wsHandler.sendTo(clientId, {
 			type: "context_window_info",
-			contextWindow: activeId
-				? overrides.getContextWindow(activeId)
-				: overrides.defaultContextWindow,
-			options: findContextWindowOptions(
-				providers,
-				activeModelForVariant?.modelID,
-			),
+			contextWindow: response.contextWindow?.contextWindow ?? "",
+			options: cloneContextWindowOptions(response.contextWindow?.options) ?? [],
 		});
 	});
 
-export const handleSwitchModel = (
-	clientId: string,
-	payload: PayloadMap["switch_model"],
-) =>
+export interface SwitchModelInput {
+	readonly clientId: string;
+	readonly sessionId?: string | undefined;
+	readonly modelId: string;
+	readonly providerId: string;
+}
+
+export const switchModelForSession = (input: SwitchModelInput) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
-		const { modelId, providerId } = payload;
-		if (modelId && providerId) {
-			const clientSession = wsHandler.getClientSession(clientId);
-			if (clientSession) {
-				overrides.setModel(clientSession, {
-					providerID: providerId,
-					modelID: modelId,
-				});
-				// Bind session to the correct provider adapter
-				const engineResult = yield* Effect.either(
-					Effect.gen(function* () {
-						const engine = yield* OrchestrationEngineTag;
-						const providerAdapterId = isClaudeProvider(providerId)
-							? "claude"
-							: "opencode";
-						engine.bindSession(clientSession, providerAdapterId);
-					}),
-				);
-				// engineResult ignored — orchestration engine is optional
-				void engineResult;
-				wsHandler.sendToSession(clientSession, {
-					type: "model_info",
-					model: modelId,
-					provider: providerId,
-				});
-			} else {
-				log.warn(`client=${clientId} switch_model with no session — ignoring`);
-				wsHandler.sendTo(clientId, {
-					type: "model_info",
-					model: modelId,
-					provider: providerId,
-				});
+		const { modelId, providerId } = input;
+		const sessionId = input.sessionId;
+		if (sessionId) {
+			yield* setModel(sessionId, {
+				providerID: providerId,
+				modelID: modelId,
+			});
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "Some") {
+				const providerInstanceId = isClaudeProvider(providerId)
+					? "claude"
+					: "opencode";
+				engineOption.value.bindSession(sessionId, providerInstanceId);
 			}
-			log.info(
-				`client=${clientId} session=${wsHandler.getClientSession(clientId) ?? "?"} Switched to: ${modelId} (${providerId})`,
+		} else {
+			log.warn(
+				`client=${input.clientId} model switch with no session; sending client-local state only`,
 			);
-
-			// Restore persisted variant for the new model and send variant_info
-			const modelKey = `${providerId}/${modelId}`;
-			let availableVariants: string[] = [];
-			if (isClaudeProvider(providerId)) {
-				const engineOption = yield* Effect.serviceOption(
-					OrchestrationEngineTag,
-				);
-				if (engineOption._tag === "Some") {
-					const capsResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engineOption.value.dispatch({
-								type: "discover",
-								providerId: "claude",
-							}),
-						),
-					);
-					if (capsResult._tag === "Right") {
-						const model = capsResult.right.models.find((m) => m.id === modelId);
-						if (model?.variants) {
-							availableVariants = Object.keys(model.variants);
-						}
-					} else {
-						log.warn(
-							`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
-						);
-					}
-				}
-			} else {
-				const provListResult = yield* Effect.either(
-					Effect.tryPromise(() => client.provider.list()),
-				);
-				if (provListResult._tag === "Right") {
-					for (const p of provListResult.right.providers) {
-						const m = (p.models ?? []).find((mod) => mod.id === modelId);
-						if (m?.variants) {
-							availableVariants = Object.keys(m.variants);
-							break;
-						}
-					}
-				}
-			}
-
-			const settings = loadRelaySettings(config.configDir);
-			const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
-			const validVariant =
-				persistedVariant && availableVariants.includes(persistedVariant)
-					? persistedVariant
-					: "";
-
-			if (clientSession) {
-				overrides.setVariant(clientSession, validVariant);
-				wsHandler.sendToSession(clientSession, {
-					type: "variant_info",
-					variant: validVariant,
-					variants: availableVariants,
-				});
-			} else {
-				wsHandler.sendTo(clientId, {
-					type: "variant_info",
-					variant: validVariant,
-					variants: availableVariants,
-				});
-			}
 		}
+
+		const modelMessage = {
+			type: "model_info" as const,
+			model: modelId,
+			provider: providerId,
+		};
+		if (sessionId) {
+			wsHandler.sendToSession(sessionId, modelMessage);
+		} else {
+			wsHandler.sendTo(input.clientId, modelMessage);
+		}
+
+		log.info(
+			`client=${input.clientId} session=${sessionId ?? "?"} Switched to: ${modelId} (${providerId})`,
+		);
+
+		const availableVariants = yield* loadVariantsForModel({
+			providerID: providerId,
+			modelID: modelId,
+		});
+		const modelKey = `${providerId}/${modelId}`;
+		const settings = loadRelaySettings(config.configDir);
+		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
+		const validVariant =
+			persistedVariant && availableVariants.includes(persistedVariant)
+				? persistedVariant
+				: "";
+
+		if (sessionId) {
+			yield* setVariant(sessionId, validVariant);
+		}
+
+		const variantMessage = {
+			type: "variant_info" as const,
+			variant: validVariant,
+			variants: availableVariants,
+		};
+		if (sessionId) {
+			wsHandler.sendToSession(sessionId, variantMessage);
+		} else {
+			wsHandler.sendTo(input.clientId, variantMessage);
+		}
+
+		return { model: modelMessage, variant: variantMessage };
 	});
 
-export const handleSetDefaultModel = (
-	clientId: string,
-	payload: PayloadMap["set_default_model"],
-) =>
+export interface SetDefaultModelInput {
+	readonly clientId: string;
+	readonly provider: string;
+	readonly model: string;
+}
+
+export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const modelService = yield* OpenCodeModelServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
-		const { provider, model } = payload;
-		if (!provider || !model) return;
+		const { provider, model } = input;
 
 		const modelSpec = `${provider}/${model}`;
 		const override = { providerID: provider, modelID: model };
-		overrides.setDefaultModel(override);
-		saveRelaySettings({ defaultModel: modelSpec }, config.configDir);
+		yield* setDefaultModel(override);
+		yield* saveRelaySettingsEffect(
+			{ defaultModel: modelSpec },
+			config.configDir,
+		);
 
 		// Also persist to OpenCode's project config
 		const updateResult = yield* Effect.either(
-			Effect.tryPromise(async () => {
-				await client.config.update({ model: modelSpec });
-				await fixupConfigFile(config.projectDir, log);
-			}),
+			modelService.persistDefaultModel(provider, model),
 		);
 		if (updateResult._tag === "Left") {
 			log.warn("Failed to persist default model to OpenCode config");
 		}
 
-		wsHandler.broadcast({ type: "model_info", model, provider });
-		wsHandler.broadcast({ type: "default_model_info", model, provider });
-		log.info(`client=${clientId} Set default: ${model} (${provider})`);
+		const modelMessage = { type: "model_info" as const, model, provider };
+		const defaultModelMessage = {
+			type: "default_model_info" as const,
+			model,
+			provider,
+		};
+		wsHandler.broadcast(modelMessage);
+		wsHandler.broadcast(defaultModelMessage);
+		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
-		// Send variant_info for the new default model
-		let availableVariants: string[] = [];
-		if (isClaudeProvider(provider)) {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "Some") {
-				const capsResult = yield* Effect.either(
-					Effect.tryPromise(() =>
-						engineOption.value.dispatch({
-							type: "discover",
-							providerId: "claude",
-						}),
-					),
-				);
-				if (capsResult._tag === "Right") {
-					const selectedModel = capsResult.right.models.find(
-						(m) => m.id === model,
-					);
-					if (selectedModel?.variants) {
-						availableVariants = Object.keys(selectedModel.variants);
-					}
-				} else {
-					log.warn(
-						`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
-					);
-				}
-			}
-		} else {
-			const provListResult = yield* Effect.either(
-				Effect.tryPromise(() => client.provider.list()),
-			);
-			if (provListResult._tag === "Right") {
-				for (const p of provListResult.right.providers) {
-					const m = (p.models ?? []).find((mod) => mod.id === model);
-					if (m?.variants) {
-						availableVariants = Object.keys(m.variants);
-						break;
-					}
-				}
-			}
-		}
+		const availableVariants = yield* loadVariantsForModel({
+			providerID: provider,
+			modelID: model,
+		});
 		const settings = loadRelaySettings(config.configDir);
 		const modelKey = `${provider}/${model}`;
 		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
@@ -406,111 +513,68 @@ export const handleSetDefaultModel = (
 			persistedVariant && availableVariants.includes(persistedVariant)
 				? persistedVariant
 				: "";
-		overrides.defaultVariant = validVariant;
-		wsHandler.broadcast({
+		yield* setDefaultVariant(validVariant);
+		const variantMessage = {
 			type: "variant_info",
 			variant: validVariant,
 			variants: availableVariants,
-		});
+		} as const;
+		wsHandler.broadcast(variantMessage);
+
+		return {
+			model: modelMessage,
+			defaultModel: defaultModelMessage,
+			variant: variantMessage,
+		};
 	});
 
-export const handleSwitchVariant = (
-	clientId: string,
-	payload: PayloadMap["switch_variant"],
-) =>
+export interface SwitchVariantInput {
+	readonly clientId: string;
+	readonly sessionId?: string | undefined;
+	readonly variant: string;
+}
+
+export const switchVariantForSession = (input: SwitchVariantInput) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const overrides = yield* SessionOverridesTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
-		const { variant } = payload;
-		const sessionId = yield* resolveSessionFromContext(clientId);
+		const { variant } = input;
+		const sessionId = input.sessionId;
 		if (sessionId) {
-			overrides.setVariant(sessionId, variant);
+			yield* setVariant(sessionId, variant);
 		} else {
-			overrides.defaultVariant = variant;
+			yield* setDefaultVariant(variant);
 		}
 
 		// Resolve active model
 		const activeModel = sessionId
-			? overrides.getModel(sessionId)
-			: overrides.defaultModel;
+			? yield* getModel(sessionId)
+			: yield* getDefaultModel();
 
 		// Persist variant preference
 		if (activeModel) {
 			const modelKey = `${activeModel.providerID}/${activeModel.modelID}`;
-			saveRelaySettings(
+			yield* saveRelaySettingsEffect(
 				{ defaultVariants: { [modelKey]: variant } },
 				config.configDir,
 			);
 		}
 
-		// Send variant_info
-		let availableVariants: string[] = [];
-		if (activeModel) {
-			if (isClaudeProvider(activeModel.providerID)) {
-				const engineOption = yield* Effect.serviceOption(
-					OrchestrationEngineTag,
-				);
-				if (engineOption._tag === "Some") {
-					const capsResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engineOption.value.dispatch({
-								type: "discover",
-								providerId: "claude",
-							}),
-						),
-					);
-					if (capsResult._tag === "Right") {
-						const model = capsResult.right.models.find(
-							(m) => m.id === activeModel.modelID,
-						);
-						if (model?.variants) {
-							availableVariants = Object.keys(model.variants);
-						}
-					} else {
-						log.warn(
-							`Failed to fetch Claude variant list: ${capsResult.left instanceof Error ? capsResult.left.message : capsResult.left}`,
-						);
-					}
-				}
-			} else {
-				const provListResult = yield* Effect.either(
-					Effect.tryPromise(() => client.provider.list()),
-				);
-				if (provListResult._tag === "Right") {
-					for (const p of provListResult.right.providers) {
-						const m = (p.models ?? []).find(
-							(mod) => mod.id === activeModel.modelID,
-						);
-						if (m?.variants) {
-							availableVariants = Object.keys(m.variants);
-							break;
-						}
-					}
-				} else {
-					log.warn(
-						`Failed to fetch variant list: ${provListResult.left instanceof Error ? provListResult.left.message : provListResult.left}`,
-					);
-				}
-			}
-		}
+		const availableVariants = yield* loadVariantsForModel(activeModel);
+		const message = {
+			type: "variant_info" as const,
+			variant,
+			variants: availableVariants,
+		};
 		if (sessionId) {
-			wsHandler.sendToSession(sessionId, {
-				type: "variant_info",
-				variant,
-				variants: availableVariants,
-			});
+			wsHandler.sendToSession(sessionId, message);
 		} else {
-			wsHandler.sendTo(clientId, {
-				type: "variant_info",
-				variant,
-				variants: availableVariants,
-			});
+			wsHandler.sendTo(input.clientId, message);
 		}
 		log.info(
-			`client=${clientId} session=${sessionId ?? "?"} Switched variant to: ${variant || "default"}`,
+			`client=${input.clientId} session=${sessionId ?? "?"} Switched variant to: ${variant || "default"}`,
 		);
+		return message;
 	});

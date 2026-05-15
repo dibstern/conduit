@@ -1,17 +1,24 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, Layer, Option, Ref } from "effect";
 import { expect } from "vitest";
-import {
-	DaemonConfigRefLive,
-	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
+import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	HttpServerRefLive,
 	HttpServerRefTag,
 	RelayFactoryError,
 	RelayFactoryLive,
 	RelayFactoryTag,
-} from "../../../src/lib/effect/relay-factory-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 
 // ─── HttpServerRefTag tests ─────────────────────────────────────────────────
 
@@ -56,7 +63,31 @@ describe("HttpServerRefTag", () => {
 // ─── RelayFactoryTag tests ──────────────────────────────────────────────────
 
 describe("RelayFactoryTag", () => {
-	const configLayer = DaemonConfigRefLive(makeDaemonConfigFromOptions({}));
+	const configLayer = Layer.mergeAll(
+		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+		ConfigPersistenceNoopLive,
+		DaemonEventBusLive,
+		makeProjectRegistryLive(),
+		makeInstanceManagerStateLive(),
+		Layer.succeed(PortScannerTag, {
+			getKnownPorts: () => Effect.succeed(new Set<number>()),
+			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
+		}),
+		Layer.succeed(VersionCheckerTag, {
+			getLatestKnown: () => Effect.succeed(null),
+			getCurrentVersion: () => Effect.succeed("unknown"),
+		}),
+		Layer.succeed(PushManagerTag, {
+			subscribe: () => Effect.void,
+			unsubscribe: () => Effect.void,
+			broadcast: () => Effect.void,
+			getPublicKey: Effect.succeed(undefined),
+			addSubscription: () => Effect.void,
+			removeSubscription: () => Effect.void,
+			sendToAll: () => Effect.void,
+			getLegacyManager: Effect.succeed(Option.none()),
+		}),
+	);
 
 	// RelayFactoryLive provides both RelayFactoryTag and HttpServerRefTag.
 	// It requires DaemonConfigRefTag from the caller.

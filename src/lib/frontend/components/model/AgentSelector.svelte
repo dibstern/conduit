@@ -9,7 +9,9 @@
 		getActiveAgent,
 		formatAgentLabel,
 	} from "../../stores/discovery.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { switchAgentRpc } from "../../transport/ws-rpc-client.js";
 	import type { AgentInfo } from "../../types.js";
 
 	// ─── State ──────────────────────────────────────────────────────────────────
@@ -104,8 +106,19 @@
 
 	function handleAgentClick(agent: AgentInfo) {
 		if (agent.id !== discoveryState.activeAgentId) {
-			wsSend({ type: "switch_agent", agentId: agent.id });
+			const previousAgentId = discoveryState.activeAgentId;
 			discoveryState.activeAgentId = agent.id;
+			const projectSlug = getCurrentSlug();
+			const sessionId = sessionState.currentId;
+			if (projectSlug && sessionId) {
+				void switchAgentRpc({
+					projectSlug,
+					sessionId,
+					agentId: agent.id,
+				}).catch(() => {
+					discoveryState.activeAgentId = previousAgentId;
+				});
+			}
 		}
 		close();
 	}

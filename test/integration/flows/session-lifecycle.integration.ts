@@ -26,8 +26,7 @@ describe("Integration: Session Lifecycle", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({ type: "new_session", title: "Test Session" });
-		const msg = await client.waitFor("session_switched", { timeout: 5000 });
+		const msg = await client.createSession("Test Session");
 		expect(msg["id"]).toBeTruthy();
 		expect(typeof msg["id"]).toBe("string");
 
@@ -41,15 +40,9 @@ describe("Integration: Session Lifecycle", () => {
 
 		// Create a session with a deterministic title
 		const title = "Lifecycle-List-Test";
-		client.send({ type: "new_session", title });
-		const switched = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client.createSession(title);
 		const newId = switched["id"] as string;
-		client.clearReceived();
-
-		// List sessions and verify the new one is present
-		client.send({ type: "list_sessions" });
+		// Verify the broadcast session list includes the new session.
 		const list = await client.waitFor("session_list", { timeout: 5000 });
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		expect(Array.isArray(sessions)).toBe(true);
@@ -74,16 +67,12 @@ describe("Integration: Session Lifecycle", () => {
 
 		// Create a second session (this switches to it automatically)
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Switch Target" });
-		const switchMsg = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switchMsg = await client.createSession("Switch Target");
 		expect(switchMsg["id"]).toBeTruthy();
 		client.clearReceived();
 
 		// Now switch back to the first session
-		client.send({ type: "switch_session", sessionId: firstId });
-		const msg = await client.waitFor("session_switched", { timeout: 5000 });
+		const msg = await client.switchSession(firstId);
 		expect(msg["id"]).toBe(firstId);
 
 		await client.close();
@@ -97,24 +86,27 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 
 		// Create a session
-		client.send({ type: "new_session", title: "Before Rename" });
-		const switched = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client.createSession("Before Rename");
 		const sessionId = switched["id"] as string;
 		client.clearReceived();
 
 		// Rename it
 		const newTitle = "Renamed-Session-Test";
-		client.send({ type: "rename_session", sessionId, title: newTitle });
+		await client.renameSession(sessionId, newTitle);
 
-		// Give the rename a moment to take effect
-		await new Promise((r) => setTimeout(r, 500));
-		client.clearReceived();
-
-		// List sessions and verify the title changed
-		client.send({ type: "list_sessions" });
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		// Verify the broadcast session list includes the new title.
+		const list = await client.waitFor("session_list", {
+			timeout: 5000,
+			predicate: (msg) => {
+				const sessions = msg["sessions"] as
+					| Array<{ id: string; title?: string }>
+					| undefined;
+				return (
+					Array.isArray(sessions) &&
+					sessions.some((s) => s.id === sessionId && s.title === newTitle)
+				);
+			},
+		});
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		const found = sessions.find((s) => s.id === sessionId);
 		expect(found).toBeTruthy();
@@ -132,23 +124,23 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 
 		// Create a session to delete
-		client.send({ type: "new_session", title: "To Be Deleted" });
-		const switched = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client.createSession("To Be Deleted");
 		const sessionId = switched["id"] as string;
 		client.clearReceived();
 
 		// Delete it
-		client.send({ type: "delete_session", sessionId });
+		await client.deleteSession(sessionId);
 
-		// Give the delete a moment to propagate
-		await new Promise((r) => setTimeout(r, 500));
-		client.clearReceived();
-
-		// List sessions and verify it is gone
-		client.send({ type: "list_sessions" });
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		// Verify the broadcast session list no longer includes it.
+		const list = await client.waitFor("session_list", {
+			timeout: 5000,
+			predicate: (msg) => {
+				const sessions = msg["sessions"] as Array<{ id: string }> | undefined;
+				return (
+					Array.isArray(sessions) && !sessions.some((s) => s.id === sessionId)
+				);
+			},
+		});
 		const sessions = list["sessions"] as Array<{ id: string }>;
 		const found = sessions.find((s) => s.id === sessionId);
 		expect(found).toBeUndefined();
@@ -165,17 +157,13 @@ describe("Integration: Session Lifecycle", () => {
 
 		// Create a session with a unique, searchable title
 		const uniqueTag = "Searchable-Integration-Test";
-		client.send({ type: "new_session", title: uniqueTag });
-		const switched = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client.createSession(uniqueTag);
 		expect(switched["id"]).toBeTruthy();
 		client.clearReceived();
 
 		// Search for it
-		client.send({ type: "search_sessions", query: uniqueTag });
-		const msg = await client.waitFor("session_list", { timeout: 5000 });
-		const sessions = msg["sessions"] as Array<{ id: string; title?: string }>;
+		const msg = await client.searchSessions(uniqueTag);
+		const sessions = msg.sessions;
 		expect(Array.isArray(sessions)).toBe(true);
 
 		const found = sessions.find((s) => s.title?.includes(uniqueTag));
@@ -190,12 +178,10 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 
 		// Search for something that should not match anything
-		client.send({
-			type: "search_sessions",
-			query: "NoMatchWillEverExist-zzz-integration",
-		});
-		const msg = await client.waitFor("session_list", { timeout: 5000 });
-		const sessions = msg["sessions"] as Array<{ id: string }>;
+		const msg = await client.searchSessions(
+			"NoMatchWillEverExist-zzz-integration",
+		);
+		const sessions = msg.sessions;
 		expect(Array.isArray(sessions)).toBe(true);
 		expect(sessions).toHaveLength(0);
 
@@ -215,18 +201,12 @@ describe("Integration: Session Lifecycle", () => {
 
 		// Create a new session (auto-switches)
 		client.clearReceived();
-		client.send({ type: "new_session", title: "Reset State Test" });
-		const switchMsg = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switchMsg = await client.createSession("Reset State Test");
 		expect(switchMsg["id"]).toBeTruthy();
 
 		// Now switch back — should get session_switched + session_list
 		client.clearReceived();
-		client.send({ type: "switch_session", sessionId: firstId });
-		const switched = await client.waitFor("session_switched", {
-			timeout: 5000,
-		});
+		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
 
 		// After switching, verify we also get an updated session list

@@ -8,14 +8,15 @@
 //   2. Injecting a notification_event with a sessionId for a different session
 //   3. Simulating the notification click via navigator.serviceWorker message
 //      dispatch (the same path a real push notification click takes)
-//   4. Verifying the frontend sends view_session via WS and the URL updates
+//   4. Verifying the frontend sends ViewSession RPC and the URL updates
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
 
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -103,29 +104,31 @@ test.describe("Notification → Session Navigation", () => {
 		page,
 		baseURL,
 	}) => {
-		// Set up WS mock — respond to view_session with session_switched + empty history
-		const control = await mockRelayWebSocket(page, {
+		// Set up WS mock and respond to ViewSession RPC with relay events.
+		let control!: WsMockControl;
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				ViewSession: (params) => {
+					const sessionId = String(params["sessionId"] ?? "");
+					control.sendMessage({
+						type: "session_switched",
+						id: sessionId,
+					});
+					control.sendMessage({
+						type: "history_page",
+						sessionId,
+						messages: [],
+						hasMore: false,
+					});
+					return { ok: true };
+				},
+			},
+		});
+		control = await mockRelayWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: (parsed, ctrl) => {
-				if (
-					parsed["type"] === "view_session" &&
-					typeof parsed["sessionId"] === "string"
-				) {
-					ctrl.sendMessage({
-						type: "session_switched",
-						id: parsed["sessionId"],
-					});
-					ctrl.sendMessage({
-						type: "history_page",
-						sessionId: parsed["sessionId"],
-						messages: [],
-						hasMore: false,
-					});
-				}
-			},
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
@@ -170,17 +173,15 @@ test.describe("Notification → Session Navigation", () => {
 			{ sessionId: SESS_B, slug: PROJECT_SLUG },
 		);
 
-		// Verify the frontend sent view_session with sess-B
-		const viewMsg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "view_session" &&
-				(m as { sessionId?: string }).sessionId === SESS_B,
-		);
-		expect(viewMsg).toMatchObject({
-			type: "view_session",
-			sessionId: SESS_B,
+		// Verify the frontend sent ViewSession with sess-B
+		const viewRequest = await rpc.waitForRequest((request) => {
+			return (
+				request.tag === "ViewSession" && request.payload["sessionId"] === SESS_B
+			);
+		});
+		expect(viewRequest).toMatchObject({
+			tag: "ViewSession",
+			payload: { sessionId: SESS_B },
 		});
 
 		// Verify URL updated to include /s/sess-B
@@ -203,28 +204,30 @@ test.describe("Notification → Session Navigation", () => {
 		// Since we can't create real Notification objects in Playwright,
 		// we test the onNavigateToSession callback is wired up by
 		// directly calling it via the session list click path.
-		const control = await mockRelayWebSocket(page, {
+		let control!: WsMockControl;
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				ViewSession: (params) => {
+					const sessionId = String(params["sessionId"] ?? "");
+					control.sendMessage({
+						type: "session_switched",
+						id: sessionId,
+					});
+					control.sendMessage({
+						type: "history_page",
+						sessionId,
+						messages: [],
+						hasMore: false,
+					});
+					return { ok: true };
+				},
+			},
+		});
+		control = await mockRelayWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
-			onClientMessage: (parsed, ctrl) => {
-				if (
-					parsed["type"] === "view_session" &&
-					typeof parsed["sessionId"] === "string"
-				) {
-					ctrl.sendMessage({
-						type: "session_switched",
-						id: parsed["sessionId"],
-					});
-					ctrl.sendMessage({
-						type: "history_page",
-						sessionId: parsed["sessionId"],
-						messages: [],
-						hasMore: false,
-					});
-				}
-			},
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
@@ -235,17 +238,15 @@ test.describe("Notification → Session Navigation", () => {
 			.locator(`[data-session-id="${SESS_B}"]`)
 			.click({ timeout: 5_000 });
 
-		// Verify the frontend sent view_session with sess-B
-		const viewMsg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as { type?: string }).type === "view_session" &&
-				(m as { sessionId?: string }).sessionId === SESS_B,
-		);
-		expect(viewMsg).toMatchObject({
-			type: "view_session",
-			sessionId: SESS_B,
+		// Verify the frontend sent ViewSession with sess-B
+		const viewRequest = await rpc.waitForRequest((request) => {
+			return (
+				request.tag === "ViewSession" && request.payload["sessionId"] === SESS_B
+			);
+		});
+		expect(viewRequest).toMatchObject({
+			tag: "ViewSession",
+			payload: { sessionId: SESS_B },
 		});
 
 		// Verify URL updated

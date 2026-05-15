@@ -19,30 +19,14 @@
 // are attached to a later REST queue entry. We don't wait for the full
 // response to complete — we wait for the fork UI elements instead.
 
+import { Socket } from "@effect/platform";
+import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { Effect } from "effect";
+import NodeWebSocket from "ws";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
-
-/**
- * Send a raw JSON message through the browser's open WebSocket.
- */
-async function sendWsMessage(
-	page: import("@playwright/test").Page,
-	payload: Record<string, unknown>,
-): Promise<void> {
-	await page.evaluate((msg) => {
-		const allSockets = (window as unknown as { __testWs?: WebSocket[] })
-			.__testWs;
-		if (allSockets && allSockets.length > 0) {
-			const ws = allSockets[allSockets.length - 1];
-			if (ws && ws.readyState === WebSocket.OPEN) {
-				ws.send(JSON.stringify(msg));
-				return;
-			}
-		}
-		throw new Error("No WebSocket found. Ensure WS capture is set up.");
-	}, payload);
-}
 
 /**
  * Install a WebSocket capture hook before the page navigates.
@@ -69,6 +53,54 @@ async function installWsCapture(
 		Object.defineProperty(WsProxy, "CLOSED", { value: OrigWs.CLOSED });
 		(window as unknown as { WebSocket: typeof WebSocket }).WebSocket = WsProxy;
 	});
+}
+
+async function getCapturedBrowserClientId(
+	page: import("@playwright/test").Page,
+): Promise<string> {
+	return await page.evaluate(() => {
+		const allSockets = (window as unknown as { __testWs?: WebSocket[] })
+			.__testWs;
+		const ws = allSockets?.find((socket) => socket.url.includes("/ws"));
+		if (!ws) throw new Error("No captured browser WebSocket found");
+		const clientId = new URL(ws.url).searchParams.get("client");
+		if (!clientId) throw new Error("Browser WebSocket has no client id");
+		return clientId;
+	});
+}
+
+async function forkSessionViaRpc(
+	relayUrl: string,
+	originId: string,
+): Promise<void> {
+	const url = new URL(relayUrl);
+	const [, projectSlug] = /^\/p\/([^/]+)\//.exec(url.pathname) ?? [];
+	if (!projectSlug)
+		throw new Error(`Cannot derive project slug from ${relayUrl}`);
+	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+	url.pathname = `/p/${projectSlug}/rpc`;
+	url.search = "";
+
+	const previousWebSocket = globalThis.WebSocket;
+	globalThis.WebSocket =
+		NodeWebSocket as unknown as typeof globalThis.WebSocket;
+	try {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const client = yield* RpcClient.make(WsRpcGroup);
+					yield* client.ForkSession({ projectSlug, originId });
+				}),
+			).pipe(
+				Effect.provide(RpcClient.layerProtocolSocket()),
+				Effect.provide(Socket.layerWebSocket(url.toString())),
+				Effect.provide(Socket.layerWebSocketConstructorGlobal),
+				Effect.provide(RpcSerialization.layerJson),
+			),
+		);
+	} finally {
+		globalThis.WebSocket = previousWebSocket;
+	}
 }
 
 /**
@@ -100,11 +132,13 @@ async function setupForkSession(
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
 
-	// ── Fork: whole-session fork (no messageId) ──
-	await sendWsMessage(page, { type: "fork_session" });
-
 	// Wait for the fork to process — URL should update to a different session.
 	const currentPath = new URL(page.url()).pathname;
+	const originId = await getCapturedBrowserClientId(page);
+
+	// ── Fork: whole-session fork (no messageId) ──
+	await forkSessionViaRpc(relayUrl, originId);
+
 	await page.waitForFunction(
 		(prevPath) => {
 			const p = window.location.pathname;

@@ -1,8 +1,7 @@
 // ─── Daemon Types ──────────────────────────────────────────────────────────
-// Shared type definitions extracted from daemon.ts so that modules like
-// daemon-ipc.ts, daemon-lifecycle.ts, daemon-spawn.ts, and daemon-layers.ts
-// can import types without pulling in the full Daemon class (and its heavy
-// transitive dependencies).
+// Shared type definitions extracted from daemon.ts so daemon lifecycle, spawn,
+// and layer modules can import types without pulling in the full Daemon class
+// and its heavy transitive dependencies.
 
 import type { LogFormat, LogLevel } from "../logger.js";
 

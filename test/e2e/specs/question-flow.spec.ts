@@ -2,7 +2,7 @@
 // Tests the full question/answer lifecycle via WS mock:
 //   1. Agent asks a question → QuestionCard appears
 //   2. User selects an option and submits
-//   3. Frontend sends ask_user_response back to the relay
+//   3. Frontend sends AnswerQuestion RPC back to the relay
 //   4. Agent continues processing after the answer → more deltas/done arrive
 //
 // Uses WS mock — no real OpenCode or relay needed.
@@ -10,11 +10,13 @@
 
 import { expect, test } from "@playwright/test";
 import { initMessages, type MockMessage } from "../fixtures/mockup-state.js";
+import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
+type QuestionFlowControl = WsMockControl & { rpc: RpcMockControl };
 
 const PROJECT_URL = "/p/myapp/";
 
@@ -60,6 +62,7 @@ const questionResponseMessages: MockMessage[] = [
 	{
 		type: "ask_user",
 		toolId: "que_question_001",
+		toolUseId: "toolu_question_001",
 		questions: [
 			{
 				question: "Which database should I use?",
@@ -101,21 +104,36 @@ const postAnswerMessages: MockMessage[] = [
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 test.describe("Question/Answer Flow", () => {
-	let control: WsMockControl;
+	async function setupQuestionFlow(
+		page: Page,
+		baseURL?: string,
+	): Promise<QuestionFlowControl> {
+		let relay: WsMockControl | null = null;
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				SendMessage: async () => {
+					await relay?.sendMessages(questionResponseMessages);
+					return { ok: true };
+				},
+				AnswerQuestion: () => ({ ok: true }),
+				RejectQuestion: () => ({ ok: true }),
+			},
+		});
+		relay = await mockRelayWebSocket(page, {
+			initMessages: [...initMessages],
+			responses: new Map(),
+		});
+
+		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+		await waitForChatReady(page);
+		return Object.assign(relay, { rpc });
+	}
 
 	test("question card appears when agent asks a question", async ({
 		page,
 		baseURL,
 	}) => {
-		control = await mockRelayWebSocket(page, {
-			initMessages: [...initMessages],
-			responses: new Map([
-				["Ask me about databases", questionResponseMessages],
-			]),
-		});
-
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
+		await setupQuestionFlow(page, baseURL);
 
 		// Send a user message that triggers the question
 		await page.locator("#input").fill("Ask me about databases");
@@ -140,15 +158,7 @@ test.describe("Question/Answer Flow", () => {
 		page,
 		baseURL,
 	}) => {
-		control = await mockRelayWebSocket(page, {
-			initMessages: [...initMessages],
-			responses: new Map([
-				["Ask me about databases", questionResponseMessages],
-			]),
-		});
-
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
+		const control = await setupQuestionFlow(page, baseURL);
 
 		// Send a user message
 		await page.locator("#input").fill("Ask me about databases");
@@ -173,22 +183,20 @@ test.describe("Question/Answer Flow", () => {
 		// Click submit
 		await submitBtn.click();
 
-		// Verify the frontend sent ask_user_response
-		const answerMsg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as Record<string, unknown>)["type"] === "ask_user_response",
+		const answer = await control.rpc.waitForRequest(
+			(request) => request.tag === "AnswerQuestion",
 		);
 
-		expect(answerMsg).toMatchObject({
-			type: "ask_user_response",
+		expect(answer.payload).toMatchObject({
 			toolId: "que_question_001",
 			answers: { "0": "PostgreSQL" },
 		});
 
-		// Card should show "Answered ✓"
-		await expect(questionCard.locator(".question-resolved-ok")).toBeVisible();
+		// The card stays pending until the relay sends ask_user_resolved and
+		// follow-up tool/result events.
+		await expect(questionCard.locator(".question-submit-btn")).toContainText(
+			"Submitting",
+		);
 	});
 
 	test("agent continues responding after user answers a question", async ({
@@ -197,18 +205,10 @@ test.describe("Question/Answer Flow", () => {
 	}) => {
 		// This test reproduces the bug: "When I answer a question, the agent
 		// doesn't respond." The ws-mock is set up so that when the frontend
-		// sends ask_user_response, we inject the post-answer messages
+		// sends AnswerQuestion, we inject the post-answer messages
 		// (simulating the agent continuing).
 
-		control = await mockRelayWebSocket(page, {
-			initMessages: [...initMessages],
-			responses: new Map([
-				["Ask me about databases", questionResponseMessages],
-			]),
-		});
-
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
+		const control = await setupQuestionFlow(page, baseURL);
 
 		// Send a user message
 		await page.locator("#input").fill("Ask me about databases");
@@ -224,12 +224,9 @@ test.describe("Question/Answer Flow", () => {
 			.click();
 		await questionCard.locator(".question-submit-btn").click();
 
-		// Wait for the frontend to send the answer
-		await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as Record<string, unknown>)["type"] === "ask_user_response",
+		// Wait for the frontend to send the answer.
+		await control.rpc.waitForRequest(
+			(request) => request.tag === "AnswerQuestion",
 		);
 
 		// NOW simulate the agent continuing after the answer
@@ -250,15 +247,7 @@ test.describe("Question/Answer Flow", () => {
 	});
 
 	test("user can skip a question", async ({ page, baseURL }) => {
-		control = await mockRelayWebSocket(page, {
-			initMessages: [...initMessages],
-			responses: new Map([
-				["Ask me about databases", questionResponseMessages],
-			]),
-		});
-
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
+		const control = await setupQuestionFlow(page, baseURL);
 
 		// Send a user message
 		await page.locator("#input").fill("Ask me about databases");
@@ -271,15 +260,10 @@ test.describe("Question/Answer Flow", () => {
 		// Click Skip
 		await questionCard.locator(".question-skip-btn").click();
 
-		// Verify the frontend sent question_reject
-		const rejectMsg = await control.waitForClientMessage(
-			(m: unknown) =>
-				typeof m === "object" &&
-				m !== null &&
-				(m as Record<string, unknown>)["type"] === "question_reject",
+		const reject = await control.rpc.waitForRequest(
+			(request) => request.tag === "RejectQuestion",
 		);
-		expect(rejectMsg).toMatchObject({
-			type: "question_reject",
+		expect(reject.payload).toMatchObject({
 			toolId: "que_question_001",
 		});
 

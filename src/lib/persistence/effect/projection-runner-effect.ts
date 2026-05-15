@@ -11,6 +11,10 @@ import type {
 	EffectProjector,
 	ProjectionContext,
 } from "./projectors-effect.js";
+import {
+	decodeStoredEventRow,
+	type StoredEventRow,
+} from "./stored-event-row.js";
 
 // ─── Error type ─────────────────────────────────────────────────────────────
 
@@ -246,7 +250,7 @@ export const makeProjectionRunnerEffect = (
 				replaying = true;
 				let totalReplayed = 0;
 
-				try {
+				yield* Effect.gen(function* () {
 					for (const projector of projectors) {
 						const cursor =
 							(yield* cursorRepo.get(projector.name))?.lastAppliedSeq ?? 0;
@@ -267,7 +271,7 @@ export const makeProjectionRunnerEffect = (
 								...handledTypes,
 								batchSize,
 							];
-							const events = yield* sql.unsafe<EventRow>(
+							const events = yield* sql.unsafe<StoredEventRow>(
 								`SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at
 								 FROM events
 								 WHERE sequence > ? AND type IN (${typePlaceholders})
@@ -279,7 +283,7 @@ export const makeProjectionRunnerEffect = (
 							if (events.length === 0) break;
 
 							for (const eventRow of events) {
-								const storedEvent = rowToStoredEvent(eventRow);
+								const storedEvent = yield* decodeProjectionEventRow(eventRow);
 								yield* sql
 									.withTransaction(
 										Effect.gen(function* () {
@@ -310,10 +314,14 @@ export const makeProjectionRunnerEffect = (
 						// Advance cursor to global max for non-matching events
 						yield* cursorRepo.upsert(projector.name, latestSeq);
 					}
-				} finally {
-					replaying = false;
-					recovered = true;
-				}
+				}).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							replaying = false;
+							recovered = true;
+						}),
+					),
+				);
 
 				return {
 					startCursor: 0,
@@ -352,39 +360,11 @@ export const makeProjectionRunnerEffect = (
 		} satisfies ProjectionRunnerEffect;
 	});
 
-// ─── Internal types ─────────────────────────────────────────────────────────
-
-interface EventRow {
-	readonly sequence: number;
-	readonly event_id: string;
-	readonly session_id: string;
-	readonly stream_version: number;
-	readonly type: string;
-	readonly data: string;
-	readonly metadata: string;
-	readonly provider: string;
-	readonly created_at: number;
-}
-
-import type { CanonicalEventType } from "../events.js";
-import { CANONICAL_EVENT_TYPES } from "../events.js";
-
-function rowToStoredEvent(row: EventRow): StoredEvent {
-	if (!CANONICAL_EVENT_TYPES.includes(row.type as CanonicalEventType)) {
-		throw new ProjectionRunnerError({
-			operation: "rowToStoredEvent",
-			cause: `Unknown event type: ${row.type}`,
-		});
-	}
-	return {
-		sequence: row.sequence,
-		eventId: row.event_id,
-		sessionId: row.session_id,
-		streamVersion: row.stream_version,
-		type: row.type,
-		data: JSON.parse(row.data),
-		metadata: JSON.parse(row.metadata),
-		provider: row.provider,
-		createdAt: row.created_at,
-	} as StoredEvent;
-}
+const decodeProjectionEventRow = (
+	row: StoredEventRow,
+): Effect.Effect<StoredEvent, ProjectionRunnerError> =>
+	decodeStoredEventRow(
+		row,
+		(cause) =>
+			new ProjectionRunnerError({ operation: "decodeStoredEventRow", cause }),
+	);

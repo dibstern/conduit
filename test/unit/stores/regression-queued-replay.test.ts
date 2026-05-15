@@ -50,6 +50,7 @@ import {
 	clearMessages,
 	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
@@ -294,6 +295,17 @@ describe("Regression: sentDuringEpoch preserved during replayEvents", () => {
 // ─── Multi-tab: live user_message from another client ───────────────────────
 
 describe("Multi-tab: live user_message sentDuringEpoch", () => {
+	it("ignores live user_message echoes from this browser tab", () => {
+		handleMessage({
+			type: "user_message",
+			sessionId: "test-session",
+			text: "echo from this tab",
+			originId: getBrowserClientId(),
+		});
+
+		expect(userMessages()).toHaveLength(0);
+	});
+
 	it("sets sentDuringEpoch on live user_message when session is processing", () => {
 		phaseToProcessing();
 		handleMessage({

@@ -1,6 +1,10 @@
 // ─── Project Store ──────────────────────────────────────────────────────────
 // Manages the list of registered projects and the current project slug.
 
+import type {
+	GetProjectsResponse,
+	ProjectMutationResponse,
+} from "../transport/ws-rpc.js";
 import type { ProjectInfo, RelayMessage } from "../types.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -50,3 +54,41 @@ export function handleProjectList(
 		});
 	}
 }
+
+export function applyGetProjectsResponse(response: GetProjectsResponse): void {
+	handleProjectList({
+		type: "project_list",
+		projects: toProjectInfoList(response.projects),
+		...(response.current != null ? { current: response.current } : {}),
+	});
+}
+
+export function applyProjectMutationResponse(
+	response: ProjectMutationResponse,
+): void {
+	handleProjectList({
+		type: "project_list",
+		projects: toProjectInfoList(response.projects),
+		...(response.current != null ? { current: response.current } : {}),
+		...(response.addedSlug != null ? { addedSlug: response.addedSlug } : {}),
+	});
+}
+
+const toProjectInfoList = (
+	projects: ReadonlyArray<{
+		readonly slug: string;
+		readonly title: string;
+		readonly directory: string;
+		readonly clientCount?: number | undefined;
+		readonly instanceId?: string | undefined;
+	}>,
+): ProjectInfo[] =>
+	projects.map((project) => ({
+		slug: project.slug,
+		title: project.title,
+		directory: project.directory,
+		...(project.clientCount != null
+			? { clientCount: project.clientCount }
+			: {}),
+		...(project.instanceId != null ? { instanceId: project.instanceId } : {}),
+	}));

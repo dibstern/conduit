@@ -1,3 +1,4 @@
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 // ─── OpenCode API Request/RequestResolver Tests ────────────────────────────
 // Tests for Effect Request types and RequestResolver implementations.
 //
@@ -21,8 +22,7 @@ import {
 	getSessionStatuses,
 	getSessions,
 	OpenCodeRequestError,
-} from "../../../src/lib/effect/opencode-requests.js";
-import { OpenCodeAPITag } from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/provider/Services/opencode-requests.js";
 
 // ─── Test Data ─────────────────────────────────────────────────────────────
 

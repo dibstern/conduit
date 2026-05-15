@@ -10,7 +10,7 @@ import { join } from "node:path";
 import {
 	commandToTaggedRequestPayload,
 	isIpcResponse,
-} from "../lib/effect/ipc-requests.js";
+} from "../lib/contracts/ipc-requests.js";
 import {
 	DEFAULT_CONFIG_DIR,
 	DEFAULT_OC_PORT,

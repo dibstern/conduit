@@ -1,71 +1,95 @@
 // test/unit/provider/types.test.ts
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type {
-	AdapterCapabilities,
 	CommandInfo,
 	CommandSource,
 	EventSink,
 	PermissionDecision,
-	ProviderAdapter,
+	ProviderCapabilities,
+	ProviderInstance,
 	SendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 
-describe("ProviderAdapter types", () => {
-	it("ProviderAdapter has exactly the 8-method interface", () => {
+const REPO_ROOT = process.cwd();
+
+describe("ProviderInstance types", () => {
+	it("does not expose adapter-named provider type exports", () => {
+		const providerTypes = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/types.ts"),
+			"utf8",
+		);
+		const providerErrors = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/errors.ts"),
+			"utf8",
+		);
+
+		expect(providerTypes).not.toMatch(
+			/\b(?:ProviderAdapter|AdapterCapabilities)\b/,
+		);
+		expect(providerErrors).not.toMatch(/\bProviderAdapterFailure\b/);
+	});
+
+	it("ProviderInstance has exactly the 8-method interface", () => {
 		// Compile-time check: if the interface changes shape, this won't compile.
-		const adapter: ProviderAdapter = {
+		const instance: ProviderInstance = {
 			providerId: "test",
-			discover: async () => ({
-				models: [],
-				supportsTools: false,
-				supportsThinking: false,
-				supportsPermissions: false,
-				supportsQuestions: false,
-				supportsAttachments: false,
-				supportsFork: false,
-				supportsRevert: false,
-				commands: [],
-			}),
-			sendTurn: async (_input: SendTurnInput) => ({
-				status: "completed" as const,
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			}),
-			interruptTurn: async (_sessionId: string) => {},
-			resolvePermission: async (
+			discoverEffect: () =>
+				Effect.succeed({
+					models: [],
+					supportsTools: false,
+					supportsThinking: false,
+					supportsPermissions: false,
+					supportsQuestions: false,
+					supportsAttachments: false,
+					supportsFork: false,
+					supportsRevert: false,
+					commands: [],
+				}),
+			sendTurnEffect: (_input: SendTurnInput) =>
+				Effect.succeed({
+					status: "completed" as const,
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				}),
+			interruptTurnEffect: (_sessionId: string) => Effect.void,
+			resolvePermissionEffect: (
 				_sessionId: string,
 				_requestId: string,
 				_decision: PermissionDecision,
-			) => {},
-			resolveQuestion: async (
+			) => Effect.void,
+			resolveQuestionEffect: (
 				_sessionId: string,
 				_requestId: string,
 				_answers: Record<string, unknown>,
-			) => {},
-			shutdown: async () => {},
-			endSession: async (_sessionId: string) => {},
+			) => Effect.void,
+			shutdownEffect: () => Effect.void,
+			endSessionEffect: (_sessionId: string) => Effect.void,
 		};
 
-		expect(adapter.providerId).toBe("test");
-		expect(typeof adapter.discover).toBe("function");
-		expect(typeof adapter.sendTurn).toBe("function");
-		expect(typeof adapter.interruptTurn).toBe("function");
-		expect(typeof adapter.resolvePermission).toBe("function");
-		expect(typeof adapter.resolveQuestion).toBe("function");
-		expect(typeof adapter.shutdown).toBe("function");
-		expect(typeof adapter.endSession).toBe("function");
+		expect(instance.providerId).toBe("test");
+		expect(typeof instance.discoverEffect).toBe("function");
+		expect(typeof instance.sendTurnEffect).toBe("function");
+		expect(typeof instance.interruptTurnEffect).toBe("function");
+		expect(typeof instance.resolvePermissionEffect).toBe("function");
+		expect(typeof instance.resolveQuestionEffect).toBe("function");
+		expect(typeof instance.shutdownEffect).toBe("function");
+		expect(typeof instance.endSessionEffect).toBe("function");
 	});
 
 	it("SendTurnInput includes all required fields", () => {
 		const mockSink: EventSink = {
-			push: async () => {},
-			requestPermission: async () => ({ decision: "once" }),
-			requestQuestion: async () => ({}),
-			resolvePermission: () => {},
-			resolveQuestion: () => {},
+			push: () => Effect.void,
+			requestPermission: () => Effect.succeed({ decision: "once" }),
+			requestQuestion: () => Effect.succeed({}),
+			resolvePermission: () => Effect.void,
+			resolveQuestion: () => Effect.void,
 		};
 
 		const input: SendTurnInput = {
@@ -83,17 +107,18 @@ describe("ProviderAdapter types", () => {
 		expect(input.sessionId).toBe("s1");
 		expect(input.turnId).toBe("t1");
 		expect(input.eventSink).toBe(mockSink);
+		expect(Effect.isEffect(mockSink.push({} as never))).toBe(true);
 		expect(typeof mockSink.resolvePermission).toBe("function");
 		expect(typeof mockSink.resolveQuestion).toBe("function");
 	});
 
 	it("SendTurnInput supports optional fields", () => {
 		const mockSink: EventSink = {
-			push: async () => {},
-			requestPermission: async () => ({ decision: "once" }),
-			requestQuestion: async () => ({}),
-			resolvePermission: () => {},
-			resolveQuestion: () => {},
+			push: () => Effect.void,
+			requestPermission: () => Effect.succeed({ decision: "once" }),
+			requestQuestion: () => Effect.succeed({}),
+			resolvePermission: () => Effect.void,
+			resolveQuestion: () => Effect.void,
 		};
 
 		const input: SendTurnInput = {
@@ -143,8 +168,8 @@ describe("ProviderAdapter types", () => {
 		expect(result.error?.code).toBe("provider_error");
 	});
 
-	it("AdapterCapabilities describes provider features", () => {
-		const caps: AdapterCapabilities = {
+	it("ProviderCapabilities describes provider features", () => {
+		const caps: ProviderCapabilities = {
 			models: [
 				{
 					id: "claude-sonnet",

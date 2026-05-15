@@ -71,7 +71,7 @@ describe("Integration: Model Selection", () => {
 		await client.close();
 	}, 15_000);
 
-	it("switch_model updates model_info broadcast", async () => {
+	it("SwitchModel RPC updates model_info broadcast", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -94,12 +94,7 @@ describe("Integration: Model Selection", () => {
 
 		client.clearReceived();
 
-		// Switch to that model
-		client.send({
-			type: "switch_model",
-			modelId: targetModel,
-			providerId: targetProvider,
-		});
+		await client.switchModel(targetModel, targetProvider);
 
 		// Should receive model_info broadcast
 		const modelInfo = await client.waitFor("model_info");
@@ -122,22 +117,18 @@ describe("Integration: Model Selection", () => {
 		}>;
 		const provider = providers.find((p) => p.models.length > 0);
 		expect(provider).toBeDefined();
-		client.send({
-			type: "switch_model",
+		await client.switchModel(
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			modelId: provider!.models[0]!.id,
+			provider!.models[0]!.id,
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			providerId: provider!.id,
-		});
+			provider!.id,
+		);
 
 		await client.waitFor("model_info");
 		client.clearReceived();
 
 		// Send a message — should work with the selected model
-		client.send({
-			type: "message",
-			text: "Reply with just 'ok'.",
-		});
+		await client.sendMessage("Reply with just 'ok'.");
 
 		const status = await client.waitFor("status", {
 			predicate: (m) => m["status"] === "processing",
@@ -155,7 +146,7 @@ describe("Integration: Model Selection", () => {
 		await client.close();
 	}, 30_000);
 
-	it("new_session resets model selection without breaking messages", async () => {
+	it("CreateSession RPC resets model selection without breaking messages", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -168,18 +159,17 @@ describe("Integration: Model Selection", () => {
 		}>;
 		const provider = providers.find((p) => p.models.length > 0);
 		expect(provider).toBeDefined();
-		client.send({
-			type: "switch_model",
+		await client.switchModel(
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			modelId: provider!.models[0]!.id,
+			provider!.models[0]!.id,
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			providerId: provider!.id,
-		});
+			provider!.id,
+		);
 
 		await client.waitFor("model_info");
 
 		// Create a new session — should reset model selection
-		client.send({ type: "new_session", title: "Model Reset Test" });
+		await client.createSession("Model Reset Test");
 		await client.waitFor("session_switched");
 
 		// Let the session fully initialize before sending a message
@@ -187,10 +177,7 @@ describe("Integration: Model Selection", () => {
 		client.clearReceived();
 
 		// Send a message in the new session — should work
-		client.send({
-			type: "message",
-			text: "Reply with just 'ok'.",
-		});
+		await client.sendMessage("Reply with just 'ok'.");
 
 		// The key assertion: the new session accepts messages (enters processing).
 		const status = await client.waitFor("status", {

@@ -7,7 +7,7 @@ import {
 	publishStatusChanged,
 	publishVersionUpdate,
 	subscribeToDaemonEvents,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 
 describe("DaemonEventBus", () => {
 	it.scoped("publishes and receives StatusChanged events", () =>

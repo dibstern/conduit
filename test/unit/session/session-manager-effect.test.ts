@@ -1,17 +1,18 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
-import { OpenCodeAPITag } from "../../../src/lib/effect/services.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+
 import {
 	createSession,
 	deleteSession,
 	listSessions,
 	recordMessageActivity,
-} from "../../../src/lib/effect/session-manager-service.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../../src/lib/effect/session-manager-state.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 
 describe("SessionManager Effect", () => {

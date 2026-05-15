@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { GapEndpoints } from "../../../src/lib/instance/gap-endpoints.js";
+import {
+	GapEndpointHttpError,
+	GapEndpoints,
+} from "../../../src/lib/instance/gap-endpoints.js";
 
 describe("GapEndpoints", () => {
 	function makeGap(
@@ -92,5 +95,33 @@ describe("GapEndpoints", () => {
 		expect(capturedUrl).toContain("/session/s1/message");
 		expect(capturedUrl).toContain("limit=10");
 		expect(capturedUrl).toContain("before=m5");
+	});
+
+	it("rejects GET failures with a tagged gap endpoint error", async () => {
+		const gap = makeGap([{ status: 503, body: { error: "down" } }]);
+		const rejected = gap.listPendingPermissions();
+
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "GapEndpointHttpError",
+			method: "GET",
+			path: "/permission",
+			status: 503,
+			message: "GET /permission failed: 503",
+		});
+		await expect(rejected).rejects.toBeInstanceOf(GapEndpointHttpError);
+	});
+
+	it("rejects POST failures with a tagged gap endpoint error", async () => {
+		const gap = makeGap([{ status: 400, body: { error: "bad" } }]);
+		const rejected = gap.replyQuestion("q1", [["yes"]]);
+
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "GapEndpointHttpError",
+			method: "POST",
+			path: "/question/q1/reply",
+			status: 400,
+			message: "POST /question/q1/reply failed: 400",
+		});
+		await expect(rejected).rejects.toBeInstanceOf(GapEndpointHttpError);
 	});
 });

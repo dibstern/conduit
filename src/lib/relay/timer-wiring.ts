@@ -5,10 +5,8 @@
 // Fiber is automatically interrupted on scope close (ManagedRuntime.dispose).
 
 import { Duration, Effect, Layer, Schedule } from "effect";
-import {
-	PermissionBridgeTag,
-	WebSocketHandlerTag,
-} from "../effect/services.js";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import type { PermissionId } from "../shared-types.js";
 
 // ─── Effect Layer ───────────────────────────────────────────────────────────
@@ -17,21 +15,22 @@ import type { PermissionId } from "../shared-types.js";
  * Scoped Layer that checks for timed-out permissions every 30 seconds
  * and broadcasts resolution messages to all connected clients.
  *
- * Requires: PermissionBridgeTag, WebSocketHandlerTag (provided via bridge or native Layers).
+ * Requires: PendingInteractionServiceTag, WebSocketHandlerTag.
  */
 export const PermissionTimeoutLive: Layer.Layer<
 	never,
 	never,
-	PermissionBridgeTag | WebSocketHandlerTag
+	PendingInteractionServiceTag | WebSocketHandlerTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
-		const permissionBridge = yield* PermissionBridgeTag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 
 		yield* Effect.forkScoped(
 			Effect.repeat(
-				Effect.sync(() => {
-					const timedOutPerms = permissionBridge.checkTimeouts();
+				Effect.gen(function* () {
+					const timedOutPerms =
+						yield* pendingInteractions.takeTimedOutPermissions();
 					for (const entry of timedOutPerms) {
 						wsHandler.broadcast({
 							type: "permission_resolved",

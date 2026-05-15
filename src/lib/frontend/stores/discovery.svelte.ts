@@ -2,6 +2,11 @@
 // Agents, models, providers, and commands.
 
 import type {
+	GetAgentsResponse,
+	GetCommandsResponse,
+	GetModelsResponse,
+} from "../transport/ws-rpc.js";
+import type {
 	AgentInfo,
 	CommandInfo,
 	ContextWindowOption,
@@ -10,6 +15,68 @@ import type {
 	ProviderInfo,
 	RelayMessage,
 } from "../types.js";
+
+const cloneContextWindowOptions = (
+	options:
+		| readonly {
+				readonly value: string;
+				readonly label: string;
+				readonly isDefault?: boolean | undefined;
+		  }[]
+		| undefined,
+): ContextWindowOption[] | undefined =>
+	options?.map((option) =>
+		option.isDefault == null
+			? { value: option.value, label: option.label }
+			: {
+					value: option.value,
+					label: option.label,
+					isDefault: option.isDefault,
+				},
+	);
+
+const providersFromGetModelsResponse = (
+	providers: GetModelsResponse["providers"],
+): ProviderInfo[] =>
+	providers.map((provider) => ({
+		id: provider.id,
+		name: provider.name,
+		configured: provider.configured,
+		models: provider.models.map((model) => ({
+			id: model.id,
+			name: model.name,
+			provider: model.provider,
+			...(model.cost
+				? {
+						cost: {
+							...(model.cost.input != null ? { input: model.cost.input } : {}),
+							...(model.cost.output != null
+								? { output: model.cost.output }
+								: {}),
+						},
+					}
+				: {}),
+			...(model.limit
+				? {
+						limit: {
+							...(model.limit.context != null
+								? { context: model.limit.context }
+								: {}),
+							...(model.limit.output != null
+								? { output: model.limit.output }
+								: {}),
+						},
+					}
+				: {}),
+			...(model.variants ? { variants: [...model.variants] } : {}),
+			...(model.contextWindowOptions
+				? {
+						contextWindowOptions:
+							cloneContextWindowOptions(model.contextWindowOptions) ?? [],
+					}
+				: {}),
+		})),
+	}));
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -126,12 +193,59 @@ export function handleAgentList(
 	}
 }
 
+export function applyGetAgentsResponse(response: GetAgentsResponse): void {
+	handleAgentList({
+		type: "agent_list",
+		agents: response.agents.map((agent) => ({
+			id: agent.id,
+			name: agent.name,
+			...(agent.description != null ? { description: agent.description } : {}),
+			...(agent.model != null ? { model: agent.model } : {}),
+		})),
+		...(response.activeAgentId != null
+			? { activeAgentId: response.activeAgentId }
+			: {}),
+	});
+}
+
 export function handleModelList(
 	msg: Extract<RelayMessage, { type: "model_list" }>,
 ): void {
 	const { providers } = msg;
 	if (Array.isArray(providers)) {
 		discoveryState.providers = providers;
+	}
+}
+
+export function applyGetModelsResponse(response: GetModelsResponse): void {
+	handleModelList({
+		type: "model_list",
+		providers: providersFromGetModelsResponse(response.providers),
+	});
+	if (response.active) {
+		handleModelInfo({
+			type: "model_info",
+			model: response.active.model,
+			provider: response.active.provider,
+		});
+	}
+	if (response.variant) {
+		handleVariantInfo({
+			type: "variant_info",
+			...(response.variant.variant != null
+				? { variant: response.variant.variant }
+				: {}),
+			...(response.variant.variants
+				? { variants: [...response.variant.variants] }
+				: {}),
+		});
+	}
+	if (response.contextWindow) {
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: response.contextWindow.contextWindow,
+			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
+		});
 	}
 }
 
@@ -151,6 +265,19 @@ export function handleCommandList(
 		discoveryState.commands = commands;
 		discoveryState.commandsFetched = true;
 	}
+}
+
+export function applyGetCommandsResponse(response: GetCommandsResponse): void {
+	handleCommandList({
+		type: "command_list",
+		commands: response.commands.map((command) => ({
+			name: command.name,
+			...(command.description != null
+				? { description: command.description }
+				: {}),
+			...(command.args != null ? { args: command.args } : {}),
+		})),
+	});
 }
 
 export function handleDefaultModelInfo(

@@ -1,17 +1,19 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	LoggerTag,
-	OpenCodeAPITag,
+	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { handleGetCommands } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -45,6 +47,14 @@ function mockLogger(): Logger {
 	} as unknown as Logger;
 }
 
+function openCodeSettingsLayer(client: OpenCodeAPI) {
+	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	return Layer.merge(
+		apiLayer,
+		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+	);
+}
+
 describe("handleGetCommands active provider", () => {
 	it.effect("returns Claude commands for a Claude-bound active session", () => {
 		const ws = mockWsHandler({
@@ -76,16 +86,16 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OrchestrationEngine;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			Layer.succeed(LoggerTag, mockLogger()),
 		);
 
 		return handleGetCommands("client-1", {}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(engine.dispatch).toHaveBeenCalledWith({
+				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
 				});
@@ -116,15 +126,15 @@ describe("handleGetCommands active provider", () => {
 			} as unknown as OrchestrationEngine;
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
+				openCodeSettingsLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			);
 
 			return handleGetCommands("client-1", {}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(engine.dispatch).not.toHaveBeenCalled();
+					expect(engine.dispatchEffect).not.toHaveBeenCalled();
 					expect(client.app.commands).toHaveBeenCalledOnce();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "command_list",
@@ -145,7 +155,7 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -177,9 +187,9 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OrchestrationEngine;
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
+			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			Layer.succeed(LoggerTag, log),
 		);
 

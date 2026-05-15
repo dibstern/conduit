@@ -394,47 +394,7 @@ const arbClientId = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant("viewer") },
 );
 
-const validMessageTypes: IncomingMessageType[] = [
-	"message",
-	"permission_response",
-	"ask_user_response",
-	"question_reject",
-	"new_session",
-	"switch_session",
-	"delete_session",
-	"rename_session",
-	"fork_session",
-	"list_sessions",
-	"search_sessions",
-	"load_more_history",
-	"terminal_command",
-	"input_sync",
-	"switch_agent",
-	"switch_model",
-	"switch_context_window",
-	"get_todo",
-	"get_agents",
-	"get_models",
-	"get_commands",
-	"get_projects",
-	"add_project",
-	"get_file_list",
-	"get_file_content",
-	"get_file_tree",
-	"get_tool_content",
-	"pty_create",
-	"pty_input",
-	"pty_resize",
-	"pty_close",
-	"cancel",
-	"rewind",
-	"instance_add",
-	"instance_remove",
-	"instance_start",
-	"instance_stop",
-	"instance_update",
-	"set_project_instance",
-];
+const validMessageTypes: IncomingMessageType[] = ["pty_input"];
 
 const arbInvalidType = fc
 	.oneof(

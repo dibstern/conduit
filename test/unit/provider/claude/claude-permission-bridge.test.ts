@@ -1,4 +1,7 @@
 // test/unit/provider/claude/claude-permission-bridge.test.ts
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudePermissionBridge } from "../../../../src/lib/provider/claude/claude-permission-bridge.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
@@ -9,33 +12,61 @@ import type {
 
 function makeSink(): EventSink {
 	return {
-		push: vi.fn(async () => {}),
-		requestPermission: vi.fn(async () => ({ decision: "once" as const })),
-		requestQuestion: vi.fn(),
-		resolvePermission: vi.fn(),
-		resolveQuestion: vi.fn(),
+		push: vi.fn(() => Effect.void),
+		requestPermission: vi.fn(() =>
+			Effect.succeed({ decision: "once" as const }),
+		),
+		requestQuestion: vi.fn(() => Effect.succeed({})),
+		resolvePermission: vi.fn(() => Effect.void),
+		resolveQuestion: vi.fn(() => Effect.void),
 	};
 }
 
 function makeInteractiveSink(): EventSink & {
-	resolvePermission(requestId: string, response: PermissionResponse): void;
+	resolvePermission(
+		requestId: string,
+		response: PermissionResponse,
+	): Effect.Effect<void, unknown>;
 } {
 	const pending = new Map<string, (response: PermissionResponse) => void>();
 	return {
-		push: vi.fn(async () => {}),
-		requestPermission: vi.fn(
-			async (request) =>
-				new Promise<PermissionResponse>((resolve) => {
-					pending.set(request.requestId, resolve);
-				}),
+		push: vi.fn(() => Effect.void),
+		requestPermission: vi.fn((request) =>
+			Effect.tryPromise({
+				try: () =>
+					new Promise<PermissionResponse>((resolve) => {
+						pending.set(request.requestId, resolve);
+					}),
+				catch: (cause) => cause,
+			}),
 		),
-		requestQuestion: vi.fn(),
-		resolvePermission: vi.fn((requestId, response) => {
-			pending.get(requestId)?.(response);
-			pending.delete(requestId);
-		}),
-		resolveQuestion: vi.fn(),
+		requestQuestion: vi.fn(() => Effect.succeed({})),
+		resolvePermission: vi.fn((requestId, response) =>
+			Effect.sync(() => {
+				pending.get(requestId)?.(response);
+				pending.delete(requestId);
+			}),
+		),
+		resolveQuestion: vi.fn(() => Effect.void),
 	};
+}
+
+function pendingPermissionEffect(
+	register: (resolve: (value: unknown) => void) => void,
+): Effect.Effect<PermissionResponse, unknown> {
+	return Effect.tryPromise({
+		try: () =>
+			new Promise<PermissionResponse>((resolve) => {
+				register(resolve as (value: unknown) => void);
+			}),
+		catch: (cause) => cause,
+	});
+}
+
+function permissionResponseEffect(
+	response: unknown,
+): Effect.Effect<PermissionResponse, unknown> {
+	return Effect.succeed(response as PermissionResponse);
 }
 
 function makeCtx(): ClaudeSessionContext {
@@ -80,13 +111,28 @@ describe("ClaudePermissionBridge", () => {
 		bridge = new ClaudePermissionBridge({ sink });
 	});
 
+	it("keeps permission waits behind a named Claude SDK callback boundary", () => {
+		const source = readFileSync(
+			join(
+				process.cwd(),
+				"src/lib/provider/claude/claude-permission-bridge.ts",
+			),
+			"utf8",
+		);
+
+		expect(source).toContain("runPermissionRequestAtSdkBoundary");
+		expect(source.match(/Effect\.runPromise/g)).toHaveLength(1);
+		expect(source).toMatch(
+			/function runPermissionRequestAtSdkBoundary[\s\S]*Effect\.runPromise/,
+		);
+	});
+
 	it("creates a pending approval and blocks until resolved", async () => {
 		let resolveSink: (v: unknown) => void = () => {};
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(
-			() =>
-				new Promise((r) => {
-					resolveSink = r;
-				}),
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			pendingPermissionEffect((resolve) => {
+				resolveSink = resolve;
+			}),
 		);
 
 		const ac = new AbortController();
@@ -114,9 +160,9 @@ describe("ClaudePermissionBridge", () => {
 	});
 
 	it("returns deny when user rejects", async () => {
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(async () => ({
-			decision: "reject",
-		}));
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect({ decision: "reject" }),
+		);
 		const ac = new AbortController();
 		const result = await bridge.canUseTool(
 			ctx,
@@ -132,11 +178,10 @@ describe("ClaudePermissionBridge", () => {
 
 	it("returns deny when abort signal fires before user responds", async () => {
 		let resolveSink: (v: unknown) => void = () => {};
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(
-			() =>
-				new Promise((r) => {
-					resolveSink = r;
-				}),
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			pendingPermissionEffect((resolve) => {
+				resolveSink = resolve;
+			}),
 		);
 
 		const ac = new AbortController();
@@ -161,9 +206,9 @@ describe("ClaudePermissionBridge", () => {
 	});
 
 	it("returns allow when decision is 'always'", async () => {
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(async () => ({
-			decision: "always",
-		}));
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect({ decision: "always" }),
+		);
 		const ac = new AbortController();
 		const result = await bridge.canUseTool(
 			ctx,
@@ -178,9 +223,9 @@ describe("ClaudePermissionBridge", () => {
 	});
 
 	it("createCanUseTool returns a function with the CanUseTool signature", async () => {
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(async () => ({
-			decision: "once",
-		}));
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect({ decision: "once" }),
+		);
 		const canUseTool = bridge.createCanUseTool(ctx);
 		expect(typeof canUseTool).toBe("function");
 
@@ -217,7 +262,9 @@ describe("ClaudePermissionBridge", () => {
 		expect(pending).toBeDefined();
 
 		// Resolve via the bridge's resolvePermission (which resolves the deferred)
-		await bridge.resolvePermission(ctx, pending?.requestId ?? "", "once");
+		await Effect.runPromise(
+			bridge.resolvePermission(ctx, pending?.requestId ?? "", "once"),
+		);
 
 		const result = await Promise.race([
 			callbackPromise,
@@ -233,7 +280,9 @@ describe("ClaudePermissionBridge", () => {
 
 	it("resolvePermission is a no-op for unknown requestId", async () => {
 		// Should not throw
-		await bridge.resolvePermission(ctx, "unknown-id", "once");
+		await Effect.runPromise(
+			bridge.resolvePermission(ctx, "unknown-id", "once"),
+		);
 	});
 
 	it("concurrent canUseTool calls for different tools resolve independently", async () => {
@@ -243,12 +292,12 @@ describe("ClaudePermissionBridge", () => {
 		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() => {
 			callCount++;
 			if (callCount === 1) {
-				return new Promise((r) => {
-					resolveSinkA = r;
+				return pendingPermissionEffect((resolve) => {
+					resolveSinkA = resolve;
 				});
 			}
-			return new Promise((r) => {
-				resolveSinkB = r;
+			return pendingPermissionEffect((resolve) => {
+				resolveSinkB = resolve;
 			});
 		});
 
@@ -302,9 +351,11 @@ describe("ClaudePermissionBridge", () => {
 
 	it("unexpected response shape from EventSink defaults to reject", async () => {
 		// Return a weird shape from requestPermission
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(async () => ({
-			decision: "invalid_value",
-		}));
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect({
+				decision: "invalid_value",
+			}),
+		);
 
 		const ac = new AbortController();
 		const result = await bridge.canUseTool(
@@ -316,8 +367,8 @@ describe("ClaudePermissionBridge", () => {
 		expect(result.behavior).toBe("deny");
 
 		// Also test with empty object
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(
-			async () => ({}),
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect({}),
 		);
 		const result2 = await bridge.canUseTool(
 			ctx,
@@ -328,8 +379,8 @@ describe("ClaudePermissionBridge", () => {
 		expect(result2.behavior).toBe("deny");
 
 		// Also test with undefined
-		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(
-			async () => undefined,
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect(undefined),
 		);
 		const result3 = await bridge.canUseTool(
 			ctx,

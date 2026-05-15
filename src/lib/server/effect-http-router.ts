@@ -1,8 +1,7 @@
 // ─── Effect HTTP Router ─────────────────────────────────────────────────────
-// Effect-based HTTP router using @effect/platform, created alongside the
-// existing RequestRouter (http-router.ts). Covers all JSON API routes;
-// auth gate, static files, and SPA serving remain in the imperative router
-// until the full daemon entry point migration.
+// Effect-based HTTP router using @effect/platform. This is the production HTTP
+// route graph for both daemon and relay server modes; Node's request callback
+// only delegates into the handler built from this router.
 //
 // Routes:
 //   GET  /health, /api/status     — health check
@@ -14,6 +13,7 @@
 //   GET  /api/themes              — theme list
 //   GET  /api/setup-info          — setup/onboarding info
 //   GET  /ca/download             — CA certificate download
+//   GET  /auth, /setup, /, /p/*   — SPA/static entry routes
 
 import { readFile } from "node:fs/promises";
 import {
@@ -28,8 +28,8 @@ import {
 	authRoute,
 	authStatusRoute,
 	withAuthGate,
-} from "../effect/auth-middleware.js";
-import { serveStaticFile } from "../effect/static-file-handler.js";
+} from "../domain/server/Layers/auth-middleware.js";
+import { serveStaticFile } from "../domain/server/Services/static-file-handler.js";
 import type {
 	ApiError,
 	DashboardProjectResponse,
@@ -62,13 +62,13 @@ export interface RouterProjectInfo {
 
 export class ProjectsProvider extends Context.Tag("ProjectsProvider")<
 	ProjectsProvider,
-	{ readonly getProjects: () => RouterProjectInfo[] }
+	{ readonly getProjects: () => Effect.Effect<RouterProjectInfo[]> }
 >() {}
 
 /** Health response provider — optionally overridden by daemon mode. */
 export class HealthProvider extends Context.Tag("HealthProvider")<
 	HealthProvider,
-	{ readonly getHealthResponse: () => object }
+	{ readonly getHealthResponse: () => Effect.Effect<object> }
 >() {}
 
 /** Push notification manager — may not be available. */
@@ -94,7 +94,7 @@ export class CaCertProvider extends Context.Tag("CaCertProvider")<
 export class ThemeProvider extends Context.Tag("ThemeProvider")<
 	ThemeProvider,
 	{
-		readonly loadThemes: () => Promise<ThemesResponse>;
+		readonly loadThemes: () => Effect.Effect<ThemesResponse, unknown>;
 	}
 >() {}
 
@@ -102,8 +102,8 @@ export class ThemeProvider extends Context.Tag("ThemeProvider")<
 export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 	SetupInfoProvider,
 	{
-		readonly getPort: () => number;
-		readonly getIsTls: () => boolean;
+		readonly getPort: () => Effect.Effect<number>;
+		readonly getIsTls: () => Effect.Effect<boolean>;
 	}
 >() {}
 
@@ -184,10 +184,10 @@ const healthHandler = Effect.gen(function* () {
 	const maybeHealth = yield* Effect.serviceOption(HealthProvider);
 
 	const body = Option.isSome(maybeHealth)
-		? maybeHealth.value.getHealthResponse()
+		? yield* maybeHealth.value.getHealthResponse()
 		: ({
 				ok: true,
-				projects: getProjects().length,
+				projects: (yield* getProjects()).length,
 				uptime: process.uptime(),
 			} satisfies HealthResponse);
 
@@ -204,7 +204,7 @@ const infoHandler = Effect.gen(function* () {
 /** GET /api/projects */
 const projectsHandler = Effect.gen(function* () {
 	const { getProjects } = yield* ProjectsProvider;
-	const projects = getProjects();
+	const projects = yield* getProjects();
 
 	return yield* HttpServerResponse.json({
 		projects: projects.map(serializeProject),
@@ -323,10 +323,12 @@ const themesHandler = Effect.gen(function* () {
 		);
 	}
 
-	const themes = yield* Effect.tryPromise({
-		try: () => maybeThemes.value.loadThemes(),
-		catch: () => new Error("Failed to load themes"),
-	});
+	const themes = yield* maybeThemes.value
+		.loadThemes()
+		.pipe(Effect.catchAll(() => Effect.succeed(null)));
+	if (themes === null) {
+		return yield* jsonError(500, "THEMES_ERROR", "Failed to load themes");
+	}
 
 	return yield* HttpServerResponse.json(themes);
 });
@@ -340,8 +342,8 @@ const setupInfoHandler = Effect.gen(function* () {
 	}
 
 	const setup = maybeSetup.value;
-	const port = setup.getPort();
-	const isTls = setup.getIsTls();
+	const port = yield* setup.getPort();
+	const isTls = yield* setup.getIsTls();
 	const request = yield* HttpServerRequest.HttpServerRequest;
 	const hostHeader = request.headers["host"] ?? `localhost:${port}`;
 	const hostBase = hostHeader.replace(/:\d+$/, "");
@@ -365,7 +367,7 @@ const setupPageHandler = serveStaticFile("/index.html");
 
 const rootHandler = Effect.gen(function* () {
 	const { getProjects } = yield* ProjectsProvider;
-	const projects = getProjects();
+	const projects = yield* getProjects();
 	if (projects.length === 1 && projects[0]) {
 		return HttpServerResponse.empty({
 			status: 302,
@@ -413,7 +415,7 @@ const projectRouteHandler = Effect.gen(function* () {
 	const pathname = new URL(req.url, `http://${host}`).pathname;
 	const subPath = pathname.slice(`/p/${rawSlug}`.length) || "/";
 	const { getProjects } = yield* ProjectsProvider;
-	const project = getProjects().find((p) => p.slug === slug);
+	const project = (yield* getProjects()).find((p) => p.slug === slug);
 
 	if (!project) {
 		return yield* jsonError(404, "NOT_FOUND", `Project "${slug}" not found`);

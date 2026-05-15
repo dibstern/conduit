@@ -8,64 +8,79 @@
  * ## Effect Layer helpers
  *
  * Effect-based test helpers live at the bottom of this file. They compose
- * the service Tags from `src/lib/effect/services.ts` into reusable Layers
+ * the service Tags from `src/lib/domain/relay/Services/services.ts` into reusable Layers
  * that can be used with `@effect/vitest`'s `it.effect` / `it.scoped`.
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { vi } from "vitest";
 import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
-import type { PermissionBridge } from "../../src/lib/bridges/permission-bridge.js";
-import type { QuestionBridge } from "../../src/lib/bridges/question-bridge.js";
-import { DaemonEventBusLive } from "../../src/lib/effect/daemon-pubsub.js";
+import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type DaemonState,
 	makeDaemonStateLive,
-} from "../../src/lib/effect/daemon-state.js";
+} from "../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	type InstanceManagerConfig,
 	makeInstanceManagerStateLive,
-} from "../../src/lib/effect/instance-manager-service.js";
-import { makePollerManagerStateLive } from "../../src/lib/effect/message-poller.js";
-import { RateLimiterLive } from "../../src/lib/effect/rate-limiter-layer.js";
+} from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { InstanceMgmtTag } from "../../src/lib/domain/daemon/Services/management-service.js";
+import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import { AgentServiceLive } from "../../src/lib/domain/relay/Services/agent-service.js";
+import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
+import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
+import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
+import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
-	type ForkMetaShape,
-	ForkMetaTag,
 	LoggerTag,
-	OpenCodeAPITag,
-	PermissionBridgeTag,
+	OpenCodeFileServiceLive,
+	OpenCodeModelServiceLive,
+	OpenCodeSettingsServiceLive,
+	OrchestrationEngineTag,
 	type PollerManagerShape,
 	PollerManagerTag,
 	PtyManagerTag,
-	QuestionBridgeTag,
 	type SessionManagerShape,
-	SessionManagerTag,
-	SessionOverridesTag,
 	type StatusPollerShape,
 	StatusPollerTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
-} from "../../src/lib/effect/services.js";
+} from "../../src/lib/domain/relay/Services/services.js";
+import {
+	type SessionManagerService,
+	SessionManagerServiceLive,
+	SessionManagerServiceTag,
+} from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	type SessionManagerState,
-} from "../../src/lib/effect/session-manager-state.js";
-import { makeSessionRegistryStateLive } from "../../src/lib/effect/session-registry-state.js";
-import { makePollerStateLive } from "../../src/lib/effect/session-status-poller.js";
-import type { HandlerDeps } from "../../src/lib/handlers/types.js";
+} from "../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
+import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
+import { OpenCodeTerminalServiceLive } from "../../src/lib/domain/relay/Services/terminal-service.js";
+import { ToolContentServiceNoop } from "../../src/lib/domain/relay/Services/tool-content-service.js";
+import type {
+	HandlerDeps,
+	InstanceManagementDeps,
+} from "../../src/lib/handlers/types.js";
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
+import type { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
-import type { SessionOverrides } from "../../src/lib/session/session-overrides.js";
-import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import type { PermissionId } from "../../src/lib/shared-types.js";
+import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
 
@@ -222,57 +237,17 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
-function createMockPermissionBridge(): HandlerDeps["permissionBridge"] {
+function createMockClientInitOverrideState(): ClientInitDeps["overrideState"] {
 	return {
-		onPermissionResponse: vi.fn().mockReturnValue(null),
-		onPermissionRequest: vi.fn(),
-		onPermissionReplied: vi.fn(),
-		getPending: vi.fn().mockReturnValue([]),
-		checkTimeouts: vi.fn().mockReturnValue([]),
-		findPendingForSession: vi.fn().mockReturnValue([]),
-		recoverPending: vi.fn(),
-	} as unknown as HandlerDeps["permissionBridge"];
-}
-
-function createMockQuestionBridge(): HandlerDeps["questionBridge"] {
-	return {
-		trackPending: vi.fn(),
-		onResolved: vi.fn().mockReturnValue(false),
-		getPending: vi.fn().mockReturnValue([]),
-		size: 0,
-	} as unknown as HandlerDeps["questionBridge"];
-}
-
-function createMockOverrides(): HandlerDeps["overrides"] {
-	return {
-		agent: undefined,
-		model: undefined,
-		variant: "",
-		contextWindow: "",
-		defaultModel: undefined,
-		defaultVariant: "",
-		defaultContextWindow: "",
-		modelUserSelected: false,
-		setAgent: vi.fn(),
-		setModel: vi.fn(),
-		setModelDefault: vi.fn(),
-		setDefaultModel: vi.fn(),
-		setVariant: vi.fn(),
-		setContextWindow: vi.fn(),
-		getModel: vi.fn().mockReturnValue(undefined),
-		getAgent: vi.fn().mockReturnValue(undefined),
-		clearAgent: vi.fn(),
-		getVariant: vi.fn().mockReturnValue(""),
-		getContextWindow: vi.fn().mockReturnValue(""),
-		isModelUserSelected: vi.fn().mockReturnValue(false),
-		clear: vi.fn(),
-		clearSession: vi.fn(),
-		startProcessingTimeout: vi.fn(),
-		clearProcessingTimeout: vi.fn(),
-		resetProcessingTimeout: vi.fn(),
-		hasActiveProcessingTimeout: vi.fn().mockReturnValue(false),
-		dispose: vi.fn(),
-	} as unknown as HandlerDeps["overrides"];
+		getModel: vi.fn().mockResolvedValue(undefined),
+		getDefaultModel: vi.fn().mockResolvedValue(undefined),
+		getVariant: vi.fn().mockResolvedValue(""),
+		getDefaultVariant: vi.fn().mockResolvedValue(""),
+		getContextWindow: vi.fn().mockResolvedValue(""),
+		getDefaultContextWindow: vi.fn().mockResolvedValue(""),
+		setDefaultModel: vi.fn().mockResolvedValue(undefined),
+		hasActiveProcessingTimeout: vi.fn().mockResolvedValue(false),
+	};
 }
 
 function createMockPtyManager(): HandlerDeps["ptyManager"] {
@@ -315,9 +290,6 @@ export function createMockHandlerDeps(
 		wsHandler: createMockWsHandlerFull(),
 		client: createMockClient(),
 		sessionMgr: createMockSessionMgr(),
-		permissionBridge: createMockPermissionBridge(),
-		questionBridge: createMockQuestionBridge(),
-		overrides: createMockOverrides(),
 		ptyManager: createMockPtyManager(),
 		config: createMockConfig(),
 		log: createSilentLogger(),
@@ -325,19 +297,12 @@ export function createMockHandlerDeps(
 		statusPoller: {
 			isProcessing: vi.fn().mockReturnValue(false),
 		},
-		registry: {
-			hasViewers: vi.fn().mockReturnValue(false),
-			addViewer: vi.fn(),
-			removeClient: vi.fn(),
-		} as unknown as HandlerDeps["registry"],
 		pollerManager: {
+			on: vi.fn(),
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
-		},
-		forkMeta: {
-			setForkEntry: vi.fn(),
-			getForkEntry: vi.fn().mockReturnValue(undefined),
+			notifySSEEvent: vi.fn(),
 		},
 		...overrides,
 	};
@@ -348,11 +313,41 @@ export function createMockSSEWiringDeps(
 ): SSEWiringDeps {
 	return {
 		translator: createMockTranslator(),
-		sessionMgr:
-			createMockSessionMgr() as unknown as SSEWiringDeps["sessionMgr"],
-		permissionBridge:
-			createMockPermissionBridge() as unknown as SSEWiringDeps["permissionBridge"],
-		overrides: createMockOverrides() as unknown as SSEWiringDeps["overrides"],
+		sessionService:
+			createMockSessionMgr() as unknown as SSEWiringDeps["sessionService"],
+		pendingInteractions: {
+			recordPermissionRequest: vi.fn((input) => ({
+				requestId: input.requestId,
+				sessionId: input.sessionId,
+				toolName: input.toolName,
+				toolInput: input.toolInput,
+				always: [...(input.always ?? [])],
+				timestamp: Date.now(),
+			})),
+			markPermissionReplied: vi.fn(() => true),
+			recoverPendingPermissions: vi.fn(
+				(
+					permissions: Parameters<
+						SSEWiringDeps["pendingInteractions"]["recoverPendingPermissions"]
+					>[0],
+				) =>
+					permissions.map((permission) => ({
+						requestId: permission.id as PermissionId,
+						sessionId: permission.sessionId ?? "",
+						toolName: permission.permission,
+						toolInput: {
+							patterns: [...(permission.patterns ?? [])],
+							metadata: permission.metadata ?? {},
+						},
+						always: [...(permission.always ?? [])],
+						timestamp: Date.now(),
+					})),
+			),
+		},
+		processingTimeouts: {
+			clearProcessingTimeout: vi.fn(),
+			resetProcessingTimeout: vi.fn(),
+		},
 		wsHandler: {
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),
@@ -369,6 +364,12 @@ export function createMockSSEWiringDeps(
 export function createMockClientInitDeps(
 	overrides?: Partial<ClientInitDeps>,
 ): ClientInitDeps {
+	const sessionService =
+		createMockSessionMgr() as unknown as ClientInitDeps["sessionService"];
+	sessionService.resolveSessionHistory = vi.fn(async (sessionId) => ({
+		kind: "rest-history" as const,
+		history: await sessionService.loadPreRenderedHistory(sessionId),
+	}));
 	return {
 		wsHandler: {
 			broadcast: vi.fn(),
@@ -377,14 +378,35 @@ export function createMockClientInitDeps(
 			markClientBootstrapped: vi.fn(),
 		},
 		client: createMockClient() as unknown as ClientInitDeps["client"],
-		sessionMgr:
-			createMockSessionMgr() as unknown as ClientInitDeps["sessionMgr"],
-		overrides: createMockOverrides() as unknown as ClientInitDeps["overrides"],
-		ptyManager:
-			createMockPtyManager() as unknown as ClientInitDeps["ptyManager"],
-		permissionBridge: {
-			getPending: vi.fn().mockReturnValue([]),
-			recoverPending: vi.fn().mockReturnValue([]),
+		sessionService,
+		overrideState: createMockClientInitOverrideState(),
+		terminal: {
+			replay: vi.fn(async () => undefined),
+		},
+		agentService: {
+			listAgents: vi.fn(async () => ({ agents: [] })),
+		},
+		modelService: {
+			getSession: vi.fn(async () => ({
+				id: "s1",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Session 1",
+				version: "1.0.0",
+				time: { created: 0, updated: 0 },
+				modelID: "gpt-4",
+				providerID: "openai",
+			})),
+			listProviders: vi.fn(async () => ({
+				providers: [],
+				defaults: {},
+				connected: [],
+			})),
+		},
+		pendingInteractions: {
+			listPendingPermissions: vi.fn().mockResolvedValue([]),
+			recoverPendingPermissions: vi.fn().mockResolvedValue([]),
+			listPendingQuestions: vi.fn().mockResolvedValue([]),
 		},
 		log: createSilentLogger(),
 		...overrides,
@@ -399,15 +421,20 @@ export function createMockProjectRelay(
 	return {
 		wsHandler:
 			createMockWsHandlerFull() as unknown as ProjectRelay["wsHandler"],
+		rpcWsHandler: {
+			handleUpgrade: vi.fn(),
+			drain: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ProjectRelay["rpcWsHandler"],
 		sseStream: {
-			connect: vi.fn(),
-			disconnect: vi.fn(),
+			connectEffect: vi.fn(),
+			disconnectEffect: vi.fn(),
+			drainEffect: vi.fn(),
+			getHealth: vi.fn(),
+			isConnected: vi.fn(),
+			on: vi.fn(),
 		} as unknown as ProjectRelay["sseStream"],
 		client: createMockClient() as unknown as ProjectRelay["client"],
-		sessionMgr: createMockSessionMgr() as unknown as ProjectRelay["sessionMgr"],
 		translator: {} as unknown as ProjectRelay["translator"],
-		permissionBridge:
-			createMockPermissionBridge() as unknown as ProjectRelay["permissionBridge"],
 		orchestration: {
 			engine: {
 				dispatch: vi.fn().mockResolvedValue({
@@ -424,18 +451,26 @@ export function createMockProjectRelay(
 				shutdown: vi.fn().mockResolvedValue(undefined),
 			},
 			registry: {} as OrchestrationLayer["registry"],
-			adapter: {} as OrchestrationLayer["adapter"],
-			wireSSEToAdapter: vi.fn(),
+			openCodeInstance: {} as OrchestrationLayer["openCodeInstance"],
+			wireSSEToInstance: vi.fn(),
 		} as unknown as OrchestrationLayer,
 		effectRuntime: {
 			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],
-			runSync: vi.fn(),
-			dispatch: vi.fn().mockResolvedValue(undefined),
 			dispose: vi.fn().mockResolvedValue(undefined),
 		},
+		getStatusSnapshot: vi.fn(() => ({
+			sessionCount: 0,
+			clients: 0,
+			isProcessing: false,
+		})),
 		isAnySessionProcessing: vi.fn().mockReturnValue(false),
+		initialSessionId: "s1",
 		stop: vi.fn().mockResolvedValue(undefined),
 		...overrides,
+		setDefaultAgent:
+			overrides?.setDefaultAgent ?? vi.fn().mockResolvedValue(undefined),
+		setDefaultModel:
+			overrides?.setDefaultModel ?? vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -489,7 +524,7 @@ export function deferredRelayFactory(): DeferredRelay {
 // Effect Layer Test Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// These helpers compose the Effect service Tags from src/lib/effect/services.ts
+// These helpers compose the Effect service Tags from src/lib/domain/relay/Services/services.ts
 // into reusable Layers for @effect/vitest tests. They complement (not replace)
 // the imperative factories above.
 //
@@ -620,6 +655,70 @@ export function makeMockWebSocketHandler(
 	};
 }
 
+export type RecordedWebSocketCall =
+	| {
+			readonly channel: "broadcast";
+			readonly message: RelayMessage;
+	  }
+	| {
+			readonly channel: "sendTo";
+			readonly clientId: string;
+			readonly message: RelayMessage;
+	  }
+	| {
+			readonly channel: "sendToSession";
+			readonly sessionId: string;
+			readonly message: RelayMessage;
+	  }
+	| {
+			readonly channel: "broadcastPerSessionEvent";
+			readonly sessionId: string;
+			readonly message: RelayMessage;
+	  };
+
+/** Create a WebSocket handler mock that records outbound envelopes. */
+export function makeRecordingWebSocketHandler(
+	overrides?: Partial<WebSocketHandlerShape>,
+): {
+	readonly wsHandler: WebSocketHandlerShape;
+	readonly calls: RecordedWebSocketCall[];
+} {
+	const calls: RecordedWebSocketCall[] = [];
+	const onBroadcast = overrides?.broadcast;
+	const onSendTo = overrides?.sendTo;
+	const onSendToSession = overrides?.sendToSession;
+	const onBroadcastPerSessionEvent = overrides?.broadcastPerSessionEvent;
+
+	return {
+		calls,
+		wsHandler: makeMockWebSocketHandler({
+			...overrides,
+			broadcast: vi.fn((message: RelayMessage) => {
+				calls.push({ channel: "broadcast", message });
+				onBroadcast?.(message);
+			}),
+			sendTo: vi.fn((clientId: string, message: RelayMessage) => {
+				calls.push({ channel: "sendTo", clientId, message });
+				onSendTo?.(clientId, message);
+			}),
+			sendToSession: vi.fn((sessionId: string, message: RelayMessage) => {
+				calls.push({ channel: "sendToSession", sessionId, message });
+				onSendToSession?.(sessionId, message);
+			}),
+			broadcastPerSessionEvent: vi.fn(
+				(sessionId: string, message: RelayMessage) => {
+					calls.push({
+						channel: "broadcastPerSessionEvent",
+						sessionId,
+						message,
+					});
+					onBroadcastPerSessionEvent?.(sessionId, message);
+				},
+			),
+		}),
+	};
+}
+
 /** Create a mock SessionManagerShape for Effect tests. */
 export function makeMockSessionManagerShape(
 	overrides?: Partial<SessionManagerShape>,
@@ -665,78 +764,80 @@ export function makeMockSessionManagerShape(
 	} as unknown as SessionManagerShape;
 }
 
+/** Create a mock SessionManagerService for Effect-native handler tests. */
+export function makeMockSessionManagerService(
+	overrides?: Partial<SessionManagerService>,
+): SessionManagerService {
+	return {
+		initialize: vi.fn(() => Effect.succeed("s1")),
+		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
+		getLastKnownSessionCount: vi.fn(() => Effect.succeed(1)),
+		listSessions: vi.fn(() =>
+			Effect.succeed([
+				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
+			]),
+		),
+		createSession: vi.fn(() => Effect.succeed({ id: "session-new" })),
+		deleteSession: vi.fn(() => Effect.void),
+		renameSession: vi.fn(() => Effect.void),
+		clearPaginationCursor: vi.fn(() => Effect.void),
+		seedPaginationCursor: vi.fn(() => Effect.void),
+		loadPreRenderedHistory: vi.fn(() =>
+			Effect.succeed({ messages: [], hasMore: false }),
+		),
+		recordMessageActivity: vi.fn(() => Effect.void),
+		addToParentMap: vi.fn(() => Effect.void),
+		getSessionParentMap: vi.fn(() => Effect.succeed(new Map())),
+		incrementPendingQuestionCount: vi.fn(() => Effect.void),
+		decrementPendingQuestionCount: vi.fn(() => Effect.void),
+		setPendingQuestionCounts: vi.fn(() => Effect.void),
+		setForkEntry: vi.fn(() => Effect.void),
+		sendDualSessionLists: vi.fn((send) =>
+			Effect.sync(() => {
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "s1",
+							title: "Session 1",
+							updatedAt: 0,
+							messageCount: 0,
+						},
+					],
+					roots: true,
+				});
+				send({
+					type: "session_list",
+					sessions: [
+						{
+							id: "s1",
+							title: "Session 1",
+							updatedAt: 0,
+							messageCount: 0,
+						},
+					],
+					roots: false,
+				});
+			}),
+		),
+		...overrides,
+	} as unknown as SessionManagerService;
+}
+
 /** Create a mock Logger for Effect tests. */
 export function makeMockLogger(): Logger {
-	return {
+	const logger = {
 		info: vi.fn(),
 		warn: vi.fn(),
 		error: vi.fn(),
 		debug: vi.fn(),
-	} as unknown as Logger;
-}
-
-/** Create a mock SessionOverrides for Effect tests. */
-export function makeMockSessionOverrides(
-	overrides?: Partial<SessionOverrides>,
-): SessionOverrides {
+		verbose: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
 	return {
-		agent: undefined,
-		model: undefined,
-		variant: "",
-		contextWindow: "",
-		defaultModel: undefined,
-		defaultVariant: "",
-		defaultContextWindow: "",
-		modelUserSelected: false,
-		setAgent: vi.fn(),
-		setModel: vi.fn(),
-		setModelDefault: vi.fn(),
-		setDefaultModel: vi.fn(),
-		setVariant: vi.fn(),
-		setContextWindow: vi.fn(),
-		getModel: vi.fn(() => undefined),
-		getAgent: vi.fn(() => undefined),
-		getVariant: vi.fn(() => ""),
-		getContextWindow: vi.fn(() => ""),
-		isModelUserSelected: vi.fn(() => false),
-		clear: vi.fn(),
-		clearSession: vi.fn(),
-		startProcessingTimeout: vi.fn(),
-		clearProcessingTimeout: vi.fn(),
-		resetProcessingTimeout: vi.fn(),
-		hasActiveProcessingTimeout: vi.fn(() => false),
-		dispose: vi.fn(),
-		...overrides,
-	} as unknown as SessionOverrides;
-}
-
-/** Create a mock PermissionBridge for Effect tests. */
-export function makeMockPermissionBridge(
-	overrides?: Partial<PermissionBridge>,
-): PermissionBridge {
-	return {
-		onPermissionResponse: vi.fn(() => null),
-		onPermissionRequest: vi.fn(),
-		onPermissionReplied: vi.fn(),
-		getPending: vi.fn(() => []),
-		checkTimeouts: vi.fn(() => []),
-		findPendingForSession: vi.fn(() => []),
-		recoverPending: vi.fn(),
-		...overrides,
-	} as unknown as PermissionBridge;
-}
-
-/** Create a mock QuestionBridge for Effect tests. */
-export function makeMockQuestionBridge(
-	overrides?: Partial<QuestionBridge>,
-): QuestionBridge {
-	return {
-		trackPending: vi.fn(),
-		onResolved: vi.fn(() => false),
-		getPending: vi.fn(() => []),
-		size: 0,
-		...overrides,
-	} as unknown as QuestionBridge;
+		...logger,
+	} as Logger;
 }
 
 /** Create a mock PtyManager for Effect tests. */
@@ -754,6 +855,25 @@ export function makeMockPtyManager(
 		sessionCount: 0,
 		...overrides,
 	} as unknown as PtyManager;
+}
+
+/** Create a mock StatusPoller service for Effect tests. */
+export function makeMockStatusPoller(
+	overrides?: Partial<StatusPollerShape>,
+): StatusPollerShape {
+	return {
+		on: vi.fn(() => Effect.void),
+		start: vi.fn(() => Effect.void),
+		stop: vi.fn(() => Effect.void),
+		drain: vi.fn(() => Effect.void),
+		getCurrentStatuses: vi.fn(() => Effect.succeed({})),
+		isProcessing: vi.fn(() => Effect.succeed(false)),
+		markMessageActivity: vi.fn(() => Effect.void),
+		clearMessageActivity: vi.fn(() => Effect.void),
+		notifySSEIdle: vi.fn(() => Effect.void),
+		reconcileNow: vi.fn(() => Effect.void),
+		...overrides,
+	};
 }
 
 /** Create a mock ProjectRelayConfig for Effect tests. */
@@ -779,16 +899,15 @@ export interface TestHandlerLayerOptions {
 	api?: OpenCodeAPI;
 	wsHandler?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
-	overrides?: SessionOverrides;
-	permissionBridge?: PermissionBridge;
-	questionBridge?: QuestionBridge;
+	sessionManagerService?: SessionManagerService;
 	ptyManager?: PtyManager;
 	config?: ProjectRelayConfig;
 	log?: Logger;
 	statusPoller?: StatusPollerShape;
 	pollerManager?: PollerManagerShape;
 	connectPtyUpstream?: ConnectPtyUpstreamShape;
-	forkMeta?: ForkMetaShape;
+	instanceMgmt?: InstanceManagementDeps;
+	orchestrationEngine?: OrchestrationEngine;
 }
 
 /**
@@ -807,49 +926,123 @@ export function makeTestHandlerLayer(
 ): Layer.Layer<any> {
 	const api = opts?.api ?? makeMockOpenCodeAPI();
 	const wsHandler = opts?.wsHandler ?? makeMockWebSocketHandler();
-	const sessionMgr = opts?.sessionMgr ?? makeMockSessionManagerShape();
-	const sessionOverrides = opts?.overrides ?? makeMockSessionOverrides();
-	const permissionBridge = opts?.permissionBridge ?? makeMockPermissionBridge();
-	const questionBridge = opts?.questionBridge ?? makeMockQuestionBridge();
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
 	const config = opts?.config ?? makeMockConfig();
 	const log = opts?.log ?? makeMockLogger();
-	const statusPoller: StatusPollerShape = opts?.statusPoller ?? {
-		isProcessing: vi.fn(() => false),
-		clearMessageActivity: vi.fn(),
-	};
+	const statusPoller: StatusPollerShape =
+		opts?.statusPoller ?? makeMockStatusPoller();
 	const pollerManager: PollerManagerShape = opts?.pollerManager ?? {
+		on: vi.fn(),
 		isPolling: vi.fn(() => true),
 		startPolling: vi.fn(),
 		stopPolling: vi.fn(),
+		notifySSEEvent: vi.fn(),
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
-	const forkMeta: ForkMetaShape = opts?.forkMeta ?? {
-		setForkEntry: vi.fn(),
-		getForkEntry: vi.fn(() => undefined),
-	};
+	const instanceMgmt = opts?.instanceMgmt;
+	const overridesStateLayer = makeOverridesStateLive();
+	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
+	const configLayer = Layer.succeed(ConfigTag, config);
+	const loggerLayer = Layer.succeed(LoggerTag, log);
+	const orchestrationLayer =
+		opts?.orchestrationEngine == null
+			? Layer.empty
+			: Layer.succeed(OrchestrationEngineTag, opts.orchestrationEngine);
+	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
+	const connectPtyUpstreamLayer = Layer.succeed(
+		ConnectPtyUpstreamTag,
+		connectPtyUpstream,
+	);
+	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
+	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
+		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+	);
+	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
+		Layer.provide(openCodeApiLayer),
+	);
+	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
+		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
+	);
+	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
+	const agentServiceLayer = AgentServiceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				loggerLayer,
+				overridesStateLayer,
+				orchestrationLayer,
+			),
+		),
+	);
+	const toolContentServiceLayer = ToolContentServiceNoop;
+	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				wsHandlerLayer,
+				loggerLayer,
+				configLayer,
+				ptyManagerLayer,
+				connectPtyUpstreamLayer,
+			),
+		),
+	);
+	const sessionManagerServiceLayer = opts?.sessionManagerService
+		? Layer.succeed(SessionManagerServiceTag, opts.sessionManagerService)
+		: SessionManagerServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						openCodeApiLayer,
+						makeSessionManagerStateLive(),
+						Layer.succeed(LoggerTag, log),
+						Layer.succeed(StatusPollerTag, statusPoller),
+						DaemonEventBusLive,
+					),
+				),
+			);
+	const instanceManagementServiceLayer =
+		instanceMgmt == null
+			? Layer.empty
+			: InstanceManagementServiceLive.pipe(
+					Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
+				);
 
 	return Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(SessionManagerTag, sessionMgr),
-		Layer.succeed(SessionOverridesTag, sessionOverrides),
-		Layer.succeed(PermissionBridgeTag, permissionBridge),
-		Layer.succeed(QuestionBridgeTag, questionBridge),
-		Layer.succeed(PtyManagerTag, ptyManager),
-		Layer.succeed(ConfigTag, config),
-		Layer.succeed(LoggerTag, log),
+		openCodeApiLayer,
+		openCodeFileServiceLayer,
+		openCodeModelServiceLayer,
+		openCodeSettingsServiceLayer,
+		projectManagementServiceLayer,
+		DirectoryListingServiceLive,
+		scanServiceLayer,
+		agentServiceLayer,
+		toolContentServiceLayer,
+		openCodeTerminalServiceLayer,
+		instanceManagementServiceLayer,
+		PendingInteractionServiceLive,
+		sessionManagerServiceLayer,
+		wsHandlerLayer,
+		overridesStateLayer,
+		ptyManagerLayer,
+		configLayer,
+		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
-		Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
-		Layer.succeed(ForkMetaTag, forkMeta),
+		connectPtyUpstreamLayer,
+		orchestrationLayer,
+		...(instanceMgmt == null
+			? []
+			: [Layer.succeed(InstanceMgmtTag, instanceMgmt)]),
 	);
 }
 
 // ─── State-layer test helpers ──────────────────────────────────────────────
 // Convenience wrappers around the Effect state Layer factories from
-// src/lib/effect/. They provide zero-config defaults suitable for tests.
+// src/lib/domain/. They provide zero-config defaults suitable for tests.
 
 /**
  * Options for building the daemon-level state test Layer.

@@ -11,6 +11,10 @@ import type {
 	PerSessionEventType,
 } from "../../shared-types.js";
 import type {
+	GetFileContentResponse,
+	GetFileListResponse,
+} from "../transport/ws-rpc.js";
+import type {
 	ChatMessage,
 	HistoryMessage,
 	RelayMessage,
@@ -60,6 +64,7 @@ import {
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
+import { isOwnBrowserClientId } from "./client-identity.js";
 import {
 	handleAgentList,
 	handleCommandList,
@@ -118,7 +123,6 @@ import {
 } from "./ui.svelte.js";
 
 import {
-	directoryListeners,
 	fileBrowserListeners,
 	fileHistoryListeners,
 	planModeListeners,
@@ -179,6 +183,13 @@ const GLOBALLY_COORDINATED_TYPES: ReadonlySet<string> = new Set([
 
 function isDev(): boolean {
 	return (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
+}
+
+function shouldIgnoreOwnUserMessage(event: {
+	type: string;
+	originId?: string;
+}): boolean {
+	return event.type === "user_message" && isOwnBrowserClientId(event.originId);
 }
 
 /**
@@ -267,6 +278,7 @@ function routePerSession(event: PerSessionEvent): void {
 			triggerNotifications(event);
 			break;
 		case "user_message":
+			if (shouldIgnoreOwnUserMessage(event)) break;
 			addUserMessage(activity, messages, event.text, undefined, isProcessing());
 			break;
 		case "tool_content":
@@ -527,6 +539,7 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 
 	switch (event.type) {
 		case "user_message":
+			if (shouldIgnoreOwnUserMessage(event)) return true;
 			addUserMessage(activity, messages, event.text, undefined, ctx.isQueued);
 			return true;
 		case "delta":
@@ -682,7 +695,7 @@ export function handleMessage(msg: RelayMessage): void {
 		case "session_switched": {
 			// Use the ID captured by switchToSession() before it changed currentId.
 			// Falls back to sessionState.currentId for server-initiated switches
-			// (e.g. new_session flow) where switchToSession() wasn't called.
+			// (e.g. CreateSession flow) where switchToSession() wasn't called.
 			// consumeSwitchingFromId() reads and clears the value in one call to
 			// prevent stale IDs from leaking into future server-initiated switches.
 			const previousSessionId =
@@ -743,6 +756,8 @@ export function handleMessage(msg: RelayMessage): void {
 								capturedSlot.messages,
 								chatMsgs,
 							);
+							capturedSlot.messages.historyHasMore = hasMore;
+							capturedSlot.messages.historyMessageCount = msgCount;
 							historyState.hasMore = hasMore;
 							historyState.messageCount = msgCount;
 							// Transition loadLifecycle so the scroll controller
@@ -750,9 +765,11 @@ export function handleMessage(msg: RelayMessage): void {
 							capturedSlot.messages.loadLifecycle = "ready";
 							chatState.loadLifecycle = "ready";
 						}
+						capturedSlot.messages.historyLoading = false;
 					})
 					.catch((err) => {
 						log.warn("History conversion error:", err);
+						capturedSlot.messages.historyLoading = false;
 					});
 			} else {
 				// Empty session (neither events nor history) — hasMore stays false
@@ -830,6 +847,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleBannerMessage(msg);
 			break;
 		case "input_sync":
+			if (isOwnBrowserClientId(msg.from)) break;
 			handleInputSyncReceived(msg);
 			break;
 
@@ -841,8 +859,9 @@ export function handleMessage(msg: RelayMessage): void {
 			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
 			const rawMessages = historyMsg.messages ?? [];
 			const hasMore = historyMsg.hasMore ?? false;
-			const hpCapturedSlot = sessionState.currentId
-				? getOrCreateSessionSlot(sessionState.currentId)
+			const hpSessionId = historyMsg.sessionId ?? sessionState.currentId;
+			const hpCapturedSlot = hpSessionId
+				? getOrCreateSessionSlot(hpSessionId)
 				: null;
 			const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
 			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
@@ -864,7 +883,10 @@ export function handleMessage(msg: RelayMessage): void {
 								hpCapturedSlot.messages,
 								chatMsgs,
 							);
+							hpCapturedSlot.messages.historyHasMore = hasMore;
+							hpCapturedSlot.messages.historyMessageCount += rawMessages.length;
 						}
+						if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
 						historyState.hasMore = hasMore;
 						historyState.messageCount += rawMessages.length;
 					}
@@ -872,6 +894,7 @@ export function handleMessage(msg: RelayMessage): void {
 				})
 				.catch((err) => {
 					log.warn("History page conversion error:", err);
+					if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
 					historyState.loading = false;
 				});
 			break;
@@ -916,11 +939,6 @@ export function handleMessage(msg: RelayMessage): void {
 			for (const fn of projectListeners) fn(msg);
 			break;
 
-		// ─── Directory Listing ──────────────────────────────────────────
-		case "directory_list":
-			for (const fn of directoryListeners) fn(msg);
-			break;
-
 		// ─── Todo ────────────────────────────────────────────────────────
 		case "todo_state":
 			handleTodoState(msg);
@@ -941,6 +959,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "scan_result":
 			handleScanResult(msg);
+			break;
+		case "system_error":
+			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
 			break;
 
 		// ─── Cross-session notifications ─────────────────────────────────
@@ -1129,6 +1150,47 @@ function handleToolContentResponse(
 			}),
 		);
 	}
+}
+
+export function applyToolContentResponse(msg: {
+	readonly projectSlug?: string;
+	readonly toolId: string;
+	readonly content: string;
+	readonly sessionId?: string;
+}): void {
+	const sessionId = msg.sessionId ?? sessionState.currentId;
+	if (sessionId == null) return;
+	handleToolContentResponse(getOrCreateSessionSlot(sessionId).messages, {
+		type: "tool_content",
+		sessionId,
+		toolId: msg.toolId,
+		content: msg.content,
+	});
+}
+
+export function applyGetFileListResponse(response: GetFileListResponse): void {
+	const msg = {
+		type: "file_list" as const,
+		path: response.path,
+		entries: response.entries.map((entry) => ({
+			name: entry.name,
+			type: entry.type,
+			...(entry.size != null ? { size: entry.size } : {}),
+		})),
+	};
+	for (const fn of fileBrowserListeners) fn(msg);
+}
+
+export function applyGetFileContentResponse(
+	response: GetFileContentResponse,
+): void {
+	const msg = {
+		type: "file_content" as const,
+		path: response.path,
+		content: response.content,
+		...(response.binary != null ? { binary: response.binary } : {}),
+	};
+	for (const fn of fileBrowserListeners) fn(msg);
 }
 
 /** Error routing: PTY errors vs chat errors. */

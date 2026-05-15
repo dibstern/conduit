@@ -9,13 +9,13 @@ import { Effect, Layer } from "effect";
 import { expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import {
-	AuthManagerTag,
 	authRoute,
 	authStatusRoute,
+	makeAuthManagerLive,
 	withAuthGate,
-} from "../../../src/lib/effect/auth-middleware.js";
+} from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
-const authLayer = (auth: AuthManager) => Layer.succeed(AuthManagerTag, auth);
+const authLayer = (auth: AuthManager) => makeAuthManagerLive(auth);
 
 const requestLayer = (url: string, headers?: HeadersInit) =>
 	Layer.succeed(

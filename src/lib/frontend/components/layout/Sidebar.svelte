@@ -18,11 +18,13 @@
 		SIDEBAR_MIN_WIDTH,
 		SIDEBAR_MAX_WIDTH,
 	} from "../../stores/ui.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
 	import { navigate, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
+	import { createPtyRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
+	import { beginCreateTab, failCreateTab, terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { sendNewSession, sessionCreation } from "../../stores/session.svelte.js";
+	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
@@ -37,13 +39,13 @@
 	}
 
 	function handleNewSession() {
-		sendNewSession(wsSend);
+		sendNewSession();
 	}
 
 	function handleResumeSession() {
 		const id = prompt("Enter session ID to resume:");
 		if (id?.trim()) {
-			wsSend({ type: "switch_session", sessionId: id.trim() });
+			switchToSession(id.trim());
 		}
 	}
 
@@ -52,13 +54,32 @@
 			setSidebarPanel("sessions");
 		} else {
 			setSidebarPanel("files");
-			wsSend({ type: "get_file_list", path: "." });
+			const slug = getCurrentSlug();
+			if (slug) {
+				void getFileListRpc({ projectSlug: slug, path: "." }).then(
+					applyGetFileListResponse,
+				);
+			}
 		}
+	}
+
+	function requestTerminalCreate() {
+		const slug = getCurrentSlug();
+		if (!slug || !beginCreateTab()) return;
+		void createPtyRpc({
+			projectSlug: slug,
+			originId: getBrowserClientId(),
+		}).catch(() => {
+			failCreateTab("Failed to create terminal");
+		});
 	}
 
 	function handleTerminalSidebar() {
 		const wasOpen = terminalState.panelOpen;
-		toggleTerminalPanel(wsSend);
+		toggleTerminalPanel();
+		if (!wasOpen && terminalState.tabs.size === 0) {
+			requestTerminalCreate();
+		}
 		// On mobile: close sidebar overlay and maximize terminal so user can type
 		if (!wasOpen && window.innerWidth <= 768) {
 			closeMobileSidebar();

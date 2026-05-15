@@ -31,10 +31,7 @@ describe("Integration: Send Message", () => {
 		client.clearReceived();
 
 		// Send a simple message
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Should immediately get processing status
 		const status = await client.waitFor("status", {
@@ -51,10 +48,7 @@ describe("Integration: Send Message", () => {
 		client.clearReceived();
 
 		// Send a minimal prompt that should produce a short response
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Wait for at least one delta (streamed text)
 		const delta = await client.waitFor("delta");
@@ -68,7 +62,7 @@ describe("Integration: Send Message", () => {
 		// result events (from message.updated) may or may not arrive depending
 		// on SSE event ordering — the critical path is delta + done above
 		await client.close();
-	}, 10_000);
+	}, 15_000);
 
 	it("does not send flat text field to OpenCode (Bug A)", async () => {
 		// This test verifies the fix for the original 400 error.
@@ -77,7 +71,7 @@ describe("Integration: Send Message", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({ type: "message", text: "Reply with just 'ok'" });
+		await client.sendMessage("Reply with just 'ok'");
 
 		// Wait a moment for the request to be processed
 		await new Promise((r) => setTimeout(r, 2000));

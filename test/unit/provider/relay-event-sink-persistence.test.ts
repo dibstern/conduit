@@ -1,91 +1,88 @@
-// Integration test: RelayEventSink → real EventStore + ProjectionRunner → SQLite → session history
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { PersistenceLayer } from "../../../src/lib/persistence/persistence-layer.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
-import { SessionSeeder } from "../../../src/lib/persistence/session-seeder.js";
+// Integration test: RelayEventSink -> Effect persistence -> SQLite read query
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "@effect/vitest";
+import { Effect } from "effect";
+import { expect, vi } from "vitest";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
-import { resolveSessionHistoryFromSqlite } from "../../../src/lib/session/session-switch.js";
 import {
 	makeMessageCreatedEvent,
 	makeTextDelta,
 } from "../../helpers/persistence-factories.js";
 
-describe("RelayEventSink persistence integration", () => {
-	let layer: PersistenceLayer;
+describe("RelayEventSink Effect persistence integration", () => {
+	it.effect(
+		"persisted Claude events are readable through ReadQueryEffect",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-sink-effect-"));
+			const layer = makePersistenceEffectLayer(join(dir, "events.db"));
 
-	afterEach(() => {
-		layer?.close();
-	});
+			return Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const send = vi.fn();
+				const sink = createRelayEventSink({
+					sessionId: "s1",
+					send,
+					persist,
+				});
 
-	it("persisted Claude events are retrievable via resolveSessionHistoryFromSqlite", async () => {
-		layer = PersistenceLayer.memory();
-		layer.projectionRunner.recover();
+				yield* sink.push(
+					makeMessageCreatedEvent("s1", "m1", {
+						role: "assistant",
+					}),
+				);
+				yield* sink.push(makeTextDelta("s1", "m1", "Hello from Claude"));
 
-		const seeder = new SessionSeeder(layer.db);
-		const send = vi.fn();
-		const sink = createRelayEventSink({
-			sessionId: "s1",
-			send,
-			persist: {
-				eventStore: layer.eventStore,
-				projectionRunner: layer.projectionRunner,
-				ensureSession: (sid) => seeder.ensureSession(sid, "claude"),
-			},
-		});
-
-		// Push a message.created + text.delta (simulates Claude assistant turn)
-		await sink.push(
-			makeMessageCreatedEvent("s1", "m1", {
-				role: "assistant",
-			}),
-		);
-		await sink.push(makeTextDelta("s1", "m1", "Hello from Claude"));
-
-		// Verify session history is now available from SQLite
-		const readQuery = new ReadQueryService(layer.db);
-		const source = resolveSessionHistoryFromSqlite("s1", readQuery, {
-			pageSize: 50,
-		});
-
-		expect(source.kind).toBe("rest-history");
-		if (source.kind === "rest-history") {
-			expect(source.history.messages.length).toBeGreaterThanOrEqual(1);
-			// The assistant message should have text content
-			const assistantMsg = source.history.messages.find(
-				(m) => m.role === "assistant",
+				const messages = yield* readQuery.getSessionMessagesWithParts("s1");
+				expect(messages.length).toBeGreaterThanOrEqual(1);
+				expect(messages.find((m) => m.role === "assistant")).toBeDefined();
+				expect(send).toHaveBeenCalled();
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
 			);
-			expect(assistantMsg).toBeDefined();
-		}
+		},
+	);
 
-		// Verify WebSocket send was also called
-		expect(send).toHaveBeenCalled();
-	});
+	it.effect("creates the session row with provider claude", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-sink-effect-"));
+		const layer = makePersistenceEffectLayer(join(dir, "events.db"));
 
-	it("session row is created with provider 'claude'", async () => {
-		layer = PersistenceLayer.memory();
-		layer.projectionRunner.recover();
+		return Effect.gen(function* () {
+			const persist = yield* ClaudeEventPersistEffectTag;
+			const readQuery = yield* ReadQueryEffectTag;
+			const send = vi.fn();
+			const sink = createRelayEventSink({
+				sessionId: "s-claude",
+				send,
+				persist,
+			});
 
-		const seeder = new SessionSeeder(layer.db);
-		const send = vi.fn();
-		const sink = createRelayEventSink({
-			sessionId: "s-claude",
-			send,
-			persist: {
-				eventStore: layer.eventStore,
-				projectionRunner: layer.projectionRunner,
-				ensureSession: (sid) => seeder.ensureSession(sid, "claude"),
-			},
-		});
+			yield* sink.push(
+				makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+			);
 
-		await sink.push(
-			makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+			const sessions = yield* readQuery.listSessions();
+			expect(sessions).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						id: "s-claude",
+						provider: "claude",
+					}),
+				]),
+			);
+		}).pipe(
+			Effect.provide(layer),
+			Effect.ensuring(
+				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			),
 		);
-
-		// Verify session row exists with correct provider
-		const row = layer.db.queryOne<{ provider: string }>(
-			"SELECT provider FROM sessions WHERE id = ?",
-			["s-claude"],
-		);
-		expect(row?.provider).toBe("claude");
 	});
 });

@@ -4,8 +4,11 @@
 
 <script lang="ts">
 	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
-	import { wsSend, onFileBrowser } from "../../stores/ws.svelte.js";
+	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { openFileViewer, closeMobileSidebar, setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getFileContentRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileContentResponse, applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import Icon from "../shared/Icon.svelte";
 	import BlockGrid from "../shared/BlockGrid.svelte";
@@ -42,9 +45,15 @@
 			currentPath = path;
 			return;
 		}
+		const slug = getCurrentSlug();
+		if (!slug) return;
 		loading = true;
 		currentPath = path;
-		wsSend({ type: "get_file_list", path });
+		void getFileListRpc({ projectSlug: slug, path })
+			.then(applyGetFileListResponse)
+			.catch(() => {
+				if (currentPath === path) loading = false;
+			});
 	}
 
 	function sortEntries(fileEntries: FileEntry[]): FileEntry[] {
@@ -76,15 +85,23 @@
 
 	function handleFileClick(fullPath: string) {
 		openFileViewer(fullPath);
-		wsSend({ type: "get_file_content", path: fullPath });
+		const slug = getCurrentSlug();
+		if (slug) {
+			void getFileContentRpc({ projectSlug: slug, path: fullPath }).then(
+				applyGetFileContentResponse,
+			);
+		}
 		if (typeof window !== "undefined" && window.innerWidth < 768) {
 			closeMobileSidebar();
 		}
 	}
 
 	function handleDirClick(fullPath: string) {
-		if (!dirChildren.has(fullPath)) {
-			wsSend({ type: "get_file_list", path: fullPath });
+		const slug = getCurrentSlug();
+		if (slug && !dirChildren.has(fullPath)) {
+			void getFileListRpc({ projectSlug: slug, path: fullPath }).then(
+				applyGetFileListResponse,
+			);
 		}
 	}
 

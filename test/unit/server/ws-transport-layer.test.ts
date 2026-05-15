@@ -2,17 +2,17 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option, TestClock } from "effect";
 import { expect } from "vitest";
 import {
+	makeHeartbeatFiber,
+	makeWsTransportLive,
+	WsTransportTag,
+} from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import {
 	addClient,
 	getClientCount,
 	getClientSession,
 	makeWsHandlerStateLive,
 	type WsConn,
-} from "../../../src/lib/effect/ws-handler-service.js";
-import {
-	makeHeartbeatFiber,
-	makeWsTransportLive,
-	WsTransportTag,
-} from "../../../src/lib/effect/ws-transport-layer.js";
+} from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 
 function mockWs(): WsConn & {
 	closed: boolean;

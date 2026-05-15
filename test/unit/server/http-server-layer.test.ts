@@ -28,12 +28,12 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	HttpServerConfigTag,
 	HttpServerLive,
-} from "../../../src/lib/effect/http-server-layer.js";
-import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
+} from "../../../src/lib/domain/server/Layers/http-server-layer.js";
+import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	effectRouter,
 	effectRouterWithCors,
@@ -61,7 +61,7 @@ const testProjects: RouterProjectInfo[] = [
 // ─── Test Layers ───────────────────────────────────────────────────────────
 
 const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
-	getProjects: () => testProjects,
+	getProjects: () => Effect.succeed(testProjects),
 });
 
 const TestPushLayer = Layer.succeed(PushProvider, {
@@ -71,39 +71,40 @@ const TestPushLayer = Layer.succeed(PushProvider, {
 });
 
 const TestThemeLayer = Layer.succeed(ThemeProvider, {
-	loadThemes: async () => ({
-		bundled: {
-			"test-theme": {
-				name: "Test Theme",
-				variant: "dark" as const,
-				base00: "000000",
-				base01: "111111",
-				base02: "222222",
-				base03: "333333",
-				base04: "444444",
-				base05: "555555",
-				base06: "666666",
-				base07: "777777",
-				base08: "888888",
-				base09: "999999",
-				base0A: "AAAAAA",
-				base0B: "BBBBBB",
-				base0C: "CCCCCC",
-				base0D: "DDDDDD",
-				base0E: "EEEEEE",
-				base0F: "FFFFFF",
+	loadThemes: () =>
+		Effect.succeed({
+			bundled: {
+				"test-theme": {
+					name: "Test Theme",
+					variant: "dark" as const,
+					base00: "000000",
+					base01: "111111",
+					base02: "222222",
+					base03: "333333",
+					base04: "444444",
+					base05: "555555",
+					base06: "666666",
+					base07: "777777",
+					base08: "888888",
+					base09: "999999",
+					base0A: "AAAAAA",
+					base0B: "BBBBBB",
+					base0C: "CCCCCC",
+					base0D: "DDDDDD",
+					base0E: "EEEEEE",
+					base0F: "FFFFFF",
+				},
 			},
-		},
-		custom: {},
-	}),
+			custom: {},
+		}),
 });
 
 let setupInfoPort = 9999;
 let setupInfoIsTls = false;
 
 const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
-	getPort: () => setupInfoPort,
-	getIsTls: () => setupInfoIsTls,
+	getPort: () => Effect.sync(() => setupInfoPort),
+	getIsTls: () => Effect.sync(() => setupInfoIsTls),
 });
 
 let staticDir = "";
@@ -114,7 +115,7 @@ beforeAll(async () => {
 
 const baseRouterLayer = () =>
 	Layer.mergeAll(
-		Layer.succeed(AuthManagerTag, new AuthManager()),
+		makeAuthManagerLive(new AuthManager()),
 		Layer.succeed(StaticDirTag, staticDir),
 		NodeFileSystem.layer,
 		NodePath.layer,

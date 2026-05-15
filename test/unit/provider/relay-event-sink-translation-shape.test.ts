@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 
@@ -104,7 +105,7 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 				sessionId: "ses-1",
 				send: (msg: unknown) => sent.push(msg as { type: string }),
 			});
-			await sink.push(makeEvent(type, data as never, meta));
+			await Effect.runPromise(sink.push(makeEvent(type, data as never, meta)));
 			expect(sent.map((m) => m.type)).toEqual(expectedTypes);
 		});
 	}
@@ -157,7 +158,7 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 				sessionId: "ses-1",
 				send: (msg: unknown) => sent.push(msg),
 			});
-			await sink.push(makeEvent(type, data as never));
+			await Effect.runPromise(sink.push(makeEvent(type, data as never)));
 			expect(sent).toHaveLength(0);
 		});
 	}

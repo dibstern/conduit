@@ -17,7 +17,12 @@
 import type { Page } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import {
+	mockRelayWebSocket,
+	type WsMockControl,
+	type WsMockOptions,
+} from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -50,6 +55,28 @@ async function scrollTo(page: Page, scrollTop: number): Promise<void> {
 		if (el) el.scrollTop = st;
 	}, scrollTop);
 	await page.waitForTimeout(300);
+}
+
+async function mockRelayWithViewSessionRpc(
+	page: Page,
+	options: Omit<WsMockOptions, "onClientMessage">,
+	viewResponses: ReadonlyMap<string, readonly MockMessage[]>,
+): Promise<WsMockControl> {
+	let control!: WsMockControl;
+	await mockWsRpc(page, {
+		handlers: {
+			ViewSession: (params) => {
+				const sessionId = String(params["sessionId"] ?? "");
+				const messages = viewResponses.get(sessionId);
+				if (messages) {
+					for (const msg of messages) control.sendMessage(msg);
+				}
+				return { ok: true };
+			},
+		},
+	});
+	control = await mockRelayWebSocket(page, options);
+	return control;
 }
 
 /**
@@ -673,78 +700,84 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		// Session B: 20-turn conversation (loaded on switch)
 		const sessionBEvents = generateConversationEvents(20);
 
-		const _wsMock = await mockRelayWebSocket(page, {
-			initMessages: [
-				{
-					type: "session_switched",
-					id: "sess-switch-A",
-					events: sessionAEvents,
-				},
-				{ type: "status", status: "idle" },
-				{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
-				{ type: "client_count", count: 1 },
-				{
-					type: "session_list",
-					roots: true,
-					sessions: [
-						{
-							id: "sess-switch-A",
-							title: "Session A",
-							updatedAt: Date.now(),
-							messageCount: TURN_COUNT * 2,
-						},
-						{
-							id: "sess-switch-B",
-							title: "Session B",
-							updatedAt: Date.now() - 3600_000,
-							messageCount: 40,
-						},
-					],
-				},
-				{
-					type: "model_list",
-					providers: [
-						{
-							id: "anthropic",
-							name: "Anthropic",
-							configured: true,
-							models: [
-								{
-									id: "claude-sonnet-4",
-									name: "claude-sonnet-4",
-									provider: "anthropic",
-								},
-							],
-						},
-					],
-				},
-				{
-					type: "agent_list",
-					agents: [
-						{
-							id: "code",
-							name: "Code",
-							description: "General coding assistant",
-						},
-					],
-				},
-			],
-			responses: new Map(),
-			onClientMessage: (parsed, control) => {
-				// Respond to session switch requests
-				if (
-					parsed["type"] === "view_session" &&
-					parsed["sessionId"] === "sess-switch-B"
-				) {
-					control.sendMessage({
+		const _wsMock = await mockRelayWithViewSessionRpc(
+			page,
+			{
+				initMessages: [
+					{
 						type: "session_switched",
-						id: "sess-switch-B",
-						events: sessionBEvents,
-					});
-					control.sendMessage({ type: "status", status: "idle" });
-				}
+						id: "sess-switch-A",
+						events: sessionAEvents,
+					},
+					{ type: "status", status: "idle" },
+					{
+						type: "model_info",
+						model: "claude-sonnet-4",
+						provider: "anthropic",
+					},
+					{ type: "client_count", count: 1 },
+					{
+						type: "session_list",
+						roots: true,
+						sessions: [
+							{
+								id: "sess-switch-A",
+								title: "Session A",
+								updatedAt: Date.now(),
+								messageCount: TURN_COUNT * 2,
+							},
+							{
+								id: "sess-switch-B",
+								title: "Session B",
+								updatedAt: Date.now() - 3600_000,
+								messageCount: 40,
+							},
+						],
+					},
+					{
+						type: "model_list",
+						providers: [
+							{
+								id: "anthropic",
+								name: "Anthropic",
+								configured: true,
+								models: [
+									{
+										id: "claude-sonnet-4",
+										name: "claude-sonnet-4",
+										provider: "anthropic",
+									},
+								],
+							},
+						],
+					},
+					{
+						type: "agent_list",
+						agents: [
+							{
+								id: "code",
+								name: "Code",
+								description: "General coding assistant",
+							},
+						],
+					},
+				],
+				responses: new Map(),
 			},
-		});
+			new Map([
+				[
+					"sess-switch-B",
+					[
+						{
+							type: "session_switched",
+							id: "sess-switch-B",
+							events: sessionBEvents,
+						},
+						{ type: "status", status: "idle" },
+					],
+				],
+			]),
+		);
 
 		await page.goto(relayUrl);
 		await page.locator("#connect-overlay").waitFor({
@@ -1064,77 +1097,84 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		const sessionAEvents = generateConversationEvents(TURN_COUNT);
 		const sessionBEvents = generateConversationEvents(15);
 
-		const _wsMock = await mockRelayWebSocket(page, {
-			initMessages: [
-				{
-					type: "session_switched",
-					id: "sess-scrollup-A",
-					events: sessionAEvents,
-				},
-				{ type: "status", status: "idle" },
-				{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
-				{ type: "client_count", count: 1 },
-				{
-					type: "session_list",
-					roots: true,
-					sessions: [
-						{
-							id: "sess-scrollup-A",
-							title: "Session A (long)",
-							updatedAt: Date.now(),
-							messageCount: TURN_COUNT * 2,
-						},
-						{
-							id: "sess-scrollup-B",
-							title: "Session B (short)",
-							updatedAt: Date.now() - 3600_000,
-							messageCount: 30,
-						},
-					],
-				},
-				{
-					type: "model_list",
-					providers: [
-						{
-							id: "anthropic",
-							name: "Anthropic",
-							configured: true,
-							models: [
-								{
-									id: "claude-sonnet-4",
-									name: "claude-sonnet-4",
-									provider: "anthropic",
-								},
-							],
-						},
-					],
-				},
-				{
-					type: "agent_list",
-					agents: [
-						{
-							id: "code",
-							name: "Code",
-							description: "General coding assistant",
-						},
-					],
-				},
-			],
-			responses: new Map(),
-			onClientMessage: (parsed, control) => {
-				if (
-					parsed["type"] === "view_session" &&
-					parsed["sessionId"] === "sess-scrollup-B"
-				) {
-					control.sendMessage({
+		const _wsMock = await mockRelayWithViewSessionRpc(
+			page,
+			{
+				initMessages: [
+					{
 						type: "session_switched",
-						id: "sess-scrollup-B",
-						events: sessionBEvents,
-					});
-					control.sendMessage({ type: "status", status: "idle" });
-				}
+						id: "sess-scrollup-A",
+						events: sessionAEvents,
+					},
+					{ type: "status", status: "idle" },
+					{
+						type: "model_info",
+						model: "claude-sonnet-4",
+						provider: "anthropic",
+					},
+					{ type: "client_count", count: 1 },
+					{
+						type: "session_list",
+						roots: true,
+						sessions: [
+							{
+								id: "sess-scrollup-A",
+								title: "Session A (long)",
+								updatedAt: Date.now(),
+								messageCount: TURN_COUNT * 2,
+							},
+							{
+								id: "sess-scrollup-B",
+								title: "Session B (short)",
+								updatedAt: Date.now() - 3600_000,
+								messageCount: 30,
+							},
+						],
+					},
+					{
+						type: "model_list",
+						providers: [
+							{
+								id: "anthropic",
+								name: "Anthropic",
+								configured: true,
+								models: [
+									{
+										id: "claude-sonnet-4",
+										name: "claude-sonnet-4",
+										provider: "anthropic",
+									},
+								],
+							},
+						],
+					},
+					{
+						type: "agent_list",
+						agents: [
+							{
+								id: "code",
+								name: "Code",
+								description: "General coding assistant",
+							},
+						],
+					},
+				],
+				responses: new Map(),
 			},
-		});
+			new Map([
+				[
+					"sess-scrollup-B",
+					[
+						{
+							type: "session_switched",
+							id: "sess-scrollup-B",
+							events: sessionBEvents,
+						},
+						{ type: "status", status: "idle" },
+					],
+				],
+			]),
+		);
 
 		await page.goto(relayUrl);
 		await page.locator("#connect-overlay").waitFor({

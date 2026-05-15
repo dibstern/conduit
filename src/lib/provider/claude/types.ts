@@ -1,17 +1,19 @@
 // src/lib/provider/claude/types.ts
 /**
- * Types used by the Claude Agent SDK adapter.
+ * Types used by the Claude Agent SDK provider instance.
  *
  * The SDK's `query()` returns a long-lived session: you feed it an
  * AsyncIterable of user messages and read back an AsyncIterable of SDK
  * messages. One `query()` runs for the entire conduit session (not per turn).
- * sendTurn() enqueues into the prompt queue; a background consumer drains
+ * sendTurnEffect() enqueues into the prompt queue; a background consumer drains
  * the output stream and translates events for EventSink.
  *
  * SDK types are imported from `@anthropic-ai/claude-agent-sdk` and
  * re-exported for convenience. Conduit-specific types (session context,
  * pending approvals, tool tracking, etc.) are defined here.
  */
+
+import type { Effect } from "effect";
 import type { EventSink, PermissionDecision } from "../types.js";
 
 // ─── SDK Type Re-exports ──────────────────────────────────────────────────
@@ -76,22 +78,22 @@ export interface ClaudeResumeCursor {
 /**
  * An in-flight `canUseTool` callback waiting for a user decision. The
  * permission bridge creates one, emits permission.asked via EventSink, and
- * blocks by awaiting the deferred until the UI calls resolvePermission().
+ * blocks by awaiting the EventSink Effect until the UI calls resolvePermission().
  */
 export interface PendingApproval {
 	readonly requestId: string;
 	readonly toolName: string;
 	readonly toolInput: Record<string, unknown>;
 	readonly createdAt: string;
-	resolve(decision: PermissionDecision): void;
-	reject(error: Error): void;
+	resolve(decision: PermissionDecision): Effect.Effect<void, unknown>;
+	reject(error: Error): Effect.Effect<void, unknown>;
 }
 
 export interface PendingQuestion {
 	readonly requestId: string;
 	readonly createdAt: string;
-	resolve(answers: Record<string, unknown>): void;
-	reject(error: Error): void;
+	resolve(answers: Record<string, unknown>): Effect.Effect<void, unknown>;
+	reject(error: Error): Effect.Effect<void, unknown>;
 }
 
 // ─── Tool In Flight ────────────────────────────────────────────────────────
@@ -116,7 +118,7 @@ export interface ToolInFlight {
 // ─── Session Context ───────────────────────────────────────────────────────
 
 /**
- * All state for a single Claude session. Owned by ClaudeAdapter and keyed
+ * All state for a single Claude session. Owned by ClaudeProviderInstance and keyed
  * by conduit sessionId. One instance per live SDK `query()`.
  */
 export interface ClaudeSessionContext {
@@ -146,6 +148,6 @@ export interface ClaudeSessionContext {
  * here to decouple ClaudeSessionContext from the concrete class.
  */
 export interface PromptQueueController extends AsyncIterable<SDKUserMessage> {
-	enqueue(message: SDKUserMessage): void;
-	close(): void;
+	enqueue(message: SDKUserMessage): Effect.Effect<void>;
+	close(): Effect.Effect<void>;
 }

@@ -2,6 +2,12 @@
 // Pure functions for event processing. Each function does one thing and returns
 // data — no side effects. The caller composes them and executes side effects.
 
+import { Effect } from "effect";
+import {
+	clearProcessingTimeout,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
+} from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../shared-types.js";
 import { truncateToolResult as truncateToolResultImpl } from "./truncate-content.js";
@@ -133,14 +139,16 @@ export function resolveTimeout(
 // ─── Side-effect application ─────────────────────────────────────────────────
 
 /** Dependencies for applying pipeline side effects. */
+export interface ProcessingTimeoutsPort {
+	clearProcessingTimeout(sessionId: string): void;
+	resetProcessingTimeout(sessionId: string): void;
+}
+
 export interface PipelineDeps {
-	overrides: {
-		clearProcessingTimeout(sessionId: string): void;
-		resetProcessingTimeout(sessionId: string): void;
-	};
+	processingTimeouts: ProcessingTimeoutsPort;
 	/**
 	 * Phase 0b: per-session events are broadcast to every client on the
-	 * project's `/p/<slug>` regardless of `view_session` state. The
+	 * project's `/p/<slug>` regardless of per-tab viewed-session state. The
 	 * handler buffers events for clients still in bootstrap so that
 	 * `session_list` always arrives first — see
 	 * {@link WebSocketHandler.broadcastPerSessionEvent} and
@@ -157,8 +165,8 @@ export interface PipelineDeps {
  * This is the single place where pipeline decisions become actions.
  *
  * Under Phase 0b the {@link PipelineResult.route} field still reflects
- * viewer presence (`action: "send"` when at least one client called
- * `view_session` on the target session, `action: "drop"` otherwise).
+ * viewer presence (`action: "send"` when at least one client has bound to
+ * the target session, `action: "drop"` otherwise).
  * That signal drives downstream notification logic (cross-session
  * `notification_event` broadcasts fire only when no client is actively
  * viewing), but it no longer gates delivery: every per-session event is
@@ -170,9 +178,9 @@ export function applyPipelineResult(
 	deps: PipelineDeps,
 ): void {
 	if (result.timeout === "clear" && sessionId) {
-		deps.overrides.clearProcessingTimeout(sessionId);
+		deps.processingTimeouts.clearProcessingTimeout(sessionId);
 	} else if (result.timeout === "reset" && sessionId) {
-		deps.overrides.resetProcessingTimeout(sessionId);
+		deps.processingTimeouts.resetProcessingTimeout(sessionId);
 	}
 	// Phase 0b: always firehose to the project. The route field is retained
 	// as a "had-viewers?" signal for cross-session notification decisions.
@@ -184,6 +192,32 @@ export function applyPipelineResult(
 			`${result.route.reason} — ${result.msg.type} (${result.source})`,
 		);
 	}
+}
+
+export function applyPipelineResultEffect(
+	result: PipelineResult,
+	sessionId: string | undefined,
+	deps: Omit<PipelineDeps, "processingTimeouts">,
+) {
+	return Effect.gen(function* () {
+		if (result.timeout === "clear" && sessionId) {
+			yield* clearProcessingTimeout(sessionId);
+		} else if (result.timeout === "reset" && sessionId) {
+			yield* resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION);
+		}
+		yield* Effect.sync(() => {
+			// Phase 0b: always firehose to the project. The route field is retained
+			// as a "had-viewers?" signal for cross-session notification decisions.
+			if (sessionId) {
+				deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
+			}
+			if (result.route.action === "drop") {
+				deps.log.info(
+					`${result.route.reason} — ${result.msg.type} (${result.source})`,
+				);
+			}
+		});
+	});
 }
 
 // ─── Composed pipeline (convenience, still side-effect free) ─────────────────

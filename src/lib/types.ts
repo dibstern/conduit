@@ -2,8 +2,10 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
 import type { Logger } from "./logger.js";
-import type { PushNotificationManager } from "./server/push.js";
+import type { PushNotificationSender } from "./server/push.js";
 import type { PartType, PermissionId, ToolStatus } from "./shared-types.js";
+
+type MaybePromise<T> = T | PromiseLike<T>;
 
 // Re-export all shared types (shared between server and frontend)
 export type {
@@ -208,12 +210,14 @@ export interface ProjectRelayConfig {
 		callback: (result: boolean, code?: number, message?: string) => void,
 	) => void;
 	/** Return the relay's registered project list (for the project switcher). */
-	getProjects?: () => ReadonlyArray<{
-		slug: string;
-		title: string;
-		directory: string;
-		instanceId?: string;
-	}>;
+	getProjects?: () => MaybePromise<
+		ReadonlyArray<{
+			slug: string;
+			title: string;
+			directory: string;
+			instanceId?: string;
+		}>
+	>;
 	/** Remove a project from the registry. */
 	removeProject?: (slug: string) => void | Promise<void>;
 	/** Set a project's display title. */
@@ -229,27 +233,27 @@ export interface ProjectRelayConfig {
 		instanceId?: string;
 	}>;
 	/** Return the current list of OpenCode instances (for the instance switcher). */
-	getInstances?: () => ReadonlyArray<
-		Readonly<import("./shared-types.js").OpenCodeInstance>
+	getInstances?: () => MaybePromise<
+		ReadonlyArray<Readonly<import("./shared-types.js").OpenCodeInstance>>
 	>;
 	/** Add a new instance. Returns the created instance. */
 	addInstance?: (
 		id: string,
 		config: import("./shared-types.js").InstanceConfig,
-	) => import("./shared-types.js").OpenCodeInstance;
+	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Remove an instance by ID. */
-	removeInstance?: (id: string) => void;
+	removeInstance?: (id: string) => MaybePromise<void>;
 	/** Start a managed instance. */
 	startInstance?: (id: string) => Promise<void>;
 	/** Stop an instance. */
-	stopInstance?: (id: string) => void;
+	stopInstance?: (id: string) => MaybePromise<void>;
 	/** Update an instance's name, env, or port. */
 	updateInstance?: (
 		id: string,
 		updates: { name?: string; env?: Record<string, string>; port?: number },
-	) => import("./shared-types.js").OpenCodeInstance;
+	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Persist daemon config to disk after instance mutations. */
-	persistConfig?: () => void;
+	persistConfig?: () => MaybePromise<void>;
 	/** Change a project's instance binding and rebuild relay. */
 	setProjectInstance?: (
 		slug: string,
@@ -262,9 +266,9 @@ export interface ProjectRelayConfig {
 		active: number[];
 	}>;
 	/** Return cached update version if one is available (for replaying to new clients). */
-	getCachedUpdate?: () => string | null;
+	getCachedUpdate?: () => MaybePromise<string | null>;
 	/** Optional push notification manager for server-side push delivery */
-	pushManager?: PushNotificationManager;
+	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */
 	configDir?: string;
 	/**
@@ -293,6 +297,6 @@ export interface ProjectRelayConfig {
 	 * Default: 750ms. Tests can use a shorter interval for faster feedback.
 	 */
 	messagePollerInterval?: number;
-	/** Optional: shared PersistenceLayer for SQLite event store. */
-	persistence?: import("./persistence/persistence-layer.js").PersistenceLayer;
+	/** Optional: SQLite event-store path for Effect-native persistence services. */
+	persistenceDbPath?: string;
 }

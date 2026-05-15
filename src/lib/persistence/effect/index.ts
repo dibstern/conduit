@@ -2,6 +2,12 @@
 // Re-exports all Effect-based persistence services.
 
 export {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectError,
+	ClaudeEventPersistEffectTag,
+	makeClaudeEventPersistEffect,
+} from "./claude-event-persist-effect.js";
+export {
 	EventStoreEffect,
 	EventStoreEffectTag,
 	EventStoreError,
@@ -34,3 +40,16 @@ export {
 	type ProjectionContext,
 	ProjectionError,
 } from "./projectors-effect.js";
+export {
+	makeProviderStateEffect,
+	type ProviderStateEffect,
+	ProviderStateEffectError,
+	ProviderStateEffectTag,
+	type ProviderStateEffectUpdate,
+} from "./provider-state-effect.js";
+export {
+	makeReadQueryEffect,
+	type ReadQueryEffect,
+	ReadQueryEffectError,
+	ReadQueryEffectTag,
+} from "./read-query-effect.js";

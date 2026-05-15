@@ -34,57 +34,7 @@ const NUM_RUNS = 300;
 
 // ─── Generators ─────────────────────────────────────────────────────────────
 
-const validMessageTypes: IncomingMessageType[] = [
-	"message",
-	"permission_response",
-	"ask_user_response",
-	"question_reject",
-	"new_session",
-	"switch_session",
-	"view_session",
-	"delete_session",
-	"rename_session",
-	"fork_session",
-	"list_sessions",
-	"search_sessions",
-	"load_more_history",
-	"terminal_command",
-	"input_sync",
-	"switch_agent",
-	"switch_model",
-	"set_default_model",
-	"switch_variant",
-	"switch_context_window",
-	"get_todo",
-	"get_agents",
-	"get_models",
-	"get_commands",
-	"get_projects",
-	"add_project",
-	"list_directories",
-	"remove_project",
-	"rename_project",
-	"get_file_list",
-	"get_file_content",
-	"get_file_tree",
-	"get_tool_content",
-	"pty_create",
-	"pty_input",
-	"pty_resize",
-	"pty_close",
-	"cancel",
-	"rewind",
-	"instance_add",
-	"instance_remove",
-	"instance_start",
-	"instance_stop",
-	"instance_update",
-	"instance_rename",
-	"set_project_instance",
-	"proxy_detect",
-	"scan_now",
-	"reload_provider_session",
-];
+const validMessageTypes: IncomingMessageType[] = ["pty_input"];
 
 const arbValidMessageType: fc.Arbitrary<IncomingMessageType> = fc.constantFrom(
 	...validMessageTypes,
@@ -430,20 +380,20 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			const invalidResult = routeMessage({ type: "__definitely_not_valid__" });
 			expect(isRouteError(invalidResult)).toBe(true);
 
-			// Verify our test list has exactly the right number (49 routed types).
-			expect(validMessageTypes).toHaveLength(49);
+			// Verify our test list has exactly the right number of routed types.
+			expect(validMessageTypes).toHaveLength(1);
 
 			// Verify no duplicates
 			const uniqueTypes = new Set(validMessageTypes);
 			expect(uniqueTypes.size).toBe(validMessageTypes.length);
 		});
 
-		it("every handler in EFFECT_MESSAGE_HANDLERS is in our test list", () => {
+		it("every dispatch-table handler is routeable", () => {
 			// This catches the case where a new handler is added to production
-			// but the test list is not updated — the actual drift we want to detect.
-			const handlerKeys = Object.keys(EFFECT_MESSAGE_HANDLERS).sort();
-			const testKeys = [...validMessageTypes].sort();
-			expect(testKeys).toEqual(handlerKeys);
+			// but the routeable message list is not updated.
+			for (const handler of Object.keys(EFFECT_MESSAGE_HANDLERS)) {
+				expect(validMessageTypes).toContain(handler as IncomingMessageType);
+			}
 		});
 
 		it("every type that routes successfully is in our test list", () => {

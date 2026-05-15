@@ -1,32 +1,32 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
-import { makeInstanceManagerStateLive } from "../../../src/lib/effect/instance-manager-service.js";
-import { makePollerManagerStateLive } from "../../../src/lib/effect/message-poller.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { makePollerManagerStateLive } from "../../../src/lib/domain/relay/Services/message-poller.js";
 import {
 	PtyManagerStateLive,
 	PtyManagerStateTag,
-} from "../../../src/lib/effect/pty-manager-service.js";
+} from "../../../src/lib/domain/relay/Services/pty-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../../src/lib/effect/session-manager-state.js";
+} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	makeOverridesStateLive,
 	OverridesStateTag,
-} from "../../../src/lib/effect/session-overrides-state.js";
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	makeSessionRegistryStateLive,
 	SessionRegistryStateTag,
-} from "../../../src/lib/effect/session-registry-state.js";
+} from "../../../src/lib/domain/relay/Services/session-registry-state.js";
 import {
 	makePollerPubSubLive,
 	makePollerStateLive,
-} from "../../../src/lib/effect/session-status-poller.js";
+} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import {
 	makeWsHandlerStateLive,
 	WsHandlerStateTag,
-} from "../../../src/lib/effect/ws-handler-service.js";
+} from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 
 describe("Self-constructing service layers", () => {
 	const testLayer = Layer.mergeAll(

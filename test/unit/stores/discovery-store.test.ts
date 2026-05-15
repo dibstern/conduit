@@ -1,6 +1,7 @@
 // ─── Discovery Store Tests ───────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	applyGetModelsResponse,
 	discoveryState,
 	extractSlashQuery,
 	filterCommands,
@@ -16,6 +17,7 @@ import {
 	setActiveAgent,
 	setActiveModel,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type {
 	AgentInfo,
 	CommandInfo,
@@ -191,6 +193,46 @@ describe("handleModelList", () => {
 	it("ignores non-array providers", () => {
 		handleModelList(msg({ type: "model_list", providers: null }));
 		expect(discoveryState.providers).toHaveLength(0);
+	});
+});
+
+describe("applyGetModelsResponse", () => {
+	it("updates model discovery state from one RPC response", () => {
+		const response: GetModelsResponse = {
+			projectSlug: "project-a",
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{
+							id: "claude-sonnet",
+							name: "Claude Sonnet",
+							provider: "anthropic",
+						},
+					],
+				},
+			],
+			active: { model: "claude-sonnet", provider: "anthropic" },
+			variant: { variant: "careful", variants: ["fast", "careful"] },
+			contextWindow: {
+				contextWindow: "200k",
+				options: [{ value: "200k", label: "200K", isDefault: true }],
+			},
+		};
+
+		applyGetModelsResponse(response);
+
+		expect(discoveryState.providers).toHaveLength(1);
+		expect(discoveryState.currentModelId).toBe("claude-sonnet");
+		expect(discoveryState.currentProviderId).toBe("anthropic");
+		expect(discoveryState.currentVariant).toBe("careful");
+		expect(discoveryState.availableVariants).toEqual(["fast", "careful"]);
+		expect(discoveryState.currentContextWindow).toBe("200k");
+		expect(discoveryState.availableContextWindowOptions).toEqual([
+			{ value: "200k", label: "200K", isDefault: true },
+		]);
 	});
 });
 

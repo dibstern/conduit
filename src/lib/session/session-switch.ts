@@ -4,7 +4,7 @@
 // of constructing session_switched messages manually.
 
 import { isLastTurnActive } from "../event-classify.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
+import type { MessageWithParts } from "../persistence/read-model-types.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import type { HistoryMessage, RequestId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
@@ -59,7 +59,10 @@ export interface SessionSwitchDeps {
 			hasMore: boolean;
 			total?: number;
 		}>;
-		seedPaginationCursor(sessionId: string, messageId: string): void;
+		seedPaginationCursor(
+			sessionId: string,
+			messageId: string,
+		): void | Promise<void>;
 		getLastMessageAtMap?(): ReadonlyMap<string, number>;
 	};
 	readonly wsHandler: {
@@ -68,8 +71,8 @@ export interface SessionSwitchDeps {
 	};
 	readonly statusPoller?: { isProcessing(sessionId: string): boolean };
 	/** Check if a Claude SDK turn is in progress (processing timeout active). */
-	readonly overrides?: {
-		hasActiveProcessingTimeout(sessionId: string): boolean;
+	readonly processingTimeouts?: {
+		hasActiveProcessingTimeout(sessionId: string): boolean | Promise<boolean>;
 	};
 	readonly pollerManager?: {
 		isPolling(sessionId: string): boolean;
@@ -80,8 +83,9 @@ export interface SessionSwitchDeps {
 		warn(...args: unknown[]): void;
 	};
 	readonly getInputDraft: (sessionId: string) => string | undefined;
-	/** SQLite read query service (optional — absent when persistence is not configured). */
-	readonly readQuery?: ReadQueryService;
+	readonly resolveSessionHistory?: (
+		sessionId: string,
+	) => Promise<SessionHistorySource>;
 }
 
 // ─── Pure functions ─────────────────────────────────────────────────────────
@@ -161,12 +165,28 @@ export function patchMissingDone(
 	source: SessionHistorySource,
 	statusPoller: SessionSwitchDeps["statusPoller"],
 	sessionId: string,
-	overrides?: SessionSwitchDeps["overrides"],
+	processingTimeouts?: {
+		hasActiveProcessingTimeout(sessionId: string): boolean;
+	},
+): SessionHistorySource {
+	const sessionIsProcessing =
+		statusPoller?.isProcessing(sessionId) ||
+		processingTimeouts?.hasActiveProcessingTimeout(sessionId) ||
+		false;
+	return patchMissingDoneForProcessingState(
+		source,
+		sessionId,
+		sessionIsProcessing,
+	);
+}
+
+export function patchMissingDoneForProcessingState(
+	source: SessionHistorySource,
+	sessionId: string,
+	isProcessing: boolean,
 ): SessionHistorySource {
 	if (source.kind !== "cached-events") return source;
-	// F3 fix: widen guard to check both poller and processing timeout
-	if (statusPoller?.isProcessing(sessionId)) return source;
-	if (overrides?.hasActiveProcessingTimeout(sessionId)) return source;
+	if (isProcessing) return source;
 
 	if (!isLastTurnActive(source.events)) return source;
 
@@ -228,23 +248,12 @@ export function buildSessionSwitchedMessage(
 	}
 }
 
-// ─── SQLite history path ─────────────────────────────────────────────────────
+// ─── Projected history path ──────────────────────────────────────────────────
 
-/**
- * Resolve session history from the SQLite projection.
- * Synchronous — all data comes from the local database.
- *
- * Returns a `SessionHistorySource` compatible with `buildSessionSwitchedMessage()`.
- * Uses the same `"rest-history"` kind as the REST path so the frontend cannot
- * tell whether data came from REST or SQLite.
- */
-export function resolveSessionHistoryFromSqlite(
-	sessionId: string,
-	readQuery: ReadQueryService,
+export function resolveSessionHistoryFromRows(
+	rows: MessageWithParts[],
 	opts: { pageSize: number },
 ): SessionHistorySource {
-	const rows = readQuery.getSessionMessagesWithParts(sessionId);
-
 	if (rows.length === 0) {
 		return { kind: "empty" };
 	}
@@ -262,25 +271,29 @@ export function resolveSessionHistoryFromSqlite(
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
 /**
- * Resolve session history from SQLite or REST API.
+ * Resolve session history from the legacy REST API boundary.
  * Impure — may call REST.
  *
- * SQLite is the sole source of truth for history. When `readQuery` is
- * available (persistence configured), reads from SQLite synchronously.
- * Otherwise falls back to REST API via loadPreRenderedHistory.
+ * Effect-owned handler paths read SQLite through `ReadQueryEffectTag` before
+ * adapting rows with `resolveSessionHistoryFromRows`. This legacy helper keeps
+ * the remaining Promise-facing switch callers on their existing REST fallback
+ * without accepting a sync persistence bridge.
  */
 export async function resolveSessionHistory(
 	sessionId: string,
-	deps: Pick<SessionSwitchDeps, "sessionMgr" | "log" | "readQuery">,
+	deps: Pick<SessionSwitchDeps, "sessionMgr" | "log" | "resolveSessionHistory">,
 ): Promise<SessionHistorySource> {
-	// Read from SQLite when available (sole read path).
-	if (deps.readQuery) {
-		return resolveSessionHistoryFromSqlite(sessionId, deps.readQuery, {
-			pageSize: 50,
-		});
+	if (deps.resolveSessionHistory) {
+		try {
+			return await deps.resolveSessionHistory(sessionId);
+		} catch (err) {
+			deps.log.warn(
+				`Failed to load history for ${sessionId}: ${err instanceof Error ? err.message : err}`,
+			);
+			return { kind: "empty" };
+		}
 	}
 
-	// Fallback: REST API (persistence not configured)
 	try {
 		const history = await deps.sessionMgr.loadPreRenderedHistory(sessionId);
 		return { kind: "rest-history", history };
@@ -315,22 +328,31 @@ export async function switchClientToSession(
 	const source: SessionHistorySource = options?.skipHistory
 		? { kind: "empty" }
 		: await resolveSessionHistory(sessionId, deps);
+	const hasActiveTimeout =
+		(await deps.processingTimeouts?.hasActiveProcessingTimeout(sessionId)) ??
+		false;
 
 	// Patch missing done event for idle sessions served from cache
-	// F3 fix: pass overrides so the guard checks both poller and processing timeout
-	const patchedSource = patchMissingDone(
-		source,
-		deps.statusPoller,
-		sessionId,
-		deps.overrides,
-	);
+	// F3 fix: pass timeout state so the guard checks both poller and Claude SDK turns
+	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId, {
+		hasActiveProcessingTimeout: () => hasActiveTimeout,
+	});
 
-	// Seed pagination cursor only when the cache is incomplete (hasMore=true).
-	// Complete caches cover the full session — no server fallback needed.
+	// Seed pagination cursor only when the returned history is incomplete
+	// (hasMore=true). Complete histories cover the full session — no server
+	// fallback needed.
 	if (patchedSource.kind === "cached-events" && patchedSource.hasMore) {
 		const oldestMsgId = extractOldestMessageId(patchedSource.events);
 		if (oldestMsgId) {
-			deps.sessionMgr.seedPaginationCursor(sessionId, oldestMsgId);
+			await deps.sessionMgr.seedPaginationCursor(sessionId, oldestMsgId);
+		}
+	} else if (
+		patchedSource.kind === "rest-history" &&
+		patchedSource.history.hasMore
+	) {
+		const oldestMsgId = patchedSource.history.messages[0]?.id;
+		if (oldestMsgId) {
+			await deps.sessionMgr.seedPaginationCursor(sessionId, oldestMsgId);
 		}
 	}
 
@@ -344,8 +366,7 @@ export async function switchClientToSession(
 
 	// Send processing status — check both OpenCode poller and Claude SDK timeout
 	const isProcessing =
-		deps.statusPoller?.isProcessing(sessionId) ||
-		deps.overrides?.hasActiveProcessingTimeout(sessionId);
+		deps.statusPoller?.isProcessing(sessionId) || hasActiveTimeout;
 	deps.wsHandler.sendTo(clientId, {
 		type: "status",
 		sessionId,

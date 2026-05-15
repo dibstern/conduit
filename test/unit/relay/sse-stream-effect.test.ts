@@ -15,7 +15,7 @@ import { expect } from "vitest";
 import {
 	reconnectSchedule,
 	type SSEEvent,
-} from "../../../src/lib/effect/sse-stream.js";
+} from "../../../src/lib/domain/relay/Services/sse-stream.js";
 
 describe("SSE Stream Effect", () => {
 	it("reconnectSchedule has exponential backoff with jitter", () => {

@@ -8,19 +8,21 @@ import { Effect, Layer, Ref, type Scope } from "effect";
 import { expect } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import {
-	DaemonConfigRefLive,
-	DaemonConfigRefTag,
-	type DaemonRuntimeConfig,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import {
 	makeHttpServerLive,
 	makeOnboardingServerLive,
-} from "../../../src/lib/effect/daemon-layers.js";
+} from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { HttpServerRefLive } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
 	EnsureCertsTag,
 	TlsCertLive,
 	TlsCertTag,
-} from "../../../src/lib/effect/tls-cert-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/tls-cert-layer.js";
+import {
+	DaemonConfigRefLive,
+	DaemonConfigRefTag,
+	type DaemonRuntimeConfig,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonHttpRequestHandlerTag } from "../../../src/lib/domain/server/Layers/http-router-layer.js";
 import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
 const fixtureCerts = makeTestTlsCerts();
@@ -56,14 +58,16 @@ function makeContext(): DaemonLifecycleContext {
 		ipcClients: new Set(),
 		clientCount: 0,
 		socketPath: "/tmp/conduit-http-server-live.sock",
-		router: {
-			async handleRequest(_req, res) {
-				res.writeHead(200, { "Content-Type": "text/plain" });
-				res.end("ok");
-			},
-		},
+		router: null,
 	};
 }
+
+const TestRequestHandlerLive = Layer.succeed(DaemonHttpRequestHandlerTag, {
+	async handleRequest(_req, res) {
+		res.writeHead(200, { "Content-Type": "text/plain" });
+		res.end("ok");
+	},
+});
 
 function boundAddress(ctx: DaemonLifecycleContext): AddressInfo {
 	const addr = ctx.httpServer?.address();
@@ -148,6 +152,8 @@ describe("makeHttpServerLive", () => {
 		const testLayer = makeHttpServerLive(ctx).pipe(
 			Layer.provideMerge(configLayer),
 			Layer.provide(NullTlsLayer),
+			Layer.provide(HttpServerRefLive),
+			Layer.provide(TestRequestHandlerLive),
 		);
 
 		return Effect.sync(() => {
@@ -166,6 +172,8 @@ describe("makeHttpServerLive", () => {
 		const testLayer = makeHttpServerLive(ctx).pipe(
 			Layer.provideMerge(configLayer),
 			Layer.provide(NullTlsLayer),
+			Layer.provide(HttpServerRefLive),
+			Layer.provide(TestRequestHandlerLive),
 		);
 
 		return Effect.gen(function* () {
@@ -197,6 +205,8 @@ describe("makeHttpServerLive", () => {
 			const testLayer = makeHttpServerLive(ctx).pipe(
 				Layer.provideMerge(configLayer),
 				Layer.provide(tlsLayer),
+				Layer.provide(HttpServerRefLive),
+				Layer.provide(TestRequestHandlerLive),
 			);
 
 			return Effect.sync(() => {
@@ -226,6 +236,8 @@ describe("makeHttpServerLive", () => {
 			);
 			const testLayer = makeHttpServerLive(ctx).pipe(
 				Layer.provideMerge(tlsLayer),
+				Layer.provide(HttpServerRefLive),
+				Layer.provide(TestRequestHandlerLive),
 			);
 
 			return Effect.gen(function* () {
@@ -246,11 +258,10 @@ describe("makeOnboardingServerLive", () => {
 		return withStaticDir((staticDir) => {
 			const ctx = makeContext();
 			const configLayer = DaemonConfigRefLive(baseConfig);
-			const testLayer = makeOnboardingServerLive(ctx, {
-				staticDir,
-				caRootPath: null,
-				caCertDer: null,
-			}).pipe(Layer.provideMerge(configLayer), Layer.provide(NullTlsLayer));
+			const testLayer = makeOnboardingServerLive(ctx, staticDir).pipe(
+				Layer.provideMerge(configLayer),
+				Layer.provide(NullTlsLayer),
+			);
 
 			return Effect.sync(() => {
 				expect(ctx.onboardingServer).toBeNull();
@@ -268,11 +279,7 @@ describe("makeOnboardingServerLive", () => {
 					host: "127.0.0.1",
 					port: 0,
 				});
-				const testLayer = makeOnboardingServerLive(ctx, {
-					staticDir,
-					caRootPath: null,
-					caCertDer: null,
-				}).pipe(
+				const testLayer = makeOnboardingServerLive(ctx, staticDir).pipe(
 					Layer.provideMerge(configLayer),
 					Layer.provide(activeTlsLayer()),
 				);
@@ -298,11 +305,7 @@ describe("makeOnboardingServerLive", () => {
 				host: "127.0.0.1",
 				port: 0,
 			});
-			const testLayer = makeOnboardingServerLive(ctx, {
-				staticDir,
-				caRootPath: null,
-				caCertDer: null,
-			}).pipe(
+			const testLayer = makeOnboardingServerLive(ctx, staticDir).pipe(
 				Layer.provideMerge(configLayer),
 				Layer.provide(activeTlsLayer(caPayload)),
 			);
@@ -334,12 +337,12 @@ describe("makeOnboardingServerLive", () => {
 				const upstream = Layer.merge(configLayer, activeTlsLayer());
 				const httpLayer = makeHttpServerLive(ctx).pipe(
 					Layer.provideMerge(upstream),
+					Layer.provide(HttpServerRefLive),
+					Layer.provide(TestRequestHandlerLive),
 				);
-				const testLayer = makeOnboardingServerLive(ctx, {
-					staticDir,
-					caRootPath: null,
-					caCertDer: null,
-				}).pipe(Layer.provideMerge(httpLayer));
+				const testLayer = makeOnboardingServerLive(ctx, staticDir).pipe(
+					Layer.provideMerge(httpLayer),
+				);
 
 				return Effect.gen(function* () {
 					const mainPort = boundAddress(ctx).port;

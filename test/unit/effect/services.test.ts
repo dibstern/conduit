@@ -1,60 +1,41 @@
 import { describe, it } from "@effect/vitest";
 import { Context, Effect } from "effect";
 import { expect } from "vitest";
+import {
+	InstanceMgmtTag,
+	ProjectMgmtTag,
+} from "../../../src/lib/domain/daemon/Services/management-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 
 import {
-	ClaudeEventPersistTag,
 	// Per-request Tags
 	ClientIdTag,
 	ConfigTag,
 	ConnectPtyUpstreamTag,
-	ForkMetaTag,
-	// Daemon-only Tags
-	InstanceMgmtTag,
 	LoggerTag,
-	// Core Tags
-	OpenCodeAPITag,
+	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
 	PollerManagerTag,
-	ProjectMgmtTag,
-	ProviderStateServiceTag,
 	PtyManagerTag,
-	QuestionBridgeTag,
-	// Persistence extension Tags
-	ReadQueryTag,
-	ScanDepsTag,
-	SessionManagerTag,
-	SessionOverridesTag,
-	SessionRegistryTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
-} from "../../../src/lib/effect/services.js";
+} from "../../../src/lib/domain/relay/Services/services.js";
 
 // ─── Tag key uniqueness ────────────────────────────────────────────────────
 
 const ALL_TAGS = [
 	OpenCodeAPITag,
-	SessionManagerTag,
+	OpenCodeSettingsServiceTag,
 	WebSocketHandlerTag,
-	PermissionBridgeTag,
-	QuestionBridgeTag,
-	SessionOverridesTag,
 	PtyManagerTag,
 	ConfigTag,
 	LoggerTag,
 	StatusPollerTag,
-	SessionRegistryTag,
 	PollerManagerTag,
 	ConnectPtyUpstreamTag,
-	ForkMetaTag,
 	OrchestrationEngineTag,
-	ReadQueryTag,
-	ClaudeEventPersistTag,
-	ProviderStateServiceTag,
 	InstanceMgmtTag,
 	ProjectMgmtTag,
-	ScanDepsTag,
 	ClientIdTag,
 ] as const;
 
@@ -73,8 +54,8 @@ describe("Service Tags", () => {
 	});
 
 	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
-		// HandlerDeps has 21 fields (15 required + 6 optional) + 1 per-request (ClientId)
-		expect(ALL_TAGS.length).toBe(22);
+		// Bridge classes are no longer Effect services; count only active Tags.
+		expect(ALL_TAGS.length).toBe(13);
 	});
 
 	// ── Core Tags ────────────────────────────────────────────────────────────
@@ -83,24 +64,12 @@ describe("Service Tags", () => {
 		expect(OpenCodeAPITag.key).toBe("OpenCodeAPI");
 	});
 
-	it("SessionManager tag has correct key", () => {
-		expect(SessionManagerTag.key).toBe("SessionManager");
+	it("OpenCodeSettingsService tag has correct key", () => {
+		expect(OpenCodeSettingsServiceTag.key).toBe("OpenCodeSettingsService");
 	});
 
 	it("WebSocketHandler tag has correct key", () => {
 		expect(WebSocketHandlerTag.key).toBe("WebSocketHandler");
-	});
-
-	it("PermissionBridge tag has correct key", () => {
-		expect(PermissionBridgeTag.key).toBe("PermissionBridge");
-	});
-
-	it("QuestionBridge tag has correct key", () => {
-		expect(QuestionBridgeTag.key).toBe("QuestionBridge");
-	});
-
-	it("SessionOverrides tag has correct key", () => {
-		expect(SessionOverridesTag.key).toBe("SessionOverrides");
 	});
 
 	it("PtyManager tag has correct key", () => {
@@ -119,10 +88,6 @@ describe("Service Tags", () => {
 		expect(StatusPollerTag.key).toBe("StatusPoller");
 	});
 
-	it("SessionRegistry tag has correct key", () => {
-		expect(SessionRegistryTag.key).toBe("SessionRegistry");
-	});
-
 	it("PollerManager tag has correct key", () => {
 		expect(PollerManagerTag.key).toBe("PollerManager");
 	});
@@ -131,26 +96,8 @@ describe("Service Tags", () => {
 		expect(ConnectPtyUpstreamTag.key).toBe("ConnectPtyUpstream");
 	});
 
-	it("ForkMeta tag has correct key", () => {
-		expect(ForkMetaTag.key).toBe("ForkMeta");
-	});
-
 	it("OrchestrationEngine tag has correct key", () => {
 		expect(OrchestrationEngineTag.key).toBe("OrchestrationEngine");
-	});
-
-	// ── Persistence extension Tags ───────────────────────────────────────────
-
-	it("ReadQuery tag has correct key", () => {
-		expect(ReadQueryTag.key).toBe("ReadQuery");
-	});
-
-	it("ClaudeEventPersist tag has correct key", () => {
-		expect(ClaudeEventPersistTag.key).toBe("ClaudeEventPersist");
-	});
-
-	it("ProviderStateService tag has correct key", () => {
-		expect(ProviderStateServiceTag.key).toBe("ProviderStateService");
 	});
 
 	// ── Daemon-only Tags ─────────────────────────────────────────────────────
@@ -161,10 +108,6 @@ describe("Service Tags", () => {
 
 	it("ProjectMgmt tag has correct key", () => {
 		expect(ProjectMgmtTag.key).toBe("ProjectMgmt");
-	});
-
-	it("ScanDeps tag has correct key", () => {
-		expect(ScanDepsTag.key).toBe("ScanDeps");
 	});
 
 	// ── Per-request Tags ─────────────────────────────────────────────────────

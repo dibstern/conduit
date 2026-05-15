@@ -1,0 +1,159 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, it } from "@effect/vitest";
+import { Effect, Schema } from "effect";
+import { expect, vi } from "vitest";
+import {
+	handleDeleteSession,
+	handleNewSession,
+	handleViewSession,
+} from "../../../src/lib/handlers/session.js";
+import { RequestId } from "../../../src/lib/shared-types.js";
+import {
+	makeMockOpenCodeAPI,
+	makeMockSessionManagerService,
+	makeMockSessionManagerShape,
+	makeRecordingWebSocketHandler,
+	makeTestHandlerLayer,
+	type RecordedWebSocketCall,
+} from "../../helpers/mock-factories.js";
+
+const snapshotPath = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../snapshots/handlers/sessions.json",
+);
+
+const readSnapshots = (): Record<string, RecordedWebSocketCall[]> =>
+	JSON.parse(readFileSync(snapshotPath, "utf-8")) as Record<
+		string,
+		RecordedWebSocketCall[]
+	>;
+
+describe("session handler wire snapshots", () => {
+	it("keeps the ViewSession model metadata envelope stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const api = makeMockOpenCodeAPI();
+		vi.spyOn(api.session, "get").mockResolvedValue({
+			id: "session-1",
+			projectID: "project-1",
+			directory: "/tmp/project",
+			title: "Session 1",
+			version: "1.0.0",
+			time: { created: 0, updated: 0 },
+			modelID: "gpt-4",
+			providerID: "openai",
+		});
+		vi.spyOn(api.permission, "list").mockResolvedValue([]);
+		vi.spyOn(api.question, "list").mockResolvedValue([]);
+		const sessionMgr = makeMockSessionManagerShape({
+			loadPreRenderedHistory: vi.fn(async () => ({
+				messages: [],
+				hasMore: false,
+				total: 0,
+			})),
+			sendDualSessionLists: vi.fn(async () => undefined),
+		});
+
+		await Effect.runPromise(
+			handleViewSession("client-1", { sessionId: "session-1" }).pipe(
+				Effect.provide(makeTestHandlerLayer({ api, wsHandler, sessionMgr })),
+			),
+		);
+
+		const modelInfoCalls = calls.filter(
+			(call) => call.message.type === "model_info",
+		);
+		expect(modelInfoCalls).toEqual(
+			readSnapshots()["view_session_model_info_success"],
+		);
+	});
+
+	it("keeps the CreateSession switch and broadcast envelopes stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const requestId = Schema.decodeUnknownSync(RequestId)("req-1");
+		const sessionManagerService = makeMockSessionManagerService({
+			createSession: vi.fn(() =>
+				Effect.succeed({
+					id: "new-session",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "New Session",
+					version: "1.0.0",
+					time: { created: 300, updated: 300 },
+				}),
+			),
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "new-session",
+								title: "New Session",
+								updatedAt: 300,
+								messageCount: 0,
+							},
+						],
+						roots: true,
+					});
+					send({
+						type: "session_list",
+						sessions: [],
+						roots: false,
+					});
+				}),
+			),
+		});
+
+		await Effect.runPromise(
+			handleNewSession("client-1", { requestId }).pipe(
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["new_session_success"]);
+	});
+
+	it("keeps the DeleteSession deleted and broadcast envelopes stable", async () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler({
+			getClientsForSession: vi.fn(() => []),
+		});
+		const sessionManagerService = makeMockSessionManagerService({
+			deleteSession: vi.fn(() => Effect.void),
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() => {
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "remaining-session",
+								title: "Remaining Session",
+								updatedAt: 400,
+								messageCount: 1,
+							},
+						],
+						roots: true,
+					});
+					send({
+						type: "session_list",
+						sessions: [],
+						roots: false,
+					});
+				}),
+			),
+		});
+
+		await Effect.runPromise(
+			handleDeleteSession("client-1", { sessionId: "deleted-session" }).pipe(
+				Effect.provide(
+					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+				),
+			),
+		);
+
+		expect(calls).toEqual(readSnapshots()["delete_session_success"]);
+	});
+});

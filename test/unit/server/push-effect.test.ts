@@ -1,10 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { expect, vi } from "vitest";
 import {
 	PushManagerLive,
 	PushManagerTag,
-} from "../../../src/lib/effect/push-service.js";
+	PushNotificationManagerLive,
+} from "../../../src/lib/domain/server/Services/push-service.js";
 
 describe("Push Notifications Effect", () => {
 	it.scoped("subscribe adds subscription", () => {
@@ -60,4 +64,29 @@ describe("Push Notifications Effect", () => {
 			expect(mockSend).toHaveBeenCalledTimes(2);
 		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
 	});
+
+	it.scoped(
+		"daemon live layer exposes one initialized legacy-compatible sender",
+		() => {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-push-"));
+			return Effect.gen(function* () {
+				const push = yield* PushManagerTag;
+				const publicKey = yield* push.getPublicKey;
+				const legacy = yield* push.getLegacyManager;
+
+				expect(publicKey).toEqual(expect.any(String));
+				expect(Option.isSome(legacy)).toBe(true);
+				if (Option.isSome(legacy)) {
+					expect(legacy.value.getPublicKey()).toBe(publicKey);
+				}
+			}).pipe(
+				Effect.provide(PushNotificationManagerLive(configDir)),
+				Effect.ensuring(
+					Effect.sync(() =>
+						rmSync(configDir, { recursive: true, force: true }),
+					),
+				),
+			);
+		},
+	);
 });

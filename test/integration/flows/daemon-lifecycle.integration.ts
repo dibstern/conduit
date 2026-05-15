@@ -1,7 +1,7 @@
 /**
  * Integration test: Daemon start/stop lifecycle cleans up all async work.
  *
- * Starts a real daemon (via startDaemonProcess), stops it, and verifies
+ * Starts a real foreground daemon, stops it, and verifies
  * no lingering server/socket handles remain and the HTTP server is
  * unreachable. This is the end-to-end proof that the async lifecycle
  * refactor works: the process WILL exit after stop().
@@ -12,8 +12,10 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { setLogLevel } from "../../../src/lib/logger.js";
 
 // Suppress info-level log noise
@@ -39,7 +41,7 @@ async function httpStatus(url: string): Promise<number | string> {
 
 describe("Daemon lifecycle (real services, real timers)", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle | null = null;
+	let daemon: ForegroundDaemonHandle | null = null;
 
 	afterEach(async () => {
 		if (daemon) {
@@ -58,7 +60,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 	it("stop() closes HTTP server — no more connections accepted", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-lifecycle-"));
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -88,7 +90,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		const pidPath = join(tmpDir, "daemon.pid");
 		const socketPath = join(tmpDir, "relay.sock");
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath,
 			pidPath,
@@ -112,7 +114,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 	it("stop() with a registered project cleans up relay services too", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-lifecycle-"));
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),

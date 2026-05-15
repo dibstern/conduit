@@ -6,7 +6,7 @@ import {
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
 	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 
 describe("DaemonConfigRef", () => {
 	const defaults: DaemonRuntimeConfig = {

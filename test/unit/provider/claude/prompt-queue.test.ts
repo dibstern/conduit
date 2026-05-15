@@ -1,7 +1,15 @@
 // test/unit/provider/claude/prompt-queue.test.ts
+import { readFileSync } from "node:fs";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { EffectPromptQueue } from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
-import type { SDKUserMessage } from "../../../../src/lib/provider/claude/types.js";
+import {
+	EffectPromptQueueAlreadyIterating,
+	makeEffectPromptQueue,
+} from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
+import type {
+	PromptQueueController,
+	SDKUserMessage,
+} from "../../../../src/lib/provider/claude/types.js";
 
 function msg(text: string): SDKUserMessage {
 	return {
@@ -20,13 +28,48 @@ async function takeN<T>(iter: AsyncIterable<T>, n: number): Promise<T[]> {
 	return out;
 }
 
+async function makeQueue(): Promise<PromptQueueController> {
+	return Effect.runPromise(makeEffectPromptQueue());
+}
+
+async function enqueue(
+	queue: PromptQueueController,
+	message: SDKUserMessage,
+): Promise<void> {
+	await Effect.runPromise(queue.enqueue(message));
+}
+
+async function close(queue: PromptQueueController): Promise<void> {
+	await Effect.runPromise(queue.close());
+}
+
 describe("EffectPromptQueue", () => {
+	it("keeps producer operations free of local runtime bridges", () => {
+		const source = readFileSync(
+			"src/lib/provider/claude/effect-prompt-queue.ts",
+			"utf8",
+		);
+		expect(source).not.toMatch(/Effect\.run(?:Promise|Sync)/);
+	});
+
+	it("exposes Effect-returning producer operations", async () => {
+		const q = await makeQueue();
+
+		const enqueueEffect = q.enqueue(msg("effectful"));
+		expect(Effect.isEffect(enqueueEffect)).toBe(true);
+		await Effect.runPromise(enqueueEffect);
+
+		const closeEffect = q.close();
+		expect(Effect.isEffect(closeEffect)).toBe(true);
+		await Effect.runPromise(closeEffect);
+	});
+
 	it("yields messages in enqueue order", async () => {
-		const q = EffectPromptQueue.create();
-		q.enqueue(msg("one"));
-		q.enqueue(msg("two"));
-		q.enqueue(msg("three"));
-		q.close();
+		const q = await makeQueue();
+		await enqueue(q, msg("one"));
+		await enqueue(q, msg("two"));
+		await enqueue(q, msg("three"));
+		await close(q);
 
 		const items: SDKUserMessage[] = [];
 		for await (const m of q) items.push(m);
@@ -40,25 +83,25 @@ describe("EffectPromptQueue", () => {
 	});
 
 	it("blocks consumer until a message is enqueued", async () => {
-		const q = EffectPromptQueue.create();
+		const q = await makeQueue();
 		const consumerPromise = takeN(q, 1);
 
 		// Give the consumer a tick to start awaiting.
 		await new Promise((r) => setTimeout(r, 10));
 
-		q.enqueue(msg("hello"));
+		await enqueue(q, msg("hello"));
 		const items = await consumerPromise;
 		expect(items).toHaveLength(1);
 		expect(
 			(items[0]?.message.content as ReadonlyArray<{ text: string }>)[0]?.text,
 		).toBe("hello");
-		q.close();
+		await close(q);
 	});
 
 	it("terminates the iterator when close() is called", async () => {
-		const q = EffectPromptQueue.create();
-		q.enqueue(msg("only"));
-		q.close();
+		const q = await makeQueue();
+		await enqueue(q, msg("only"));
+		await close(q);
 
 		const items: SDKUserMessage[] = [];
 		for await (const m of q) items.push(m);
@@ -66,7 +109,7 @@ describe("EffectPromptQueue", () => {
 	});
 
 	it("close() unblocks a waiting consumer with an end-of-stream", async () => {
-		const q = EffectPromptQueue.create();
+		const q = await makeQueue();
 		const consumer = (async () => {
 			const items: SDKUserMessage[] = [];
 			for await (const m of q) items.push(m);
@@ -74,40 +117,51 @@ describe("EffectPromptQueue", () => {
 		})();
 
 		await new Promise((r) => setTimeout(r, 10));
-		q.close();
+		await close(q);
 
 		const items = await consumer;
 		expect(items).toEqual([]);
 	});
 
 	it("enqueue after close is a no-op", async () => {
-		const q = EffectPromptQueue.create();
-		q.close();
-		q.enqueue(msg("ignored"));
+		const q = await makeQueue();
+		await close(q);
+		await enqueue(q, msg("ignored"));
 		const items: SDKUserMessage[] = [];
 		for await (const m of q) items.push(m);
 		expect(items).toEqual([]);
 	});
 
-	it("throws on second iteration attempt (single-consumer guard)", () => {
-		const q = EffectPromptQueue.create();
+	it("throws on second iteration attempt (single-consumer guard)", async () => {
+		const q = await makeQueue();
 		q[Symbol.asyncIterator]();
-		expect(() => q[Symbol.asyncIterator]()).toThrow("single-consumer");
-		q.close();
+		let error: unknown;
+		try {
+			q[Symbol.asyncIterator]();
+		} catch (err) {
+			error = err;
+		}
+		expect(error).toBeInstanceOf(EffectPromptQueueAlreadyIterating);
+		expect(error).toMatchObject({
+			_tag: "EffectPromptQueueAlreadyIterating",
+			message:
+				"EffectPromptQueue is single-consumer. Cannot iterate more than once.",
+		});
+		await close(q);
 	});
 
-	it("close() is idempotent", () => {
-		const q = EffectPromptQueue.create();
-		q.close();
-		q.close(); // should not throw
+	it("close() is idempotent", async () => {
+		const q = await makeQueue();
+		await close(q);
+		await close(q); // should not throw
 	});
 
 	it("drains buffered messages before ending on close", async () => {
-		const q = EffectPromptQueue.create();
-		q.enqueue(msg("first"));
-		q.enqueue(msg("second"));
-		q.close();
-		q.enqueue(msg("ignored")); // after close
+		const q = await makeQueue();
+		await enqueue(q, msg("first"));
+		await enqueue(q, msg("second"));
+		await close(q);
+		await enqueue(q, msg("ignored")); // after close
 
 		const items: SDKUserMessage[] = [];
 		for await (const m of q) items.push(m);
@@ -115,7 +169,7 @@ describe("EffectPromptQueue", () => {
 	});
 
 	it("return() closes the queue and signals done", async () => {
-		const q = EffectPromptQueue.create();
+		const q = await makeQueue();
 		const iter = q[Symbol.asyncIterator]();
 		const result = await iter.return?.();
 		expect(result?.done).toBe(true);

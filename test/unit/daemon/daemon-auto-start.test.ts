@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock daemon-utils before importing startDaemonProcess
+// Mock daemon-utils before importing startForegroundDaemon
 vi.mock("../../../src/lib/daemon/daemon-utils.js", async (importOriginal) => {
 	const original =
 		await importOriginal<
@@ -25,8 +25,11 @@ import {
 	isOpencodeInstalled,
 	probeOpenCode,
 } from "../../../src/lib/daemon/daemon-utils.js";
-import type { DaemonHandle } from "../../../src/lib/effect/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/effect/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	OpenCodeUnavailableError,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);
@@ -47,7 +50,7 @@ function daemonOpts(tmpDir: string) {
 
 describe("daemon auto-start (probe-and-convert)", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle;
+	let daemon: ForegroundDaemonHandle;
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir();
@@ -66,7 +69,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 	it("keeps unmanaged when OpenCode is reachable", async () => {
 		mockProbe.mockResolvedValue(true);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
@@ -83,7 +86,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
@@ -99,19 +102,25 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		await expect(
-			startDaemonProcess({
-				...daemonOpts(tmpDir),
-				opencodeUrl: "http://localhost:4096",
-				smartDefault: true,
-			}),
-		).rejects.toThrow(/opencode.*not found/i);
+		const rejected = startForegroundDaemon({
+			...daemonOpts(tmpDir),
+			opencodeUrl: "http://localhost:4096",
+			smartDefault: true,
+		});
+
+		await expect(rejected).rejects.toBeInstanceOf(OpenCodeUnavailableError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "OpenCodeUnavailableError",
+			url: "http://localhost:4096",
+			port: 4096,
+		});
+		await expect(rejected).rejects.toThrow(/opencode.*not found/i);
 	});
 
 	it("skips probe-and-convert when smartDefault is false", async () => {
 		mockProbe.mockResolvedValue(false);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
@@ -130,20 +139,26 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		await expect(
-			startDaemonProcess({
-				...daemonOpts(tmpDir),
-				// No opencodeUrl — triggers the smart default path
-				smartDefault: true,
-			}),
-		).rejects.toThrow(/opencode.*not found/i);
+		const rejected = startForegroundDaemon({
+			...daemonOpts(tmpDir),
+			// No opencodeUrl — triggers the smart default path
+			smartDefault: true,
+		});
+
+		await expect(rejected).rejects.toBeInstanceOf(OpenCodeUnavailableError);
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "OpenCodeUnavailableError",
+			url: "http://localhost:4096",
+			port: 4096,
+		});
+		await expect(rejected).rejects.toThrow(/opencode.*not found/i);
 	});
 
 	it("preserves instance name during conversion", async () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,

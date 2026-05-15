@@ -7,18 +7,16 @@ import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
-import {
-	makeDaemonStateFromDisk,
-	makeRelayCacheLayer,
-} from "../../../src/lib/effect/daemon-layers.js";
+import { makeDaemonStateFromDisk } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
-} from "../../../src/lib/effect/daemon-state.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
+	makeRelayCacheLive,
 	type Relay,
 	RelayCacheTag,
-} from "../../../src/lib/effect/relay-cache.js";
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 // ─── In-memory test FileSystem ────────────────────────────────────────────────
 
@@ -108,10 +106,11 @@ describe("daemon-layers", () => {
 			expect(cache.invalidate).toBeTypeOf("function");
 		}).pipe(
 			Effect.provide(
-				makeRelayCacheLayer((slug) =>
+				makeRelayCacheLive((slug) =>
 					Effect.succeed({
 						slug,
 						wsHandler: { handleUpgrade: () => {} },
+						rpcWsHandler: { handleUpgrade: () => {} },
 						stop: () => {},
 					} satisfies Relay),
 				),

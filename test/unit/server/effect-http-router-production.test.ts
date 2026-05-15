@@ -6,8 +6,8 @@ import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
-import { StaticDirTag } from "../../../src/lib/effect/static-file-handler.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	effectRouterWithCors,
 	ProjectApiDelegateProvider,
@@ -55,9 +55,9 @@ function makeHandler(options?: {
 	const auth = options?.auth ?? new AuthManager();
 	const layer = Layer.mergeAll(
 		Layer.succeed(ProjectsProvider, {
-			getProjects: () => options?.projects ?? oneProject,
+			getProjects: () => Effect.succeed(options?.projects ?? oneProject),
 		}),
-		Layer.succeed(AuthManagerTag, auth),
+		makeAuthManagerLive(auth),
 		Layer.succeed(StaticDirTag, staticDir),
 		Layer.succeed(RemoveProjectProvider, {
 			removeProject: (slug: string) =>

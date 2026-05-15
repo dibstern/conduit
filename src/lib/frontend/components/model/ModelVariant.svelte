@@ -9,7 +9,9 @@
 		discoveryState,
 		getActiveModelVariants,
 	} from "../../stores/discovery.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { switchVariantRpc } from "../../transport/ws-rpc-client.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -40,9 +42,29 @@
 
 	function selectVariant(variant: string, e: MouseEvent) {
 		e.stopPropagation();
-		wsSend({ type: "switch_variant", variant });
-		discoveryState.currentVariant = variant;
+		switchVariant(variant);
 		variantDropdownOpen = false;
+	}
+
+	function switchVariant(variant: string) {
+		const previousVariant = discoveryState.currentVariant;
+		discoveryState.currentVariant = variant;
+		const projectSlug = getCurrentSlug();
+		const sessionId = sessionState.currentId;
+		if (projectSlug && sessionId) {
+			void switchVariantRpc({
+				projectSlug,
+				sessionId,
+				variant,
+			})
+				.then((response) => {
+					discoveryState.currentVariant = response.variant;
+					discoveryState.availableVariants = response.variants;
+				})
+				.catch(() => {
+					discoveryState.currentVariant = previousVariant;
+				});
+		}
 	}
 
 	function cycleVariant() {
@@ -52,8 +74,7 @@
 		const nextIdx = (currentIdx + 1) % cycle.length;
 		// biome-ignore lint/style/noNonNullAssertion: index is always valid (modulo cycle.length)
 		const next = cycle[nextIdx]!;
-		wsSend({ type: "switch_variant", variant: next });
-		discoveryState.currentVariant = next;
+		switchVariant(next);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

@@ -184,8 +184,10 @@ describe("buildSessionSwitchedMessage", () => {
 });
 
 function createMinimalDeps(
-	overrides?: Partial<Pick<SessionSwitchDeps, "sessionMgr" | "log">>,
-): Pick<SessionSwitchDeps, "sessionMgr" | "log"> {
+	overrides?: Partial<
+		Pick<SessionSwitchDeps, "sessionMgr" | "log" | "resolveSessionHistory">
+	>,
+): Pick<SessionSwitchDeps, "sessionMgr" | "log" | "resolveSessionHistory"> {
 	return {
 		sessionMgr: {
 			loadPreRenderedHistory: vi.fn().mockResolvedValue({
@@ -333,6 +335,34 @@ describe("resolveSessionHistory", () => {
 		}
 	});
 
+	it("uses the service-owned history resolver when provided", async () => {
+		const history = {
+			messages: [{ id: "m1", role: "user" as const }],
+			hasMore: false,
+		};
+		const loadPreRenderedHistory = vi.fn().mockResolvedValue({
+			messages: [],
+			hasMore: false,
+		});
+		const serviceResolver = vi.fn().mockResolvedValue({
+			kind: "rest-history",
+			history,
+		});
+		const deps = createMinimalDeps({
+			sessionMgr: {
+				loadPreRenderedHistory,
+				seedPaginationCursor: vi.fn(),
+			},
+			resolveSessionHistory: serviceResolver,
+		});
+
+		const result = await resolveSessionHistory("ses_2", deps);
+
+		expect(serviceResolver).toHaveBeenCalledWith("ses_2");
+		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+		expect(result).toEqual({ kind: "rest-history", history });
+	});
+
 	it("returns empty when REST API fails", async () => {
 		const deps = createMinimalDeps({
 			sessionMgr: {
@@ -416,10 +446,11 @@ describe("switchClientToSession", () => {
 			messages: [{ id: "m1", role: "user" as const }],
 			hasMore: true,
 		};
+		const seedPaginationCursor = vi.fn();
 		const deps = createFullDeps({
 			sessionMgr: {
 				loadPreRenderedHistory: vi.fn().mockResolvedValue(history),
-				seedPaginationCursor: vi.fn(),
+				seedPaginationCursor,
 			},
 		});
 		await switchClientToSession(deps, "c1", "ses_2");
@@ -432,6 +463,7 @@ describe("switchClientToSession", () => {
 			messages: history.messages,
 			hasMore: true,
 		});
+		expect(seedPaginationCursor).toHaveBeenCalledWith("ses_2", "m1");
 	});
 
 	it("sends session_switched with empty payload when REST fails", async () => {

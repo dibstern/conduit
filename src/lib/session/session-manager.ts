@@ -13,10 +13,9 @@ import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
-import type { ReadQueryService } from "../persistence/read-query-service.js";
-import { sessionRowsToSessionInfoList } from "../persistence/session-list-adapter.js";
 import type { HistoryMessage } from "../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
+import { toSessionInfoList } from "./session-info-list.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -32,8 +31,6 @@ export interface SessionManagerOptions {
 	getStatuses?: () => Record<string, SessionStatus>;
 	/** Config directory for fork metadata persistence */
 	configDir?: string;
-	/** SQLite read query service (optional — absent when persistence is not configured) */
-	readQuery?: ReadQueryService;
 }
 
 export interface SessionManagerEvents {
@@ -64,7 +61,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly directory: string | undefined;
 	private readonly getStatuses: (() => Record<string, SessionStatus>) | null;
 	private readonly configDir: string | undefined;
-	private readonly readQuery: ReadQueryService | undefined;
 
 	/**
 	 * Cached child→parent map built from the most recent session list fetch.
@@ -115,7 +111,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.directory = options.directory;
 		this.getStatuses = options.getStatuses ?? null;
 		this.configDir = options.configDir;
-		this.readQuery = options.readQuery;
 		this.forkMeta = loadForkMetadata(options.configDir);
 	}
 
@@ -152,33 +147,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		statuses?: Record<string, SessionStatus> | undefined;
 		roots?: boolean;
 	}): Promise<SessionInfo[]> {
-		// SQLite is the sole read path when persistence is configured.
-		if (this.readQuery) {
-			const sqOpts =
-				options?.roots !== undefined ? { roots: options.roots } : undefined;
-			const rows = this.readQuery.listSessions(sqOpts);
-			const resolvedStatuses = options?.statuses ?? this.getStatuses?.();
-			const sqliteResult = sessionRowsToSessionInfoList(rows, {
-				...(resolvedStatuses !== undefined
-					? { statuses: resolvedStatuses }
-					: {}),
-				pendingQuestionCounts: this.pendingQuestionCounts,
-			});
-
-			// Update side-effect state from SQLite rows
-			if (!options?.roots) {
-				this._lastKnownSessionCount = sqliteResult.length;
-				this.cachedParentMap = new Map<string, string>();
-				for (const row of rows) {
-					if (row.parent_id) {
-						this.cachedParentMap.set(row.id, row.parent_id);
-					}
-				}
-			}
-
-			return sqliteResult;
-		}
-
 		const clientOpts =
 			options?.roots !== undefined ? { roots: options.roots } : undefined;
 		const sessions = await this.client.session.list(clientOpts);
@@ -202,7 +170,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 		// Use explicit statuses if provided, otherwise fall back to injected getter.
 		// This ensures processing flags are always included, even when callers
-		// (e.g. broadcastSessionList, handleListSessions) don't pass statuses.
+		// (e.g. broadcastSessionList) don't pass statuses.
 		const resolvedStatuses = options?.statuses ?? this.getStatuses?.();
 		this.log.verbose(
 			`listSessions: directory=${this.directory ?? "none"} roots=${options?.roots ?? "all"} returned=${sessions.length} ids=[${sessions
@@ -234,7 +202,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 * When a session is served via cached SSE events (not REST history),
 	 * no initial loadHistory() call occurs so no cursor is set. This method
 	 * pre-seeds the cursor from the oldest messageId found in the events so
-	 * that subsequent load_more_history requests can paginate correctly.
+	 * that subsequent LoadMoreHistory RPC requests can paginate correctly.
 	 *
 	 * Only seeds if no cursor already exists (avoids overwriting a cursor
 	 * from a client that has already paginated further back).
@@ -501,17 +469,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 	/** Look up fork-point metadata for a session. Returns undefined if not a fork. */
 	getForkEntry(sessionId: string): ForkEntry | undefined {
-		// SQLite is the sole read path when persistence is configured.
-		if (this.readQuery) {
-			const meta = this.readQuery.getForkMetadata(sessionId);
-			if (meta) {
-				return {
-					forkMessageId: meta.forkPointEvent ?? "",
-					parentID: meta.parentId,
-				};
-			}
-			// Fall through to in-memory on SQLite miss
-		}
 		return this.forkMeta.get(sessionId);
 	}
 
@@ -589,58 +546,4 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				this.log.warn(`Background all-sessions broadcast failed: ${err}`);
 			});
 	}
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Convert OpenCode SessionDetail[] → sorted SessionInfo[] for the frontend.
- *
- * Sorting priority: last message timestamp (from lastMessageAt map),
- * falling back to session creation time for sessions with no messages.
- * This ensures sessions are ordered by actual conversation activity,
- * not by metadata updates (renames, etc.).
- */
-function toSessionInfoList(
-	sessions: SessionDetail[],
-	statuses?: Record<string, SessionStatus>,
-	lastMessageAt?: ReadonlyMap<string, number>,
-	forkMeta?: ReadonlyMap<string, ForkEntry>,
-	pendingQuestionCounts?: ReadonlyMap<string, number>,
-): SessionInfo[] {
-	return sessions
-		.map((s) => {
-			// For display: use last message time if available, otherwise creation time
-			const lastMsgTime = lastMessageAt?.get(s.id);
-			const displayTime = lastMsgTime ?? s.time?.created ?? 0;
-
-			const forkEntry = forkMeta?.get(s.id);
-			// parentID: prefer OpenCode's value, fall back to conduit's fork metadata
-			// (OpenCode does not set parentID on user-initiated forks, only on subagent sessions)
-			const parentID = s.parentID ?? forkEntry?.parentID;
-
-			const info: SessionInfo = {
-				id: s.id,
-				title: s.title ?? "Untitled",
-				updatedAt: displayTime,
-				messageCount: 0, // OpenCode doesn't include this in list; frontend can fetch if needed
-				...(parentID != null && { parentID }),
-				...(forkEntry != null && { forkMessageId: forkEntry.forkMessageId }),
-				...(forkEntry?.forkPointTimestamp != null && {
-					forkPointTimestamp: forkEntry.forkPointTimestamp,
-				}),
-			};
-			if (statuses) {
-				const status = statuses[s.id];
-				if (status && (status.type === "busy" || status.type === "retry")) {
-					info.processing = true;
-				}
-			}
-			const qCount = pendingQuestionCounts?.get(s.id);
-			if (qCount != null && qCount > 0) {
-				info.pendingQuestionCount = qCount;
-			}
-			return info;
-		})
-		.sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number));
 }

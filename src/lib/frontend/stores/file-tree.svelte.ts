@@ -2,6 +2,8 @@
 // Background-preloaded file tree for @ autocomplete.
 // Pure filtering functions + reactive state.
 
+import type { GetFileTreeResponse } from "../transport/ws-rpc.js";
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface AtQuery {
@@ -88,6 +90,10 @@ export function handleFileTree(msg: {
 		fileTreeState.loaded = true;
 		fileTreeState.loading = false;
 	}
+}
+
+export function applyGetFileTreeResponse(response: GetFileTreeResponse): void {
+	handleFileTree({ type: "file_tree", entries: response.entries });
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────

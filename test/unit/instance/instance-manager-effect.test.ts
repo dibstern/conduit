@@ -2,12 +2,17 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	addInstance,
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 	removeInstance,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+
+const testLayer = makeInstanceManagerStateLive().pipe(
+	Layer.provideMerge(ConfigPersistenceNoopLive),
+);
 
 describe("InstanceManager Effect", () => {
 	it.scoped("addInstance registers instance in state", () =>
@@ -21,7 +26,7 @@ describe("InstanceManager Effect", () => {
 			const ref = yield* InstanceManagerStateTag;
 			const state = yield* Ref.get(ref);
 			expect(HashMap.has(state.instances, "inst-1")).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(makeInstanceManagerStateLive()))),
+		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
 	it.scoped("removeInstance clears instance from state", () =>
@@ -36,7 +41,7 @@ describe("InstanceManager Effect", () => {
 			const ref = yield* InstanceManagerStateTag;
 			const state = yield* Ref.get(ref);
 			expect(HashMap.has(state.instances, "inst-1")).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(makeInstanceManagerStateLive()))),
+		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
 	it.scoped("enforces max instance limit", () =>
@@ -54,7 +59,7 @@ describe("InstanceManager Effect", () => {
 				}),
 			);
 			expect(Exit.isFailure(exit)).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(makeInstanceManagerStateLive()))),
+		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
 	it.scoped("add-remove-add at max instances succeeds", () =>
@@ -77,7 +82,7 @@ describe("InstanceManager Effect", () => {
 			const ref = yield* InstanceManagerStateTag;
 			const state = yield* Ref.get(ref);
 			expect(HashMap.size(state.instances)).toBe(5);
-		}).pipe(Effect.provide(Layer.fresh(makeInstanceManagerStateLive()))),
+		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
 	it.scoped("max instance error has correct tag for catchTag", () =>
@@ -97,6 +102,6 @@ describe("InstanceManager Effect", () => {
 				),
 			);
 			expect(result).toBe("caught: max=5");
-		}).pipe(Effect.provide(Layer.fresh(makeInstanceManagerStateLive()))),
+		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });

@@ -2,25 +2,31 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue } from "effect";
 import { expect } from "vitest";
 import {
+	ConfigPersistenceNoopLive,
+	ConfigPersistenceTag,
+} from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type AddInstanceInput,
 	addInstance,
 	getExternalUrl,
 	getInstance,
 	getInstanceUrl,
+	getPersistedInstanceConfigs,
 	makeInstanceManagerStateLive,
 	persistConfig,
 	startInstance,
 	stopInstance,
 	updateInstance,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 
 // Shared test layer: InstanceManagerState + PollerFibers + DaemonEventBus
 const testLayer = makeInstanceManagerStateLive().pipe(
 	Layer.provideMerge(DaemonEventBusLive),
+	Layer.provideMerge(ConfigPersistenceNoopLive),
 );
 
 const sampleInput: AddInstanceInput = {
@@ -43,6 +49,35 @@ describe("InstanceManager — missing methods", () => {
 				expect(result.restartCount).toBe(0);
 				expect(typeof result.createdAt).toBe("number");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
+		);
+
+		it.scoped(
+			"rejects duplicate IDs without leaking the previous external URL",
+			() =>
+				Effect.gen(function* () {
+					yield* addInstance({
+						id: "remote-1",
+						name: "Remote Instance",
+						port: 4096,
+						managed: false,
+						url: "https://opencode.example.test",
+					});
+
+					const result = yield* addInstance({
+						id: "remote-1",
+						name: "Replacement",
+						port: 5000,
+						managed: true,
+					}).pipe(
+						Effect.catchTag("InstanceAlreadyExists", (e) =>
+							Effect.succeed(`duplicate: ${e.id}`),
+						),
+					);
+
+					expect(result).toBe("duplicate: remote-1");
+					const url = yield* getInstanceUrl("remote-1");
+					expect(url).toBe("https://opencode.example.test");
+				}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 	});
 
@@ -133,14 +168,36 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("persistConfig", () => {
-		it.scoped("publishes ConfigChanged event", () =>
+		it.scoped("requests config persistence", () => {
+			let requests = 0;
+			const trackingPersistence = Layer.succeed(ConfigPersistenceTag, {
+				requestSave: Effect.sync(() => {
+					requests += 1;
+				}),
+				flush: Effect.void,
+			});
+			const layer = makeInstanceManagerStateLive().pipe(
+				Layer.provideMerge(DaemonEventBusLive),
+				Layer.provideMerge(trackingPersistence),
+			);
+			return Effect.gen(function* () {
+				yield* persistConfig;
+
+				expect(requests).toBe(1);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		});
+	});
+
+	describe("legacy event bus", () => {
+		it.scoped("still publishes status events through the daemon bus", () =>
 			Effect.gen(function* () {
 				const sub = yield* subscribeToDaemonEvents;
 
-				yield* persistConfig;
+				yield* addInstance(sampleInput);
+				yield* startInstance("inst-1");
 
 				const event = yield* Queue.take(sub);
-				expect(event._tag).toBe("ConfigChanged");
+				expect(event._tag).toBe("InstanceStatusChanged");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 	});
@@ -164,6 +221,46 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("getInstanceUrl", () => {
+		it.scoped("returns configured external URL for unmanaged instances", () =>
+			Effect.gen(function* () {
+				yield* addInstance({
+					id: "remote-1",
+					name: "Remote Instance",
+					port: 4096,
+					managed: false,
+					url: "https://opencode.example.test",
+				});
+
+				const url = yield* getInstanceUrl("remote-1");
+				expect(url).toBe("https://opencode.example.test");
+			}).pipe(Effect.provide(Layer.fresh(testLayer))),
+		);
+
+		it.scoped(
+			"includes configured external URL in persisted instance config",
+			() =>
+				Effect.gen(function* () {
+					yield* addInstance({
+						id: "remote-1",
+						name: "Remote Instance",
+						port: 4096,
+						managed: false,
+						url: "https://opencode.example.test",
+					});
+
+					const configs = yield* getPersistedInstanceConfigs;
+					expect(configs).toEqual([
+						{
+							id: "remote-1",
+							name: "Remote Instance",
+							port: 4096,
+							managed: false,
+							url: "https://opencode.example.test",
+						},
+					]);
+				}).pipe(Effect.provide(Layer.fresh(testLayer))),
+		);
+
 		it.scoped("returns localhost URL with instance port", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);

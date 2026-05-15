@@ -492,7 +492,7 @@ describe("Ticket 3.2 — IPC Protocol PBT", () => {
 	});
 
 	describe("slug generation sanitization", () => {
-		// Tests the pattern used in daemon-ipc.ts instanceAdd
+		// Tests the pattern used by InstanceAdd IPC handlers.
 		function slugify(name: string): string {
 			return (
 				name

@@ -21,8 +21,11 @@
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { cancelSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
@@ -126,6 +129,18 @@
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
 
+	function syncInputDraft(text: string) {
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!sessionId || !projectSlug) return;
+		void syncInputDraftRpc({
+			projectSlug,
+			sessionId,
+			text,
+			originId: getBrowserClientId(),
+		}).catch(() => undefined);
+	}
+
 	function handleInput() {
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
@@ -136,7 +151,7 @@
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
 		inputSyncTimer = setTimeout(() => {
 			inputSyncTimer = null;
-			wsSend({ type: "input_sync", text: inputText });
+			syncInputDraft(inputText);
 		}, 300);
 	}
 
@@ -226,11 +241,26 @@
 		// When the LLM is processing, `sentDuringEpoch` is recorded so the
 		// UI can derive the "Queued" shimmer reactively.
 		const sid = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!sid || !projectSlug) {
+			showToast("No active session", { variant: "error" });
+			return;
+		}
 		if (sid) {
 			const { activity, messages } = getOrCreateSessionSlot(sid);
 			addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
 		}
-		wsSend({ type: "message", text: messageText, ...(imageUrls && { images: imageUrls }) });
+		rateLimitChatSend(() => {
+			void sendMessageRpc({
+				projectSlug,
+				sessionId: sid,
+				text: messageText,
+				...(imageUrls ? { images: imageUrls } : {}),
+				originId: getBrowserClientId(),
+			}).catch(() => {
+				showToast("Failed to send message", { variant: "error" });
+			});
+		});
 
 		// Clear pending images
 		pendingImages = [];
@@ -247,14 +277,19 @@
 			clearTimeout(inputSyncTimer);
 			inputSyncTimer = null;
 		}
-		wsSend({ type: "input_sync", text: "" });
+		syncInputDraft("");
 		if (textareaEl) {
 			textareaEl.style.height = "auto";
 		}
 	}
 
 	function handleStop() {
-		wsSend({ type: "cancel" });
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!sessionId || !projectSlug) return;
+		void cancelSessionRpc({ projectSlug, sessionId }).catch(() => {
+			showToast("Failed to stop session", { variant: "error" });
+		});
 	}
 
 	function handleSendClick() {

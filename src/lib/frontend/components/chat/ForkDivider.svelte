@@ -3,7 +3,7 @@
 <!-- Clicking the parent title navigates to the parent session. -->
 
 <script lang="ts">
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { switchToSession } from "../../stores/session.svelte.js";
 
 	interface Props {
 		parentTitle: string;
@@ -13,7 +13,7 @@
 	let { parentTitle, parentId }: Props = $props();
 
 	function navigateToParent() {
-		wsSend({ type: "switch_session", sessionId: parentId });
+		switchToSession(parentId);
 	}
 </script>
 

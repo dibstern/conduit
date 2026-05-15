@@ -705,12 +705,6 @@ const ProjectListSchema = Schema.Struct({
 	addedSlug: Schema.optional(Schema.String),
 });
 
-const DirectoryListSchema = Schema.Struct({
-	type: Schema.Literal("directory_list"),
-	path: Schema.String,
-	entries: Schema.Array(Schema.String),
-});
-
 // ── File browser ───────────────────────────────────────────────────────
 const FileListSchema = Schema.Struct({
 	type: Schema.Literal("file_list"),
@@ -841,6 +835,7 @@ const UserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user_message"),
 	sessionId: Schema.String,
 	text: Schema.String,
+	originId: Schema.optional(Schema.String),
 });
 
 // ── Session deletion ──────────────────────────────────────────────────
@@ -984,7 +979,6 @@ export const RelayMessageSchema = Schema.Union(
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
-	DirectoryListSchema,
 	// File browser
 	FileListSchema,
 	FileContentSchema,
@@ -1037,6 +1031,90 @@ export const RelayMessageSchema = Schema.Union(
 	ScanResultSchema,
 	// Cross-session notifications
 	NotificationEventSchema,
+);
+
+export const RELAY_MESSAGE_TYPES = [
+	"delta",
+	"thinking_start",
+	"thinking_delta",
+	"thinking_stop",
+	"tool_start",
+	"tool_executing",
+	"tool_result",
+	"tool_content",
+	"permission_request",
+	"permission_resolved",
+	"ask_user",
+	"ask_user_resolved",
+	"ask_user_error",
+	"result",
+	"status",
+	"done",
+	"session_switched",
+	"session_list",
+	"session_forked",
+	"history_page",
+	"model_info",
+	"default_model_info",
+	"model_list",
+	"agent_list",
+	"command_list",
+	"project_list",
+	"file_list",
+	"file_content",
+	"file_tree",
+	"file_changed",
+	"part_removed",
+	"message_removed",
+	"pty_created",
+	"pty_output",
+	"pty_exited",
+	"pty_deleted",
+	"pty_list",
+	"todo_state",
+	"connection_status",
+	"plan_enter",
+	"plan_exit",
+	"plan_content",
+	"plan_approval",
+	"skip_permissions",
+	"banner",
+	"file_history_result",
+	"rewind_result",
+	"user_message",
+	"session_deleted",
+	"error",
+	"system_error",
+	"client_count",
+	"input_sync",
+	"update_available",
+	"instance_list",
+	"instance_status",
+	"instance_update",
+	"provider_session_reloaded",
+	"variant_info",
+	"context_window_info",
+	"proxy_detected",
+	"scan_result",
+	"notification_event",
+] as const satisfies readonly RelayMessage["type"][];
+
+type MissingRelayMessageType = Exclude<
+	RelayMessage["type"],
+	(typeof RELAY_MESSAGE_TYPES)[number]
+>;
+type ExtraRelayMessageType = Exclude<
+	(typeof RELAY_MESSAGE_TYPES)[number],
+	RelayMessage["type"]
+>;
+type AssertNever<T extends never> = T;
+type _RelayMessageTypesIncludeAllRelayMessages =
+	AssertNever<MissingRelayMessageType>;
+type _RelayMessageTypesContainOnlyRelayMessages =
+	AssertNever<ExtraRelayMessageType>;
+
+export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
+	RELAY_MESSAGE_TYPES,
 );
 
 // ─── Relay WebSocket messages ───────────────────────────────────────────────
@@ -1129,7 +1207,7 @@ export type RelayMessage =
 			type: "session_switched";
 			id: string;
 			sessionId: string;
-			/** Correlation ID echoed from new_session request. */
+			/** Correlation ID echoed from CreateSession request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */
 			events?: RelayMessage[];
@@ -1182,7 +1260,6 @@ export type RelayMessage =
 			current?: string;
 			addedSlug?: string;
 	  }
-	| { type: "directory_list"; path: string; entries: string[] }
 	// ── File browser ───────────────────────────────────────────────────────
 	| { type: "file_list"; path: string; entries: FileEntry[] }
 	| { type: "file_content"; path: string; content: string; binary?: boolean }
@@ -1230,7 +1307,7 @@ export type RelayMessage =
 	| { type: "file_history_result"; path: string; versions: FileVersion[] }
 	| { type: "rewind_result"; mode: string }
 	// ── Cache / Replay ────────────────────────────────────────────────────
-	| { type: "user_message"; sessionId: string; text: string }
+	| { type: "user_message"; sessionId: string; text: string; originId?: string }
 	// ── Session deletion ──────────────────────────────────────────────────
 	| { type: "session_deleted"; sessionId: string }
 	// ── Misc ────────────────────────────────────────────────────────────────

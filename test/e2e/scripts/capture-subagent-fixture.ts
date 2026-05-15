@@ -229,8 +229,8 @@ async function main(): Promise<void> {
 
 	// 2. Find a child session whose parent is idle AND whose session ID
 	// appears in the parent's Task tool metadata. The subagent E2E test
-	// clicks a .subagent-link and expects the child's session ID in the
-	// switch_session message, so the fixture must have a matching pair.
+	// clicks a .subagent-link and expects a ViewSession RPC for the child's
+	// session ID, so the fixture must have a matching pair.
 	const children = sessions.filter((s) => s.parentID);
 	if (children.length === 0) {
 		console.error(

@@ -1,14 +1,43 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Layer, Scope } from "effect";
+import {
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Ref,
+	Scope,
+} from "effect";
 import { expect } from "vitest";
 import {
 	DaemonLifecycleLayerError,
+	makePidFileLive,
 	ProcessErrorHandlerLayer,
 	ShutdownAwaiterLive,
 	ShutdownSignalTag,
 	SignalHandlerLayer,
-} from "../../../src/lib/effect/daemon-layers.js";
-import { DaemonHandleTag } from "../../../src/lib/effect/daemon-main.js";
+} from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import {
+	DaemonConfigRefLive,
+	DaemonConfigRefTag,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import {
+	DaemonHandleLive,
+	DaemonHandleTag,
+} from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
+import {
+	DaemonLifecycleContextTag,
+	makeDaemonLifecycleContext,
+} from "../../../src/lib/domain/daemon/Services/daemon-lifecycle-context.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 describe("SignalHandlerLayer", () => {
 	it.scoped("installs signal handlers on layer build", () =>
@@ -55,6 +84,43 @@ describe("DaemonLifecycleLayerError", () => {
 				cause: 42,
 			});
 			expect(err.message).toBe("startIPCServer failed: 42");
+		}),
+	);
+});
+
+describe("makePidFileLive", () => {
+	it.scoped("maps PID write failures to DaemonLifecycleLayerError", () =>
+		Effect.gen(function* () {
+			const tempRoot = mkdtempSync(join(tmpdir(), "conduit-pid-"));
+			const configDir = join(tempRoot, "not-a-directory");
+			writeFileSync(configDir, "x");
+			const scope = yield* Scope.make();
+
+			try {
+				const exit = yield* Effect.exit(
+					Layer.buildWithScope(
+						makePidFileLive(
+							configDir,
+							join(configDir, "daemon.pid"),
+							join(tempRoot, "relay.sock"),
+						),
+						scope,
+					),
+				);
+
+				expect(Exit.isFailure(exit)).toBe(true);
+				if (Exit.isFailure(exit)) {
+					const failure = Cause.failureOption(exit.cause);
+					expect(Option.isSome(failure)).toBe(true);
+					if (Option.isSome(failure)) {
+						expect(failure.value).toBeInstanceOf(DaemonLifecycleLayerError);
+						expect(failure.value.operation).toBe("writePidFile");
+					}
+				}
+			} finally {
+				yield* Scope.close(scope, Exit.void);
+				rmSync(tempRoot, { recursive: true, force: true });
+			}
 		}),
 	);
 });
@@ -163,5 +229,141 @@ describe("DaemonHandleTag", () => {
 			// DaemonHandleTag should be importable and have the correct key
 			expect(DaemonHandleTag.key).toBe("DaemonHandle");
 		}),
+	);
+
+	it.scoped(
+		"provides an Effect-owned handle backed by daemon config and project registry services",
+		() => {
+			const lifecycleContext = makeDaemonLifecycleContext("/tmp/relay.sock");
+			lifecycleContext.clientCount = 7;
+			const relayCacheStub = Layer.succeed(RelayCacheTag, {
+				get: (slug: string) =>
+					Effect.succeed({
+						slug,
+						wsHandler: { handleUpgrade: () => {} },
+						rpcWsHandler: { handleUpgrade: () => {} },
+						getStatusSnapshot: () => ({
+							sessionCount: slug === "existing" ? 5 : 0,
+							clients: 0,
+							isProcessing: false,
+						}),
+						stop: () => {},
+					}),
+				peek: (slug: string) =>
+					slug === "existing"
+						? Effect.succeed(
+								Option.some({
+									slug,
+									wsHandler: { handleUpgrade: () => {} },
+									rpcWsHandler: { handleUpgrade: () => {} },
+									getStatusSnapshot: () => ({
+										sessionCount: 5,
+										clients: 0,
+										isProcessing: false,
+									}),
+									stop: () => {},
+								}),
+							)
+						: Effect.succeed(Option.none()),
+				invalidate: () => Effect.void,
+			});
+			const handleDeps = Layer.mergeAll(
+				DaemonConfigRefLive({
+					port: 49876,
+					host: "127.0.0.1",
+					pinHash: "pin-hash",
+					tlsEnabled: true,
+					keepAwake: true,
+					keepAwakeCommand: undefined,
+					keepAwakeArgs: undefined,
+					shuttingDown: false,
+					dismissedPaths: new Set(["/tmp/new-project"]),
+					startTime: Date.now() - 1_000,
+					hostExplicit: false,
+					persistedSessionCounts: new Map([["existing", 2]]),
+				}),
+				DaemonEventBusLive,
+				ConfigPersistenceNoopLive,
+				makeProjectRegistryLive([
+					{
+						slug: "existing",
+						directory: "/tmp/existing",
+						title: "Existing",
+						lastUsed: 100,
+					},
+				]),
+				relayCacheStub,
+				Layer.succeed(DaemonLifecycleContextTag, lifecycleContext),
+				makeInstanceManagerStateLive(undefined, [
+					{
+						id: "default",
+						name: "Default",
+						port: 4096,
+						managed: false,
+						url: "http://127.0.0.1:4096",
+					},
+				]),
+			);
+			const layer = DaemonHandleLive.pipe(Layer.provideMerge(handleDeps));
+
+			return Effect.gen(function* () {
+				const handle = yield* DaemonHandleTag;
+				const configRef = yield* DaemonConfigRefTag;
+
+				const initialStatus = yield* handle.getStatus();
+				const initialOnboardingPort = yield* handle.onboardingPort;
+				const instances = yield* handle.getInstances();
+				expect(initialStatus.port).toBe(49876);
+				expect(initialStatus.host).toBe("127.0.0.1");
+				expect(initialStatus.projectCount).toBe(1);
+				expect(initialStatus.sessionCount).toBe(5);
+				expect(initialStatus.clientCount).toBe(7);
+				expect(initialStatus.pinEnabled).toBe(true);
+				expect(initialStatus.tlsEnabled).toBe(true);
+				expect(initialStatus.keepAwake).toBe(true);
+				expect(initialOnboardingPort).toBeNull();
+				expect(instances.map((instance) => instance.id)).toEqual(["default"]);
+				expect(typeof handle.discoverProjects).toBe("function");
+
+				const added = yield* handle.addProject(
+					"/tmp/new-project",
+					"custom-slug",
+					"default",
+				);
+				expect(added.slug).toBe("custom-slug");
+				expect(added.instanceId).toBe("default");
+				const projects = yield* handle.getProjects();
+				expect(projects.map((project) => project.slug).sort()).toEqual([
+					"custom-slug",
+					"existing",
+				]);
+				const configAfterAdd = yield* Ref.get(configRef);
+				expect(configAfterAdd.dismissedPaths.has("/tmp/new-project")).toBe(
+					false,
+				);
+
+				yield* handle.removeProject("existing");
+				const afterRemove = yield* handle.getStatus();
+				expect(afterRemove.projectCount).toBe(1);
+				expect(afterRemove.projects.map((project) => project.slug)).toEqual([
+					"custom-slug",
+				]);
+				const configAfterRemove = yield* Ref.get(configRef);
+				expect(configAfterRemove.dismissedPaths.has("/tmp/existing")).toBe(
+					true,
+				);
+
+				const missingExit = yield* Effect.exit(handle.removeProject("missing"));
+				expect(Exit.isFailure(missingExit)).toBe(true);
+				if (Exit.isFailure(missingExit)) {
+					const failure = Cause.failureOption(missingExit.cause);
+					expect(Option.isSome(failure)).toBe(true);
+					if (Option.isSome(failure)) {
+						expect(failure.value._tag).toBe("ProjectNotFound");
+						expect(failure.value.slug).toBe("missing");
+					}
+				}
+			}).pipe(Effect.provide(layer));
+		},
 	);
 });

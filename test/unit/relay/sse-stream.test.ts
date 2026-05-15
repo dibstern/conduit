@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { SSEStream } from "../../../src/lib/relay/sse-stream.js";
 
@@ -16,6 +17,41 @@ function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
 	} as any;
 }
 
+function deferred<T = void>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
+}
+
+async function withTimeout<T>(
+	promise: Promise<T>,
+	label: string,
+	ms = 1000,
+): Promise<T> {
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timeout = setTimeout(
+					() => reject(new Error(`Timed out waiting for ${label}`)),
+					ms,
+				);
+			}),
+		]);
+	} finally {
+		if (timeout) clearTimeout(timeout);
+	}
+}
+
+const connect = (stream: SSEStream) =>
+	Effect.runPromise(stream.connectEffect());
+const disconnect = (stream: SSEStream) =>
+	Effect.runPromise(stream.disconnectEffect());
+const drain = (stream: SSEStream) => Effect.runPromise(stream.drainEffect());
+
 describe("SSEStream", () => {
 	it("can be created and starts disconnected", () => {
 		const api = makeStubApi([]);
@@ -29,9 +65,9 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
-		await stream.disconnect();
+		await disconnect(stream);
 	});
 
 	it("emits events from the SDK stream", async () => {
@@ -49,10 +85,10 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
 		await new Promise((r) => setTimeout(r, 50));
-		await stream.disconnect();
+		await disconnect(stream);
 		expect(received).toHaveLength(2);
 		expect(received[0]).toEqual(events[0]);
 	});
@@ -67,10 +103,10 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
 		await new Promise((r) => setTimeout(r, 50));
-		await stream.disconnect();
+		await disconnect(stream);
 		expect(heartbeatSeen).toBe(true);
 	});
 
@@ -84,10 +120,10 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
 		await new Promise((r) => setTimeout(r, 50));
-		await stream.disconnect();
+		await disconnect(stream);
 		expect(heartbeatSeen).toBe(true);
 	});
 
@@ -103,10 +139,10 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
 		await new Promise((r) => setTimeout(r, 50));
-		await stream.disconnect();
+		await disconnect(stream);
 		expect(received).toHaveLength(1);
 		expect((received[0] as { type: string }).type).toBe("message.part.updated");
 	});
@@ -132,10 +168,10 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
 		expect(stream.isConnected()).toBe(true);
-		await stream.disconnect();
+		await disconnect(stream);
 	});
 
 	it("isConnected returns false after disconnect", async () => {
@@ -144,9 +180,9 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
-		await stream.disconnect();
+		await disconnect(stream);
 		expect(stream.isConnected()).toBe(false);
 	});
 
@@ -156,9 +192,9 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
-		await stream.drain();
+		await drain(stream);
 		expect(stream.isConnected()).toBe(false);
 	});
 
@@ -168,11 +204,269 @@ describe("SSEStream", () => {
 		const connected = new Promise<void>((resolve) => {
 			stream.on("connected", () => resolve());
 		});
-		stream.connect().catch(() => {});
+		connect(stream).catch(() => {});
 		await connected;
 		// Second connect should be a no-op
-		await stream.connect();
+		await connect(stream);
 		expect(api.event.subscribe).toHaveBeenCalledTimes(1);
-		await stream.disconnect();
+		await disconnect(stream);
+	});
+
+	it("disconnect waits for async generator cleanup after abort", async () => {
+		const cleanupStarted = deferred();
+		const releaseCleanup = deferred();
+		const cleanupFinished = deferred();
+		const api = {
+			event: {
+				subscribe: vi.fn(async ({ signal }: { signal?: AbortSignal } = {}) => ({
+					stream: (async function* () {
+						try {
+							await new Promise<void>((resolve) => {
+								signal?.addEventListener("abort", () => resolve(), {
+									once: true,
+								});
+							});
+						} finally {
+							cleanupStarted.resolve();
+							await releaseCleanup.promise;
+							cleanupFinished.resolve();
+						}
+					})(),
+				})),
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
+		} as any;
+		const stream = new SSEStream({ api });
+		const connected = new Promise<void>((resolve) => {
+			stream.on("connected", () => resolve());
+		});
+		await connect(stream);
+		await connected;
+
+		let disconnectSettled = false;
+		const disconnecting = disconnect(stream).then(() => {
+			disconnectSettled = true;
+		});
+		let cleanupStartedSeen = false;
+		let settledBeforeCleanupReleased = true;
+
+		try {
+			await withTimeout(cleanupStarted.promise, "cleanup to start");
+			cleanupStartedSeen = true;
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			settledBeforeCleanupReleased = disconnectSettled;
+		} finally {
+			releaseCleanup.resolve();
+			await withTimeout(disconnecting, "disconnect to finish");
+		}
+
+		if (cleanupStartedSeen) {
+			await withTimeout(cleanupFinished.promise, "cleanup to finish");
+		}
+
+		expect(settledBeforeCleanupReleased).toBe(false);
+	});
+
+	it("connect waits for pending disconnect cleanup before starting another stream", async () => {
+		const firstCleanupStarted = deferred();
+		const releaseFirstCleanup = deferred();
+		let subscribeCount = 0;
+		const api = {
+			event: {
+				subscribe: vi.fn(async ({ signal }: { signal?: AbortSignal } = {}) => {
+					subscribeCount++;
+					const connectionNumber = subscribeCount;
+					return {
+						stream: (async function* () {
+							try {
+								await new Promise<void>((resolve) => {
+									if (signal?.aborted) {
+										resolve();
+										return;
+									}
+									signal?.addEventListener("abort", () => resolve(), {
+										once: true,
+									});
+								});
+							} finally {
+								if (connectionNumber === 1) {
+									firstCleanupStarted.resolve();
+									await releaseFirstCleanup.promise;
+								}
+							}
+						})(),
+					};
+				}),
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
+		} as any;
+		const stream = new SSEStream({ api });
+		const firstConnected = new Promise<void>((resolve) => {
+			stream.on("connected", () => resolve());
+		});
+		await connect(stream);
+		await firstConnected;
+
+		const disconnecting = disconnect(stream);
+		let reconnectSettled = false;
+		let reconnecting: Promise<void> = Promise.resolve();
+
+		let assertionFailure: unknown;
+		try {
+			await withTimeout(firstCleanupStarted.promise, "first cleanup to start");
+			reconnecting = connect(stream).then(() => {
+				reconnectSettled = true;
+			});
+			await Promise.resolve();
+			expect(reconnectSettled).toBe(false);
+			expect(api.event.subscribe).toHaveBeenCalledTimes(1);
+		} catch (error) {
+			assertionFailure = error;
+		} finally {
+			releaseFirstCleanup.resolve();
+			await withTimeout(disconnecting, "disconnect to finish");
+			await withTimeout(reconnecting, "reconnect to finish");
+			if (assertionFailure) await disconnect(stream);
+		}
+
+		if (assertionFailure) throw assertionFailure;
+		expect(api.event.subscribe).toHaveBeenCalledTimes(2);
+		await disconnect(stream);
+	});
+
+	it("later disconnect cancels a reconnect queued behind cleanup", async () => {
+		const firstCleanupStarted = deferred();
+		const releaseFirstCleanup = deferred();
+		let subscribeCount = 0;
+		const api = {
+			event: {
+				subscribe: vi.fn(async ({ signal }: { signal?: AbortSignal } = {}) => {
+					subscribeCount++;
+					const connectionNumber = subscribeCount;
+					return {
+						stream: (async function* () {
+							try {
+								await new Promise<void>((resolve) => {
+									if (signal?.aborted) {
+										resolve();
+										return;
+									}
+									signal?.addEventListener("abort", () => resolve(), {
+										once: true,
+									});
+								});
+							} finally {
+								if (connectionNumber === 1) {
+									firstCleanupStarted.resolve();
+									await releaseFirstCleanup.promise;
+								}
+							}
+						})(),
+					};
+				}),
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
+		} as any;
+		const stream = new SSEStream({ api });
+		const firstConnected = new Promise<void>((resolve) => {
+			stream.on("connected", () => resolve());
+		});
+		await connect(stream);
+		await firstConnected;
+
+		const firstDisconnect = disconnect(stream);
+		let queuedReconnect: Promise<void> = Promise.resolve();
+		let laterDisconnect: Promise<void> = Promise.resolve();
+		let assertionFailure: unknown;
+
+		try {
+			await withTimeout(firstCleanupStarted.promise, "first cleanup to start");
+			queuedReconnect = connect(stream);
+			laterDisconnect = disconnect(stream);
+		} catch (error) {
+			assertionFailure = error;
+		} finally {
+			releaseFirstCleanup.resolve();
+			await withTimeout(firstDisconnect, "first disconnect to finish");
+			await withTimeout(queuedReconnect, "queued reconnect to finish");
+			await withTimeout(laterDisconnect, "later disconnect to finish");
+			if (assertionFailure) await disconnect(stream);
+		}
+
+		if (assertionFailure) throw assertionFailure;
+		expect(api.event.subscribe).toHaveBeenCalledTimes(1);
+		expect(stream.isConnected()).toBe(false);
+	});
+
+	it("connect waits even when triggered synchronously by abort listeners", async () => {
+		const firstCleanupStarted = deferred();
+		const releaseFirstCleanup = deferred();
+		let subscribeCount = 0;
+		let stream: SSEStream;
+		let reentrantConnect: Promise<void> | undefined;
+		const api = {
+			event: {
+				subscribe: vi.fn(async ({ signal }: { signal?: AbortSignal } = {}) => {
+					subscribeCount++;
+					const connectionNumber = subscribeCount;
+					return {
+						stream: (async function* () {
+							try {
+								await new Promise<void>((resolve) => {
+									if (signal?.aborted) {
+										resolve();
+										return;
+									}
+									signal?.addEventListener(
+										"abort",
+										() => {
+											if (connectionNumber === 1) {
+												reentrantConnect = connect(stream);
+											}
+											resolve();
+										},
+										{ once: true },
+									);
+								});
+							} finally {
+								if (connectionNumber === 1) {
+									firstCleanupStarted.resolve();
+									await releaseFirstCleanup.promise;
+								}
+							}
+						})(),
+					};
+				}),
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
+		} as any;
+		stream = new SSEStream({ api });
+		const firstConnected = new Promise<void>((resolve) => {
+			stream.on("connected", () => resolve());
+		});
+		await connect(stream);
+		await firstConnected;
+
+		const disconnecting = disconnect(stream);
+
+		let assertionFailure: unknown;
+		try {
+			await withTimeout(firstCleanupStarted.promise, "first cleanup to start");
+			await Promise.resolve();
+			expect(api.event.subscribe).toHaveBeenCalledTimes(1);
+		} catch (error) {
+			assertionFailure = error;
+		} finally {
+			releaseFirstCleanup.resolve();
+			await withTimeout(disconnecting, "disconnect to finish");
+			if (reentrantConnect) {
+				await withTimeout(reentrantConnect, "reentrant connect to finish");
+			}
+			if (assertionFailure) await disconnect(stream);
+		}
+
+		if (assertionFailure) throw assertionFailure;
+		expect(api.event.subscribe).toHaveBeenCalledTimes(2);
+		await disconnect(stream);
 	});
 });

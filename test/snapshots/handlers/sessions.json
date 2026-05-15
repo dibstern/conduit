@@ -1,0 +1,124 @@
+{
+	"view_session_model_info_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "model_info",
+				"model": "gpt-4",
+				"provider": "openai"
+			}
+		}
+	],
+	"list_sessions_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "session_list",
+				"sessions": [
+					{
+						"id": "root-1",
+						"title": "Root Session",
+						"updatedAt": 100,
+						"messageCount": 2
+					}
+				],
+				"roots": true
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "session_list",
+				"sessions": [
+					{
+						"id": "child-1",
+						"title": "Child Session",
+						"updatedAt": 200,
+						"messageCount": 4,
+						"parentID": "root-1"
+					}
+				],
+				"roots": false
+			}
+		}
+	],
+	"new_session_success": [
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "session_switched",
+				"id": "new-session",
+				"sessionId": "new-session",
+				"requestId": "req-1"
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "status",
+				"sessionId": "new-session",
+				"status": "idle"
+			}
+		},
+		{
+			"channel": "broadcast",
+			"message": {
+				"type": "session_list",
+				"sessions": [
+					{
+						"id": "new-session",
+						"title": "New Session",
+						"updatedAt": 300,
+						"messageCount": 0
+					}
+				],
+				"roots": true
+			}
+		},
+		{
+			"channel": "broadcast",
+			"message": {
+				"type": "session_list",
+				"sessions": [],
+				"roots": false
+			}
+		}
+	],
+	"delete_session_success": [
+		{
+			"channel": "broadcast",
+			"message": {
+				"type": "session_deleted",
+				"sessionId": "deleted-session"
+			}
+		},
+		{
+			"channel": "broadcast",
+			"message": {
+				"type": "session_list",
+				"sessions": [
+					{
+						"id": "remaining-session",
+						"title": "Remaining Session",
+						"updatedAt": 400,
+						"messageCount": 1
+					}
+				],
+				"roots": true
+			}
+		},
+		{
+			"channel": "broadcast",
+			"message": {
+				"type": "session_list",
+				"sessions": [],
+				"roots": false
+			}
+		}
+	]
+}

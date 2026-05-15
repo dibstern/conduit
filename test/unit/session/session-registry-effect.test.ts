@@ -8,7 +8,7 @@ import {
 	removeClient,
 	SessionRegistryStateTag,
 	setClientSession,
-} from "../../../src/lib/effect/session-registry-state.js";
+} from "../../../src/lib/domain/relay/Services/session-registry-state.js";
 
 describe("SessionRegistryState Effect", () => {
 	it.effect("setClientSession registers a client for a session", () =>

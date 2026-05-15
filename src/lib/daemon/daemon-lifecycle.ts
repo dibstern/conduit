@@ -20,26 +20,20 @@ import {
 import * as Headers from "@effect/platform/Headers";
 import { Effect, Either, Schema } from "effect";
 import {
-	IpcError,
-	IpcInstancesResponseSchema,
-	IpcKeepAwakeResponseSchema,
-	IpcOpenCodeInstanceSchema,
-	IpcProjectsResponseSchema,
-	IpcStatusResponseSchema,
+	commandToTaggedRequestPayload,
 	type IpcTaggedRequest,
 	IpcTaggedRequestSchema,
-} from "../effect/ipc-requests.js";
-import { IpcRpcGroup } from "../effect/ipc-rpc-group.js";
+} from "../contracts/ipc-requests.js";
+import { IpcRpcGroup } from "../domain/daemon/Services/ipc-rpc-group.js";
 import { formatErrorDetail } from "../errors.js";
 import { createLogger } from "../logger.js";
 import { serveStaticFile, tryServeStatic } from "../server/static-files.js";
 import type { SetupInfoResponse } from "../shared-types.js";
-import { buildIPCHandlers, type DaemonIPCContext } from "./daemon-ipc.js";
-import type { DaemonStatus } from "./daemon-types.js";
+import type { IPCResponse } from "../types.js";
 import {
-	createCommandRouter,
 	parseCommand,
 	serializeResponse,
+	validateCommand,
 } from "./ipc-protocol.js";
 import { removeSocketFile } from "./pid-manager.js";
 
@@ -48,292 +42,15 @@ import { removeSocketFile } from "./pid-manager.js";
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const log = createLogger("daemon");
 
-const ipcFailure = (response: { readonly error?: string }) =>
-	new IpcError({ message: response.error ?? "IPC command failed" });
-
-const invalidSuccess = (command: string) =>
-	new IpcError({ message: `${command} returned an invalid success response` });
-
-const decodeProjectsResponse = (response: unknown) =>
-	Schema.decodeUnknown(IpcProjectsResponseSchema)(response);
-
-const decodeInstance = (instance: unknown) =>
-	Schema.decodeUnknown(IpcOpenCodeInstanceSchema)(instance);
-
-const decodeInstancesResponse = (response: unknown) =>
-	Schema.decodeUnknown(IpcInstancesResponseSchema)(response);
-
-const decodeStatus = (response: unknown) =>
-	Schema.decodeUnknown(IpcStatusResponseSchema)(response);
-
-const decodeKeepAwake = (response: unknown) =>
-	Schema.decodeUnknown(IpcKeepAwakeResponseSchema)(response);
-
-function makeRpcHandlerLayer(handlers: ReturnType<typeof buildIPCHandlers>) {
-	return IpcRpcGroup.toLayer({
-		AddProject: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.addProject(request.directory),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) => {
-					if (!response.ok) return Effect.fail(ipcFailure(response));
-					if (
-						typeof response.slug !== "string" ||
-						typeof response.directory !== "string"
-					) {
-						return Effect.fail(invalidSuccess("AddProject"));
-					}
-					return Effect.succeed({
-						ok: true as const,
-						slug: response.slug,
-						directory: response.directory,
-					});
-				}),
-			),
-		RemoveProject: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.removeProject(request.slug),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		ListProjects: () =>
-			Effect.tryPromise({
-				try: () => handlers.listProjects(),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? decodeProjectsResponse(response).pipe(
-								Effect.mapError(() => invalidSuccess("ListProjects")),
-							)
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		SetProjectTitle: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.setProjectTitle(request.slug, request.title),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		GetStatus: () =>
-			Effect.tryPromise({
-				try: () => handlers.getStatus(),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) => {
-					if (!response.ok) return Effect.fail(ipcFailure(response));
-					return decodeStatus(response).pipe(
-						Effect.mapError(() => invalidSuccess("GetStatus")),
-					);
-				}),
-			),
-		SetPin: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.setPin(request.pin),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		SetKeepAwake: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.setKeepAwake(request.enabled),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? decodeKeepAwake(response).pipe(
-								Effect.mapError(() => invalidSuccess("SetKeepAwake")),
-							)
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		SetKeepAwakeCommand: (request) =>
-			Effect.tryPromise({
-				try: () =>
-					handlers.setKeepAwakeCommand(request.command, [...request.args]),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		Shutdown: () =>
-			Effect.tryPromise({
-				try: () => handlers.shutdown(),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.orDie,
-				Effect.map(() => ({ ok: true as const })),
-			),
-		SetAgent: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.setAgent(request.slug, request.agent),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		SetModel: (request) =>
-			Effect.tryPromise({
-				try: () =>
-					handlers.setModel(request.slug, request.provider, request.model),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		RestartWithConfig: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.restartWithConfig(request.config),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		InstanceList: () =>
-			Effect.tryPromise({
-				try: () => handlers.instanceList(),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? decodeInstancesResponse(response).pipe(
-								Effect.mapError(() => invalidSuccess("InstanceList")),
-							)
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		InstanceAdd: (request) =>
-			Effect.tryPromise({
-				try: () =>
-					handlers.instanceAdd(
-						request.name,
-						request.port,
-						request.managed,
-						request.env,
-						request.url,
-					),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) => {
-					if (!response.ok) return Effect.fail(ipcFailure(response));
-					return decodeInstance(response.instance).pipe(
-						Effect.map((instance) => ({
-							ok: true as const,
-							instance,
-						})),
-						Effect.mapError(() => invalidSuccess("InstanceAdd")),
-					);
-				}),
-			),
-		InstanceRemove: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.instanceRemove(request.id),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		InstanceStart: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.instanceStart(request.id),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		InstanceStop: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.instanceStop(request.id),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) =>
-					response.ok
-						? Effect.succeed({ ok: true as const })
-						: Effect.fail(ipcFailure(response)),
-				),
-			),
-		InstanceUpdate: (request) =>
-			Effect.tryPromise({
-				try: () =>
-					handlers.instanceUpdate(
-						request.id,
-						request.name,
-						request.env,
-						request.port,
-					),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) => {
-					if (!response.ok) return Effect.fail(ipcFailure(response));
-					return decodeInstance(response.instance).pipe(
-						Effect.map((instance) => ({
-							ok: true as const,
-							instance,
-						})),
-						Effect.mapError(() => invalidSuccess("InstanceUpdate")),
-					);
-				}),
-			),
-		InstanceStatus: (request) =>
-			Effect.tryPromise({
-				try: () => handlers.instanceStatus(request.id),
-				catch: (error) => new IpcError({ message: formatErrorDetail(error) }),
-			}).pipe(
-				Effect.flatMap((response) => {
-					if (!response.ok) return Effect.fail(ipcFailure(response));
-					return decodeInstance(response.instance).pipe(
-						Effect.map((instance) => ({
-							ok: true as const,
-							instance,
-						})),
-						Effect.mapError(() => invalidSuccess("InstanceStatus")),
-					);
-				}),
-			),
-	});
+function decodeTaggedRequest(line: string) {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch {
+		return Either.left(new Error("Invalid JSON"));
+	}
+	return Schema.decodeUnknownEither(IpcTaggedRequestSchema)(parsed);
 }
-
-const decodeTaggedRequest = (line: string) =>
-	Effect.try({
-		try: () => JSON.parse(line) as unknown,
-		catch: () => new Error("Invalid JSON"),
-	}).pipe(
-		Effect.flatMap(Schema.decodeUnknown(IpcTaggedRequestSchema)),
-		Effect.either,
-	);
 
 function isTaggedPayload(value: unknown): value is { _tag: string } {
 	return (
@@ -344,24 +61,37 @@ function isTaggedPayload(value: unknown): value is { _tag: string } {
 	);
 }
 
-async function dispatchTaggedRequest(
-	request: IpcTaggedRequest,
-	rpcLayer: ReturnType<typeof makeRpcHandlerLayer>,
-) {
-	return Effect.runPromise(
-		Effect.gen(function* () {
-			const handler = yield* IpcRpcGroup.accessHandler(request._tag);
-			return yield* handler(request, Headers.empty);
-		}).pipe(
-			Effect.provide(rpcLayer),
-			Effect.catchAll((error) =>
-				Effect.succeed({
-					ok: false,
-					error: formatErrorDetail(error),
-				}),
-			),
+function makeTaggedPostResponseAction(
+	request: IpcTaggedRequest | undefined,
+	response: IPCResponse,
+	actions: IpcPostResponseActions | undefined,
+): (() => void) | undefined {
+	if (!actions || !request || response.ok !== true) return undefined;
+	if (request._tag !== "Shutdown" && request._tag !== "RestartWithConfig") {
+		return undefined;
+	}
+	return actions.scheduleShutdown;
+}
+
+export const dispatchTaggedRequestEffect = (request: IpcTaggedRequest) =>
+	Effect.gen(function* () {
+		const handler = yield* IpcRpcGroup.accessHandler(request._tag);
+		return yield* handler(request, Headers.empty);
+	}).pipe(
+		Effect.catchAll((error) =>
+			Effect.succeed({
+				ok: false,
+				error: formatErrorDetail(error),
+			}),
 		),
 	);
+
+export type TaggedIpcDispatcher = (
+	request: IpcTaggedRequest,
+) => Promise<IPCResponse>;
+
+export interface IpcPostResponseActions {
+	readonly scheduleShutdown: () => void;
 }
 
 // ─── Context interface ──────────────────────────────────────────────────────
@@ -734,16 +464,12 @@ export function closeOnboardingServer(
 /** Create and start the IPC (Unix socket) server with command routing. */
 export function startIPCServer(
 	ctx: DaemonLifecycleContext,
-	ipcContext: DaemonIPCContext,
-	getStatus: () => DaemonStatus,
+	dispatchTaggedRequest: TaggedIpcDispatcher,
+	postResponseActions?: IpcPostResponseActions,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		// Remove stale socket file if it exists
 		removeSocketFile(ctx.socketPath);
-
-		const handlers = buildIPCHandlers(ipcContext, getStatus);
-		const router = createCommandRouter(handlers);
-		const rpcLayer = makeRpcHandlerLayer(handlers);
 
 		ctx.ipcServer = createNetServer((socket: Socket) => {
 			ctx.ipcClients.add(socket);
@@ -772,16 +498,16 @@ export function startIPCServer(
 
 					let parsedLine: unknown;
 					try {
-						parsedLine = JSON.parse(line) as unknown;
+						parsedLine = JSON.parse(line);
 					} catch {
 						parsedLine = null;
 					}
 
 					if (isTaggedPayload(parsedLine)) {
 						const ipcT0 = Date.now();
-						const decoded = await Effect.runPromise(decodeTaggedRequest(line));
+						const decoded = decodeTaggedRequest(line);
 						const response = Either.isRight(decoded)
-							? await dispatchTaggedRequest(decoded.right, rpcLayer)
+							? await dispatchTaggedRequest(decoded.right)
 							: {
 									ok: false,
 									error: formatErrorDetail(decoded.left),
@@ -792,7 +518,14 @@ export function startIPCServer(
 						} else {
 							log.debug(`[ipc] ${parsedLine._tag} ${ipcMs}ms`);
 						}
-						socket.write(serializeResponse(response));
+						socket.write(
+							serializeResponse(response),
+							makeTaggedPostResponseAction(
+								Either.isRight(decoded) ? decoded.right : undefined,
+								response,
+								postResponseActions,
+							),
+						);
 						continue;
 					}
 
@@ -811,14 +544,41 @@ export function startIPCServer(
 						log.warn(
 							"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
 						);
-						const response = await router(cmd);
+						const validationError = validateCommand(
+							cmd as Record<string, unknown> & { cmd: string },
+						);
+						let response: IPCResponse;
+						let decodedRequest: IpcTaggedRequest | undefined;
+						if (validationError) {
+							response = validationError;
+						} else {
+							const decoded = Schema.decodeUnknownEither(
+								IpcTaggedRequestSchema,
+							)(commandToTaggedRequestPayload(cmd));
+							decodedRequest = Either.isRight(decoded)
+								? decoded.right
+								: undefined;
+							response = Either.isRight(decoded)
+								? await dispatchTaggedRequest(decoded.right)
+								: {
+										ok: false,
+										error: formatErrorDetail(decoded.left),
+									};
+						}
 						const ipcMs = Date.now() - ipcT0;
 						if (ipcMs > 100) {
 							log.warn(`[ipc] ${cmd.cmd} took ${ipcMs}ms`);
 						} else {
 							log.debug(`[ipc] ${cmd.cmd} ${ipcMs}ms`);
 						}
-						socket.write(serializeResponse(response));
+						socket.write(
+							serializeResponse(response),
+							makeTaggedPostResponseAction(
+								decodedRequest,
+								response,
+								postResponseActions,
+							),
+						);
 					} catch (err) {
 						const ipcMs = Date.now() - ipcT0;
 						log.warn(

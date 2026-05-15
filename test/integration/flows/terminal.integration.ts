@@ -37,12 +37,12 @@ describe("Integration: Terminal (PTY)", () => {
 
 	// ── PTY creation ──────────────────────────────────────────────────────
 
-	it("pty_create returns pty_created with a valid id", async () => {
+	it("CreatePty RPC returns pty_created with a valid id", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({ type: "pty_create" });
+		await client.createPty();
 
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const pty = created["pty"] as { id: string };
@@ -50,7 +50,7 @@ describe("Integration: Terminal (PTY)", () => {
 		expect(pty.id.length).toBeGreaterThan(0);
 
 		// Cleanup
-		client.send({ type: "pty_close", ptyId: pty.id });
+		await client.closePty(pty.id);
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		await client.close();
 	}, 15_000);
@@ -66,7 +66,7 @@ describe("Integration: Terminal (PTY)", () => {
 		client2.clearReceived();
 
 		// Client 1 creates PTY
-		client1.send({ type: "pty_create" });
+		await client1.createPty();
 		const created1 = await client1.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created1["pty"] as { id: string }).id;
 
@@ -98,7 +98,7 @@ describe("Integration: Terminal (PTY)", () => {
 				String(msg["data"]).includes("MULTI_CLIENT_TEST"),
 		});
 
-		client1.send({ type: "pty_close", ptyId });
+		await client1.closePty(ptyId);
 		await client1.waitFor("pty_deleted", { timeout: 5_000 });
 		await client1.close();
 		await client2.close();
@@ -113,7 +113,7 @@ describe("Integration: Terminal (PTY)", () => {
 		clientB.clearReceived();
 
 		// Client A creates PTY
-		clientA.send({ type: "pty_create" });
+		await clientA.createPty();
 		const created = await clientA.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
@@ -136,7 +136,7 @@ describe("Integration: Terminal (PTY)", () => {
 				String(msg["data"]).includes("CROSS_CLIENT_INPUT"),
 		});
 
-		clientA.send({ type: "pty_close", ptyId });
+		await clientA.closePty(ptyId);
 		await clientA.waitFor("pty_deleted", { timeout: 5_000 });
 		await clientA.close();
 		await clientB.close();
@@ -148,7 +148,7 @@ describe("Integration: Terminal (PTY)", () => {
 		client1.clearReceived();
 
 		// Create PTY
-		client1.send({ type: "pty_create" });
+		await client1.createPty();
 		const created = await client1.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
@@ -170,23 +170,23 @@ describe("Integration: Terminal (PTY)", () => {
 				msg["ptyId"] === ptyId && String(msg["data"]).includes("STILL_ALIVE"),
 		});
 
-		client2.send({ type: "pty_close", ptyId });
+		await client2.closePty(ptyId);
 		await client2.waitFor("pty_deleted", { timeout: 5_000 });
 		await client2.close();
 	}, 25_000);
 
 	// ── Close + cleanup ───────────────────────────────────────────────────
 
-	it("pty_close returns pty_deleted with correct id", async () => {
+	it("ClosePty RPC returns pty_deleted with correct id", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({ type: "pty_create" });
+		await client.createPty();
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
-		client.send({ type: "pty_close", ptyId });
+		await client.closePty(ptyId);
 		const deleted = await client.waitFor("pty_deleted", { timeout: 5_000 });
 		expect(deleted["ptyId"]).toBe(ptyId);
 
@@ -221,11 +221,11 @@ describe("Integration: Terminal (PTY)", () => {
 		client.clearReceived();
 
 		// Create and close a PTY
-		client.send({ type: "pty_create" });
+		await client.createPty();
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
-		client.send({ type: "pty_close", ptyId });
+		await client.closePty(ptyId);
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		client.clearReceived();
 
@@ -236,37 +236,33 @@ describe("Integration: Terminal (PTY)", () => {
 		await delay(1000);
 
 		// The relay should still be responsive
-		client.send({ type: "pty_create" });
+		await client.createPty();
 		const created2 = await client.waitFor("pty_created", { timeout: 5_000 });
 		expect(created2["pty"]).toBeDefined();
 
 		const ptyId2 = (created2["pty"] as { id: string }).id;
-		client.send({ type: "pty_close", ptyId: ptyId2 });
+		await client.closePty(ptyId2);
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		await client.close();
 	}, 20_000);
 
 	// ── PTY list on connect ──────────────────────────────────────────────
 
-	it("terminal_command list returns existing PTYs after creation", async () => {
+	it("ListPtys RPC returns existing PTYs after creation", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
 		// Create a PTY
-		client.send({ type: "pty_create" });
+		await client.createPty();
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
 		await delay(300);
 		client.clearReceived();
 
-		// Request PTY list
-		client.send({ type: "terminal_command", action: "list" });
-
-		// Should receive pty_list with at least the PTY we created
-		const list = await client.waitFor("pty_list", { timeout: 5_000 });
-		const ptys = list["ptys"] as Array<{ id: string }>;
+		const list = await client.listPtys();
+		const ptys = list.ptys;
 		expect(Array.isArray(ptys)).toBe(true);
 		expect(ptys.length).toBeGreaterThanOrEqual(1);
 
@@ -274,7 +270,7 @@ describe("Integration: Terminal (PTY)", () => {
 		expect(found).toBeTruthy();
 
 		// Cleanup
-		client.send({ type: "pty_close", ptyId });
+		await client.closePty(ptyId);
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		await client.close();
 	}, 20_000);
@@ -287,7 +283,7 @@ describe("Integration: Terminal (PTY)", () => {
 		client.clearReceived();
 
 		// Create a PTY
-		client.send({ type: "pty_create" });
+		await client.createPty();
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
@@ -309,7 +305,7 @@ describe("Integration: Terminal (PTY)", () => {
 		}
 
 		// Cleanup
-		client.send({ type: "pty_close", ptyId });
+		await client.closePty(ptyId);
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		await client.close();
 	}, 15_000);

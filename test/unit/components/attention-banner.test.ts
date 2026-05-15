@@ -12,13 +12,23 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── Mock ws store ──────────────────────────────────────────────────────────
-// Only wsSend is needed by AttentionBanner (passed to switchToSession).
+// ─── Mock RPC transport ─────────────────────────────────────────────────────
 
 const wsSendSpy = vi.fn();
+const viewSessionRpcSpy = vi.hoisted(() =>
+	vi.fn(async (_input: unknown) => undefined),
+);
 
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
 	wsSend: (...args: unknown[]) => wsSendSpy(...args),
+}));
+vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
+	getAgentsRpc: vi.fn(async () => ({ projectSlug: "project-a", agents: [] })),
+	getCommandsRpc: vi.fn(async () => ({
+		projectSlug: "project-a",
+		commands: [],
+	})),
+	viewSessionRpc: (input: unknown) => viewSessionRpcSpy(input),
 }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
@@ -29,6 +39,10 @@ import {
 	resetNotifState,
 } from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
+import {
+	routerState,
+	syncSlugState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
 
@@ -73,6 +87,8 @@ describe("AttentionBanner merge logic", () => {
 		sessionState.currentId = "ses_current";
 		sessionState.rootSessions = [];
 		sessionState.allSessions = [];
+		routerState.path = "/p/project-a/s/ses_current";
+		syncSlugState(routerState.path);
 	});
 
 	afterEach(() => {
@@ -226,10 +242,10 @@ describe("AttentionBanner merge logic", () => {
 		const sessionButton = screen.getByText(/Clickable session/);
 		await fireEvent.click(sessionButton);
 
-		// switchToSession sends view_session via wsSend
-		expect(wsSendSpy).toHaveBeenCalledWith({
-			type: "view_session",
+		expect(viewSessionRpcSpy).toHaveBeenCalledWith({
+			projectSlug: "project-a",
 			sessionId: "ses_other1",
+			originId: expect.any(String),
 		});
 	});
 

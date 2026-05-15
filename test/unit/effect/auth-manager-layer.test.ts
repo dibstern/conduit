@@ -3,18 +3,18 @@ import { Effect, Fiber, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
 import {
-	AuthManagerFromConfigLive,
-	AuthManagerTag,
-} from "../../../src/lib/effect/auth-middleware.js";
-import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	type DaemonRuntimeConfig,
-} from "../../../src/lib/effect/daemon-config-ref.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	CrashCounterLive,
 	CrashCounterTag,
-} from "../../../src/lib/effect/daemon-startup.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
+import {
+	AuthManagerFromConfigLive,
+	AuthManagerTag,
+} from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
 // ─── AuthManagerFromConfigLive tests ─────────────────────────────────────────
 
@@ -47,21 +47,21 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 	it.effect("initializes with pinHash from DaemonConfigRef", () =>
 		Effect.gen(function* () {
 			const auth = yield* AuthManagerTag;
-			expect(auth.hasPin()).toBe(true);
+			expect(yield* auth.hasPin()).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(layerWithPin))),
 	);
 
 	it.effect("initializes without pin when pinHash is null", () =>
 		Effect.gen(function* () {
 			const auth = yield* AuthManagerTag;
-			expect(auth.hasPin()).toBe(false);
+			expect(yield* auth.hasPin()).toBe(false);
 		}).pipe(Effect.provide(Layer.fresh(layerNoPin))),
 	);
 
 	it.effect("reactively reads pinHash from DaemonConfigRef", () =>
 		Effect.gen(function* () {
 			const auth = yield* AuthManagerTag;
-			expect(auth.hasPin()).toBe(false); // starts with no pin
+			expect(yield* auth.hasPin()).toBe(false); // starts with no pin
 
 			// Update DaemonConfigRef
 			const configRef = yield* DaemonConfigRefTag;
@@ -71,7 +71,7 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 			}));
 
 			// AuthManager should now see the pin reactively
-			expect(auth.hasPin()).toBe(true);
+			expect(yield* auth.hasPin()).toBe(true);
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(
@@ -87,7 +87,7 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 		Effect.gen(function* () {
 			const auth = yield* AuthManagerTag;
 			// No pin set — checkPin should return true (no-pin mode)
-			expect(auth.checkPin("anything")).toBe(true);
+			expect(yield* auth.checkPin("anything")).toBe(true);
 
 			// Set a pinHash via DaemonConfigRef
 			const configRef = yield* DaemonConfigRefTag;
@@ -95,9 +95,9 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 			yield* Ref.update(configRef, (c) => ({ ...c, pinHash: hash }));
 
 			// Now checkPin with wrong pin should fail
-			expect(auth.checkPin("9999")).toBe(false);
+			expect(yield* auth.checkPin("9999")).toBe(false);
 			// checkPin with correct pin should succeed
-			expect(auth.checkPin("1234")).toBe(true);
+			expect(yield* auth.checkPin("1234")).toBe(true);
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(
@@ -112,7 +112,7 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 	it.effect("getPinHash returns reactive value", () =>
 		Effect.gen(function* () {
 			const auth = yield* AuthManagerTag;
-			expect(auth.getPinHash()).toBeNull();
+			expect(yield* auth.getPinHash()).toBeNull();
 
 			const configRef = yield* DaemonConfigRefTag;
 			yield* Ref.update(configRef, (c) => ({
@@ -120,7 +120,7 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 				pinHash: "updated-hash",
 			}));
 
-			expect(auth.getPinHash()).toBe("updated-hash");
+			expect(yield* auth.getPinHash()).toBe("updated-hash");
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(
@@ -216,11 +216,13 @@ describe("AuthManager concurrent pinHash safety", () => {
 				const readerFibers = yield* Effect.all(
 					Array.from({ length: 10 }, () =>
 						Effect.fork(
-							Effect.sync(() => {
-								const pin = auth.getPinHash();
-								readResults.push(pin);
-								return pin;
-							}),
+							auth.getPinHash().pipe(
+								Effect.tap((pin) =>
+									Effect.sync(() => {
+										readResults.push(pin);
+									}),
+								),
+							),
 						),
 					),
 				);
@@ -241,7 +243,7 @@ describe("AuthManager concurrent pinHash safety", () => {
 				}
 
 				// Final state should be one of the hashes
-				const finalPin = auth.getPinHash();
+				const finalPin = yield* auth.getPinHash();
 				expect(finalPin).not.toBeNull();
 				expect(hashes).toContain(finalPin);
 			}).pipe(
@@ -270,10 +272,10 @@ describe("AuthManager concurrent pinHash safety", () => {
 						pinHash: hash,
 					}));
 					// checkPin should immediately reflect the updated hash
-					expect(auth.hasPin()).toBe(true);
-					expect(auth.checkPin(pin)).toBe(true);
+					expect(yield* auth.hasPin()).toBe(true);
+					expect(yield* auth.checkPin(pin)).toBe(true);
 					// Wrong pin should fail
-					expect(auth.checkPin("wrong")).toBe(false);
+					expect(yield* auth.checkPin("wrong")).toBe(false);
 				}
 
 				// Clear pin
@@ -281,9 +283,9 @@ describe("AuthManager concurrent pinHash safety", () => {
 					...c,
 					pinHash: null,
 				}));
-				expect(auth.hasPin()).toBe(false);
+				expect(yield* auth.hasPin()).toBe(false);
 				// No pin → checkPin always returns true
-				expect(auth.checkPin("anything")).toBe(true);
+				expect(yield* auth.checkPin("anything")).toBe(true);
 			}).pipe(
 				Effect.provide(
 					Layer.fresh(

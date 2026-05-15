@@ -4,6 +4,7 @@
 // duplicate detection, error-state reset, mock fetch session prefetch,
 // scoped fiber lifecycle, and finalizer verification.
 
+import { createServer, type Server } from "node:http";
 import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
@@ -17,34 +18,40 @@ import {
 } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { AuthManagerTag } from "../../../src/lib/effect/auth-middleware.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import { ProjectDiscoveryLive } from "../../../src/lib/domain/daemon/Layers/project-discovery-layer.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import {
+	prefetchSessionCounts,
+	SessionPrefetchLive,
+} from "../../../src/lib/domain/daemon/Layers/session-prefetch-layer.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	type InstanceManagerState,
 	InstanceManagerStateTag,
+	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 	PollerFibersTag,
-} from "../../../src/lib/effect/instance-manager-service.js";
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { discoverProjectsEffect } from "../../../src/lib/domain/daemon/Services/project-discovery-service.js";
 import {
-	discoverProjectsEffect,
-	ProjectDiscoveryLive,
-} from "../../../src/lib/effect/project-discovery-layer.js";
-import {
+	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
 	type ProjectState,
-} from "../../../src/lib/effect/project-registry-service.js";
-import { HttpServerRefLive } from "../../../src/lib/effect/relay-factory-layer.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
-	prefetchSessionCounts,
-	SessionPrefetchLive,
-} from "../../../src/lib/effect/session-prefetch-layer.js";
-import { WebSocketRoutingLive } from "../../../src/lib/effect/ws-routing-layer.js";
+	WebSocketRelayRouterTag,
+	WebSocketRoutingLive,
+	WebSocketUpgradeError,
+} from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
 // ─── Shared test layers ────────────────────────────────────────────────────
@@ -53,14 +60,33 @@ const configRefLayer = DaemonConfigRefLive(
 	makeDaemonConfigFromOptions({ port: 2633 }),
 );
 
-const authLayer = Layer.succeed(
-	AuthManagerTag,
+const authLayer = makeAuthManagerLive(
 	new AuthManager({ getPinHash: () => null }),
+);
+const wsRelayRouterLayer = Layer.succeed(WebSocketRelayRouterTag, {
+	ensureRelayStarted: () => Effect.void,
+	waitForRelay: (slug: string) =>
+		Effect.fail(
+			new WebSocketUpgradeError({
+				reason: "relay_unavailable",
+				slug,
+				cause: new Error("No relay configured in this test"),
+			}),
+		),
+	touchLastUsed: () => Effect.void,
+});
+const httpServerRefWithServerLayer = Layer.effect(
+	HttpServerRefTag,
+	Effect.flatMap(
+		Effect.sync(() => createServer()),
+		(server) => Ref.make<Server | null>(server),
+	),
 );
 
 const registryLayer = makeProjectRegistryLive();
 const instanceLayer = makeInstanceManagerStateLive();
 const eventBusLayer = DaemonEventBusLive;
+const persistenceLayer = ConfigPersistenceNoopLive;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -88,6 +114,7 @@ const makeSeededInstanceLayer = (
 		InstanceManagerStateTag,
 		Ref.make<InstanceManagerState>({
 			instances: instanceMap,
+			externalUrls: HashMap.empty(),
 			restartTimestamps: HashMap.empty(),
 			config: {
 				maxInstances: 5,
@@ -107,8 +134,9 @@ const makeSeededRegistryLayer = (entries: Array<[string, ProjectState]>) =>
 describe("WebSocketRoutingLive", () => {
 	const wsLayer = WebSocketRoutingLive.pipe(
 		Layer.provide(configRefLayer),
-		Layer.provide(HttpServerRefLive),
+		Layer.provide(httpServerRefWithServerLayer),
 		Layer.provide(authLayer),
+		Layer.provide(wsRelayRouterLayer),
 	);
 
 	it.scoped("builds without error", () =>
@@ -145,6 +173,7 @@ describe("ProjectDiscoveryLive", () => {
 		Layer.provide(instanceLayer),
 		Layer.provide(registryLayer),
 		Layer.provide(eventBusLayer),
+		Layer.provide(persistenceLayer),
 	);
 
 	it.scoped("builds without error", () =>
@@ -162,6 +191,7 @@ describe("discoverProjectsEffect", () => {
 		instanceLayer,
 		registryLayer,
 		eventBusLayer,
+		persistenceLayer,
 	);
 
 	it.scoped("returns 0 when no instances available", () =>
@@ -185,6 +215,7 @@ describe("discoverProjectsEffect", () => {
 							makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
 							registryLayer,
 							eventBusLayer,
+							persistenceLayer,
 						),
 					),
 				),
@@ -217,6 +248,7 @@ describe("discoverProjectsEffect", () => {
 							],
 						]),
 						eventBusLayer,
+						persistenceLayer,
 					),
 				),
 			),
@@ -243,6 +275,7 @@ describe("discoverProjectsEffect", () => {
 						makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
 						registryLayer,
 						eventBusLayer,
+						persistenceLayer,
 					),
 				),
 			),
@@ -376,6 +409,62 @@ describe("prefetchSessionCounts", () => {
 							]),
 						),
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
+					),
+				),
+			),
+		),
+	);
+
+	it.scoped("uses daemon-state seeded projects and instances", () =>
+		Effect.gen(function* () {
+			const fetchMock = vi.fn().mockResolvedValue({
+				json: () => Promise.resolve([{ id: "s1" }, { id: "s2" }]),
+			});
+			vi.stubGlobal("fetch", fetchMock);
+
+			const count = yield* prefetchSessionCounts;
+			expect(count).toBe(1);
+			expect(fetchMock).toHaveBeenCalledWith(
+				"http://localhost:4567/session?limit=10000",
+				expect.objectContaining({
+					headers: expect.objectContaining({
+						"x-opencode-directory": "/tmp/seeded-project",
+					}),
+				}),
+			);
+
+			const configRef = yield* DaemonConfigRefTag;
+			const config = yield* Ref.get(configRef);
+			expect(config.persistedSessionCounts.get("seeded-project")).toBe(2);
+		}).pipe(
+			Effect.provide(
+				Layer.fresh(
+					Layer.mergeAll(
+						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
+						makeProjectRegistryFromDaemonStateLive,
+						makeInstanceManagerStateFromDaemonStateLive(),
+					).pipe(
+						Layer.provideMerge(
+							makeDaemonStateLive({
+								projects: [
+									{
+										slug: "seeded-project",
+										path: "/tmp/seeded-project",
+										title: "Seeded Project",
+										addedAt: 1,
+										instanceId: "default",
+									},
+								],
+								instances: [
+									{
+										id: "default",
+										name: "Default",
+										port: 4567,
+										managed: true,
+									},
+								],
+							}),
+						),
 					),
 				),
 			),
@@ -543,6 +632,7 @@ describe("Scoped fiber lifecycle", () => {
 					Layer.provide(instanceLayer),
 					Layer.provide(registryLayer),
 					Layer.provide(eventBusLayer),
+					Layer.provide(persistenceLayer),
 				),
 			);
 			const scope = yield* Scope.make();
@@ -572,8 +662,9 @@ describe("Scoped fiber lifecycle", () => {
 			const layer = Layer.fresh(
 				WebSocketRoutingLive.pipe(
 					Layer.provide(configRefLayer),
-					Layer.provide(HttpServerRefLive),
+					Layer.provide(httpServerRefWithServerLayer),
 					Layer.provide(authLayer),
+					Layer.provide(wsRelayRouterLayer),
 				),
 			);
 			const scope = yield* Scope.make();

@@ -3,7 +3,7 @@
 
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { switchToSession } from "../../stores/session.svelte.js";
 
 	import Icon from "../shared/Icon.svelte";
 	import BlockGrid from '../shared/BlockGrid.svelte';
@@ -61,7 +61,7 @@
 	function navigateToSubagent(e: MouseEvent) {
 		e.stopPropagation();
 		if (subagentSessionId) {
-			wsSend({ type: "switch_session", sessionId: subagentSessionId });
+			switchToSession(subagentSessionId);
 		}
 	}
 

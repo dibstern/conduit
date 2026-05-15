@@ -3,13 +3,17 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import type { SessionStatusPollerService } from "../effect/session-status-poller.js";
+import { Cause, Effect, Runtime } from "effect";
+import { StatusPollerTag } from "../domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
-import type { PushNotificationManager } from "../server/push.js";
+import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
+	applyPipelineResultEffect,
 	type PipelineDeps,
 	processEvent,
 } from "./event-pipeline.js";
@@ -17,7 +21,7 @@ import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
-import type { SSEStream } from "./sse-stream.js";
+import type { SSEStreamEvents } from "./sse-stream.js";
 import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
 
 /** Structural interface for the message poller manager's capabilities needed by poller wiring. */
@@ -31,27 +35,107 @@ interface PollerManagerLike {
 
 // ─── Deps interface ──────────────────────────────────────────────────────────
 
-/** Narrowed SessionManager capabilities needed by poller wiring. */
-interface SessionManagerLike {
+/** Narrowed Effect session service capabilities needed by poller wiring. */
+interface SessionServiceLike {
 	getSessionParentMap(): Map<string, string>;
+}
+
+interface LegacyStatusPollerPort {
+	markMessageActivity(sessionId: string): void;
 }
 
 export interface PollerWiringDeps {
 	pollerManager: PollerManagerLike;
-	sseStream: SSEStream;
-	statusPoller: SessionStatusPollerService;
+	sseStream: SSEStreamEvents;
+	statusPoller: LegacyStatusPollerPort;
 	wsHandler: WebSocketHandlerShape;
-	sessionMgr: SessionManagerLike;
+	sessionService: SessionServiceLike;
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
 	config: {
-		pushManager?: PushNotificationManager;
+		pushManager?: PushNotificationSender;
 		slug: string;
 	};
 	pollerLog: Logger;
 	/** Optional: record that a "done" was delivered via poller (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
 }
+
+export type EffectPollerWiringDeps = Omit<
+	PollerWiringDeps,
+	"sessionService" | "pipelineDeps" | "statusPoller"
+> & {
+	pipelineDeps: Omit<PipelineDeps, "processingTimeouts">;
+};
+
+const handlePollerEventsEffect = (
+	deps: EffectPollerWiringDeps,
+	events: RelayMessage[],
+	polledSessionId: string,
+) =>
+	Effect.gen(function* () {
+		const statusPoller = yield* StatusPollerTag;
+		const sessionService = yield* SessionManagerServiceTag;
+		const { wsHandler, pipelineDeps, config, pollerLog } = deps;
+
+		if (events.length > 0 && polledSessionId) {
+			if (classifyPollerBatch(events).hasContentActivity) {
+				yield* statusPoller.markMessageActivity(polledSessionId);
+			}
+		}
+
+		const parentMap = yield* sessionService.getSessionParentMap();
+		for (const msg of events) {
+			const pollerViewers = polledSessionId
+				? wsHandler.getClientsForSession(polledSessionId)
+				: [];
+			const pollerResult = processEvent(
+				msg,
+				polledSessionId,
+				pollerViewers,
+				"message-poller",
+			);
+			yield* applyPipelineResultEffect(
+				pollerResult,
+				polledSessionId,
+				pipelineDeps,
+			);
+
+			// Record done delivery for dedup with status-poller synthetic done
+			if (msg.type === "done" && polledSessionId) {
+				yield* Effect.sync(() => deps.onDoneProcessed?.(polledSessionId));
+			}
+
+			// Notification routing: push + cross-session broadcast
+			const isSubagentPoller =
+				polledSessionId != null && parentMap.has(polledSessionId);
+			const pollerNotification = resolveNotifications(
+				msg,
+				pollerResult.route,
+				isSubagentPoller,
+				polledSessionId ?? undefined,
+			);
+			const pushManager = config.pushManager;
+			if (pollerNotification.sendPush && pushManager) {
+				yield* Effect.sync(() =>
+					sendPushForEvent(pushManager, msg, pollerLog, {
+						slug: config.slug,
+						sessionId: polledSessionId ?? undefined,
+					}),
+				);
+			}
+			if (
+				pollerNotification.broadcastCrossSession &&
+				pollerNotification.crossSessionPayload
+			) {
+				yield* Effect.sync(() =>
+					wsHandler.broadcast(
+						pollerNotification.crossSessionPayload as RelayMessage,
+					),
+				);
+			}
+		}
+	});
 
 // ─── Wiring function ─────────────────────────────────────────────────────────
 
@@ -61,7 +145,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		sseStream,
 		statusPoller,
 		wsHandler,
-		sessionMgr,
+		sessionService,
 		pipelineDeps,
 		sseTracker,
 		config,
@@ -108,7 +192,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 			// Notification routing: push + cross-session broadcast
 			const isSubagentPoller =
 				polledSessionId != null &&
-				sessionMgr.getSessionParentMap().has(polledSessionId);
+				sessionService.getSessionParentMap().has(polledSessionId);
 			const pollerNotification = resolveNotifications(
 				msg,
 				pollerResult.route,
@@ -141,3 +225,34 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		}
 	});
 }
+
+export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
+	Effect.gen(function* () {
+		const runtime = yield* Effect.runtime<
+			SessionManagerServiceTag | StatusPollerTag | OverridesStateTag
+		>();
+		yield* Effect.sync(() => {
+			const runFork = Runtime.runFork(runtime);
+			deps.pollerManager.on("events", (events, polledSessionId) => {
+				runFork(
+					handlePollerEventsEffect(deps, events, polledSessionId).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.sync(() =>
+								deps.pollerLog.warn(
+									`Message poller event handling failed: ${Cause.pretty(cause)}`,
+								),
+							),
+						),
+					),
+				);
+			});
+
+			deps.sseStream.on("event", (event: unknown) => {
+				const sid = extractSessionId(event as SSEEvent);
+				if (sid) {
+					deps.sseTracker.recordEvent(sid, Date.now());
+					deps.pollerManager.notifySSEEvent(sid);
+				}
+			});
+		});
+	});

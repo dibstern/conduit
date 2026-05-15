@@ -3,16 +3,16 @@ import { Effect, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import type { TlsCerts } from "../../../src/lib/cli/tls.js";
 import {
-	DaemonConfigRefLive,
-	DaemonConfigRefTag,
-	type DaemonRuntimeConfig,
-} from "../../../src/lib/effect/daemon-config-ref.js";
-import {
 	EnsureCertsTag,
 	TlsCertLive,
 	TlsCertLoadError,
 	TlsCertTag,
-} from "../../../src/lib/effect/tls-cert-layer.js";
+} from "../../../src/lib/domain/daemon/Layers/tls-cert-layer.js";
+import {
+	DaemonConfigRefLive,
+	DaemonConfigRefTag,
+	type DaemonRuntimeConfig,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

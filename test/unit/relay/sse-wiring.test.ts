@@ -8,12 +8,8 @@ import {
 	wireSSEConsumer,
 } from "../../../src/lib/relay/sse-wiring.js";
 import { TRUNCATION_THRESHOLD } from "../../../src/lib/relay/truncate-content.js";
-import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
-
-/** Cast a plain string to PermissionId for test data. */
-const pid = (s: string) => s as PermissionId;
 
 // ─── extractSessionId ────────────────────────────────────────────────────────
 
@@ -215,7 +211,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
 			"active-session",
 		);
 	});
@@ -234,7 +230,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.clearProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
 			"other-session",
 		);
 	});
@@ -257,10 +253,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
 			"active-session",
 		);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("does not reset processing timeout when no sessionID is present", () => {
@@ -281,8 +279,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).not.toHaveBeenCalled();
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets processing timeout on non-done events for active session", () => {
@@ -303,8 +305,10 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalled();
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets processing timeout on non-done events for any session (per-session timer)", () => {
@@ -325,10 +329,12 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledWith(
+		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
 			"other-session",
 		);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("resets processing timeout on retry events for active session", () => {
@@ -349,8 +355,12 @@ describe("handleSSEEvent", () => {
 		handleSSEEvent(deps, event);
 
 		// The error message should reset the timeout (it's not "done")
-		expect(deps.overrides.resetProcessingTimeout).toHaveBeenCalledTimes(1);
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).toHaveBeenCalledTimes(1);
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
 	it("does not reset processing timeout when no sessionID is present", () => {
@@ -371,35 +381,46 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.overrides.resetProcessingTimeout).not.toHaveBeenCalled();
-		expect(deps.overrides.clearProcessingTimeout).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.resetProcessingTimeout,
+		).not.toHaveBeenCalled();
+		expect(
+			deps.processingTimeouts.clearProcessingTimeout,
+		).not.toHaveBeenCalled();
 	});
 
-	it("routes permission.asked events to permissionBridge", () => {
+	it("records permission.asked events through pending permission state", () => {
 		const deps = createMockSSEWiringDeps();
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
-			properties: { id: "perm-1", permission: "Bash", tool: "Bash" },
+			properties: {
+				id: "perm-1",
+				permission: "Bash",
+				sessionID: "session-1",
+				patterns: ["git *"],
+				metadata: { command: "git status" },
+				always: ["git *"],
+			},
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.permissionBridge.onPermissionRequest).toHaveBeenCalledWith(
-			event,
-		);
+		expect(
+			deps.pendingInteractions.recordPermissionRequest,
+		).toHaveBeenCalledWith({
+			requestId: "perm-1",
+			sessionId: "session-1",
+			toolName: "Bash",
+			toolInput: {
+				patterns: ["git *"],
+				metadata: { command: "git status" },
+			},
+			always: ["git *"],
+		});
 	});
 
 	it("broadcast permission_request includes sessionId from the event", () => {
 		const deps = createMockSSEWiringDeps();
-		// Permission events now go through the bridge, not the translator
-		vi.mocked(deps.permissionBridge.onPermissionRequest).mockReturnValue({
-			requestId: pid("perm-1"),
-			sessionId: "ses-abc",
-			toolName: "Bash",
-			toolInput: { patterns: [], metadata: {} },
-			always: [],
-			timestamp: Date.now(),
-		});
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
@@ -444,9 +465,15 @@ describe("handleSSEEvent", () => {
 			translated,
 		);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
+		expect(
+			deps.sessionService.incrementPendingQuestionCount,
+		).toHaveBeenCalledWith("active-session");
+		expect(
+			deps.sessionService.incrementPendingQuestionCount,
+		).toHaveBeenCalledTimes(1);
 	});
 
-	it("routes permission.replied events to permissionBridge", () => {
+	it("routes permission.replied events to pending permission state", () => {
 		const deps = createMockSSEWiringDeps();
 
 		const event: OpenCodeEvent = {
@@ -455,7 +482,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		expect(deps.permissionBridge.onPermissionReplied).toHaveBeenCalledWith(
+		expect(deps.pendingInteractions.markPermissionReplied).toHaveBeenCalledWith(
 			"perm-1",
 		);
 	});
@@ -589,15 +616,6 @@ describe("handleSSEEvent", () => {
 
 	it("broadcasts permission_request even when sessionID is missing from SSE event", () => {
 		const deps = createMockSSEWiringDeps();
-		// Mock the bridge to return a PendingPermission with the data
-		vi.mocked(deps.permissionBridge.onPermissionRequest).mockReturnValue({
-			requestId: pid("perm-1"),
-			sessionId: "",
-			toolName: "Bash",
-			toolInput: { command: "git status" },
-			always: [],
-			timestamp: Date.now(),
-		});
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
@@ -622,14 +640,6 @@ describe("handleSSEEvent", () => {
 
 	it("broadcasts permission_request with sessionID when present in SSE event", () => {
 		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.permissionBridge.onPermissionRequest).mockReturnValue({
-			requestId: pid("perm-2"),
-			sessionId: "sess-abc",
-			toolName: "Write",
-			toolInput: { patterns: [], metadata: {} },
-			always: [],
-			timestamp: Date.now(),
-		});
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
@@ -656,15 +666,6 @@ describe("handleSSEEvent", () => {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		// Bridge returns a PendingPermission so the push path uses its data
-		vi.mocked(deps.permissionBridge.onPermissionRequest).mockReturnValue({
-			requestId: pid("perm-1"),
-			sessionId: "",
-			toolName: "Bash",
-			toolInput: {},
-			always: [],
-			timestamp: Date.now(),
-		});
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
@@ -948,17 +949,6 @@ describe("wireSSEConsumer", () => {
 			},
 		]);
 		const deps = createMockSSEWiringDeps({ listPendingPermissions });
-		// Mock recoverPending to return the recovered PendingPermission entries
-		vi.mocked(deps.permissionBridge.recoverPending).mockReturnValue([
-			{
-				requestId: pid("perm-recover-1"),
-				sessionId: "sess-x",
-				toolName: "Bash",
-				toolInput: { patterns: ["git *"], metadata: { command: "git status" } },
-				always: ["git *"],
-				timestamp: Date.now(),
-			},
-		]);
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
@@ -975,8 +965,10 @@ describe("wireSSEConsumer", () => {
 			expect(listPendingPermissions).toHaveBeenCalled();
 		});
 
-		// Should recover into bridge
-		expect(deps.permissionBridge.recoverPending).toHaveBeenCalledWith([
+		// Should recover into pending permission state
+		expect(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).toHaveBeenCalledWith([
 			expect.objectContaining({
 				id: "perm-recover-1",
 				permission: "Bash",
@@ -1014,7 +1006,39 @@ describe("wireSSEConsumer", () => {
 		});
 
 		// Should not recover or broadcast anything
-		expect(deps.permissionBridge.recoverPending).not.toHaveBeenCalled();
+		expect(
+			deps.pendingInteractions.recoverPendingPermissions,
+		).not.toHaveBeenCalled();
+	});
+
+	it("sets pending question counts from API on SSE connect", async () => {
+		const listPendingQuestions = vi.fn().mockResolvedValue([
+			{ id: "que-1", sessionID: "sess-a", questions: [] },
+			{ id: "que-2", sessionID: "sess-a", questions: [] },
+			{ id: "que-3", sessionID: "sess-b", questions: [] },
+		]);
+		const deps = createMockSSEWiringDeps({
+			listPendingQuestions,
+		});
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+
+		wireSSEConsumer(deps, consumer);
+		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
+		listeners.get("connected")!();
+
+		await vi.waitFor(() => {
+			expect(deps.sessionService.setPendingQuestionCounts).toHaveBeenCalledWith(
+				new Map([
+					["sess-a", 2],
+					["sess-b", 1],
+				]),
+			);
+		});
 	});
 
 	it("broadcasts connection_status 'connected' on connected event", () => {

@@ -2,6 +2,15 @@
 // Manages session list, active session, search, and date grouping.
 
 import { SvelteMap } from "svelte/reactivity";
+import type { ListSessionsResponse } from "../transport/ws-rpc.js";
+import {
+	type CreateSessionRpcInput,
+	createSessionRpc,
+	getAgentsRpc,
+	getCommandsRpc,
+	type ViewSessionRpcInput,
+	viewSessionRpc,
+} from "../transport/ws-rpc-client.js";
 import type {
 	DateGroups,
 	RelayMessage,
@@ -9,6 +18,11 @@ import type {
 	SessionInfo,
 } from "../types.js";
 import { clearMessages, clearSessionChatState } from "./chat.svelte.js";
+import { getBrowserClientId } from "./client-identity.js";
+import {
+	applyGetAgentsResponse,
+	applyGetCommandsResponse,
+} from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { uiState } from "./ui.svelte.js";
 
@@ -149,11 +163,30 @@ export function resetSessionCreation(): void {
  * shape so they can't diverge.
  */
 export function sendNewSession(
-	send: (data: Record<string, unknown>) => void,
+	start?: (input: CreateSessionRpcInput) => void,
 ): RequestId | null {
 	const requestId = requestNewSession();
 	if (!requestId) return null;
-	send({ type: "new_session", requestId });
+	const projectSlug = getCurrentSlug();
+	if (!projectSlug) {
+		failNewSession(requestId, "No active project");
+		return requestId;
+	}
+	const input: CreateSessionRpcInput = {
+		projectSlug,
+		requestId,
+		originId: getBrowserClientId(),
+	};
+	if (start) {
+		start(input);
+	} else {
+		void createSessionRpc(input).catch((error: unknown) =>
+			failNewSession(
+				requestId,
+				error instanceof Error ? error.message : String(error),
+			),
+		);
+	}
 	return requestId;
 }
 
@@ -295,6 +328,40 @@ export function handleSessionList(
 	}
 }
 
+const sessionInfoFromRpc = (
+	session: ListSessionsResponse["sessions"][number],
+): SessionInfo => ({
+	id: session.id,
+	title: session.title,
+	...(session.createdAt != null ? { createdAt: session.createdAt } : {}),
+	...(session.updatedAt != null ? { updatedAt: session.updatedAt } : {}),
+	...(session.messageCount != null
+		? { messageCount: session.messageCount }
+		: {}),
+	...(session.processing != null ? { processing: session.processing } : {}),
+	...(session.parentID != null ? { parentID: session.parentID } : {}),
+	...(session.forkMessageId != null
+		? { forkMessageId: session.forkMessageId }
+		: {}),
+	...(session.forkPointTimestamp != null
+		? { forkPointTimestamp: session.forkPointTimestamp }
+		: {}),
+	...(session.pendingQuestionCount != null
+		? { pendingQuestionCount: session.pendingQuestionCount }
+		: {}),
+});
+
+export function applyListSessionsResponse(
+	response: ListSessionsResponse,
+): void {
+	handleSessionList({
+		type: "session_list",
+		sessions: response.sessions.map(sessionInfoFromRpc),
+		roots: response.roots,
+		...(response.search ? { search: true } : {}),
+	});
+}
+
 export function handleSessionSwitched(
 	msg: Extract<RelayMessage, { type: "session_switched" }>,
 ): void {
@@ -308,7 +375,7 @@ export function handleSessionSwitched(
 		}
 	}
 	// Co-located: complete the creation state machine if this session_switched
-	// is the response to our new_session request. This is inside
+	// is the response to our CreateSession RPC request. This is inside
 	// handleSessionSwitched (not in the dispatch switch) so it can't be
 	// accidentally separated from the state update.
 	if (requestId) {
@@ -359,14 +426,14 @@ export function consumeSwitchingFromId(): string | null {
 
 /**
  * Switch this tab to a different session.
- * Updates local state, navigates the URL, and sends `view_session` to the server.
+ * Updates local state, navigates the URL, and sends `ViewSession` to the server.
  *
  * The two-tier per-session store retains session state across switches
  * (Tier 1 is unbounded, Tier 2 is LRU-capped).
  */
 export function switchToSession(
 	sessionId: string,
-	sendWs: (data: Record<string, unknown>) => void,
+	view?: (input: ViewSessionRpcInput) => void,
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
 	_switchingFromId = sessionState.currentId;
@@ -379,9 +446,26 @@ export function switchToSession(
 
 	const slug = getCurrentSlug();
 	if (slug) navigate(`/p/${slug}/s/${sessionId}`);
-	sendWs({ type: "view_session", sessionId });
-	sendWs({ type: "get_agents" });
-	sendWs({ type: "get_commands" });
+	if (slug) {
+		const input: ViewSessionRpcInput = {
+			projectSlug: slug,
+			sessionId,
+			originId: getBrowserClientId(),
+		};
+		if (view) {
+			view(input);
+		} else {
+			void viewSessionRpc(input).catch(() => undefined);
+		}
+	}
+	if (slug) {
+		void getAgentsRpc({ projectSlug: slug, sessionId })
+			.then(applyGetAgentsResponse)
+			.catch(() => undefined);
+		void getCommandsRpc({ projectSlug: slug, sessionId })
+			.then(applyGetCommandsResponse)
+			.catch(() => undefined);
+	}
 }
 
 /** Clear all session state (for project switch). */

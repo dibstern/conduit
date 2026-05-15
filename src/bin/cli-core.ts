@@ -5,10 +5,17 @@
 
 import { resolve } from "node:path";
 import { getTailscaleIP } from "../lib/cli/tls.js";
-import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
+import {
+	isDaemonSpawnPortInUseError,
+	spawnDaemon,
+} from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
-import { startDaemonProcess } from "../lib/effect/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	startDaemonChildProcess,
+	startForegroundDaemon,
+} from "../lib/domain/daemon/Layers/daemon-foreground.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCCommand, IPCResponse } from "../lib/types.js";
@@ -48,6 +55,10 @@ export interface CLIOptions {
 	spawnDaemon?: (
 		opts?: DaemonOptions,
 	) => Promise<{ pid: number; port: number }>;
+	startForegroundDaemon?: (
+		opts: DaemonOptions,
+	) => Promise<ForegroundDaemonHandle>;
+	startDaemonChildProcess?: (opts: DaemonOptions) => Promise<void>;
 	generateQR?: (url: string) => string;
 	getNetworkAddress?: () => string | null;
 	getTailscaleIP?: () => string | null;
@@ -98,6 +109,10 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 				},
 				isDaemonRunning,
 			));
+	const startForegroundDaemonFn =
+		options?.startForegroundDaemon ?? startForegroundDaemon;
+	const startDaemonChildProcessFn =
+		options?.startDaemonChildProcess ?? startDaemonChildProcess;
 
 	const qr = options?.generateQR ?? generateQR;
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
@@ -119,7 +134,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
 		const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
 		const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
-		await startDaemonProcess({
+		await startDaemonChildProcessFn({
 			port: daemonPort,
 			...(daemonHost ? { host: daemonHost } : {}),
 			configDir: daemonConfigDir,
@@ -159,7 +174,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		stdout.write(`\nConduit (foreground)\n`);
 		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
 
-		const daemon = await startDaemonProcess({
+		const daemon = await startForegroundDaemonFn({
 			port: args.port,
 			...(args.host ? { host: args.host } : {}),
 			opencodeUrl,
@@ -653,10 +668,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			running = true;
 		} catch (err) {
 			const message = formatErrorDetail(err);
-			if (
-				message.includes("EADDRINUSE") ||
-				message.includes("address already in use")
-			) {
+			if (isDaemonSpawnPortInUseError(err)) {
 				stderr.write(`Port ${args.port} is already in use.\n`);
 				stderr.write("Try a different port: --port <number>\n");
 			} else {

@@ -1,6 +1,11 @@
 // ─── Session Store Tests ─────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	routerState,
+	syncSlugState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	applyListSessionsResponse,
 	clearSessionState,
 	completeNewSession,
 	ERROR_DISPLAY_MS,
@@ -21,6 +26,7 @@ import {
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type {
 	RelayMessage,
 	SessionInfo,
@@ -77,26 +83,24 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	sessionState.hasMore = false;
+	routerState.path = "/p/project-a/s/old-session";
+	syncSlugState(routerState.path);
 });
 
 describe("switchToSession", () => {
-	it("requests active-provider commands and agents after changing session", () => {
-		const sendWs = vi.fn();
+	it("views the session through RPC after changing local state", () => {
+		const viewSession = vi.fn();
 		sessionState.currentId = "old-session";
+		routerState.path = "/p/project-a/s/new-session";
+		syncSlugState(routerState.path);
 
-		switchToSession("new-session", sendWs);
+		switchToSession("new-session", viewSession);
 
-		expect(sendWs).toHaveBeenCalledWith({
-			type: "view_session",
+		expect(viewSession).toHaveBeenCalledWith({
+			projectSlug: "project-a",
 			sessionId: "new-session",
+			originId: expect.any(String),
 		});
-		expect(sendWs).toHaveBeenCalledWith({ type: "get_agents" });
-		expect(sendWs).toHaveBeenCalledWith({ type: "get_commands" });
-		expect(sendWs.mock.calls.map((call) => call[0])).toEqual([
-			{ type: "view_session", sessionId: "new-session" },
-			{ type: "get_agents" },
-			{ type: "get_commands" },
-		]);
 	});
 });
 
@@ -188,6 +192,31 @@ describe("handleSessionList", () => {
 		expect(sessionState.allSessions).toHaveLength(2);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(sessionState.allSessions[0]!.id).toBe("a");
+	});
+
+	it("applies ListSessions RPC responses through the same session-list path", () => {
+		applyListSessionsResponse({
+			projectSlug: "project-a",
+			roots: true,
+			sessions: [
+				{
+					id: "rpc-root",
+					title: "RPC Root",
+					updatedAt: 123,
+					pendingQuestionCount: 2,
+				},
+			],
+		});
+
+		expect(sessionState.rootSessions).toEqual([
+			{
+				id: "rpc-root",
+				title: "RPC Root",
+				updatedAt: 123,
+				pendingQuestionCount: 2,
+			},
+		]);
+		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
 	});
 
 	it("ignores non-array sessions payload", () => {
@@ -533,29 +562,34 @@ describe("SessionCreationStatus state machine", () => {
 
 describe("sendNewSession", () => {
 	let sent: Record<string, unknown>[];
-	const mockSend = (data: Record<string, unknown>) => sent.push(data);
+	const mockStart = (data: CreateSessionRpcInput) =>
+		sent.push(data as unknown as Record<string, unknown>);
 
 	beforeEach(() => {
 		sent = [];
 		resetSessionCreation();
 	});
 
-	it("sends new_session with requestId and returns requestId", () => {
-		const requestId = sendNewSession(mockSend);
+	it("sends CreateSession input with requestId and returns requestId", () => {
+		const requestId = sendNewSession(mockStart);
 		expect(requestId).not.toBeNull();
 		expect(sent).toHaveLength(1);
-		expect(sent[0]).toEqual({ type: "new_session", requestId });
+		expect(sent[0]).toEqual({
+			projectSlug: "project-a",
+			requestId,
+			originId: expect.any(String),
+		});
 	});
 
 	it("transitions to creating phase", () => {
-		sendNewSession(mockSend);
+		sendNewSession(mockStart);
 		expect(sessionCreation.value.phase).toBe("creating");
 	});
 
 	it("returns null and sends nothing when already creating", () => {
-		sendNewSession(mockSend);
+		sendNewSession(mockStart);
 		sent = [];
-		const result = sendNewSession(mockSend);
+		const result = sendNewSession(mockStart);
 		expect(result).toBeNull();
 		expect(sent).toHaveLength(0);
 	});
@@ -565,11 +599,11 @@ describe("sendNewSession", () => {
 	it("mirrors Sidebar button guard: disabled when creating, re-enabled after complete", () => {
 		// First click — succeeds, button should be disabled
 		// biome-ignore lint/style/noNonNullAssertion: safe — first call from idle
-		const requestId = sendNewSession(mockSend)!;
+		const requestId = sendNewSession(mockStart)!;
 		expect(sessionCreation.value.phase === "creating").toBe(true);
 
 		// Second click while creating — guard blocks
-		expect(sendNewSession(mockSend)).toBeNull();
+		expect(sendNewSession(mockStart)).toBeNull();
 
 		// Server responds — button should re-enable
 		completeNewSession(requestId);
@@ -577,7 +611,7 @@ describe("sendNewSession", () => {
 
 		// Third click — succeeds again
 		sent = [];
-		expect(sendNewSession(mockSend)).not.toBeNull();
+		expect(sendNewSession(mockStart)).not.toBeNull();
 		expect(sent).toHaveLength(1);
 	});
 });

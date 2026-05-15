@@ -13,7 +13,9 @@ import {
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Effect, Ref } from "effect";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,
@@ -189,6 +191,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
 		slug: "test-status-poller",
+		noServer: true,
 		log: createSilentLogger(),
 		statusPollerInterval: 100,
 		messagePollerInterval: 150,
@@ -196,6 +199,18 @@ async function createTestHarness(): Promise<TestHarness> {
 			sseGracePeriodMs: 300,
 			sseActiveThresholdMs: 500,
 		},
+	});
+
+	relayServer.on("upgrade", (req, socket, head) => {
+		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
+			relay.wsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
+			relay.rpcWsHandler.handleUpgrade(req, socket, head);
+			return;
+		}
+		socket.destroy();
 	});
 
 	// Wait for SSE + status poller to initialize
@@ -206,7 +221,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		mock,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}`;
+			let url = `ws://127.0.0.1:${relayPort}/ws`;
 			if (opts?.session) {
 				url += `?session=${encodeURIComponent(opts.session)}`;
 			}
@@ -240,11 +255,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		await client.waitForInitialState();
 
 		// View session A
-		client.send({ type: "view_session", sessionId: "sess-A" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
+		await client.viewSession("sess-A");
 		client.clearReceived();
 
 		// Simulate session A becoming busy (e.g., TUI started processing)
@@ -269,11 +280,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
 
-		client.send({ type: "view_session", sessionId: "sess-B" });
-		await client.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await client.viewSession("sess-B");
 		client.clearReceived();
 
 		// First make session B busy
@@ -300,16 +307,8 @@ describe("Status poller → browser processing/done transitions", () => {
 		await clientB.waitForInitialState();
 
 		// Client A views session A, Client B views session B
-		clientA.send({ type: "view_session", sessionId: "sess-A" });
-		clientB.send({ type: "view_session", sessionId: "sess-B" });
-		await clientA.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-A",
-		});
-		await clientB.waitFor("session_switched", {
-			timeout: 3000,
-			predicate: (m) => m["id"] === "sess-B",
-		});
+		await clientA.viewSession("sess-A");
+		await clientB.viewSession("sess-B");
 		clientA.clearReceived();
 		clientB.clearReceived();
 
@@ -335,5 +334,30 @@ describe("Status poller → browser processing/done transitions", () => {
 
 		await clientA.close();
 		await clientB.close();
+	});
+
+	it("shares status-poller state with the relay Effect runtime", async () => {
+		harness.mock.sessionStatuses["sess-A"] = { type: "busy" };
+
+		await vi.waitFor(
+			() => expect(harness.relay.isAnySessionProcessing()).toBe(true),
+			{ timeout: 3000 },
+		);
+
+		const relayRuntimeStatus =
+			await harness.relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					const ref = yield* PollerStateTag;
+					const state = yield* Ref.get(ref);
+					return state.previousStatuses["sess-A"]?.type;
+				}),
+			);
+		expect(relayRuntimeStatus).toBe("busy");
+
+		harness.mock.sessionStatuses["sess-A"] = { type: "idle" };
+		await vi.waitFor(
+			() => expect(harness.relay.isAnySessionProcessing()).toBe(false),
+			{ timeout: 3000 },
+		);
 	});
 });

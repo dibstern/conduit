@@ -1,16 +1,17 @@
 // ─── Relay Event Sink ────────────────────────────────────────────────────────
-// Translates adapter-emitted CanonicalEvents into RelayMessages and pushes
+// Translates provider-emitted CanonicalEvents into RelayMessages and pushes
 // them straight to WebSocket clients. Used for the in-process Claude SDK path
-// (ClaudeAdapter) where there is no SSE stream to piggy-back on. Permissions
-// and questions are bridged through the same path so the UI receives the
+// (ClaudeProviderInstance) where there is no SSE stream to piggy-back on. Permissions
+// and questions are routed through the same path so the UI receives the
 // familiar RelayMessage shapes.
 
+import { Effect } from "effect";
 import { createLogger } from "../logger.js";
-import type { CanonicalEvent, StoredEvent } from "../persistence/events.js";
+import type { CanonicalEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
-import { createDeferred, type Deferred } from "./deferred.js";
+import { MissingPendingInteractions } from "./errors.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -41,11 +42,13 @@ function silent(reason: string): TranslationResult {
 
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
-export interface RelayEventSinkPersist {
-	readonly eventStore: { append(event: CanonicalEvent): StoredEvent };
-	readonly projectionRunner: { projectEvent(event: StoredEvent): void };
-	readonly ensureSession: (sessionId: string) => void;
+export interface EffectRelayEventSinkPersist {
+	readonly persistEvent: (
+		event: CanonicalEvent,
+	) => Effect.Effect<void, unknown>;
 }
+
+export type RelayEventSinkPersist = EffectRelayEventSinkPersist;
 
 export interface RelayEventSinkDeps {
 	readonly sessionId: string;
@@ -56,22 +59,23 @@ export interface RelayEventSinkDeps {
 	readonly resetTimeout?: () => void;
 	/** Optional: persist events to SQLite for session history survival. */
 	readonly persist?: RelayEventSinkPersist;
-	/** Optional: permission bridge for tracking pending permissions (enables replay on session switch). */
-	readonly permissionBridge?: {
-		trackPending(entry: {
+	/** Effect-owned pending interaction state. Required when permission/question methods are used. */
+	readonly pendingInteractions?: {
+		beginPermissionRequest(entry: {
 			requestId: PermissionId;
 			sessionId: string;
 			toolName: string;
 			toolInput: Record<string, unknown>;
 			always: string[];
-			timestamp: number;
-		}): void;
-		/** Clean up the bridge entry when a permission is resolved. */
-		onPermissionReplied(requestId: string): boolean;
-	};
-	/** Optional: question bridge for tracking pending questions (enables replay on session switch). */
-	readonly questionBridge?: {
-		trackPending(entry: {
+		}): Effect.Effect<
+			{ readonly awaitResponse: Effect.Effect<PermissionResponse, unknown> },
+			unknown
+		>;
+		resolvePermissionRequest(
+			requestId: string,
+			response: PermissionResponse,
+		): Effect.Effect<boolean | undefined, unknown>;
+		beginQuestionRequest(entry: {
 			requestId: string;
 			sessionId: string;
 			questions: Array<{
@@ -81,10 +85,17 @@ export interface RelayEventSinkDeps {
 				multiSelect?: boolean;
 			}>;
 			toolCallId?: string;
-			timestamp: number;
-		}): void;
-		/** Clean up the bridge entry when a question is resolved. */
-		onResolved(requestId: string): boolean;
+		}): Effect.Effect<
+			{
+				readonly awaitAnswers: Effect.Effect<Record<string, unknown>, unknown>;
+			},
+			unknown
+		>;
+		resolveQuestionRequest(
+			requestId: string,
+			answers: Record<string, unknown>,
+		): Effect.Effect<boolean | undefined, unknown>;
+		cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
 	};
 }
 
@@ -95,9 +106,6 @@ export type RelayEventSink = EventSink;
 export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	const { sessionId, send, clearTimeout, resetTimeout, persist } = deps;
 
-	const pendingPermissions = new Map<string, Deferred<PermissionResponse>>();
-	const pendingQuestions = new Map<string, Deferred<Record<string, unknown>>>();
-
 	function reset(): void {
 		if (resetTimeout) resetTimeout();
 	}
@@ -106,138 +114,173 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		if (clearTimeout) clearTimeout();
 	}
 
+	function missingPendingInteractions(
+		operation: "requestPermission" | "requestQuestion",
+	): MissingPendingInteractions {
+		return new MissingPendingInteractions({
+			operation,
+			sessionId,
+		});
+	}
+
 	return {
-		async push(event: CanonicalEvent): Promise<void> {
-			reset();
-			// Persist to SQLite when available (before WS send for durability)
-			if (persist) {
-				try {
-					persist.ensureSession(sessionId);
-					const stored = persist.eventStore.append(event);
-					persist.projectionRunner.projectEvent(stored);
-				} catch (err) {
-					// Non-fatal — same pattern as dual-write-hook.ts:149.
-					// Covers: disk full, DB locked, projection recovery guard, etc.
-					log.debug(
-						`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+		push(event: CanonicalEvent): Effect.Effect<void, never> {
+			return Effect.gen(function* () {
+				yield* Effect.sync(reset);
+				// Persist to SQLite when available (before WS send for durability)
+				if (persist) {
+					const persistResult = yield* Effect.either(
+						persist.persistEvent(event),
 					);
+					if (persistResult._tag === "Left") {
+						// Non-fatal — same pattern as dual-write-hook.ts:149.
+						// Covers: disk full, DB locked, projection recovery guard, etc.
+						yield* Effect.sync(() => {
+							const err = persistResult.left;
+							log.debug(
+								`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+							);
+						});
+					}
 				}
-			}
-			const result = translateCanonicalEvent(event);
-			if (result.kind === "emit") {
-				for (const raw of result.messages) {
-					const m = tagWithSessionId(raw, sessionId);
-					send(m);
-					const isTerminal =
-						m.type === "done" || (m.type === "error" && m.code !== "RETRY");
-					if (isTerminal) finish();
-				}
-			}
+				yield* Effect.sync(() => {
+					const result = translateCanonicalEvent(event);
+					if (result.kind === "emit") {
+						for (const raw of result.messages) {
+							const m = tagWithSessionId(raw, sessionId);
+							send(m);
+							const isTerminal =
+								m.type === "done" || (m.type === "error" && m.code !== "RETRY");
+							if (isTerminal) finish();
+						}
+					}
+				});
+			});
 		},
 
-		async requestPermission(
+		requestPermission(
 			request: PermissionRequest,
-		): Promise<PermissionResponse> {
-			reset();
-			// Register with the permission bridge so this permission can be
-			// replayed when the user switches sessions and comes back.
-			if (deps.permissionBridge) {
-				deps.permissionBridge.trackPending({
+		): Effect.Effect<PermissionResponse, unknown> {
+			return Effect.gen(function* () {
+				yield* Effect.sync(reset);
+				const pendingInteractions = deps.pendingInteractions;
+				if (!pendingInteractions) {
+					return yield* Effect.fail(
+						missingPendingInteractions("requestPermission"),
+					);
+				}
+				const pending = yield* pendingInteractions.beginPermissionRequest({
 					requestId: request.requestId as PermissionId,
 					sessionId,
 					toolName: request.toolName,
 					toolInput: request.toolInput as Record<string, unknown>,
 					always: request.always ?? [],
-					timestamp: Date.now(),
 				});
-			}
-			send({
-				type: "permission_request",
-				sessionId,
-				requestId: request.requestId as PermissionId,
-				toolName: request.toolName,
-				toolInput: request.toolInput,
-				always: request.always ?? [],
+				yield* Effect.sync(() => {
+					send({
+						type: "permission_request",
+						sessionId,
+						requestId: request.requestId as PermissionId,
+						toolName: request.toolName,
+						toolInput: request.toolInput,
+						always: request.always ?? [],
+					});
+				});
+				return yield* pending.awaitResponse;
 			});
-			const deferred = createDeferred<PermissionResponse>();
-			pendingPermissions.set(request.requestId, deferred);
-			return deferred.promise;
 		},
 
-		async requestQuestion(
+		requestQuestion(
 			request: QuestionRequest,
-		): Promise<Record<string, unknown>> {
-			reset();
-			// Register with the question bridge so this question can be
-			// replayed when the user switches sessions and comes back.
-			if (deps.questionBridge) {
-				deps.questionBridge.trackPending({
-					requestId: request.requestId,
-					sessionId,
-					questions: request.questions.map((q) => ({
-						question: q.question,
-						header: q.header,
-						options: q.options,
-						multiSelect: q.multiSelect ?? false,
-					})),
-					timestamp: Date.now(),
-				});
-			}
-			send({
-				type: "ask_user",
-				sessionId,
-				toolId: request.requestId,
-				questions: request.questions.map((q) => ({
+		): Effect.Effect<Record<string, unknown>, unknown> {
+			return Effect.gen(function* () {
+				yield* Effect.sync(reset);
+				const pendingInteractions = deps.pendingInteractions;
+				if (!pendingInteractions) {
+					return yield* Effect.fail(
+						missingPendingInteractions("requestQuestion"),
+					);
+				}
+				const questions = request.questions.map((q) => ({
 					question: q.question,
 					header: q.header,
 					options: q.options,
 					multiSelect: q.multiSelect ?? false,
-					custom: q.custom ?? true,
-				})),
+				}));
+				const pending = yield* pendingInteractions.beginQuestionRequest({
+					requestId: request.requestId,
+					sessionId,
+					questions,
+				});
+				yield* Effect.sync(() => {
+					send({
+						type: "ask_user",
+						sessionId,
+						toolId: request.requestId,
+						questions: request.questions.map((q) => ({
+							question: q.question,
+							header: q.header,
+							options: q.options,
+							multiSelect: q.multiSelect ?? false,
+							custom: q.custom ?? true,
+						})),
+					});
+				});
+				return yield* pending.awaitAnswers;
 			});
-			const deferred = createDeferred<Record<string, unknown>>();
-			pendingQuestions.set(request.requestId, deferred);
-			return deferred.promise;
 		},
 
-		resolvePermission(requestId: string, response: PermissionResponse): void {
-			const deferred = pendingPermissions.get(requestId);
-			if (!deferred) {
-				log.warn(
-					`resolvePermission: no pending request ${requestId} (session=${sessionId})`,
+		resolvePermission(
+			requestId: string,
+			response: PermissionResponse,
+		): Effect.Effect<void, unknown> {
+			return Effect.gen(function* () {
+				if (!deps.pendingInteractions) {
+					yield* Effect.sync(() => {
+						log.warn(
+							`resolvePermission: no pending interaction port for ${requestId} (session=${sessionId})`,
+						);
+					});
+					return;
+				}
+				yield* deps.pendingInteractions.resolvePermissionRequest(
+					requestId,
+					response,
 				);
-				return;
-			}
-			pendingPermissions.delete(requestId);
-			// Clean up the bridge entry so it is no longer replayed on
-			// session switch / reconnect.
-			if (deps.permissionBridge) {
-				deps.permissionBridge.onPermissionReplied(requestId);
-			}
-			deferred.resolve(response);
+			});
 		},
 
-		resolveQuestion(requestId: string, answers: Record<string, unknown>): void {
-			const deferred = pendingQuestions.get(requestId);
-			if (!deferred) {
-				log.warn(
-					`resolveQuestion: no pending request ${requestId} (session=${sessionId})`,
+		resolveQuestion(
+			requestId: string,
+			answers: Record<string, unknown>,
+		): Effect.Effect<void, unknown> {
+			return Effect.gen(function* () {
+				if (!deps.pendingInteractions) {
+					yield* Effect.sync(() => {
+						log.warn(
+							`resolveQuestion: no pending interaction port for ${requestId} (session=${sessionId})`,
+						);
+					});
+					return;
+				}
+				yield* deps.pendingInteractions.resolveQuestionRequest(
+					requestId,
+					answers,
 				);
-				return;
+			});
+		},
+
+		cancelSessionInteractions(reason: string): Effect.Effect<void, unknown> {
+			if (deps.pendingInteractions?.cancelSessionInteractions) {
+				return deps.pendingInteractions.cancelSessionInteractions(reason);
 			}
-			pendingQuestions.delete(requestId);
-			// Clean up the bridge entry so it is no longer replayed on
-			// session switch / reconnect.
-			if (deps.questionBridge) {
-				deps.questionBridge.onResolved(requestId);
-			}
-			deferred.resolve(answers);
+			return Effect.void;
 		},
 	};
 }
 
 // ─── Translation ────────────────────────────────────────────────────────────
-// Maps CanonicalEvent (adapter-emitted) → RelayMessage[] (client-facing).
+// Maps CanonicalEvent (provider-emitted) → RelayMessage[] (client-facing).
 // An event may produce zero, one, or many relay messages.
 
 function translateCanonicalEvent(event: CanonicalEvent): TranslationResult {

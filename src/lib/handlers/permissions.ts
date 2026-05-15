@@ -1,3 +1,4 @@
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Permission & Question Handlers ──────────────────────────────────────────
 //
 // Questions use a bridge-less design: the frontend receives the question's
@@ -5,21 +6,38 @@
 // answer. The handler calls the OpenCode REST API directly — no in-memory
 // bridge state is needed, so questions survive relay restarts.
 
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeAPITag,
 	OrchestrationEngineTag,
-	PermissionBridgeTag,
-	SessionManagerTag,
-	SessionOverridesTag,
 	WebSocketHandlerTag,
-} from "../effect/services.js";
+} from "../domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	PROCESSING_TIMEOUT_DURATION,
+	startProcessingTimeout,
+} from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
-import type { PermissionDecision } from "../provider/types.js";
-import { fixupConfigFile } from "./fixup-config-file.js";
-import type { PayloadMap } from "./payloads.js";
+import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
+import type { PermissionId } from "../shared-types.js";
+
+interface PermissionResponsePayload {
+	readonly requestId: PermissionId;
+	readonly decision: string;
+	readonly persistScope?: "tool" | "pattern";
+	readonly persistPattern?: string;
+}
+
+interface AskUserResponsePayload {
+	readonly toolId: string;
+	readonly answers: Record<string, string>;
+}
+
+interface QuestionRejectPayload {
+	readonly toolId: string;
+}
 
 /**
  * Convert browser answer format `Record<string, string>` to OpenCode's
@@ -47,27 +65,28 @@ function formatAnswers(rawAnswers: Record<string, string>): string[][] {
 const restartProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		if (!sessionId) return;
-		const overrides = yield* SessionOverridesTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
-		overrides.startProcessingTimeout(sessionId, () => {
-			log.warn(
-				`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
-			);
-			wsHandler.sendToSession(
-				sessionId,
-				new RelayError(
-					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-					{ code: "PROCESSING_TIMEOUT" },
-				).toMessage(sessionId),
-			);
-			wsHandler.sendToSession(sessionId, {
-				type: "done",
-				sessionId,
-				code: 1,
-			});
-		});
+		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
+			Effect.sync(() => {
+				log.warn(
+					`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
+				);
+				wsHandler.sendToSession(
+					sessionId,
+					new RelayError(
+						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+						{ code: "PROCESSING_TIMEOUT" },
+					).toMessage(sessionId),
+				);
+				wsHandler.sendToSession(sessionId, {
+					type: "done",
+					sessionId,
+					code: 1,
+				});
+			}),
+		);
 	});
 
 /** Persist permission rule to opencode.jsonc. */
@@ -131,53 +150,46 @@ const persistPermissionRule = (
 
 export const handlePermissionResponse = (
 	clientId: string,
-	payload: PayloadMap["permission_response"],
+	payload: PermissionResponsePayload,
 ) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const permissionBridge = yield* PermissionBridgeTag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
 
 		const { requestId, decision, persistScope, persistPattern } = payload;
-		const sessionId = wsHandler.getClientSession(clientId) ?? "?";
-		const result = permissionBridge.onPermissionResponse(requestId, decision);
+		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
+		const resultOption =
+			yield* pendingInteractions.resolvePermissionFromBrowser(
+				requestId,
+				decision,
+			);
+		const result = Option.getOrUndefined(resultOption);
 
 		if (result) {
+			const sessionId = result.sessionId || visibleSessionId || "?";
 			log.info(
 				`client=${clientId} session=${sessionId} ${result.toolName}: ${result.mapped}`,
 			);
 
-			// Route through OrchestrationEngine for Claude sessions
+			let isClaudeSession = false;
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 			if (engineOption._tag === "Some") {
 				const engine = engineOption.value;
 				const providerId = engine.getProviderForSession(sessionId);
 				if (providerId === "claude") {
-					const dispatchResult = yield* Effect.either(
-						Effect.tryPromise(() =>
-							engine.dispatch({
-								type: "resolve_permission",
-								sessionId,
-								requestId,
-								decision: result.mapped as PermissionDecision,
-							}),
-						),
-					);
-					if (dispatchResult._tag === "Left") {
-						log.warn(
-							`client=${clientId} session=${sessionId} engine resolve_permission failed: ${dispatchResult.left}`,
-						);
-					}
+					isClaudeSession = true;
 				}
 			}
 
-			// Also call the OpenCode REST API (harmless no-op for Claude sessions)
-			yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.permission.reply(sessionId, requestId, result.mapped),
-				),
-			);
+			if (!isClaudeSession) {
+				yield* Effect.either(
+					Effect.tryPromise(() =>
+						client.permission.reply(sessionId, requestId, result.mapped),
+					),
+				);
+			}
 
 			wsHandler.broadcast({
 				type: "permission_resolved",
@@ -199,13 +211,13 @@ export const handlePermissionResponse = (
 
 export const handleAskUserResponse = (
 	clientId: string,
-	payload: PayloadMap["ask_user_response"],
+	payload: AskUserResponsePayload,
 ) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const sessionMgr = yield* SessionManagerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const { toolId, answers } = payload;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "";
@@ -216,41 +228,44 @@ export const handleAskUserResponse = (
 			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: formatted })}`,
 		);
 
-		// Route through OrchestrationEngine for Claude sessions
-		const engineHandled = yield* Effect.gen(function* () {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None" || !sessionId) return false;
-			const engine = engineOption.value;
-			const providerId = engine.getProviderForSession(sessionId);
-			if (providerId !== "claude") return false;
-
-			const dispatchResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engine.dispatch({
-						type: "resolve_question",
-						sessionId,
-						requestId: toolId,
-						answers: answers as Record<string, unknown>,
-					}),
-				),
-			);
-			if (dispatchResult._tag === "Left") {
-				log.warn(
-					`client=${clientId} session=${sessionId} engine resolve_question failed: ${dispatchResult.left}`,
+		const pendingInteractionsOption = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
+		if (pendingInteractionsOption._tag === "Some") {
+			const resolvedOption =
+				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
+					toolId,
+					answers as Record<string, unknown>,
 				);
-				return false;
+			const resolved = Option.getOrUndefined(resolvedOption);
+			if (resolved) {
+				const questionSessionId = resolved.sessionId || sessionId;
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				if (engineOption._tag === "Some") {
+					const providerId =
+						engineOption.value.getProviderForSession(questionSessionId);
+					if (providerId !== "claude") {
+						log.warn(
+							`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+						);
+					}
+				}
+				wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId: questionSessionId,
+				});
+				if (questionSessionId) {
+					yield* sessionManagerService.decrementPendingQuestionCount(
+						questionSessionId,
+					);
+				}
+				yield* restartProcessingTimeout(questionSessionId);
+				return;
 			}
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				toolId,
-				sessionId,
-			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
-			yield* restartProcessingTimeout(sessionId);
-			return true;
-		});
-
-		if (engineHandled) return;
+		}
 
 		// OpenCode REST API path with fallback (preserving recovery logic)
 		const replyResult = yield* Effect.either(
@@ -262,7 +277,9 @@ export const handleAskUserResponse = (
 				toolId,
 				sessionId,
 			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+			if (sessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
+			}
 			yield* restartProcessingTimeout(sessionId);
 			return;
 		}
@@ -291,7 +308,11 @@ export const handleAskUserResponse = (
 						toolId: queId,
 						sessionId,
 					});
-					if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+					if (sessionId) {
+						yield* sessionManagerService.decrementPendingQuestionCount(
+							sessionId,
+						);
+					}
 					yield* restartProcessingTimeout(sessionId);
 					return true;
 				}
@@ -322,56 +343,59 @@ export const handleAskUserResponse = (
 
 export const handleQuestionReject = (
 	clientId: string,
-	payload: PayloadMap["question_reject"],
+	payload: QuestionRejectPayload,
 ) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const sessionMgr = yield* SessionManagerTag;
 
 		const { toolId } = payload;
 		if (!toolId) return;
 
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "";
 
 		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
 
-		// Route through OrchestrationEngine for Claude sessions
-		const engineHandled = yield* Effect.gen(function* () {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None" || !sessionId) return false;
-			const engine = engineOption.value;
-			const providerId = engine.getProviderForSession(sessionId);
-			if (providerId !== "claude") return false;
-
-			const dispatchResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					engine.dispatch({
-						type: "resolve_question",
-						sessionId,
-						requestId: toolId,
-						answers: {},
-					}),
-				),
-			);
-			if (dispatchResult._tag === "Left") {
-				log.warn(
-					`client=${clientId} session=${sessionId} engine resolve_question (reject) failed: ${dispatchResult.left}`,
+		const pendingInteractionsOption = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
+		if (pendingInteractionsOption._tag === "Some") {
+			const resolvedOption =
+				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
+					toolId,
+					{},
 				);
-				return false;
+			const resolved = Option.getOrUndefined(resolvedOption);
+			if (resolved) {
+				const questionSessionId = resolved.sessionId || sessionId;
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				if (engineOption._tag === "Some") {
+					const providerId =
+						engineOption.value.getProviderForSession(questionSessionId);
+					if (providerId !== "claude") {
+						log.warn(
+							`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+						);
+					}
+				}
+				wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId: questionSessionId,
+				});
+				if (questionSessionId) {
+					yield* sessionManagerService.decrementPendingQuestionCount(
+						questionSessionId,
+					);
+				}
+				yield* restartProcessingTimeout(questionSessionId);
+				return;
 			}
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				toolId,
-				sessionId,
-			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
-			yield* restartProcessingTimeout(sessionId);
-			return true;
-		});
-
-		if (engineHandled) return;
+		}
 
 		// OpenCode REST API path with fallback (preserving recovery logic)
 		const rejectResult = yield* Effect.either(
@@ -383,7 +407,9 @@ export const handleQuestionReject = (
 				toolId,
 				sessionId,
 			});
-			if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+			if (sessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
+			}
 			yield* restartProcessingTimeout(sessionId);
 			return;
 		}
@@ -410,7 +436,11 @@ export const handleQuestionReject = (
 						toolId: queId,
 						sessionId,
 					});
-					if (sessionId) sessionMgr.decrementPendingQuestionCount(sessionId);
+					if (sessionId) {
+						yield* sessionManagerService.decrementPendingQuestionCount(
+							sessionId,
+						);
+					}
 					yield* restartProcessingTimeout(sessionId);
 					return true;
 				}

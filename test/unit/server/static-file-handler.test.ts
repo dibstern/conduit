@@ -8,7 +8,7 @@ import {
 	MIME_TYPES,
 	StaticDirTag,
 	serveStaticFile,
-} from "../../../src/lib/effect/static-file-handler.js";
+} from "../../../src/lib/domain/server/Services/static-file-handler.js";
 
 const nodeLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer);
 
@@ -83,6 +83,15 @@ describe("Static file handler", () => {
 				Effect.gen(function* () {
 					const response = yield* serveStaticFile("/../secret.txt");
 					expect(response.status).toBe(403);
+				}),
+			),
+		);
+
+		it.effect("returns bad request for malformed URI encoding", () =>
+			withTempStaticDir(() =>
+				Effect.gen(function* () {
+					const response = yield* serveStaticFile("/%E0%A4%A");
+					expect(response.status).toBe(400);
 				}),
 			),
 		);

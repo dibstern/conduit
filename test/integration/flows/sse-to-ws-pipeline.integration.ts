@@ -48,10 +48,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Should get processing status (sent immediately by the relay on message send)
 		const processing = await client.waitFor("status", {
@@ -73,10 +70,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Collect delta events until done
 		await client.waitFor("done", { timeout: 10_000 });
@@ -98,10 +92,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Wait for done
 		await client.waitFor("done", { timeout: 10_000 });
@@ -126,10 +117,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		client2.clearReceived();
 
 		// Send prompt from client1
-		client1.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client1.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Both clients should receive delta events
 		const [delta1, delta2] = await Promise.all([
@@ -160,10 +148,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		client.send({
-			type: "message",
-			text: "Reply with just the word 'pong'. Nothing else.",
-		});
+		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		// Wait for the full cycle: processing → deltas → done
 		const done = await client.waitFor("done", { timeout: 10_000 });

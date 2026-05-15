@@ -2,8 +2,9 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClaudeAdapter } from "../../../../src/lib/provider/claude/claude-adapter.js";
+import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import {
@@ -13,7 +14,7 @@ import {
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
 
-describe("Provider wiring with Claude adapter", () => {
+describe("Provider wiring with Claude provider instance", () => {
 	let workspace: string;
 
 	beforeEach(() => {
@@ -25,46 +26,45 @@ describe("Provider wiring with Claude adapter", () => {
 		rmSync(workspace, { recursive: true, force: true });
 	});
 
-	it("registers Claude adapter in ProviderRegistry", () => {
+	it("registers Claude provider instance in ProviderRegistry", () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
+		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 
-		registry.registerAdapter(adapter);
+		registry.registerInstance(instance);
 
-		expect(registry.hasAdapter("claude")).toBe(true);
-		expect(registry.getAdapter("claude")).toBe(adapter);
+		expect(registry.hasInstance("claude")).toBe(true);
+		expect(registry.getInstance("claude")).toBe(instance);
 	});
 
 	it("lists both providers when both registered", () => {
 		const registry = new ProviderRegistry();
-		const claude = new ClaudeAdapter({ workspaceRoot: workspace });
+		const claude = new ClaudeProviderInstance({ workspaceRoot: workspace });
 
-		// Create a minimal mock for opencode adapter
+		// Create a minimal mock for opencode instance
 		const opencode = {
 			providerId: "opencode",
-			discover: async () => ({
-				models: [],
-				supportsTools: true,
-				supportsThinking: true,
-				supportsPermissions: true,
-				supportsQuestions: true,
-				supportsAttachments: true,
-				supportsFork: true,
-				supportsRevert: true,
-				commands: [],
-			}),
-			sendTurn: async () => {
-				throw new Error("not implemented");
-			},
-			interruptTurn: async () => {},
-			resolvePermission: async () => {},
-			resolveQuestion: async () => {},
-			shutdown: async () => {},
-			endSession: async () => {},
+			discoverEffect: () =>
+				Effect.succeed({
+					models: [],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: true,
+					supportsRevert: true,
+					commands: [],
+				}),
+			sendTurnEffect: () => Effect.die("not implemented"),
+			interruptTurnEffect: () => Effect.void,
+			resolvePermissionEffect: () => Effect.void,
+			resolveQuestionEffect: () => Effect.void,
+			shutdownEffect: () => Effect.void,
+			endSessionEffect: () => Effect.void,
 		};
 
-		registry.registerAdapter(opencode);
-		registry.registerAdapter(claude);
+		registry.registerInstance(opencode);
+		registry.registerInstance(claude);
 
 		const providers = registry.listProviders();
 		expect(providers).toContain("opencode");
@@ -72,16 +72,18 @@ describe("Provider wiring with Claude adapter", () => {
 		expect(providers).toHaveLength(2);
 	});
 
-	it("OrchestrationEngine dispatches discover to Claude adapter", async () => {
+	it("OrchestrationEngine dispatches discover to Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		registry.registerAdapter(adapter);
+		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		registry.registerInstance(instance);
 
 		const engine = new OrchestrationEngine({ registry });
-		const caps = await engine.dispatch({
-			type: "discover",
-			providerId: "claude",
-		});
+		const caps = await Effect.runPromise(
+			engine.dispatchEffect({
+				type: "discover",
+				providerId: "claude",
+			}),
+		);
 
 		expect(caps.models.length).toBeGreaterThan(0);
 		expect(caps.supportsTools).toBe(true);
@@ -93,23 +95,25 @@ describe("Provider wiring with Claude adapter", () => {
 		const engine = new OrchestrationEngine({ registry });
 
 		await expect(
-			engine.dispatch({ type: "discover", providerId: "nonexistent" }),
-		).rejects.toThrow("No adapter registered");
+			Effect.runPromise(
+				engine.dispatchEffect({ type: "discover", providerId: "nonexistent" }),
+			),
+		).rejects.toThrow("No provider instance registered");
 	});
 
-	it("shutdownAll shuts down Claude adapter", async () => {
+	it("shutdownAllEffect shuts down Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		registry.registerAdapter(adapter);
+		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		registry.registerInstance(instance);
 
 		// Should not throw
-		await registry.shutdownAll();
+		await Effect.runPromise(registry.shutdownAllEffect());
 	});
 
 	it("session binding tracks provider for session", () => {
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({ workspaceRoot: workspace });
-		registry.registerAdapter(adapter);
+		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		registry.registerInstance(instance);
 
 		const engine = new OrchestrationEngine({ registry });
 		engine.bindSession("sess-1", "claude");
@@ -145,7 +149,7 @@ describe("Provider wiring with Claude adapter", () => {
 		);
 	});
 
-	it("end-to-end: dispatch sendTurn through full ProviderRegistry → ClaudeAdapter → mock SDK stack", async () => {
+	it("end-to-end: dispatch sendTurn through full ProviderRegistry → ClaudeProviderInstance → mock SDK stack", async () => {
 		const resultMsg = makeSuccessResult({ total_cost_usd: 0.03 } as Record<
 			string,
 			unknown
@@ -153,28 +157,30 @@ describe("Provider wiring with Claude adapter", () => {
 		const mockQuery = createMockQuery([resultMsg]);
 		const queryFactory = vi.fn(() => mockQuery);
 
-		// Wire up the full stack: ProviderRegistry + ClaudeAdapter + OrchestrationEngine
+		// Wire up the full stack: ProviderRegistry + ClaudeProviderInstance + OrchestrationEngine
 		const registry = new ProviderRegistry();
-		const adapter = new ClaudeAdapter({
+		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 		});
-		registry.registerAdapter(adapter);
+		registry.registerInstance(instance);
 
 		const engine = new OrchestrationEngine({ registry });
 
 		const sink = createMockEventSink();
-		const result = await engine.dispatch({
-			type: "send_turn",
-			providerId: "claude",
-			input: makeBaseSendTurnInput({
-				sessionId: "e2e-session-1",
-				turnId: "e2e-turn-1",
-				prompt: "End-to-end wiring test",
-				workspaceRoot: workspace,
-				eventSink: sink,
+		const result = await Effect.runPromise(
+			engine.dispatchEffect({
+				type: "send_turn",
+				providerId: "claude",
+				input: makeBaseSendTurnInput({
+					sessionId: "e2e-session-1",
+					turnId: "e2e-turn-1",
+					prompt: "End-to-end wiring test",
+					workspaceRoot: workspace,
+					eventSink: sink,
+				}),
 			}),
-		});
+		);
 
 		// Result flows back through the full stack
 		expect(result.status).toBe("completed");

@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
@@ -41,14 +42,18 @@ function makeTranslator() {
 	const events: CanonicalEvent[] = [];
 	const translator = new ClaudeEventTranslator({
 		sink: {
-			push: async (e: CanonicalEvent) => {
-				events.push(e);
-			},
-			requestPermission: vi.fn(),
-			requestQuestion: vi.fn(),
-			resolvePermission: vi.fn(),
-			resolveQuestion: vi.fn(),
+			push: (e: CanonicalEvent) =>
+				Effect.sync(() => {
+					events.push(e);
+				}),
+			requestPermission: vi.fn(() =>
+				Effect.succeed({ decision: "once" as const }),
+			),
+			requestQuestion: vi.fn(() => Effect.succeed({})),
+			resolvePermission: vi.fn(() => Effect.void),
+			resolveQuestion: vi.fn(() => Effect.void),
 		},
+		runEffect: Effect.runPromise,
 	});
 	return { translator, events };
 }
@@ -178,7 +183,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const tool = ctx.inFlightTools.get(0);
 		expect(tool?.pendingStart).toBe(true);
 
-		// Simulate adapter cleanup: flush pendingStart tools
+		// Simulate provider instance cleanup: flush pendingStart tools
 		await translator.flushPendingTools(ctx);
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");

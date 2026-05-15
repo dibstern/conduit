@@ -1,11 +1,21 @@
 // test/unit/relay/project-registry-effect.test.ts
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, PubSub, Queue } from "effect";
+import {
+	Deferred,
+	Effect,
+	Fiber,
+	Layer,
+	Option,
+	PubSub,
+	Queue,
+	Ref,
+} from "effect";
 import { expect } from "vitest";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
-} from "../../../src/lib/effect/daemon-pubsub.js";
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addWithoutRelay,
 	allProjects,
@@ -25,11 +35,11 @@ import {
 	startRelay,
 	touchLastUsed,
 	updateProject,
-} from "../../../src/lib/effect/project-registry-service.js";
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	type RelayCache,
 	RelayCacheTag,
-} from "../../../src/lib/effect/relay-cache.js";
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -49,14 +59,17 @@ const NoOpRelayCacheLive = Layer.succeed(RelayCacheTag, {
 		Effect.succeed({
 			slug: _slug,
 			wsHandler: { handleUpgrade: () => {} },
+			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
 		}),
+	peek: () => Effect.succeed(Option.none()),
 	invalidate: (_slug: string) => Effect.void,
 } satisfies RelayCache);
 
 /** Failing RelayCache for testing error paths (dies with defect). */
 const FailingRelayCacheLive = Layer.succeed(RelayCacheTag, {
 	get: (_slug: string) => Effect.die(new Error("relay-boom")),
+	peek: () => Effect.succeed(Option.none()),
 	invalidate: (_slug: string) => Effect.void,
 } satisfies RelayCache);
 
@@ -66,6 +79,7 @@ const TestLayer = Layer.fresh(
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,
 		NoOpRelayCacheLive,
+		ConfigPersistenceNoopLive,
 	),
 );
 
@@ -75,6 +89,7 @@ const FailingRelayTestLayer = Layer.fresh(
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,
 		FailingRelayCacheLive,
+		ConfigPersistenceNoopLive,
 	),
 );
 
@@ -252,8 +267,10 @@ describe("ProjectRegistry Effect - remove", () => {
 				Effect.succeed({
 					slug: _slug,
 					wsHandler: { handleUpgrade: () => {} },
+					rpcWsHandler: { handleUpgrade: () => {} },
 					stop: () => {},
 				}),
+			peek: () => Effect.succeed(Option.none()),
 			invalidate: (slug: string) =>
 				Effect.sync(() => {
 					invalidatedSlug = slug;
@@ -265,6 +282,7 @@ describe("ProjectRegistry Effect - remove", () => {
 				makeProjectRegistryLive(),
 				DaemonEventBusLive,
 				Layer.succeed(RelayCacheTag, trackingCache),
+				ConfigPersistenceNoopLive,
 			),
 		);
 
@@ -579,6 +597,70 @@ describe("ProjectRegistry Effect - removeAll", () => {
 			yield* removeAll;
 			expect(yield* size).toBe(0);
 		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.scoped(
+		"caps relay invalidation concurrency without dropping projects",
+		() =>
+			Effect.gen(function* () {
+				const projectCount = 7;
+				const maxAllowedConcurrency = 4;
+				const current = yield* Ref.make(0);
+				const maxObserved = yield* Ref.make(0);
+				const invalidated = yield* Ref.make<ReadonlyArray<string>>([]);
+				const firstInvalidationStarted = yield* Deferred.make<void>();
+				const releaseInvalidations = yield* Deferred.make<void>();
+				const TrackingRelayCacheLive = Layer.succeed(RelayCacheTag, {
+					get: (slug: string) =>
+						Effect.succeed({
+							slug,
+							wsHandler: { handleUpgrade: () => {} },
+							rpcWsHandler: { handleUpgrade: () => {} },
+							stop: () => {},
+						}),
+					peek: () => Effect.succeed(Option.none()),
+					invalidate: (slug: string) =>
+						Effect.gen(function* () {
+							const inFlight = yield* Ref.updateAndGet(current, (n) => n + 1);
+							yield* Ref.update(maxObserved, (n) => Math.max(n, inFlight));
+							yield* Deferred.succeed(firstInvalidationStarted, void 0).pipe(
+								Effect.ignore,
+							);
+							yield* Deferred.await(releaseInvalidations);
+							yield* Ref.update(invalidated, (slugs) => [...slugs, slug]);
+							yield* Ref.update(current, (n) => n - 1);
+						}),
+				} satisfies RelayCache);
+				const TrackingLayer = Layer.fresh(
+					Layer.mergeAll(
+						makeProjectRegistryLive(),
+						DaemonEventBusLive,
+						TrackingRelayCacheLive,
+						ConfigPersistenceNoopLive,
+					),
+				);
+
+				yield* Effect.gen(function* () {
+					for (let index = 0; index < projectCount; index++) {
+						yield* addWithoutRelay(makeProject(`project-${index}`));
+					}
+
+					const fiber = yield* Effect.fork(removeAll);
+					yield* Deferred.await(firstInvalidationStarted);
+					for (let index = 0; index < maxAllowedConcurrency; index++) {
+						yield* Effect.yieldNow();
+					}
+					expect(yield* Ref.get(maxObserved)).toBe(maxAllowedConcurrency);
+					yield* Deferred.succeed(releaseInvalidations, void 0);
+					yield* Fiber.join(fiber);
+
+					expect(yield* Ref.get(maxObserved)).toBeLessThanOrEqual(
+						maxAllowedConcurrency,
+					);
+					expect(new Set(yield* Ref.get(invalidated)).size).toBe(projectCount);
+					expect(yield* size).toBe(0);
+				}).pipe(Effect.provide(TrackingLayer));
+			}),
 	);
 });
 

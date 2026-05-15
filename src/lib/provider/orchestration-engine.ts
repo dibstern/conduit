@@ -1,16 +1,21 @@
 // src/lib/provider/orchestration-engine.ts
 // ─── Orchestration Engine ───────────────────────────────────────────────────
-// Central command processor for the provider adapter layer (CQRS core loop).
-// Routes commands to the correct adapter via ProviderRegistry.
+// Central command processor for the provider instance layer (CQRS core loop).
+// Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
 import { Effect, Ref } from "effect";
 
 import { createLogger } from "../logger.js";
+import {
+	DuplicateCommand,
+	type OrchestrationError,
+	SessionProviderNotBound,
+} from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import type {
-	AdapterCapabilities,
 	PermissionDecision,
+	ProviderCapabilities,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -70,8 +75,8 @@ export type OrchestrationCommand =
 	| DiscoverCommand
 	| EndSessionCommand;
 
-// biome-ignore lint/suspicious/noConfusingVoidType: void is needed for Promise<void> overloads
-export type OrchestrationResult = TurnResult | AdapterCapabilities | void;
+// biome-ignore lint/suspicious/noConfusingVoidType: void is needed in the command result union.
+export type OrchestrationResult = TurnResult | ProviderCapabilities | void;
 
 // ─── Session Binding ────────────────────────────────────────────────────────
 
@@ -91,201 +96,274 @@ export interface OrchestrationEngineOptions {
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindings = new Map<string, string>();
-	private readonly processedCommands: Ref.Ref<Set<string>>;
+	private processedCommands: Ref.Ref<Set<string>>;
 	private static readonly PROCESSED_COMMANDS_MAX = 10_000;
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
-		this.processedCommands = Effect.runSync(Ref.make(new Set<string>()));
+		this.processedCommands = Ref.unsafeMake(new Set<string>());
 	}
 
-	/**
-	 * Dispatch a command to the appropriate provider adapter.
-	 * Overloaded for typed results.
-	 */
-	async dispatch(command: SendTurnCommand): Promise<TurnResult>;
-	async dispatch(command: DiscoverCommand): Promise<AdapterCapabilities>;
-	async dispatch(command: InterruptTurnCommand): Promise<void>;
-	async dispatch(command: ResolvePermissionCommand): Promise<void>;
-	async dispatch(command: ResolveQuestionCommand): Promise<void>;
-	async dispatch(command: EndSessionCommand): Promise<void>;
-	async dispatch(command: OrchestrationCommand): Promise<OrchestrationResult> {
-		// Idempotency check via Effect Ref<Set>
-		if (command.commandId) {
-			const isDuplicate = Effect.runSync(
-				Ref.modify(this.processedCommands, (set) => {
-					if (set.has(command.commandId as string)) return [true, set] as const;
-					return [false, set] as const;
-				}),
-			);
+	dispatchEffect(
+		command: SendTurnCommand,
+	): Effect.Effect<TurnResult, OrchestrationError>;
+	dispatchEffect(
+		command: DiscoverCommand,
+	): Effect.Effect<ProviderCapabilities, OrchestrationError>;
+	dispatchEffect(
+		command: InterruptTurnCommand,
+	): Effect.Effect<void, OrchestrationError>;
+	dispatchEffect(
+		command: ResolvePermissionCommand,
+	): Effect.Effect<void, OrchestrationError>;
+	dispatchEffect(
+		command: ResolveQuestionCommand,
+	): Effect.Effect<void, OrchestrationError>;
+	dispatchEffect(
+		command: EndSessionCommand,
+	): Effect.Effect<void, OrchestrationError>;
+	dispatchEffect(
+		command: OrchestrationCommand,
+	): Effect.Effect<OrchestrationResult, OrchestrationError>;
+	dispatchEffect(
+		command: OrchestrationCommand,
+	): Effect.Effect<OrchestrationResult, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			yield* this.ensureCommandNotProcessed(command);
+
+			let result: OrchestrationResult;
+
+			switch (command.type) {
+				case "send_turn":
+					result = yield* this.handleSendTurnEffect(command);
+					break;
+				case "interrupt_turn":
+					result = yield* this.handleInterruptTurnEffect(command);
+					break;
+				case "resolve_permission":
+					result = yield* this.handleResolvePermissionEffect(command);
+					break;
+				case "resolve_question":
+					result = yield* this.handleResolveQuestionEffect(command);
+					break;
+				case "discover":
+					result = yield* this.handleDiscoverEffect(command);
+					break;
+				case "end_session":
+					result = yield* this.handleEndSessionEffect(command);
+					break;
+				default: {
+					const _exhaustive: never = command;
+					return _exhaustive;
+				}
+			}
+
+			yield* this.markCommandProcessed(command);
+			return result;
+		});
+	}
+
+	private ensureCommandNotProcessed(
+		command: OrchestrationCommand,
+	): Effect.Effect<void, DuplicateCommand> {
+		if (!command.commandId) return Effect.void;
+		const id = command.commandId;
+		return Effect.gen(this, function* () {
+			const isDuplicate = yield* Ref.modify(this.processedCommands, (set) => {
+				if (set.has(id)) return [true, set] as const;
+				return [false, set] as const;
+			});
 			if (isDuplicate) {
-				throw new Error(`Duplicate command: ${command.commandId}`);
+				return yield* new DuplicateCommand({ commandId: id });
 			}
-		}
+		});
+	}
 
-		let result: OrchestrationResult;
-
-		switch (command.type) {
-			case "send_turn":
-				result = await this.handleSendTurn(command);
-				break;
-			case "interrupt_turn":
-				result = await this.handleInterruptTurn(command);
-				break;
-			case "resolve_permission":
-				result = await this.handleResolvePermission(command);
-				break;
-			case "resolve_question":
-				result = await this.handleResolveQuestion(command);
-				break;
-			case "discover":
-				result = await this.handleDiscover(command);
-				break;
-			case "end_session":
-				result = await this.handleEndSession(command);
-				break;
-			default: {
-				const _exhaustive: never = command;
-				throw new Error(
-					`Unknown command type: ${(_exhaustive as { type: string }).type}`,
-				);
+	private markCommandProcessed(
+		command: OrchestrationCommand,
+	): Effect.Effect<void> {
+		if (!command.commandId) return Effect.void;
+		const id = command.commandId;
+		return Ref.modify(this.processedCommands, (set) => {
+			const next = new Set(set);
+			next.add(id);
+			if (next.size > OrchestrationEngine.PROCESSED_COMMANDS_MAX) {
+				const evictCount = OrchestrationEngine.PROCESSED_COMMANDS_MAX / 2;
+				let count = 0;
+				for (const entry of next) {
+					if (count++ >= evictCount) break;
+					next.delete(entry);
+				}
 			}
-		}
-
-		// Record the command as processed (after successful execution) via
-		// atomic Ref.modify with inline FIFO eviction.
-		if (command.commandId) {
-			const id = command.commandId;
-			Effect.runSync(
-				Ref.modify(this.processedCommands, (set) => {
-					const next = new Set(set);
-					next.add(id);
-					if (next.size > OrchestrationEngine.PROCESSED_COMMANDS_MAX) {
-						const evictCount = OrchestrationEngine.PROCESSED_COMMANDS_MAX / 2;
-						let count = 0;
-						for (const entry of next) {
-							if (count++ >= evictCount) break;
-							next.delete(entry);
-						}
-					}
-					return [undefined, next] as const;
-				}),
-			);
-		}
-
-		return result;
+			return [undefined, next] as const;
+		});
 	}
 
 	// ─── Command Handlers ─────────────────────────────────────────────────
 
-	private async handleSendTurn(command: SendTurnCommand): Promise<TurnResult> {
-		const adapter = this.registry.getAdapterOrThrow(command.providerId);
+	private handleSendTurnEffect(
+		command: SendTurnCommand,
+	): Effect.Effect<TurnResult, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const instance = yield* this.registry.getInstanceEffect(
+				command.providerId,
+			);
 
-		log.info(
-			`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,
-		);
+			yield* Effect.sync(() =>
+				log.info(
+					`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,
+				),
+			);
 
-		// Bind AFTER sendTurn succeeds — if it throws, the session is not
-		// viable at the provider and should not be bound. Error TurnResults
-		// (non-throwing) still bind because the session exists at the provider.
-		const result = await adapter.sendTurn(command.input);
-		this.sessionBindings.set(command.input.sessionId, command.providerId);
-		return result;
+			// Bind AFTER sendTurn succeeds — if it throws, the session is not
+			// viable at the provider and should not be bound. Error TurnResults
+			// (non-throwing) still bind because the session exists at the provider.
+			const result = yield* instance.sendTurnEffect(command.input);
+			yield* Effect.sync(() =>
+				this.sessionBindings.set(command.input.sessionId, command.providerId),
+			);
+			return result;
+		});
 	}
 
-	private async handleInterruptTurn(
+	private handleInterruptTurnEffect(
 		command: InterruptTurnCommand,
-	): Promise<void> {
-		const providerId = this.getProviderForSessionOrThrow(command.sessionId);
-		const adapter = this.registry.getAdapterOrThrow(providerId);
-
-		log.info(`Dispatching interruptTurn: session=${command.sessionId}`);
-
-		try {
-			return await adapter.interruptTurn(command.sessionId);
-		} catch (err) {
-			log.error(
-				`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
+	): Effect.Effect<void, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const providerId = yield* this.getProviderForSessionEffect(
+				command.sessionId,
 			);
-			throw err;
-		}
+			const instance = yield* this.registry.getInstanceEffect(providerId);
+
+			yield* Effect.sync(() =>
+				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
+			);
+
+			return yield* instance
+				.interruptTurnEffect(command.sessionId)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
+		});
 	}
 
-	private async handleResolvePermission(
+	private handleResolvePermissionEffect(
 		command: ResolvePermissionCommand,
-	): Promise<void> {
-		const providerId = this.getProviderForSessionOrThrow(command.sessionId);
-		const adapter = this.registry.getAdapterOrThrow(providerId);
-
-		try {
-			return await adapter.resolvePermission(
+	): Effect.Effect<void, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
-				command.requestId,
-				command.decision,
 			);
-		} catch (err) {
-			log.error(
-				`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
-			);
-			throw err;
-		}
+			const instance = yield* this.registry.getInstanceEffect(providerId);
+
+			return yield* instance
+				.resolvePermissionEffect(
+					command.sessionId,
+					command.requestId,
+					command.decision,
+				)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
+		});
 	}
 
-	private async handleResolveQuestion(
+	private handleResolveQuestionEffect(
 		command: ResolveQuestionCommand,
-	): Promise<void> {
-		const providerId = this.getProviderForSessionOrThrow(command.sessionId);
-		const adapter = this.registry.getAdapterOrThrow(providerId);
-
-		try {
-			return await adapter.resolveQuestion(
+	): Effect.Effect<void, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
-				command.requestId,
-				command.answers,
 			);
-		} catch (err) {
-			log.error(
-				`resolveQuestion failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
-			);
-			throw err;
-		}
+			const instance = yield* this.registry.getInstanceEffect(providerId);
+
+			return yield* instance
+				.resolveQuestionEffect(
+					command.sessionId,
+					command.requestId,
+					command.answers,
+				)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`resolveQuestion failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
+		});
 	}
 
-	private async handleDiscover(
+	private handleDiscoverEffect(
 		command: DiscoverCommand,
-	): Promise<AdapterCapabilities> {
-		const adapter = this.registry.getAdapterOrThrow(command.providerId);
-		try {
-			return await adapter.discover();
-		} catch (err) {
-			log.error(
-				`discover failed: provider=${command.providerId}: ${err instanceof Error ? err.message : err}`,
+	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const instance = yield* this.registry.getInstanceEffect(
+				command.providerId,
 			);
-			throw err;
-		}
+			return yield* instance
+				.discoverEffect()
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`discover failed: provider=${command.providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
+		});
 	}
 
-	private async handleEndSession(command: EndSessionCommand): Promise<void> {
-		const providerId = this.sessionBindings.get(command.sessionId);
-		if (!providerId) {
-			log.debug(
-				`endSession: no provider bound for session=${command.sessionId}`,
+	private handleEndSessionEffect(
+		command: EndSessionCommand,
+	): Effect.Effect<void, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const providerId = this.sessionBindings.get(command.sessionId);
+			if (!providerId) {
+				yield* Effect.sync(() =>
+					log.debug(
+						`endSession: no provider bound for session=${command.sessionId}`,
+					),
+				);
+				return;
+			}
+			const instance = yield* this.registry.getInstanceEffect(providerId);
+			yield* Effect.sync(() =>
+				log.info(
+					`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
+				),
 			);
-			return;
-		}
-		const adapter = this.registry.getAdapterOrThrow(providerId);
-		log.info(
-			`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
-		);
-		try {
-			await adapter.endSession(command.sessionId);
-		} catch (err) {
-			log.error(
-				`endSession failed: session=${command.sessionId} provider=${providerId}: ${err instanceof Error ? err.message : err}`,
-			);
-			throw err;
-		}
-		if (command.unbind) this.sessionBindings.delete(command.sessionId);
+			yield* instance
+				.endSessionEffect(command.sessionId)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`endSession failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+							),
+						),
+					),
+				);
+			if (command.unbind) {
+				yield* Effect.sync(() =>
+					this.sessionBindings.delete(command.sessionId),
+				);
+			}
+		});
 	}
 
 	// ─── Session Binding Management ───────────────────────────────────────
@@ -312,22 +390,28 @@ export class OrchestrationEngine {
 		);
 	}
 
-	/** Shutdown the engine and all adapters. */
-	async shutdown(): Promise<void> {
-		log.info("OrchestrationEngine shutting down");
-		await this.registry.shutdownAll();
-		this.sessionBindings.clear();
-		Effect.runSync(Ref.set(this.processedCommands, new Set<string>()));
+	/** Shutdown the engine and all provider instances. */
+	shutdownEffect(): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
+			yield* this.registry.shutdownAllEffect();
+			yield* Effect.sync(() => {
+				this.sessionBindings.clear();
+				this.processedCommands = Ref.unsafeMake(new Set<string>());
+			});
+		});
 	}
 
 	// ─── Internal ─────────────────────────────────────────────────────────
 
-	private getProviderForSessionOrThrow(sessionId: string): string {
+	private getProviderForSessionEffect(
+		sessionId: string,
+	): Effect.Effect<string, SessionProviderNotBound> {
 		const providerId = this.sessionBindings.get(sessionId);
 		if (!providerId) {
-			throw new Error(`No provider bound to session: ${sessionId}`);
+			return Effect.fail(new SessionProviderNotBound({ sessionId }));
 		}
-		return providerId;
+		return Effect.succeed(providerId);
 	}
 
 	// pruneProcessedCommands() removed — FIFO eviction is now inlined

@@ -14,7 +14,10 @@
 	import type { AssistantMessage } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading } from "../../stores/chat.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { assertNever } from "../../../utils.js";
 	import Icon from "../shared/Icon.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
@@ -319,8 +322,12 @@
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation(); // Don't trigger the copy click handler
 		if (message.messageId) {
-			wsSend({
-				type: "fork_session",
+			const projectSlug = getCurrentSlug();
+			if (!projectSlug) return;
+			void forkSessionRpc({
+				projectSlug,
+				originId: getBrowserClientId(),
+				...(sessionState.currentId ? { sessionId: sessionState.currentId } : {}),
 				messageId: message.messageId,
 			});
 		}
