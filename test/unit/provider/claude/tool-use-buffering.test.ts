@@ -41,7 +41,7 @@ function makeCtx(
 function makeTranslator() {
 	const events: CanonicalEvent[] = [];
 	const translator = new ClaudeEventTranslator({
-		sink: {
+		getSink: () => ({
 			push: (e: CanonicalEvent) =>
 				Effect.sync(() => {
 					events.push(e);
@@ -52,7 +52,7 @@ function makeTranslator() {
 			requestQuestion: vi.fn(() => Effect.succeed({})),
 			resolvePermission: vi.fn(() => Effect.void),
 			resolveQuestion: vi.fn(() => Effect.void),
-		},
+		}),
 		runEffect: Effect.runPromise,
 	});
 	return { translator, events };

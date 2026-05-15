@@ -510,7 +510,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				// 8. Start background stream consumer.
 				const runtime = yield* Effect.runtime<never>();
 				const translator = new ClaudeEventTranslator({
-					sink: input.eventSink,
+					getSink: (ctx) => ctx.eventSink,
 					runEffect: makeRuntimeEffectRunner(runtime),
 				});
 				ctx.streamConsumer = this.runStreamConsumer(ctx, translator);

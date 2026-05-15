@@ -377,15 +377,25 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		releaseTurn2?.();
 		await turn2Promise;
 
-		const sinkATypes = (sinkA.push as ReturnType<typeof vi.fn>).mock.calls.map(
-			([event]) => (event as CanonicalEvent).type,
-		);
 		const sinkBTypes = (sinkB.push as ReturnType<typeof vi.fn>).mock.calls.map(
 			([event]) => (event as CanonicalEvent).type,
 		);
+		const sinkAText = (sinkA.push as ReturnType<typeof vi.fn>).mock.calls.map(
+			([event]) => ((event as CanonicalEvent).data as { text?: string }).text,
+		);
+		const sinkBText = (sinkB.push as ReturnType<typeof vi.fn>).mock.calls.map(
+			([event]) => ((event as CanonicalEvent).data as { text?: string }).text,
+		);
+		const turnCompleted = (
+			sinkB.push as ReturnType<typeof vi.fn>
+		).mock.calls.find(
+			([event]) => (event as CanonicalEvent).type === "turn.completed",
+		)?.[0] as CanonicalEvent | undefined;
 		expect(sinkBTypes).toContain("message.created");
 		expect(sinkBTypes).toContain("text.delta");
-		expect(sinkATypes).not.toContain("text.delta");
+		expect(sinkBText).toContain("second turn text");
+		expect(sinkAText).not.toContain("second turn text");
+		expect(turnCompleted?.data).toMatchObject({ messageId: "msg-turn-2" });
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
@@ -1676,17 +1686,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		resolveSecond?.();
 		await turn2Promise;
 
-		// sinkA should have received events during the first turn (the result
-		// message translation goes through the translator which uses ctx.eventSink
-		// indirectly via the sink passed at construction). Since the translator
-		// is created with the initial sink but result events are pushed through
-		// it, we verify sinkA got calls during turn 1.
+		// sinkA should have received events during the first turn.
 		expect(sinkA.push).toHaveBeenCalled();
 
-		// After second turn completes, the event translator was constructed with
-		// the first sink, but the important thing is the context's eventSink was
-		// updated. We verify enqueueTurn changed the sink by confirming the provider instance
-		// created only one query (meaning it went through enqueueTurn path).
+		// The second turn reused the same SDK query, so enqueueTurn updated the
+		// context instead of constructing a new translator.
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 	});
 

@@ -105,7 +105,7 @@ describe("ClaudeEventTranslator", () => {
 		sink = makeStubSink();
 		ctx = makeCtx();
 		translator = new ClaudeEventTranslator({
-			sink,
+			getSink: () => sink,
 			runEffect: Effect.runPromise,
 		});
 	});
@@ -281,7 +281,7 @@ describe("ClaudeEventTranslator", () => {
 				},
 			});
 			const relayTranslator = new ClaudeEventTranslator({
-				sink: relaySink,
+				getSink: () => relaySink,
 				runEffect: Effect.runPromise,
 			});
 			const relayCtx = makeCtx({

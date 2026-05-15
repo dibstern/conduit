@@ -42,7 +42,7 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 	it("tool.started event carries CanonicalToolInput with camelCase fields", async () => {
 		const events: CanonicalEvent[] = [];
 		const translator = new ClaudeEventTranslator({
-			sink: {
+			getSink: () => ({
 				push: (e: CanonicalEvent) =>
 					Effect.sync(() => {
 						events.push(e);
@@ -53,7 +53,7 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 				requestQuestion: vi.fn(() => Effect.succeed({})),
 				resolvePermission: vi.fn(() => Effect.void),
 				resolveQuestion: vi.fn(() => Effect.void),
-			},
+			}),
 			runEffect: Effect.runPromise,
 		});
 
