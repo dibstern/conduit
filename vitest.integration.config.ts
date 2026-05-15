@@ -12,17 +12,7 @@ export default defineConfig({
 			"test/integration/**/*.integration.ts",
 			"test/integration/**/*.test.ts",
 		],
-		exclude: [
-			"**/node_modules/**",
-			"**/dist/**",
-			// Daemon TLS tests that call startDaemonProcess trigger circular
-			// dependency in services.ts re-export chain, causing "Not a valid
-			// effect: undefined". The startHttpServer unit tests in the same
-			// file pass fine — only the ManagedRuntime-based daemon tests fail.
-			// TODO: Fix by refactoring services.ts to not re-export from modules
-			// that participate in the daemon-main → daemon-layers cycle.
-			"**/daemon-tls.test.ts",
-		],
+		exclude: ["**/node_modules/**", "**/dist/**"],
 		pool: "threads",
 	},
 });

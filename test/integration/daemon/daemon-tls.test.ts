@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import { startHttpServer } from "../../../src/lib/daemon/daemon-lifecycle.js";
 
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 // ─── Generate test certs (same pattern as server.pbt.test.ts) ────────────────
 
@@ -147,8 +147,6 @@ describe("startHttpServer TLS support", () => {
 		"creates HTTPS server when tls certs are provided in context",
 		async () => {
 			const ctx: DaemonLifecycleContext = {
-				port: 0,
-				host: "127.0.0.1",
 				httpServer: null,
 				upgradeServer: null,
 				onboardingServer: null,
@@ -162,11 +160,13 @@ describe("startHttpServer TLS support", () => {
 						res.end(JSON.stringify({ ok: true, tls: true }));
 					},
 				},
-				tls: { key: testKey, cert: testCert },
 			};
 
-			await startHttpServer(ctx);
-			const port = ctx.port;
+			const port = await startHttpServer(ctx, {
+				port: 0,
+				host: "127.0.0.1",
+				tls: { key: testKey, cert: testCert },
+			});
 			expect(port).toBeGreaterThan(0);
 
 			// HTTPS request should succeed
@@ -186,8 +186,6 @@ describe("startHttpServer TLS support", () => {
 		"still creates HTTP server when no tls in context (regression)",
 		async () => {
 			const ctx: DaemonLifecycleContext = {
-				port: 0,
-				host: "127.0.0.1",
 				httpServer: null,
 				upgradeServer: null,
 				onboardingServer: null,
@@ -203,8 +201,7 @@ describe("startHttpServer TLS support", () => {
 				},
 			};
 
-			await startHttpServer(ctx);
-			const port = ctx.port;
+			const port = await startHttpServer(ctx, { port: 0, host: "127.0.0.1" });
 			expect(port).toBeGreaterThan(0);
 
 			// HTTP request should succeed
@@ -223,12 +220,6 @@ describe("startHttpServer TLS support", () => {
 
 // ─── Test: Daemon integration — TLS end-to-end ──────────────────────────────
 
-// NOTE: This describe block is excluded from the integration config
-// (vitest.integration.config.ts) due to a circular dependency in the
-// services.ts re-export chain that causes "Not a valid effect: undefined"
-// when startDaemonProcess builds ManagedRuntime. The startHttpServer
-// tests above pass fine because they don't trigger the daemon-main import.
-// TODO: Fix by refactoring services.ts re-exports.
 describe("Daemon TLS integration", () => {
 	let tmpDir: string;
 	let staticDir: string;
@@ -257,7 +248,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "key.pem"), testKey);
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 
-			const d = await startDaemonProcess({
+			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -293,7 +284,7 @@ describe("Daemon TLS integration", () => {
 			// the fallback CA root lookup when mkcert is not installed.
 			writeFileSync(join(daemonCertDir, "rootCA.pem"), testCert);
 
-			const d = await startDaemonProcess({
+			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -324,7 +315,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "key.pem"), testKey);
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 
-			const d = await startDaemonProcess({
+			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -344,7 +335,7 @@ describe("Daemon TLS integration", () => {
 	);
 
 	it("daemon without TLS stays bound to 127.0.0.1", async () => {
-		const d = await startDaemonProcess({
+		const d = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			pidPath: join(tmpDir, "daemon.pid"),
@@ -369,7 +360,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "key.pem"), testKey);
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 
-			const d = await startDaemonProcess({
+			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
@@ -397,7 +388,7 @@ describe("Daemon TLS integration", () => {
 			writeFileSync(join(daemonCertDir, "cert.pem"), testCert);
 			writeFileSync(join(daemonCertDir, "rootCA.pem"), testCert);
 
-			const d = await startDaemonProcess({
+			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
 				pidPath: join(tmpDir, "daemon.pid"),
