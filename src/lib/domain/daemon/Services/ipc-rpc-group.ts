@@ -32,28 +32,37 @@ import {
 	SetProjectTitle,
 	Shutdown,
 } from "../../../contracts/ipc-requests.js";
-import type { IpcHandlerDeps } from "./ipc-dispatch.js";
+import { formatErrorDetail } from "../../../errors.js";
+import type { ShutdownSignalTag } from "../Layers/daemon-layers.js";
+import type { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
+import type { ConfigPersistenceTag } from "./config-persistence-service.js";
+import type { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import { DaemonHandleTag } from "./daemon-handle.js";
+import type { DaemonEventBusTag } from "./daemon-pubsub.js";
+import type { DaemonStateTag } from "./daemon-state.js";
 import {
-	handleAddProject,
-	handleGetStatus,
-	handleInstanceAdd,
-	handleInstanceList,
-	handleInstanceRemove,
-	handleInstanceStart,
-	handleInstanceStatus,
-	handleInstanceStop,
-	handleInstanceUpdate,
-	handleListProjects,
-	handleRemoveProject,
+	addInstance as addEffectInstance,
+	getInstance as getEffectInstance,
+	getInstances as getEffectInstances,
+	type InstanceManagerStateTag,
+	type PollerFibersTag,
+	removeInstance as removeEffectInstance,
+	startInstance as startEffectInstance,
+	stopInstance as stopEffectInstance,
+	updateInstance as updateEffectInstance,
+} from "./instance-manager-service.js";
+import {
 	handleRestartWithConfig,
-	handleSetAgent,
 	handleSetKeepAwake,
 	handleSetKeepAwakeCommand,
-	handleSetModel,
 	handleSetPin,
-	handleSetProjectTitle,
 	handleShutdown,
 } from "./ipc-handlers.js";
+import {
+	type ProjectRegistryTag,
+	updateProject,
+} from "./project-registry-service.js";
+import { RelayCacheTag } from "./relay-cache.js";
 
 export const IpcRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(AddProject),
@@ -102,72 +111,93 @@ const decodeKeepAwake = (response: unknown) =>
 export const IpcHandlersLayer: Layer.Layer<
 	Rpc.ToHandler<RpcGroup.Rpcs<typeof IpcRpcGroup>>,
 	never,
-	IpcHandlerDeps
+	| DaemonHandleTag
+	| DaemonStateTag
+	| DaemonConfigRefTag
+	| ConfigPersistenceTag
+	| KeepAwakeTag
+	| ShutdownSignalTag
+	| InstanceManagerStateTag
+	| PollerFibersTag
+	| DaemonEventBusTag
+	| ProjectRegistryTag
+	| RelayCacheTag
 > = IpcRpcGroup.toLayer({
 	AddProject: (request) =>
-		handleAddProject({
-			cmd: "add_project",
-			directory: request.directory,
-		}).pipe(
-			Effect.flatMap((response) => {
-				if (!response.ok) return Effect.fail(failureFromResponse(response));
-				if (
-					typeof response.slug !== "string" ||
-					typeof response.directory !== "string"
-				) {
-					return Effect.fail(
-						ipcFailure("add_project returned an invalid success response"),
-					);
-				}
-				return Effect.succeed({
-					ok: true as const,
-					slug: response.slug,
-					directory: response.directory,
-				});
-			}),
+		DaemonHandleTag.pipe(
+			Effect.flatMap((handle) => handle.addProject(request.directory)),
+			Effect.map((project) => ({
+				ok: true as const,
+				slug: project.slug,
+				directory: project.directory,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(ipcFailure(formatErrorDetail(error))),
+			),
 		),
 	RemoveProject: (request) =>
-		handleRemoveProject({ cmd: "remove_project", slug: request.slug }).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		DaemonHandleTag.pipe(
+			Effect.flatMap((handle) => handle.removeProject(request.slug)),
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(ipcFailure(formatErrorDetail(error))),
 			),
 		),
 	ListProjects: () =>
-		handleListProjects({ cmd: "list_projects" }).pipe(
+		DaemonHandleTag.pipe(
+			Effect.flatMap((handle) => handle.getProjects()),
+			Effect.map((projects) => ({
+				ok: true as const,
+				projects: projects.map((project) => ({
+					slug: project.slug,
+					directory: project.directory,
+					title: project.title,
+					...(project.lastUsed !== undefined && {
+						lastUsed: project.lastUsed,
+					}),
+					...(project.instanceId !== undefined && {
+						instanceId: project.instanceId,
+					}),
+				})),
+			})),
 			Effect.flatMap((response) =>
-				response.ok
-					? decodeProjectsResponse(response).pipe(
-							Effect.mapError(() =>
-								ipcFailure("list_projects returned invalid projects"),
-							),
-						)
-					: Effect.fail(failureFromResponse(response)),
+				decodeProjectsResponse(response).pipe(
+					Effect.mapError(() =>
+						ipcFailure("list_projects returned invalid projects"),
+					),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
 			),
 		),
 	SetProjectTitle: (request) =>
-		handleSetProjectTitle({
-			cmd: "set_project_title",
-			slug: request.slug,
-			title: request.title,
-		}).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		updateProject(request.slug, { title: request.title }).pipe(
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(ipcFailure(formatErrorDetail(error))),
 			),
 		),
 	GetStatus: () =>
-		handleGetStatus({ cmd: "get_status" }).pipe(
+		DaemonHandleTag.pipe(
+			Effect.flatMap((handle) => handle.getStatus()),
 			Effect.flatMap((response) =>
-				response.ok
-					? decodeStatus(response).pipe(
-							Effect.mapError(() =>
-								ipcFailure("get_status returned an invalid status response"),
-							),
-						)
-					: Effect.fail(failureFromResponse(response)),
+				decodeStatus(response).pipe(
+					Effect.mapError(() =>
+						ipcFailure("get_status returned an invalid status response"),
+					),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
 			),
 		),
 	SetPin: (request) =>
@@ -210,28 +240,59 @@ export const IpcHandlersLayer: Layer.Layer<
 			Effect.map(() => ({ ok: true as const })),
 		),
 	SetAgent: (request) =>
-		handleSetAgent({
-			cmd: "set_agent",
-			slug: request.slug,
-			agent: request.agent,
-		}).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		RelayCacheTag.pipe(
+			Effect.flatMap((cache) => cache.get(request.slug)),
+			Effect.flatMap((relay) => {
+				const setDefaultAgent = relay.setDefaultAgent;
+				if (setDefaultAgent === undefined) {
+					return Effect.fail(
+						ipcFailure(
+							`Relay "${request.slug}" does not support default agent updates`,
+						),
+					);
+				}
+				return Effect.tryPromise({
+					try: () => setDefaultAgent(request.agent),
+					catch: (cause) => ipcFailure(formatErrorDetail(cause)),
+				});
+			}),
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
 			),
 		),
 	SetModel: (request) =>
-		handleSetModel({
-			cmd: "set_model",
-			slug: request.slug,
-			provider: request.provider,
-			model: request.model,
-		}).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		RelayCacheTag.pipe(
+			Effect.flatMap((cache) => cache.get(request.slug)),
+			Effect.flatMap((relay) => {
+				const setDefaultModel = relay.setDefaultModel;
+				if (setDefaultModel === undefined) {
+					return Effect.fail(
+						ipcFailure(
+							`Relay "${request.slug}" does not support default model updates`,
+						),
+					);
+				}
+				return Effect.tryPromise({
+					try: () =>
+						setDefaultModel({
+							providerID: request.provider,
+							modelID: request.model,
+						}),
+					catch: (cause) => ipcFailure(formatErrorDetail(cause)),
+				});
+			}),
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
 			),
 		),
 	RestartWithConfig: (request) =>
@@ -246,28 +307,46 @@ export const IpcHandlersLayer: Layer.Layer<
 			),
 		),
 	InstanceList: () =>
-		handleInstanceList({ cmd: "instance_list" }).pipe(
-			Effect.flatMap((response) => {
-				if (!response.ok) return Effect.fail(failureFromResponse(response));
-				return decodeInstancesResponse(response).pipe(
+		getEffectInstances.pipe(
+			Effect.map((instances) => ({
+				ok: true as const,
+				instances: Array.from(instances),
+			})),
+			Effect.flatMap((response) =>
+				decodeInstancesResponse(response).pipe(
 					Effect.mapError(() =>
 						ipcFailure("instance_list returned invalid instances"),
 					),
-				);
-			}),
+				),
+			),
 		),
 	InstanceAdd: (request) =>
-		handleInstanceAdd({
-			cmd: "instance_add",
-			name: request.name,
-			managed: request.managed,
-			...(request.port !== undefined ? { port: request.port } : {}),
-			...(request.env !== undefined ? { env: request.env } : {}),
-			...(request.url !== undefined ? { url: request.url } : {}),
+		Effect.gen(function* () {
+			const existingInstances = Array.from(yield* getEffectInstances);
+			let id =
+				request.name
+					.toLowerCase()
+					.replace(/[^a-z0-9-]/g, "-")
+					.replace(/-+/g, "-")
+					.replace(/^-|-$/g, "") || "instance";
+			const baseId = id;
+			let counter = 2;
+			while (existingInstances.some((instance) => instance.id === id)) {
+				id = `${baseId}-${counter}`;
+				counter++;
+			}
+			const instance = yield* addEffectInstance({
+				id,
+				name: request.name,
+				port: request.port ?? 0,
+				managed: request.managed,
+				...(request.env !== undefined ? { env: request.env } : {}),
+				...(request.url !== undefined ? { url: request.url } : {}),
+			});
+			return instance;
 		}).pipe(
-			Effect.flatMap((response) => {
-				if (!response.ok) return Effect.fail(failureFromResponse(response));
-				return decodeInstance(response.instance).pipe(
+			Effect.flatMap((instance) =>
+				decodeInstance(instance).pipe(
 					Effect.map((instance) => ({
 						ok: true as const,
 						instance,
@@ -275,44 +354,56 @@ export const IpcHandlersLayer: Layer.Layer<
 					Effect.mapError(() =>
 						ipcFailure("instance_add returned an invalid instance"),
 					),
-				);
-			}),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
+			),
 		),
 	InstanceRemove: (request) =>
-		handleInstanceRemove({ cmd: "instance_remove", id: request.id }).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		getEffectInstance(request.id).pipe(
+			Effect.zipRight(removeEffectInstance(request.id)),
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(ipcFailure(formatErrorDetail(error))),
 			),
 		),
 	InstanceStart: (request) =>
-		handleInstanceStart({ cmd: "instance_start", id: request.id }).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		getEffectInstance(request.id).pipe(
+			Effect.zipRight(startEffectInstance(request.id)),
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(ipcFailure(formatErrorDetail(error))),
 			),
 		),
 	InstanceStop: (request) =>
-		handleInstanceStop({ cmd: "instance_stop", id: request.id }).pipe(
-			Effect.flatMap((response) =>
-				response.ok
-					? Effect.succeed({ ok: true as const })
-					: Effect.fail(failureFromResponse(response)),
+		getEffectInstance(request.id).pipe(
+			Effect.zipRight(stopEffectInstance(request.id)),
+			Effect.map(() => ({ ok: true as const })),
+			Effect.catchAll((error) =>
+				Effect.fail(ipcFailure(formatErrorDetail(error))),
 			),
 		),
 	InstanceUpdate: (request) =>
-		handleInstanceUpdate({
-			cmd: "instance_update",
-			id: request.id,
-			...(request.name !== undefined ? { name: request.name } : {}),
-			...(request.env !== undefined ? { env: request.env } : {}),
-			...(request.port !== undefined ? { port: request.port } : {}),
+		Effect.gen(function* () {
+			yield* getEffectInstance(request.id);
+			const updates: {
+				name?: string;
+				env?: Record<string, string>;
+				port?: number;
+			} = {};
+			if (request.name !== undefined) updates.name = request.name;
+			if (request.env !== undefined) updates.env = request.env;
+			if (request.port !== undefined) updates.port = request.port;
+			yield* updateEffectInstance(request.id, updates);
+			return yield* getEffectInstance(request.id);
 		}).pipe(
-			Effect.flatMap((response) => {
-				if (!response.ok) return Effect.fail(failureFromResponse(response));
-				return decodeInstance(response.instance).pipe(
+			Effect.flatMap((instance) =>
+				decodeInstance(instance).pipe(
 					Effect.map((instance) => ({
 						ok: true as const,
 						instance,
@@ -320,14 +411,20 @@ export const IpcHandlersLayer: Layer.Layer<
 					Effect.mapError(() =>
 						ipcFailure("instance_update returned an invalid instance"),
 					),
-				);
-			}),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
+			),
 		),
 	InstanceStatus: (request) =>
-		handleInstanceStatus({ cmd: "instance_status", id: request.id }).pipe(
-			Effect.flatMap((response) => {
-				if (!response.ok) return Effect.fail(failureFromResponse(response));
-				return decodeInstance(response.instance).pipe(
+		getEffectInstance(request.id).pipe(
+			Effect.flatMap((instance) =>
+				decodeInstance(instance).pipe(
 					Effect.map((instance) => ({
 						ok: true as const,
 						instance,
@@ -335,7 +432,14 @@ export const IpcHandlersLayer: Layer.Layer<
 					Effect.mapError(() =>
 						ipcFailure("instance_status returned an invalid instance"),
 					),
-				);
-			}),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					error instanceof IpcError
+						? error
+						: ipcFailure(formatErrorDetail(error)),
+				),
+			),
 		),
 });

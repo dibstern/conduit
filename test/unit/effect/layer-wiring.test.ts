@@ -56,8 +56,6 @@ import {
 	ProjectRegistryTag,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
-import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
-import type { StoredProject } from "../../../src/lib/types.js";
 
 // ─── Mock DaemonLiveOptions ─────────────────────────────────────────────────
 
@@ -66,39 +64,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		configDir: "/tmp/test-daemon-wiring",
 		pidPath: "/tmp/test-daemon-wiring/daemon.pid",
 		socketPath: "/tmp/test-daemon-wiring/relay.sock",
-		ipcContext: {
-			addProject: () => Promise.resolve({}) as Promise<StoredProject>,
-			removeProject: () => Promise.resolve(),
-			getStatus: () => ({
-				ok: true as const,
-				pid: process.pid,
-				port: 0,
-				host: "127.0.0.1",
-				version: "0.0.0-test",
-				uptime: 0,
-				projectCount: 0,
-				sessionCount: 0,
-				instanceCount: 0,
-				clientCount: 0,
-				keepAwake: false,
-				pinEnabled: false,
-				tlsEnabled: false,
-				projects: [],
-				instances: [],
-			}),
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: () => ({}) as OpenCodeInstance,
-			removeInstance: () => {},
-			startInstance: () => Promise.resolve(),
-			stopInstance: () => {},
-			updateInstance: () => ({}) as OpenCodeInstance,
-			setProjectAgent: () => Promise.resolve(),
-			setProjectModel: () => Promise.resolve(),
-		},
 		staticDir: process.cwd(),
 		initialConfig: makeDaemonConfigFromOptions({
 			port: 0,

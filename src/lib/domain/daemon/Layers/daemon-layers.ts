@@ -6,6 +6,7 @@
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
+import type { Rpc, RpcGroup } from "@effect/rpc";
 import {
 	Cause,
 	Context,
@@ -20,7 +21,6 @@ import {
 	Runtime,
 	Stream,
 } from "effect";
-import type { DaemonIPCContext } from "../../../daemon/daemon-ipc.js";
 import {
 	closeHttpServer,
 	closeIPCServer,
@@ -87,6 +87,10 @@ import {
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
+import {
+	IpcHandlersLayer,
+	type IpcRpcGroup,
+} from "../Services/ipc-rpc-group.js";
 import {
 	addWithoutRelay as addEffectProjectWithoutRelay,
 	findByDirectory,
@@ -478,6 +482,11 @@ export const makeRelayCacheLayer: Layer.Layer<
 					wsHandler: relay.wsHandler,
 					rpcWsHandler: relay.rpcWsHandler,
 					getStatusSnapshot: () => relay.getStatusSnapshot(),
+					setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
+					setDefaultModel: (model: {
+						readonly providerID: string;
+						readonly modelID: string;
+					}) => relay.setDefaultModel(model),
 					stop: () => relay.stop(),
 				};
 			}),
@@ -559,19 +568,12 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
  * and closes it on scope close.
  */
 export const makeIpcServerLive = (
-	ipcContext: DaemonIPCContext,
 	postResponseActions?: IpcPostResponseActions,
 ) =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const ctx = yield* DaemonLifecycleContextTag;
-			const runtime = yield* Effect.runtime<
-				| ConfigPersistenceTag
-				| DaemonConfigRefTag
-				| DaemonStateTag
-				| KeepAwakeTag
-				| ShutdownSignalTag
-			>();
+			const runtime = yield* Effect.runtime<IpcDispatchServices>();
 			const shutdownSignal = yield* ShutdownSignalTag;
 			const resolvedPostResponseActions = postResponseActions ?? {
 				scheduleShutdown: () => {
@@ -581,7 +583,6 @@ export const makeIpcServerLive = (
 			yield* startLifecycleServer("startIPCServer", () =>
 				startIPCServer(
 					ctx,
-					ipcContext,
 					makeTaggedIpcDispatcher(runtime),
 					resolvedPostResponseActions,
 				),
@@ -592,30 +593,22 @@ export const makeIpcServerLive = (
 		}),
 	);
 
-type IpcDispatchServices =
-	| ConfigPersistenceTag
-	| DaemonConfigRefTag
-	| DaemonStateTag
-	| KeepAwakeTag
-	| ShutdownSignalTag;
+type IpcDispatchServices = Rpc.ToHandler<RpcGroup.Rpcs<typeof IpcRpcGroup>>;
 
 function makeTaggedIpcDispatcher(
 	runtime: Runtime.Runtime<IpcDispatchServices>,
 ): TaggedIpcDispatcher {
-	return (request, rpcLayer) =>
+	return (request) =>
 		new Promise((resolve, reject) => {
-			Runtime.runCallback(runtime)(
-				dispatchTaggedRequestEffect(request, rpcLayer),
-				{
-					onExit: (exit) => {
-						if (Exit.isSuccess(exit)) {
-							resolve(exit.value);
-							return;
-						}
-						reject(Cause.squash(exit.cause));
-					},
+			Runtime.runCallback(runtime)(dispatchTaggedRequestEffect(request), {
+				onExit: (exit) => {
+					if (Exit.isSuccess(exit)) {
+						resolve(exit.value);
+						return;
+					}
+					reject(Cause.squash(exit.cause));
 				},
-			);
+			});
 		});
 }
 
@@ -709,7 +702,6 @@ export const makePidFileLive = (
  */
 export interface DaemonLiveOptions {
 	// Server lifecycle (still partially imperative — AP-38 deferred)
-	ipcContext: DaemonIPCContext;
 	ipcPostResponseActions?: IpcPostResponseActions;
 	staticDir: string;
 
@@ -878,8 +870,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.staticDir);
 	const httpAndIpc = Layer.mergeAll(
 		HttpServerLive,
-		makeIpcServerLive(options.ipcContext, options.ipcPostResponseActions),
-	).pipe(Layer.provideMerge(httpRequestHandler));
+		makeIpcServerLive(options.ipcPostResponseActions),
+	)
+		.pipe(Layer.provideMerge(httpRequestHandler))
+		.pipe(Layer.provideMerge(IpcHandlersLayer));
 
 	const servers = OnboardingServerLive(options.staticDir).pipe(
 		Layer.provideMerge(httpAndIpc),

@@ -5,7 +5,6 @@ import {
 	type DaemonConfig,
 	loadDaemonConfig,
 } from "../../../daemon/config-persistence.js";
-import type { DaemonIPCContext } from "../../../daemon/daemon-ipc.js";
 import type {
 	DaemonOptions,
 	DaemonStatus,
@@ -24,18 +23,7 @@ import {
 	DaemonHandleTag,
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
-import type { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
-import {
-	addInstance as addEffectInstance,
-	getInstance as getEffectInstance,
-	type InstanceManagerStateTag,
-	type PollerFibersTag,
-	removeInstance as removeEffectInstance,
-	startInstance as startEffectInstance,
-	stopInstance as stopEffectInstance,
-	updateInstance as updateEffectInstance,
-} from "../Services/instance-manager-service.js";
 import { type DaemonLiveOptions, makeDaemonLive } from "./daemon-layers.js";
 
 export interface ForegroundDaemonHandle {
@@ -138,10 +126,7 @@ const makeInitialStatus = (options: DaemonOptions): DaemonStatus => ({
 type ForegroundRuntimeRequirements =
 	| DaemonHandleTag
 	| ConfigPersistenceTag
-	| DaemonConfigRefTag
-	| InstanceManagerStateTag
-	| PollerFibersTag
-	| DaemonEventBusTag;
+	| DaemonConfigRefTag;
 
 export async function startForegroundDaemon(
 	options: DaemonOptions,
@@ -199,15 +184,6 @@ export async function startForegroundDaemon(
 		return result;
 	};
 
-	const runDaemonEffect = async <A, E>(
-		effect: Effect.Effect<A, E, ForegroundRuntimeRequirements>,
-	) => {
-		const current = requireRuntime();
-		const result = await runRuntimeEffect(current.runtime, effect);
-		await refreshSnapshots();
-		return result;
-	};
-
 	const stop = async () => {
 		const currentRuntime = runtime;
 		if (currentRuntime == null || stopped) return;
@@ -230,46 +206,6 @@ export async function startForegroundDaemon(
 		handle = null;
 	};
 
-	const ipcContext: DaemonIPCContext = {
-		addProject: (directory) => runHandleEffect((h) => h.addProject(directory)),
-		removeProject: (slug) => runHandleEffect((h) => h.removeProject(slug)),
-		getStatus: () => status,
-		getProjects: () => projects,
-		setProjectTitle: () => {
-			throw new ForegroundIpcUnsupportedError("setProjectTitle");
-		},
-		persistConfig: () => {
-			const currentRuntime = runtime;
-			if (currentRuntime == null) return;
-			return runRuntimeEffect(
-				currentRuntime,
-				ConfigPersistenceTag.pipe(
-					Effect.flatMap((persistence) => persistence.requestSave),
-				),
-			).then(() => undefined);
-		},
-		getInstances: () => instances,
-		getInstance: (id) => instances.find((instance) => instance.id === id),
-		addInstance: (id, config) =>
-			runDaemonEffect(addEffectInstance({ id, ...config })),
-		removeInstance: (id) =>
-			runDaemonEffect(removeEffectInstance(id)).then(() => undefined),
-		startInstance: (id) =>
-			runDaemonEffect(startEffectInstance(id)).then(() => undefined),
-		stopInstance: (id) =>
-			runDaemonEffect(stopEffectInstance(id)).then(() => undefined),
-		updateInstance: (id, updates) =>
-			runDaemonEffect(
-				updateEffectInstance(id, updates).pipe(
-					Effect.zipRight(getEffectInstance(id)),
-				),
-			),
-		setProjectAgent: () =>
-			Promise.reject(new ForegroundIpcUnsupportedError("setProjectAgent")),
-		setProjectModel: () =>
-			Promise.reject(new ForegroundIpcUnsupportedError("setProjectModel")),
-	};
-
 	const initialConfig = buildInitialRuntimeConfig(options, configDir);
 	const liveOptions: DaemonLiveOptions = {
 		configDir,
@@ -277,7 +213,6 @@ export async function startForegroundDaemon(
 		socketPath: options.socketPath ?? join(configDir, "relay.sock"),
 		staticDir: options.staticDir ?? resolveDefaultStaticDir(),
 		initialConfig,
-		ipcContext,
 		ipcPostResponseActions: {
 			scheduleShutdown: () => {
 				void stop();

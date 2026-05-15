@@ -29,6 +29,8 @@ const makeTestRelay = (slug: string): Relay => ({
 	rpcWsHandler: {
 		handleUpgrade: vi.fn(),
 	} as unknown as Relay["rpcWsHandler"],
+	setDefaultAgent: vi.fn(() => Promise.resolve()),
+	setDefaultModel: vi.fn(() => Promise.resolve()),
 	stop: vi.fn(),
 });
 

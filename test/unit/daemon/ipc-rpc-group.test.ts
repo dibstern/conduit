@@ -1,9 +1,16 @@
-import { FileSystem } from "@effect/platform";
-import { SystemError } from "@effect/platform/Error";
-import { type Rpc, RpcClient, type RpcGroup, RpcTest } from "@effect/rpc";
+import type { Socket } from "node:net";
+import { RpcClient, RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Either, Exit, Layer, Ref, Schema } from "effect";
-import type { Scope } from "effect/Scope";
+import {
+	Deferred,
+	Effect,
+	Either,
+	HashMap,
+	Layer,
+	Option,
+	Ref,
+	Schema,
+} from "effect";
 import { expect } from "vitest";
 import {
 	AddProject,
@@ -15,99 +22,25 @@ import {
 import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
-import { PersistencePathTag } from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
 import type { DaemonRuntimeConfig } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonHandleLive } from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
+import { DaemonLifecycleContextTag } from "../../../src/lib/domain/daemon/Services/daemon-lifecycle-context.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	DaemonStateTag,
 	makeDaemonStateLive,
 } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import type { IpcHandlerDeps } from "../../../src/lib/domain/daemon/Services/ipc-dispatch.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	IpcHandlersLayer,
 	IpcRpcGroup,
 } from "../../../src/lib/domain/daemon/Services/ipc-rpc-group.js";
 import {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-} from "../../../src/lib/domain/daemon/Services/management-service.js";
-
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-
-const makeTestFileSystem = () => {
-	const files = new Map<string, string>();
-
-	const fs = FileSystem.makeNoop({
-		readFileString: (path: string) =>
-			Effect.gen(function* () {
-				const content = files.get(path);
-				if (content === undefined) {
-					return yield* Effect.fail(
-						new SystemError({
-							reason: "NotFound",
-							module: "FileSystem",
-							method: "readFileString",
-							description: `File not found: ${path}`,
-							pathOrDescriptor: path,
-						}),
-					);
-				}
-				return content;
-			}),
-		writeFileString: (path: string, data: string) =>
-			Effect.sync(() => {
-				files.set(path, data);
-			}),
-		rename: (oldPath: string, newPath: string) =>
-			Effect.sync(() => {
-				const content = files.get(oldPath);
-				if (content !== undefined) {
-					files.set(newPath, content);
-					files.delete(oldPath);
-				}
-			}),
-		makeDirectory: () => Effect.void,
-	});
-
-	return Layer.succeed(FileSystem.FileSystem, fs);
-};
-
-const makeMockInstanceMgmt = (overrides?: Partial<InstanceManagementDeps>) =>
-	Layer.succeed(InstanceMgmtTag, {
-		getInstances: () => [
-			{
-				id: "inst-1",
-				name: "Dev",
-				port: 4096,
-				managed: true,
-				status: "healthy" as const,
-				restartCount: 0,
-				createdAt: Date.now(),
-			},
-		],
-		addInstance: (id, config) => ({
-			id,
-			...config,
-			status: "stopped" as const,
-			restartCount: 0,
-			createdAt: Date.now(),
-		}),
-		removeInstance: () => {},
-		startInstance: () => Promise.resolve(),
-		stopInstance: () => {},
-		updateInstance: (id, updates) => ({
-			id,
-			name: updates.name ?? "Updated",
-			port: updates.port ?? 4096,
-			managed: true,
-			status: "healthy" as const,
-			restartCount: 0,
-			createdAt: Date.now(),
-		}),
-		persistConfig: () => {},
-		...overrides,
-	});
+	makeProjectRegistryLive,
+	ProjectRegistryTag,
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 const makeMockKeepAwake = () =>
 	Layer.effect(
@@ -144,17 +77,34 @@ const makeMockConfigRef = () => {
 const makeMockShutdownSignal = () =>
 	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
 
-const makeTestLayer = () =>
+const makeBaseTestLayer = () =>
 	Layer.mergeAll(
-		makeTestFileSystem(),
-		Layer.succeed(PersistencePathTag, "/test-config/daemon.json"),
 		makeDaemonStateLive({ projects: [] }),
-		Layer.succeed(ProjectMgmtTag, {
-			getProjects: () => [],
-			setProjectInstance: () => {},
+		makeProjectRegistryLive(),
+		DaemonEventBusLive,
+		makeInstanceManagerStateLive(undefined, [
+			{
+				id: "inst-1",
+				name: "Dev",
+				port: 4096,
+				managed: true,
+			},
+		]),
+		Layer.succeed(RelayCacheTag, {
+			get: () => Effect.fail(new Error("Relay cache not expected in test")),
+			peek: () => Effect.succeed(Option.none()),
+			invalidate: () => Effect.void,
 		}),
-		makeMockInstanceMgmt(),
-		makeOverridesStateLive(),
+		Layer.succeed(DaemonLifecycleContextTag, {
+			httpServer: null,
+			onboardingServer: null,
+			upgradeServer: null,
+			ipcServer: null,
+			ipcClients: new Set<Socket>(),
+			clientCount: 0,
+			socketPath: "/tmp/conduit-test.sock",
+			router: null,
+		}),
 		makeMockKeepAwake(),
 		makeMockConfigRef(),
 		makeMockShutdownSignal(),
@@ -164,15 +114,18 @@ const makeTestLayer = () =>
 		}),
 	);
 
-type RpcTestEnv =
-	| Scope
-	| IpcHandlerDeps
-	| Rpc.ToHandler<RpcGroup.Rpcs<typeof IpcRpcGroup>>;
+const makeTestLayer = () => {
+	const base = makeBaseTestLayer();
+	return Layer.merge(base, DaemonHandleLive.pipe(Layer.provide(base)));
+};
 
-const provideRpc = <A, E>(effect: Effect.Effect<A, E, RpcTestEnv>) =>
-	Effect.scoped(effect).pipe(
-		Effect.provide(Layer.provideMerge(IpcHandlersLayer, makeTestLayer())),
-	);
+const makeRpcTestLayer = () => {
+	const deps = makeTestLayer();
+	return Layer.merge(deps, IpcHandlersLayer.pipe(Layer.provide(deps)));
+};
+
+const provideRpc = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.scoped(effect).pipe(Effect.provide(makeRpcTestLayer()));
 
 describe("IPC RPC request group", () => {
 	it("uses installed @effect/rpc group/client APIs", () => {
@@ -195,40 +148,29 @@ describe("IPC RPC request group", () => {
 					directory: "/tmp/project",
 				});
 
-				const ref = yield* DaemonStateTag;
-				const state = yield* Ref.get(ref);
-				expect(state.projects).toHaveLength(1);
-				expect(state.projects[0]?.path).toBe("/tmp/project");
+				const registryRef = yield* ProjectRegistryTag;
+				const registry = yield* Ref.get(registryRef);
+				expect(HashMap.size(registry)).toBe(1);
+				const entry = HashMap.get(registry, "project");
+				expect(Option.getOrUndefined(entry)?.project.directory).toBe(
+					"/tmp/project",
+				);
 			}),
 		),
 	);
 
-	it.effect("fails duplicate AddProject through request failure schema", () =>
+	it.effect("returns the existing project for duplicate AddProject", () =>
 		provideRpc(
 			Effect.gen(function* () {
-				const ref = yield* DaemonStateTag;
-				yield* Ref.update(ref, (state) => ({
-					...state,
-					projects: [
-						{
-							path: "/tmp/project",
-							slug: "project",
-							addedAt: Date.now(),
-						},
-					],
-				}));
-
 				const client = yield* RpcTest.makeClient(IpcRpcGroup);
-				const exit = yield* Effect.exit(
-					client.AddProject({ directory: "/tmp/project" }),
-				);
+				const first = yield* client.AddProject({ directory: "/tmp/project" });
+				const second = yield* client.AddProject({ directory: "/tmp/project" });
 
-				expect(Exit.isFailure(exit)).toBe(true);
-				if (Exit.isFailure(exit)) {
-					const cause = exit.cause.toJSON() as { failures?: unknown[] };
-					expect(JSON.stringify(cause)).toContain("IpcError");
-					expect(JSON.stringify(cause)).toContain("Project already exists");
-				}
+				expect(second).toEqual(first);
+
+				const registryRef = yield* ProjectRegistryTag;
+				const registry = yield* Ref.get(registryRef);
+				expect(HashMap.size(registry)).toBe(1);
 			}),
 		),
 	);
@@ -250,23 +192,28 @@ describe("IPC RPC request group", () => {
 	it.effect("returns full GetStatus data through the RPC client", () =>
 		provideRpc(
 			Effect.gen(function* () {
-				const ref = yield* DaemonStateTag;
-				yield* Ref.update(ref, (state) => ({
-					...state,
+				const configRef = yield* DaemonConfigRefTag;
+				yield* Ref.update(configRef, (config) => ({
+					...config,
 					host: "0.0.0.0",
-					tls: true,
+					tlsEnabled: true,
 					pinHash: "hashed",
 					keepAwake: true,
-					projects: [
-						{
-							path: "/tmp/project",
-							slug: "project",
-							title: "Project",
-							addedAt: Date.now(),
-							sessionCount: 3,
-						},
-					],
+					persistedSessionCounts: new Map([["project", 3]]),
 				}));
+				const registryRef = yield* ProjectRegistryTag;
+				const addedAt = Date.now();
+				yield* Ref.update(registryRef, (registry) =>
+					HashMap.set(registry, "project", {
+						_tag: "Ready" as const,
+						project: {
+							slug: "project",
+							directory: "/tmp/project",
+							title: "Project",
+							lastUsed: addedAt,
+						},
+					}),
+				);
 
 				const client = yield* RpcTest.makeClient(IpcRpcGroup);
 				const result = yield* client.GetStatus({});
@@ -281,6 +228,8 @@ describe("IPC RPC request group", () => {
 						slug: "project",
 						directory: "/tmp/project",
 						title: "Project",
+						status: "ready",
+						lastUsed: addedAt,
 					},
 				]);
 			}),

@@ -58,19 +58,31 @@ export type ProjectState = ProjectRegistering | ProjectReady | ProjectError;
 
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{
 	slug: string;
-}> {}
+}> {
+	get message(): string {
+		return `Project "${this.slug}" not found`;
+	}
+}
 
 export class ProjectAlreadyExists extends Data.TaggedError(
 	"ProjectAlreadyExists",
 )<{
 	slug: string;
-}> {}
+}> {
+	get message(): string {
+		return `Project already exists: ${this.slug}`;
+	}
+}
 
 export class ProjectAlreadyReady extends Data.TaggedError(
 	"ProjectAlreadyReady",
 )<{
 	slug: string;
-}> {}
+}> {
+	get message(): string {
+		return `Project "${this.slug}" is already ready`;
+	}
+}
 
 // ─── State type ──────────────────────────────────────────────────────────────
 

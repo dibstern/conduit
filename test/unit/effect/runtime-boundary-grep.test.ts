@@ -1676,6 +1676,66 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not require callers to assemble daemon IPC context", () => {
+		const daemonLayersPath = "src/lib/domain/daemon/Layers/daemon-layers.ts";
+		const daemonLayers = readFileSync(
+			join(REPO_ROOT, daemonLayersPath),
+			"utf8",
+		);
+		const optionsStart = daemonLayers.indexOf(
+			"export interface DaemonLiveOptions",
+		);
+		const makeDaemonStart = daemonLayers.indexOf(
+			"export const makeDaemonLive",
+			optionsStart,
+		);
+		expect(optionsStart).toBeGreaterThanOrEqual(0);
+		expect(makeDaemonStart).toBeGreaterThan(optionsStart);
+		const optionsSource = daemonLayers.slice(optionsStart, makeDaemonStart);
+
+		const daemonMainPath = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const daemonMain = readFileSync(join(REPO_ROOT, daemonMainPath), "utf8");
+		const daemonLiveOptions = daemonMain.match(
+			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
+		)?.[0];
+
+		const hits = [
+			...optionsSource.split("\n").flatMap((line, index) =>
+				/\bipcContext:\s*DaemonIPCContext\b/.test(line)
+					? [
+							{
+								path: daemonLayersPath,
+								line:
+									daemonLayers.slice(0, optionsStart).split("\n").length +
+									index,
+								source: line.trim(),
+								reason:
+									"DaemonLiveOptions should derive IPC handlers from Effect services inside the daemon Layer graph",
+							},
+						]
+					: [],
+			),
+			...(daemonLiveOptions ?? "").split("\n").flatMap((line, index) =>
+				/\bipcContext\b/.test(line)
+					? [
+							{
+								path: daemonMainPath,
+								line:
+									daemonMain
+										.slice(0, daemonMain.indexOf(daemonLiveOptions ?? ""))
+										.split("\n").length + index,
+								source: line.trim(),
+								reason:
+									"daemon-main should not pass a prebuilt IPC context into DaemonLiveOptions",
+							},
+						]
+					: [],
+			),
+		];
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not require callers to assemble the daemon relay factory", () => {
 		const daemonLayersPath = "src/lib/domain/daemon/Layers/daemon-layers.ts";
 		const daemonLayers = readFileSync(

@@ -275,7 +275,6 @@ import {
 import {
 	ProjectRegistry,
 	projectRegistryProjectNotFound,
-	projectRelayNotReady,
 } from "../../../daemon/project-registry.js";
 import { fetchLatestVersion } from "../../../daemon/version-check.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
@@ -1131,78 +1130,6 @@ export async function startDaemonProcess(
 	}
 	log.debug(`[startup:${elapsed()}] Instance auto-start done`);
 
-	// ── IPC server ────────────────────────────────────────────────────────
-	const getReadyProjectRelay = (slug: string): ProjectRelay => {
-		const relay = registry.getRelay(slug);
-		if (!relay) {
-			throw projectRelayNotReady(slug);
-		}
-		return relay;
-	};
-	const ipcContext = {
-		addProject: (dir: string) => addProject(dir),
-		removeProject: (slug: string) => removeProject(slug),
-		getStatus,
-		getProjects: () => {
-			const cfg = readRuntimeConfigSnapshot();
-			return registry.allProjects().map((project) => {
-				// biome-ignore lint/style/noNonNullAssertion: slug comes from registry.allProjects() so the entry is guaranteed to exist
-				const entry = registry.get(project.slug)!;
-				const relay = entry.status === "ready" ? entry.relay : undefined;
-				const relayStatus = relay?.getStatusSnapshot();
-				return {
-					...project,
-					sessions:
-						relayStatus?.sessionCount ||
-						cfg.persistedSessionCounts.get(project.slug) ||
-						persistedSessionCounts.get(project.slug) ||
-						0,
-					clients: relayStatus?.clients ?? 0,
-					isProcessing: relayStatus?.isProcessing ?? false,
-				};
-			});
-		},
-		setProjectTitle: (slug: string, title: string) => {
-			registry.updateProject(slug, { title });
-			syncEffectProjectRegistrySoon(
-				"set project title",
-				updateEffectProject(slug, { title }),
-			);
-		},
-		persistConfig: () => persistConfig(),
-		getInstances: () => instanceManager.getInstances(),
-		getInstance: (id: string) => instanceManager.getInstance(id),
-		addInstance: (
-			id: string,
-			config: import("../../../types.js").InstanceConfig,
-		) => instanceManager.addInstance(id, config),
-		removeInstance: (id: string) => instanceManager.removeInstance(id),
-		startInstance: (id: string) => instanceManager.startInstance(id),
-		stopInstance: (id: string) => instanceManager.stopInstance(id),
-		updateInstance: (
-			id: string,
-			updates: {
-				name?: string;
-				env?: Record<string, string>;
-				port?: number;
-			},
-		) => instanceManager.updateInstance(id, updates),
-		setProjectAgent: async (slug: string, agent: string) => {
-			const relay = getReadyProjectRelay(slug);
-			await relay.setDefaultAgent(agent);
-		},
-		setProjectModel: async (
-			slug: string,
-			model: { providerID: string; modelID: string },
-		) => {
-			const relay = getReadyProjectRelay(slug);
-			await relay.setDefaultModel(model);
-		},
-	};
-
-	// IPC server is now started by makeIpcServerLive (via makeDaemonLive).
-	log.debug(`[startup:${elapsed()}] IPC context built`);
-
 	// ── Layer-managed daemon lifecycle ────────────────────────────────────
 	const initialRuntimeConfig = runtimeConfigSnapshot;
 	const firstProject = registry.allProjects()[0];
@@ -1291,7 +1218,6 @@ export async function startDaemonProcess(
 		configDir,
 		pidPath,
 		socketPath,
-		ipcContext,
 		ipcPostResponseActions: {
 			scheduleShutdown: scheduleLegacyPostResponseShutdown,
 		},

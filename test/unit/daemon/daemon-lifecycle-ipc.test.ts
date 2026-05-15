@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Layer, ManagedRuntime, Ref, Runtime } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Option, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 const warnSpy = vi.hoisted(() => vi.fn());
@@ -31,7 +31,7 @@ vi.mock("../../../src/lib/logger.js", async (importOriginal) => {
 	};
 });
 
-import type { DaemonIPCContext } from "../../../src/lib/daemon/daemon-ipc.js";
+import type { IpcTaggedRequest } from "../../../src/lib/contracts/ipc-requests.js";
 import {
 	closeIPCServer,
 	type DaemonLifecycleContext,
@@ -46,20 +46,14 @@ import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-
 import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonHandleTag } from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import type {
-	InstanceConfig,
-	IPCResponse,
-	OpenCodeInstance,
-	StoredProject,
-} from "../../../src/lib/types.js";
-
-type TestDaemonIPCContext = Omit<
-	DaemonIPCContext,
-	"getStatus" | "scheduleShutdown"
-> & {
-	readonly getStatus?: () => DaemonStatus;
-};
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { IpcHandlersLayer } from "../../../src/lib/domain/daemon/Services/ipc-rpc-group.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import type { IPCResponse } from "../../../src/lib/types.js";
 
 const makeContext = (socketPath: string): DaemonLifecycleContext => ({
 	httpServer: null,
@@ -72,29 +66,11 @@ const makeContext = (socketPath: string): DaemonLifecycleContext => ({
 	router: null,
 });
 
-const testTaggedDispatcher: TaggedIpcDispatcher = (request, rpcLayer) =>
-	Runtime.runPromise(Runtime.defaultRuntime)(
-		dispatchTaggedRequestEffect(
-			request,
-			rpcLayer,
-		) as Effect.Effect<IPCResponse>,
-	);
-
 const startTestIPCServer = (
 	ctx: DaemonLifecycleContext,
-	ipcContext: TestDaemonIPCContext,
-	getStatus: () => DaemonStatus = makeStatus,
+	dispatchTaggedRequest: TaggedIpcDispatcher,
 	postResponseActions?: IpcPostResponseActions,
-) =>
-	startIPCServer(
-		ctx,
-		{
-			...ipcContext,
-			getStatus: ipcContext.getStatus ?? getStatus,
-		},
-		testTaggedDispatcher,
-		postResponseActions,
-	);
+) => startIPCServer(ctx, dispatchTaggedRequest, postResponseActions);
 
 const makeNativeIpcDispatcher = () => {
 	const initialConfig: import("../../../src/lib/domain/daemon/Services/daemon-config-ref.js").DaemonRuntimeConfig =
@@ -112,9 +88,32 @@ const makeNativeIpcDispatcher = () => {
 			hostExplicit: false,
 			persistedSessionCounts: new Map<string, number>(),
 		};
-	const nativeLayer = Layer.mergeAll(
+	const nativeDeps = Layer.mergeAll(
 		makeDaemonStateLive(),
 		Layer.effect(DaemonConfigRefTag, Ref.make(initialConfig)),
+		Layer.succeed(DaemonHandleTag, {
+			port: Effect.succeed(2633),
+			onboardingPort: Effect.succeed(null),
+			addProject: (directory: string) =>
+				Effect.succeed({
+					slug: "project",
+					directory,
+					title: "Project",
+				}),
+			discoverProjects: () => Effect.succeed(0),
+			removeProject: () => Effect.void,
+			getStatus: () => Effect.succeed(makeStatus()),
+			getProjects: () => Effect.succeed([]),
+			getInstances: () => Effect.succeed([]),
+		}),
+		DaemonEventBusLive,
+		makeProjectRegistryLive(),
+		makeInstanceManagerStateLive(),
+		Layer.succeed(RelayCacheTag, {
+			get: () => Effect.fail(new Error("Relay cache not expected in test")),
+			peek: () => Effect.succeed(Option.none()),
+			invalidate: () => Effect.void,
+		}),
 		Layer.effect(
 			KeepAwakeTag,
 			Effect.gen(function* () {
@@ -133,11 +132,13 @@ const makeNativeIpcDispatcher = () => {
 		}),
 		Layer.effect(ShutdownSignalTag, Deferred.make<void>()),
 	);
-	const runtime = ManagedRuntime.make(nativeLayer);
+	const runtime = ManagedRuntime.make(
+		Layer.provideMerge(IpcHandlersLayer, nativeDeps),
+	);
 	return {
-		dispatch: ((request, rpcLayer) =>
+		dispatch: ((request) =>
 			runtime.runPromise(
-				dispatchTaggedRequestEffect(request, rpcLayer),
+				dispatchTaggedRequestEffect(request),
 			)) satisfies TaggedIpcDispatcher,
 		readConfig: () =>
 			runtime.runPromise(
@@ -163,21 +164,6 @@ const makeStatus = (overrides: Partial<DaemonStatus> = {}): DaemonStatus => ({
 	keepAwake: false,
 	projects: [],
 	...overrides,
-});
-
-const makeInstance = (
-	id: string,
-	config: InstanceConfig,
-): OpenCodeInstance => ({
-	id,
-	name: config.name,
-	port: config.port,
-	managed: config.managed,
-	...(config.env !== undefined ? { env: config.env } : {}),
-	...(config.url !== undefined ? { url: config.url } : {}),
-	status: "stopped",
-	restartCount: 0,
-	createdAt: Date.now(),
 });
 
 const sendJsonLine = (
@@ -210,60 +196,20 @@ describe("daemon IPC lifecycle RPC transition", () => {
 	it("routes _tag IPC through daemon RPC handlers instead of parseCommand", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-		const projects: StoredProject[] = [];
-		const instances = new Map<string, OpenCodeInstance>();
-
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => {
-				const project = {
+		const dispatchTaggedRequest = vi.fn(
+			async (request: IpcTaggedRequest): Promise<IPCResponse> => {
+				expect(request._tag).toBe("AddProject");
+				return {
+					ok: true,
 					slug: "rpc-project",
-					directory,
-					title: "RPC Project",
+					directory:
+						request._tag === "AddProject" ? request.directory : "unexpected",
 				};
-				projects.push(project);
-				return project;
 			},
-			removeProject: async (slug) => {
-				const index = projects.findIndex((project) => project.slug === slug);
-				if (index >= 0) projects.splice(index, 1);
-			},
-			getProjects: () => projects,
-			setProjectTitle: (slug, title) => {
-				const project = projects.find((entry) => entry.slug === slug);
-				if (project) {
-					projects.splice(projects.indexOf(project), 1, {
-						...project,
-						title,
-					});
-				}
-			},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => Array.from(instances.values()),
-			getInstance: (id) => instances.get(id),
-			addInstance: (id, config) => {
-				const instance = makeInstance(id, config);
-				instances.set(id, instance);
-				return instance;
-			},
-			removeInstance: (id) => {
-				instances.delete(id);
-			},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) => {
-				const current =
-					instances.get(id) ??
-					makeInstance(id, { name: id, port: 0, managed: true });
-				const updated = { ...current, ...updates };
-				instances.set(id, updated);
-				return updated;
-			},
-		};
+		);
 
 		try {
-			await startTestIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
 
 			expect(
 				parseCommand('{"_tag":"AddProject","directory":"/tmp/rpc"}'),
@@ -279,7 +225,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 				slug: "rpc-project",
 				directory: "/tmp/rpc",
 			});
-			expect(projects).toHaveLength(1);
+			expect(dispatchTaggedRequest).toHaveBeenCalledTimes(1);
 		} finally {
 			await closeIPCServer(ctx);
 			await rm(tmp, { recursive: true, force: true });
@@ -289,37 +235,27 @@ describe("daemon IPC lifecycle RPC transition", () => {
 	it("routes tagged SetModel through the project override port", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-		const setProjectModel = vi.fn(async () => {});
-
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel,
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
+		const setProjectModelCalls: Array<
+			[string, { readonly providerID: string; readonly modelID: string }]
+		> = [];
+		const dispatchTaggedRequest = async (
+			request: IpcTaggedRequest,
+		): Promise<IPCResponse> => {
+			if (request._tag !== "SetModel") {
+				return { ok: false, error: `Unexpected request: ${request._tag}` };
+			}
+			setProjectModelCalls.push([
+				request.slug,
+				{
+					providerID: request.provider,
+					modelID: request.model,
+				},
+			]);
+			return { ok: true };
 		};
 
 		try {
-			await startTestIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "SetModel",
 				slug: "project-a",
@@ -328,10 +264,15 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			});
 
 			expect(response).toEqual({ ok: true });
-			expect(setProjectModel).toHaveBeenCalledWith("project-a", {
-				providerID: "anthropic",
-				modelID: "claude-opus-4-1",
-			});
+			expect(setProjectModelCalls).toEqual([
+				[
+					"project-a",
+					{
+						providerID: "anthropic",
+						modelID: "claude-opus-4-1",
+					},
+				],
+			]);
 		} finally {
 			await closeIPCServer(ctx);
 			await rm(tmp, { recursive: true, force: true });
@@ -343,42 +284,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		const native = makeNativeIpcDispatcher();
 
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
-		};
-
 		try {
-			await startIPCServer(
-				ctx,
-				{
-					...ipcContext,
-					getStatus: ipcContext.getStatus ?? makeStatus,
-				},
-				native.dispatch,
-			);
+			await startTestIPCServer(ctx, native.dispatch);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "SetKeepAwake",
 				enabled: true,
@@ -401,42 +308,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		const native = makeNativeIpcDispatcher();
 
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
-		};
-
 		try {
-			await startIPCServer(
-				ctx,
-				{
-					...ipcContext,
-					getStatus: ipcContext.getStatus ?? makeStatus,
-				},
-				native.dispatch,
-			);
+			await startTestIPCServer(ctx, native.dispatch);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "SetPin",
 				pin: "1234",
@@ -459,43 +332,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const native = makeNativeIpcDispatcher();
 		const scheduleShutdown = vi.fn();
 
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
-		};
-
 		try {
-			await startIPCServer(
-				ctx,
-				{
-					...ipcContext,
-					getStatus: ipcContext.getStatus ?? makeStatus,
-				},
-				native.dispatch,
-				{ scheduleShutdown },
-			);
+			await startTestIPCServer(ctx, native.dispatch, { scheduleShutdown });
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "Shutdown",
 			});
@@ -514,38 +352,20 @@ describe("daemon IPC lifecycle RPC transition", () => {
 	it("routes legacy set_agent through the project override port", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-		const setProjectAgent = vi.fn(async () => {});
+		const setProjectAgentCalls: Array<[string, string]> = [];
 		warnSpy.mockClear();
-
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent,
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
+		const dispatchTaggedRequest = async (
+			request: IpcTaggedRequest,
+		): Promise<IPCResponse> => {
+			if (request._tag !== "SetAgent") {
+				return { ok: false, error: `Unexpected request: ${request._tag}` };
+			}
+			setProjectAgentCalls.push([request.slug, request.agent]);
+			return { ok: true };
 		};
 
 		try {
-			await startTestIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
 				cmd: "set_agent",
 				slug: "project-a",
@@ -553,7 +373,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 			});
 
 			expect(response).toEqual({ ok: true });
-			expect(setProjectAgent).toHaveBeenCalledWith("project-a", "plan");
+			expect(setProjectAgentCalls).toEqual([["project-a", "plan"]]);
 			expect(warnSpy).toHaveBeenCalledWith(
 				"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
 			);
@@ -567,36 +387,21 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		warnSpy.mockClear();
-
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
+		const dispatchTaggedRequest = async (
+			request: IpcTaggedRequest,
+		): Promise<IPCResponse> => {
+			if (request._tag !== "AddProject") {
+				return { ok: false, error: `Unexpected request: ${request._tag}` };
+			}
+			return {
+				ok: true,
 				slug: "legacy-project",
-				directory,
-				title: "Legacy Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
+				directory: request.directory,
+			};
 		};
 
 		try {
-			await startTestIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
 				cmd: "add_project",
 				directory: "/tmp/legacy",
@@ -622,43 +427,8 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		const native = makeNativeIpcDispatcher();
 		const scheduleShutdown = vi.fn();
 
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
-		};
-
 		try {
-			await startIPCServer(
-				ctx,
-				{
-					...ipcContext,
-					getStatus: ipcContext.getStatus ?? makeStatus,
-				},
-				native.dispatch,
-				{ scheduleShutdown },
-			);
+			await startTestIPCServer(ctx, native.dispatch, { scheduleShutdown });
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "RestartWithConfig",
 				config: { tls: true, port: 2634 },
@@ -680,52 +450,44 @@ describe("daemon IPC lifecycle RPC transition", () => {
 	it("returns full GetStatus data through daemon RPC dispatch", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance: (id, config) => makeInstance(id, config),
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
+		const dispatchTaggedRequest = async (
+			request: IpcTaggedRequest,
+		): Promise<IPCResponse> => {
+			if (request._tag !== "GetStatus") {
+				return { ok: false, error: `Unexpected request: ${request._tag}` };
+			}
+			const status = makeStatus({
+				tlsEnabled: true,
+				pinEnabled: true,
+				keepAwake: true,
+				sessionCount: 4,
+				projects: [
+					{
+						slug: "project",
+						directory: "/tmp/project",
+						title: "Project",
+						status: "ready",
+						lastUsed: 123,
+					},
+				],
+			});
+			return {
+				ok: status.ok,
+				uptime: status.uptime,
+				port: status.port,
+				host: status.host,
+				projectCount: status.projectCount,
+				sessionCount: status.sessionCount,
+				clientCount: status.clientCount,
+				pinEnabled: status.pinEnabled,
+				tlsEnabled: status.tlsEnabled,
+				keepAwake: status.keepAwake,
+				projects: status.projects,
+			};
 		};
 
 		try {
-			await startTestIPCServer(ctx, ipcContext, () =>
-				makeStatus({
-					tlsEnabled: true,
-					pinEnabled: true,
-					keepAwake: true,
-					sessionCount: 4,
-					projects: [
-						{
-							slug: "project",
-							directory: "/tmp/project",
-							title: "Project",
-							status: "ready",
-							lastUsed: 123,
-						},
-					],
-				}),
-			);
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "GetStatus",
 			});
@@ -752,39 +514,12 @@ describe("daemon IPC lifecycle RPC transition", () => {
 	it("rejects invalid _tag InstanceAdd before handler dispatch", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-		const addInstance = vi.fn((id: string, config: InstanceConfig) =>
-			makeInstance(id, config),
+		const dispatchTaggedRequest = vi.fn(
+			async (): Promise<IPCResponse> => ({ ok: true }),
 		);
 
-		const ipcContext: TestDaemonIPCContext = {
-			addProject: async (directory) => ({
-				slug: "project",
-				directory,
-				title: "Project",
-			}),
-			removeProject: async () => {},
-			getProjects: () => [],
-			setProjectTitle: () => {},
-			persistConfig: () => {},
-			setProjectAgent: async () => {},
-			setProjectModel: async () => {},
-			getInstances: () => [],
-			getInstance: () => undefined,
-			addInstance,
-			removeInstance: () => {},
-			startInstance: async () => {},
-			stopInstance: () => {},
-			updateInstance: (id, updates) =>
-				makeInstance(id, {
-					name: updates.name ?? id,
-					port: updates.port ?? 0,
-					managed: true,
-					...(updates.env !== undefined ? { env: updates.env } : {}),
-				}),
-		};
-
 		try {
-			await startTestIPCServer(ctx, ipcContext, makeStatus);
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "InstanceAdd",
 				name: "Managed Missing Port",
@@ -793,7 +528,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 
 			expect(response["ok"]).toBe(false);
 			expect(String(response["error"])).toContain("InstanceAdd requires");
-			expect(addInstance).not.toHaveBeenCalled();
+			expect(dispatchTaggedRequest).not.toHaveBeenCalled();
 		} finally {
 			await closeIPCServer(ctx);
 			await rm(tmp, { recursive: true, force: true });
