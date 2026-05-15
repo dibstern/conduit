@@ -123,6 +123,13 @@ export class ClaudePermissionBridge {
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
 	): Promise<PermissionResult> {
+		if (toolName === "AskUserQuestion") {
+			return {
+				behavior: "allow",
+				updatedInput: toolInput ?? {},
+			};
+		}
+
 		const requestId = randomUUID();
 		const createdAt = new Date().toISOString();
 		const sink = ctx.eventSink ?? this.deps.sink;

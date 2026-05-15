@@ -160,6 +160,40 @@ describe("ClaudePermissionBridge", () => {
 		expect(ctx.pendingApprovals.size).toBe(0);
 	});
 
+	it("allows AskUserQuestion without emitting a permission request", async () => {
+		const ac = new AbortController();
+		const result = await bridge.canUseTool(
+			ctx,
+			"AskUserQuestion",
+			{
+				questions: [
+					{
+						header: "Explore what?",
+						question: "What should the subagents explore?",
+					},
+				],
+			},
+			{
+				signal: ac.signal,
+				toolUseID: "tool-question",
+			},
+		);
+
+		expect(result).toMatchObject({
+			behavior: "allow",
+			updatedInput: {
+				questions: [
+					{
+						header: "Explore what?",
+						question: "What should the subagents explore?",
+					},
+				],
+			},
+		});
+		expect(sink.requestPermission).not.toHaveBeenCalled();
+		expect(ctx.pendingApprovals.size).toBe(0);
+	});
+
 	it("returns deny when user rejects", async () => {
 		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
 			permissionResponseEffect({ decision: "reject" }),
