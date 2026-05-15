@@ -14,14 +14,12 @@
 	function toggleVerbose() {
 		const newValue = !wsDebugState.verboseMessages;
 		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
 		wsDebugState.verboseMessages = newValue;
+		if (!projectSlug) return;
 		void setLogLevelRpc({
 			projectSlug,
 			level: newValue ? "verbose" : "info",
-		}).catch(() => {
-			wsDebugState.verboseMessages = !newValue;
-		});
+		}).catch(() => {});
 	}
 
 	async function handleClear() {
@@ -379,7 +377,11 @@
 			ontouchstart={handleDragStart}
 		>
 			<span class="text-green-500 font-semibold text-xs">WS Debug</span>
-		<div class="flex items-center gap-3">
+		<div
+			class="flex items-center gap-3"
+			onmousedown={(e) => e.stopPropagation()}
+			ontouchstart={(e) => e.stopPropagation()}
+		>
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={toggleVerbose}

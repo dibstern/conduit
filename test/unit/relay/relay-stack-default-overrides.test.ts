@@ -179,6 +179,27 @@ describe("createProjectRelay override-state defaults", () => {
 		expect(defaultAgent).toBe("plan");
 	});
 
+	it("starts when OpenCode is unavailable so non-OpenCode providers can load", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-relay-no-opencode-"));
+		relayServer = createServer();
+		await new Promise<void>((resolve) =>
+			relayServer?.listen(0, "127.0.0.1", resolve),
+		);
+
+		relay = await createProjectRelay({
+			httpServer: relayServer,
+			opencodeUrl: "http://127.0.0.1:9",
+			projectDir: process.cwd(),
+			slug: "test-no-opencode-startup",
+			configDir,
+			log: createSilentLogger(),
+			statusPollerInterval: 60_000,
+			messagePollerInterval: 60_000,
+		});
+
+		expect(relay.wsHandler).toBeDefined();
+	});
+
 	it("rejects relay creation cancellation with a tagged error", async () => {
 		relayServer = createServer();
 		const controller = new AbortController();

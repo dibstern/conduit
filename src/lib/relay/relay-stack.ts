@@ -93,6 +93,7 @@ import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
 } from "../persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	getOrchestrationLayer,
 	makeOrchestrationRuntimeLayer,
@@ -802,10 +803,28 @@ export async function createProjectRelay(
 				});
 				const statusSnapshot = yield* RelayStatusSnapshotTag;
 				const sseStream = yield* SSEStreamTag;
-				yield* Effect.tryPromise(() => api.app.path());
-				yield* Effect.sync(() =>
-					log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
+				const opencodePathCheck = yield* Effect.either(
+					Effect.tryPromise({
+						try: () => api.app.path(),
+						catch: (cause) => cause,
+					}),
 				);
+				const opencodeAvailable = opencodePathCheck._tag === "Right";
+				if (opencodeAvailable) {
+					yield* Effect.sync(() =>
+						log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
+					);
+				} else {
+					yield* Effect.sync(() =>
+						log.warn(
+							`OpenCode is unavailable at ${config.opencodeUrl}: ${
+								opencodePathCheck.left instanceof Error
+									? opencodePathCheck.left.message
+									: String(opencodePathCheck.left)
+							}; continuing so other providers can load`,
+						),
+					);
+				}
 
 				let defaultModel = initialDefaultModel;
 				if (!defaultModel) {
@@ -845,9 +864,38 @@ export async function createProjectRelay(
 				}
 
 				const sessionManagerService = yield* SessionManagerServiceTag;
-				const sessionId = yield* sessionManagerService.initialize(
-					config.sessionTitle,
-				);
+				const sessionId = opencodeAvailable
+					? yield* sessionManagerService.initialize(config.sessionTitle)
+					: yield* Effect.gen(function* () {
+							const readQueryEffectOption =
+								yield* Effect.serviceOption(ReadQueryEffectTag);
+							if (readQueryEffectOption._tag === "None") {
+								return "";
+							}
+							const sessionsResult = yield* Effect.either(
+								readQueryEffectOption.value.listSessions(),
+							);
+							if (
+								sessionsResult._tag === "Right" &&
+								sessionsResult.right.length > 0
+							) {
+								yield* statusSnapshot.setSessionCount(
+									sessionsResult.right.length,
+								);
+								const topLevel = sessionsResult.right.find(
+									(session) => !session.parent_id,
+								);
+								return (topLevel ?? sessionsResult.right[0])?.id ?? "";
+							}
+							if (sessionsResult._tag === "Left") {
+								yield* Effect.sync(() =>
+									log.warn(
+										`Session list unavailable while OpenCode is down: ${formatErrorDetail(sessionsResult.left)}`,
+									),
+								);
+							}
+							return "";
+						});
 				const orchestration = yield* getOrchestrationLayer;
 				yield* PollerStateTag;
 				yield* PollerPubSubTag;
@@ -885,63 +933,65 @@ export async function createProjectRelay(
 						}),
 					},
 				});
-				const monitoring = yield* wireMonitoringEffect({
-					client: api,
-					wsHandler,
-					pollerManager,
-					sseStream,
-					config: {
-						...(config.pollerGatingConfig != null && {
-							pollerGatingConfig: config.pollerGatingConfig,
-						}),
-						...(config.pushManager != null && {
-							pushManager: config.pushManager,
-						}),
-						slug: config.slug,
-					},
-					statusLog,
-					sseLog,
-					pipelineLog,
-					state: monitoringStateAccess,
-				});
-				yield* Effect.sync(() => {
-					stopMonitoring = monitoring.stopMonitoring;
-				});
-				yield* wirePollersEffect({
-					pollerManager,
-					sseStream,
-					wsHandler,
-					pipelineDeps: monitoring.pipelineDeps,
-					sseTracker: monitoringStateAccess.sseTracker,
-					config: {
-						...(config.pushManager != null && {
-							pushManager: config.pushManager,
-						}),
-						slug: config.slug,
-					},
-					pollerLog,
-					onDoneProcessed: monitoring.recordDoneDelivered,
-				});
-				yield* wireSSEConsumerEffect(
-					{
-						translator,
+				if (opencodeAvailable) {
+					const monitoring = yield* wireMonitoringEffect({
+						client: api,
 						wsHandler,
-						...(config.pushManager != null && {
-							pushManager: config.pushManager,
-						}),
-						log: sseLog,
+						pollerManager,
+						sseStream,
+						config: {
+							...(config.pollerGatingConfig != null && {
+								pollerGatingConfig: config.pollerGatingConfig,
+							}),
+							...(config.pushManager != null && {
+								pushManager: config.pushManager,
+							}),
+							slug: config.slug,
+						},
+						statusLog,
+						sseLog,
 						pipelineLog,
-						getSessionStatuses: () => statusPoller.getCurrentStatuses(),
-						listPendingQuestions: () => api.question.list(),
-						listPendingPermissions: () => api.permission.list(),
-						statusPoller,
-						slug: config.slug,
+						state: monitoringStateAccess,
+					});
+					yield* Effect.sync(() => {
+						stopMonitoring = monitoring.stopMonitoring;
+					});
+					yield* wirePollersEffect({
+						pollerManager,
+						sseStream,
+						wsHandler,
+						pipelineDeps: monitoring.pipelineDeps,
+						sseTracker: monitoringStateAccess.sseTracker,
+						config: {
+							...(config.pushManager != null && {
+								pushManager: config.pushManager,
+							}),
+							slug: config.slug,
+						},
+						pollerLog,
 						onDoneProcessed: monitoring.recordDoneDelivered,
-						...(dualWriteHook != null && { dualWriteHook }),
-					},
-					sseStream,
-				);
-				yield* sseStream.connectEffect();
+					});
+					yield* wireSSEConsumerEffect(
+						{
+							translator,
+							wsHandler,
+							...(config.pushManager != null && {
+								pushManager: config.pushManager,
+							}),
+							log: sseLog,
+							pipelineLog,
+							getSessionStatuses: () => statusPoller.getCurrentStatuses(),
+							listPendingQuestions: () => api.question.list(),
+							listPendingPermissions: () => api.permission.list(),
+							statusPoller,
+							slug: config.slug,
+							onDoneProcessed: monitoring.recordDoneDelivered,
+							...(dualWriteHook != null && { dualWriteHook }),
+						},
+						sseStream,
+					);
+					yield* sseStream.connectEffect();
+				}
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
 				return {
