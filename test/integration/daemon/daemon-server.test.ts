@@ -316,7 +316,7 @@ describe("instance status broadcast", () => {
 		}
 		expect(noAuthRes.status).toBe(401);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl,
 		});

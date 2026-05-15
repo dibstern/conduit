@@ -28,6 +28,9 @@ async function closeServer(server: Server): Promise<void> {
 	});
 }
 
+const expectedBasicAuth = (username: string, password: string) =>
+	`Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+
 describe("startForegroundDaemon", () => {
 	it("starts an Effect-backed foreground handle with isolated config", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-"));
@@ -114,6 +117,74 @@ describe("startForegroundDaemon", () => {
 		} finally {
 			await daemon.stop();
 			await closeServer(healthServer);
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("authenticates default instance health checks with OpenCode credentials", async () => {
+		const previousPassword = process.env["OPENCODE_SERVER_PASSWORD"];
+		const previousUsername = process.env["OPENCODE_SERVER_USERNAME"];
+		process.env["OPENCODE_SERVER_PASSWORD"] = "health-secret";
+		process.env["OPENCODE_SERVER_USERNAME"] = "opencode";
+
+		const healthServer = createServer((req, res) => {
+			if (
+				req.headers.authorization !==
+				expectedBasicAuth("opencode", "health-secret")
+			) {
+				res.writeHead(401);
+				res.end("unauthorized");
+				return;
+			}
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ ok: true }));
+		});
+		const opencodePort = await listen(healthServer);
+		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-auth-health-"));
+		const configDir = join(root, "config");
+		const staticDir = join(root, "static");
+		mkdirSync(staticDir);
+		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>", {
+			flag: "w",
+		});
+
+		const daemon = await startForegroundDaemon({
+			port: 0,
+			configDir,
+			socketPath: join(root, "relay.sock"),
+			pidPath: join(root, "daemon.pid"),
+			staticDir,
+			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
+			tlsEnabled: false,
+			smartDefault: false,
+			logLevel: "error",
+			logFormat: "json",
+		});
+
+		try {
+			await vi.waitFor(() => {
+				expect(daemon.getInstances()).toEqual([
+					expect.objectContaining({
+						id: "default",
+						managed: false,
+						port: opencodePort,
+						status: "healthy",
+					}),
+				]);
+			});
+		} finally {
+			await daemon.stop();
+			await closeServer(healthServer);
+			if (previousPassword === undefined) {
+				delete process.env["OPENCODE_SERVER_PASSWORD"];
+			} else {
+				process.env["OPENCODE_SERVER_PASSWORD"] = previousPassword;
+			}
+			if (previousUsername === undefined) {
+				delete process.env["OPENCODE_SERVER_USERNAME"];
+			} else {
+				process.env["OPENCODE_SERVER_USERNAME"] = previousUsername;
+			}
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

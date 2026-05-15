@@ -44,6 +44,10 @@ import {
 } from "./daemon-pubsub.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
 import {
+	InstanceHealthCheckLiveService,
+	InstanceHealthCheckTag,
+} from "./instance-health-service.js";
+import {
 	defaultInstanceForUrl,
 	type OpenCodeUnavailableError,
 	resolveSmartDefaultInstances,
@@ -460,6 +464,13 @@ export const startHealthPoller = (instanceId: string) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
 		const fibers = yield* PollerFibersTag;
+		const healthCheckOption = yield* Effect.serviceOption(
+			InstanceHealthCheckTag,
+		);
+		const healthCheck = Option.getOrElse(
+			healthCheckOption,
+			() => InstanceHealthCheckLiveService,
+		);
 		const { config } = yield* Ref.get(stateRef);
 
 		const pollOnce = Effect.gen(function* () {
@@ -477,10 +488,14 @@ export const startHealthPoller = (instanceId: string) =>
 				return;
 			}
 
-			// Raw HTTP health check
-			const isHealthy = yield* Effect.tryPromise(() =>
-				fetch(`http://localhost:${instance.port}/health`).then((r) => r.ok),
-			).pipe(Effect.catchAll(() => Effect.succeed(false)));
+			const externalUrl = HashMap.get(state.externalUrls, instanceId);
+			const instanceUrl = Option.isSome(externalUrl)
+				? externalUrl.value
+				: `http://localhost:${instance.port}`;
+			const isHealthy = yield* healthCheck.check({
+				instance,
+				url: instanceUrl,
+			});
 
 			const newStatus = isHealthy
 				? ("healthy" as const)

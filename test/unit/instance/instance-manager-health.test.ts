@@ -20,6 +20,7 @@ import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import {
 	type AddInstanceInput,
 	addInstance,
@@ -47,6 +48,7 @@ const testLayer = Layer.mergeAll(
 	makeInstanceManagerStateLive(testConfig),
 	DaemonEventBusLive,
 	ConfigPersistenceNoopLive,
+	InstanceHealthCheckLive,
 );
 
 const mkInstance = (

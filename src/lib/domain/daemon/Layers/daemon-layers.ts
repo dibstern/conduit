@@ -80,6 +80,7 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	getInstances as getEffectInstances,
 	getInstanceUrl,
@@ -766,6 +767,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			? DaemonConfigMirrorLive(options.configMirror)
 			: Layer.empty,
 		DaemonLifecycleContextLive(socketPath),
+		InstanceHealthCheckLive,
 		SignalHandlerLayer,
 		ProcessErrorHandlerLayer,
 		makePidFileLive(configDir, pidPath, socketPath),
