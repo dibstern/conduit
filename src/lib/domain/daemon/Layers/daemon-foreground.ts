@@ -148,6 +148,7 @@ export async function startForegroundDaemon(
 	let projects: ReadonlyArray<Readonly<StoredProject>> = [];
 	let instances: ReadonlyArray<Readonly<OpenCodeInstance>> = [];
 	let stopped = false;
+	let refreshInFlight: Promise<void> | null = null;
 
 	const requireRuntime = () => {
 		if (runtime == null || handle == null || stopped) {
@@ -171,6 +172,24 @@ export async function startForegroundDaemon(
 		onboardingPort = snapshot.onboardingPort;
 		projects = snapshot.projects;
 		instances = snapshot.instances;
+	};
+
+	const requestSnapshotRefresh = () => {
+		if (
+			refreshInFlight != null ||
+			stopped ||
+			runtime == null ||
+			handle == null
+		) {
+			return;
+		}
+		refreshInFlight = refreshSnapshots()
+			.catch(() => {
+				// Foreground sync getters return the latest successful snapshot.
+			})
+			.finally(() => {
+				refreshInFlight = null;
+			});
 	};
 
 	const runHandleEffect = async <A, E>(
@@ -265,9 +284,18 @@ export async function startForegroundDaemon(
 			runHandleEffect((h) => h.addProject(directory, slug, instanceId)),
 		discoverProjects: () =>
 			runHandleEffect((h) => h.discoverProjects()).then(() => undefined),
-		getStatus: () => status,
-		getProjects: () => projects,
-		getInstances: () => instances,
+		getStatus: () => {
+			requestSnapshotRefresh();
+			return status;
+		},
+		getProjects: () => {
+			requestSnapshotRefresh();
+			return projects;
+		},
+		getInstances: () => {
+			requestSnapshotRefresh();
+			return instances;
+		},
 		removeProject: (slug) => runHandleEffect((h) => h.removeProject(slug)),
 		stop,
 	};

@@ -1,10 +1,32 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { sendIPCCommand } from "../../../src/bin/cli-utils.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import type { OpenCodeInstance } from "../../../src/lib/types.js";
+
+async function listen(server: Server): Promise<number> {
+	return new Promise((resolve) => {
+		server.listen(0, "127.0.0.1", () => {
+			const address = server.address();
+			if (typeof address !== "object" || address == null) {
+				throw new Error("Expected TCP server address");
+			}
+			resolve(address.port);
+		});
+	});
+}
+
+async function closeServer(server: Server): Promise<void> {
+	return new Promise((resolve, reject) => {
+		server.close((error) => {
+			if (error) reject(error);
+			else resolve();
+		});
+	});
+}
 
 describe("startForegroundDaemon", () => {
 	it("starts an Effect-backed foreground handle with isolated config", async () => {
@@ -47,6 +69,51 @@ describe("startForegroundDaemon", () => {
 			]);
 		} finally {
 			await daemon.stop();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("starts health polling for an opencodeUrl default instance", async () => {
+		const healthServer = createServer((_req, res) => {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ ok: true }));
+		});
+		const opencodePort = await listen(healthServer);
+		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-health-"));
+		const configDir = join(root, "config");
+		const staticDir = join(root, "static");
+		mkdirSync(staticDir);
+		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>", {
+			flag: "w",
+		});
+
+		const daemon = await startForegroundDaemon({
+			port: 0,
+			configDir,
+			socketPath: join(root, "relay.sock"),
+			pidPath: join(root, "daemon.pid"),
+			staticDir,
+			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
+			tlsEnabled: false,
+			smartDefault: false,
+			logLevel: "error",
+			logFormat: "json",
+		});
+
+		try {
+			await vi.waitFor(() => {
+				expect(daemon.getInstances()).toEqual([
+					expect.objectContaining({
+						id: "default",
+						managed: false,
+						port: opencodePort,
+						status: "healthy",
+					}),
+				]);
+			});
+		} finally {
+			await daemon.stop();
+			await closeServer(healthServer);
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

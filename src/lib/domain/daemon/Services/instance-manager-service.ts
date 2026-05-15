@@ -379,6 +379,20 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 	return configs;
 }).pipe(Effect.withSpan("instance.getPersistedConfigs"));
 
+export const startInitialUnmanagedInstanceHealthPollers = Effect.gen(
+	function* () {
+		const ref = yield* InstanceManagerStateTag;
+		const state = yield* Ref.get(ref);
+
+		yield* Effect.forEach(
+			HashMap.values(state.instances),
+			(instance) =>
+				instance.managed ? Effect.void : startHealthPoller(instance.id),
+			{ concurrency: 1, discard: true },
+		);
+	},
+).pipe(Effect.withSpan("instance.startInitialUnmanagedHealthPollers"));
+
 // ─── Health Polling ──────────────────────────────────────────────────────
 
 /**

@@ -85,6 +85,12 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 
 Detailed completed-slice notes moved to `docs/plans/2026-05-14-effect-ts-mainline-live-progress-archive.md`. Keep only live state and the last few current updates here.
 
+2026-05-15, foreground instance-health parity:
+
+- Started health pollers for unmanaged instances seeded into the Effect instance state at daemon Layer startup.
+- Changed foreground sync getters to request a background snapshot refresh so async daemon state changes become visible without the legacy bridge.
+- Added foreground coverage proving an `opencodeUrl` default instance reaches `healthy` through the Effect-owned graph.
+
 2026-05-15, daemon lifecycle integration foreground parity:
 
 - Moved `test/integration/flows/daemon-lifecycle.integration.ts` from the legacy daemon bridge to `startForegroundDaemon`.

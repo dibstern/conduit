@@ -86,6 +86,8 @@ import {
 	InstanceManagerStateTag,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
+	type PollerFibersTag,
+	startInitialUnmanagedInstanceHealthPollers,
 } from "../Services/instance-manager-service.js";
 import {
 	IpcHandlersLayer,
@@ -292,6 +294,12 @@ export const DaemonWiringLive: Layer.Layer<
 		);
 	}),
 );
+
+const InstanceHealthPollingLive: Layer.Layer<
+	never,
+	never,
+	DaemonEventBusTag | InstanceManagerStateTag | PollerFibersTag
+> = Layer.scopedDiscard(startInitialUnmanagedInstanceHealthPollers);
 
 // ─── DaemonState & RelayCache Layers ──────────────────────────────────────
 
@@ -907,6 +915,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		WebSocketRoutingLive,
 		ProjectDiscoveryLive,
 		SessionPrefetchLive,
+		InstanceHealthPollingLive,
 	).pipe(Layer.provideMerge(withWsRelayRouter));
 
 	return scopedFibers;
