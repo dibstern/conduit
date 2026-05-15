@@ -9,6 +9,7 @@ import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/clau
 import type {
 	Query,
 	SDKMessage,
+	SDKPartialAssistantMessage,
 	SDKUserMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import {
@@ -240,6 +241,153 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 		expect(turn2Result.status).toBe("completed");
 		expect(turn2Result.cost).toBe(0.1);
+	});
+
+	it("routes translated events from a second turn to the second turn sink", async () => {
+		const result1 = makeSuccessResult({ session_id: "sdk-session-1" } as Record<
+			string,
+			unknown
+		>);
+		const result2 = makeSuccessResult({
+			session_id: "sdk-session-1",
+			total_cost_usd: 0.1,
+		} as Record<string, unknown>);
+		const turn2MessageStart: SDKPartialAssistantMessage = {
+			type: "stream_event",
+			event: {
+				type: "message_start",
+				message: {
+					id: "msg-turn-2",
+					type: "message",
+					role: "assistant",
+					content: [],
+					container: null,
+					context_management: null,
+					model: "claude-sonnet-4-5",
+					stop_reason: null,
+					stop_sequence: null,
+					usage: {
+						cache_creation: null,
+						cache_creation_input_tokens: null,
+						cache_read_input_tokens: null,
+						inference_geo: null,
+						input_tokens: 0,
+						iterations: null,
+						output_tokens: 0,
+						server_tool_use: null,
+						service_tier: null,
+						speed: null,
+					},
+				},
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000101",
+			session_id: "sdk-session-1",
+		};
+		const turn2TextStart: SDKPartialAssistantMessage = {
+			type: "stream_event",
+			event: {
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "", citations: null },
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000102",
+			session_id: "sdk-session-1",
+		};
+		const turn2TextDelta: SDKPartialAssistantMessage = {
+			type: "stream_event",
+			event: {
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "second turn text" },
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000103",
+			session_id: "sdk-session-1",
+		};
+
+		let releaseTurn2: (() => void) | undefined;
+		const turn2Ready = new Promise<void>((resolve) => {
+			releaseTurn2 = resolve;
+		});
+		const gen = (async function* () {
+			yield result1 as unknown as SDKMessage;
+			await turn2Ready;
+			yield turn2MessageStart;
+			yield turn2TextStart;
+			yield turn2TextDelta;
+			yield result2 as unknown as SDKMessage;
+		})();
+		const mockQuery = Object.assign(gen, {
+			interrupt: vi.fn(async () => {}),
+			close: vi.fn(),
+			setModel: vi.fn(async () => {}),
+			setPermissionMode: vi.fn(async () => {}),
+			streamInput: vi.fn(async () => {}),
+			setMaxThinkingTokens: vi.fn(async () => {}),
+			applyFlagSettings: vi.fn(async () => {}),
+			initializationResult: vi.fn(async () => ({})),
+			supportedCommands: vi.fn(async () => []),
+			supportedModels: vi.fn(async () => []),
+			supportedAgents: vi.fn(async () => []),
+			mcpServerStatus: vi.fn(async () => []),
+			getContextUsage: vi.fn(async () => ({})),
+			reloadPlugins: vi.fn(async () => ({})),
+			accountInfo: vi.fn(async () => ({})),
+			rewindFiles: vi.fn(async () => ({ canRewind: false })),
+			seedReadState: vi.fn(async () => {}),
+			reconnectMcpServer: vi.fn(async () => {}),
+			toggleMcpServer: vi.fn(async () => {}),
+			setMcpServers: vi.fn(async () => ({})),
+			stopTask: vi.fn(async () => {}),
+			next: gen.next.bind(gen),
+			return: gen.return.bind(gen),
+			throw: gen.throw.bind(gen),
+			[Symbol.asyncIterator]: () => gen,
+		}) as unknown as Query;
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sinkA = createMockEventSink();
+		const sinkB = createMockEventSink();
+		const turn1Result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-multi-sink",
+					turnId: "turn-1",
+					eventSink: sinkA,
+				}),
+			),
+		);
+		expect(turn1Result.status).toBe("completed");
+
+		const turn2Promise = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-multi-sink",
+					turnId: "turn-2",
+					eventSink: sinkB,
+				}),
+			),
+		);
+		releaseTurn2?.();
+		await turn2Promise;
+
+		const sinkATypes = (sinkA.push as ReturnType<typeof vi.fn>).mock.calls.map(
+			([event]) => (event as CanonicalEvent).type,
+		);
+		const sinkBTypes = (sinkB.push as ReturnType<typeof vi.fn>).mock.calls.map(
+			([event]) => (event as CanonicalEvent).type,
+		);
+		expect(sinkBTypes).toContain("message.created");
+		expect(sinkBTypes).toContain("text.delta");
+		expect(sinkATypes).not.toContain("text.delta");
+
+		await Effect.runPromise(instance.shutdownEffect());
 	});
 
 	it("restarts the SDK query when the Claude agent changes between turns", async () => {
