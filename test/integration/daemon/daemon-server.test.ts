@@ -11,7 +11,7 @@
 // - WS upgrade rejection for non-matching URLs
 // - Instance status broadcast and health checking
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,8 +20,6 @@ import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,61 +60,83 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 	});
 
 	it("WS upgrade blocks on registering project, calls handleUpgrade when relay becomes ready", async () => {
-		const d = await startDaemonProcess(daemonOpts(tmpDir));
-		const port = d.port;
-
-		// Add project without relay (simulates no OpenCode instance available)
-		await d.addProject("/home/user/ws-test-app");
-		const slug = "ws-test-app";
-
-		// Project should be registering (no relay yet)
-		expect(d.registry.get(slug)?.status).toBe("registering");
-
 		const { createMockProjectRelay } = await import(
 			"../../helpers/mock-factories.js"
 		);
-
-		// Prepare a mock relay with handleUpgrade that completes the WS handshake
 		const relay = createMockProjectRelay();
 		(relay.wsHandler as unknown as Record<string, unknown>)["handleUpgrade"] =
 			vi.fn();
 
-		// Send a raw HTTP upgrade request — it will block on waitForRelay
-		// while the project is still registering
-		const upgradeReq = http.request({
-			hostname: "127.0.0.1",
-			port,
-			path: `/p/${slug}/ws`,
-			headers: {
-				Connection: "Upgrade",
-				Upgrade: "websocket",
-				"Sec-WebSocket-Version": "13",
-				"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-			},
+		let releaseRelay!: () => void;
+		const relayGate = new Promise<void>((resolve) => {
+			releaseRelay = resolve;
 		});
-		// Suppress socket errors from teardown (ECONNRESET when daemon stops)
-		upgradeReq.on("error", () => {});
-		upgradeReq.end();
-
-		// Give the upgrade request time to reach the daemon handler
-		await new Promise((r) => setTimeout(r, 50));
-
-		// Now start the relay — this should unblock the pending waitForRelay
-		d.registry.startRelay(slug, async () => relay);
-
-		// Wait for relay to become ready
-		await vi.waitFor(() => {
-			expect(d.registry.isReady(slug)).toBe(true);
+		const createProjectRelayMock = vi.fn(async () => {
+			await relayGate;
+			return relay;
 		});
+		vi.doMock("../../../src/lib/relay/relay-stack.js", () => ({
+			createProjectRelay: createProjectRelayMock,
+		}));
 
-		// Wait for the upgrade handler to process
-		await vi.waitFor(() => {
-			expect(relay.wsHandler.handleUpgrade).toHaveBeenCalled();
-		});
+		const slug = "ws-test-app";
+		const projectDir = join(tmpDir, slug);
+		mkdirSync(projectDir, { recursive: true });
+		let d: ForegroundDaemonHandle | null = null;
+		let upgradeReq: http.ClientRequest | null = null;
 
-		// Clean up
-		upgradeReq.destroy();
-		await d.stop();
+		try {
+			d = await startForegroundDaemon({
+				...daemonOpts(tmpDir),
+				opencodeUrl: "http://localhost:4096",
+			});
+			const runningDaemon = d;
+			const port = runningDaemon.port;
+
+			await runningDaemon.addProject(projectDir, slug);
+			expect(
+				runningDaemon
+					.getStatus()
+					.projects.find((project) => project.slug === slug)?.status,
+			).toBe("registering");
+
+			upgradeReq = http.request({
+				hostname: "127.0.0.1",
+				port,
+				path: `/p/${slug}/ws`,
+				headers: {
+					Connection: "Upgrade",
+					Upgrade: "websocket",
+					"Sec-WebSocket-Version": "13",
+					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+				},
+			});
+			upgradeReq.on("error", () => {});
+			upgradeReq.end();
+
+			await vi.waitFor(() => {
+				expect(createProjectRelayMock).toHaveBeenCalled();
+			});
+
+			releaseRelay();
+
+			await vi.waitFor(() => {
+				expect(
+					runningDaemon
+						.getStatus()
+						.projects.find((project) => project.slug === slug)?.status,
+				).toBe("ready");
+			});
+			await vi.waitFor(() => {
+				expect(relay.wsHandler.handleUpgrade).toHaveBeenCalled();
+			});
+
+			upgradeReq.destroy();
+		} finally {
+			upgradeReq?.destroy();
+			await d?.stop();
+			vi.doUnmock("../../../src/lib/relay/relay-stack.js");
+		}
 	});
 
 	it("WS upgrade for non-existent slug destroys socket immediately", async () => {
@@ -250,7 +270,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 
 describe("instance status broadcast", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle | ForegroundDaemonHandle | null = null;
+	let daemon: ForegroundDaemonHandle | null = null;
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir("daemon-broadcast-");
