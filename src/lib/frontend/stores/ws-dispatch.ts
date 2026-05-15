@@ -185,6 +185,13 @@ function isDev(): boolean {
 	return (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
 }
 
+function shouldIgnoreOwnUserMessage(event: {
+	type: string;
+	originId?: string;
+}): boolean {
+	return event.type === "user_message" && isOwnBrowserClientId(event.originId);
+}
+
 /**
  * Route a per-session event to the correct session slot by event.sessionId.
  * Validates sessionId presence and membership in sessionState.sessions.
@@ -271,6 +278,7 @@ function routePerSession(event: PerSessionEvent): void {
 			triggerNotifications(event);
 			break;
 		case "user_message":
+			if (shouldIgnoreOwnUserMessage(event)) break;
 			addUserMessage(activity, messages, event.text, undefined, isProcessing());
 			break;
 		case "tool_content":
@@ -531,7 +539,7 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 
 	switch (event.type) {
 		case "user_message":
-			if (isOwnBrowserClientId(event.originId)) return true;
+			if (shouldIgnoreOwnUserMessage(event)) return true;
 			addUserMessage(activity, messages, event.text, undefined, ctx.isQueued);
 			return true;
 		case "delta":
