@@ -11,6 +11,7 @@ import {
 	canonicalEvent,
 	type MessageRole,
 } from "../../persistence/events.js";
+import { normalizeToolInput } from "./normalize-tool-input.js";
 
 const PROVIDER = "claude" as const;
 
@@ -139,6 +140,12 @@ function sessionMessagesToEvents(
 ): CanonicalEvent[] {
 	const events: CanonicalEvent[] = [];
 	const toolMessageIds = new Map<string, string>();
+	const baseCreatedAt = Date.now();
+	let eventIndex = 0;
+	const eventOptions = () => ({
+		provider: PROVIDER,
+		createdAt: baseCreatedAt + eventIndex++,
+	});
 
 	for (const message of messages) {
 		if (message.type !== "user" && message.type !== "assistant") continue;
@@ -149,7 +156,7 @@ function sessionMessagesToEvents(
 				"message.created",
 				sessionId,
 				{ messageId, role, sessionId },
-				{ provider: PROVIDER },
+				eventOptions(),
 			),
 		);
 
@@ -162,6 +169,7 @@ function sessionMessagesToEvents(
 				block,
 				index,
 				toolMessageIds,
+				eventOptions,
 			});
 		}
 	}
@@ -184,6 +192,7 @@ function appendContentBlockEvents(input: {
 	readonly block: unknown;
 	readonly index: number;
 	readonly toolMessageIds: Map<string, string>;
+	readonly eventOptions: () => { provider: typeof PROVIDER; createdAt: number };
 }): void {
 	if (!isRecord(input.block)) return;
 	const type = input.block["type"];
@@ -198,7 +207,7 @@ function appendContentBlockEvents(input: {
 					partId: `${input.messageId}-${input.index}`,
 					text: input.block["text"],
 				},
-				{ provider: PROVIDER },
+				input.eventOptions(),
 			),
 		);
 		return;
@@ -211,19 +220,19 @@ function appendContentBlockEvents(input: {
 				"thinking.start",
 				input.sessionId,
 				{ messageId: input.messageId, partId },
-				{ provider: PROVIDER },
+				input.eventOptions(),
 			),
 			canonicalEvent(
 				"thinking.delta",
 				input.sessionId,
 				{ messageId: input.messageId, partId, text: input.block["thinking"] },
-				{ provider: PROVIDER },
+				input.eventOptions(),
 			),
 			canonicalEvent(
 				"thinking.end",
 				input.sessionId,
 				{ messageId: input.messageId, partId },
-				{ provider: PROVIDER },
+				input.eventOptions(),
 			),
 		);
 		return;
@@ -250,9 +259,9 @@ function appendContentBlockEvents(input: {
 					partId,
 					toolName,
 					callId: partId,
-					input: isRecord(input.block["input"]) ? input.block["input"] : {},
+					input: normalizeToolInput(toolName, input.block["input"]),
 				},
-				{ provider: PROVIDER },
+				input.eventOptions(),
 			),
 		);
 		return;
@@ -273,7 +282,7 @@ function appendContentBlockEvents(input: {
 					result: readToolResultContent(input.block["content"]),
 					duration: 0,
 				},
-				{ provider: PROVIDER },
+				input.eventOptions(),
 			),
 		);
 	}
