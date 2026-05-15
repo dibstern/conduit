@@ -19,7 +19,6 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
-import { DEFAULT_OPENCODE_PORT } from "../../../constants.js";
 import {
 	instanceAlreadyExists,
 	instanceLimitExceeded,
@@ -44,6 +43,12 @@ import {
 	publishInstanceStatusChanged,
 } from "./daemon-pubsub.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
+import {
+	defaultInstanceForUrl,
+	type OpenCodeUnavailableError,
+	resolveSmartDefaultInstances,
+	type SmartDefaultInstanceOptions,
+} from "./opencode-smart-default.js";
 
 // ─── Input type ───────────────────────────────────────────────────────────
 
@@ -80,9 +85,16 @@ export interface InstanceManagerState {
 	config: InstanceManagerConfig;
 }
 
-export interface InstanceManagerStateOptions {
-	readonly defaultOpencodeUrl?: string | undefined;
-}
+export interface InstanceManagerStateOptions
+	extends SmartDefaultInstanceOptions {}
+
+type SmartDefaultEnabledOptions = InstanceManagerStateOptions & {
+	readonly smartDefault: true;
+};
+
+type SmartDefaultDisabledOptions = InstanceManagerStateOptions & {
+	readonly smartDefault?: false | undefined;
+};
 
 export const emptyInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
@@ -93,48 +105,14 @@ export const emptyInstanceManagerState = (
 	config: { ...DEFAULT_CONFIG, ...config },
 });
 
-const defaultInstanceForUrl = (url: string): DaemonInstanceConfig => {
-	let port = DEFAULT_OPENCODE_PORT;
-	try {
-		const parsed = new URL(url);
-		port = parsed.port
-			? Number.parseInt(parsed.port, 10)
-			: DEFAULT_OPENCODE_PORT;
-	} catch {
-		port = DEFAULT_OPENCODE_PORT;
-	}
-
-	return {
-		id: "default",
-		name: "Default",
-		port,
-		managed: false,
-		url,
-	};
-};
-
-const withDefaultOpencodeInstance = (
-	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
-	options?: InstanceManagerStateOptions,
-): ReadonlyArray<DaemonInstanceConfig> => {
-	const defaultUrl = options?.defaultOpencodeUrl;
-	if (defaultUrl == null) return initialInstances;
-	if (initialInstances.some((instance) => instance.id === "default")) {
-		return initialInstances;
-	}
-	return [defaultInstanceForUrl(defaultUrl), ...initialInstances];
-};
-
 const buildInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
-	options?: InstanceManagerStateOptions,
 ): InstanceManagerState => {
-	const instances = withDefaultOpencodeInstance(initialInstances, options);
 	const now = Date.now();
 	return {
 		instances: HashMap.fromIterable(
-			instances.map((instance) => {
+			initialInstances.map((instance) => {
 				const opencodeInstance: OpenCodeInstance = {
 					id: instance.id,
 					name: instance.name,
@@ -149,7 +127,7 @@ const buildInstanceManagerState = (
 			}),
 		),
 		externalUrls: HashMap.fromIterable(
-			instances.flatMap((instance) =>
+			initialInstances.flatMap((instance) =>
 				instance.url === undefined
 					? []
 					: ([[instance.id, instance.url]] as const),
@@ -159,6 +137,28 @@ const buildInstanceManagerState = (
 		config: { ...DEFAULT_CONFIG, ...config },
 	};
 };
+
+const withConfiguredDefaultInstance = (
+	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
+	options?: InstanceManagerStateOptions,
+): ReadonlyArray<DaemonInstanceConfig> => {
+	if (options?.defaultOpencodeUrl == null) return initialInstances;
+	if (initialInstances.some((instance) => instance.id === "default")) {
+		return initialInstances;
+	}
+	return [
+		defaultInstanceForUrl(options.defaultOpencodeUrl),
+		...initialInstances,
+	];
+};
+
+const resolveInitialInstanceConfigs = (
+	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
+	options?: InstanceManagerStateOptions,
+) =>
+	options?.smartDefault === true
+		? resolveSmartDefaultInstances(initialInstances, options)
+		: Effect.succeed(withConfiguredDefaultInstance(initialInstances, options));
 
 // ─── Context Tags ─────────────────────────────────────────────────────────
 
@@ -183,34 +183,89 @@ export class PollerFibersTag extends Context.Tag("PollerFibers")<
  *
  * @param config - Optional config overrides (e.g. maxInstances).
  */
-export const makeInstanceManagerStateLive = (
+export function makeInstanceManagerStateLive(
+	config?: Partial<InstanceManagerConfig>,
+	initialInstances?: ReadonlyArray<DaemonInstanceConfig>,
+	options?: SmartDefaultDisabledOptions,
+): Layer.Layer<InstanceManagerStateTag | PollerFibersTag>;
+export function makeInstanceManagerStateLive(
+	config: Partial<InstanceManagerConfig> | undefined,
+	initialInstances: ReadonlyArray<DaemonInstanceConfig> | undefined,
+	options: SmartDefaultEnabledOptions,
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	OpenCodeUnavailableError
+>;
+export function makeInstanceManagerStateLive(
+	config: Partial<InstanceManagerConfig> | undefined,
+	initialInstances: ReadonlyArray<DaemonInstanceConfig> | undefined,
+	options: InstanceManagerStateOptions,
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	OpenCodeUnavailableError
+>;
+export function makeInstanceManagerStateLive(
 	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 	options?: InstanceManagerStateOptions,
-): Layer.Layer<InstanceManagerStateTag | PollerFibersTag> =>
-	Layer.scoped(
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	OpenCodeUnavailableError
+> {
+	return Layer.scoped(
 		InstanceManagerStateTag,
-		Ref.make(buildInstanceManagerState(config, initialInstances, options)),
+		resolveInitialInstanceConfigs(initialInstances, options).pipe(
+			Effect.map((instances) => buildInstanceManagerState(config, instances)),
+			Effect.flatMap(Ref.make),
+		),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
+}
 
-export const makeInstanceManagerStateFromDaemonStateLive = (
+export function makeInstanceManagerStateFromDaemonStateLive(
 	config?: Partial<InstanceManagerConfig>,
-	options?: InstanceManagerStateOptions,
+	options?: SmartDefaultDisabledOptions,
 ): Layer.Layer<
 	InstanceManagerStateTag | PollerFibersTag,
 	never,
 	DaemonStateTag
-> =>
-	Layer.scoped(
+>;
+export function makeInstanceManagerStateFromDaemonStateLive(
+	config: Partial<InstanceManagerConfig> | undefined,
+	options: SmartDefaultEnabledOptions,
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	OpenCodeUnavailableError,
+	DaemonStateTag
+>;
+export function makeInstanceManagerStateFromDaemonStateLive(
+	config: Partial<InstanceManagerConfig> | undefined,
+	options: InstanceManagerStateOptions,
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	OpenCodeUnavailableError,
+	DaemonStateTag
+>;
+export function makeInstanceManagerStateFromDaemonStateLive(
+	config?: Partial<InstanceManagerConfig>,
+	options?: InstanceManagerStateOptions,
+): Layer.Layer<
+	InstanceManagerStateTag | PollerFibersTag,
+	OpenCodeUnavailableError,
+	DaemonStateTag
+> {
+	return Layer.scoped(
 		InstanceManagerStateTag,
 		Effect.gen(function* () {
 			const stateRef = yield* DaemonStateTag;
 			const state = yield* Ref.get(stateRef);
-			return yield* Ref.make(
-				buildInstanceManagerState(config, state.instances, options),
+			const instances = yield* resolveInitialInstanceConfigs(
+				state.instances,
+				options,
 			);
+			return yield* Ref.make(buildInstanceManagerState(config, instances));
 		}),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
+}
 
 // ─── Key prefix scheme for shared FiberMap ───────────────────────────────
 

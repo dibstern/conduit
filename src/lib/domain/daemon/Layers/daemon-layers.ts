@@ -724,6 +724,7 @@ export interface DaemonLiveOptions {
 	storageMon?: Parameters<typeof StorageMonitorLive>[0];
 	portScanner?: Parameters<typeof PortScannerLive>[0];
 	defaultOpencodeUrl?: string;
+	smartDefault?: boolean;
 
 	// DaemonOptions-derived values (computed by caller from DaemonOptions)
 	configDir: string;
@@ -825,6 +826,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const instanceManagerOptions = {
 		...(options.defaultOpencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.defaultOpencodeUrl,
+		}),
+		...(options.smartDefault !== undefined && {
+			smartDefault: options.smartDefault,
 		}),
 	};
 	const instanceManagerLayer = options.configPath

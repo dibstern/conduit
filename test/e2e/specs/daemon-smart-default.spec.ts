@@ -19,14 +19,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test as base, expect } from "@playwright/test";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
 
 const SMART_DEFAULT_OPENCODE_URL = "http://localhost:4096";
 
 interface SmartDaemonInfo {
-	daemon: DaemonHandle;
+	daemon: ForegroundDaemonHandle;
 	port: number;
 	baseUrl: string;
 	projectUrl: string;
@@ -55,7 +57,7 @@ const test = base.extend<{
 		const tmpDir = mkdtempSync(join(tmpdir(), "e2e-smart-default-"));
 
 		// KEY: no opencodeUrl, smartDefault: true (the default)
-		const daemon = await startDaemonProcess({
+		const daemon = await startForegroundDaemon({
 			port: 0,
 			host: "127.0.0.1",
 			configDir: tmpDir,

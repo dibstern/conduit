@@ -49,11 +49,13 @@ import {
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
+import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
 import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 
 export { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
+export { OpenCodeUnavailableError };
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -214,22 +216,6 @@ export const startDaemonEffect = (daemonLiveOptions: DaemonLiveOptions) => {
 		disablePrettyLogger: true,
 	});
 };
-
-export class OpenCodeUnavailableError extends Data.TaggedError(
-	"OpenCodeUnavailableError",
-)<{
-	readonly url: string;
-	readonly port: number;
-}> {
-	override get message(): string {
-		return (
-			`OpenCode is not running at ${this.url} and the "opencode" ` +
-			"binary was not found on PATH.\n" +
-			"Install OpenCode first: https://opencode.ai\n" +
-			`Or start it manually: opencode serve --port ${this.port}`
-		);
-	}
-}
 
 export class DaemonLifecycleContextUnavailableError extends Data.TaggedError(
 	"DaemonLifecycleContextUnavailableError",

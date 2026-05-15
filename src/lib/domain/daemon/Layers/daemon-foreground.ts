@@ -25,7 +25,10 @@ import {
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
+import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
 import { type DaemonLiveOptions, makeDaemonLive } from "./daemon-layers.js";
+
+export { OpenCodeUnavailableError };
 
 export interface ForegroundDaemonHandle {
 	readonly port: number;
@@ -258,6 +261,7 @@ export async function startForegroundDaemon(
 		...(options.opencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.opencodeUrl,
 		}),
+		smartDefault: options.smartDefault ?? true,
 		keepAwake: initialConfig.keepAwakeCommand
 			? {
 					command: initialConfig.keepAwakeCommand,
@@ -270,8 +274,15 @@ export async function startForegroundDaemon(
 	};
 
 	runtime = ManagedRuntime.make(makeDaemonLive(liveOptions));
-	handle = await runRuntimeEffect(runtime, DaemonHandleTag);
-	await refreshSnapshots();
+	try {
+		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
+		await refreshSnapshots();
+	} catch (error) {
+		await runtime.dispose();
+		runtime = null;
+		handle = null;
+		throw error;
+	}
 
 	return {
 		get port() {

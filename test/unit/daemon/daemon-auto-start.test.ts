@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock daemon-utils before importing startDaemonProcess
+// Mock daemon-utils before importing startForegroundDaemon
 vi.mock("../../../src/lib/daemon/daemon-utils.js", async (importOriginal) => {
 	const original =
 		await importOriginal<
@@ -25,11 +25,11 @@ import {
 	isOpencodeInstalled,
 	probeOpenCode,
 } from "../../../src/lib/daemon/daemon-utils.js";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import {
+	type ForegroundDaemonHandle,
 	OpenCodeUnavailableError,
-	startDaemonProcess,
-} from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);
@@ -50,7 +50,7 @@ function daemonOpts(tmpDir: string) {
 
 describe("daemon auto-start (probe-and-convert)", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle;
+	let daemon: ForegroundDaemonHandle;
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir();
@@ -69,7 +69,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 	it("keeps unmanaged when OpenCode is reachable", async () => {
 		mockProbe.mockResolvedValue(true);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
@@ -86,7 +86,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
@@ -102,7 +102,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		const rejected = startDaemonProcess({
+		const rejected = startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
@@ -120,7 +120,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 	it("skips probe-and-convert when smartDefault is false", async () => {
 		mockProbe.mockResolvedValue(false);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
@@ -139,7 +139,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(false);
 
-		const rejected = startDaemonProcess({
+		const rejected = startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			// No opencodeUrl — triggers the smart default path
 			smartDefault: true,
@@ -158,7 +158,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
 
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: true,
