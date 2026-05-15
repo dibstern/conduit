@@ -37,6 +37,7 @@ export type {
 	SDKSystemMessage,
 	SDKTaskProgressMessage,
 	SDKUserMessage,
+	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -130,6 +131,10 @@ export interface ClaudeSessionContext {
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingQuestions: Map<string, PendingQuestion>;
 	readonly inFlightTools: Map<number, ToolInFlight>;
+	readonly subagentTasks?: Map<
+		string,
+		{ readonly toolUseId: string; description?: string; subagentType?: string }
+	>;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	streamConsumer: Promise<void> | undefined;

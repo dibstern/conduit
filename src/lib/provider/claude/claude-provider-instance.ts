@@ -41,6 +41,11 @@ import {
 	isInterruptedResult,
 } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
+import type {
+	ClaudeSubagentSdk,
+	MaterializeClaudeSubagentsInput,
+	MaterializedClaudeSubagent,
+} from "./claude-subagent-materializer.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
 import type {
@@ -76,13 +81,13 @@ function asError(cause: unknown): Error {
 
 function makeRuntimeEffectRunner(
 	runtime: Runtime.Runtime<never>,
-): (effect: Effect.Effect<void, unknown>) => Promise<void> {
+): <A>(effect: Effect.Effect<A, unknown>) => Promise<A> {
 	return (effect) =>
 		new Promise((resolve, reject) => {
 			Runtime.runCallback(runtime)(effect, {
 				onExit: (exit) => {
 					if (Exit.isSuccess(exit)) {
-						resolve();
+						resolve(exit.value);
 						return;
 					}
 					reject(Cause.squash(exit.cause));
@@ -223,6 +228,10 @@ export interface ClaudeProviderInstanceDeps {
 		prompt: AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => Query;
+	readonly subagentSdk?: ClaudeSubagentSdk;
+	readonly materializeSubagents?: (
+		input: MaterializeClaudeSubagentsInput,
+	) => Effect.Effect<readonly MaterializedClaudeSubagent[], unknown>;
 }
 
 // ─── ClaudeProviderInstance ────────────────────────────────────────────────
@@ -466,6 +475,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 					pendingApprovals: new Map(),
 					pendingQuestions: new Map(),
 					inFlightTools: new Map(),
+					subagentTasks: new Map(),
 					eventSink: input.eventSink,
 					streamConsumer: undefined,
 					currentTurnId: input.turnId,
@@ -513,7 +523,11 @@ export class ClaudeProviderInstance implements ProviderInstance {
 					getSink: (ctx) => ctx.eventSink,
 					runEffect: makeRuntimeEffectRunner(runtime),
 				});
-				ctx.streamConsumer = this.runStreamConsumer(ctx, translator);
+				ctx.streamConsumer = this.runStreamConsumer(
+					ctx,
+					translator,
+					makeRuntimeEffectRunner(runtime),
+				);
 			});
 
 			yield* setup.pipe(
@@ -646,11 +660,17 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	private async runStreamConsumer(
 		ctx: ClaudeSessionContext,
 		translator: ClaudeEventTranslator,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
 	): Promise<void> {
 		try {
 			for await (const message of ctx.query) {
 				await translator.translate(ctx, message);
 				if (message.type === "result") {
+					await this.materializeSubagentsAfterResult(
+						ctx,
+						message as unknown as SDKResultMessage,
+						runEffect,
+					);
 					this.resolveTurn(ctx, message as unknown as SDKResultMessage);
 				}
 			}
@@ -680,6 +700,47 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			this.rejectTurnIfPending(
 				ctx,
 				new Error("SDK stream ended without result"),
+			);
+		}
+	}
+
+	private async materializeSubagentsAfterResult(
+		ctx: ClaudeSessionContext,
+		result: SDKResultMessage,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<void> {
+		if (!this.deps.materializeSubagents) return;
+		const parentClaudeSessionId = ctx.resumeSessionId ?? result.session_id;
+		if (!parentClaudeSessionId) return;
+
+		const materialized = await runEffect(
+			this.deps.materializeSubagents({
+				parentConduitSessionId: ctx.sessionId,
+				parentClaudeSessionId,
+				workspaceRoot: ctx.workspaceRoot,
+				knownTasks: ctx.subagentTasks ?? new Map(),
+			}),
+		);
+
+		for (const child of materialized) {
+			if (!child.parentToolUseId || !ctx.eventSink) continue;
+			await runEffect(
+				ctx.eventSink.push(
+					canonicalEvent(
+						"tool.running",
+						ctx.sessionId,
+						{
+							messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
+							partId: child.parentToolUseId,
+							metadata: {
+								childSessionId: child.childSessionId,
+								sdkSubagentId: child.sdkSubagentId,
+								providerTaskId: child.sdkSubagentId,
+							},
+						},
+						{ provider: "claude" },
+					),
+				),
 			);
 		}
 	}

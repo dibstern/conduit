@@ -27,6 +27,14 @@ export interface ClaudeEventPersistEffect {
 		sessionId: string,
 		text: string,
 	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+
+	readonly persistClaudeSubagent: (input: {
+		readonly childSessionId: string;
+		readonly parentSessionId: string;
+		readonly providerSessionId: string;
+		readonly title: string;
+		readonly events: readonly CanonicalEvent[];
+	}) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 }
 
 export class ClaudeEventPersistEffectTag extends Context.Tag(
@@ -56,11 +64,13 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const ensureSession = (
 		sessionId: string,
 		provider: string,
+		opts?: { parentId?: string; providerSessionId?: string },
 	): Effect.Effect<void, SqlError> => {
 		const now = Date.now();
 		return sql`
-			INSERT OR IGNORE INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${now}, ${now})`.pipe(
+			INSERT OR IGNORE INTO sessions
+			(id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+			VALUES (${sessionId}, ${provider}, ${opts?.providerSessionId ?? null}, 'Untitled', 'idle', ${opts?.parentId ?? null}, ${now}, ${now})`.pipe(
 			Effect.asVoid,
 		);
 	};
@@ -137,8 +147,46 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			yield* projectBatch(stored);
 		}).pipe(Effect.mapError(mapPersistError("persistUserMessage")));
 
+	const persistClaudeSubagent: ClaudeEventPersistEffect["persistClaudeSubagent"] =
+		(input) =>
+			Effect.gen(function* () {
+				yield* ensureRecovered();
+				yield* ensureSession(input.parentSessionId, "claude");
+				yield* ensureSession(input.childSessionId, "claude", {
+					parentId: input.parentSessionId,
+					providerSessionId: input.providerSessionId,
+				});
+
+				const existingRows = yield* sql<{ id: string }>`
+					SELECT id FROM messages WHERE session_id = ${input.childSessionId}`;
+				const existingMessageIds = new Set(existingRows.map((row) => row.id));
+				const events = input.events.filter((event) => {
+					const data = event.data as { readonly messageId?: string };
+					return (
+						data.messageId == null || !existingMessageIds.has(data.messageId)
+					);
+				});
+				const stored = yield* eventStore.appendBatch([
+					canonicalEvent(
+						"session.created",
+						input.childSessionId,
+						{
+							sessionId: input.childSessionId,
+							title: input.title,
+							provider: "claude",
+							parentId: input.parentSessionId,
+							providerSessionId: input.providerSessionId,
+						},
+						{ provider: "claude" },
+					),
+					...events,
+				]);
+				yield* projectBatch(stored);
+			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
+
 	return {
 		persistEvent,
 		persistUserMessage,
+		persistClaudeSubagent,
 	} satisfies ClaudeEventPersistEffect;
 });

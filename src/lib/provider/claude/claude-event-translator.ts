@@ -305,11 +305,15 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Promise<void> {
 		if (!message.tool_use_id) return;
+		const extras = message as unknown as Record<string, unknown>;
 		await this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: "running",
 			description: message.description,
 			...(message.task_type ? { subagentType: message.task_type } : {}),
+			...(typeof extras["child_session_id"] === "string"
+				? { childSessionId: extras["child_session_id"] }
+				: {}),
 			...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
 			...(message.prompt ? { prompt: message.prompt } : {}),
 			...(message.skip_transcript !== undefined
@@ -324,10 +328,17 @@ export class ClaudeEventTranslator {
 	): Promise<void> {
 		if (!message.tool_use_id) return;
 		const usage = message.usage as Record<string, unknown>;
+		const extras = message as unknown as Record<string, unknown>;
 		await this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: "running",
 			description: message.description,
+			...(typeof extras["subagent_type"] === "string"
+				? { subagentType: extras["subagent_type"] }
+				: {}),
+			...(typeof extras["child_session_id"] === "string"
+				? { childSessionId: extras["child_session_id"] }
+				: {}),
 			totalTokens: usage["total_tokens"] ?? 0,
 			toolUses: usage["tool_uses"] ?? 0,
 			durationMs: usage["duration_ms"] ?? 0,
@@ -344,11 +355,15 @@ export class ClaudeEventTranslator {
 	): Promise<void> {
 		if (!message.tool_use_id) return;
 		const usage = message.usage as Record<string, unknown> | undefined;
+		const extras = message as unknown as Record<string, unknown>;
 		await this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: message.status,
 			outputFile: message.output_file,
 			summary: message.summary,
+			...(typeof extras["child_session_id"] === "string"
+				? { childSessionId: extras["child_session_id"] }
+				: {}),
 			...(usage
 				? {
 						totalTokens: usage["total_tokens"] ?? 0,
@@ -382,13 +397,37 @@ export class ClaudeEventTranslator {
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
 	): Promise<void> {
+		const providerTaskId = metadata["providerTaskId"];
+		const subagentTasks = ctx.subagentTasks;
+		const task =
+			typeof providerTaskId === "string" && subagentTasks
+				? subagentTasks.get(providerTaskId)
+				: undefined;
+		const mergedMetadata = {
+			...(task?.description != null ? { description: task.description } : {}),
+			...(task?.subagentType != null
+				? { subagentType: task.subagentType }
+				: {}),
+			...metadata,
+		};
+		if (typeof providerTaskId === "string" && subagentTasks) {
+			subagentTasks.set(providerTaskId, {
+				toolUseId: parentToolUseId,
+				...(typeof mergedMetadata["description"] === "string"
+					? { description: mergedMetadata["description"] }
+					: {}),
+				...(typeof mergedMetadata["subagentType"] === "string"
+					? { subagentType: mergedMetadata["subagentType"] }
+					: {}),
+			});
+		}
 		await this.push(
 			ctx,
 			makeCanonicalEvent("tool.running", ctx.sessionId, {
 				messageId:
 					this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 				partId: parentToolUseId,
-				metadata,
+				metadata: mergedMetadata,
 			}),
 		);
 	}

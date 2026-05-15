@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
+import type { MaterializeClaudeSubagentsInput } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Query,
 	SDKMessage,
@@ -396,6 +397,84 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(sinkBText).toContain("second turn text");
 		expect(sinkAText).not.toContain("second turn text");
 		expect(turnCompleted?.data).toMatchObject({ messageId: "msg-turn-2" });
+
+		await Effect.runPromise(instance.shutdownEffect());
+	});
+
+	it("materializes Claude subagents after result and links the parent Task tool", async () => {
+		const taskStarted = {
+			type: "system",
+			subtype: "task_started",
+			session_id: "sdk-parent",
+			task_id: "agent-abc",
+			tool_use_id: "toolu-task",
+			description: "Audit auth",
+			task_type: "explore",
+		} as unknown as SDKMessage;
+		const result = makeSuccessResult({
+			session_id: "sdk-parent",
+			uuid: "00000000-0000-0000-0000-000000000501" as `${string}-${string}-${string}-${string}-${string}`,
+		} as Record<string, unknown>);
+		const mockQuery = createMockQuery([taskStarted, result as SDKMessage]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const materializeSubagents = vi.fn(
+			(_input: MaterializeClaudeSubagentsInput) =>
+				Effect.succeed([
+					{
+						sdkSubagentId: "agent-abc",
+						childSessionId: "claude-subagent-abc",
+						parentToolUseId: "toolu-task",
+					},
+				]),
+		);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+			materializeSubagents,
+		});
+		const sink = createMockEventSink();
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "parent-session",
+					turnId: "turn-1",
+					workspaceRoot: workspace,
+					eventSink: sink,
+				}),
+			),
+		);
+
+		expect(materializeSubagents).toHaveBeenCalledWith(
+			expect.objectContaining({
+				parentConduitSessionId: "parent-session",
+				parentClaudeSessionId: "sdk-parent",
+				workspaceRoot: workspace,
+			}),
+		);
+		const firstCall = materializeSubagents.mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const materializerInput = firstCall?.[0] as {
+			knownTasks: ReadonlyMap<
+				string,
+				{ toolUseId: string; subagentType?: string }
+			>;
+		};
+		expect(materializerInput.knownTasks.get("agent-abc")).toMatchObject({
+			toolUseId: "toolu-task",
+			subagentType: "explore",
+		});
+		expect(
+			(sink.push as ReturnType<typeof vi.fn>).mock.calls.some(([event]) => {
+				const canonical = event as CanonicalEvent;
+				return (
+					canonical.type === "tool.running" &&
+					(canonical.data as { metadata?: Record<string, unknown> }).metadata?.[
+						"childSessionId"
+					] === "claude-subagent-abc"
+				);
+			}),
+		).toBe(true);
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
