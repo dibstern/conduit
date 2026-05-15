@@ -2,12 +2,8 @@
 // Composes all Effect-native state Layers into a single merged Layer.
 // These provide the state Tags that Effect handler functions use.
 //
-// Bridge Tags (for old imperative consumers) are still provided via
-// Layer.succeed(Tag, instance) in relay-stack.ts during the transition.
-// They are deleted incrementally as consumers move to Effect-owned services.
-//
 // External deps provided by caller: OpenCodeAPITag, ConfigTag, LoggerTag,
-// and all bridge Tags.
+// provider instances, persistence, and transport services.
 
 import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
@@ -45,9 +41,9 @@ const SessionManagerStateAndServiceLive = Layer.provideMerge(
  * All layers here are self-constructing — they create their own Ref, FiberMap,
  * PubSub, etc. No imperative instance is needed.
  *
- * Consumers of remaining bridge Tags (PollerManagerTag,
- * etc.) still get them from Layer.succeed() in relay-stack.ts. Those bridge
- * layers are merged alongside RelayStateLive when creating the full runtime.
+ * Keep new relay state in self-constructing Layers here, or in a focused
+ * service Layer merged here, so relay-stack does not regain prebuilt service
+ * instance wiring.
  */
 export const RelayStateLive = Layer.mergeAll(
 	// Session state

@@ -192,6 +192,36 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toHaveLength(allowedRuntimeBoundaries.length);
 	});
 
+	it("does not keep relay Layer.succeed bridge composition", () => {
+		const forbiddenPatterns = [
+			{
+				path: "src/lib/relay/relay-stack.ts",
+				pattern: /Layer\.succeed\(/g,
+				reason:
+					"relay-stack should compose self-constructing relay Layers, not prebuilt service instances",
+			},
+			{
+				path: "src/lib/domain/relay/Layers/relay-layer.ts",
+				pattern:
+					/Layer\.succeed\(Tag, instance\)|bridge Tags[\s\S]*relay-stack\.ts/gi,
+				reason:
+					"RelayStateLive docs should not describe deleted relay-stack bridge layers",
+			},
+		] as const;
+
+		const hits = forbiddenPatterns.flatMap(({ path, pattern, reason }) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return Array.from(source.matchAll(pattern), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0].split("\n")[0]?.trim(),
+				reason,
+			}));
+		});
+
+		expect(hits).toEqual([]);
+	});
+
 	it("constructs the daemon HTTP router handler inside the Layer effect", () => {
 		const path = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
