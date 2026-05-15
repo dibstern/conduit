@@ -15,8 +15,10 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
@@ -79,7 +81,7 @@ function filterTestSlugs(allSlugs: string[]): string[] {
 
 // ─── Test setup ──────────────────────────────────────────────────────────────
 
-let daemon: DaemonHandle;
+let daemon: ForegroundDaemonHandle;
 let baseUrl: string;
 let tmpDir: string;
 const projectDirs: string[] = [];
@@ -106,7 +108,7 @@ test.beforeAll(async () => {
 		projectDirs.push(dir);
 	}
 
-	daemon = await startDaemonProcess({
+	daemon = await startForegroundDaemon({
 		port: 0,
 		host: "127.0.0.1",
 		configDir: join(tmpDir, "config"),
