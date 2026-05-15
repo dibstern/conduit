@@ -376,20 +376,18 @@ export const createSessionForClient = ({
 			skipPollerSeed: true,
 		});
 
-		// Session list broadcast — non-blocking
-		yield* Effect.either(
-			sessionManagerService.sendDualSessionLists((msg) =>
-				wsHandler.broadcast(msg),
-			),
-		).pipe(
-			Effect.tap((result) => {
-				if (result._tag === "Left") {
-					log.warn(
-						`Failed to broadcast session list after CreateSession: ${result.left}`,
-					);
-				}
-				return Effect.void;
-			}),
+		yield* Effect.forkDaemon(
+			sessionManagerService
+				.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+				.pipe(
+					Effect.catchAll((err) =>
+						Effect.sync(() =>
+							log.warn(
+								`Failed to broadcast session list after CreateSession: ${err}`,
+							),
+						),
+					),
+				),
 		);
 
 		log.info(`client=${clientId} Created: ${session.id}`);

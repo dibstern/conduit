@@ -175,6 +175,18 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					toolName: request.toolName,
 					toolInput: request.toolInput as Record<string, unknown>,
 					always: request.always ?? [],
+					...(request.permissionSuggestions != null
+						? { permissionSuggestions: request.permissionSuggestions }
+						: {}),
+					...(request.permissionTitle != null
+						? { permissionTitle: request.permissionTitle }
+						: {}),
+					...(request.permissionDisplayName != null
+						? { permissionDisplayName: request.permissionDisplayName }
+						: {}),
+					...(request.permissionDescription != null
+						? { permissionDescription: request.permissionDescription }
+						: {}),
 				});
 				yield* Effect.sync(() => {
 					send({
@@ -184,6 +196,18 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						toolName: request.toolName,
 						toolInput: request.toolInput,
 						always: request.always ?? [],
+						...(request.permissionSuggestions != null
+							? { permissionSuggestions: [...request.permissionSuggestions] }
+							: {}),
+						...(request.permissionTitle != null
+							? { permissionTitle: request.permissionTitle }
+							: {}),
+						...(request.permissionDisplayName != null
+							? { permissionDisplayName: request.permissionDisplayName }
+							: {}),
+						...(request.permissionDescription != null
+							? { permissionDescription: request.permissionDescription }
+							: {}),
 					});
 				});
 				return yield* pending.awaitResponse;

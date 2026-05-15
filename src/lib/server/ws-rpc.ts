@@ -798,6 +798,9 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			...(request.persistPattern != null
 				? { persistPattern: request.persistPattern }
 				: {}),
+			...(request.permissionDestination != null
+				? { permissionDestination: request.permissionDestination }
+				: {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catchAll((error) =>

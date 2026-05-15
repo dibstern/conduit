@@ -14,6 +14,7 @@ import type {
 	ModelInfo,
 	PermissionId,
 	ProviderInfo,
+	ProviderPermissionUpdate,
 	SessionInfo,
 	ToolStatus,
 } from "../shared-types.js";
@@ -34,6 +35,8 @@ export type {
 	PermissionId,
 	ProjectInfo,
 	ProviderInfo,
+	ProviderPermissionUpdate,
+	ProviderPermissionUpdateDestination,
 	PtyInfo,
 	PtyStatus,
 	RelayMessage,
@@ -206,6 +209,10 @@ export interface PermissionRequest {
 	toolInput?: Record<string, unknown>;
 	toolUseId?: string;
 	always?: string[]; // Suggested patterns for "always" scope
+	permissionSuggestions?: ProviderPermissionUpdate[];
+	permissionTitle?: string;
+	permissionDisplayName?: string;
+	permissionDescription?: string;
 }
 
 // ─── Question Types ──────────────────────────────────────────────────────────

@@ -44,7 +44,12 @@ import {
 	publishSessionDeleted,
 } from "../../daemon/Services/daemon-pubsub.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
-import { ConfigTag, LoggerTag, StatusPollerTag } from "./services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+	StatusPollerTag,
+} from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
 
@@ -955,6 +960,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
@@ -1001,6 +1007,15 @@ export const SessionManagerServiceLive: Layer.Layer<
 			});
 		const serviceCreateSession = (title?: string) =>
 			Effect.gen(function* () {
+				const bindSessionProvider = (
+					session: SessionDetail,
+					providerId: "claude" | "opencode",
+				) =>
+					Effect.sync(() => {
+						if (engineOption._tag === "Some") {
+							engineOption.value.bindSession(session.id, providerId);
+						}
+					});
 				const createViaOpenCode = () =>
 					Effect.either(
 						createSession(title).pipe(
@@ -1010,9 +1025,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 				const createViaLocal = () => Effect.either(createLocalSession(title));
 
 				const configuredProvider = yield* getConfiguredLocalSessionProvider();
-				if (configuredProvider === "claude") {
+				if (configuredProvider == null || configuredProvider === "claude") {
 					const localResult = yield* createViaLocal();
 					if (localResult._tag === "Right") {
+						yield* bindSessionProvider(localResult.right, "claude");
 						return localResult.right;
 					}
 
@@ -1021,6 +1037,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 					const openCodeResult = yield* createViaOpenCode();
 					if (openCodeResult._tag === "Right") {
+						yield* bindSessionProvider(openCodeResult.right, "opencode");
 						return openCodeResult.right;
 					}
 
@@ -1034,13 +1051,19 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}
 
 				const openCodeResult = yield* createViaOpenCode();
-				if (openCodeResult._tag === "Right") return openCodeResult.right;
+				if (openCodeResult._tag === "Right") {
+					yield* bindSessionProvider(openCodeResult.right, "opencode");
+					return openCodeResult.right;
+				}
 
 				log.warn(
 					`OpenCode session create failed; creating relay-owned session: ${openCodeResult.left}`,
 				);
 				const localResult = yield* createViaLocal();
 				if (localResult._tag === "Right") {
+					if (localResult.right.providerID === "claude") {
+						yield* bindSessionProvider(localResult.right, "claude");
+					}
 					return localResult.right;
 				}
 

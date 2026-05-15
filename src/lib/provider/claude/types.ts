@@ -25,6 +25,8 @@ export type {
 	Options,
 	PermissionMode,
 	PermissionResult,
+	PermissionUpdate,
+	PermissionUpdateDestination,
 	Query,
 	SDKAPIRetryMessage,
 	SDKAssistantMessage,

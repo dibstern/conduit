@@ -138,7 +138,7 @@
 		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 	{/if}
 	<button
-		class="tool-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left"
+		class="tool-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-text text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left"
 		onclick={handleToggle}
 	>
 	<span
@@ -156,19 +156,19 @@
 		</span>
 	{/if}
 
-	<span class="tool-name font-medium text-text-dimmer">
+	<span class="tool-name font-medium text-text-dimmer select-text">
 		{message.name}
 	</span>
 
 	<span
-		class="tool-desc flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-text-dimmer"
+		class="tool-desc flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-text-dimmer select-text"
 	>
 		{descText}
 	</span>
 
 	{#if toolSummary.tags}
 		{#each toolSummary.tags as tag}
-			<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-sm text-text-dimmer shrink-0">
+			<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-sm text-text-dimmer shrink-0 select-text">
 				{tag}
 			</span>
 		{/each}
@@ -186,7 +186,7 @@
 
 	{#if expanded && (message.result || bashCommand)}
 		<div
-			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-3 px-4 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto {resultErrorClass}"
+			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-3 px-4 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
 			class:is-error={message.isError}
 		>
 			{#if bashCommand}<span class="text-text-muted">$ {bashCommand}</span>{#if message.result}{"\n\n"}{/if}{/if}{#if message.result}{message.result}{/if}

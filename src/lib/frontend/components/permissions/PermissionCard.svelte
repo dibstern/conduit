@@ -3,7 +3,10 @@
 <!-- Preserves .permission-card class and [data-request-id] for E2E. -->
 
 <script lang="ts">
-	import type { PermissionRequest } from "../../types.js";
+	import type {
+		PermissionRequest,
+		ProviderPermissionUpdateDestination,
+	} from "../../types.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -14,6 +17,47 @@
 
 	let resolved = $state<"allow" | "allow_always" | "deny" | null>(null);
 	let showAlwaysOptions = $state(false);
+
+	const destinationLabels: Record<
+		ProviderPermissionUpdateDestination,
+		{ label: string; description: string }
+	> = {
+		session: {
+			label: "This Claude session",
+			description: "Applies until this Claude SDK session ends.",
+		},
+		localSettings: {
+			label: "This checkout",
+			description: "Updates .claude/settings.local.json.",
+		},
+		projectSettings: {
+			label: "This project",
+			description: "Updates .claude/settings.json.",
+		},
+		userSettings: {
+			label: "My user settings",
+			description: "Updates ~/.claude/settings.json.",
+		},
+		cliArg: {
+			label: "This Claude launch",
+			description: "Applies through the SDK runtime option Claude suggested.",
+		},
+	};
+
+	const heading = $derived(request.permissionTitle ?? "Permission Required");
+	const toolLabel = $derived(request.permissionDisplayName ?? request.toolName);
+	const claudeRememberOptions = $derived.by(() => {
+		const suggestions = request.permissionSuggestions ?? [];
+		const destinations = new Set<ProviderPermissionUpdateDestination>();
+		for (const suggestion of suggestions) {
+			destinations.add(suggestion.destination);
+		}
+		return Array.from(destinations).map((destination) => ({
+			destination,
+			...destinationLabels[destination],
+		}));
+	});
+	const hasClaudeRememberOptions = $derived(claudeRememberOptions.length > 0);
 
 	// Format tool input for display (unchanged logic)
 	const inputDisplay = $derived.by(() => {
@@ -101,9 +145,22 @@
 		showAlwaysOptions = false;
 	}
 
+	function handleRememberDestination(
+		permissionDestination: ProviderPermissionUpdateDestination,
+	) {
+		if (resolved) return;
+		sendPermissionResponse({
+			requestId: request.requestId,
+			decision: "allow_always",
+			permissionDestination,
+		});
+		resolved = "allow_always";
+		showAlwaysOptions = false;
+	}
+
 	function handleAlwaysAllow() {
 		if (resolved) return;
-		if (hasPatterns) {
+		if (hasClaudeRememberOptions || hasPatterns) {
 			showAlwaysOptions = !showAlwaysOptions;
 		} else {
 			// No patterns available — default to tool-level
@@ -125,20 +182,26 @@
 	class="my-2 mx-auto max-w-[760px] px-4"
 	data-request-id={request.requestId}
 >
-	<div
-		class="permission-card bg-bg-alt border border-border rounded-xl p-3"
+		<div
+			class="permission-card bg-bg-alt border border-border rounded-xl p-3"
 	>
 		<div class="text-base font-medium mb-2 text-text">
-			Permission Required
+			{heading}
 		</div>
 
-		<div class="font-mono text-xs text-accent mb-1 break-all">
-			{request.toolName}
+		{#if request.permissionDescription}
+			<div class="text-xs text-text-secondary mb-2">
+				{request.permissionDescription}
+			</div>
+		{/if}
+
+		<div class="font-mono text-xs text-accent mb-1 break-all select-text">
+			{toolLabel}
 		</div>
 
 		{#if inputDisplay}
 			<div
-				class="font-mono text-xs text-text-secondary mb-2.5 bg-code-bg rounded-md p-2 max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all"
+				class="font-mono text-xs text-text-secondary mb-2.5 bg-code-bg rounded-md p-2 max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all select-text"
 			>
 				{inputDisplay}
 			</div>
@@ -156,7 +219,10 @@
 					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border cursor-pointer font-sans text-sm font-medium bg-success/[0.08] border-success/15 text-success/70 hover:bg-success/15"
 					onclick={handleAlwaysAllow}
 				>
-					Always Allow{hasPatterns ? " \u25BE" : ""}
+					{hasClaudeRememberOptions ? "Remember" : "Always Allow"}{hasClaudeRememberOptions ||
+					hasPatterns
+						? " \u25BE"
+						: ""}
 				</button>
 				<button
 					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border border-border cursor-pointer font-sans text-sm font-medium text-error hover:bg-error/[0.08]"
@@ -168,21 +234,38 @@
 
 			{#if showAlwaysOptions}
 				<div class="mt-2 flex flex-col gap-1.5">
-					<div class="text-xs text-text-secondary mb-0.5">Always allow:</div>
-					<button
-						class="w-full text-left px-3 py-2 rounded-lg border border-success/15 cursor-pointer font-sans text-xs font-medium text-success/80 hover:bg-success/[0.06]"
-						onclick={handleAlwaysAllowTool}
-					>
-						All <span class="font-mono">{request.toolName}</span> operations
-					</button>
-					{#each alwaysPatterns as pattern}
+					{#if hasClaudeRememberOptions}
+						<div class="text-xs text-text-secondary mb-0.5">Remember for:</div>
+						{#each claudeRememberOptions as option}
+							<button
+								class="w-full text-left px-3 py-2 rounded-lg border border-border cursor-pointer font-sans text-xs hover:bg-success/[0.06] hover:border-success/15"
+								onclick={() => handleRememberDestination(option.destination)}
+							>
+								<span class="block font-medium text-success/80">
+									{option.label}
+								</span>
+								<span class="block text-text-secondary mt-0.5">
+									{option.description}
+								</span>
+							</button>
+						{/each}
+					{:else}
+						<div class="text-xs text-text-secondary mb-0.5">Always allow:</div>
 						<button
-							class="w-full text-left px-3 py-2 rounded-lg border border-border cursor-pointer font-mono text-xs text-text-secondary hover:bg-success/[0.06] hover:text-success/80 hover:border-success/15 break-all"
-							onclick={() => handleAlwaysAllowPattern(pattern)}
+							class="w-full text-left px-3 py-2 rounded-lg border border-success/15 cursor-pointer font-sans text-xs font-medium text-success/80 hover:bg-success/[0.06]"
+							onclick={handleAlwaysAllowTool}
 						>
-							{pattern}
+							All <span class="font-mono">{request.toolName}</span> operations
 						</button>
-					{/each}
+						{#each alwaysPatterns as pattern}
+							<button
+								class="w-full text-left px-3 py-2 rounded-lg border border-border cursor-pointer font-mono text-xs text-text-secondary hover:bg-success/[0.06] hover:text-success/80 hover:border-success/15 break-all select-text"
+								onclick={() => handleAlwaysAllowPattern(pattern)}
+							>
+								{pattern}
+							</button>
+						{/each}
+					{/if}
 				</div>
 			{/if}
 		{:else}

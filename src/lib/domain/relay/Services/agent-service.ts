@@ -6,6 +6,7 @@ import { LoggerTag, OrchestrationEngineTag } from "./services.js";
 import {
 	clearAgent,
 	getAgent,
+	getDefaultModel,
 	OverridesStateTag,
 	setAgent,
 } from "./session-overrides-state.js";
@@ -135,6 +136,12 @@ export const AgentServiceLive: Layer.Layer<
 						typeof engineOption.value.getProviderForSession === "function"
 							? engineOption.value.getProviderForSession(activeSessionId)
 							: undefined;
+					const defaultModel =
+						activeProviderId == null
+							? yield* provideOverrides(getDefaultModel())
+							: undefined;
+					const preferredProviderId =
+						activeProviderId ?? defaultModel?.providerID;
 
 					const listClaudeAgents = () =>
 						Effect.gen(function* () {
@@ -165,7 +172,10 @@ export const AgentServiceLive: Layer.Layer<
 							);
 						});
 
-					if (activeProviderId === "claude" && engineOption._tag === "Some") {
+					if (
+						preferredProviderId === "claude" &&
+						engineOption._tag === "Some"
+					) {
 						return yield* listClaudeAgents();
 					}
 
@@ -181,7 +191,10 @@ export const AgentServiceLive: Layer.Layer<
 						);
 					}
 
-					if (activeProviderId !== "opencode" && engineOption._tag === "Some") {
+					if (
+						preferredProviderId !== "opencode" &&
+						engineOption._tag === "Some"
+					) {
 						log.warn(
 							`Failed to discover OpenCode agents; falling back to Claude agents: ${describeError(rawAgentsResult.left)}`,
 						);

@@ -29,7 +29,10 @@ import type {
 	ClaudeSessionContext,
 	PendingApproval,
 	PermissionResult,
+	PermissionUpdate,
 } from "./types.js";
+
+type CanUseToolOptions = Parameters<CanUseTool>[2];
 
 export interface ClaudePermissionBridgeDeps {
 	readonly sink?: EventSink;
@@ -61,6 +64,37 @@ function runPermissionRequestAtSdkBoundary(
 	return Effect.runPromise(effect);
 }
 
+function toSdkPermissionUpdates(
+	updates: PermissionResponse["permissionUpdates"],
+): PermissionUpdate[] | undefined {
+	if (updates == null || updates.length === 0) return undefined;
+	return updates.map((update): PermissionUpdate => {
+		switch (update.type) {
+			case "addRules":
+			case "replaceRules":
+			case "removeRules":
+				return {
+					...update,
+					rules: update.rules.map((rule) => ({
+						toolName: rule.toolName,
+						...(rule.ruleContent != null
+							? { ruleContent: rule.ruleContent }
+							: {}),
+					})),
+				};
+			case "addDirectories":
+			case "removeDirectories":
+				return {
+					...update,
+					directories: [...update.directories],
+				};
+			case "setMode":
+				return { ...update };
+		}
+		return update;
+	});
+}
+
 export class ClaudePermissionBridge {
 	constructor(private readonly deps: ClaudePermissionBridgeDeps = {}) {}
 
@@ -74,7 +108,7 @@ export class ClaudePermissionBridge {
 		return async (
 			toolName: string,
 			toolInput: Record<string, unknown>,
-			options: { signal: AbortSignal; toolUseID: string },
+			options: CanUseToolOptions,
 		): Promise<PermissionResult> => {
 			return this._handlePermission(ctx, toolName, toolInput, options);
 		};
@@ -87,7 +121,7 @@ export class ClaudePermissionBridge {
 		ctx: ClaudeSessionContext,
 		toolName: string,
 		toolInput: Record<string, unknown>,
-		options: { signal: AbortSignal; toolUseID: string },
+		options: CanUseToolOptions,
 	): Promise<PermissionResult> {
 		const requestId = randomUUID();
 		const createdAt = new Date().toISOString();
@@ -122,11 +156,22 @@ export class ClaudePermissionBridge {
 					toolName,
 					toolInput: toolInput ?? {},
 					providerItemId: options.toolUseID,
+					...(options.suggestions != null
+						? { permissionSuggestions: options.suggestions }
+						: {}),
+					...(options.title != null ? { permissionTitle: options.title } : {}),
+					...(options.displayName != null
+						? { permissionDisplayName: options.displayName }
+						: {}),
+					...(options.description != null
+						? { permissionDescription: options.description }
+						: {}),
 				}),
 			);
 
 			// Race: sink resolution vs abort signal.
 			let decision: PermissionDecision;
+			let permissionUpdates: PermissionResponse["permissionUpdates"];
 			try {
 				const response = await withAbort(sinkPromise, options.signal);
 				// EventSink.requestPermission returns PermissionResponse { decision }.
@@ -137,6 +182,7 @@ export class ClaudePermissionBridge {
 					"decision" in response
 				) {
 					decision = (response as { decision: PermissionDecision }).decision;
+					permissionUpdates = response.permissionUpdates;
 				} else {
 					decision = "reject";
 				}
@@ -149,9 +195,11 @@ export class ClaudePermissionBridge {
 			}
 
 			if (decision === "once" || decision === "always") {
+				const updatedPermissions = toSdkPermissionUpdates(permissionUpdates);
 				return {
 					behavior: "allow",
 					updatedInput: toolInput ?? {},
+					...(updatedPermissions != null ? { updatedPermissions } : {}),
 				};
 			}
 			return {
@@ -172,7 +220,7 @@ export class ClaudePermissionBridge {
 		ctx: ClaudeSessionContext,
 		toolName: string,
 		toolInput: Record<string, unknown>,
-		options: { signal: AbortSignal; toolUseID: string },
+		options: CanUseToolOptions,
 	): Promise<PermissionResult> {
 		return this._handlePermission(ctx, toolName, toolInput, options);
 	}

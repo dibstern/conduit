@@ -656,6 +656,55 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.has(1)).toBe(false);
 	});
 
+	it("serializes structured TodoWrite tool_result content so the todo UI can update", async () => {
+		ctx.inFlightTools.set(1, {
+			itemId: "tool-todos",
+			toolName: "TodoWrite",
+			title: "Update tasks",
+			input: {
+				todos: [
+					{ content: "Write tests", status: "in_progress" },
+					{ content: "Patch implementation", status: "pending" },
+				],
+			},
+			partialInputJson: "",
+		});
+
+		await translator.translate(ctx, {
+			type: "user",
+			message: {
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-todos",
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									todos: [
+										{ content: "Write tests", status: "in_progress" },
+										{
+											content: "Patch implementation",
+											status: "pending",
+										},
+									],
+								}),
+							},
+						],
+						is_error: false,
+					},
+				],
+			},
+			parent_tool_use_id: null,
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const completed = sink.events.find((e) => e.type === "tool.completed");
+		expect(dataOf(completed)["result"]).toContain("Write tests");
+		expect(dataOf(completed)["result"]).toContain("Patch implementation");
+	});
+
 	it("emits tool.running before tool.completed when tool_result has content", async () => {
 		ctx.inFlightTools.set(0, {
 			itemId: "tool-run",

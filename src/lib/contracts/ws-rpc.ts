@@ -199,6 +199,13 @@ export const PermissionDecisionSchema = Schema.Literal(
 );
 
 export const PermissionPersistScopeSchema = Schema.Literal("tool", "pattern");
+export const PermissionUpdateDestinationSchema = Schema.Literal(
+	"userSettings",
+	"projectSettings",
+	"localSettings",
+	"session",
+	"cliArg",
+);
 export const RpcLogLevelSchema = Schema.Literal(
 	"debug",
 	"verbose",
@@ -366,6 +373,8 @@ export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
 export type PermissionPersistScope = typeof PermissionPersistScopeSchema.Type;
+export type PermissionUpdateDestination =
+	typeof PermissionUpdateDestinationSchema.Type;
 export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
@@ -815,6 +824,7 @@ export class RespondPermission extends Schema.TaggedRequest<RespondPermission>()
 			decision: PermissionDecisionSchema,
 			persistScope: Schema.optional(PermissionPersistScopeSchema),
 			persistPattern: Schema.optional(Schema.String),
+			permissionDestination: Schema.optional(PermissionUpdateDestinationSchema),
 		},
 	},
 ) {}

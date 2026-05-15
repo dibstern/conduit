@@ -1,3 +1,4 @@
+import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Fiber, Option, TestClock } from "effect";
 import { expect } from "vitest";
@@ -106,6 +107,53 @@ describe("PendingInteractionService", () => {
 					"deny",
 				);
 				expect(Option.isNone(duplicate)).toBe(true);
+			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+	);
+
+	it.effect(
+		"returns only the selected Claude permission destination to active waiters",
+		() =>
+			Effect.gen(function* () {
+				const service = yield* PendingInteractionServiceTag;
+				const sessionSuggestion: PermissionUpdate = {
+					type: "addRules",
+					behavior: "allow",
+					destination: "session",
+					rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+				};
+				const localSuggestion: PermissionUpdate = {
+					type: "addRules",
+					behavior: "allow",
+					destination: "localSettings",
+					rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+				};
+
+				const request = {
+					requestId: "perm-claude" as PermissionId,
+					sessionId: "session-1",
+					toolName: "Bash",
+					toolInput: { command: "npm test" },
+					permissionSuggestions: [sessionSuggestion, localSuggestion],
+				};
+				const pending = yield* service.beginPermissionRequest(request);
+				const waiter = yield* Effect.fork(pending.awaitResponse);
+
+				const resolveWithDestination = service.resolvePermissionFromBrowser as (
+					requestId: string,
+					decision: string,
+					options?: { permissionDestination?: string },
+				) => Effect.Effect<Option.Option<unknown>>;
+				const resolved = yield* resolveWithDestination(
+					"perm-claude",
+					"allow_always",
+					{ permissionDestination: "localSettings" },
+				);
+
+				expect(Option.isSome(resolved)).toBe(true);
+				expect(yield* Fiber.join(waiter)).toEqual({
+					decision: "always",
+					permissionUpdates: [localSuggestion],
+				});
 			}).pipe(Effect.provide(PendingInteractionServiceLive)),
 	);
 

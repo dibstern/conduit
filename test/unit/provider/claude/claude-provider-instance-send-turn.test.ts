@@ -703,6 +703,63 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		).toBeUndefined();
 	});
 
+	it("does not pass direct Anthropic API credentials from the relay environment into Claude Code", async () => {
+		const originalApiKey = process.env["ANTHROPIC_API_KEY"];
+		const originalAuthToken = process.env["ANTHROPIC_AUTH_TOKEN"];
+		const originalBaseUrl = process.env["ANTHROPIC_BASE_URL"];
+		process.env["ANTHROPIC_API_KEY"] = "bad-key-from-opencode";
+		process.env["ANTHROPIC_AUTH_TOKEN"] = "bad-token-from-opencode";
+		process.env["ANTHROPIC_BASE_URL"] =
+			"http://127.0.0.1:4096/api/provider/anthropic/v1";
+		try {
+			const resultMsg = makeSuccessResult();
+			const mockQuery = createMockQuery([resultMsg]);
+			queryFactorySpy = vi.fn(() => mockQuery);
+
+			const instance = new ClaudeProviderInstance({
+				workspaceRoot: workspace,
+				queryFactory: queryFactorySpy,
+			});
+
+			await Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "session-local-claude-auth",
+					}),
+				),
+			);
+
+			const callArgs = queryFactorySpy.mock.calls[0]?.[0] as Record<
+				string,
+				unknown
+			>;
+			const env = (callArgs["options"] as Record<string, unknown>)["env"] as
+				| Record<string, string | undefined>
+				| undefined;
+			expect(env).toBeDefined();
+			expect(env?.["ANTHROPIC_API_KEY"]).toBeUndefined();
+			expect(env?.["ANTHROPIC_AUTH_TOKEN"]).toBeUndefined();
+			expect(env?.["ANTHROPIC_BASE_URL"]).toBeUndefined();
+			expect(env?.["CLAUDE_AGENT_SDK_CLIENT_APP"]).toBe("conduit");
+		} finally {
+			if (originalApiKey === undefined) {
+				delete process.env["ANTHROPIC_API_KEY"];
+			} else {
+				process.env["ANTHROPIC_API_KEY"] = originalApiKey;
+			}
+			if (originalAuthToken === undefined) {
+				delete process.env["ANTHROPIC_AUTH_TOKEN"];
+			} else {
+				process.env["ANTHROPIC_AUTH_TOKEN"] = originalAuthToken;
+			}
+			if (originalBaseUrl === undefined) {
+				delete process.env["ANTHROPIC_BASE_URL"];
+			} else {
+				process.env["ANTHROPIC_BASE_URL"] = originalBaseUrl;
+			}
+		}
+	});
+
 	it("uses the [1m] SDK model suffix for Sonnet when contextWindow is 1m", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
@@ -1779,9 +1836,16 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		// Manually mark the session as stopped (simulating interruptTurn, etc.)
 		const ctx = (
-			instance as unknown as { sessions: Map<string, { stopped: boolean }> }
+			instance as unknown as {
+				sessions: Map<
+					string,
+					{ stopped: boolean; resumeSessionId: string | undefined }
+				>;
+			}
 		).sessions.get("session-evict");
 		expect(ctx).toBeDefined();
+		(ctx as { resumeSessionId: string }).resumeSessionId =
+			"sdk-resume-after-stop";
 		(ctx as { stopped: boolean }).stopped = true;
 
 		// Second turn after a stop should evict + create a new query
@@ -1797,6 +1861,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(r2.cost).toBe(0.09);
 		// Two queries: one for the initial session, one for the re-creation
 		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
+		expect(
+			(queryFactorySpy.mock.calls[1]?.[0]?.options as Record<string, unknown>)[
+				"resume"
+			],
+		).toBe("sdk-resume-after-stop");
 	});
 
 	// ── Group 3: Stale resume cursor fallback ────────────────────────────

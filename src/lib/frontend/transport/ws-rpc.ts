@@ -41,6 +41,7 @@ export {
 	type ModelInfo,
 	type PermissionDecision,
 	type PermissionPersistScope,
+	type PermissionUpdateDestination,
 	type ProjectMutationResponse,
 	type ProviderInfo,
 	type PtyInfo,

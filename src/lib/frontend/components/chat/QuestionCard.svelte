@@ -14,6 +14,7 @@
 		buildAnswerPayload,
 		formatQuestionHeader,
 		isValidSubmission,
+		removeQuestion,
 		permissionsState,
 	} from "../../stores/permissions.svelte.js";
 
@@ -159,7 +160,24 @@
 			originId: getBrowserClientId(),
 			toolId: request.toolId,
 			answers,
-		});
+		})
+			.then(() => {
+				if (resolved === "submitting") {
+					resolved = "submitted";
+					clearTimeout(submitTimeout);
+					removeQuestion(request.toolId);
+				}
+			})
+			.catch((error) => {
+				if (resolved === "submitting") {
+					resolved = null;
+				}
+				errorMessage =
+					error instanceof Error
+						? error.message
+						: "No response from server. You can try again, or send a follow-up message to continue.";
+				clearTimeout(submitTimeout);
+			});
 		// Show "submitting" state until the server confirms with ask_user_resolved
 		// (which removes this question from pendingQuestions, unmounting us).
 		// If the server fails, an ask_user_error message will revert us immediately.

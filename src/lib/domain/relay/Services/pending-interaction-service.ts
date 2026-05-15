@@ -13,6 +13,8 @@ import type {
 	FrontendDecision,
 	OpenCodeDecision,
 	PendingPermission,
+	ProviderPermissionUpdate,
+	ProviderPermissionUpdateDestination,
 } from "../../../types.js";
 
 const DEFAULT_PERMISSION_TIMEOUT_MS = 5 * 60_000;
@@ -37,6 +39,10 @@ export interface PendingPermissionRequestInput {
 	readonly toolName: string;
 	readonly toolInput: Record<string, unknown>;
 	readonly always?: readonly string[];
+	readonly permissionSuggestions?: readonly ProviderPermissionUpdate[];
+	readonly permissionTitle?: string;
+	readonly permissionDisplayName?: string;
+	readonly permissionDescription?: string;
 }
 
 export interface PendingPermissionRecoveryInput {
@@ -89,6 +95,7 @@ export interface ResolvedQuestionResponse {
 
 export interface PendingPermissionResponse {
 	readonly decision: OpenCodeDecision;
+	readonly permissionUpdates?: readonly ProviderPermissionUpdate[];
 }
 
 export interface StartedPermissionRequest {
@@ -120,6 +127,9 @@ export interface PendingInteractionService {
 	resolvePermissionFromBrowser(
 		requestId: string,
 		decision: string,
+		options?: {
+			readonly permissionDestination?: ProviderPermissionUpdateDestination;
+		},
 	): Effect.Effect<Option.Option<ResolvedPermissionDecision>>;
 	markPermissionReplied(requestId: string): Effect.Effect<boolean>;
 	recoverPendingPermissions(
@@ -196,6 +206,18 @@ export const makePendingInteractionServiceLive = (
 				toolName: state.toolName,
 				toolInput: state.toolInput,
 				always: state.always,
+				...(state.permissionSuggestions != null
+					? { permissionSuggestions: [...state.permissionSuggestions] }
+					: {}),
+				...(state.permissionTitle != null
+					? { permissionTitle: state.permissionTitle }
+					: {}),
+				...(state.permissionDisplayName != null
+					? { permissionDisplayName: state.permissionDisplayName }
+					: {}),
+				...(state.permissionDescription != null
+					? { permissionDescription: state.permissionDescription }
+					: {}),
 				timestamp: state.timestamp,
 			});
 
@@ -222,6 +244,18 @@ export const makePendingInteractionServiceLive = (
 						toolName: input.toolName,
 						toolInput: input.toolInput,
 						always: [...(input.always ?? [])],
+						...(input.permissionSuggestions != null
+							? { permissionSuggestions: [...input.permissionSuggestions] }
+							: {}),
+						...(input.permissionTitle != null
+							? { permissionTitle: input.permissionTitle }
+							: {}),
+						...(input.permissionDisplayName != null
+							? { permissionDisplayName: input.permissionDisplayName }
+							: {}),
+						...(input.permissionDescription != null
+							? { permissionDescription: input.permissionDescription }
+							: {}),
 						timestamp,
 						...(waiter != null ? { waiter } : {}),
 					};
@@ -416,7 +450,13 @@ export const makePendingInteractionServiceLive = (
 								.map(toPendingPermission),
 						),
 					),
-				resolvePermissionFromBrowser: (requestId: string, decision: string) =>
+				resolvePermissionFromBrowser: (
+					requestId: string,
+					decision: string,
+					options?: {
+						readonly permissionDestination?: ProviderPermissionUpdateDestination;
+					},
+				) =>
 					Effect.gen(function* () {
 						const result = yield* Ref.modify(permissions, (current) => {
 							const entry = current.get(requestId);
@@ -433,9 +473,20 @@ export const makePendingInteractionServiceLive = (
 						});
 						const resolved = Option.getOrUndefined(result);
 						if (!resolved) return Option.none();
+						const selectedPermissionUpdates =
+							resolved.mapped === "always" &&
+							options?.permissionDestination != null
+								? (resolved.permissionSuggestions ?? []).filter(
+										(suggestion) =>
+											suggestion.destination === options.permissionDestination,
+									)
+								: undefined;
 						if (resolved.waiter) {
 							yield* Deferred.succeed(resolved.waiter, {
 								decision: resolved.mapped,
+								...(selectedPermissionUpdates != null
+									? { permissionUpdates: selectedPermissionUpdates }
+									: {}),
 							}).pipe(Effect.ignore);
 						}
 						return Option.some({

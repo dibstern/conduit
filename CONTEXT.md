@@ -1,0 +1,58 @@
+# Conduit
+
+Conduit is a browser-facing orchestrator for AI coding assistants. It keeps durable conversation state in its own event store while provider runtimes execute stateless turns.
+
+## Language
+
+**Provider Runtime**:
+An execution engine that runs assistant turns and streams events back into Conduit.
+_Avoid_: backend, model server
+
+**Provider Contract**:
+The externally documented and locally installed request, response, and event shapes that a provider runtime exposes to Conduit.
+_Avoid_: guessed SDK shape, TypeScript-only guarantee
+
+**Provider Envelope**:
+The discriminants and fields Conduit reads in order to route, translate, persist, or display a provider message.
+_Avoid_: arbitrary provider JSON payload
+
+**Provider-Owned Payload**:
+Nested JSON whose structure belongs to the provider or model/tool protocol and is not interpreted by Conduit.
+_Avoid_: Conduit contract field
+
+**Session Approval**:
+A user decision that allows a provider runtime to continue using a requested tool without creating a file-backed permission rule.
+_Avoid_: persisted permission, config rule
+
+**Durable Permission Rule**:
+A permission rule stored in a provider-owned settings file and reused outside the current provider session.
+_Avoid_: session approval
+
+**Approve And Remember**:
+A user decision that approves a requested tool and asks the provider runtime to persist a matching permission rule.
+_Avoid_: always allow, if the persistence scope is unclear
+
+**Provider Permission Suggestion**:
+A provider runtime's proposed permission update, including the destination it is able to persist to.
+_Avoid_: Conduit-invented permission scope
+
+## Relationships
+
+- A **Provider Runtime** may request a **Session Approval** during a turn.
+- A **Provider Contract** defines what Conduit accepts from and sends to a **Provider Runtime**.
+- A **Provider Envelope** should be runtime-decoded before adapter translation.
+- A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
+- A **Session Approval** does not create a **Durable Permission Rule**.
+- **Approve And Remember** creates a **Durable Permission Rule** only through the provider runtime that owns the rule destination.
+- A **Durable Permission Rule** belongs to the provider runtime that owns the settings file.
+- Claude **Approve And Remember** options come from Claude SDK **Provider Permission Suggestions**. Conduit should show only the destinations Claude offered and should return the user-selected destination's suggestion set, not every suggestion.
+- OpenCode approvals keep Conduit's existing OpenCode behavior. Claude destination selection does not change OpenCode's tool/pattern persistence model.
+
+## Example Dialogue
+
+> **Dev:** "When Claude asks for Always Allow, should Conduit edit OpenCode config?"
+> **Domain expert:** "No. Conduit should answer through Claude's provider runtime. If the user chose **Approve And Remember**, Claude owns the resulting **Durable Permission Rule**; OpenCode config is never involved."
+
+## Flagged Ambiguities
+
+- "Always allow" can mean either **Session Approval** or **Approve And Remember**. The UI must name the scope instead of using ambiguous provider-neutral wording.

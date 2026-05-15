@@ -21,6 +21,7 @@ import {
 	type LoadMoreHistoryResponse,
 	type PermissionDecision,
 	type PermissionPersistScope,
+	type PermissionUpdateDestination,
 	type ProjectMutationResponse,
 	type PtyListResponse,
 	type ReloadProviderSessionResponse,
@@ -155,6 +156,7 @@ export interface RespondPermissionRpcInput {
 	readonly decision: PermissionDecision;
 	readonly persistScope?: PermissionPersistScope;
 	readonly persistPattern?: string;
+	readonly permissionDestination?: PermissionUpdateDestination;
 }
 
 export interface AnswerQuestionRpcInput {

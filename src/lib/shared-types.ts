@@ -28,6 +28,71 @@ export type RequestId = typeof RequestId.Type;
 export const PermissionId = Schema.String.pipe(Schema.brand("PermissionId"));
 export type PermissionId = typeof PermissionId.Type;
 
+// ─── Provider Permission Updates ───────────────────────────────────────────
+
+export const ProviderPermissionUpdateDestinationSchema = Schema.Literal(
+	"userSettings",
+	"projectSettings",
+	"localSettings",
+	"session",
+	"cliArg",
+);
+export type ProviderPermissionUpdateDestination =
+	typeof ProviderPermissionUpdateDestinationSchema.Type;
+
+const ProviderPermissionRuleValueSchema = Schema.Struct({
+	toolName: Schema.String,
+	ruleContent: Schema.optional(Schema.String),
+});
+
+const ProviderPermissionBehaviorSchema = Schema.Literal("allow", "deny", "ask");
+const ProviderPermissionModeSchema = Schema.Literal(
+	"default",
+	"acceptEdits",
+	"bypassPermissions",
+	"plan",
+	"dontAsk",
+	"auto",
+);
+
+export const ProviderPermissionUpdateSchema = Schema.Union(
+	Schema.Struct({
+		type: Schema.Literal("addRules"),
+		rules: Schema.Array(ProviderPermissionRuleValueSchema),
+		behavior: ProviderPermissionBehaviorSchema,
+		destination: ProviderPermissionUpdateDestinationSchema,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("replaceRules"),
+		rules: Schema.Array(ProviderPermissionRuleValueSchema),
+		behavior: ProviderPermissionBehaviorSchema,
+		destination: ProviderPermissionUpdateDestinationSchema,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("removeRules"),
+		rules: Schema.Array(ProviderPermissionRuleValueSchema),
+		behavior: ProviderPermissionBehaviorSchema,
+		destination: ProviderPermissionUpdateDestinationSchema,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("setMode"),
+		mode: ProviderPermissionModeSchema,
+		destination: ProviderPermissionUpdateDestinationSchema,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("addDirectories"),
+		directories: Schema.Array(Schema.String),
+		destination: ProviderPermissionUpdateDestinationSchema,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("removeDirectories"),
+		directories: Schema.Array(Schema.String),
+		destination: ProviderPermissionUpdateDestinationSchema,
+	}),
+);
+export type ProviderPermissionUpdate =
+	typeof ProviderPermissionUpdateSchema.Type;
+
 // ─── Base16 Theme ───────────────────────────────────────────────────────────
 
 export const BASE16_KEYS = [
@@ -572,6 +637,12 @@ const PermissionRequestSchema = Schema.Struct({
 	toolInput: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	toolUseId: Schema.optional(Schema.String),
 	always: Schema.optional(Schema.Array(Schema.String)),
+	permissionSuggestions: Schema.optional(
+		Schema.Array(ProviderPermissionUpdateSchema),
+	),
+	permissionTitle: Schema.optional(Schema.String),
+	permissionDisplayName: Schema.optional(Schema.String),
+	permissionDescription: Schema.optional(Schema.String),
 });
 
 const PermissionResolvedSchema = Schema.Struct({
@@ -1171,6 +1242,10 @@ export type RelayMessage =
 			toolInput: Record<string, unknown>;
 			toolUseId?: string;
 			always?: string[];
+			permissionSuggestions?: ProviderPermissionUpdate[];
+			permissionTitle?: string;
+			permissionDisplayName?: string;
+			permissionDescription?: string;
 	  }
 	| {
 			type: "permission_resolved";

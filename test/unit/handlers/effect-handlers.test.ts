@@ -6,7 +6,7 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 // the Effect to completion, and asserts on captured calls.
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	PendingInteractionServiceLive,
@@ -1682,6 +1682,60 @@ describe("handlePermissionResponse", () => {
 		},
 	);
 
+	it.effect(
+		"does not persist OpenCode permission rules for Claude sessions",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-claude"),
+			});
+			const log = mockLogger();
+			const client = {
+				permission: { reply: vi.fn(async () => {}) },
+				config: {
+					get: vi.fn(async () => ({})),
+					update: vi.fn(async () => {}),
+				},
+			} as unknown as OpenCodeAPI;
+			const config = mockConfig();
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+			};
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, config),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				PendingInteractionServiceLive,
+			);
+
+			return Effect.gen(function* () {
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				yield* pendingInteractions.recordPermissionRequest({
+					requestId: "perm-claude" as PermissionId,
+					sessionId: "session-claude",
+					toolName: "Bash",
+					toolInput: { command: "npm test" },
+					always: [],
+				});
+
+				yield* handlePermissionResponse("client-1", {
+					requestId: "perm-claude" as PermissionId,
+					decision: "allow_always",
+					persistScope: "tool",
+				});
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.permission.reply).not.toHaveBeenCalled();
+					expect(client.config.get).not.toHaveBeenCalled();
+					expect(client.config.update).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
+
 	it.effect("processes permission response and broadcasts resolution", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -2092,6 +2146,49 @@ describe("handleNewSession", () => {
 			);
 		},
 	);
+
+	it.effect("does not wait for session list refresh before completing", () => {
+		const ws = mockWsHandler();
+		const log = mockLogger();
+		const serviceCreateSession = vi.fn(() =>
+			Effect.succeed({
+				id: "new-session-fast",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "New Session",
+				version: "1.0.0",
+				time: { created: 100, updated: 200 },
+			}),
+		);
+		const sendDualSessionLists = vi.fn(() => Effect.never);
+		const sessionManagerService = makeMockSessionManagerService({
+			createSession: serviceCreateSession,
+			sendDualSessionLists,
+		});
+		const layer = makeSessionLifecycleLayer({
+			ws,
+			sessionManagerService,
+			log,
+		});
+
+		return Effect.gen(function* () {
+			const result = yield* Effect.either(
+				handleNewSession("client-1", {
+					title: "New Session",
+					requestId: "request-fast" as RequestId,
+				}).pipe(Effect.timeout(Duration.millis(50)), Effect.provide(layer)),
+			);
+
+			expect(result._tag).toBe("Right");
+			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "session_switched",
+				id: "new-session-fast",
+				sessionId: "new-session-fast",
+				requestId: "request-fast",
+			});
+			expect(sendDualSessionLists).toHaveBeenCalled();
+		});
+	});
 
 	it.effect("logs and completes when the service list broadcast fails", () => {
 		const ws = mockWsHandler();

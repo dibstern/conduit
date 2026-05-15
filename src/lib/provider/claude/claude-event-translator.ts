@@ -128,6 +128,27 @@ export function isInterruptedResult(result: SDKResultMessage): boolean {
 	);
 }
 
+function serializeToolResultContent(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.map((block) => {
+				if (typeof block === "string") return block;
+				if (block && typeof block === "object") {
+					const record = block as Record<string, unknown>;
+					if (record["type"] === "text" && typeof record["text"] === "string") {
+						return record["text"];
+					}
+				}
+				return JSON.stringify(block);
+			})
+			.filter((part) => part != null && part !== "")
+			.join("\n");
+	}
+	if (content == null) return "";
+	return JSON.stringify(content);
+}
+
 // ─── Translator ────────────────────────────────────────────────────────────
 
 export interface ClaudeEventTranslatorDeps {
@@ -677,10 +698,7 @@ export class ClaudeEventTranslator {
 			}
 			if (!matchedTool || matchedIndex === undefined) continue;
 
-			// content on ToolResultBlockParam is string | ContentBlockParam[] | undefined.
-			// Coerce to string for downstream use.
-			const rawContent = block.content;
-			const resultContent = typeof rawContent === "string" ? rawContent : "";
+			const resultContent = serializeToolResultContent(block.content);
 
 			if (resultContent.length > 0) {
 				await this.push(

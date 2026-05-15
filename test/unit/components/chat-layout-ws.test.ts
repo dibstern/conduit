@@ -18,6 +18,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
+const wsLifecycleHarness = vi.hoisted(() => ({
+	onConnectCallbacks: [] as Array<() => void>,
+}));
 
 // Layout components
 vi.mock(
@@ -118,7 +121,9 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 			getCurrentSessionId();
 		}),
 		disconnect: vi.fn(),
-		onConnect: vi.fn(),
+		onConnect: vi.fn((callback: () => void) => {
+			wsLifecycleHarness.onConnectCallbacks.push(callback);
+		}),
 		onNavigateToSession: vi.fn(),
 		clearNavigateToSession: vi.fn(),
 		initSWNavigationListener: vi.fn(),
@@ -142,6 +147,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 		hasMore: false,
 	},
 	clearSessionState: vi.fn(),
+	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },
 }));
@@ -153,10 +159,14 @@ vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
 	terminalState: { panelOpen: false },
 	destroyAll: vi.fn(),
+	applyPtyListResponse: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 	clearDiscoveryState: vi.fn(),
+	applyGetAgentsResponse: vi.fn(),
+	applyGetCommandsResponse: vi.fn(),
+	applyGetModelsResponse: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({
@@ -189,6 +199,59 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	FILE_VIEWER_MAX_WIDTH: 600,
 }));
 
+vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
+	applyGetProjectsResponse: vi.fn(),
+}));
+
+vi.mock("../../../src/lib/frontend/stores/version.svelte.js", () => ({
+	fetchCurrentVersion: vi.fn(),
+}));
+
+vi.mock("../../../src/lib/frontend/stores/feature-flags.svelte.js", () => ({
+	featureFlags: {},
+	initFeatureFlags: vi.fn(),
+	toggleFeature: vi.fn(),
+}));
+
+vi.mock("../../../src/lib/frontend/stores/client-identity.js", () => ({
+	getBrowserClientId: vi.fn(() => "browser-client-1"),
+}));
+
+vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
+	interruptStream: vi.fn(),
+	disposeRuntime: vi.fn(),
+}));
+
+vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
+	listSessionsRpc: vi.fn(async (input: { roots?: boolean }) => ({
+		projectSlug: "test-project",
+		roots: input.roots === true,
+		sessions: [],
+	})),
+	getAgentsRpc: vi.fn(async () => {
+		throw new Error("agents temporarily unavailable");
+	}),
+	getModelsRpc: vi.fn(async () => {
+		throw new Error("models temporarily unavailable");
+	}),
+	getCommandsRpc: vi.fn(async () => {
+		throw new Error("commands temporarily unavailable");
+	}),
+	getProjectsRpc: vi.fn(async () => ({
+		projectSlug: "test-project",
+		projects: [],
+		current: "test-project",
+	})),
+	getFileTreeRpc: vi.fn(async () => ({
+		projectSlug: "test-project",
+		files: [],
+	})),
+	listPtysRpc: vi.fn(async () => ({
+		projectSlug: "test-project",
+		ptys: [],
+	})),
+}));
+
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
 
 import ChatLayout from "../../../src/lib/frontend/components/layout/ChatLayout.svelte";
@@ -196,9 +259,11 @@ import {
 	routerState,
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
 	connect,
 	disconnect,
+	onConnect,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -206,6 +271,7 @@ import {
 describe("ChatLayout WS lifecycle", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		wsLifecycleHarness.onConnectCallbacks = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.
 		vi.stubGlobal("localStorage", {
@@ -233,6 +299,25 @@ describe("ChatLayout WS lifecycle", () => {
 
 		expect(connect).toHaveBeenCalledTimes(1);
 		expect(connect).toHaveBeenCalledWith("test-project");
+	});
+
+	it("does not toast when optional discovery RPCs fail on connect", async () => {
+		render(ChatLayout);
+
+		expect(onConnect).toHaveBeenCalledTimes(1);
+		wsLifecycleHarness.onConnectCallbacks[0]?.();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(showToast).not.toHaveBeenCalledWith("Failed to load agents", {
+			variant: "error",
+		});
+		expect(showToast).not.toHaveBeenCalledWith("Failed to load models", {
+			variant: "error",
+		});
+		expect(showToast).not.toHaveBeenCalledWith("Failed to load commands", {
+			variant: "error",
+		});
 	});
 
 	// This is the regression test for the untrack() fix. Without untrack(),

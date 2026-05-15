@@ -41,6 +41,7 @@ import {
 	isInterruptedResult,
 } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
+import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
 import type {
@@ -381,8 +382,19 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				// endSession, shutdown) leaves it in sessions with a closed prompt
 				// queue; enqueueing would throw. Evict silently and create fresh.
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
+				const providerState =
+					existingCtx.resumeSessionId != null
+						? {
+								...input.providerState,
+								resumeSessionId: existingCtx.resumeSessionId,
+							}
+						: input.providerState;
 				this.sessions.delete(sessionId);
 				this.endedSessionStreams.delete(sessionId);
+				return yield* this.createSessionAndSendTurnEffect({
+					...input,
+					providerState,
+				});
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 				if (this.hasPendingTurn(sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
@@ -482,6 +494,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				const options: SDKOptions = {
 					cwd: input.workspaceRoot,
 					abortController,
+					env: makeClaudeSdkEnv(),
 					includePartialMessages: true,
 					settingSources: ["user", "project", "local"],
 					canUseTool: bridge.createCanUseTool(ctx),

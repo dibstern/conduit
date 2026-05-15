@@ -13,6 +13,7 @@ import {
 	getAgent,
 	makeOverridesStateLive,
 	setAgent,
+	setDefaultModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleGetAgents } from "../../../src/lib/handlers/agent.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -281,6 +282,55 @@ describe("handleGetAgents active provider", () => {
 					});
 				}),
 			);
+		},
+	);
+
+	it.effect(
+		"uses Claude agents immediately when the default provider is Claude",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => undefined),
+			});
+			const client = {
+				app: {
+					agents: vi.fn(async () => {
+						throw new Error("opencode should not be queried");
+					}),
+				},
+			} as unknown as OpenCodeAPI;
+			const engine = {
+				dispatchEffect: vi.fn(() =>
+					Effect.succeed({
+						models: [],
+						supportsTools: true,
+						supportsThinking: true,
+						supportsPermissions: true,
+						supportsQuestions: true,
+						supportsAttachments: true,
+						supportsFork: false,
+						supportsRevert: false,
+						commands: [],
+						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
+					}),
+				),
+			} as unknown as OrchestrationEngine;
+
+			return Effect.gen(function* () {
+				yield* setDefaultModel({
+					providerID: "claude",
+					modelID: "default",
+				});
+				yield* handleGetAgents("client-1", {});
+				expect(client.app.agents).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).toHaveBeenCalledWith({
+					type: "discover",
+					providerId: "claude",
+				});
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "agent_list",
+					agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
+				});
+			}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
 		},
 	);
 

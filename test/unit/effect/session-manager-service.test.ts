@@ -21,6 +21,7 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
@@ -55,6 +56,8 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -314,6 +317,48 @@ describe("SessionManagerService", () => {
 						title: "Local Claude",
 					}),
 				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"live service creates a local Claude session before model discovery sets a default provider",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-local-default-${Date.now()}.sqlite`,
+			);
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create");
+			const engine = new OrchestrationEngine({
+				registry: new ProviderRegistry(),
+			});
+			const bindSession = vi.spyOn(engine, "bindSession");
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+
+				const session = yield* service.createSession("Local before models");
+
+				expect(session.id).toMatch(/^ses_/);
+				expect(session.providerID).toBe("claude");
+				expect(api.session.create).not.toHaveBeenCalled();
+				expect(bindSession).toHaveBeenCalledWith(session.id, "claude");
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),

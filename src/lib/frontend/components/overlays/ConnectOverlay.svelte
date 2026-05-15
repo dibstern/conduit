@@ -5,6 +5,7 @@
 	import { fade } from "svelte/transition";
 	import { wsState, getIsConnected } from "../../stores/ws.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
+	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import {
 		applyInstanceListResponse,
 		getInstanceById,
@@ -36,6 +37,7 @@
 	let cachedInstanceId = $state<string | null>(null);
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
+	let cachedProviderId = $state<string | null>(null);
 
 	const instanceName = $derived.by(() => {
 		const slug = projectState.currentSlug;
@@ -54,6 +56,12 @@
 	$effect(() => {
 		if (instanceName && instanceName !== cachedInstanceName) {
 			cachedInstanceName = instanceName;
+		}
+	});
+
+	$effect(() => {
+		if (discoveryState.currentProviderId) {
+			cachedProviderId = discoveryState.currentProviderId;
 		}
 	});
 
@@ -82,8 +90,12 @@
 	// Show instance action buttons when overlay is visible, instance was unhealthy/stopped,
 	// and there are multiple instances
 	const showInstanceActions = $derived(
-		!connected && cachedMultiInstance && cachedInstanceStatus != null &&
+		cachedProviderId !== "claude" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
+	);
+
+	const connectionTargetName = $derived(
+		cachedProviderId === "claude" ? "Claude" : instanceName,
 	);
 
 	// ─── Status display text ────────────────────────────────────────────────────
@@ -96,10 +108,10 @@
 			wsState.statusText === "" ||
 			!wsState.statusText
 		) {
-			return `Connecting to ${instanceName} server...`;
+			return `Connecting to ${connectionTargetName} server...`;
 		}
 		if (wsState.statusText === "Disconnected") {
-			return `Reconnecting to ${instanceName} server...`;
+			return `Reconnecting to ${connectionTargetName} server...`;
 		}
 		return wsState.statusText;
 	});

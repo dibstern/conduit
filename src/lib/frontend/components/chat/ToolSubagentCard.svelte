@@ -130,12 +130,12 @@
 
 		<!-- Agent label + description -->
 		<div class="flex-1 min-w-0">
-			<span class="agent-title text-text-dimmer font-medium capitalize">
+			<span class="agent-title text-text-dimmer font-medium capitalize select-text">
 				{agentLabel}
 			</span>
 			{#if agentDescription}
 				<span
-					class="subagent-link block text-xs text-text-dimmer truncate max-w-full mt-0.5"
+					class="subagent-link block text-xs text-text-dimmer truncate max-w-full mt-0.5 select-text"
 					class:underline={!!subagentSessionId}
 					class:hover:text-accent={!!subagentSessionId}
 				>

@@ -9,6 +9,7 @@ import type {
 	ModelInfo,
 	ProviderAgentInfo,
 } from "../types.js";
+import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
 import { TTLCache } from "./ttl-cache.js";
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
@@ -177,6 +178,7 @@ export async function probeClaudeCapabilities(
 				persistSession: false,
 				maxTurns: 0,
 				cwd: deps.workspaceRoot,
+				env: makeClaudeSdkEnv(),
 				settingSources: ["user", "project", "local"],
 				abortController,
 				allowedTools: [],

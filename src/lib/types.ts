@@ -3,7 +3,12 @@
 
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
-import type { PartType, PermissionId, ToolStatus } from "./shared-types.js";
+import type {
+	PartType,
+	PermissionId,
+	ProviderPermissionUpdate,
+	ToolStatus,
+} from "./shared-types.js";
 
 type MaybePromise<T> = T | PromiseLike<T>;
 
@@ -22,6 +27,8 @@ export type {
 	PerSessionEvent,
 	PerSessionEventType,
 	ProviderInfo,
+	ProviderPermissionUpdate,
+	ProviderPermissionUpdateDestination,
 	PtyInfo,
 	PtyStatus,
 	RelayMessage,
@@ -140,6 +147,10 @@ export interface PendingPermission {
 	toolName: string;
 	toolInput: Record<string, unknown>;
 	always: string[];
+	permissionSuggestions?: ProviderPermissionUpdate[];
+	permissionTitle?: string;
+	permissionDisplayName?: string;
+	permissionDescription?: string;
 	timestamp: number;
 }
 

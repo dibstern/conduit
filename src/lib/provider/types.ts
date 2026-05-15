@@ -6,6 +6,7 @@
 
 import type { Effect, Scope } from "effect";
 import type { CanonicalEvent } from "../persistence/events.js";
+import type { ProviderPermissionUpdate } from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 
 // ─── Permission / Question Decisions ────────────────────────────────────────
@@ -20,10 +21,15 @@ export interface PermissionRequest {
 	readonly turnId: string;
 	readonly providerItemId: string;
 	readonly always?: string[];
+	readonly permissionSuggestions?: readonly ProviderPermissionUpdate[];
+	readonly permissionTitle?: string;
+	readonly permissionDisplayName?: string;
+	readonly permissionDescription?: string;
 }
 
 export interface PermissionResponse {
 	readonly decision: PermissionDecision;
+	readonly permissionUpdates?: readonly ProviderPermissionUpdate[];
 }
 
 export interface QuestionRequest {

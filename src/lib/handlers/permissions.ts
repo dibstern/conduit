@@ -21,13 +21,17 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
-import type { PermissionId } from "../shared-types.js";
+import type {
+	PermissionId,
+	ProviderPermissionUpdateDestination,
+} from "../shared-types.js";
 
 interface PermissionResponsePayload {
 	readonly requestId: PermissionId;
 	readonly decision: string;
 	readonly persistScope?: "tool" | "pattern";
 	readonly persistPattern?: string;
+	readonly permissionDestination?: ProviderPermissionUpdateDestination;
 }
 
 interface AskUserResponsePayload {
@@ -158,12 +162,19 @@ export const handlePermissionResponse = (
 		const log = yield* LoggerTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 
-		const { requestId, decision, persistScope, persistPattern } = payload;
+		const {
+			requestId,
+			decision,
+			persistScope,
+			persistPattern,
+			permissionDestination,
+		} = payload;
 		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
 		const resultOption =
 			yield* pendingInteractions.resolvePermissionFromBrowser(
 				requestId,
 				decision,
+				permissionDestination != null ? { permissionDestination } : undefined,
 			);
 		const result = Option.getOrUndefined(resultOption);
 
@@ -199,7 +210,7 @@ export const handlePermissionResponse = (
 			});
 
 			// Persist to opencode.jsonc when the user chose "Always Allow"
-			if (decision === "allow_always" && persistScope) {
+			if (decision === "allow_always" && persistScope && !isClaudeSession) {
 				yield* persistPermissionRule(
 					result.toolName,
 					persistScope,

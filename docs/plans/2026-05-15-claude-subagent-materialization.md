@@ -14,10 +14,13 @@
 
 - Claude subagent output is represented as child sessions in conduit's event store, not inline parent-card output.
 - Child session IDs are deterministic conduit IDs derived from `{ parentConduitSessionId, parentClaudeSessionId, sdkSubagentId }`, for example `claude-subagent-${sha256(...).slice(0, 24)}`.
-- The parent Task tool stores `metadata.childSessionId` and `metadata.sdkSubagentId`; the UI should navigate using that metadata before falling back to old result-text parsing.
+- The parent Task tool stores `metadata.childSessionId` and `metadata.sdkSubagentId`; the UI should navigate using canonical metadata and Task input only.
 - Claude SDK transcript APIs are accessed through a narrow adapter seam so tests never need the real local Claude config.
 - New schema and projector fields are optional and backwards-compatible.
 - Do not assume `task_id === sdkSubagentId` until a test/fixture proves it. The materializer should first support direct match, then keep unmatched discovered subagents visible as child sessions without wiring them to a parent tool card.
+- Make the Claude translator contract explicit in tests: typed SDK fixture -> canonical event -> relay message -> persisted history -> frontend `ToolMessage`.
+- `ToolSubagentCard` should use a small `isTaskInput()` guard and read canonical `subagentType` / `taskId` only. Snake-case compatibility belongs in provider normalization before the data reaches frontend components.
+- Promptability is deliberately phased. First materialize/read Claude child sessions. Then prove whether the Claude SDK accepts follow-up messages targeted with `SDKUserMessage.parent_tool_use_id`. Only after that proof should conduit add a child-session send path, and that path must route through the parent Claude SDK query rather than creating an independent `claude-subagent-*` query.
 
 ---
 
@@ -70,7 +73,25 @@ expect(metadata).toMatchObject({
 expect(metadata).not.toHaveProperty("subagent_type")
 ```
 
-**Step 5: Run focused tests**
+**Step 5: Add an explicit translator contract test**
+
+Add a focused contract test that drives the full path with typed fixtures, not broad casts:
+
+1. Build a typed Claude SDK fixture for a Task tool use and task-progress/subagent metadata.
+2. Translate it into canonical events.
+3. Pass those events through `RelayEventSink`.
+4. Persist and read the resulting history.
+5. Convert history to frontend chat messages and assert the final `ToolMessage` has canonical `input.subagentType`, `input.taskId` when present, and `metadata.childSessionId` when materialized.
+
+Name the test around the contract, for example:
+
+```ts
+it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage")
+```
+
+This is the guard that prevents Claude SDK field extraction from silently landing in the wrong layer of conduit's cross-provider types.
+
+**Step 6: Run focused tests**
 
 Run:
 
@@ -517,6 +538,166 @@ git commit -m "feat(claude): materialize subagents as child sessions"
 
 ---
 
+## Task 5B: Prove and Add Promptable Claude Child Sessions
+
+This is a three-part sub-plan. Do not implement Part 3 until Part 2 gives concrete evidence that Claude Agent SDK subagent targeting works.
+
+### Part 1: Materialize and Read Child Sessions Only
+
+**Files:**
+- Modify: files from Task 5
+- Modify: `src/lib/handlers/prompt.ts`
+- Test: `test/unit/handlers/prompt.test.ts` or the nearest existing prompt-handler test
+- Test: `test/unit/pipeline/claude-subagent-materialization.test.ts`
+
+**Step 1: Treat initial child sessions as transcript sessions**
+
+After Task 5, a materialized Claude child session must be:
+
+- persisted in conduit's event store
+- linked to the parent session with `parentId`
+- visible through direct session switch
+- excluded from roots-only session lists
+- not backed by an independent Claude SDK query
+
+**Step 2: Prevent accidental independent sends**
+
+Add a failing test that attempts to send a prompt while the active session is a materialized `claude-subagent-*` child session before Part 3 exists.
+
+Expected behavior for Part 1:
+
+- prompt handling does not call the normal top-level Claude `sendTurn`
+- orchestration does not bind `claude-subagent-*` as a new provider session
+- the UI receives an explicit unsupported message such as "Claude subagent replies are not enabled yet"
+
+This prevents the dangerous middle state where child transcripts look promptable but a send silently creates the wrong Claude conversation.
+
+**Step 3: Commit with read-only semantics**
+
+If this needs a separate commit from Task 5:
+
+```bash
+git add src/lib/handlers test/unit/handlers test/unit/pipeline
+git commit -m "fix(claude): keep materialized subagents read-only"
+```
+
+### Part 2: Prove `parent_tool_use_id` Targeting Against the Real SDK
+
+**Files:**
+- Create: `test/integration/claude-subagent-parent-tool-use-id.test.ts` or `scripts/probe-claude-subagent-parent-tool-use-id.ts`
+- Optionally update: `docs/plans/2026-05-15-claude-subagent-materialization.md` with probe results before Part 3
+
+**Step 1: Build an opt-in real-SDK probe**
+
+The probe should run only when an explicit environment variable is set, for example:
+
+```bash
+CONDUIT_REAL_CLAUDE_SUBAGENT_PROBE=1 pnpm vitest run test/integration/claude-subagent-parent-tool-use-id.test.ts
+```
+
+It should:
+
+1. start a real Claude SDK query in a temporary workspace
+2. send a prompt that reliably causes a `Task` tool call
+3. capture the parent Task `tool_use_id`, SDK `task_id`, and any `task_started.tool_use_id`
+4. call `listSubagents(parentClaudeSessionId, { dir })`
+5. call `getSubagentMessages(parentClaudeSessionId, sdkSubagentId, { dir })`
+6. send a follow-up `SDKUserMessage` through the same parent query with `parent_tool_use_id`
+7. verify the follow-up appears in the subagent transcript and produces a subagent-scoped assistant reply
+
+**Step 2: Test candidate target IDs explicitly**
+
+Do not assume which SDK identifier belongs in `parent_tool_use_id`. Try candidates in this order and record which one works:
+
+1. `task_started.tool_use_id` when present
+2. the parent Task content block `tool_use_id`
+3. `sdkSubagentId` only if SDK behavior indicates it is accepted
+
+Passing criterion: after sending the targeted user message, the next `getSubagentMessages()` call for that SDK subagent contains the new user content and a subsequent assistant response attributable to that subagent.
+
+Failing criterion: the message is ignored, appears only in the parent transcript, creates a new top-level turn, or cannot be sent without a provider error.
+
+**Step 3: Capture the result before implementation**
+
+If targeting works, update this plan with:
+
+- the exact identifier that `parent_tool_use_id` must contain
+- the observed SDK message fields on the resulting user and assistant messages
+- whether streamed events carry `parent_tool_use_id` during the targeted reply
+- any SDK version constraints
+
+If targeting does not work, stop here. Keep child sessions as read-only transcript sessions and do not implement Part 3.
+
+### Part 3: Add Explicit Child-Session Send Routing If the Probe Passes
+
+**Files:**
+- Modify: `src/lib/handlers/prompt.ts`
+- Modify: `src/lib/provider/types.ts`
+- Modify: `src/lib/provider/claude/claude-provider-instance.ts`
+- Modify: `src/lib/provider/claude/claude-event-translator.ts`
+- Modify: `src/lib/provider/claude/types.ts`
+- Modify: `src/lib/persistence/effect/claude-event-persist-effect.ts`
+- Test: `test/unit/provider/claude/claude-provider-instance-send-turn.test.ts`
+- Test: `test/unit/provider/claude/claude-event-translator.test.ts`
+- Test: `test/unit/handlers/prompt.test.ts`
+- Test: `test/unit/pipeline/claude-subagent-materialization.test.ts`
+
+**Step 1: Store the routing metadata on child sessions**
+
+Materialization must persist enough metadata to route a child prompt back to the parent query:
+
+```ts
+{
+  parentSessionId: "parent-conduit-session",
+  parentClaudeSessionId: "claude-sdk-parent-session",
+  sdkSubagentId: "sdk-subagent-id",
+  parentToolUseId: "task-tool-use-id-that-the-probe-proved",
+  promptable: true,
+}
+```
+
+Store this in canonical session/provider state, not by parsing child session IDs.
+
+**Step 2: Route child prompts through the parent session**
+
+When `sendMessageToSession()` receives a materialized Claude child session:
+
+- look up its parent routing metadata
+- build a child-session event sink so live and persisted output goes to the child window
+- dispatch to the parent Claude provider context, not to a new `claude-subagent-*` provider context
+- enqueue an `SDKUserMessage` with `parent_tool_use_id: parentToolUseId`
+
+Do not let the orchestration engine bind `claude-subagent-*` as an independent Claude provider session.
+
+**Step 3: Route streamed targeted output back to the child session**
+
+In the Claude translator/provider instance, route SDK messages with the proven child `parent_tool_use_id` to the child session sink and persistence path.
+
+Required tests:
+
+- child prompt becomes an SDK user message with the proven `parent_tool_use_id`
+- parent session does not receive the child user's message as normal parent history
+- child session receives the targeted assistant response
+- parent Task card remains linked to the child session
+- interruption/permission/question handling uses the child session for UI display but resolves through the parent query
+
+**Step 4: Update capability/UI behavior**
+
+Only after Part 3 passes:
+
+- remove the Part 1 unsupported-send response for promptable Claude child sessions
+- keep unsupported-send behavior for non-promptable materialized children
+- surface the child session as promptable only when routing metadata has `promptable: true`
+
+**Step 5: Commit**
+
+```bash
+git add src/lib/handlers src/lib/provider src/lib/persistence/effect test/unit
+git commit -m "feat(claude): send prompts to materialized subagents"
+```
+
+---
+
 ## Task 6: Fix Parent Task Card Rendering and Navigation
 
 **Files:**
@@ -525,38 +706,33 @@ git commit -m "feat(claude): materialize subagents as child sessions"
 - Test: component/unit test from Task 1
 - Test: `test/visual/tool-item.spec.ts`
 
-**Step 1: Replace ad hoc input parsing**
+**Step 1: Replace ad hoc input parsing with an `isTaskInput()` guard**
 
-Add a small local parser:
+Add a small local guard that accepts the canonical cross-provider Task input only:
 
 ```ts
-function readTaskInput(input: unknown): {
+type TaskInput = {
+  tool: "Task";
   description: string;
   subagentType: string;
   prompt: string;
   taskId?: string;
-} | null {
-  if (!input || typeof input !== "object") return null;
+};
+
+function isTaskInput(input: unknown): input is TaskInput {
+  if (!input || typeof input !== "object") return false;
   const record = input as Record<string, unknown>;
-  return {
-    description: typeof record["description"] === "string" ? record["description"] : "",
-    subagentType:
-      typeof record["subagentType"] === "string"
-        ? record["subagentType"]
-        : typeof record["subagent_type"] === "string"
-          ? record["subagent_type"]
-          : "general",
-    prompt: typeof record["prompt"] === "string" ? record["prompt"] : "",
-    ...(typeof record["taskId"] === "string"
-      ? { taskId: record["taskId"] }
-      : typeof record["task_id"] === "string"
-        ? { taskId: record["task_id"] }
-        : {}),
-  };
+  return (
+    record["tool"] === "Task" &&
+    typeof record["description"] === "string" &&
+    typeof record["subagentType"] === "string" &&
+    typeof record["prompt"] === "string" &&
+    (record["taskId"] === undefined || typeof record["taskId"] === "string")
+  );
 }
 ```
 
-Keep backwards-compatible snake_case reads only as migration fallback. Canonical output remains camelCase.
+Use `isTaskInput(message.input)` before rendering Task-specific fields. Do not read `subagent_type` or `task_id` in `ToolSubagentCard`; those fields must be normalized to canonical `subagentType` / `taskId` before the frontend sees them.
 
 **Step 2: Prefer childSessionId metadata for navigation**
 
@@ -565,7 +741,8 @@ Update `subagentSessionId` priority:
 1. `message.metadata.childSessionId`
 2. `message.metadata.sessionId`
 3. `taskInput.taskId`
-4. result text `task_id: ...` legacy fallback
+
+Do not parse `task_id:` out of result text. If legacy history needs migration, handle it in the history adapter or migration layer by producing canonical metadata/input before `ToolSubagentCard` receives the message.
 
 Do not require IDs to start with `ses_`; Claude child sessions use `claude-subagent-*`.
 
@@ -582,7 +759,7 @@ The child session window shows the transcript.
 
 **Step 4: Update mocks**
 
-Change story mocks to use canonical `subagentType` and `metadata.childSessionId`, while keeping one legacy snake_case story if useful.
+Change story mocks to use canonical `subagentType`, canonical `taskId` where needed, and `metadata.childSessionId`.
 
 **Step 5: Run tests**
 
@@ -815,7 +992,10 @@ Confirm:
 - Claude parent Task tools navigate to child sessions via `metadata.childSessionId`.
 - Child sessions use `parentID` and are hidden by roots-only session list mode.
 - Claude subagent transcript text appears in the child session window.
+- Before the real-SDK probe passes, materialized Claude child sessions cannot accidentally create independent provider sessions when prompted.
+- If the real-SDK probe passes, promptable Claude child sessions route sends through the parent Claude query with the proven `parent_tool_use_id`.
+- If the real-SDK probe fails, child sessions remain read-only and Part 3 is not implemented.
 - No parent Task card attempts to inline large subagent output.
-- Canonical Task input uses `subagentType`, with snake_case only as backward-compatible UI fallback.
+- Canonical Task input uses `subagentType` / `taskId`; `ToolSubagentCard` does not read snake_case fields or parse IDs out of result text.
 - Claude SDK fields used by conduit are pinned by type tests against real SDK imports.
 - Provider key drift is resolved or explicitly documented if not changed.

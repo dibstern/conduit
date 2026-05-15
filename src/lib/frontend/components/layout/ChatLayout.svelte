@@ -352,30 +352,24 @@
 						showToast("Failed to load sessions", { variant: "error" });
 					});
 				const routeSessionId = getCurrentSessionId();
-				void getAgentsRpc({
-					projectSlug: slug,
-					...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-				})
-					.then(applyGetAgentsResponse)
-					.catch(() => {
-						showToast("Failed to load agents", { variant: "error" });
-					});
-				void getModelsRpc({
-					projectSlug: slug,
-					...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-				})
-					.then(applyGetModelsResponse)
-					.catch(() => {
-						showToast("Failed to load models", { variant: "error" });
-					});
-				void getCommandsRpc({
-					projectSlug: slug,
-					...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-				})
-					.then(applyGetCommandsResponse)
-					.catch(() => {
-						showToast("Failed to load commands", { variant: "error" });
-					});
+					void getAgentsRpc({
+						projectSlug: slug,
+						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+					})
+						.then(applyGetAgentsResponse)
+						.catch(() => undefined);
+					void getModelsRpc({
+						projectSlug: slug,
+						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+					})
+						.then(applyGetModelsResponse)
+						.catch(() => undefined);
+					void getCommandsRpc({
+						projectSlug: slug,
+						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+					})
+						.then(applyGetCommandsResponse)
+						.catch(() => undefined);
 				void getProjectsRpc({ projectSlug: slug })
 					.then(applyGetProjectsResponse)
 					.catch(() => {

@@ -13,7 +13,12 @@
 	// ─── Skill name parsing ──────────────────────────────────────────────
 	const skillName = $derived.by(() => {
 		const inp = message.input as Record<string, unknown> | null | undefined;
-		return (inp?.['name'] as string) ?? null;
+		const inputName = inp?.["name"] ?? inp?.["skill_name"] ?? inp?.["skillName"];
+		if (typeof inputName === "string" && inputName.length > 0) return inputName;
+		const match = message.result?.match(
+			/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']/,
+		);
+		return match?.[1] ?? null;
 	});
 
 	/** Format the skill name for display: kebab-case → Title Case */
@@ -73,7 +78,7 @@
 >
 	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-[10px] {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
 		<button
-			class="skill-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left rounded-t-[10px]"
+			class="skill-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-text text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left rounded-t-[10px]"
 			onclick={handleToggle}
 		>
 			<!-- Status icon -->
@@ -92,11 +97,11 @@
 
 			<!-- Skill label -->
 			<div class="flex-1 min-w-0">
-				<span class="skill-title text-text-dimmer font-medium">
+				<span class="skill-title text-text-dimmer font-medium select-text">
 					{skillDisplayName}
 				</span>
 				{#if skillName}
-					<span class="text-text-dimmer font-mono text-xs ml-1.5">
+					<span class="text-text-dimmer font-mono text-xs ml-1.5 select-text">
 						{skillName}
 					</span>
 				{/if}
@@ -115,7 +120,7 @@
 
 		{#if expanded && message.result}
 			<div
-				class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[300px] overflow-y-auto"
+				class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[300px] overflow-y-auto select-text"
 			>
 				{message.result.replace(/^<skill_content[^>]*>\n?/, "").replace(/\n?<\/skill_content>\s*$/, "")}
 			</div>

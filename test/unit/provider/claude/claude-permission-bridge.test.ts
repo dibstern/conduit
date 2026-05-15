@@ -1,6 +1,7 @@
 // test/unit/provider/claude/claude-permission-bridge.test.ts
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudePermissionBridge } from "../../../../src/lib/provider/claude/claude-permission-bridge.js";
@@ -220,6 +221,58 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 		expect(result.behavior).toBe("allow");
+	});
+
+	it("returns selected Claude SDK permission updates when approving remembered scope", async () => {
+		const sessionSuggestion: PermissionUpdate = {
+			type: "addRules",
+			behavior: "allow",
+			destination: "session",
+			rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+		};
+		const localSuggestion: PermissionUpdate = {
+			type: "addRules",
+			behavior: "allow",
+			destination: "localSettings",
+			rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+		};
+		const suggestions = [sessionSuggestion, localSuggestion];
+
+		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			permissionResponseEffect({
+				decision: "always",
+				permissionUpdates: [localSuggestion],
+			} as unknown as PermissionResponse),
+		);
+
+		const ac = new AbortController();
+		const options = {
+			signal: ac.signal,
+			toolUseID: "tool-remember",
+			suggestions,
+			title: "Claude wants to run npm test",
+			displayName: "Run command",
+			description: "Claude will run npm test in this project.",
+		};
+		const result = await bridge.canUseTool(
+			ctx,
+			"Bash",
+			{ command: "npm test" },
+			options,
+		);
+
+		expect(sink.requestPermission).toHaveBeenCalledWith(
+			expect.objectContaining({
+				permissionSuggestions: suggestions,
+				permissionTitle: "Claude wants to run npm test",
+				permissionDisplayName: "Run command",
+				permissionDescription: "Claude will run npm test in this project.",
+			}),
+		);
+		expect(result).toMatchObject({
+			behavior: "allow",
+			updatedPermissions: [localSuggestion],
+		});
 	});
 
 	it("createCanUseTool returns a function with the CanUseTool signature", async () => {
