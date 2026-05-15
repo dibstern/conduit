@@ -5,6 +5,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createOpencodeServer } from "@opencode-ai/sdk/server";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock daemon-utils before importing startForegroundDaemon
@@ -21,6 +23,13 @@ vi.mock("../../../src/lib/daemon/daemon-utils.js", async (importOriginal) => {
 	};
 });
 
+vi.mock("@opencode-ai/sdk/server", () => ({
+	createOpencodeServer: vi.fn().mockResolvedValue({
+		url: "http://127.0.0.1:4096",
+		close: vi.fn(),
+	}),
+}));
+
 import {
 	isOpencodeInstalled,
 	probeOpenCode,
@@ -30,9 +39,11 @@ import {
 	OpenCodeUnavailableError,
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { resolveSmartDefaultInstances } from "../../../src/lib/domain/daemon/Services/opencode-smart-default.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);
+const mockCreateOpencodeServer = vi.mocked(createOpencodeServer);
 
 function makeTmpDir(): string {
 	return mkdtempSync(join(tmpdir(), "daemon-auto-start-"));
@@ -55,6 +66,10 @@ describe("daemon auto-start (probe-and-convert)", () => {
 	beforeEach(() => {
 		tmpDir = makeTmpDir();
 		vi.clearAllMocks();
+		mockCreateOpencodeServer.mockResolvedValue({
+			url: "http://127.0.0.1:4096",
+			close: vi.fn(),
+		});
 	});
 
 	afterEach(async () => {
@@ -82,6 +97,28 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		expect(mockInstalled).not.toHaveBeenCalled();
 	});
 
+	it("prefers a healthy localhost:4096 OpenCode over a persisted managed default", async () => {
+		mockProbe.mockResolvedValue(true);
+
+		const instances = await Effect.runPromise(
+			resolveSmartDefaultInstances(
+				[{ id: "default", name: "opencode", port: 4096, managed: true }],
+				{ smartDefault: true },
+			),
+		);
+
+		expect(instances).toEqual([
+			{
+				id: "default",
+				name: "opencode",
+				port: 4096,
+				managed: false,
+				url: "http://localhost:4096",
+			},
+		]);
+		expect(mockInstalled).not.toHaveBeenCalled();
+	});
+
 	it("converts to managed when OpenCode is unreachable and binary exists", async () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
@@ -96,6 +133,27 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		const inst = instances.find((i: { id: string }) => i.id === "default");
 		expect(inst).toBeDefined();
 		expect(inst?.managed).toBe(true);
+	});
+
+	it("starts the managed default through the OpenCode SDK server helper", async () => {
+		mockProbe.mockResolvedValue(false);
+		mockInstalled.mockResolvedValue(true);
+
+		daemon = await startForegroundDaemon({
+			...daemonOpts(tmpDir),
+			opencodeUrl: "http://localhost:4096",
+			smartDefault: true,
+		});
+
+		expect(mockCreateOpencodeServer).toHaveBeenCalledWith(
+			expect.objectContaining({
+				hostname: "127.0.0.1",
+				port: 4096,
+			}),
+		);
+		const instances = daemon.getInstances();
+		const inst = instances.find((i: { id: string }) => i.id === "default");
+		expect(inst?.status).toBe("healthy");
 	});
 
 	it("throws when OpenCode is unreachable and binary is not installed", async () => {

@@ -89,6 +89,7 @@ import {
 	makeInstanceManagerStateLive,
 	type PollerFibersTag,
 	startInitialUnmanagedInstanceHealthPollers,
+	startManagedOpenCodeServers,
 } from "../Services/instance-manager-service.js";
 import {
 	IpcHandlersLayer,
@@ -301,6 +302,12 @@ const InstanceHealthPollingLive: Layer.Layer<
 	never,
 	DaemonEventBusTag | InstanceManagerStateTag | PollerFibersTag
 > = Layer.scopedDiscard(startInitialUnmanagedInstanceHealthPollers);
+
+const ManagedOpenCodeServersLive: Layer.Layer<
+	never,
+	never,
+	DaemonEventBusTag | InstanceManagerStateTag
+> = Layer.scopedDiscard(startManagedOpenCodeServers);
 
 // ─── DaemonState & RelayCache Layers ──────────────────────────────────────
 
@@ -847,8 +854,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
 
-	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
+	const withManagedOpenCodeServers = ManagedOpenCodeServersLive.pipe(
 		Layer.provideMerge(registryState),
+	);
+
+	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
+		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 
 	const withConfigPersistence = ConfigPersistenceLive.pipe(

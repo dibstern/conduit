@@ -53,6 +53,13 @@ export const defaultInstanceForUrl = (url: string): DaemonInstanceConfig => ({
 const defaultUrlForInstance = (instance: DaemonInstanceConfig): string =>
 	instance.url ?? `http://localhost:${instance.port}`;
 
+const externalDefaultForHealthyLocalhost = (
+	instance: DaemonInstanceConfig,
+): DaemonInstanceConfig => ({
+	...defaultInstanceForUrl(DEFAULT_OPENCODE_URL),
+	name: instance.name,
+});
+
 const probeReachable = (url: string) =>
 	Effect.tryPromise(() => probeOpenCode(url)).pipe(
 		Effect.orElseSucceed(() => false),
@@ -78,6 +85,31 @@ const convertUnreachableDefault = (instance: DaemonInstanceConfig) =>
 			return yield* new OpenCodeUnavailableError({
 				url,
 				port: instance.port,
+			});
+		}
+
+		const freePort = yield* findAvailablePort(instance.port);
+		const { url: _url, ...managedInstance } = instance;
+		return {
+			...managedInstance,
+			port: freePort,
+			managed: true,
+		} satisfies DaemonInstanceConfig;
+	});
+
+const resolvePersistedManagedDefault = (instance: DaemonInstanceConfig) =>
+	Effect.gen(function* () {
+		const reachableLocalhostDefault =
+			yield* probeReachable(DEFAULT_OPENCODE_URL);
+		if (reachableLocalhostDefault) {
+			return externalDefaultForHealthyLocalhost(instance);
+		}
+
+		const installed = yield* hasOpenCodeBinary;
+		if (!installed) {
+			return yield* new OpenCodeUnavailableError({
+				url: DEFAULT_OPENCODE_URL,
+				port: DEFAULT_OPENCODE_PORT,
 			});
 		}
 
@@ -137,8 +169,10 @@ export const resolveSmartDefaultInstances = (
 		);
 		if (defaultIndex >= 0) {
 			const defaultInstance = instances[defaultIndex];
-			if (defaultInstance == null || defaultInstance.managed) return instances;
-			const resolvedDefault = yield* convertUnreachableDefault(defaultInstance);
+			if (defaultInstance == null) return instances;
+			const resolvedDefault = defaultInstance.managed
+				? yield* resolvePersistedManagedDefault(defaultInstance)
+				: yield* convertUnreachableDefault(defaultInstance);
 			return instances.map((instance, index) =>
 				index === defaultIndex ? resolvedDefault : instance,
 			);

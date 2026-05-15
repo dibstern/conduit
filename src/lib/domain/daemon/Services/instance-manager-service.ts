@@ -7,6 +7,7 @@
 // addInstance uses atomic Ref.modify for capacity enforcement — two
 // concurrent addInstance calls cannot both pass the capacity check.
 
+import { createOpencodeServer } from "@opencode-ai/sdk/server";
 import {
 	Clock,
 	Context,
@@ -545,6 +546,95 @@ export const stopHealthPoller = (instanceId: string) =>
 		const fibers = yield* PollerFibersTag;
 		yield* FiberMap.remove(fibers, pollerKey(instanceId));
 	});
+
+const portFromServerUrl = (url: string, fallback: number): number => {
+	try {
+		const parsed = new URL(url);
+		if (parsed.port) return Number.parseInt(parsed.port, 10);
+		return parsed.protocol === "https:" ? 443 : 80;
+	} catch {
+		return fallback;
+	}
+};
+
+const markManagedInstanceHealthy = (
+	instance: OpenCodeInstance,
+	serverUrl: string,
+) =>
+	Effect.gen(function* () {
+		const ref = yield* InstanceManagerStateTag;
+		const now = yield* Clock.currentTimeMillis;
+		const port = portFromServerUrl(serverUrl, instance.port);
+		yield* Ref.update(ref, (state) => ({
+			...state,
+			instances: HashMap.modify(state.instances, instance.id, (current) => ({
+				...current,
+				port,
+				status: "healthy" as const,
+				lastHealthCheck: now,
+			})),
+			externalUrls: HashMap.remove(state.externalUrls, instance.id),
+		}));
+		yield* publishInstanceStatusChanged(instance.id);
+	});
+
+const markManagedInstanceUnhealthy = (
+	instance: OpenCodeInstance,
+	cause: unknown,
+) =>
+	Effect.gen(function* () {
+		const ref = yield* InstanceManagerStateTag;
+		yield* Ref.update(ref, (state) => ({
+			...state,
+			instances: HashMap.modify(state.instances, instance.id, (current) => ({
+				...current,
+				status: "unhealthy" as const,
+			})),
+		}));
+		const message = cause instanceof Error ? cause.message : String(cause);
+		yield* publishInstanceStatusChanged(instance.id);
+		yield* publishInstanceError(instance.id, message);
+		yield* Effect.logWarning(
+			`Failed to start OpenCode SDK server for instance ${instance.id}: ${message}`,
+		);
+	});
+
+const startManagedOpenCodeServer = (instance: OpenCodeInstance) =>
+	Effect.acquireRelease(
+		Effect.tryPromise({
+			try: () =>
+				createOpencodeServer({
+					hostname: "127.0.0.1",
+					port: instance.port,
+					timeout: 5000,
+				}),
+			catch: (cause) => cause,
+		}).pipe(
+			Effect.tap((server) => markManagedInstanceHealthy(instance, server.url)),
+			Effect.catchAll((cause) =>
+				markManagedInstanceUnhealthy(instance, cause).pipe(Effect.as(null)),
+			),
+		),
+		(server) =>
+			server === null
+				? Effect.void
+				: Effect.try({
+						try: () => server.close(),
+						catch: (cause) => cause,
+					}).pipe(Effect.catchAll(() => Effect.void)),
+	);
+
+export const startManagedOpenCodeServers = Effect.gen(function* () {
+	const ref = yield* InstanceManagerStateTag;
+	const state = yield* Ref.get(ref);
+	const managedInstances = Array.from(HashMap.values(state.instances)).filter(
+		(instance) => instance.managed,
+	);
+	yield* Effect.forEach(managedInstances, startManagedOpenCodeServer, {
+		concurrency: 1,
+		discard: true,
+	});
+}).pipe(Effect.withSpan("instance.startManagedOpenCodeServers"));
 
 // ─── Restart Scheduling ──────────────────────────────────────────────────
 
