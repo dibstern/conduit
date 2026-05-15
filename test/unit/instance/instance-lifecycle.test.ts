@@ -7,12 +7,14 @@ import {
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 describe("instance lifecycle integration", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle | null = null;
+	let daemon: ForegroundDaemonHandle | null = null;
 
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "instance-lifecycle-"));
@@ -29,7 +31,7 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("daemon with opencodeUrl creates default instance", async () => {
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
@@ -43,7 +45,7 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("daemon without opencodeUrl has no instances (smartDefault=false)", async () => {
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
@@ -86,7 +88,7 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("addProject assigns instanceId from available instances", async () => {
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
