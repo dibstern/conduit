@@ -27,6 +27,7 @@ import {
 } from "../../../src/bin/cli-core.js";
 import { HELP_TEXT } from "../../../src/bin/cli-utils.js";
 import { DaemonSpawnPortInUseError } from "../../../src/lib/daemon/daemon-spawn.js";
+import { RELAY_ENV_KEYS } from "../../../src/lib/env.js";
 import type { IPCCommand, IPCResponse } from "../../../src/lib/types.js";
 
 const SEED = 42;
@@ -264,6 +265,61 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			),
 			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 		);
+	});
+});
+
+// ─── Internal Daemon Child ───────────────────────────────────────────────
+
+describe("internal --daemon child", () => {
+	it("starts through the injectable daemon child starter", async () => {
+		const previousEnv = Object.fromEntries(
+			Object.values(RELAY_ENV_KEYS).map((key) => [key, process.env[key]]),
+		);
+		let captured:
+			| Parameters<NonNullable<CLIOptions["startDaemonChildProcess"]>>[0]
+			| null = null;
+		try {
+			process.env[RELAY_ENV_KEYS.PORT] = "3456";
+			process.env[RELAY_ENV_KEYS.HOST] = "0.0.0.0";
+			process.env[RELAY_ENV_KEYS.CONFIG_DIR] = "/tmp/conduit-cli-daemon";
+			process.env[RELAY_ENV_KEYS.PIN_HASH] = "pin-hash";
+			process.env[RELAY_ENV_KEYS.KEEP_AWAKE] = "1";
+			process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND] = "caffeinate";
+			process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS] = JSON.stringify(["-dims"]);
+			process.env[RELAY_ENV_KEYS.TLS] = "1";
+			process.env[RELAY_ENV_KEYS.OC_URL] = "http://opencode:4096";
+
+			await run(
+				["--daemon", "--log-level", "debug", "--log-format", "pretty"],
+				createMockCLI({
+					startDaemonChildProcess: async (opts) => {
+						captured = opts;
+					},
+				}),
+			);
+
+			expect(captured).toEqual({
+				port: 3456,
+				host: "0.0.0.0",
+				configDir: "/tmp/conduit-cli-daemon",
+				pinHash: "pin-hash",
+				keepAwake: true,
+				keepAwakeCommand: "caffeinate",
+				keepAwakeArgs: ["-dims"],
+				tlsEnabled: true,
+				opencodeUrl: "http://opencode:4096",
+				logLevel: "debug",
+				logFormat: "pretty",
+			});
+		} finally {
+			for (const [key, value] of Object.entries(previousEnv)) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+		}
 	});
 });
 

@@ -1245,6 +1245,25 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not import the legacy daemon process bridge from the CLI", () => {
+		const path = "src/bin/cli-core.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const patterns = [
+			/\bstartDaemonProcess\b/,
+			/domain\/daemon\/Layers\/daemon-main\.js/,
+		] as const;
+
+		const hits = patterns.flatMap((pattern) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0],
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not throw plain Error for push manager initialization failures", () => {
 		const path = "src/lib/server/push.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

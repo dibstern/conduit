@@ -291,3 +291,9 @@ export async function startForegroundDaemon(
 		stop,
 	};
 }
+
+export async function startDaemonChildProcess(
+	options: DaemonOptions,
+): Promise<void> {
+	await startForegroundDaemon(options);
+}

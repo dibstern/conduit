@@ -13,9 +13,9 @@ import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
 import {
 	type ForegroundDaemonHandle,
+	startDaemonChildProcess,
 	startForegroundDaemon,
 } from "../lib/domain/daemon/Layers/daemon-foreground.js";
-import { startDaemonProcess } from "../lib/domain/daemon/Layers/daemon-main.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCCommand, IPCResponse } from "../lib/types.js";
@@ -58,6 +58,7 @@ export interface CLIOptions {
 	startForegroundDaemon?: (
 		opts: DaemonOptions,
 	) => Promise<ForegroundDaemonHandle>;
+	startDaemonChildProcess?: (opts: DaemonOptions) => Promise<void>;
 	generateQR?: (url: string) => string;
 	getNetworkAddress?: () => string | null;
 	getTailscaleIP?: () => string | null;
@@ -110,6 +111,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			));
 	const startForegroundDaemonFn =
 		options?.startForegroundDaemon ?? startForegroundDaemon;
+	const startDaemonChildProcessFn =
+		options?.startDaemonChildProcess ?? startDaemonChildProcess;
 
 	const qr = options?.generateQR ?? generateQR;
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
@@ -131,7 +134,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
 		const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
 		const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
-		await startDaemonProcess({
+		await startDaemonChildProcessFn({
 			port: daemonPort,
 			...(daemonHost ? { host: daemonHost } : {}),
 			configDir: daemonConfigDir,
