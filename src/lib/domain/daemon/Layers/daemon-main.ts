@@ -48,9 +48,12 @@ import {
 	type CrashLimitExceeded,
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
+import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
 import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
+
+export { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
@@ -247,8 +250,7 @@ export class DaemonLifecycleContextUnavailableError extends Data.TaggedError(
 import { existsSync, mkdirSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
 import {
@@ -292,32 +294,6 @@ import {
 	updateProject as updateEffectProject,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag as EffectRelayCacheTag } from "../Services/relay-cache.js";
-
-/**
- * Default frontend directory resolved relative to this file.
- * Compiled: dist/src/lib/domain/daemon/Layers/daemon-main.js -> 5x.. -> dist/ -> dist/frontend/
- * Dev (tsx): src/lib/domain/daemon/Layers/daemon-main.ts -> 5x.. -> repo root -> frontend/ (doesn't exist)
- * Falls back to cwd-based resolution for dev mode.
- */
-export function resolveDefaultStaticDir(options?: {
-	readonly moduleUrl?: string;
-	readonly cwd?: string;
-	readonly exists?: (path: string) => boolean;
-}): string {
-	const moduleUrl = options?.moduleUrl ?? import.meta.url;
-	const cwd = options?.cwd ?? process.cwd();
-	const exists = options?.exists ?? existsSync;
-	const candidate = join(
-		dirname(fileURLToPath(moduleUrl)),
-		"..",
-		"..",
-		"..",
-		"..",
-		"..",
-		"frontend",
-	);
-	return exists(candidate) ? candidate : join(cwd, "dist", "frontend");
-}
 
 const DEFAULT_STATIC_DIR = resolveDefaultStaticDir();
 

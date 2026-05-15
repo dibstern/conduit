@@ -11,6 +11,10 @@ import {
 } from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../lib/domain/daemon/Layers/daemon-foreground.js";
 import { startDaemonProcess } from "../lib/domain/daemon/Layers/daemon-main.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
@@ -51,6 +55,9 @@ export interface CLIOptions {
 	spawnDaemon?: (
 		opts?: DaemonOptions,
 	) => Promise<{ pid: number; port: number }>;
+	startForegroundDaemon?: (
+		opts: DaemonOptions,
+	) => Promise<ForegroundDaemonHandle>;
 	generateQR?: (url: string) => string;
 	getNetworkAddress?: () => string | null;
 	getTailscaleIP?: () => string | null;
@@ -101,6 +108,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 				},
 				isDaemonRunning,
 			));
+	const startForegroundDaemonFn =
+		options?.startForegroundDaemon ?? startForegroundDaemon;
 
 	const qr = options?.generateQR ?? generateQR;
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
@@ -162,7 +171,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		stdout.write(`\nConduit (foreground)\n`);
 		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
 
-		const daemon = await startDaemonProcess({
+		const daemon = await startForegroundDaemonFn({
 			port: args.port,
 			...(args.host ? { host: args.host } : {}),
 			opencodeUrl,
