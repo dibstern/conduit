@@ -47,6 +47,13 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 | Daemon-owned state | The config directory holds socket and PID files, daemon config, recent projects, and push settings. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
 
+## Effect Ownership Guardrails
+
+- Daemon and relay internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
+- The surviving runtime boundaries are explicit compatibility edges: standalone HTTP handler construction, OpenCode SDK fetch, Claude SDK permission callback, frontend transport Promise API, and the public `createProjectRelay()` startup Promise API.
+- `relay-stack.ts` must not regain `Layer.succeed(Tag, alreadyConstructedInstance)` bridge composition. Relay state belongs in self-constructing domain Layers under `src/lib/domain/relay/*`.
+- Browser real-time transport remains WebSocket-based. Effect RPC runs over the WebSocket protocol for migrated browser operations; raw PTY input remains the terminal data-plane path.
+
 ## Communication Flow
 
 | Flow | Path |

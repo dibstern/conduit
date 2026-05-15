@@ -91,3 +91,17 @@ pnpm test:storybook-visual
 - Do not run full E2E or visual suites for pure refactors, docs changes, or isolated backend logic.
 - If a change affects both runtime logic and UI, use the default path first, then add the narrowest relevant integration or E2E command.
 - If you need alternate modes or helper variants, check `package.json` rather than copying the full script inventory into AGENTS.md.
+
+## Effect Migration Guardrails
+
+Run the static guardrail suite when touching Effect ownership, daemon/relay composition, provider adapters, persistence, or transport boundaries:
+
+```bash
+pnpm exec vitest run test/unit/effect/runtime-boundary-grep.test.ts
+```
+
+Final guardrail expectations as of 2026-05-15:
+
+- `startDaemonProcess`, `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic `concurrency: "unbounded"` have zero production hits under `src`.
+- Runtime entry grep has exactly five accepted hits: standalone HTTP compatibility, OpenCode SDK fetch, Claude SDK permission callback, frontend transport, and relay startup.
+- `relay-stack.ts` has zero `Layer.succeed(...)` relay bridge composition hits.
