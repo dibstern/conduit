@@ -34,6 +34,7 @@ export interface PermissionResponse {
 
 export interface QuestionRequest {
 	readonly requestId: string;
+	readonly toolUseId?: string;
 	readonly questions: Array<{
 		question: string;
 		header: string;

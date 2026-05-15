@@ -1871,7 +1871,7 @@ describe("handleQuestionReject", () => {
 	});
 
 	it.effect(
-		"uses the pending question session when rejecting a Claude question from another visible session",
+		"keeps Claude questions pending when the browser tries to skip them",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "visible-session"),
@@ -1911,23 +1911,32 @@ describe("handleQuestionReject", () => {
 					questions: [{ question: "Continue?" }],
 				});
 				yield* handleQuestionReject("client-1", { toolId: "que-claude" });
+				const pending = yield* pendingInteractions.listPendingQuestions();
+				return pending;
 			}).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.tap((pending) => {
 					expect(client.question.reject).not.toHaveBeenCalled();
 					expect(engine.getProviderForSession).toHaveBeenCalledWith(
 						"question-session",
 					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						"client-1",
 						expect.objectContaining({
-							type: "ask_user_resolved",
+							type: "ask_user_error",
 							toolId: "que-claude",
 							sessionId: "question-session",
 						}),
 					);
-					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
-						"question-session",
+					expect(ws.broadcast).not.toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "ask_user_resolved",
+							toolId: "que-claude",
+						}),
 					);
+					expect(decrementPendingQuestionCount).not.toHaveBeenCalled();
+					expect(pending).toHaveLength(1);
+					expect(pending[0]?.requestId).toBe("que-claude");
 				}),
 			);
 		},

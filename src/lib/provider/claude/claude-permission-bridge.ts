@@ -23,6 +23,7 @@ import type {
 	EventSink,
 	PermissionDecision,
 	PermissionResponse,
+	QuestionRequest,
 } from "../types.js";
 import type {
 	CanUseTool,
@@ -58,9 +59,9 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	});
 }
 
-function runPermissionRequestAtSdkBoundary(
-	effect: Effect.Effect<PermissionResponse, unknown>,
-): Promise<PermissionResponse> {
+function runPermissionRequestAtSdkBoundary<T>(
+	effect: Effect.Effect<T, unknown>,
+): Promise<T> {
 	return Effect.runPromise(effect);
 }
 
@@ -95,6 +96,58 @@ function toSdkPermissionUpdates(
 	});
 }
 
+function toQuestionRequestQuestions(
+	toolInput: Record<string, unknown>,
+): QuestionRequest["questions"] {
+	const rawQuestions = Array.isArray(toolInput["questions"])
+		? toolInput["questions"]
+		: [];
+	return rawQuestions.map((raw) => {
+		const question = isRecord(raw) ? raw : {};
+		const rawOptions = Array.isArray(question["options"])
+			? question["options"]
+			: [];
+		return {
+			question: stringField(question["question"]),
+			header: stringField(question["header"]),
+			options: rawOptions.map((rawOption) => {
+				const option = isRecord(rawOption) ? rawOption : {};
+				return {
+					label: stringField(option["label"]),
+					description: stringField(option["description"]),
+				};
+			}),
+			multiSelect:
+				question["multiSelect"] === true || question["multiple"] === true,
+			custom: question["custom"] !== false,
+		};
+	});
+}
+
+function toClaudeQuestionAnswers(
+	questions: QuestionRequest["questions"],
+	answers: Record<string, unknown>,
+): Record<string, string> {
+	const byQuestionText: Record<string, string> = {};
+	for (let i = 0; i < questions.length; i++) {
+		const question = questions[i];
+		if (!question) continue;
+		const answer = answers[String(i)] ?? answers[question.question];
+		if (typeof answer === "string" && answer.trim()) {
+			byQuestionText[question.question] = answer;
+		}
+	}
+	return byQuestionText;
+}
+
+function stringField(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 export class ClaudePermissionBridge {
 	constructor(private readonly deps: ClaudePermissionBridgeDeps = {}) {}
 
@@ -124,10 +177,35 @@ export class ClaudePermissionBridge {
 		options: CanUseToolOptions,
 	): Promise<PermissionResult> {
 		if (toolName === "AskUserQuestion") {
-			return {
-				behavior: "allow",
-				updatedInput: toolInput ?? {},
-			};
+			const sink = ctx.eventSink ?? this.deps.sink;
+			if (!sink) {
+				return {
+					behavior: "deny",
+					message: "Question sink unavailable.",
+				};
+			}
+			const questions = toQuestionRequestQuestions(toolInput ?? {});
+			try {
+				const answers = await runPermissionRequestAtSdkBoundary(
+					sink.requestQuestion({
+						requestId: options.toolUseID,
+						toolUseId: options.toolUseID,
+						questions,
+					}),
+				);
+				return {
+					behavior: "allow",
+					updatedInput: {
+						...(toolInput ?? {}),
+						answers: toClaudeQuestionAnswers(questions, answers),
+					},
+				};
+			} catch {
+				return {
+					behavior: "deny",
+					message: "Turn interrupted",
+				};
+			}
 		}
 
 		const requestId = randomUUID();

@@ -373,6 +373,35 @@ export const handleQuestionReject = (
 			PendingInteractionServiceTag,
 		);
 		if (pendingInteractionsOption._tag === "Some") {
+			const pendingQuestions =
+				yield* pendingInteractionsOption.value.listPendingQuestions();
+			const pendingQuestion = pendingQuestions.find(
+				(question) => question.requestId === toolId,
+			);
+			if (pendingQuestion) {
+				const questionSessionId = pendingQuestion.sessionId || sessionId;
+				const engineOption = yield* Effect.serviceOption(
+					OrchestrationEngineTag,
+				);
+				const providerId =
+					engineOption._tag === "Some"
+						? engineOption.value.getProviderForSession(questionSessionId)
+						: undefined;
+				if (providerId === "claude") {
+					log.warn(
+						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
+					);
+					wsHandler.sendTo(clientId, {
+						type: "ask_user_error",
+						sessionId: questionSessionId,
+						toolId,
+						message:
+							"Claude questions require an answer before the turn can continue.",
+					});
+					return;
+				}
+			}
+
 			const resolvedOption =
 				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
 					toolId,

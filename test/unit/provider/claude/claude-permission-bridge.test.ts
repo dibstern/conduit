@@ -64,6 +64,18 @@ function pendingPermissionEffect(
 	});
 }
 
+function pendingQuestionEffect(
+	register: (resolve: (value: Record<string, unknown>) => void) => void,
+): Effect.Effect<Record<string, unknown>, unknown> {
+	return Effect.tryPromise({
+		try: () =>
+			new Promise<Record<string, unknown>>((resolve) => {
+				register(resolve);
+			}),
+		catch: (cause) => cause,
+	});
+}
+
 function permissionResponseEffect(
 	response: unknown,
 ): Effect.Effect<PermissionResponse, unknown> {
@@ -160,9 +172,16 @@ describe("ClaudePermissionBridge", () => {
 		expect(ctx.pendingApprovals.size).toBe(0);
 	});
 
-	it("allows AskUserQuestion without emitting a permission request", async () => {
+	it("blocks AskUserQuestion until the user submits an answer", async () => {
+		let resolveQuestion: (value: Record<string, unknown>) => void = () => {};
+		(sink.requestQuestion as ReturnType<typeof vi.fn>) = vi.fn(() =>
+			pendingQuestionEffect((resolve) => {
+				resolveQuestion = resolve;
+			}),
+		);
+
 		const ac = new AbortController();
-		const result = await bridge.canUseTool(
+		const callbackPromise = bridge.canUseTool(
 			ctx,
 			"AskUserQuestion",
 			{
@@ -170,6 +189,16 @@ describe("ClaudePermissionBridge", () => {
 					{
 						header: "Explore what?",
 						question: "What should the subagents explore?",
+						options: [
+							{
+								label: "Provider adapters",
+								description: "Inspect provider code",
+							},
+							{
+								label: "Frontend",
+								description: "Inspect Svelte code",
+							},
+						],
 					},
 				],
 			},
@@ -179,9 +208,35 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
+		await new Promise((r) => setTimeout(r, 0));
+		let settled = false;
+		void callbackPromise.then(() => {
+			settled = true;
+		});
+		await new Promise((r) => setTimeout(r, 0));
+		expect(settled).toBe(false);
+		expect(sink.requestQuestion).toHaveBeenCalledWith(
+			expect.objectContaining({
+				requestId: "tool-question",
+				toolUseId: "tool-question",
+				questions: [
+					expect.objectContaining({
+						header: "Explore what?",
+						question: "What should the subagents explore?",
+					}),
+				],
+			}),
+		);
+		expect(sink.requestPermission).not.toHaveBeenCalled();
+
+		resolveQuestion({ "0": "Provider adapters" });
+		const result = await callbackPromise;
 		expect(result).toMatchObject({
 			behavior: "allow",
 			updatedInput: {
+				answers: {
+					"What should the subagents explore?": "Provider adapters",
+				},
 				questions: [
 					{
 						header: "Explore what?",

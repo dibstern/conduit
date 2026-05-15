@@ -235,6 +235,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					requestId: request.requestId,
 					sessionId,
 					questions,
+					...(request.toolUseId != null
+						? { toolCallId: request.toolUseId }
+						: {}),
 				});
 				yield* Effect.sync(() => {
 					send({
@@ -248,6 +251,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 							multiSelect: q.multiSelect ?? false,
 							custom: q.custom ?? true,
 						})),
+						...(request.toolUseId != null
+							? { toolUseId: request.toolUseId }
+							: {}),
 					});
 				});
 				return yield* pending.awaitAnswers;
