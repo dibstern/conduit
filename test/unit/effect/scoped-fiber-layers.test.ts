@@ -19,10 +19,7 @@ import {
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
-import {
-	discoverProjectsEffect,
-	ProjectDiscoveryLive,
-} from "../../../src/lib/domain/daemon/Layers/project-discovery-layer.js";
+import { ProjectDiscoveryLive } from "../../../src/lib/domain/daemon/Layers/project-discovery-layer.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
 	prefetchSessionCounts,
@@ -42,6 +39,7 @@ import {
 	makeInstanceManagerStateLive,
 	PollerFibersTag,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { discoverProjectsEffect } from "../../../src/lib/domain/daemon/Services/project-discovery-service.js";
 import {
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,

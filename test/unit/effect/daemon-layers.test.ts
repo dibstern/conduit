@@ -30,7 +30,12 @@ import {
 	DaemonHandleLive,
 	DaemonHandleTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
+import {
+	DaemonLifecycleContextTag,
+	makeDaemonLifecycleContext,
+} from "../../../src/lib/domain/daemon/Services/daemon-lifecycle-context.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
@@ -226,18 +231,40 @@ describe("DaemonHandleTag", () => {
 		}),
 	);
 
-	it.effect(
+	it.scoped(
 		"provides an Effect-owned handle backed by daemon config and project registry services",
 		() => {
+			const lifecycleContext = makeDaemonLifecycleContext("/tmp/relay.sock");
+			lifecycleContext.clientCount = 7;
 			const relayCacheStub = Layer.succeed(RelayCacheTag, {
 				get: (slug: string) =>
 					Effect.succeed({
 						slug,
 						wsHandler: { handleUpgrade: () => {} },
 						rpcWsHandler: { handleUpgrade: () => {} },
+						getStatusSnapshot: () => ({
+							sessionCount: slug === "existing" ? 5 : 0,
+							clients: 0,
+							isProcessing: false,
+						}),
 						stop: () => {},
 					}),
-				peek: () => Effect.succeed(Option.none()),
+				peek: (slug: string) =>
+					slug === "existing"
+						? Effect.succeed(
+								Option.some({
+									slug,
+									wsHandler: { handleUpgrade: () => {} },
+									rpcWsHandler: { handleUpgrade: () => {} },
+									getStatusSnapshot: () => ({
+										sessionCount: 5,
+										clients: 0,
+										isProcessing: false,
+									}),
+									stop: () => {},
+								}),
+							)
+						: Effect.succeed(Option.none()),
 				invalidate: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(
@@ -266,6 +293,16 @@ describe("DaemonHandleTag", () => {
 					},
 				]),
 				relayCacheStub,
+				Layer.succeed(DaemonLifecycleContextTag, lifecycleContext),
+				makeInstanceManagerStateLive(undefined, [
+					{
+						id: "default",
+						name: "Default",
+						port: 4096,
+						managed: false,
+						url: "http://127.0.0.1:4096",
+					},
+				]),
 			);
 			const layer = DaemonHandleLive.pipe(Layer.provideMerge(handleDeps));
 
@@ -274,19 +311,31 @@ describe("DaemonHandleTag", () => {
 				const configRef = yield* DaemonConfigRefTag;
 
 				const initialStatus = yield* handle.getStatus();
+				const initialOnboardingPort = yield* handle.onboardingPort;
+				const instances = yield* handle.getInstances();
 				expect(initialStatus.port).toBe(49876);
 				expect(initialStatus.host).toBe("127.0.0.1");
 				expect(initialStatus.projectCount).toBe(1);
-				expect(initialStatus.sessionCount).toBe(2);
+				expect(initialStatus.sessionCount).toBe(5);
+				expect(initialStatus.clientCount).toBe(7);
 				expect(initialStatus.pinEnabled).toBe(true);
 				expect(initialStatus.tlsEnabled).toBe(true);
 				expect(initialStatus.keepAwake).toBe(true);
+				expect(initialOnboardingPort).toBeNull();
+				expect(instances.map((instance) => instance.id)).toEqual(["default"]);
+				expect(typeof handle.discoverProjects).toBe("function");
 
-				yield* handle.addProject("/tmp/new-project");
+				const added = yield* handle.addProject(
+					"/tmp/new-project",
+					"custom-slug",
+					"default",
+				);
+				expect(added.slug).toBe("custom-slug");
+				expect(added.instanceId).toBe("default");
 				const projects = yield* handle.getProjects();
 				expect(projects.map((project) => project.slug).sort()).toEqual([
+					"custom-slug",
 					"existing",
-					"new-project",
 				]);
 				const configAfterAdd = yield* Ref.get(configRef);
 				expect(configAfterAdd.dismissedPaths.has("/tmp/new-project")).toBe(
@@ -297,7 +346,7 @@ describe("DaemonHandleTag", () => {
 				const afterRemove = yield* handle.getStatus();
 				expect(afterRemove.projectCount).toBe(1);
 				expect(afterRemove.projects.map((project) => project.slug)).toEqual([
-					"new-project",
+					"custom-slug",
 				]);
 				const configAfterRemove = yield* Ref.get(configRef);
 				expect(configAfterRemove.dismissedPaths.has("/tmp/existing")).toBe(

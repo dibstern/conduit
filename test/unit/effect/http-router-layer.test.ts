@@ -86,7 +86,9 @@ const makeStaticDir = Effect.acquireRelease(
 
 const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 	port: Effect.succeed(2633),
+	onboardingPort: Effect.succeed(null),
 	addProject: () => Effect.die("unused"),
+	discoverProjects: () => Effect.succeed(0),
 	removeProject: (slug: string) => Effect.fail(new ProjectNotFound({ slug })),
 	getStatus: () =>
 		Effect.succeed({
@@ -103,6 +105,7 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 			projects: [],
 		}),
 	getProjects: () => Effect.succeed([]),
+	getInstances: () => Effect.succeed([]),
 });
 
 const relayWithSnapshot = (

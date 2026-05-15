@@ -67,6 +67,10 @@ import {
 } from "../Services/daemon-config-ref.js";
 import { DaemonHandleLive } from "../Services/daemon-handle.js";
 import {
+	DaemonLifecycleContextLive,
+	DaemonLifecycleContextTag,
+} from "../Services/daemon-lifecycle-context.js";
+import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../Services/daemon-pubsub.js";
@@ -145,29 +149,6 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 		return `${this.operation} failed: ${inner}`;
 	}
 }
-
-export class DaemonLifecycleContextTag extends Context.Tag(
-	"DaemonLifecycleContext",
-)<DaemonLifecycleContextTag, DaemonLifecycleContext>() {}
-
-export const makeDaemonLifecycleContext = (
-	socketPath: string,
-): DaemonLifecycleContext => ({
-	httpServer: null,
-	upgradeServer: null,
-	onboardingServer: null,
-	ipcServer: null,
-	ipcClients: new Set(),
-	clientCount: 0,
-	socketPath,
-	router: null,
-});
-
-export const DaemonLifecycleContextLive = (socketPath: string) =>
-	Layer.effect(
-		DaemonLifecycleContextTag,
-		Effect.sync(() => makeDaemonLifecycleContext(socketPath)),
-	);
 
 const startLifecycleServer = (operation: string, start: () => Promise<void>) =>
 	Effect.tryPromise({

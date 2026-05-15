@@ -43,16 +43,13 @@ import {
 	type DaemonRuntimeConfig,
 	makeDaemonConfigFromOptions,
 } from "../Services/daemon-config-ref.js";
+import { DaemonLifecycleContextTag } from "../Services/daemon-lifecycle-context.js";
 import {
 	type CrashLimitExceeded,
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import type { DaemonLiveOptions } from "./daemon-layers.js";
-import {
-	DaemonLifecycleContextTag,
-	makeDaemonLive,
-	ShutdownAwaiterLive,
-} from "./daemon-layers.js";
+import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 
 // ─── SupervisorTag ───────────────────────────────────────────────────────
