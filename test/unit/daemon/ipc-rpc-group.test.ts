@@ -189,6 +189,45 @@ describe("IPC RPC request group", () => {
 			),
 	);
 
+	it.effect(
+		"handles InstanceAdd and InstanceRemove through real handlers",
+		() =>
+			provideRpc(
+				Effect.gen(function* () {
+					const client = yield* RpcTest.makeClient(IpcRpcGroup);
+
+					const added = yield* client.InstanceAdd({
+						name: "Personal",
+						port: 4096,
+						managed: true,
+					});
+					expect(added.ok).toBe(true);
+					expect(added.instance.id).toBe("personal");
+					expect(added.instance.name).toBe("Personal");
+
+					const colliding = yield* client.InstanceAdd({
+						name: "Personal!",
+						port: 4097,
+						managed: true,
+					});
+					expect(colliding.instance.id).toBe("personal-2");
+
+					const withAdded = yield* client.InstanceList({});
+					expect(
+						withAdded.instances.map((instance) => instance.id).sort(),
+					).toEqual(["inst-1", "personal", "personal-2"]);
+
+					const removed = yield* client.InstanceRemove({ id: "personal" });
+					expect(removed).toEqual({ ok: true });
+
+					const afterRemove = yield* client.InstanceList({});
+					expect(
+						afterRemove.instances.map((instance) => instance.id).sort(),
+					).toEqual(["inst-1", "personal-2"]);
+				}),
+			),
+	);
+
 	it.effect("returns full GetStatus data through the RPC client", () =>
 		provideRpc(
 			Effect.gen(function* () {

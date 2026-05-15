@@ -244,7 +244,7 @@ export class DaemonLifecycleContextUnavailableError extends Data.TaggedError(
 // ─── Imperative bridge: startDaemonProcess ───────────────────────────────
 // Standalone startup function that replaces `new Daemon(options).start()`.
 // Orchestrates the same initialization sequence the Daemon class performed,
-// using the already-extracted helper modules (daemon-lifecycle, daemon-ipc,
+// using the already-extracted helper modules (daemon-lifecycle,
 // project-registry, instance-manager, config-persistence, etc.).
 
 import { existsSync, mkdirSync } from "node:fs";

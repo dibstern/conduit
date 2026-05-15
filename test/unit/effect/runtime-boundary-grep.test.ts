@@ -295,7 +295,9 @@ describe("Effect runtime boundary grep", () => {
 		] as const;
 
 		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
-			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			const fullPath = join(REPO_ROOT, path);
+			if (!existsSync(fullPath)) return [];
+			const source = readFileSync(fullPath, "utf8");
 			return source
 				.split("\n")
 				.flatMap((line, index) =>
@@ -310,7 +312,9 @@ describe("Effect runtime boundary grep", () => {
 
 	it("does not carry post-response shutdown scheduling on DaemonIPCContext", () => {
 		const path = "src/lib/daemon/daemon-ipc.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const fullPath = join(REPO_ROOT, path);
+		if (!existsSync(fullPath)) return;
+		const source = readFileSync(fullPath, "utf8");
 		const contextStart = source.indexOf("export interface DaemonIPCContext");
 		const contextEnd = source.indexOf(
 			"export interface IPCHandlerMap",
@@ -440,7 +444,9 @@ describe("Effect runtime boundary grep", () => {
 		] as const;
 
 		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
-			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			const fullPath = join(REPO_ROOT, path);
+			if (!existsSync(fullPath)) return [];
+			const source = readFileSync(fullPath, "utf8");
 			return source
 				.split("\n")
 				.flatMap((line, index) =>
@@ -451,34 +457,36 @@ describe("Effect runtime boundary grep", () => {
 		});
 
 		const daemonIpcPath = "src/lib/daemon/daemon-ipc.ts";
-		const daemonIpcSource = readFileSync(
-			join(REPO_ROOT, daemonIpcPath),
-			"utf8",
-		);
-		const contextStart = daemonIpcSource.indexOf(
-			"export interface DaemonIPCContext",
-		);
-		const contextEnd = daemonIpcSource.indexOf(
-			"export interface IPCHandlerMap",
-			contextStart,
-		);
-		expect(contextStart).toBeGreaterThanOrEqual(0);
-		expect(contextEnd).toBeGreaterThan(contextStart);
-		const contextSource = daemonIpcSource.slice(contextStart, contextEnd);
-		const contextHits = contextSource.split("\n").flatMap((line, index) =>
-			/\b(getKeepAwake|setKeepAwake|setKeepAwakeCommand)\b/.test(line)
-				? [
-						{
-							path: daemonIpcPath,
-							line:
-								daemonIpcSource.slice(0, contextStart).split("\n").length +
-								index,
-							source: line.trim(),
-							reason: "DaemonIPCContext should not carry keep-awake callbacks",
-						},
-					]
-				: [],
-		);
+		const daemonIpcFullPath = join(REPO_ROOT, daemonIpcPath);
+		const contextHits = existsSync(daemonIpcFullPath)
+			? (() => {
+					const daemonIpcSource = readFileSync(daemonIpcFullPath, "utf8");
+					const contextStart = daemonIpcSource.indexOf(
+						"export interface DaemonIPCContext",
+					);
+					const contextEnd = daemonIpcSource.indexOf(
+						"export interface IPCHandlerMap",
+						contextStart,
+					);
+					if (contextStart < 0 || contextEnd <= contextStart) return [];
+					const contextSource = daemonIpcSource.slice(contextStart, contextEnd);
+					return contextSource.split("\n").flatMap((line, index) =>
+						/\b(getKeepAwake|setKeepAwake|setKeepAwakeCommand)\b/.test(line)
+							? [
+									{
+										path: daemonIpcPath,
+										line:
+											daemonIpcSource.slice(0, contextStart).split("\n")
+												.length + index,
+										source: line.trim(),
+										reason:
+											"DaemonIPCContext should not carry keep-awake callbacks",
+									},
+								]
+							: [],
+					);
+				})()
+			: [];
 
 		expect([...hits, ...contextHits]).toEqual([]);
 	});
@@ -506,34 +514,35 @@ describe("Effect runtime boundary grep", () => {
 			);
 
 		const daemonIpcPath = "src/lib/daemon/daemon-ipc.ts";
-		const daemonIpcSource = readFileSync(
-			join(REPO_ROOT, daemonIpcPath),
-			"utf8",
-		);
-		const contextStart = daemonIpcSource.indexOf(
-			"export interface DaemonIPCContext",
-		);
-		const contextEnd = daemonIpcSource.indexOf(
-			"export interface IPCHandlerMap",
-			contextStart,
-		);
-		expect(contextStart).toBeGreaterThanOrEqual(0);
-		expect(contextEnd).toBeGreaterThan(contextStart);
-		const contextSource = daemonIpcSource.slice(contextStart, contextEnd);
-		const contextHits = contextSource.split("\n").flatMap((line, index) =>
-			/\b(getPinHash|setPinHash)\b/.test(line)
-				? [
-						{
-							path: daemonIpcPath,
-							line:
-								daemonIpcSource.slice(0, contextStart).split("\n").length +
-								index,
-							source: line.trim(),
-							reason: "DaemonIPCContext should not carry PIN callbacks",
-						},
-					]
-				: [],
-		);
+		const daemonIpcFullPath = join(REPO_ROOT, daemonIpcPath);
+		const contextHits = existsSync(daemonIpcFullPath)
+			? (() => {
+					const daemonIpcSource = readFileSync(daemonIpcFullPath, "utf8");
+					const contextStart = daemonIpcSource.indexOf(
+						"export interface DaemonIPCContext",
+					);
+					const contextEnd = daemonIpcSource.indexOf(
+						"export interface IPCHandlerMap",
+						contextStart,
+					);
+					if (contextStart < 0 || contextEnd <= contextStart) return [];
+					const contextSource = daemonIpcSource.slice(contextStart, contextEnd);
+					return contextSource.split("\n").flatMap((line, index) =>
+						/\b(getPinHash|setPinHash)\b/.test(line)
+							? [
+									{
+										path: daemonIpcPath,
+										line:
+											daemonIpcSource.slice(0, contextStart).split("\n")
+												.length + index,
+										source: line.trim(),
+										reason: "DaemonIPCContext should not carry PIN callbacks",
+									},
+								]
+							: [],
+					);
+				})()
+			: [];
 
 		expect([...daemonMainHits, ...contextHits]).toEqual([]);
 	});
@@ -1589,7 +1598,9 @@ describe("Effect runtime boundary grep", () => {
 		] as const;
 
 		const hits = retiredBridgePatterns.flatMap(({ path, pattern, reason }) => {
-			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			const fullPath = join(REPO_ROOT, path);
+			if (!existsSync(fullPath)) return [];
+			const source = readFileSync(fullPath, "utf8");
 			const index = source.search(pattern);
 			if (index < 0) return [];
 			const line = source.slice(0, index).split("\n").length;
@@ -1597,6 +1608,30 @@ describe("Effect runtime boundary grep", () => {
 				{ path, line, source: source.split("\n")[line - 1]?.trim(), reason },
 			];
 		});
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not keep the legacy daemon IPC context adapter", () => {
+		const path = "src/lib/daemon/daemon-ipc.ts";
+		const fullPath = join(REPO_ROOT, path);
+		const hits = existsSync(fullPath)
+			? readFileSync(fullPath, "utf8")
+					.split("\n")
+					.flatMap((line, index) =>
+						/\b(DaemonIPCContext|buildIPCHandlers)\b/.test(line)
+							? [
+									{
+										path,
+										line: index + 1,
+										source: line.trim(),
+										reason:
+											"IPC dispatch should be owned by IpcHandlersLayer and the daemon runtime, not the legacy context adapter",
+									},
+								]
+							: [],
+					)
+			: [];
 
 		expect(hits).toEqual([]);
 	});

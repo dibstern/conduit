@@ -3,8 +3,7 @@
 // the appropriate Effect-returning IPC handler.
 
 import type { Socket } from "node:net";
-import { Context, Effect, Schema, Stream } from "effect";
-import type { DaemonIPCContext } from "../../../daemon/daemon-ipc.js";
+import { Effect, Schema, Stream } from "effect";
 import {
 	IPCCommandSchema,
 	serializeResponse,
@@ -51,16 +50,6 @@ export type IpcHandlerDeps =
 	| OverridesStateTag
 	| KeepAwakeTag
 	| ShutdownSignalTag;
-
-// ─── IpcContextTag ──────────────────────────────────────────────────────────
-// Context.Tag for the imperative DaemonIPCContext interface.
-// Task 11 will provide this via IpcDispatchLive Layer; for now it is a
-// forward-looking Tag that daemon-main.ts can populate imperatively.
-
-export class IpcContextTag extends Context.Tag("IpcContext")<
-	IpcContextTag,
-	DaemonIPCContext
->() {}
 
 // ─── Decode + Dispatch ───────────────────────────────────────────────────────
 
