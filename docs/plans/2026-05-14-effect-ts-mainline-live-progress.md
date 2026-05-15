@@ -44,7 +44,7 @@ Every open item must be removed or explicitly reclassified before the migration 
 
 ## Current Blockers
 
-1. The legacy `startDaemonProcess` bridge still exists for remaining non-CLI parity harnesses until branch-local smoke parity is proven against the Effect-owned graph. Instance lifecycle, daemon runtime-config status, daemon lifecycle integration parity, the shared daemon E2E harness, daemon project-order E2E setup, daemon smart-default unit/E2E setup, and all daemon-server integration cases now run through `startForegroundDaemon`.
+1. The legacy `startDaemonProcess` bridge still exists for remaining non-CLI parity harnesses until branch-local smoke parity is proven against the Effect-owned graph. Instance lifecycle, daemon runtime-config status, daemon lifecycle integration parity, the shared daemon E2E harness, daemon project-order E2E setup, daemon smart-default unit/E2E setup, all daemon-server integration cases, and daemon-main helper unit coverage now avoid importing the legacy bridge.
 
 ## Remaining Order
 
@@ -84,6 +84,11 @@ For docs-only edits, `git diff --check` is sufficient unless the edit changes co
 ## Latest Update
 
 Detailed completed-slice notes moved to `docs/plans/2026-05-14-effect-ts-mainline-live-progress-archive.md`. Keep only live state and the last few current updates here.
+
+2026-05-15, daemon-main helper import cleanup:
+
+- Moved `projectDiscovery` out of `daemon-main.ts` and into `daemon-startup.ts`.
+- Changed `test/unit/daemon/daemon-main.test.ts` to import helpers from their owning services instead of `daemon-main.js`.
 
 2026-05-15, daemon-server relay-ready foreground parity:
 

@@ -1,7 +1,7 @@
 import type { CrashCounterTag } from "../Services/daemon-startup.js";
 import type { DaemonStateTag } from "../Services/daemon-state.js";
-import {
-	type InstanceMgmtTag,
+import type {
+	InstanceMgmtTag,
 	ProjectMgmtTag,
 } from "../Services/management-service.js";
 // ─── Daemon Main — Effect Entry Point ────────────────────────────────────────
@@ -46,6 +46,7 @@ import {
 import { DaemonLifecycleContextTag } from "../Services/daemon-lifecycle-context.js";
 import {
 	type CrashLimitExceeded,
+	projectDiscovery,
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
@@ -92,31 +93,6 @@ export type DaemonDeps =
 export const startupRetry = Schedule.exponential("1 second").pipe(
 	Schedule.intersect(Schedule.recurs(3)),
 );
-
-// ─── Background tasks ─────────────────────────────────────────────────────
-
-/**
- * Discover projects from the ProjectMgmt service.
- *
- * Phase 1 implementation: calls getProjects() as a lightweight discovery
- * step. The full discovery logic (calling OpenCode's /project API) will
- * be wired in later phases.
- *
- * Error isolation: catches all expected errors and logs them.
- * Programming defects propagate to the supervisor.
- */
-export const projectDiscovery: Effect.Effect<void, never, ProjectMgmtTag> =
-	Effect.gen(function* () {
-		const mgmt = yield* ProjectMgmtTag;
-		yield* Effect.try(() => mgmt.getProjects());
-		yield* Effect.logInfo("Project discovery complete");
-	}).pipe(
-		Effect.catchAll((e) =>
-			Effect.logWarning("Project discovery failed", { error: String(e) }),
-		),
-		Effect.annotateLogs("task", "projectDiscovery"),
-		Effect.withSpan("projectDiscovery"),
-	);
 
 // ── sessionPrefetch — STUB (Phase 2a) ──
 // export const sessionPrefetch: Effect.Effect<void, never, ...> = ...

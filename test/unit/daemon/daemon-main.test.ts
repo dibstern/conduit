@@ -16,16 +16,14 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
 import {
-	projectDiscovery,
-	resolveDefaultStaticDir,
-} from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import {
 	type CrashCounter,
 	CrashCounterTag,
 	CrashLimitExceeded,
+	projectDiscovery,
 	runStartupSequence,
 } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { resolveDefaultStaticDir } from "../../../src/lib/domain/daemon/Services/daemon-static-dir.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -119,7 +117,7 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 
 describe("daemon-main", () => {
 	describe("resolveDefaultStaticDir", () => {
-		it("resolves packaged frontend assets from the moved domain layer path", () => {
+		it("resolves packaged frontend assets from the moved domain service path", () => {
 			const moduleUrl = pathToFileURL(
 				join(
 					"/pkg",
@@ -128,8 +126,8 @@ describe("daemon-main", () => {
 					"lib",
 					"domain",
 					"daemon",
-					"Layers",
-					"daemon-main.js",
+					"Services",
+					"daemon-static-dir.js",
 				),
 			).href;
 
