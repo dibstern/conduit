@@ -34,6 +34,16 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 		linePattern: /Effect\.runPromise\(/,
 		reason: "OpenCode SDK and GapEndpoints require a Promise-shaped fetch",
 	},
+	{
+		path: "src/lib/frontend/transport/runtime.ts",
+		linePattern: /return await rt\.runPromise\(effect\);/,
+		reason: "frontend transport wrappers expose Promise-shaped store APIs",
+	},
+	{
+		path: "src/lib/relay/relay-stack.ts",
+		linePattern: /startup = await relayManagedRuntime\.runPromise\(/,
+		reason: "public createProjectRelay startup boundary returns a Promise",
+	},
 ];
 
 const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
@@ -156,13 +166,15 @@ function extractDaemonHttpRouterOptions(source: string): {
 }
 
 describe("Effect runtime boundary grep", () => {
-	it("keeps app-internal Effect runtime bridges on an explicit allowlist", () => {
+	it("keeps Effect runtime runPromise/runSync bridges on an explicit allowlist", () => {
 		const hits = tsFiles(SRC_LIB).flatMap((file) => {
 			const relPath = relative(REPO_ROOT, file);
 			return readFileSync(file, "utf8")
 				.split("\n")
 				.flatMap((line, index) =>
-					/Effect\.run(?:Promise|Sync)/.test(line)
+					/(?:\b(?:Effect|Runtime|ManagedRuntime)\.run(?:Promise|Sync)\(|\b[A-Za-z_$][\w$]*\.run(?:Promise|Sync)\()/.test(
+						line,
+					)
 						? [{ path: relPath, line: index + 1, source: line.trim() }]
 						: [],
 				);

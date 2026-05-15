@@ -843,8 +843,8 @@ rg -n "startDaemonProcess" src
 rg -n "PersistenceLayer\\.open" src
 rg -n "Effect\\.promise" src
 rg -n "concurrency: \"unbounded\"" src
-rg -n "Effect\\.run(Promise|Sync)" src/lib
-rg -n "Effect\\.run(Promise|Sync)" src/bin
+rg -n "(Effect|Runtime|ManagedRuntime)\\.run(Promise|Sync)|\\.run(Promise|Sync)\\(" src/lib
+rg -n "(Effect|Runtime|ManagedRuntime)\\.run(Promise|Sync)|\\.run(Promise|Sync)\\(" src/bin
 rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/domain
 ```
 
@@ -854,6 +854,9 @@ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/dom
 |---|---|---|
 | `Effect.runPromise` | `src/lib/instance/sdk-factory.ts` inside the returned `fetch` callback only | OpenCode SDK and GapEndpoints require a standard Promise-shaped Fetch callback; the callback delegates to the Effect retry transport |
 | `Effect.runPromise` | `src/lib/provider/claude/claude-permission-bridge.ts` inside the SDK `canUseTool` callback only | Claude Agent SDK requires a Promise-returning permission callback; the EventSink wait remains Effect-returning internally |
+| `Effect.runSync` | `src/lib/domain/server/Layers/http-router-layer.ts` inside `makeStandaloneHttpRouterRequestHandler` only | Standalone relay HTTP compatibility adapter; daemon HTTP handler construction must stay inside the router Layer |
+| `.runPromise` | `src/lib/frontend/transport/runtime.ts` inside `runTransportEffect` only | Frontend store/transport callers are Promise-shaped; all frontend transport effects share this one app-lifetime runtime boundary |
+| `.runPromise` | `src/lib/relay/relay-stack.ts` inside `createProjectRelay()` startup only | Public relay factory API returns a Promise while the startup Effect owns acquisition, wiring, and readiness |
 | `NodeRuntime.runMain` | `src/bin/cli-core.ts` daemon process entrypoint only | Process entrypoint owns the top-level Effect runtime; it should not use `Effect.runPromise` / `Effect.runSync` |
 | `ws` library callback | `src/lib/domain/server/Layers/ws-routing-layer.ts` | Library callback boundary; immediately hands off to Effect |
 | `Effect.promise` | only inside finalizers where the promise is provably non-rejecting, with inline comment | Some Node APIs return `Promise<void>` that cannot reject |
@@ -863,13 +866,13 @@ rg -n "Layer\\.succeed\\([^\\n]+Tag, [a-zA-Z0-9_]+\\)" src/lib/relay src/lib/dom
 
 **Known non-exceptions:**
 
-- `Effect.runPromise` inside daemon IPC dispatch is still an internal daemon socket-server ownership gap. It must move
+- `Effect.runPromise` inside daemon IPC dispatch is an internal daemon socket-server ownership gap. It must move
   into an Effect-owned IPC server or the top-level daemon runtime before completion.
 - `Effect.runSync(NodeHttpServer.makeHandler(...))` in `src/lib/relay/relay-stack.ts` or
-  `src/lib/domain/daemon/Layers/daemon-main.ts` is still an internal HTTP ownership gap. Do not hide it behind a helper; remove it by
+  `src/lib/domain/daemon/Layers/daemon-main.ts` is an internal HTTP ownership gap. Do not hide it behind a helper; remove it by
   moving HTTP serving into the scoped server Layer.
 - `Effect.runPromise` / `Effect.runSync` in relay callbacks, orchestration, handlers, or daemon services is a blocker
-  unless the call site is one of the SDK callback rows above.
+  unless the call site is one of the allowed external-boundary rows above.
 
 For any `Effect.runPromise` / `Effect.runSync` hit not on the allowed table, the PR must eliminate it or explicitly
 re-open the owning phase; extending the allowlist is not enough.
@@ -975,8 +978,8 @@ they conflict.
    - Re-run the behavior smoke list, integration tests, and daemon E2E before claiming this blocker closed.
 
 13. Final guardrail cleanup.
-   - Update static guard tests so internal `Effect.runPromise` / `Effect.runSync` hits cannot be allowlisted except for
-     the SDK callback boundaries named in Phase 9.
+   - Update static guard tests so internal runtime entry hits cannot be allowlisted except for
+     the external callback and compatibility boundaries named in Phase 9.
    - Triage throwing-helper greps by call path. Fix any helper called inside Effect programs with typed errors; explicitly
      reclassify ordinary defect/external-boundary throws.
    - Confirm `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic `concurrency: "unbounded"` remain
