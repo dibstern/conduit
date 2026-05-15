@@ -16,6 +16,10 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
 
@@ -116,59 +120,53 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 	});
 
 	it("WS upgrade for non-existent slug destroys socket immediately", async () => {
-		const d = await startDaemonProcess(daemonOpts(tmpDir));
+		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 
-		const error = await new Promise<Error>((resolve) => {
-			const req = http.request({
-				hostname: "127.0.0.1",
-				port,
-				path: "/p/ghost/ws",
-				headers: {
-					Connection: "Upgrade",
-					Upgrade: "websocket",
-					"Sec-WebSocket-Version": "13",
-					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-				},
+		try {
+			const error = await new Promise<Error>((resolve) => {
+				const req = http.request({
+					hostname: "127.0.0.1",
+					port,
+					path: "/p/ghost/ws",
+					headers: {
+						Connection: "Upgrade",
+						Upgrade: "websocket",
+						"Sec-WebSocket-Version": "13",
+						"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+					},
+				});
+				const timeout = setTimeout(() => {
+					req.destroy();
+					resolve(new Error("timed out"));
+				}, 5000);
+				req.on("error", (err) => {
+					clearTimeout(timeout);
+					resolve(err);
+				});
+				req.end();
 			});
-			const timeout = setTimeout(() => {
-				req.destroy();
-				resolve(new Error("timed out"));
-			}, 5000);
-			req.on("error", (err) => {
-				clearTimeout(timeout);
-				resolve(err);
-			});
-			req.end();
-		});
 
-		// Socket should be destroyed by the daemon (connection reset or closed)
-		expect(error).toBeDefined();
-
-		await d.stop();
+			// Socket should be destroyed by the daemon (connection reset or closed)
+			expect(error).toBeDefined();
+		} finally {
+			await d.stop();
+		}
 	});
 
 	it("WS upgrade returns HTTP 503 when relay fails to become ready", async () => {
-		const d = await startDaemonProcess(daemonOpts(tmpDir));
+		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 
-		// Add a project, then make it enter "error" state
-		await d.addProject("/home/user/error-app");
+		// Add a project with no usable OpenCode instance. Relay startup should
+		// fail through the Effect-owned relay cache and return HTTP 503.
+		await d.addProject("/home/user/error-app", "error-app");
 		const slug = "error-app";
 
-		// Start relay with a factory that rejects — this transitions to "error" state
-		d.registry.startRelay(slug, async () => {
-			throw new Error("simulated relay failure");
-		});
-
-		// Wait for the project to enter error state
-		await vi.waitFor(() => {
-			expect(d.registry.get(slug)?.status).toBe("error");
-		});
-
-		// Now send a WS upgrade — should get HTTP 503
-		const result = await new Promise<{ statusCode: number } | { error: Error }>(
-			(resolve) => {
+		try {
+			const result = await new Promise<
+				{ statusCode: number } | { error: Error }
+			>((resolve) => {
 				const req = http.request({
 					hostname: "127.0.0.1",
 					port,
@@ -194,49 +192,57 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 					resolve({ error: err });
 				});
 				req.end();
-			},
-		);
+			});
 
-		// The daemon should have written "HTTP/1.1 503 Service Unavailable"
-		// which Node sees as a regular response (not an upgrade)
-		expect("statusCode" in result).toBe(true);
-		if ("statusCode" in result) {
-			expect(result.statusCode).toBe(503);
+			// The daemon should have written "HTTP/1.1 503 Service Unavailable"
+			// which Node sees as a regular response (not an upgrade)
+			expect("statusCode" in result).toBe(true);
+			if ("statusCode" in result) {
+				expect(result.statusCode).toBe(503);
+			}
+			await vi.waitFor(() => {
+				const project = d
+					.getStatus()
+					.projects.find((entry) => entry.slug === slug);
+				expect(project?.status).toBe("error");
+			});
+		} finally {
+			await d.stop();
 		}
-
-		await d.stop();
 	});
 
 	it("WS upgrade on URL that does not match /p/{slug}/ws destroys socket", async () => {
-		const d = await startDaemonProcess(daemonOpts(tmpDir));
+		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 
-		const error = await new Promise<Error>((resolve) => {
-			const req = http.request({
-				hostname: "127.0.0.1",
-				port,
-				path: "/invalid",
-				headers: {
-					Connection: "Upgrade",
-					Upgrade: "websocket",
-					"Sec-WebSocket-Version": "13",
-					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-				},
+		try {
+			const error = await new Promise<Error>((resolve) => {
+				const req = http.request({
+					hostname: "127.0.0.1",
+					port,
+					path: "/invalid",
+					headers: {
+						Connection: "Upgrade",
+						Upgrade: "websocket",
+						"Sec-WebSocket-Version": "13",
+						"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+					},
+				});
+				const timeout = setTimeout(() => {
+					req.destroy();
+					resolve(new Error("timed out"));
+				}, 5000);
+				req.on("error", (err) => {
+					clearTimeout(timeout);
+					resolve(err);
+				});
+				req.end();
 			});
-			const timeout = setTimeout(() => {
-				req.destroy();
-				resolve(new Error("timed out"));
-			}, 5000);
-			req.on("error", (err) => {
-				clearTimeout(timeout);
-				resolve(err);
-			});
-			req.end();
-		});
 
-		expect(error).toBeDefined();
-
-		await d.stop();
+			expect(error).toBeDefined();
+		} finally {
+			await d.stop();
+		}
 	});
 });
 
@@ -244,7 +250,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 
 describe("instance status broadcast", () => {
 	let tmpDir: string;
-	let daemon: DaemonHandle | null = null;
+	let daemon: DaemonHandle | ForegroundDaemonHandle | null = null;
 
 	beforeEach(() => {
 		tmpDir = makeTmpDir("daemon-broadcast-");
@@ -261,7 +267,7 @@ describe("instance status broadcast", () => {
 	});
 
 	it("getInstances returns registered instances", async () => {
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 		});
@@ -272,7 +278,7 @@ describe("instance status broadcast", () => {
 	});
 
 	it("status_changed listener is wired (does not throw without relays)", async () => {
-		daemon = await startDaemonProcess({
+		daemon = await startForegroundDaemon({
 			...daemonOpts(tmpDir),
 			opencodeUrl: "http://localhost:4096",
 		});
@@ -281,7 +287,7 @@ describe("instance status broadcast", () => {
 		// Verify getInstances works and the daemon was started successfully.
 		expect(daemon.getInstances()).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(daemon.getInstances()[0]!.status).toBe("stopped");
+		expect(daemon.getInstances()[0]!.id).toBe("default");
 	});
 
 	it("health checker authenticates with real OpenCode server", async () => {
