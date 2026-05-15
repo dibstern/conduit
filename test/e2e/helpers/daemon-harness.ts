@@ -1,5 +1,5 @@
 // ─── Daemon E2E Harness ──────────────────────────────────────────────────────
-// Starts a real daemon (via startDaemonProcess) pointed at a real OpenCode
+// Starts a real foreground daemon pointed at a real OpenCode
 // instance. Unlike E2EHarness (which wraps RelayStack), this provides the
 // full daemon experience: project routing, instance management, health
 // polling, and the dashboard. Browser tests connect to the daemon's own
@@ -13,14 +13,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { DaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
-import { startDaemonProcess } from "../../../src/lib/domain/daemon/Layers/daemon-main.js";
+import {
+	type ForegroundDaemonHandle,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
 export interface DaemonHarness {
 	/** The running daemon handle */
-	daemon: DaemonHandle;
+	daemon: ForegroundDaemonHandle;
 	/** The daemon's HTTP port (OS-assigned) */
 	port: number;
 	/** Base URL for Playwright navigation (e.g. "http://127.0.0.1:54321") */
@@ -87,7 +89,7 @@ export async function createDaemonHarness(
 	// Create temp directory for daemon config, socket, PID file, and logs
 	const tmpDir = mkdtempSync(join(tmpdir(), "e2e-daemon-"));
 
-	const daemon = await startDaemonProcess({
+	const daemon = await startForegroundDaemon({
 		port: 0,
 		host: "127.0.0.1",
 		configDir: tmpDir,
@@ -133,7 +135,7 @@ export async function createDaemonHarness(
 
 /** Poll daemon instances until at least one is healthy. */
 async function waitForHealthy(
-	daemon: DaemonHandle,
+	daemon: ForegroundDaemonHandle,
 	timeoutMs: number,
 ): Promise<void> {
 	const start = Date.now();
