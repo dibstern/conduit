@@ -53,25 +53,22 @@ This plan intentionally avoids prescribing every line of implementation. The imp
 - Do not replace the per-project relay with a daemon-global engine in this plan.
 - Do not keep compatibility wrappers after a consumer is converted. Delete old imports and old implementations in the same PR whenever the change surface is local enough. **Bridge deletion is incremental, per phase.** Phase 9 only confirms the greps are clean and updates docs — its bridge-deletion list should already be empty by the time it runs. If a phase ends with a bridge still alive, that phase did not meet its own exit criteria.
 
-## Live Blocker Map
+## Guardrail Closure
 
-The original phase list below remains useful as detailed implementation background, but the remaining work should be
-driven by the live guardrail blockers. As of the 2026-05-14 refresh:
+The original phase list below remains useful as detailed implementation background. The live guardrail checklist is
+closed as of 2026-05-15; use `docs/plans/2026-05-14-effect-ts-mainline-live-progress.md` for the final status and
+verification evidence.
 
-- Clean in production `src`: `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic
-  `concurrency: "unbounded"`.
-- Router service ownership is still blocking completion. `src/lib/domain/daemon/Layers/daemon-main.ts` and the route graph still use
-  callback-shaped route provider objects for daemon/project/config state, and HTTP handler construction still crosses
-  an internal `Effect.runSync(NodeHttpServer.makeHandler(...))` boundary.
-- Scoped project relay ownership is still blocking completion. `src/lib/relay/relay-stack.ts` still constructs the
-  relay imperatively, then bridge-injects prebuilt relay objects such as OpenCode API, config, logger, WebSocket handler,
-  status poller, and instance management with `Layer.succeed(Tag, instance)`.
-- IPC socket ownership is still blocking completion. `src/lib/daemon/daemon-lifecycle.ts` still dispatches from the
-  Unix socket callback into Effect with `Effect.runPromise(...)`.
-- The single daemon entrypoint cutover is still blocked by the router, relay, and IPC ownership gaps. `src/bin/cli-core.ts`
-  still imports/calls `startDaemonProcess`, and `src/lib/domain/daemon/Layers/daemon-main.ts` still exports the hybrid bridge.
-- Throwing-helper cleanup still needs targeted triage. The broad grep has ordinary defect/external-boundary throws mixed
-  with candidate Effect-program defects; do not treat the grep count itself as the blocker.
+Closed blockers:
+
+- `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic `concurrency: "unbounded"` are clean in
+  production `src` and covered by the final static guard run.
+- Router service ownership and HTTP runtime ownership have moved into Effect-owned daemon/router services.
+- Scoped project relay ownership no longer bridge-injects prebuilt relay objects in `relay-stack.ts`.
+- IPC socket dispatch now routes through the daemon runtime-owned tagged RPC handler surface.
+- The single daemon entrypoint cutover is complete: CLI foreground and internal child startup enter through the
+  Effect daemon starter facade, and the legacy `startDaemonProcess` bridge export has been deleted.
+- Throwing-helper cleanup has been triaged into typed domain errors or explicit external/invariant reclassifications.
 
 ## Target Architecture Refresh
 
@@ -891,10 +888,11 @@ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log
 
 ---
 
-## Remaining Implementation Order
+## Completed Implementation Order
 
-This is the authoritative order for the rest of the conversion. It supersedes the older phase-number order whenever
-they conflict.
+This was the authoritative order used for the final conversion. It superseded the older phase-number order whenever
+they conflicted. The corresponding completion state now lives in
+`docs/plans/2026-05-14-effect-ts-mainline-live-progress.md`.
 
 1. Effect version freeze and post-migration v4 record.
    - Keep the mainline migration on Effect 3.x and the current package set.
