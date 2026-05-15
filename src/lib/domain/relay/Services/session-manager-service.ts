@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { SqlClient } from "@effect/sql";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 // ─── SessionManager Service (Effect) ────────────────────────────────────────
 // Pure Effect functions that replace the imperative SessionManager methods.
@@ -27,7 +29,10 @@ import type {
 	SessionDetail,
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { sessionRowsToSessionInfoList } from "../../../persistence/session-list-adapter.js";
 import { toSessionInfoList } from "../../../session/session-info-list.js";
@@ -41,6 +46,7 @@ import {
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
+import { OverridesStateTag } from "./session-overrides-state.js";
 
 // ─── Retry policy ──────────────────────────────────────────────────────────
 
@@ -309,6 +315,139 @@ export const createSession = (title?: string) =>
 		Effect.annotateLogs("operation", "createSession"),
 		Effect.withSpan("session.createSession"),
 	);
+
+const normalizeSessionTitle = (title?: string): string => {
+	const trimmed = title?.trim();
+	return trimmed ? trimmed : "Untitled";
+};
+
+const createLocalSessionId = (): string =>
+	`ses_${randomUUID().replaceAll("-", "")}`;
+
+const getLocalSessionProvider = () =>
+	Effect.gen(function* () {
+		const configuredProvider = yield* getConfiguredLocalSessionProvider();
+		return configuredProvider ?? "claude";
+	});
+
+const getConfiguredLocalSessionProvider = () =>
+	Effect.gen(function* () {
+		const overridesOption = yield* Effect.serviceOption(OverridesStateTag);
+		if (overridesOption._tag === "Some") {
+			const state = yield* Ref.get(overridesOption.value);
+			return state.defaultModel?.providerID;
+		}
+		return undefined;
+	});
+
+const createLocalSession = (title?: string) =>
+	Effect.gen(function* () {
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunnerOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
+
+		if (
+			eventStoreOption._tag === "None" ||
+			projectionRunnerOption._tag === "None" ||
+			sqlOption._tag === "None"
+		) {
+			return yield* new SessionManagerError({
+				operation: "createLocalSession",
+				cause: "SQLite event-store services are unavailable",
+			});
+		}
+
+		const eventStore = eventStoreOption.value;
+		const projectionRunner = projectionRunnerOption.value;
+		const sql = sqlOption.value;
+		const provider = yield* getLocalSessionProvider();
+		const sessionId = createLocalSessionId();
+		const now = Date.now();
+		const sessionTitle = normalizeSessionTitle(title);
+
+		const withSql = <A, E>(
+			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+		): Effect.Effect<A, E> =>
+			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+		const recovered = yield* projectionRunner.isRecovered();
+		if (!recovered) {
+			yield* withSql(projectionRunner.recover()).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "createLocalSession.recover",
+							cause,
+						}),
+				),
+				Effect.asVoid,
+			);
+		}
+
+		yield* sql`
+			INSERT OR IGNORE INTO sessions (id, provider, title, status, created_at, updated_at)
+			VALUES (${sessionId}, ${provider}, ${sessionTitle}, 'idle', ${now}, ${now})`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "createLocalSession.seed",
+						cause,
+					}),
+			),
+			Effect.asVoid,
+		);
+
+		const stored = yield* eventStore
+			.append(
+				canonicalEvent(
+					"session.created",
+					sessionId,
+					{
+						sessionId,
+						title: sessionTitle,
+						provider,
+					},
+					{
+						provider,
+						createdAt: now,
+						metadata: { source: "relay", synthetic: true },
+					},
+				),
+			)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "createLocalSession.append",
+							cause,
+						}),
+				),
+			);
+
+		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "createLocalSession.project",
+						cause,
+					}),
+			),
+		);
+
+		return {
+			id: sessionId,
+			projectID: "",
+			directory:
+				configOption._tag === "Some" ? configOption.value.projectDir : "",
+			title: sessionTitle,
+			version: "",
+			time: { created: now, updated: now },
+			providerID: provider,
+		} satisfies SessionDetail;
+	}).pipe(Effect.withSpan("session.createLocalSession"));
 
 /**
  * Delete a session via the API and clear all associated state.
@@ -860,6 +999,59 @@ export const SessionManagerServiceLive: Layer.Layer<
 						: base;
 				return yield* withEffectRead;
 			});
+		const serviceCreateSession = (title?: string) =>
+			Effect.gen(function* () {
+				const createViaOpenCode = () =>
+					Effect.either(
+						createSession(title).pipe(
+							Effect.provideService(OpenCodeAPITag, api),
+						),
+					);
+				const createViaLocal = () => Effect.either(createLocalSession(title));
+
+				const configuredProvider = yield* getConfiguredLocalSessionProvider();
+				if (configuredProvider === "claude") {
+					const localResult = yield* createViaLocal();
+					if (localResult._tag === "Right") {
+						return localResult.right;
+					}
+
+					log.warn(
+						`Relay-owned Claude session create failed; falling back to OpenCode session create: ${localResult.left}`,
+					);
+					const openCodeResult = yield* createViaOpenCode();
+					if (openCodeResult._tag === "Right") {
+						return openCodeResult.right;
+					}
+
+					return yield* new SessionManagerError({
+						operation: "createSession",
+						cause: {
+							local: localResult.left,
+							openCode: openCodeResult.left,
+						},
+					});
+				}
+
+				const openCodeResult = yield* createViaOpenCode();
+				if (openCodeResult._tag === "Right") return openCodeResult.right;
+
+				log.warn(
+					`OpenCode session create failed; creating relay-owned session: ${openCodeResult.left}`,
+				);
+				const localResult = yield* createViaLocal();
+				if (localResult._tag === "Right") {
+					return localResult.right;
+				}
+
+				return yield* new SessionManagerError({
+					operation: "createSession",
+					cause: {
+						openCode: openCodeResult.left,
+						local: localResult.left,
+					},
+				});
+			});
 
 		return {
 			getDefaultSessionId: (title) =>
@@ -869,9 +1061,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 						const topLevel = sessions.find((session) => !session.parentID);
 						return (topLevel ?? sessions[0])?.id ?? "";
 					}
-					const session = yield* createSession(title).pipe(
-						Effect.provideService(OpenCodeAPITag, api),
-					);
+					const session = yield* serviceCreateSession(title);
 					yield* incrementLastKnownSessionCount().pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
@@ -881,10 +1071,21 @@ export const SessionManagerServiceLive: Layer.Layer<
 					return session.id;
 				}),
 			initialize: (title) =>
-				initialize(title).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
+				Effect.gen(function* () {
+					const sessions = yield* serviceListSessions();
+					if (sessions.length > 0) {
+						const sorted = [...sessions].sort(
+							(a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0),
+						);
+						return sorted[0]?.id ?? "";
+					}
+					const session = yield* serviceCreateSession(title);
+					yield* incrementLastKnownSessionCount().pipe(
+						Effect.provideService(SessionManagerStateTag, stateRef),
+					);
+					yield* updateRelaySessionCountSnapshot(1);
+					return session.id;
+				}),
 			getLastKnownSessionCount: () =>
 				getLastKnownSessionCount().pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
@@ -892,9 +1093,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			listSessions: serviceListSessions,
 			createSession: (title) =>
 				Effect.gen(function* () {
-					const session = yield* createSession(title).pipe(
-						Effect.provideService(OpenCodeAPITag, api),
-					);
+					const session = yield* serviceCreateSession(title);
 					yield* incrementLastKnownSessionCount().pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);

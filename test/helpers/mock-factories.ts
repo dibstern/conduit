@@ -65,7 +65,12 @@ import {
 import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
-import { OpenCodeTerminalServiceLive } from "../../src/lib/domain/relay/Services/terminal-service.js";
+import {
+	type LocalPtyService,
+	LocalPtyServiceTag,
+	type LocalPtySession,
+	OpenCodeTerminalServiceLive,
+} from "../../src/lib/domain/relay/Services/terminal-service.js";
 import { ToolContentServiceNoop } from "../../src/lib/domain/relay/Services/tool-content-service.js";
 import type {
 	HandlerDeps,
@@ -906,6 +911,7 @@ export interface TestHandlerLayerOptions {
 	statusPoller?: StatusPollerShape;
 	pollerManager?: PollerManagerShape;
 	connectPtyUpstream?: ConnectPtyUpstreamShape;
+	localPty?: LocalPtyService;
 	instanceMgmt?: InstanceManagementDeps;
 	orchestrationEngine?: OrchestrationEngine;
 }
@@ -940,6 +946,29 @@ export function makeTestHandlerLayer(
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
+	const localPty: LocalPtyService = opts?.localPty ?? {
+		create: vi.fn(() => {
+			const session: LocalPtySession = {
+				pty: {
+					id: "local-pty-test",
+					title: "Terminal",
+					command: "zsh",
+					cwd: config.projectDir,
+					status: "running",
+					pid: 1,
+				},
+				upstream: {
+					readyState: 1,
+					send: vi.fn(),
+					close: vi.fn(),
+					terminate: vi.fn(),
+				},
+				onData: vi.fn(),
+				onExit: vi.fn(),
+			};
+			return Effect.succeed(session);
+		}),
+	};
 	const instanceMgmt = opts?.instanceMgmt;
 	const overridesStateLayer = makeOverridesStateLive();
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
@@ -955,6 +984,7 @@ export function makeTestHandlerLayer(
 		ConnectPtyUpstreamTag,
 		connectPtyUpstream,
 	);
+	const localPtyLayer = Layer.succeed(LocalPtyServiceTag, localPty);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
@@ -988,6 +1018,7 @@ export function makeTestHandlerLayer(
 				configLayer,
 				ptyManagerLayer,
 				connectPtyUpstreamLayer,
+				localPtyLayer,
 			),
 		),
 	);

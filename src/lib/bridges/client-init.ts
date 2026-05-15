@@ -59,6 +59,7 @@ import type { ContextWindowOption } from "../shared-types.js";
 import type {
 	OpenCodeInstance,
 	PendingPermission,
+	ProviderInfo,
 	RelayMessage,
 } from "../types.js";
 
@@ -117,6 +118,67 @@ function findContextWindowOptions(
 		if (model?.contextWindowOptions) return model.contextWindowOptions;
 	}
 	return [];
+}
+
+function toConfiguredOpenCodeProviders(
+	providerResult: OpenCodeProviderList,
+): ProviderInfo[] {
+	const connectedSet = new Set(providerResult.connected);
+	return providerResult.providers
+		.map((p) => ({
+			id: p.id || p.name || "",
+			name: p.name || p.id || "",
+			configured: connectedSet.has(p.id) || connectedSet.has(p.name),
+			models: (p.models ?? []).map((m) => ({
+				id: m.id,
+				name: m.name || m.id,
+				provider: p.id || p.name || "",
+				...(m.limit && { limit: m.limit }),
+				...(m.variants &&
+					Object.keys(m.variants).length > 0 && {
+						variants: Object.keys(m.variants),
+					}),
+			})),
+		}))
+		.filter((p) => p.configured);
+}
+
+function addClaudeProvider(
+	providers: ProviderInfo[],
+	capabilities: ProviderCapabilities,
+): boolean {
+	if (capabilities.models.length === 0) return false;
+	for (const p of providers) {
+		if (p.id === "anthropic") {
+			p.name = "Anthropic - opencode";
+		}
+	}
+	providers.push({
+		id: "claude",
+		name: "Anthropic - claude",
+		configured: true,
+		models: capabilities.models.map((m) => ({
+			id: m.id,
+			name: m.name,
+			provider: "claude",
+			...(m.limit ? { limit: m.limit } : {}),
+			...(m.variants && Object.keys(m.variants).length > 0
+				? { variants: Object.keys(m.variants) }
+				: {}),
+			...(m.contextWindowOptions && m.contextWindowOptions.length > 0
+				? {
+						contextWindowOptions: m.contextWindowOptions.map((option) => ({
+							value: option.value,
+							label: option.label,
+							...(option.isDefault != null
+								? { isDefault: option.isDefault }
+								: {}),
+						})),
+					}
+				: {}),
+		})),
+	});
+	return true;
 }
 
 export interface ClientInitDeps {
@@ -354,10 +416,10 @@ export const handleClientConnectedEffect = (
 					}
 				}
 			} else {
-				yield* sendInitErrorEffect(
-					clientId,
-					sessionInfoResult.left,
-					"Failed to load session info",
+				yield* Effect.sync(() =>
+					log.warn(
+						`Failed to load session info for ${activeId}: ${sessionInfoResult.left}`,
+					),
 				);
 				const fallbackModel = yield* getModel(activeId);
 				if (fallbackModel) {
@@ -534,27 +596,20 @@ export const handleClientConnectedEffect = (
 
 		const providerResult = yield* Effect.either(
 			Effect.gen(function* () {
-				const providerResult = yield* modelService.listProviders();
-				const connectedSet = new Set(providerResult.connected);
-				const providers = providerResult.providers
-					.map((p) => ({
-						id: p.id || p.name || "",
-						name: p.name || p.id || "",
-						configured: connectedSet.has(p.id) || connectedSet.has(p.name),
-						models: (p.models ?? []).map((m) => ({
-							id: m.id,
-							name: m.name || m.id,
-							provider: p.id || p.name || "",
-							...(m.limit && { limit: m.limit }),
-							...(m.variants &&
-								Object.keys(m.variants).length > 0 && {
-									variants: Object.keys(m.variants),
-								}),
-						})),
-					}))
-					.filter((p) => p.configured);
-
-				wsHandler.sendTo(clientId, { type: "model_list", providers });
+				const openCodeProviderResult = yield* Effect.either(
+					modelService.listProviders(),
+				);
+				const providers =
+					openCodeProviderResult._tag === "Right"
+						? toConfiguredOpenCodeProviders(openCodeProviderResult.right)
+						: [];
+				if (openCodeProviderResult._tag === "Right") {
+					wsHandler.sendTo(clientId, { type: "model_list", providers });
+				} else {
+					log.warn(
+						`OpenCode provider discovery failed during client init: ${formatErrorDetail(openCodeProviderResult.left)}`,
+					);
+				}
 
 				const claudeCapsResult = yield* Effect.either(
 					engine.dispatchEffect({
@@ -564,31 +619,15 @@ export const handleClientConnectedEffect = (
 				);
 				if (
 					claudeCapsResult._tag === "Right" &&
-					claudeCapsResult.right.models.length > 0
+					addClaudeProvider(providers, claudeCapsResult.right)
 				) {
-					for (const p of providers) {
-						if (p.id === "anthropic") {
-							p.name = "Anthropic - opencode";
-						}
-					}
-					providers.push({
-						id: "claude",
-						name: "Anthropic - claude",
-						configured: true,
-						models: claudeCapsResult.right.models.map((m) => ({
-							id: m.id,
-							name: m.name,
-							provider: "claude",
-							...(m.limit ? { limit: m.limit } : {}),
-							...(m.variants && Object.keys(m.variants).length > 0
-								? { variants: Object.keys(m.variants) }
-								: {}),
-							...(m.contextWindowOptions && m.contextWindowOptions.length > 0
-								? { contextWindowOptions: m.contextWindowOptions }
-								: {}),
-						})),
-					});
 					wsHandler.sendTo(clientId, { type: "model_list", providers });
+				}
+				if (
+					openCodeProviderResult._tag === "Left" &&
+					(claudeCapsResult._tag === "Left" || providers.length === 0)
+				) {
+					return yield* Effect.fail(openCodeProviderResult.left);
 				}
 
 				const currentVariant = activeId
@@ -636,9 +675,10 @@ export const handleClientConnectedEffect = (
 					});
 				}
 
-				if (!defaultModel) {
-					for (const providerId of providerResult.connected) {
-						const defaultModelId = providerResult.defaults[providerId];
+				if (!defaultModel && openCodeProviderResult._tag === "Right") {
+					for (const providerId of openCodeProviderResult.right.connected) {
+						const defaultModelId =
+							openCodeProviderResult.right.defaults[providerId];
 						if (defaultModelId) {
 							yield* setDefaultModel({
 								providerID: providerId,
@@ -655,7 +695,31 @@ export const handleClientConnectedEffect = (
 							break;
 						}
 					}
-				} else if (connectedSet.has(defaultModel.providerID)) {
+				} else if (
+					!defaultModel &&
+					providers.some((provider) => provider.id === "claude")
+				) {
+					const defaultClaudeModel = providers
+						.find((provider) => provider.id === "claude")
+						?.models.at(0);
+					if (defaultClaudeModel) {
+						yield* setDefaultModel({
+							providerID: "claude",
+							modelID: defaultClaudeModel.id,
+						});
+						wsHandler.broadcast({
+							type: "model_info",
+							model: defaultClaudeModel.id,
+							provider: "claude",
+						});
+						log.info(
+							`Auto-selected default: ${defaultClaudeModel.id} (claude)`,
+						);
+					}
+				} else if (
+					defaultModel &&
+					providers.some((provider) => provider.id === defaultModel.providerID)
+				) {
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
 						model: defaultModel.modelID,
@@ -800,7 +864,11 @@ export async function handleClientConnected(
 				}
 			}
 		} catch (err) {
-			sendInitError(err, "Failed to load session info");
+			deps.log.warn(
+				`Failed to load session info for ${activeId}: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
 			const fallbackModel = await overrideState.getModel(activeId);
 			if (fallbackModel) {
 				wsHandler.sendTo(clientId, {
@@ -970,64 +1038,39 @@ export async function handleClientConnected(
 
 	// ── Provider/model list + auto-select default ────────────────────────
 	try {
-		const providerResult = await deps.modelService.listProviders();
-		const connectedSet = new Set(providerResult.connected);
-		const providers = providerResult.providers
-			.map((p) => ({
-				id: p.id || p.name || "",
-				name: p.name || p.id || "",
-				configured: connectedSet.has(p.id) || connectedSet.has(p.name),
-				models: (p.models ?? []).map((m) => ({
-					id: m.id,
-					name: m.name || m.id,
-					provider: p.id || p.name || "",
-					...(m.limit && { limit: m.limit }),
-					...(m.variants &&
-						Object.keys(m.variants).length > 0 && {
-							variants: Object.keys(m.variants),
-						}),
-				})),
-			}))
-			.filter((p) => p.configured);
-
-		wsHandler.sendTo(clientId, { type: "model_list", providers });
+		let providerResult: OpenCodeProviderList | undefined;
+		const providers: ProviderInfo[] = [];
+		let openCodeError: unknown;
+		try {
+			providerResult = await deps.modelService.listProviders();
+			providers.push(...toConfiguredOpenCodeProviders(providerResult));
+			wsHandler.sendTo(clientId, { type: "model_list", providers });
+		} catch (err) {
+			openCodeError = err;
+			deps.log.warn(
+				`OpenCode provider discovery failed during client init: ${formatErrorDetail(err)}`,
+			);
+		}
 
 		// Merge Claude in-process models when the orchestration engine is available.
 		// Mirrors model discovery so the initial client_connected payload doesn't
 		// overwrite the merged list the client later receives from RPC.
 		//   "Anthropic - opencode" → routes via OpenCode REST API
 		//   "Anthropic - claude"  → routes via in-process Claude Agent SDK
+		let claudeAdded = false;
 		if (deps.discoverClaudeCapabilities) {
 			try {
 				const claudeCaps = await deps.discoverClaudeCapabilities();
-				if (claudeCaps.models.length > 0) {
-					for (const p of providers) {
-						if (p.id === "anthropic") {
-							p.name = "Anthropic - opencode";
-						}
-					}
-					providers.push({
-						id: "claude",
-						name: "Anthropic - claude",
-						configured: true,
-						models: claudeCaps.models.map((m) => ({
-							id: m.id,
-							name: m.name,
-							provider: "claude",
-							...(m.limit ? { limit: m.limit } : {}),
-							...(m.variants && Object.keys(m.variants).length > 0
-								? { variants: Object.keys(m.variants) }
-								: {}),
-							...(m.contextWindowOptions && m.contextWindowOptions.length > 0
-								? { contextWindowOptions: m.contextWindowOptions }
-								: {}),
-						})),
-					});
+				claudeAdded = addClaudeProvider(providers, claudeCaps);
+				if (claudeAdded) {
 					wsHandler.sendTo(clientId, { type: "model_list", providers });
 				}
 			} catch {
 				// Claude provider instance may not be available — skip silently
 			}
+		}
+		if (openCodeError && !claudeAdded && providers.length === 0) {
+			throw openCodeError;
 		}
 
 		// Send variant info — current thinking level and available variants
@@ -1079,7 +1122,7 @@ export async function handleClientConnected(
 
 		// Auto-select default model if none set.
 		// Priority: defaultModel (seeded from config or user-set) > provider-level default.
-		if (!defaultModel) {
+		if (!defaultModel && providerResult) {
 			// Fallback: first connected provider's default model
 			for (const providerId of providerResult.connected) {
 				const defaultModelId = providerResult.defaults[providerId];
@@ -1099,7 +1142,28 @@ export async function handleClientConnected(
 					break;
 				}
 			}
-		} else if (connectedSet.has(defaultModel.providerID)) {
+		} else if (!defaultModel && claudeAdded) {
+			const defaultClaudeModel = providers
+				.find((provider) => provider.id === "claude")
+				?.models.at(0);
+			if (defaultClaudeModel) {
+				await overrideState.setDefaultModel({
+					providerID: "claude",
+					modelID: defaultClaudeModel.id,
+				});
+				wsHandler.broadcast({
+					type: "model_info",
+					model: defaultClaudeModel.id,
+					provider: "claude",
+				});
+				deps.log.info(
+					`Auto-selected default: ${defaultClaudeModel.id} (claude)`,
+				);
+			}
+		} else if (
+			defaultModel &&
+			providers.some((provider) => provider.id === defaultModel.providerID)
+		) {
 			// Broadcast existing default to new client
 			wsHandler.sendTo(clientId, {
 				type: "model_info",

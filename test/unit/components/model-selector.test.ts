@@ -35,6 +35,7 @@ const reloadProviderSessionRpcSpy = vi.hoisted(() =>
 		sessionId: input.sessionId,
 	})),
 );
+const showToastSpy = vi.hoisted(() => vi.fn());
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
@@ -78,7 +79,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		switchModelRpcSpy(input),
 }));
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
-	showToast: vi.fn(),
+	showToast: showToastSpy,
 }));
 
 describe("ModelSelector", () => {
@@ -88,6 +89,7 @@ describe("ModelSelector", () => {
 		switchModelRpcSpy.mockClear();
 		setDefaultModelRpcSpy.mockClear();
 		reloadProviderSessionRpcSpy.mockClear();
+		showToastSpy.mockClear();
 		clearDiscoveryState();
 		discoveryState.currentModelId = "claude-sonnet-4-7";
 		discoveryState.currentProviderId = "claude";
@@ -184,5 +186,8 @@ describe("ModelSelector", () => {
 			});
 		});
 		expect(wsSendSpy).not.toHaveBeenCalled();
+		expect(showToastSpy).toHaveBeenCalledWith("Reloading skills…", {
+			duration: 1500,
+		});
 	});
 });

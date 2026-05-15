@@ -45,8 +45,13 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	makeOverridesStateLive,
+	setDefaultModel,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
@@ -265,6 +270,54 @@ describe("SessionManagerService", () => {
 				const extra = yield* Queue.poll(sub);
 				expect(Option.isNone(extra)).toBe(true);
 			}).pipe(Effect.provide(Layer.fresh(layer)));
+		},
+	);
+
+	it.scoped(
+		"live service creates a SQLite-backed session without OpenCode when default provider is Claude",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-local-${Date.now()}.sqlite`,
+			);
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create");
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* setDefaultModel({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				const service = yield* SessionManagerServiceTag;
+
+				const session = yield* service.createSession("Local Claude");
+				const sessions = yield* service.listSessions();
+
+				expect(session.id).toMatch(/^ses_/);
+				expect(session.title).toBe("Local Claude");
+				expect(session.providerID).toBe("claude");
+				expect(api.session.create).not.toHaveBeenCalled();
+				expect(sessions).toEqual([
+					expect.objectContaining({
+						id: session.id,
+						title: "Local Claude",
+					}),
+				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
 		},
 	);
 

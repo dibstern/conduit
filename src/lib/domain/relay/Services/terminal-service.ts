@@ -1,5 +1,11 @@
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { Context, Data, Effect, Layer } from "effect";
+import * as nodePty from "node-pty";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
+import type { PtyUpstream } from "../../../relay/pty-manager.js";
 import type { PtyInfo, PtyStatus } from "../../../shared-types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
@@ -11,6 +17,11 @@ import {
 } from "./services.js";
 
 type TerminalOperation = "create" | "connect" | "list" | "delete" | "resize";
+const PTY_OPEN = 1;
+const PTY_CLOSED = 3;
+const DEFAULT_COLS = 80;
+const DEFAULT_ROWS = 24;
+const requireFromHere = createRequire(import.meta.url);
 
 export class TerminalServiceError extends Data.TaggedError(
 	"TerminalServiceError",
@@ -37,6 +48,141 @@ export interface OpenCodeTerminalService {
 export class OpenCodeTerminalServiceTag extends Context.Tag(
 	"OpenCodeTerminalService",
 )<OpenCodeTerminalServiceTag, OpenCodeTerminalService>() {}
+
+export interface LocalPtySession {
+	readonly pty: PtyInfo;
+	readonly upstream: PtyUpstream;
+	onData(handler: (data: string) => void): void;
+	onExit(handler: (exitCode: number) => void): void;
+}
+
+export interface LocalPtyService {
+	create(options: {
+		readonly cwd: string;
+		readonly cols?: number | undefined;
+		readonly rows?: number | undefined;
+	}): Effect.Effect<LocalPtySession, TerminalServiceError>;
+}
+
+export class LocalPtyServiceTag extends Context.Tag("LocalPtyService")<
+	LocalPtyServiceTag,
+	LocalPtyService
+>() {}
+
+const getDefaultShell = (): string => {
+	if (process.platform === "win32") {
+		return process.env["COMSPEC"] ?? "powershell.exe";
+	}
+	return process.env["SHELL"] ?? "/bin/zsh";
+};
+
+const toPtyWriteData = (
+	data: string | Buffer | ArrayBuffer,
+): string | Buffer => {
+	if (typeof data === "string" || Buffer.isBuffer(data)) return data;
+	return Buffer.from(data);
+};
+
+const getPtyEnv = (): Record<string, string> => {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (value != null) env[key] = value;
+	}
+	return env;
+};
+
+const ensureNodePtySpawnHelperExecutable = (): void => {
+	if (process.platform !== "darwin") return;
+	const nodePtyRoot = path.resolve(
+		path.dirname(requireFromHere.resolve("node-pty")),
+		"..",
+	);
+	for (const helperPath of [
+		path.join(
+			nodePtyRoot,
+			"prebuilds",
+			`${process.platform}-${process.arch}`,
+			"spawn-helper",
+		),
+		path.join(nodePtyRoot, "build", "Release", "spawn-helper"),
+	]) {
+		if (!fs.existsSync(helperPath)) continue;
+		const mode = fs.statSync(helperPath).mode;
+		if ((mode & 0o111) === 0) {
+			fs.chmodSync(helperPath, mode | 0o755);
+		}
+	}
+};
+
+export const LocalPtyServiceLive: Layer.Layer<LocalPtyServiceTag> =
+	Layer.succeed(LocalPtyServiceTag, {
+		create: ({ cwd, cols = DEFAULT_COLS, rows = DEFAULT_ROWS }) =>
+			Effect.try({
+				try: () => {
+					ensureNodePtySpawnHelperExecutable();
+					const shell = getDefaultShell();
+					const id = `local-pty-${randomUUID()}`;
+					const ptyProcess = nodePty.spawn(shell, [], {
+						name: "xterm-256color",
+						cols,
+						rows,
+						cwd,
+						env: {
+							...getPtyEnv(),
+							COLORTERM: "truecolor",
+							CONDUIT: "1",
+							TERM: process.env["TERM"] ?? "xterm-256color",
+						},
+					});
+					let readyState = PTY_OPEN;
+					const close = () => {
+						if (readyState !== PTY_OPEN) return;
+						readyState = PTY_CLOSED;
+						ptyProcess.kill();
+					};
+					const upstream: PtyUpstream = {
+						get readyState() {
+							return readyState;
+						},
+						send: (data, cb) => {
+							try {
+								ptyProcess.write(toPtyWriteData(data));
+								cb?.();
+							} catch (err) {
+								cb?.(err instanceof Error ? err : new Error(String(err)));
+							}
+						},
+						close,
+						terminate: close,
+						resize: (nextCols, nextRows) => {
+							ptyProcess.resize(nextCols, nextRows);
+						},
+					};
+					return {
+						pty: {
+							id,
+							title: "Terminal",
+							command: path.basename(shell),
+							cwd,
+							status: "running",
+							pid: ptyProcess.pid,
+						},
+						upstream,
+						onData: (handler) => {
+							ptyProcess.onData(handler);
+						},
+						onExit: (handler) => {
+							ptyProcess.onExit(({ exitCode }) => {
+								readyState = PTY_CLOSED;
+								handler(exitCode);
+							});
+						},
+					};
+				},
+				catch: (cause) =>
+					new TerminalServiceError({ operation: "create", cause }),
+			}),
+	});
 
 type PtyInfoResult =
 	| { readonly _tag: "MissingId"; readonly raw: Record<string, unknown> }
@@ -89,6 +235,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 	| ConfigTag
 	| PtyManagerTag
 	| ConnectPtyUpstreamTag
+	| LocalPtyServiceTag
 > = Layer.effect(
 	OpenCodeTerminalServiceTag,
 	Effect.gen(function* () {
@@ -98,17 +245,14 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		const config = yield* ConfigTag;
 		const ptyManager = yield* PtyManagerTag;
 		const connectPtyUpstream = yield* ConnectPtyUpstreamTag;
+		const localPty = yield* LocalPtyServiceTag;
 
 		return {
 			create: (clientId: string) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
 					const createResult = yield* Effect.either(
-						Effect.tryPromise({
-							try: () => client.pty.create(),
-							catch: (cause) =>
-								new TerminalServiceError({ operation: "create", cause }),
-						}),
+						localPty.create({ cwd: config.projectDir }),
 					);
 					if (createResult._tag === "Left") {
 						log.warn(
@@ -125,73 +269,57 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						return;
 					}
 
-					const ptyResult = toPtyInfo(createResult.right, config.projectDir);
-					if (ptyResult._tag === "MissingId") {
-						log.warn(
-							`client=${clientId} session=${session} Create returned no id: ${JSON.stringify(ptyResult.raw)}`,
-						);
-						wsHandler.sendTo(
-							clientId,
-							new RelayError("Terminal creation returned no ID", {
-								code: "PTY_CREATE_FAILED",
-							}).toSystemError(),
-						);
-						return;
-					}
-
-					const { pty } = ptyResult;
+					const { pty, upstream } = createResult.right;
+					ptyManager.registerSession(pty.id, upstream, "local");
+					createResult.right.onData((data) => {
+						ptyManager.appendScrollback(pty.id, data);
+						wsHandler.broadcast({ type: "pty_output", ptyId: pty.id, data });
+					});
+					createResult.right.onExit((exitCode) => {
+						ptyManager.markExited(pty.id, exitCode);
+						if (ptyManager.hasSession(pty.id)) {
+							wsHandler.broadcast({
+								type: "pty_exited",
+								ptyId: pty.id,
+								exitCode,
+							});
+						}
+					});
 					log.info(
 						`client=${clientId} session=${session} Created: ${pty.id} (pid=${pty.pid})`,
 					);
 					wsHandler.broadcast({ type: "pty_created", pty });
-
-					const connectResult = yield* Effect.either(
-						Effect.tryPromise({
-							try: () => connectPtyUpstream(pty.id),
-							catch: (cause) =>
-								new TerminalServiceError({
-									operation: "connect",
-									ptyId: pty.id,
-									cause,
-								}),
-						}),
-					);
-					if (connectResult._tag === "Left") {
-						log.warn(
-							`client=${clientId} session=${session} Failed to connect upstream WS: ${pty.id}: ${formatErrorDetail(connectResult.left.cause)}`,
-						);
-						wsHandler.broadcast({ type: "pty_deleted", ptyId: pty.id });
-						wsHandler.sendTo(
-							clientId,
-							RelayError.fromCaught(
-								connectResult.left.cause,
-								"PTY_CONNECT_FAILED",
-								"Failed to connect to terminal",
-							).toSystemError(),
-						);
-					} else {
-						log.info(
-							`client=${clientId} session=${session} Connected upstream WS: ${pty.id}`,
-						);
-					}
 				}),
 			list: (clientId: string) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
-					const rawPtys = yield* Effect.tryPromise({
-						try: () => client.pty.list(),
-						catch: (cause) =>
-							new TerminalServiceError({ operation: "list", cause }),
-					});
-					const ptys: PtyInfo[] = [];
-					for (const rawPty of rawPtys) {
-						const ptyResult = toPtyInfo(rawPty, config.projectDir);
-						if (ptyResult._tag === "Created") {
-							ptys.push(ptyResult.pty);
-						} else {
-							log.warn(
-								`client=${clientId} session=${session} List returned PTY with no id: ${JSON.stringify(ptyResult.raw)}`,
-							);
+					const rawPtysResult = yield* Effect.either(
+						Effect.tryPromise({
+							try: () => client.pty.list(),
+							catch: (cause) =>
+								new TerminalServiceError({ operation: "list", cause }),
+						}),
+					);
+					const ptys: PtyInfo[] = ptyManager
+						.listSessions()
+						.map((pty) => toTrackedPtyInfo(pty, config.projectDir));
+					if (rawPtysResult._tag === "Left") {
+						log.debug(
+							`client=${clientId} session=${session} OpenCode PTY list unavailable: ${formatErrorDetail(rawPtysResult.left.cause)}`,
+						);
+					} else {
+						const rawPtys = rawPtysResult.right;
+						for (const rawPty of rawPtys) {
+							const ptyResult = toPtyInfo(rawPty, config.projectDir);
+							if (ptyResult._tag === "Created") {
+								if (!ptyManager.hasSession(ptyResult.pty.id)) {
+									ptys.push(ptyResult.pty);
+								}
+							} else {
+								log.warn(
+									`client=${clientId} session=${session} List returned PTY with no id: ${JSON.stringify(ptyResult.raw)}`,
+								);
+							}
 						}
 					}
 					wsHandler.sendTo(clientId, {
@@ -260,20 +388,28 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 				}),
 			close: (ptyId: string) =>
 				Effect.gen(function* () {
+					const session = ptyManager.getSession(ptyId);
 					ptyManager.closeSession(ptyId);
-					yield* Effect.tryPromise({
-						try: () => client.pty.delete(ptyId),
-						catch: (cause) =>
-							new TerminalServiceError({
-								operation: "delete",
-								ptyId,
-								cause,
-							}),
-					});
+					if (session?.source !== "local") {
+						yield* Effect.tryPromise({
+							try: () => client.pty.delete(ptyId),
+							catch: (cause) =>
+								new TerminalServiceError({
+									operation: "delete",
+									ptyId,
+									cause,
+								}),
+						});
+					}
 					wsHandler.broadcast({ type: "pty_deleted", ptyId });
 				}),
 			resize: (clientId: string, ptyId: string, rows: number, cols: number) =>
 				Effect.gen(function* () {
+					const session = ptyManager.getSession(ptyId);
+					if (session?.source === "local") {
+						session.upstream.resize?.(cols, rows);
+						return;
+					}
 					const resizeResult = yield* Effect.either(
 						Effect.tryPromise({
 							try: () => client.pty.resize(ptyId, rows, cols),

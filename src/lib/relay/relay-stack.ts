@@ -74,7 +74,10 @@ import {
 	SSEStreamLive,
 	SSEStreamTag,
 } from "../domain/relay/Services/sse-stream-service.js";
-import { OpenCodeTerminalServiceLive } from "../domain/relay/Services/terminal-service.js";
+import {
+	LocalPtyServiceLive,
+	OpenCodeTerminalServiceLive,
+} from "../domain/relay/Services/terminal-service.js";
 import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
@@ -689,6 +692,7 @@ export async function createProjectRelay(
 				loggerLayer,
 				configLayer,
 				ptyRuntimeLayer,
+				LocalPtyServiceLive,
 			),
 		),
 	);

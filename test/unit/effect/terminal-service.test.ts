@@ -11,8 +11,12 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
+	type LocalPtyService,
+	LocalPtyServiceTag,
+	type LocalPtySession,
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
+	TerminalServiceError,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
@@ -63,6 +67,7 @@ const makeLayer = (options?: {
 	readonly api?: OpenCodeAPI;
 	readonly ptyManager?: PtyManager;
 	readonly connectPtyUpstream?: ConnectPtyUpstreamShape;
+	readonly localPty?: LocalPtyService;
 	readonly wsHandler?: ReturnType<typeof makeMockWebSocketHandler>;
 	readonly log?: ReturnType<typeof makeMockLogger>;
 }) => {
@@ -71,6 +76,26 @@ const makeLayer = (options?: {
 		options?.ptyManager ?? new PtyManager({ log: makeMockLogger() });
 	const connectPtyUpstream =
 		options?.connectPtyUpstream ?? vi.fn(async () => undefined);
+	const localPty =
+		options?.localPty ??
+		({
+			create: vi.fn(() => {
+				const session: LocalPtySession = {
+					pty: {
+						id: "local-pty-1",
+						title: "Terminal",
+						command: "zsh",
+						cwd: "/project",
+						status: "running",
+						pid: 456,
+					},
+					upstream: makeUpstream(openState),
+					onData: vi.fn(),
+					onExit: vi.fn(),
+				};
+				return Effect.succeed(session);
+			}),
+		} satisfies LocalPtyService);
 	const wsHandler = options?.wsHandler ?? makeMockWebSocketHandler();
 	const log = options?.log ?? makeMockLogger();
 
@@ -80,6 +105,7 @@ const makeLayer = (options?: {
 				Layer.succeed(OpenCodeAPITag, api),
 				Layer.succeed(PtyManagerTag, ptyManager),
 				Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
+				Layer.succeed(LocalPtyServiceTag, localPty),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
 				Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/project" })),
 				Layer.succeed(LoggerTag, log),
@@ -89,51 +115,131 @@ const makeLayer = (options?: {
 };
 
 describe("OpenCodeTerminalServiceLive", () => {
-	it.effect("broadcasts pty_created before connecting the upstream", () => {
-		const events: string[] = [];
-		const wsHandler = makeMockWebSocketHandler({
-			broadcast: vi.fn((message) => events.push(`broadcast:${message.type}`)),
+	it.effect("creates a local terminal without requiring OpenCode PTY", () => {
+		const dataHandlers: Array<(data: string) => void> = [];
+		const exitHandlers: Array<(exitCode: number) => void> = [];
+		const upstream = { ...makeUpstream(openState), resize: vi.fn() };
+		const localPty: LocalPtyService = {
+			create: vi.fn(() => {
+				const session: LocalPtySession = {
+					pty: {
+						id: "local-pty-1",
+						title: "Terminal",
+						command: "zsh",
+						cwd: "/project",
+						status: "running",
+						pid: 456,
+					},
+					upstream,
+					onData: (handler: (data: string) => void) => {
+						dataHandlers.push(handler);
+					},
+					onExit: (handler: (exitCode: number) => void) => {
+						exitHandlers.push(handler);
+					},
+				};
+				return Effect.succeed(session);
+			}),
+		};
+		const api = makeApi({
+			create: vi.fn(async () => {
+				throw new Error("fetch failed");
+			}),
 		});
-		const connectPtyUpstream = vi.fn(async () => {
-			events.push("connect");
-		});
-		const layer = makeLayer({ wsHandler, connectPtyUpstream });
+		const wsHandler = makeMockWebSocketHandler();
+		const ptyManager = new PtyManager({ log: makeMockLogger() });
+		const layer = makeLayer({ api, wsHandler, ptyManager, localPty });
 
 		return Effect.gen(function* () {
 			const service = yield* OpenCodeTerminalServiceTag;
 			yield* service.create("client-1");
+			yield* service.sendInput("local-pty-1", "echo hi\n");
 
-			expect(events).toEqual(["broadcast:pty_created", "connect"]);
-			expect(connectPtyUpstream).toHaveBeenCalledWith("pty-1");
-			expect(wsHandler.sendTo).not.toHaveBeenCalled();
+			expect(api.pty.create).not.toHaveBeenCalled();
+			expect(ptyManager.hasSession("local-pty-1")).toBe(true);
+			expect(upstream.send).toHaveBeenCalledWith("echo hi\n");
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "pty_created",
+				pty: {
+					id: "local-pty-1",
+					title: "Terminal",
+					command: "zsh",
+					cwd: "/project",
+					status: "running",
+					pid: 456,
+				},
+			});
+
+			dataHandlers[0]?.("hello\n");
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "pty_output",
+				ptyId: "local-pty-1",
+				data: "hello\n",
+			});
+
+			yield* service.resize("client-1", "local-pty-1", 40, 120);
+			expect(upstream.resize).toHaveBeenCalledWith(120, 40);
+
+			yield* service.close("local-pty-1");
+			expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
+			expect(api.pty.delete).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
 
 	it.effect(
-		"deletes the optimistic tab and sends an error when upstream connect fails",
+		"does not connect an OpenCode upstream when creating a terminal",
 		() => {
-			const sent: unknown[] = [];
-			const broadcasts: string[] = [];
+			const events: string[] = [];
 			const wsHandler = makeMockWebSocketHandler({
-				broadcast: vi.fn((message) => broadcasts.push(message.type)),
-				sendTo: vi.fn((_clientId, message) => sent.push(message)),
+				broadcast: vi.fn((message) => events.push(`broadcast:${message.type}`)),
 			});
 			const connectPtyUpstream = vi.fn(async () => {
-				throw new Error("connect failed");
+				events.push("connect");
 			});
-			const layer = makeLayer({ wsHandler, connectPtyUpstream });
+			const api = makeApi();
+			const layer = makeLayer({ api, wsHandler, connectPtyUpstream });
 
 			return Effect.gen(function* () {
 				const service = yield* OpenCodeTerminalServiceTag;
 				yield* service.create("client-1");
 
-				expect(broadcasts).toEqual(["pty_created", "pty_deleted"]);
-				expect(sent).toMatchObject([
-					{ type: "system_error", code: "PTY_CONNECT_FAILED" },
-				]);
+				expect(events).toEqual(["broadcast:pty_created"]);
+				expect(api.pty.create).not.toHaveBeenCalled();
+				expect(connectPtyUpstream).not.toHaveBeenCalled();
+				expect(wsHandler.sendTo).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	it.effect("sends an error when local terminal creation fails", () => {
+		const sent: unknown[] = [];
+		const broadcasts: string[] = [];
+		const wsHandler = makeMockWebSocketHandler({
+			broadcast: vi.fn((message) => broadcasts.push(message.type)),
+			sendTo: vi.fn((_clientId, message) => sent.push(message)),
+		});
+		const localPty: LocalPtyService = {
+			create: vi.fn(() =>
+				Effect.fail(
+					new TerminalServiceError({
+						operation: "create",
+						cause: new Error("spawn failed"),
+					}),
+				),
+			),
+		};
+		const layer = makeLayer({ wsHandler, localPty });
+
+		return Effect.gen(function* () {
+			const service = yield* OpenCodeTerminalServiceTag;
+			yield* service.create("client-1");
+
+			expect(broadcasts).toEqual([]);
+			expect(sent).toMatchObject([
+				{ type: "system_error", code: "PTY_CREATE_FAILED" },
+			]);
+		}).pipe(Effect.provide(layer));
+	});
 
 	it.effect(
 		"lists PTYs and reconnects missing running upstreams with cursor -1",

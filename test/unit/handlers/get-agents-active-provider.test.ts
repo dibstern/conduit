@@ -237,6 +237,53 @@ describe("handleGetAgents active provider", () => {
 		);
 	});
 
+	it.effect(
+		"falls back to Claude agents when startup has no active session and OpenCode is unavailable",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => undefined),
+			});
+			const client = {
+				app: {
+					agents: vi.fn(async () => {
+						throw new Error("opencode offline");
+					}),
+				},
+			} as unknown as OpenCodeAPI;
+			const engine = {
+				dispatchEffect: vi.fn(() =>
+					Effect.succeed({
+						models: [],
+						supportsTools: true,
+						supportsThinking: true,
+						supportsPermissions: true,
+						supportsQuestions: true,
+						supportsAttachments: true,
+						supportsFork: false,
+						supportsRevert: false,
+						commands: [],
+						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
+					}),
+				),
+			} as unknown as OrchestrationEngine;
+
+			return handleGetAgents("client-1", {}).pipe(
+				Effect.provide(agentHandlerLayer({ client, ws, engine })),
+				Effect.tap(() => {
+					expect(client.app.agents).toHaveBeenCalledOnce();
+					expect(engine.dispatchEffect).toHaveBeenCalledWith({
+						type: "discover",
+						providerId: "claude",
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "agent_list",
+						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
+					});
+				}),
+			);
+		},
+	);
+
 	it.effect("clears stale stored agent not present in active list", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),

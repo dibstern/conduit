@@ -7,6 +7,7 @@
 <script lang="ts">
 	import type { BannerConfig } from "../../types.js";
 	import { uiState, removeBanner } from "../../stores/ui.svelte.js";
+	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import Icon from "../shared/Icon.svelte";
 	import { assertNever } from "../../../utils.js";
@@ -20,8 +21,18 @@
 	const showInstanceWarning = $derived.by(() => {
 		const instances = instanceState.instances;
 		if (instances.length === 0) return false;
-		// Every instance must be unhealthy (not stopped, not starting, not healthy)
-		return instances.every((i) => i.status === "unhealthy");
+		// Every instance must be unhealthy (not stopped, not starting, not healthy).
+		if (!instances.every((i) => i.status === "unhealthy")) return false;
+
+		const currentProviderId = discoveryState.currentProviderId;
+		if (currentProviderId) return currentProviderId !== "claude";
+
+		return !discoveryState.providers.some(
+			(provider) =>
+				provider.id === "claude" &&
+				provider.configured &&
+				provider.models.length > 0,
+		);
 	});
 
 	function handleManageInstances() {

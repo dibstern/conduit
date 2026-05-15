@@ -270,12 +270,14 @@ describe("handleClientConnected — model info", () => {
 
 		await handleClientConnected(deps, "client-1");
 
-		// Should send INIT_FAILED error
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
+		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
+			expect.objectContaining({
+				type: "system_error",
+				code: "INIT_FAILED",
+				message: expect.stringContaining("Failed to load session info"),
+			}),
 		);
-		// And still send model_info from Effect override state
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
 			model: "claude-3",
@@ -544,6 +546,55 @@ describe("handleClientConnected — model list", () => {
 						],
 					}),
 				]),
+			}),
+		);
+	});
+
+	it("sends Claude model_list when OpenCode provider discovery fails", async () => {
+		const deps = applyTestDefaults(
+			createMockClientInitDeps({
+				discoverClaudeCapabilities: vi.fn(async () =>
+					makeClaudeCapabilities({
+						models: [
+							{
+								id: "claude-sonnet-4-7",
+								name: "Claude Sonnet 4.7",
+								providerId: "claude",
+							},
+						],
+					}),
+				),
+			}),
+		);
+		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
+			new Error("opencode offline"),
+		);
+
+		await handleClientConnected(deps, "client-1");
+
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "model_list",
+			providers: [
+				{
+					id: "claude",
+					name: "Anthropic - claude",
+					configured: true,
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							provider: "claude",
+						},
+					],
+				},
+			],
+		});
+		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "system_error",
+				code: "INIT_FAILED",
+				message: expect.stringContaining("Failed to list providers"),
 			}),
 		);
 	});
@@ -1094,14 +1145,14 @@ describe("handleClientConnected — error resilience", () => {
 			handleClientConnected(deps, "client-1"),
 		).resolves.toBeUndefined();
 
-		// Should have sent multiple INIT_FAILED errors
+		// Should have sent INIT_FAILED errors for genuinely unavailable init data.
 		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
 		const errorCalls = sendToCalls.filter(
 			(c) =>
 				(c[1] as { type: string }).type === "system_error" &&
 				(c[1] as { code: string }).code === "INIT_FAILED",
 		);
-		expect(errorCalls.length).toBeGreaterThanOrEqual(3);
+		expect(errorCalls.length).toBeGreaterThanOrEqual(2);
 	});
 });
 

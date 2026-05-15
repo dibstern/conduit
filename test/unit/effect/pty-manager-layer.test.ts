@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { expect, vi } from "vitest";
@@ -6,11 +5,16 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import { makePtyRuntimeLive } from "../../../src/lib/domain/relay/Layers/pty-manager-layer.js";
 import {
 	ConfigTag,
+	type ConnectPtyUpstreamShape,
+	ConnectPtyUpstreamTag,
 	LoggerTag,
 	PtyManagerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
+	type LocalPtyService,
+	LocalPtyServiceTag,
+	type LocalPtySession,
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
@@ -21,29 +25,6 @@ import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
-
-class FakePtyWebSocket extends EventEmitter {
-	static instances: FakePtyWebSocket[] = [];
-	readyState = 1;
-	readonly send = vi.fn();
-	readonly close = vi.fn((code?: number, reason?: string | Buffer) => {
-		this.readyState = 3;
-		this.emit("close", code, reason);
-	});
-	readonly terminate = vi.fn(() => {
-		this.readyState = 3;
-		this.emit("close");
-	});
-
-	constructor(
-		readonly url: string,
-		readonly options: unknown,
-	) {
-		super();
-		FakePtyWebSocket.instances.push(this);
-		queueMicrotask(() => this.emit("open"));
-	}
-}
 
 const makeApi = (): OpenCodeAPI =>
 	({
@@ -68,23 +49,54 @@ describe("PtyManagerLive", () => {
 		"uses one scoped manager for terminal create, replay, input, and cleanup",
 		() =>
 			Effect.gen(function* () {
-				FakePtyWebSocket.instances = [];
 				const messages: Array<{ clientId: string; message: RelayMessage }> = [];
+				const dataHandlers: Array<(data: string) => void> = [];
+				const upstream = {
+					readyState: 1,
+					send: vi.fn(),
+					close: vi.fn(),
+					terminate: vi.fn(),
+				};
+				const localPty: LocalPtyService = {
+					create: vi.fn(() => {
+						const session: LocalPtySession = {
+							pty: {
+								id: "local-pty-1",
+								title: "Terminal",
+								command: "zsh",
+								cwd: "/project",
+								status: "running",
+								pid: 123,
+							},
+							upstream,
+							onData: (handler: (data: string) => void) => {
+								dataHandlers.push(handler);
+							},
+							onExit: vi.fn(),
+						};
+						return Effect.succeed(session);
+					}),
+				};
 				const wsHandler = makeMockWebSocketHandler({
 					getClientSession: vi.fn(() => "session-1"),
 					sendTo: vi.fn((clientId, message) => {
 						messages.push({ clientId, message });
 					}),
 				});
+				const connectPtyUpstream: ConnectPtyUpstreamShape = vi.fn(
+					async () => undefined,
+				);
 				const dependencyLayer = Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag, makeApi()),
 					Layer.succeed(WebSocketHandlerTag, wsHandler),
 					Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/project" })),
 					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LocalPtyServiceTag, localPty),
+					Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
 				);
-				const ptyRuntimeLayer = makePtyRuntimeLive(
-					FakePtyWebSocket as unknown as typeof import("ws").WebSocket,
-				).pipe(Layer.provide(dependencyLayer));
+				const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
+					Layer.provide(dependencyLayer),
+				);
 				const fullLayer = Layer.merge(
 					OpenCodeTerminalServiceLive.pipe(
 						Layer.provide(Layer.merge(dependencyLayer, ptyRuntimeLayer)),
@@ -104,25 +116,24 @@ describe("PtyManagerLive", () => {
 				const ptyManager = yield* runWithContext(PtyManagerTag);
 
 				yield* runWithContext(service.create("client-1"));
-				const upstream = FakePtyWebSocket.instances[0];
-				expect(upstream).toBeDefined();
-				expect(ptyManager.hasSession("pty-1")).toBe(true);
-				expect(upstream?.url).toBe(
-					"ws://localhost:4096/pty/pty-1/connect?cursor=0",
-				);
+				expect(ptyManager.hasSession("local-pty-1")).toBe(true);
 
-				upstream?.emit("message", Buffer.from("hello\n"));
+				dataHandlers[0]?.("hello\n");
 				yield* runWithContext(service.replay("client-2"));
 				expect(messages).toContainEqual({
 					clientId: "client-2",
-					message: { type: "pty_output", ptyId: "pty-1", data: "hello\n" },
+					message: {
+						type: "pty_output",
+						ptyId: "local-pty-1",
+						data: "hello\n",
+					},
 				});
 
-				yield* runWithContext(service.sendInput("pty-1", "ls\n"));
-				expect(upstream?.send).toHaveBeenCalledWith("ls\n");
+				yield* runWithContext(service.sendInput("local-pty-1", "ls\n"));
+				expect(upstream.send).toHaveBeenCalledWith("ls\n");
 
 				yield* Scope.close(scope, Exit.void);
-				expect(upstream?.close).toHaveBeenCalledWith(1000, "Proxy closed");
+				expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
 			}),
 	);
 });

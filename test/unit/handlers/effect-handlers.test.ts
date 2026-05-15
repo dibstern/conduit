@@ -610,6 +610,63 @@ describe("sendModelsStateToClient", () => {
 		},
 	);
 	it.effect(
+		"sends Claude models when OpenCode provider discovery fails",
+		() => {
+			const ws = mockWsHandler();
+			const engine = {
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							providerId: "claude",
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+			const client = {
+				provider: {
+					list: vi.fn(async () => {
+						throw new Error("opencode offline");
+					}),
+				},
+				session: { get: vi.fn() },
+			} as unknown as OpenCodeAPI;
+			const log = mockLogger();
+
+			const layer = Layer.mergeAll(
+				openCodeModelLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makeOverridesStateLive(),
+			);
+
+			return sendModelsStateToClient("client-1").pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "model_list",
+						providers: [
+							{
+								id: "claude",
+								name: "Anthropic - claude",
+								configured: true,
+								models: [
+									{
+										id: "claude-sonnet-4-7",
+										name: "Claude Sonnet 4.7",
+										provider: "claude",
+									},
+								],
+							},
+						],
+					});
+				}),
+			);
+		},
+	);
+	it.effect(
 		"sends context_window_info for active Claude model during model refresh",
 		() => {
 			const contextWindowOptions = [
@@ -659,6 +716,61 @@ describe("sendModelsStateToClient", () => {
 					type: "context_window_info",
 					contextWindow: "1m",
 					options: contextWindowOptions,
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+	it.effect(
+		"skips OpenCode discovery for a Claude-bound session during model refresh",
+		() => {
+			const ws = mockWsHandler();
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => ({
+					models: [
+						{
+							id: "claude-opus-4-7",
+							name: "Claude Opus 4.7",
+							providerId: "claude",
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+			const client = {
+				provider: {
+					list: vi.fn(async () => {
+						throw new Error("opencode offline");
+					}),
+				},
+				session: {
+					get: vi.fn(async () => {
+						throw new Error("opencode session lookup should be skipped");
+					}),
+				},
+			} as unknown as OpenCodeAPI;
+			const log = mockLogger();
+
+			const layer = Layer.mergeAll(
+				openCodeModelLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makeOverridesStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "claude-opus-4-7",
+				});
+				yield* sendModelsStateToClient("client-1", "session-1");
+
+				expect(client.provider.list).not.toHaveBeenCalled();
+				expect(client.session.get).not.toHaveBeenCalled();
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "model_info",
+					model: "claude-opus-4-7",
+					provider: "claude",
 				});
 			}).pipe(Effect.provide(layer));
 		},

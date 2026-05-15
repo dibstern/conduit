@@ -171,6 +171,66 @@ describe("handleGetCommands active provider", () => {
 		);
 	});
 
+	it.effect(
+		"falls back to Claude commands when startup has no active session and OpenCode is unavailable",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => undefined),
+			});
+			const client = {
+				app: {
+					commands: vi.fn(async () => {
+						throw new Error("opencode offline");
+					}),
+				},
+			} as unknown as OpenCodeAPI;
+			const engine = {
+				dispatch: vi.fn(async () => ({
+					models: [],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: false,
+					supportsRevert: false,
+					commands: [
+						{
+							name: "init",
+							description: "Init Claude",
+							args: "[path]",
+							source: "claude-sdk",
+						},
+					],
+				})),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				openCodeSettingsLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(LoggerTag, mockLogger()),
+			);
+
+			return handleGetCommands("client-1", {}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(client.app.commands).toHaveBeenCalledOnce();
+					expect(engine.dispatchEffect).toHaveBeenCalledWith({
+						type: "discover",
+						providerId: "claude",
+					});
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "command_list",
+						commands: [
+							{ name: "init", description: "Init Claude", args: "[path]" },
+						],
+					});
+				}),
+			);
+		},
+	);
+
 	it.effect("sends an empty Claude list when Claude discovery fails", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),

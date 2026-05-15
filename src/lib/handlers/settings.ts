@@ -36,31 +36,56 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 				? engineOption.value.getProviderForSession(activeSessionId)
 				: undefined;
 
-		if (activeProviderId === "claude" && engineOption._tag === "Some") {
-			const result = yield* Effect.either(
-				engineOption.value.dispatchEffect({
-					type: "discover",
-					providerId: "claude",
-				}),
-			);
-			if (result._tag === "Left") {
-				const logOption = yield* Effect.serviceOption(LoggerTag);
-				if (logOption._tag === "Some") {
-					logOption.value.warn(
-						`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
-					);
+		const listClaudeCommands = () =>
+			Effect.gen(function* () {
+				if (engineOption._tag !== "Some") return [];
+				const result = yield* Effect.either(
+					engineOption.value.dispatchEffect({
+						type: "discover",
+						providerId: "claude",
+					}),
+				);
+				if (result._tag === "Left") {
+					const logOption = yield* Effect.serviceOption(LoggerTag);
+					if (logOption._tag === "Some") {
+						logOption.value.warn(
+							`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+						);
+					}
+					return [];
 				}
-				return [];
-			}
-			return result.right.commands.map((command) => ({
-				name: command.name,
-				...(command.description ? { description: command.description } : {}),
-				...(command.args ? { args: command.args } : {}),
-			}));
+				return result.right.commands.map((command) => ({
+					name: command.name,
+					...(command.description ? { description: command.description } : {}),
+					...(command.args ? { args: command.args } : {}),
+				}));
+			});
+
+		if (activeProviderId === "claude" && engineOption._tag === "Some") {
+			return yield* listClaudeCommands();
 		}
 
 		const settingsService = yield* OpenCodeSettingsServiceTag;
-		return yield* settingsService.listCommands();
+		const openCodeResult = yield* Effect.either(settingsService.listCommands());
+		if (openCodeResult._tag === "Right") {
+			return openCodeResult.right;
+		}
+
+		if (activeProviderId !== "opencode" && engineOption._tag === "Some") {
+			const logOption = yield* Effect.serviceOption(LoggerTag);
+			if (logOption._tag === "Some") {
+				logOption.value.warn(
+					`Failed to discover OpenCode commands; falling back to Claude commands: ${
+						openCodeResult.left instanceof Error
+							? openCodeResult.left.message
+							: openCodeResult.left
+					}`,
+				);
+			}
+			return yield* listClaudeCommands();
+		}
+
+		return yield* Effect.fail(openCodeResult.left);
 	});
 
 export const handleGetProjects = (

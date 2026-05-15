@@ -187,7 +187,7 @@
 		if (projectSlug && sessionId) {
 			void reloadProviderSessionRpc({ projectSlug, sessionId });
 		}
-		showToast("Reloading skills…");
+		showToast("Reloading skills…", { duration: 1500 });
 		dropdownOpen = false;
 	}
 

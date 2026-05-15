@@ -136,33 +136,64 @@ export const AgentServiceLive: Layer.Layer<
 							? engineOption.value.getProviderForSession(activeSessionId)
 							: undefined;
 
-					if (activeProviderId === "claude" && engineOption._tag === "Some") {
-						const result = yield* Effect.either(
-							engineOption.value.dispatchEffect({
-								type: "discover",
-								providerId: "claude",
-							}),
-						);
-						if (result._tag === "Left") {
-							log.warn(
-								`Failed to discover Claude agents: ${describeError(result.left)}`,
+					const listClaudeAgents = () =>
+						Effect.gen(function* () {
+							if (engineOption._tag !== "Some") {
+								return yield* provideOverrides(
+									withActiveAgent([], activeSessionId),
+								);
+							}
+							const result = yield* Effect.either(
+								engineOption.value.dispatchEffect({
+									type: "discover",
+									providerId: "claude",
+								}),
 							);
+							if (result._tag === "Left") {
+								log.warn(
+									`Failed to discover Claude agents: ${describeError(result.left)}`,
+								);
+								return yield* provideOverrides(
+									withActiveAgent([], activeSessionId),
+								);
+							}
 							return yield* provideOverrides(
-								withActiveAgent([], activeSessionId),
+								withActiveAgent(
+									toWireAgents(result.right.agents ?? []),
+									activeSessionId,
+								),
 							);
-						}
+						});
+
+					if (activeProviderId === "claude" && engineOption._tag === "Some") {
+						return yield* listClaudeAgents();
+					}
+
+					const rawAgentsResult = yield* Effect.either(
+						Effect.tryPromise(() => client.app.agents()),
+					);
+					if (rawAgentsResult._tag === "Right") {
 						return yield* provideOverrides(
 							withActiveAgent(
-								toWireAgents(result.right.agents ?? []),
+								filterAgents(rawAgentsResult.right),
 								activeSessionId,
 							),
 						);
 					}
 
-					const rawAgents = yield* Effect.tryPromise(() => client.app.agents());
-					return yield* provideOverrides(
-						withActiveAgent(filterAgents(rawAgents), activeSessionId),
-					);
+					if (activeProviderId !== "opencode" && engineOption._tag === "Some") {
+						log.warn(
+							`Failed to discover OpenCode agents; falling back to Claude agents: ${describeError(rawAgentsResult.left)}`,
+						);
+						return yield* listClaudeAgents();
+					}
+
+					if (rawAgentsResult._tag === "Left") {
+						log.warn(
+							`Failed to discover OpenCode agents: ${describeError(rawAgentsResult.left)}`,
+						);
+					}
+					return yield* Effect.fail(rawAgentsResult.left);
 				}),
 			getActiveAgent: (sessionId) => provideOverrides(getAgent(sessionId)),
 			switchAgent: ({ clientId, sessionId, agentId }) =>

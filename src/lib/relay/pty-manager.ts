@@ -14,10 +14,12 @@ export interface PtyUpstream {
 	send(data: string | Buffer | ArrayBuffer, cb?: (err?: Error) => void): void;
 	close(code?: number, reason?: string | Buffer): void;
 	terminate(): void;
+	resize?(cols: number, rows: number): void;
 }
 
 export interface PtySessionState {
 	upstream: PtyUpstream;
+	source: "local" | "opencode";
 	scrollback: string[];
 	scrollbackSize: number;
 	exited: boolean;
@@ -58,12 +60,17 @@ export class PtyManager {
 		}));
 	}
 
-	registerSession(ptyId: string, upstream: PtyUpstream): PtySessionState {
+	registerSession(
+		ptyId: string,
+		upstream: PtyUpstream,
+		source: "local" | "opencode" = "opencode",
+	): PtySessionState {
 		if (this.sessions.has(ptyId)) {
 			this.closeSession(ptyId);
 		}
 		const session: PtySessionState = {
 			upstream,
+			source,
 			scrollback: [],
 			scrollbackSize: 0,
 			exited: false,

@@ -3,10 +3,15 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import type {
+	LocalPtyService,
+	LocalPtySession,
+} from "../../../src/lib/domain/relay/Services/terminal-service.js";
+import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockPtyManager,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -90,7 +95,32 @@ describe("WsRpcServerLayer terminal controls", () => {
 			api.pty.delete = vi.fn(async () => undefined);
 			api.pty.resize = vi.fn(async () => undefined);
 			const wsHandler = makeMockWebSocketHandler();
-			const ptyManager = makeMockPtyManager();
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
+			const upstream = {
+				readyState: 1,
+				send: vi.fn(),
+				close: vi.fn(),
+				terminate: vi.fn(),
+				resize: vi.fn(),
+			};
+			const localPty: LocalPtyService = {
+				create: vi.fn(() => {
+					const session: LocalPtySession = {
+						pty: {
+							id: "pty-1",
+							title: "Shell",
+							command: "zsh",
+							cwd: "/repo",
+							status: "running",
+							pid: 123,
+						},
+						upstream,
+						onData: vi.fn(),
+						onExit: vi.fn(),
+					};
+					return Effect.succeed(session);
+				}),
+			};
 			const connectPtyUpstream = vi.fn(async () => undefined);
 
 			return Effect.gen(function* () {
@@ -102,7 +132,10 @@ describe("WsRpcServerLayer terminal controls", () => {
 						originId: "browser-tab-a",
 					}),
 				).toEqual({ ok: true });
-				expect(api.pty.create).toHaveBeenCalledWith();
+				expect(api.pty.create).not.toHaveBeenCalled();
+				expect(localPty.create).toHaveBeenCalledWith({
+					cwd: "/test/project",
+				});
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "pty_created",
 					pty: {
@@ -114,7 +147,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 						pid: 123,
 					},
 				});
-				expect(connectPtyUpstream).toHaveBeenCalledWith("pty-1");
+				expect(connectPtyUpstream).not.toHaveBeenCalled();
 
 				expect(
 					yield* client.ResizePty({
@@ -125,7 +158,8 @@ describe("WsRpcServerLayer terminal controls", () => {
 						rows: 40,
 					}),
 				).toEqual({ ok: true });
-				expect(api.pty.resize).toHaveBeenCalledWith("pty-1", 40, 120);
+				expect(upstream.resize).toHaveBeenCalledWith(120, 40);
+				expect(api.pty.resize).not.toHaveBeenCalled();
 
 				expect(
 					yield* client.ClosePty({
@@ -133,8 +167,8 @@ describe("WsRpcServerLayer terminal controls", () => {
 						ptyId: "pty-1",
 					}),
 				).toEqual({ ok: true });
-				expect(ptyManager.closeSession).toHaveBeenCalledWith("pty-1");
-				expect(api.pty.delete).toHaveBeenCalledWith("pty-1");
+				expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
+				expect(api.pty.delete).not.toHaveBeenCalled();
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "pty_deleted",
 					ptyId: "pty-1",
@@ -148,6 +182,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 								api,
 								wsHandler,
 								ptyManager,
+								localPty,
 								connectPtyUpstream,
 							}),
 						),
