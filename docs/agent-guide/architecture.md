@@ -8,7 +8,7 @@ Use this guide before changing daemon behavior, project routing, relay wiring, e
 |---|---|
 | CLI | `src/bin/cli.ts` is the thin entrypoint; `src/bin/cli-core.ts` routes commands. |
 | Process model | The CLI either runs a relay in-process with `foreground` or controls a long-lived daemon over Unix socket IPC. |
-| Daemon | Daemon lifecycle is split between extracted `src/lib/daemon/*` modules and Effect domain services/layers under `src/lib/domain/daemon/*`; the current CLI still enters through `startDaemonProcess` while Effect-native daemon layers are being mainlined. |
+| Daemon | Daemon lifecycle is owned by Effect domain services/layers under `src/lib/domain/daemon/*`, with low-level socket/server helpers still living in `src/lib/daemon/*`. CLI foreground and child-daemon startup enter through Effect-backed starter facades. |
 | Multi-project model | One daemon can host many projects, each mounted under `/p/<slug>`. |
 
 ## System Context Diagram

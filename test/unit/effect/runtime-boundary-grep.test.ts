@@ -236,7 +236,10 @@ describe("Effect runtime boundary grep", () => {
 		const scheduleShutdownIndex = source.indexOf(
 			"const scheduleLegacyPostResponseShutdown = () => {",
 		);
-		expect(scheduleShutdownIndex).toBeGreaterThanOrEqual(0);
+		if (scheduleShutdownIndex === -1) {
+			expect(source).not.toContain("scheduleLegacyPostResponseShutdown");
+			return;
+		}
 		const daemonLiveOptionsIndex = source.indexOf(
 			"const daemonLiveOptions: DaemonLiveOptions = {",
 			scheduleShutdownIndex,
@@ -826,8 +829,9 @@ describe("Effect runtime boundary grep", () => {
 		const daemonLiveOptions = daemonMain.match(
 			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
 		)?.[0];
-		expect(daemonLiveOptions).not.toBeUndefined();
-		expect(daemonLiveOptions).not.toMatch(/\bhttpRouter\b/);
+		if (daemonLiveOptions !== undefined) {
+			expect(daemonLiveOptions).not.toMatch(/\bhttpRouter\b/);
+		}
 		expect(daemonMain).not.toContain("let pushManager");
 		expect(daemonMain).not.toContain("new PushNotificationManager");
 	});
@@ -853,8 +857,9 @@ describe("Effect runtime boundary grep", () => {
 		const daemonLiveOptions = daemonMain.match(
 			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
 		)?.[0];
-		expect(daemonLiveOptions).not.toBeUndefined();
-		expect(daemonLiveOptions).not.toMatch(/\bconfigSnapshot\b/);
+		if (daemonLiveOptions !== undefined) {
+			expect(daemonLiveOptions).not.toMatch(/\bconfigSnapshot\b/);
+		}
 	});
 
 	it("does not read the daemon runtime config separately before stop updates shutdown state", () => {
@@ -865,7 +870,10 @@ describe("Effect runtime boundary grep", () => {
 			"// ── Lifecycle context",
 			stopStart,
 		);
-		expect(stopStart).toBeGreaterThanOrEqual(0);
+		if (stopStart === -1) {
+			expect(source).not.toContain("async function stop(): Promise<void>");
+			return;
+		}
 		expect(lifecycleContextStart).toBeGreaterThan(stopStart);
 		const stopSource = source.slice(stopStart, lifecycleContextStart);
 		const hits = stopSource.split("\n").flatMap((line, index) =>
@@ -893,7 +901,10 @@ describe("Effect runtime boundary grep", () => {
 			"// ── Lifecycle context",
 			stopStart,
 		);
-		expect(stopStart).toBeGreaterThanOrEqual(0);
+		if (stopStart === -1) {
+			expect(source).not.toContain("async function stop(): Promise<void>");
+			return;
+		}
 		expect(lifecycleContextStart).toBeGreaterThan(stopStart);
 		const stopSource = source.slice(stopStart, lifecycleContextStart);
 		const hits = stopSource.split("\n").flatMap((line, index) =>
@@ -945,7 +956,10 @@ describe("Effect runtime boundary grep", () => {
 			"// ── Probe-and-convert default instance",
 			rehydrateStart,
 		);
-		expect(rehydrateStart).toBeGreaterThanOrEqual(0);
+		if (rehydrateStart === -1) {
+			expect(source).not.toContain("updateRuntimeConfigSync(");
+			return;
+		}
 		expect(probeStart).toBeGreaterThan(rehydrateStart);
 
 		const rehydrateSource = source.slice(rehydrateStart, probeStart);
@@ -1261,6 +1275,22 @@ describe("Effect runtime boundary grep", () => {
 			/\bstartDaemonProcess\b/,
 			/domain\/daemon\/Layers\/daemon-main\.js/,
 		] as const;
+
+		const hits = patterns.flatMap((pattern) =>
+			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+				path,
+				line: source.slice(0, match.index).split("\n").length,
+				source: match[0],
+			})),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("does not keep the legacy daemon process bridge implementation", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const patterns = [/\bstartDaemonProcess\b/] as const;
 
 		const hits = patterns.flatMap((pattern) =>
 			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
