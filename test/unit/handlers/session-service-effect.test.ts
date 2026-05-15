@@ -216,6 +216,7 @@ describe("session handlers with Effect-native model service", () => {
 									call_id: null,
 									input: null,
 									result: null,
+									metadata: null,
 									duration: null,
 									status: null,
 									sort_order: 0,

@@ -123,6 +123,7 @@ describe("Persistence Effect", () => {
 			}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 			expect(migrationRows).toEqual([
 				{ migration_id: 1, name: "create_event_store_tables" },
+				{ migration_id: 2, name: "add_message_part_metadata" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

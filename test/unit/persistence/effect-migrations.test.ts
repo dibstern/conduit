@@ -92,17 +92,54 @@ describe("Effect SQL migrations", () => {
 				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(rows).toEqual([
 					{ migration_id: 1, name: "create_event_store_tables" },
+					{ migration_id: 2, name: "add_message_part_metadata" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
 				SELECT id, name FROM _migrations ORDER BY id`;
 				expect(legacyRows).toEqual([
 					{ id: 1, name: "create_event_store_tables" },
+					{ id: 2, name: "add_message_part_metadata" },
 				]);
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
 						seedDatabase(filename, (db) => runMigrations(db, schemaMigrations)),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"adopts an old baseline schema and adds message part metadata",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+
+				const sql = yield* SqlClient.SqlClient;
+				const migrationRows = yield* sql<{
+					migration_id: number;
+					name: string;
+				}>`
+				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(migrationRows).toEqual([
+					{ migration_id: 1, name: "create_event_store_tables" },
+					{ migration_id: 2, name: "add_message_part_metadata" },
+				]);
+
+				const columns = yield* sql<{ name: string }>`
+				PRAGMA table_info(message_parts)`;
+				expect(columns.map((column) => column.name)).toContain("metadata");
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) => {
+							const baseline = schemaMigrations[0];
+							if (!baseline) {
+								throw new Error("Expected event-store baseline migration");
+							}
+							runMigrations(db, [baseline]);
+						}),
 					),
 				),
 			),

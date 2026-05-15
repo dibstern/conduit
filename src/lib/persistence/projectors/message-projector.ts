@@ -22,6 +22,25 @@ const MESSAGE_HANDLES = [
 	"turn.error",
 ] as const;
 
+function mergeMetadata(
+	current: string | null,
+	next: Record<string, unknown> | undefined,
+): string | null {
+	if (next === undefined) return current;
+	let currentObject: Record<string, unknown> = {};
+	if (current != null) {
+		try {
+			const parsed: unknown = JSON.parse(current);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				currentObject = parsed as Record<string, unknown>;
+			}
+		} catch {
+			currentObject = {};
+		}
+	}
+	return encodeJson({ ...currentObject, ...next });
+}
+
 /**
  * Projects message lifecycle events into the `messages` and `message_parts`
  * read-model tables.
@@ -271,10 +290,18 @@ export class MessageProjector implements Projector {
 		}
 
 		if (isEventType(event, "tool.running")) {
+			const current = db.queryOne<{ metadata: string | null }>(
+				"SELECT metadata FROM message_parts WHERE id = ?",
+				[event.data.partId],
+			);
+			const metadata = mergeMetadata(
+				current?.metadata ?? null,
+				event.data.metadata,
+			);
 			// Final-state UPDATE -- naturally idempotent
 			db.execute(
-				"UPDATE message_parts SET status = 'running', updated_at = ? WHERE id = ?",
-				[event.createdAt, event.data.partId],
+				"UPDATE message_parts SET status = 'running', metadata = ?, updated_at = ? WHERE id = ?",
+				[metadata, event.createdAt, event.data.partId],
 			);
 			db.execute("UPDATE messages SET updated_at = ? WHERE id = ?", [
 				event.createdAt,

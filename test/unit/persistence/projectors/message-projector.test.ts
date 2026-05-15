@@ -64,6 +64,7 @@ interface MessagePartRow {
 	call_id: string | null;
 	input: string | null;
 	result: string | null;
+	metadata: string | null;
 	duration: number | null;
 	status: string | null;
 	sort_order: number;
@@ -494,6 +495,146 @@ describe("MessageProjector", () => {
 				["m1", "tool1"],
 			);
 			expect(parts[0]?.status).toBe("running");
+		});
+
+		it("merges tool metadata into the matching tool part", () => {
+			projector.project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "m1",
+						role: "assistant",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					1,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.started",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						toolName: "Task",
+						callId: "tool1",
+						input: { tool: "Task", description: "Audit", prompt: "Go" },
+					} satisfies ToolStartedPayload,
+					2,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: {
+							childSessionId: "claude-subagent-abc",
+							providerTaskId: "task-1",
+						},
+					} satisfies ToolRunningPayload,
+					3,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: { sdkSubagentId: "agent-abc" },
+					} satisfies ToolRunningPayload,
+					4,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+					} satisfies ToolRunningPayload,
+					5,
+				),
+				db,
+			);
+
+			const part = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(part?.status).toBe("running");
+			expect(JSON.parse(part?.metadata ?? "{}")).toEqual({
+				childSessionId: "claude-subagent-abc",
+				providerTaskId: "task-1",
+				sdkSubagentId: "agent-abc",
+			});
+		});
+
+		it("replaces malformed tool metadata with the next valid metadata", () => {
+			projector.project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "m1",
+						role: "assistant",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					1,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.started",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						toolName: "Task",
+						callId: "tool1",
+						input: { tool: "Task", description: "Audit", prompt: "Go" },
+					} satisfies ToolStartedPayload,
+					2,
+				),
+				db,
+			);
+			db.execute("UPDATE message_parts SET metadata = ? WHERE id = ?", [
+				"{not json",
+				"tool1",
+			]);
+
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: { providerTaskId: "task-1" },
+					} satisfies ToolRunningPayload,
+					3,
+				),
+				db,
+			);
+
+			const part = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(JSON.parse(part?.metadata ?? "{}")).toEqual({
+				providerTaskId: "task-1",
+			});
 		});
 	});
 

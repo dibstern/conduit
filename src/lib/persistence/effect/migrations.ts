@@ -2,11 +2,18 @@ import { SqlClient } from "@effect/sql";
 import * as Migrator from "@effect/sql/Migrator";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
-import { CURRENT_EVENT_STORE_MIGRATION, readMigrationSql } from "../schema.js";
+import {
+	CURRENT_EVENT_STORE_MIGRATION,
+	MESSAGE_PART_METADATA_MIGRATION,
+	readMigrationSql,
+} from "../schema.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
 
 const baselineMigrationSql = readMigrationSql(CURRENT_EVENT_STORE_MIGRATION);
+const messagePartMetadataMigrationSql = readMigrationSql(
+	MESSAGE_PART_METADATA_MIGRATION,
+);
 
 const expectedTableColumns = {
 	activities: [
@@ -53,6 +60,7 @@ const expectedTableColumns = {
 		"sort_order",
 		"created_at",
 		"updated_at",
+		"metadata",
 	],
 	messages: [
 		"id",
@@ -225,7 +233,14 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			`PRAGMA table_info(${tableName})`,
 		);
 		const actualColumns = columns.map((column) => column.name);
-		if (!sameStrings(actualColumns, expectedColumns)) {
+		const matchesKnownSchema =
+			sameStrings(actualColumns, expectedColumns) ||
+			(tableName === "message_parts" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter((column) => column !== "metadata"),
+				));
+		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
 				`Existing event-store columns differ for ${tableName}. Expected ${expectedColumns.join(", ")}, got ${actualColumns.join(", ")}`,
 			);
@@ -254,8 +269,23 @@ const runBaselineEventStoreMigration: Effect.Effect<
 	yield* verifyExistingBaselineSchema;
 });
 
+const runMessagePartMetadataMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(message_parts)",
+	);
+	if (columns.some((column) => column.name === "metadata")) return;
+
+	yield* executeSqlStatements(messagePartMetadataMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
+	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

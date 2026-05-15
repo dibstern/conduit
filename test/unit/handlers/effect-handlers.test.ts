@@ -2898,6 +2898,7 @@ describe("handleMessage", () => {
 									call_id: null,
 									input: null,
 									result: null,
+									metadata: null,
 									duration: null,
 									status: null,
 									sort_order: 0,

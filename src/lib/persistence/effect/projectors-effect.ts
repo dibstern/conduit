@@ -48,6 +48,25 @@ function encodeJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+function mergeMetadata(
+	current: string | null,
+	next: Record<string, unknown> | undefined,
+): string | null {
+	if (next === undefined) return current;
+	let currentObject: Record<string, unknown> = {};
+	if (current != null) {
+		try {
+			const parsed: unknown = JSON.parse(current);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				currentObject = parsed as Record<string, unknown>;
+			}
+		} catch {
+			currentObject = {};
+		}
+	}
+	return encodeJson({ ...currentObject, ...next });
+}
+
 // ─── Session Projector ──────────────────────────────────────────────────────
 
 export const makeSessionProjector = (): EffectProjector => ({
@@ -256,7 +275,16 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "tool.running")) {
-				yield* sql`UPDATE message_parts SET status = 'running', updated_at = ${event.createdAt} WHERE id = ${event.data.partId}`;
+				const rows = yield* sql<{ metadata: string | null }>`
+					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
+				const metadata = mergeMetadata(
+					rows[0]?.metadata ?? null,
+					event.data.metadata,
+				);
+				yield* sql`
+					UPDATE message_parts
+					SET status = 'running', metadata = ${metadata}, updated_at = ${event.createdAt}
+					WHERE id = ${event.data.partId}`;
 				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
 				return;
 			}

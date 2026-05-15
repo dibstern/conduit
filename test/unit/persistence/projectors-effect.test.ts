@@ -105,6 +105,51 @@ function makeTextDelta(
 	);
 }
 
+function makeToolStarted(
+	sessionId: string,
+	messageId: string,
+	partId: string,
+): CanonicalEvent {
+	return canonicalEvent(
+		"tool.started",
+		sessionId,
+		{
+			messageId,
+			partId,
+			toolName: "Task",
+			callId: partId,
+			input: { tool: "Task", description: "Audit", prompt: "Go" },
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
+function makeToolRunning(
+	sessionId: string,
+	messageId: string,
+	partId: string,
+	metadata?: Record<string, unknown>,
+): CanonicalEvent {
+	return canonicalEvent(
+		"tool.running",
+		sessionId,
+		{
+			messageId,
+			partId,
+			...(metadata !== undefined ? { metadata } : {}),
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
 function makeSessionStatus(
 	sessionId: string,
 	status: "idle" | "busy" | "error",
@@ -923,6 +968,80 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 					text: string;
 				}>`SELECT text FROM messages WHERE id = 'm1'`;
 				expect(rows[0]?.text).toBe("hello world");
+			}),
+		));
+
+	it("tool.running merges metadata into message parts", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeMessageCreated("s1", "m1"));
+				yield* runner.projectEvent(e2);
+				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e3);
+				const e4 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						childSessionId: "claude-subagent-abc",
+						providerTaskId: "task-1",
+					}),
+				);
+				yield* runner.projectEvent(e4);
+				const e5 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						sdkSubagentId: "agent-abc",
+					}),
+				);
+				yield* runner.projectEvent(e5);
+				const e6 = yield* store.append(makeToolRunning("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e6);
+
+				const rows = yield* sql<{ status: string; metadata: string | null }>`
+					SELECT status, metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(rows[0]?.status).toBe("running");
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					childSessionId: "claude-subagent-abc",
+					providerTaskId: "task-1",
+					sdkSubagentId: "agent-abc",
+				});
+			}),
+		));
+
+	it("tool.running replaces malformed metadata with the next valid metadata", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeMessageCreated("s1", "m1"));
+				yield* runner.projectEvent(e2);
+				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e3);
+				yield* sql`
+					UPDATE message_parts SET metadata = '{not json' WHERE id = 'tool1'`;
+				const e4 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						providerTaskId: "task-1",
+					}),
+				);
+				yield* runner.projectEvent(e4);
+
+				const rows = yield* sql<{ metadata: string | null }>`
+					SELECT metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					providerTaskId: "task-1",
+				});
 			}),
 		));
 });
