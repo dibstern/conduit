@@ -109,6 +109,12 @@ export type OpenCodeSessionDetail = Schema.Schema.Type<
 >;
 export type SessionDetail = OpenCodeSessionDetail;
 
+export const OpenCodeSessionDetailResponseSchema =
+	OpenCodeSessionDetailSchema as unknown as Schema.Schema<OpenCodeSessionDetail>;
+export const OpenCodeSessionDetailListResponseSchema = Schema.Array(
+	OpenCodeSessionDetailSchema,
+) as unknown as Schema.Schema<OpenCodeSessionDetail[]>;
+
 export const OpenCodeSessionStatusSchema = Schema.Union(
 	Schema.Struct({ type: Schema.Literal("idle") }),
 	Schema.Struct({ type: Schema.Literal("busy") }),
@@ -124,6 +130,11 @@ export type OpenCodeSessionStatus = Schema.Schema.Type<
 	typeof OpenCodeSessionStatusSchema
 >;
 export type SessionStatus = OpenCodeSessionStatus;
+
+export const OpenCodeSessionStatusMapSchema = Schema.Record({
+	key: Schema.String,
+	value: OpenCodeSessionStatusSchema,
+}) as unknown as Schema.Schema<Record<string, OpenCodeSessionStatus>>;
 
 type _OpenCodeSdkSessionStatusCoversSchema = AssertExtends<
 	SdkSessionStatus,
@@ -326,6 +337,15 @@ type _OpenCodeFindSymbolsCoversSdkFindSymbols = AssertExtends<
 	SdkFindSymbolsResponse
 >;
 
+export const OpenCodeFindTextResponseSchema = Schema.Array(
+	OpenCodeFindTextMatchSchema,
+) as unknown as Schema.Schema<unknown[]>;
+export const OpenCodeFindFilesArrayResponseSchema =
+	OpenCodeFindFilesResponseSchema as unknown as Schema.Schema<unknown[]>;
+export const OpenCodeFindSymbolsResponseSchema = Schema.Array(
+	OpenCodeFindSymbolSchema,
+) as unknown as Schema.Schema<unknown[]>;
+
 export const OpenCodeConfigResponseSchema = Schema.Record({
 	key: Schema.String,
 	value: Schema.Unknown,
@@ -398,6 +418,12 @@ type _OpenCodeCommandCoversSdkCommand = AssertExtends<
 	SdkCommand
 >;
 
+export const OpenCodeAgentListResponseSchema =
+	Schema.Array(OpenCodeAgentSchema);
+export const OpenCodeCommandListResponseSchema = Schema.Array(
+	OpenCodeCommandSchema,
+) as unknown as Schema.Schema<Array<{ name: string; description?: string }>>;
+
 export const OpenCodeProjectSchema = Schema.Struct({
 	id: Schema.String,
 	worktree: Schema.String,
@@ -419,6 +445,18 @@ type _OpenCodeProjectCoversSdkProject = AssertExtends<
 	NormalizeSchemaType<OpenCodeProject>,
 	SdkProject
 >;
+
+export const OpenCodeProjectListResponseSchema = Schema.Array(
+	OpenCodeProjectSchema,
+) as unknown as Schema.Schema<
+	Array<{ id: string; worktree: string; time: { created: number } }>
+>;
+export const OpenCodeCurrentProjectResponseSchema =
+	OpenCodeProjectSchema as unknown as Schema.Schema<{
+		id: string;
+		worktree: string;
+		time: { created: number };
+	}>;
 
 const OpenCodeProviderModelSchema = Schema.Struct({
 	id: Schema.String,
@@ -657,6 +695,10 @@ type _OpenCodeSdkSessionMessageResponseCoversSchemaEnvelope = AssertExtends<
 	SdkSessionMessageResponse,
 	OpenCodeMessageWithParts
 >;
+
+export const OpenCodeMessageListResponseSchema = Schema.Array(
+	OpenCodeMessageWithPartsSchema,
+) as unknown as Schema.Schema<OpenCodeMessageWithParts[]>;
 
 const OpenCodeOpaquePropertiesSchema = Schema.Record({
 	key: Schema.String,
@@ -962,6 +1004,83 @@ export type OpenCodeQuestionRejectRequest = Schema.Schema.Type<
 	typeof OpenCodeQuestionRejectRequestSchema
 >;
 
+export const OpenCodeBooleanResponseSchema = Schema.Boolean;
+export const OpenCodeUndefinedResponseSchema = Schema.Undefined;
+
+export const OpenCodeShareResponseSchema = Schema.Struct({
+	url: Schema.String,
+});
+
+export const OpenCodeDiffResponseSchema = Schema.Struct({
+	diffs: Schema.Array(
+		Schema.Struct({
+			path: Schema.String,
+			diff: Schema.String,
+		}),
+	),
+}) as unknown as Schema.Schema<{
+	diffs: Array<{ path: string; diff: string }>;
+}>;
+
+export const OpenCodeFileEntryListResponseSchema = Schema.Array(
+	OpenCodeFileNodeSchema,
+) as unknown as Schema.Schema<
+	Array<{
+		name: string;
+		path: string;
+		absolute: string;
+		type: "file" | "directory";
+		ignored: boolean;
+	}>
+>;
+
+export const OpenCodeFileReadResponseSchema =
+	OpenCodeFileContentSchema as unknown as Schema.Schema<{
+		type: "text" | "binary";
+		content: string;
+		diff?: string;
+		encoding?: "base64";
+		mimeType?: string;
+	}>;
+
+export const OpenCodeFileStatusListResponseSchema = Schema.Array(
+	OpenCodeFileStatusEntrySchema,
+) as unknown as Schema.Schema<
+	Array<{
+		path: string;
+		added: number;
+		removed: number;
+		status: "added" | "deleted" | "modified";
+	}>
+>;
+
+export const OpenCodeVcsResponseSchema = Schema.Struct({
+	branch: Schema.optional(Schema.String),
+	dirty: Schema.optional(Schema.Boolean),
+}) as unknown as Schema.Schema<{ branch?: string; dirty?: boolean }>;
+
+export const OpenCodePtyListResponseSchema = Schema.Array(
+	OpenCodePtySchema,
+) as unknown as Schema.Schema<
+	Array<{
+		id: string;
+		title: string;
+		command: string;
+		args: string[];
+		cwd: string;
+		status: "running" | "exited";
+		pid: number;
+	}>
+>;
+
+const OpenCodeSkillSchema = Schema.Struct({
+	name: Schema.String,
+	description: Schema.optional(Schema.String),
+});
+export const OpenCodeSkillListResponseSchema = Schema.Array(
+	OpenCodeSkillSchema,
+) as unknown as Schema.Schema<Array<{ name: string; description?: string }>>;
+
 export const OpenCodePendingPermissionSchema = Schema.Struct({
 	id: Schema.String,
 	sessionID: Schema.String,
@@ -975,6 +1094,10 @@ export type OpenCodePendingPermission = Schema.Schema.Type<
 	typeof OpenCodePendingPermissionSchema
 >;
 
+export const OpenCodePendingPermissionListResponseSchema = Schema.Array(
+	OpenCodePendingPermissionSchema,
+) as unknown as Schema.Schema<unknown[]>;
+
 export const OpenCodePendingQuestionSchema = Schema.Struct({
 	id: Schema.String,
 	sessionID: Schema.String,
@@ -984,3 +1107,109 @@ export const OpenCodePendingQuestionSchema = Schema.Struct({
 export type OpenCodePendingQuestion = Schema.Schema.Type<
 	typeof OpenCodePendingQuestionSchema
 >;
+
+export const OpenCodePendingQuestionListResponseSchema = Schema.Array(
+	OpenCodePendingQuestionSchema,
+) as unknown as Schema.Schema<unknown[]>;
+
+export const decodeOpenCodeSessionDetailResponse = Schema.decodeUnknownSync(
+	OpenCodeSessionDetailResponseSchema,
+);
+export const decodeOpenCodeSessionListResponse = Schema.decodeUnknownSync(
+	OpenCodeSessionDetailListResponseSchema,
+);
+export const decodeOpenCodeSessionStatusMap = Schema.decodeUnknownSync(
+	OpenCodeSessionStatusMapSchema,
+);
+export const decodeOpenCodeMessageWithPartsResponse = Schema.decodeUnknownSync(
+	OpenCodeMessageWithPartsSchema,
+);
+export const decodeOpenCodeMessageListResponse = Schema.decodeUnknownSync(
+	OpenCodeMessageListResponseSchema,
+);
+export const decodeOpenCodeSessionResponse = Schema.decodeUnknownSync(
+	OpenCodeSessionSchema,
+);
+export const decodeOpenCodeBooleanResponse = Schema.decodeUnknownSync(
+	OpenCodeBooleanResponseSchema,
+);
+export const decodeOpenCodeUndefinedResponse = Schema.decodeUnknownSync(
+	OpenCodeUndefinedResponseSchema,
+);
+export const decodeOpenCodeShareResponse = Schema.decodeUnknownSync(
+	OpenCodeShareResponseSchema,
+);
+export const decodeOpenCodeDiffResponse = Schema.decodeUnknownSync(
+	OpenCodeDiffResponseSchema,
+);
+export const decodeOpenCodeConfigResponse = Schema.decodeUnknownSync(
+	OpenCodeConfigResponseSchema,
+);
+export const decodeOpenCodeProviderListResponse = Schema.decodeUnknownSync(
+	OpenCodeProviderListResponseSchema,
+);
+export const decodeOpenCodePtyResponse =
+	Schema.decodeUnknownSync(OpenCodePtySchema);
+export const decodeOpenCodePtyListResponse = Schema.decodeUnknownSync(
+	OpenCodePtyListResponseSchema,
+);
+export const decodeOpenCodeFileEntryListResponse = Schema.decodeUnknownSync(
+	OpenCodeFileEntryListResponseSchema,
+);
+export const decodeOpenCodeFileReadResponse = Schema.decodeUnknownSync(
+	OpenCodeFileReadResponseSchema,
+);
+export const decodeOpenCodeFileStatusListResponse = Schema.decodeUnknownSync(
+	OpenCodeFileStatusListResponseSchema,
+);
+export const decodeOpenCodeFindTextResponse = Schema.decodeUnknownSync(
+	OpenCodeFindTextResponseSchema,
+);
+export const decodeOpenCodeFindFilesResponse = Schema.decodeUnknownSync(
+	OpenCodeFindFilesArrayResponseSchema,
+);
+export const decodeOpenCodeFindSymbolsResponse = Schema.decodeUnknownSync(
+	OpenCodeFindSymbolsResponseSchema,
+);
+export const decodeOpenCodeAgentListResponse = Schema.decodeUnknownSync(
+	OpenCodeAgentListResponseSchema,
+);
+export const decodeOpenCodeCommandListResponse = Schema.decodeUnknownSync(
+	OpenCodeCommandListResponseSchema,
+);
+export const decodeOpenCodePathResponse =
+	Schema.decodeUnknownSync(OpenCodePathSchema);
+export const decodeOpenCodeVcsResponse = Schema.decodeUnknownSync(
+	OpenCodeVcsResponseSchema,
+);
+export const decodeOpenCodeProjectListResponse = Schema.decodeUnknownSync(
+	OpenCodeProjectListResponseSchema,
+);
+export const decodeOpenCodeCurrentProjectResponse = Schema.decodeUnknownSync(
+	OpenCodeCurrentProjectResponseSchema,
+);
+export const decodeOpenCodePendingPermissionListResponse =
+	Schema.decodeUnknownSync(OpenCodePendingPermissionListResponseSchema);
+export const decodeOpenCodePendingQuestionListResponse =
+	Schema.decodeUnknownSync(OpenCodePendingQuestionListResponseSchema);
+export const decodeOpenCodeSkillListResponse = Schema.decodeUnknownSync(
+	OpenCodeSkillListResponseSchema,
+);
+export const decodeOpenCodePermissionReplyBody = Schema.decodeUnknownSync(
+	OpenCodePermissionReplyRequestSchema,
+);
+export const encodeOpenCodePermissionReplyBody = Schema.encodeUnknownSync(
+	OpenCodePermissionReplyRequestSchema,
+);
+export const decodeOpenCodeQuestionReplyBody = Schema.decodeUnknownSync(
+	OpenCodeQuestionReplyRequestSchema,
+);
+export const encodeOpenCodeQuestionReplyBody = Schema.encodeUnknownSync(
+	OpenCodeQuestionReplyRequestSchema,
+);
+export const decodeOpenCodeQuestionRejectBody = Schema.decodeUnknownSync(
+	OpenCodeQuestionRejectRequestSchema,
+);
+export const encodeOpenCodeQuestionRejectBody = Schema.encodeUnknownSync(
+	OpenCodeQuestionRejectRequestSchema,
+);

@@ -20,11 +20,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Cause, Data, Deferred, Effect, Exit, Runtime, Schema } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, Runtime } from "effect";
 import {
-	ClaudeSDKMessageSchema,
-	ClaudeSDKOptionsJsonShapeSchema,
-	ClaudeSDKUserMessageSchema,
+	decodeClaudeSDKMessage,
+	decodeClaudeSDKOptionsJsonShape,
+	decodeClaudeSDKUserMessage,
 } from "../../contracts/providers/claude-agent-sdk.js";
 import { createLogger } from "../../logger.js";
 import {
@@ -82,14 +82,6 @@ const log = createLogger("claude-provider-instance");
 const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 const MAX_DECODE_ERROR_LENGTH = 800;
 const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
-
-const decodeClaudeSDKMessage = Schema.decodeUnknownSync(ClaudeSDKMessageSchema);
-const decodeClaudeSDKUserMessage = Schema.decodeUnknownSync(
-	ClaudeSDKUserMessageSchema,
-);
-const decodeClaudeSDKOptionsJsonShape = Schema.decodeUnknownSync(
-	ClaudeSDKOptionsJsonShapeSchema,
-);
 
 function supportsMillionTokenContext(modelId: string): boolean {
 	const normalized = modelId.toLowerCase();
@@ -210,7 +202,7 @@ function logDecodeFailure(
 
 function decodeProviderMessage(message: unknown): SDKMessage {
 	try {
-		return decodeClaudeSDKMessage(message) as SDKMessage;
+		return decodeClaudeSDKMessage(message);
 	} catch (cause) {
 		logDecodeFailure("Claude SDK message", cause, message);
 		throw new ClaudeSDKDecodeError({ boundary: "Claude SDK message", cause });
@@ -854,21 +846,26 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		try {
 			const stream = ctx.query as AsyncIterable<unknown>;
 			for await (const rawMessage of stream) {
-				const message = decodeProviderMessage(rawMessage);
-				if (await this.pushForwardedSubagentMessage(ctx, message, runEffect)) {
+				const decodedMessage = decodeProviderMessage(rawMessage);
+				if (
+					await this.pushForwardedSubagentMessage(
+						ctx,
+						decodedMessage,
+						runEffect,
+					)
+				) {
 					continue;
 				}
-				await translator.translate(ctx, message);
-				await this.handleSubagentTaskStarted(ctx, message, runEffect);
-				if (message.type === "result") {
-					const result = message as unknown as SDKResultMessage;
+				await translator.translate(ctx, decodedMessage);
+				await this.handleSubagentTaskStarted(ctx, decodedMessage, runEffect);
+				if (decodedMessage.type === "result") {
 					const finalizationCtx = this.detachSubagentFinalizationContext(ctx);
 					resultFinalization = this.finalizeSubagentsAfterResult(
 						finalizationCtx,
-						result,
+						decodedMessage,
 						runEffect,
 					);
-					this.resolveTurn(ctx, result);
+					this.resolveTurn(ctx, decodedMessage);
 					void resultFinalization;
 				}
 			}
