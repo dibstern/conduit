@@ -684,8 +684,8 @@ export class MockOpenCodeServer {
 			this.deletedSessionIds.add(id);
 			this.injectedSessions.delete(id);
 			this.removeFromSessionListFallback(id);
-			res.writeHead(204);
-			res.end();
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(true));
 			return;
 		}
 

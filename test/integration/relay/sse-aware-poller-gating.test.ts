@@ -81,6 +81,17 @@ async function createMockOpenCode(
 	}
 
 	const messageRequestCounts: Record<string, number> = {};
+	const toOpenCodeSession = (session: SessionDef) => ({
+		id: session.id,
+		projectID: "proj-test",
+		directory: "/test",
+		title: session.title,
+		version: "test",
+		time: { created: 1, updated: 1 },
+		modelID: "gpt-4",
+		providerID: "openai",
+		...(session.parentID != null && { parentID: session.parentID }),
+	});
 
 	function handler(req: IncomingMessage, res: ServerResponse) {
 		const url = new URL(req.url ?? "/", "http://localhost");
@@ -100,30 +111,31 @@ async function createMockOpenCode(
 		res.setHeader("Content-Type", "application/json");
 
 		if (url.pathname === "/path") {
-			res.end(JSON.stringify("/test"));
+			res.end(
+				JSON.stringify({
+					state: "/tmp/opencode-state",
+					config: "/tmp/opencode-config",
+					worktree: "/test",
+					directory: "/test",
+				}),
+			);
 			return;
 		}
 
 		if (url.pathname === "/session" && req.method === "GET") {
-			const result = sessionList.map((s) => ({
-				id: s.id,
-				title: s.title,
-				modelID: "gpt-4",
-				providerID: "openai",
-				...(s.parentID != null && { parentID: s.parentID }),
-			}));
+			const result = sessionList.map(toOpenCodeSession);
 			res.end(JSON.stringify(result));
 			return;
 		}
 
 		if (url.pathname === "/session" && req.method === "POST") {
 			res.end(
-				JSON.stringify({
-					id: "sess-new",
-					title: "New",
-					modelID: "gpt-4",
-					providerID: "openai",
-				}),
+				JSON.stringify(
+					toOpenCodeSession({
+						id: "sess-new",
+						title: "New",
+					}),
+				),
 			);
 			return;
 		}
@@ -138,15 +150,7 @@ async function createMockOpenCode(
 			// biome-ignore lint/style/noNonNullAssertion: regex guarantees capture
 			const id = sessionMatch[1]!;
 			const found = sessionList.find((s) => s.id === id);
-			const session = found
-				? {
-						id: found.id,
-						title: found.title,
-						modelID: "gpt-4",
-						providerID: "openai",
-						...(found.parentID != null && { parentID: found.parentID }),
-					}
-				: { id, title: "Unknown", modelID: "gpt-4", providerID: "openai" };
+			const session = toOpenCodeSession(found ?? { id, title: "Unknown" });
 			res.end(JSON.stringify(session));
 			return;
 		}
@@ -169,7 +173,7 @@ async function createMockOpenCode(
 		}
 
 		if (url.pathname === "/provider") {
-			res.end(JSON.stringify({ providers: [], defaults: {}, connected: [] }));
+			res.end(JSON.stringify({ all: [], default: {}, connected: [] }));
 			return;
 		}
 

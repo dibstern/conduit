@@ -46,8 +46,8 @@ const FIXTURE: OpenCodeRecording = {
 			kind: "rest",
 			method: "DELETE",
 			path: "/session/ses_2",
-			status: 204,
-			responseBody: null,
+			status: 200,
+			responseBody: true,
 		},
 		{
 			kind: "rest",
@@ -192,8 +192,8 @@ describe("MockOpenCodeServer", () => {
 
 		// DELETE /session/ses_2
 		const r4 = await fetch(`${mock.url}/session/ses_2`, { method: "DELETE" });
-		expect(r4.status).toBe(204);
-		expect(r4.headers.get("content-type")).toBeNull();
+		expect(r4.status).toBe(200);
+		expect(await r4.json()).toBe(true);
 
 		// Third GET /session (back to just ses_1)
 		const r5 = await fetch(`${mock.url}/session`);
@@ -220,7 +220,8 @@ describe("MockOpenCodeServer", () => {
 		const res = await fetch(`${mock.url}/session/ses_xyz`, {
 			method: "DELETE",
 		});
-		expect(res.status).toBe(204);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toBe(true);
 	});
 
 	it("streams SSE events after prompt_async", async () => {

@@ -72,6 +72,66 @@ function makeProvider(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function makeProviderWithCurrentModelShape() {
+	return makeProvider({
+		id: "helicone",
+		name: "Helicone",
+		env: ["HELICONE_API_KEY"],
+		models: {
+			"claude-opus-4-1-20250805": {
+				id: "claude-opus-4-1-20250805",
+				providerID: "helicone",
+				api: {
+					id: "claude-opus-4-1-20250805",
+					url: "https://ai-gateway.helicone.ai/v1",
+					npm: "@ai-sdk/openai-compatible",
+				},
+				name: "Anthropic: Claude Opus 4.1 (20250805)",
+				family: "claude-opus",
+				capabilities: {
+					temperature: true,
+					reasoning: true,
+					attachment: false,
+					toolcall: true,
+					input: {
+						text: true,
+						audio: false,
+						image: true,
+						video: false,
+						pdf: false,
+					},
+					output: {
+						text: true,
+						audio: false,
+						image: false,
+						video: false,
+						pdf: false,
+					},
+					interleaved: { field: "reasoning_content" },
+				},
+				cost: {
+					input: 15,
+					output: 75,
+					cache: {
+						read: 1.5,
+						write: 18.75,
+					},
+				},
+				limit: { context: 200000, output: 32000 },
+				status: "active",
+				options: {},
+				headers: {},
+				release_date: "2025-08-05",
+				variants: {
+					low: { reasoningEffort: "low" },
+					medium: { reasoningEffort: "medium" },
+					high: { reasoningEffort: "high" },
+				},
+			},
+		},
+	});
+}
+
 // Stub SDK client — test that methods delegate correctly
 function makeStubSdk() {
 	return {
@@ -537,6 +597,47 @@ describe("OpenCodeAPI", () => {
 		});
 	});
 
+	it("provider.list() accepts the current nested model capabilities shape", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.provider.list.mockResolvedValue({
+			data: {
+				all: [makeProviderWithCurrentModelShape()],
+				default: { helicone: "claude-opus-4-1-20250805" },
+				connected: ["helicone"],
+			},
+			error: undefined,
+			response: { status: 200 },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		const result = await api.provider.list();
+
+		expect(result.providers).toHaveLength(1);
+		const provider = result.providers[0];
+		if (!provider) throw new Error("expected one provider");
+		const models = provider.models ?? [];
+		expect(models).toHaveLength(1);
+		const model = models[0];
+		expect(model).toEqual(
+			expect.objectContaining({
+				id: "claude-opus-4-1-20250805",
+				name: "Anthropic: Claude Opus 4.1 (20250805)",
+				limit: { context: 200000, output: 32000 },
+				variants: {
+					low: { reasoningEffort: "low" },
+					medium: { reasoningEffort: "medium" },
+					high: { reasoningEffort: "high" },
+				},
+			}),
+		);
+	});
+
 	it("provider.list() rejects provider entries missing SDK-required fields", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
@@ -673,7 +774,7 @@ describe("OpenCodeAPI", () => {
 		});
 	});
 
-	it("file.list() rejects entries missing SDK-required path fields", async () => {
+	it("file.list() accepts the name/type envelope Conduit reads", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
 		sdk.file.list.mockResolvedValue({
@@ -688,11 +789,9 @@ describe("OpenCodeAPI", () => {
 			authHeaders: {},
 		});
 
-		await expect(api.file.list("src")).rejects.toMatchObject({
-			_tag: "OpenCodeApiError",
-			endpoint: "/file",
-			context: expect.objectContaining({ label: "file.list" }),
-		});
+		await expect(api.file.list("src")).resolves.toEqual([
+			{ name: "app.ts", type: "file" },
+		]);
 	});
 
 	it("file.read() rejects legacy content-only responses", async () => {
@@ -781,11 +880,18 @@ describe("OpenCodeAPI", () => {
 		]);
 	});
 
-	it("app.agents() rejects agents missing SDK-required permission data", async () => {
+	it("app.agents() accepts provider-owned permission shapes", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
 		sdk.app.agents.mockResolvedValue({
-			data: [makeAgent({ permission: undefined })],
+			data: [
+				makeAgent({
+					builtIn: undefined,
+					native: true,
+					permission: [{ permission: "*", action: "allow", pattern: "*" }],
+					tools: undefined,
+				}),
+			],
 			error: undefined,
 			response: { status: 200, url: "/app/agents" },
 		});
@@ -796,11 +902,14 @@ describe("OpenCodeAPI", () => {
 			authHeaders: {},
 		});
 
-		await expect(api.app.agents()).rejects.toMatchObject({
-			_tag: "OpenCodeApiError",
-			endpoint: "/app/agents",
-			context: expect.objectContaining({ label: "app.agents" }),
-		});
+		await expect(api.app.agents()).resolves.toEqual([
+			{
+				id: "build",
+				name: "build",
+				description: "Build agent",
+				mode: "primary",
+			},
+		]);
 	});
 
 	it("app.commands() decodes SDK commands with required templates", async () => {

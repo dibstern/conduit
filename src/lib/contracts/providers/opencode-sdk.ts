@@ -196,10 +196,10 @@ type _OpenCodePtyCoversSdkPty = AssertExtends<
 
 export const OpenCodeFileNodeSchema = Schema.Struct({
 	name: Schema.String,
-	path: Schema.String,
-	absolute: Schema.String,
+	path: Schema.optional(Schema.String),
+	absolute: Schema.optional(Schema.String),
 	type: Schema.Literal("file", "directory"),
-	ignored: Schema.Boolean,
+	ignored: Schema.optional(Schema.Boolean),
 });
 
 export type OpenCodeFileNode = Schema.Schema.Type<
@@ -209,10 +209,6 @@ export type OpenCodeFileNode = Schema.Schema.Type<
 type _OpenCodeSdkFileNodeCoversSchema = AssertExtends<
 	SdkFileNode,
 	OpenCodeFileNode
->;
-type _OpenCodeFileNodeCoversSdkFileNode = AssertExtends<
-	NormalizeSchemaType<OpenCodeFileNode>,
-	SdkFileNode
 >;
 
 const OpenCodeFileContentPatchHunkSchema = Schema.Struct({
@@ -363,21 +359,13 @@ type _OpenCodeSdkConfigIsRecordResponse = AssertExtends<
 export const OpenCodeAgentSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
-	mode: Schema.Literal("subagent", "primary", "all"),
-	builtIn: Schema.Boolean,
+	mode: Schema.optional(Schema.Literal("subagent", "primary", "all")),
+	builtIn: Schema.optional(Schema.Boolean),
+	native: Schema.optional(Schema.Boolean),
 	topP: Schema.optional(Schema.Number),
 	temperature: Schema.optional(Schema.Number),
 	color: Schema.optional(Schema.String),
-	permission: Schema.Struct({
-		edit: Schema.Literal("ask", "allow", "deny"),
-		bash: Schema.Record({
-			key: Schema.String,
-			value: Schema.Literal("ask", "allow", "deny"),
-		}),
-		webfetch: Schema.optional(Schema.Literal("ask", "allow", "deny")),
-		doom_loop: Schema.optional(Schema.Literal("ask", "allow", "deny")),
-		external_directory: Schema.optional(Schema.Literal("ask", "allow", "deny")),
-	}),
+	permission: Schema.optional(Schema.Unknown),
 	model: Schema.optional(
 		Schema.Struct({
 			modelID: Schema.String,
@@ -385,18 +373,18 @@ export const OpenCodeAgentSchema = Schema.Struct({
 		}),
 	),
 	prompt: Schema.optional(Schema.String),
-	tools: Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	options: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	tools: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
+	),
+	options: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
 	maxSteps: Schema.optional(Schema.Number),
 });
 
 export type OpenCodeAgent = Schema.Schema.Type<typeof OpenCodeAgentSchema>;
 
 type _OpenCodeSdkAgentCoversSchema = AssertExtends<SdkAgent, OpenCodeAgent>;
-type _OpenCodeAgentCoversSdkAgent = AssertExtends<
-	NormalizeSchemaType<OpenCodeAgent>,
-	SdkAgent
->;
 
 export const OpenCodeCommandSchema = Schema.Struct({
 	name: Schema.String,
@@ -458,30 +446,44 @@ export const OpenCodeCurrentProjectResponseSchema =
 		time: { created: number };
 	}>;
 
+const OpenCodeProviderCostSchema = Schema.Struct({
+	input: Schema.Number,
+	output: Schema.Number,
+	cache_read: Schema.optional(Schema.Number),
+	cache_write: Schema.optional(Schema.Number),
+	cache: Schema.optional(
+		Schema.Struct({
+			read: Schema.optional(Schema.Number),
+			write: Schema.optional(Schema.Number),
+		}),
+	),
+	context_over_200k: Schema.optional(Schema.Unknown),
+});
+
+const OpenCodeProviderCapabilitiesSchema = Schema.Struct({
+	temperature: Schema.optional(Schema.Boolean),
+	reasoning: Schema.optional(Schema.Boolean),
+	attachment: Schema.optional(Schema.Boolean),
+	toolcall: Schema.optional(Schema.Boolean),
+	input: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
+	),
+	output: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
+	),
+	interleaved: Schema.optional(Schema.Unknown),
+});
+
 const OpenCodeProviderModelSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	release_date: Schema.String,
-	attachment: Schema.Boolean,
-	reasoning: Schema.Boolean,
-	temperature: Schema.Boolean,
-	tool_call: Schema.Boolean,
-	cost: Schema.optional(
-		Schema.Struct({
-			input: Schema.Number,
-			output: Schema.Number,
-			cache_read: Schema.optional(Schema.Number),
-			cache_write: Schema.optional(Schema.Number),
-			context_over_200k: Schema.optional(
-				Schema.Struct({
-					input: Schema.Number,
-					output: Schema.Number,
-					cache_read: Schema.optional(Schema.Number),
-					cache_write: Schema.optional(Schema.Number),
-				}),
-			),
-		}),
-	),
+	attachment: Schema.optional(Schema.Boolean),
+	reasoning: Schema.optional(Schema.Boolean),
+	temperature: Schema.optional(Schema.Boolean),
+	tool_call: Schema.optional(Schema.Boolean),
+	capabilities: Schema.optional(OpenCodeProviderCapabilitiesSchema),
+	cost: Schema.optional(OpenCodeProviderCostSchema),
 	limit: Schema.Struct({
 		context: Schema.Number,
 		output: Schema.Number,
@@ -497,11 +499,14 @@ const OpenCodeProviderModelSchema = Schema.Struct({
 		}),
 	),
 	experimental: Schema.optional(Schema.Boolean),
-	status: Schema.optional(Schema.Literal("alpha", "beta", "deprecated")),
+	status: Schema.optional(Schema.String),
 	options: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	headers: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.String }),
 	),
+	providerID: Schema.optional(Schema.String),
+	api: Schema.optional(Schema.Unknown),
+	family: Schema.optional(Schema.String),
 	provider: Schema.optional(
 		Schema.Struct({
 			npm: Schema.String,
@@ -541,10 +546,9 @@ type _OpenCodeSdkProviderListCoversSchema = AssertExtends<
 	SdkProviderListResponse,
 	OpenCodeProviderListResponse
 >;
-type _OpenCodeProviderListCoversSdkProviderList = AssertExtends<
-	NormalizeSchemaType<OpenCodeProviderListResponse>,
-	SdkProviderListResponse
->;
+// OpenCode's live /provider payload has drifted ahead of the published SDK type
+// for model capabilities. Keep accepting the SDK shape, but let the runtime
+// schema also decode the nested capabilities payload used by newer servers.
 
 const OpenCodeModelRefSchema = Schema.Struct({
 	providerID: Schema.String,
@@ -1005,7 +1009,18 @@ export type OpenCodeQuestionRejectRequest = Schema.Schema.Type<
 >;
 
 export const OpenCodeBooleanResponseSchema = Schema.Boolean;
-export const OpenCodeUndefinedResponseSchema = Schema.Undefined;
+const OpenCodeEmptyObjectResponseSchema = Schema.Struct({}).pipe(
+	Schema.filter((value) =>
+		Object.keys(value).length === 0
+			? undefined
+			: "expected empty object for void OpenCode response",
+	),
+);
+
+export const OpenCodeUndefinedResponseSchema = Schema.Union(
+	Schema.Undefined,
+	OpenCodeEmptyObjectResponseSchema,
+);
 
 export const OpenCodeShareResponseSchema = Schema.Struct({
 	url: Schema.String,
@@ -1027,10 +1042,10 @@ export const OpenCodeFileEntryListResponseSchema = Schema.Array(
 ) as unknown as Schema.Schema<
 	Array<{
 		name: string;
-		path: string;
-		absolute: string;
+		path?: string;
+		absolute?: string;
 		type: "file" | "directory";
-		ignored: boolean;
+		ignored?: boolean;
 	}>
 >;
 
