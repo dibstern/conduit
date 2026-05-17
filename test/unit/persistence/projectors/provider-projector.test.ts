@@ -173,7 +173,7 @@ describe("ProviderProjector", () => {
 					{
 						sessionId: "s1",
 						oldProvider: "opencode",
-						newProvider: "claude-sdk",
+						newProvider: "claude",
 					} satisfies SessionProviderChangedPayload,
 					2,
 					changeTime,
@@ -193,7 +193,7 @@ describe("ProviderProjector", () => {
 			expect(rows[0]?.deactivated_at).toBe(changeTime);
 
 			// New binding is active
-			expect(rows[1]?.provider).toBe("claude-sdk");
+			expect(rows[1]?.provider).toBe("claude");
 			expect(rows[1]?.status).toBe("active");
 			expect(rows[1]?.activated_at).toBe(changeTime);
 			expect(rows[1]?.deactivated_at).toBeNull();
@@ -222,7 +222,7 @@ describe("ProviderProjector", () => {
 					{
 						sessionId: "s1",
 						oldProvider: "opencode",
-						newProvider: "claude-sdk",
+						newProvider: "claude",
 					} satisfies SessionProviderChangedPayload,
 					2,
 					now + 1000,
@@ -236,7 +236,7 @@ describe("ProviderProjector", () => {
 					"s1",
 					{
 						sessionId: "s1",
-						oldProvider: "claude-sdk",
+						oldProvider: "claude",
 						newProvider: "gemini",
 					} satisfies SessionProviderChangedPayload,
 					3,
@@ -252,7 +252,7 @@ describe("ProviderProjector", () => {
 			expect(rows).toHaveLength(3);
 			expect(rows[0]?.provider).toBe("opencode");
 			expect(rows[0]?.status).toBe("stopped");
-			expect(rows[1]?.provider).toBe("claude-sdk");
+			expect(rows[1]?.provider).toBe("claude");
 			expect(rows[1]?.status).toBe("stopped");
 			expect(rows[2]?.provider).toBe("gemini");
 			expect(rows[2]?.status).toBe("active");
@@ -268,7 +268,7 @@ describe("ProviderProjector", () => {
 					{
 						sessionId: "s1",
 						oldProvider: "opencode",
-						newProvider: "claude-sdk",
+						newProvider: "claude",
 					} satisfies SessionProviderChangedPayload,
 					1,
 					now,
@@ -281,7 +281,7 @@ describe("ProviderProjector", () => {
 				["s1"],
 			);
 			expect(rows).toHaveLength(1);
-			expect(rows[0]?.provider).toBe("claude-sdk");
+			expect(rows[0]?.provider).toBe("claude");
 			expect(rows[0]?.status).toBe("active");
 		});
 	});

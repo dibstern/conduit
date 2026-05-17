@@ -46,6 +46,28 @@ describe("createRelayEventSink — translation", () => {
 		});
 	});
 
+	it("tags translated child-session events with the canonical event session", async () => {
+		const send = vi.fn();
+		const sink = createRelayEventSink({ sessionId: "parent", send });
+		const event = {
+			...makeEvent("text.delta", {
+				messageId: "msg_child",
+				partId: "part_child",
+				text: "Child text",
+			}),
+			sessionId: "child",
+		};
+
+		await Effect.runPromise(sink.push(event));
+
+		expect(send).toHaveBeenCalledWith({
+			type: "delta",
+			sessionId: "child",
+			text: "Child text",
+			messageId: "msg_child",
+		});
+	});
+
 	it("maps turn.completed → result + done(0)", async () => {
 		const send = vi.fn();
 		const clearTimeout = vi.fn();

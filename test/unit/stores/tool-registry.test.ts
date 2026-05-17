@@ -424,12 +424,16 @@ describe("updateMetadata", () => {
 	it("merges metadata on a running tool", () => {
 		registry.start("call-1", "Task");
 		registry.executing("call-1", { prompt: "do stuff" });
+		registry.updateMetadata("call-1", { description: "Audit auth" });
 		const result = registry.updateMetadata("call-1", {
 			sessionId: "ses_child001",
 		});
 		expect(result.action).toBe("update");
 		if (result.action !== "update") throw new Error("unreachable");
-		expect(result.tool.metadata).toEqual({ sessionId: "ses_child001" });
+		expect(result.tool.metadata).toEqual({
+			description: "Audit auth",
+			sessionId: "ses_child001",
+		});
 	});
 
 	it("merges metadata on a pending tool", () => {

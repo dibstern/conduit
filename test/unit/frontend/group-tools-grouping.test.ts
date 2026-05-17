@@ -57,6 +57,16 @@ describe("groupMessages — regression", () => {
 		expect(grouped).toHaveLength(2); // Two solo ToolMessages, not a group
 	});
 
+	it("Claude Agent subagent tools are never grouped", () => {
+		const messages: ChatMessage[] = [
+			toolMsg("1", "Agent"),
+			toolMsg("2", "Agent"),
+		];
+		const grouped = groupMessages(messages);
+		expect(grouped).toHaveLength(2);
+		expect(grouped.every((msg) => msg.type === "tool")).toBe(true);
+	});
+
 	it("Skill is never grouped", () => {
 		const messages: ChatMessage[] = [
 			toolMsg("1", "Skill"),

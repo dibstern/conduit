@@ -14,6 +14,16 @@ export {
 	ClaudeDriver,
 	ClaudeProviderInstance,
 } from "./claude-provider-instance.js";
+export type {
+	ClaudeSubagentSdk,
+	MaterializeClaudeSubagentsInput,
+	MaterializedClaudeSubagent,
+} from "./claude-subagent-materializer.js";
+export {
+	claudeSubagentSessionId,
+	defaultClaudeSubagentSdk,
+	makeClaudeSubagentMaterializer,
+} from "./claude-subagent-materializer.js";
 export {
 	EffectPromptQueue,
 	makeEffectPromptQueue,
@@ -37,5 +47,6 @@ export type {
 	SDKResultSuccess,
 	SDKSystemMessage,
 	SDKUserMessage,
+	SessionMessage,
 	ToolInFlight,
 } from "./types.js";

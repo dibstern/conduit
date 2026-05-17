@@ -17,6 +17,7 @@ export class EffectSessionSeeder {
 	ensureSession(
 		sessionId: string,
 		provider: string,
+		opts?: { parentId?: string; providerSessionId?: string },
 	): Effect.Effect<
 		boolean,
 		SessionSeederEffectError | SqlError,
@@ -28,8 +29,9 @@ export class EffectSessionSeeder {
 			const sql = yield* SqlClient.SqlClient;
 			const now = Date.now();
 			yield* sql`
-				INSERT OR IGNORE INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${now}, ${now})`;
+				INSERT OR IGNORE INTO sessions
+				(id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+				VALUES (${sessionId}, ${provider}, ${opts?.providerSessionId ?? null}, 'Untitled', 'idle', ${opts?.parentId ?? null}, ${now}, ${now})`;
 			return true;
 		}).pipe(
 			Effect.tap(() =>

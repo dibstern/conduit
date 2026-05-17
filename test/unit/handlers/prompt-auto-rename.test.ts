@@ -38,6 +38,8 @@ const makePersistService = (
 ): ClaudeEventPersistEffect => ({
 	persistEvent: vi.fn(() => Effect.void),
 	persistUserMessage,
+	persistClaudeSubagent: vi.fn(() => Effect.void),
+	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
 });
 
 const makeTitleService = (): SessionTitleService => ({

@@ -1,13 +1,27 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
+
+import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
+import {
+	createAllProjectors,
+	ProjectionRunner,
+} from "../../../../src/lib/persistence/projection-runner.js";
+import { ProjectorCursorRepository } from "../../../../src/lib/persistence/projector-cursor-repository.js";
+import { ReadQueryService } from "../../../../src/lib/persistence/read-query-service.js";
+import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
+	SDKPartialAssistantMessage,
+	SDKTaskProgressMessage,
 } from "../../../../src/lib/provider/claude/types.js";
+import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
+import { createTestHarness } from "../../../helpers/persistence-factories.js";
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────
 
@@ -91,7 +105,7 @@ describe("ClaudeEventTranslator", () => {
 		sink = makeStubSink();
 		ctx = makeCtx();
 		translator = new ClaudeEventTranslator({
-			sink,
+			getSink: () => sink,
 			runEffect: Effect.runPromise,
 		});
 	});
@@ -187,17 +201,19 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("maps system/task_started to child task metadata", async () => {
-		await translator.translate(ctx, {
+		const taskStarted: SDKTaskStartedMessage = {
 			type: "system",
 			subtype: "task_started",
 			task_id: "task-2",
 			tool_use_id: "tool-task-2",
 			description: "Explore code",
-			task_type: "Explore",
+			task_type: "explore",
 			prompt: "Find the route",
 			uuid: "00000000-0000-0000-0000-000000000026",
 			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
+		};
+
+		await translator.translate(ctx, taskStarted);
 
 		const running = sink.events.find((e) => e.type === "tool.running");
 		expect(running).toBeDefined();
@@ -207,9 +223,199 @@ describe("ClaudeEventTranslator", () => {
 			providerTaskId: "task-2",
 			status: "running",
 			description: "Explore code",
-			subagentType: "Explore",
+			subagentType: "explore",
 			prompt: "Find the route",
 		});
+		expect(data["metadata"]).not.toHaveProperty("subagent_type");
+	});
+
+	it("maps system/task_progress to canonical task metadata names", async () => {
+		const taskProgress = {
+			type: "system",
+			subtype: "task_progress",
+			task_id: "task-1",
+			tool_use_id: "tool-task-1",
+			description: "Exploring...",
+			subagent_type: "explore",
+			usage: {
+				total_tokens: 500,
+				tool_uses: 3,
+				duration_ms: 2000,
+			},
+			uuid: "00000000-0000-0000-0000-000000000027",
+			session_id: "sdk-sess",
+		} satisfies SDKTaskProgressMessage & { subagent_type: string };
+
+		await translator.translate(ctx, taskProgress);
+
+		const running = sink.events.find((e) => e.type === "tool.running");
+		expect(running).toBeDefined();
+		const metadata = dataOf(running)["metadata"] as Record<string, unknown>;
+		expect(metadata).toMatchObject({
+			providerTaskId: "task-1",
+			subagentType: "explore",
+		});
+		expect(metadata).not.toHaveProperty("subagent_type");
+	});
+
+	it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage", async () => {
+		const harness = createTestHarness();
+		try {
+			harness.seedSession("sess-contract", { provider: "claude" });
+			const runner = new ProjectionRunner({
+				db: harness.db,
+				eventStore: harness.eventStore,
+				cursorRepo: new ProjectorCursorRepository(harness.db),
+				projectors: createAllProjectors(),
+			});
+			runner.recover();
+			const relaySink = createRelayEventSink({
+				sessionId: "sess-contract",
+				send: vi.fn(),
+				persist: {
+					persistEvent: (event) =>
+						Effect.sync(() => {
+							const stored = harness.eventStore.append(event);
+							runner.projectEvent(stored);
+						}),
+				},
+			});
+			const relayTranslator = new ClaudeEventTranslator({
+				getSink: () => relaySink,
+				runEffect: Effect.runPromise,
+			});
+			const relayCtx = makeCtx({
+				sessionId: "sess-contract",
+				eventSink: relaySink,
+			});
+
+			const messageStart: SDKPartialAssistantMessage = {
+				type: "stream_event",
+				event: {
+					type: "message_start",
+					message: {
+						id: "msg-contract",
+						type: "message",
+						role: "assistant",
+						content: [],
+						container: null,
+						context_management: null,
+						model: "claude-sonnet-4-5",
+						stop_reason: null,
+						stop_sequence: null,
+						usage: {
+							cache_creation: null,
+							cache_creation_input_tokens: null,
+							cache_read_input_tokens: null,
+							inference_geo: null,
+							input_tokens: 0,
+							iterations: null,
+							output_tokens: 0,
+							server_tool_use: null,
+							service_tier: null,
+							speed: null,
+						},
+					},
+				},
+				parent_tool_use_id: null,
+				uuid: "00000000-0000-0000-0000-000000000201",
+				session_id: "sdk-sess-contract",
+			};
+			const taskToolUse: SDKPartialAssistantMessage = {
+				type: "stream_event",
+				event: {
+					type: "content_block_start",
+					index: 0,
+					content_block: {
+						type: "tool_use",
+						id: "tool-task-1",
+						name: "Task",
+						input: {
+							description: "Audit Claude provider",
+							prompt: "Find SDK mapping gaps",
+							subagent_type: "explore",
+						},
+					},
+				},
+				parent_tool_use_id: null,
+				uuid: "00000000-0000-0000-0000-000000000202",
+				session_id: "sdk-sess-contract",
+			};
+			const taskToolStop: SDKPartialAssistantMessage = {
+				type: "stream_event",
+				event: {
+					type: "content_block_stop",
+					index: 0,
+				},
+				parent_tool_use_id: null,
+				uuid: "00000000-0000-0000-0000-000000000203",
+				session_id: "sdk-sess-contract",
+			};
+			const taskStarted = {
+				type: "system",
+				subtype: "task_started",
+				task_id: "task-1",
+				tool_use_id: "tool-task-1",
+				description: "Audit Claude provider",
+				task_type: "explore",
+				prompt: "Find SDK mapping gaps",
+				child_session_id: "claude-subagent-abc",
+				uuid: "00000000-0000-0000-0000-000000000204",
+				session_id: "sdk-sess-contract",
+			} satisfies SDKTaskStartedMessage & { child_session_id: string };
+			const taskProgress = {
+				type: "system",
+				subtype: "task_progress",
+				task_id: "task-1",
+				tool_use_id: "tool-task-1",
+				description: "Audit Claude provider",
+				subagent_type: "explore",
+				child_session_id: "claude-subagent-abc",
+				usage: {
+					total_tokens: 12,
+					tool_uses: 1,
+					duration_ms: 300,
+				},
+				uuid: "00000000-0000-0000-0000-000000000205",
+				session_id: "sdk-sess-contract",
+			} satisfies SDKTaskProgressMessage & {
+				child_session_id: string;
+				subagent_type: string;
+			};
+
+			await relayTranslator.translate(relayCtx, messageStart);
+			await relayTranslator.translate(relayCtx, taskToolUse);
+			await relayTranslator.translate(relayCtx, taskToolStop);
+			await relayTranslator.translate(relayCtx, taskStarted);
+			await relayTranslator.translate(relayCtx, taskProgress);
+
+			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
+				"sess-contract",
+			);
+			const history = messageRowsToHistory(rows, { pageSize: 50 });
+			const messages = historyToChatMessages(history.messages);
+			const taskMessage = messages.find(
+				(message) => message.type === "tool" && message.name === "Task",
+			);
+
+			expect(taskMessage).toBeDefined();
+			if (taskMessage?.type === "tool") {
+				expect(taskMessage.input).toMatchObject({
+					tool: "Task",
+					description: "Audit Claude provider",
+					prompt: "Find SDK mapping gaps",
+					subagentType: "explore",
+				});
+				expect(taskMessage.input).not.toHaveProperty("taskId");
+				expect(taskMessage.input).not.toHaveProperty("task_id");
+				expect(taskMessage.metadata?.["providerTaskId"]).toBe("task-1");
+				expect(taskMessage.metadata?.["childSessionId"]).toBe(
+					"claude-subagent-abc",
+				);
+			}
+		} finally {
+			harness.close();
+		}
 	});
 
 	// ─── 3b. system (subtype api_retry) ──────────────────────────────────

@@ -25,6 +25,7 @@ function makePartRow(
 		call_id: null,
 		input: null,
 		result: null,
+		metadata: null,
 		duration: null,
 		status: null,
 		sort_order: 0,
@@ -163,6 +164,58 @@ describe("messageRowsToHistory", () => {
 		const [part] = msg?.parts ?? [];
 		// Invalid JSON falls back to the raw string
 		expect(part?.state?.input).toBe("not-json");
+	});
+
+	it("carries tool metadata into history part state", () => {
+		const rows: MessageWithParts[] = [
+			makeMessageWithParts("m1", {
+				parts: [
+					makePartRow("p1", "m1", {
+						type: "tool",
+						tool_name: "Task",
+						input: JSON.stringify({
+							tool: "Task",
+							description: "Audit",
+							prompt: "Go",
+						}),
+						status: "running",
+						metadata: JSON.stringify({
+							childSessionId: "claude-subagent-abc",
+							providerTaskId: "task-1",
+						}),
+					}),
+				],
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+		const [msg] = result.messages;
+		const [part] = msg?.parts ?? [];
+
+		expect(part?.state?.["metadata"]).toEqual({
+			childSessionId: "claude-subagent-abc",
+			providerTaskId: "task-1",
+		});
+	});
+
+	it("omits state for metadata-only parts with malformed metadata", () => {
+		const rows: MessageWithParts[] = [
+			makeMessageWithParts("m1", {
+				parts: [
+					makePartRow("p1", "m1", {
+						type: "tool",
+						tool_name: "Task",
+						metadata: "{not json",
+					}),
+				],
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+		const [msg] = result.messages;
+		const [part] = msg?.parts ?? [];
+
+		expect(part).not.toHaveProperty("state");
 	});
 
 	it("includes cost and token fields on assistant messages", () => {

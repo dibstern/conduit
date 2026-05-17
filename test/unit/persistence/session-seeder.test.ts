@@ -63,6 +63,25 @@ describe("SessionSeeder", () => {
 		expect(rows[1]?.provider).toBe("claude");
 	});
 
+	it("stores optional parent and provider session ids", () => {
+		seeder.ensureSession("parent-session", "claude");
+		seeder.ensureSession("claude-subagent-abc", "claude", {
+			parentId: "parent-session",
+			providerSessionId: "sdk-subagent-1",
+		});
+
+		const row = layer.db.queryOne<{
+			parent_id: string | null;
+			provider_sid: string | null;
+		}>("SELECT parent_id, provider_sid FROM sessions WHERE id = ?", [
+			"claude-subagent-abc",
+		]);
+		expect(row).toEqual({
+			parent_id: "parent-session",
+			provider_sid: "sdk-subagent-1",
+		});
+	});
+
 	it("sets created_at and updated_at to current time", () => {
 		const before = Date.now();
 		seeder.ensureSession("sess-1", "opencode");

@@ -123,12 +123,13 @@ export function groupMessages(messages: ChatMessage[]): GroupedMessage[] {
 		if (msg.type === "tool") {
 			// AskUserQuestion tools must never be grouped — they need
 			// ToolItem's interactive QuestionCard, not ToolGroupItem.
-			// Task tools must never be grouped — they need ToolItem's
+			// Task/Agent tools must never be grouped — they need ToolItem's
 			// subagent card with session navigation, not ToolGroupItem.
 			if (
 				msg.name === "AskUserQuestion" ||
 				msg.name === "Task" ||
 				msg.name === "task" ||
+				msg.name === "Agent" ||
 				msg.name === "Skill"
 			) {
 				flushBatch();

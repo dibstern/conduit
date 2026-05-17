@@ -43,23 +43,29 @@ export class SessionProjector implements Projector {
 			// (provider_sid, parent_id, fork_point_event) that may have been set by
 			// other code paths.
 			db.execute(
-				`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				 VALUES (?, ?, ?, 'idle', ?, ?)
+				`INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?)
 				 ON CONFLICT (id) DO UPDATE SET
 				     provider = excluded.provider,
+				     provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
 				     title = CASE
 				       WHEN sessions.title IS NULL
 				         OR sessions.title = ''
 				         OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
 				         OR sessions.title LIKE 'New session%'
+				         OR sessions.parent_id IS NOT NULL
+				         OR excluded.parent_id IS NOT NULL
 				       THEN excluded.title
 				       ELSE sessions.title
 				     END,
+				     parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
 				     updated_at = excluded.updated_at`,
 				[
 					event.data.sessionId,
 					event.data.provider,
+					event.data.providerSessionId ?? null,
 					event.data.title,
+					event.data.parentId ?? null,
 					event.createdAt,
 					event.createdAt,
 				],

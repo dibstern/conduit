@@ -326,7 +326,7 @@ export const mockToolSubagent: ToolMessage = {
 	status: "running",
 	input: {
 		description: "Explore test infrastructure",
-		subagent_type: "explore",
+		subagentType: "explore",
 		prompt: "Search for all test files...",
 	},
 };
@@ -339,10 +339,11 @@ export const mockToolSubagentCompleted: ToolMessage = {
 	status: "completed",
 	input: {
 		description: "Implement feature X",
-		subagent_type: "general",
+		subagentType: "general",
 		prompt: "Build the component...",
 	},
-	result: "task_id: ses_abc123\n\nCompleted implementation of feature X.",
+	metadata: { childSessionId: "claude-subagent-abc123" },
+	result: "Completed implementation of feature X.",
 	isError: false,
 };
 

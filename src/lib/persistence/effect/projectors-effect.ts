@@ -52,6 +52,25 @@ function isAutoTitleRename(event: StoredEvent): boolean {
 	return event.metadata.source === "auto-title";
 }
 
+function mergeMetadata(
+	current: string | null,
+	next: Record<string, unknown> | undefined,
+): string | null {
+	if (next === undefined) return current;
+	let currentObject: Record<string, unknown> = {};
+	if (current != null) {
+		try {
+			const parsed: unknown = JSON.parse(current);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				currentObject = parsed as Record<string, unknown>;
+			}
+		} catch {
+			currentObject = {};
+		}
+	}
+	return encodeJson({ ...currentObject, ...next });
+}
+
 // ─── Session Projector ──────────────────────────────────────────────────────
 
 export const makeSessionProjector = (): EffectProjector => ({
@@ -71,18 +90,22 @@ export const makeSessionProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "session.created")) {
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.title}, 'idle', ${event.createdAt}, ${event.createdAt})
+					INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.providerSessionId ?? null}, ${event.data.title}, 'idle', ${event.data.parentId ?? null}, ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO UPDATE SET
 						provider = excluded.provider,
+						provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
 						title = CASE
 							WHEN sessions.title IS NULL
 								OR sessions.title = ''
 								OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
 								OR sessions.title LIKE 'New session%'
+								OR sessions.parent_id IS NOT NULL
+								OR excluded.parent_id IS NOT NULL
 							THEN excluded.title
 							ELSE sessions.title
 						END,
+						parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
 						updated_at = excluded.updated_at`;
 				return;
 			}
@@ -288,7 +311,16 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "tool.running")) {
-				yield* sql`UPDATE message_parts SET status = 'running', updated_at = ${event.createdAt} WHERE id = ${event.data.partId}`;
+				const rows = yield* sql<{ metadata: string | null }>`
+					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
+				const metadata = mergeMetadata(
+					rows[0]?.metadata ?? null,
+					event.data.metadata,
+				);
+				yield* sql`
+					UPDATE message_parts
+					SET status = 'running', metadata = ${metadata}, updated_at = ${event.createdAt}
+					WHERE id = ${event.data.partId}`;
 				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
 				return;
 			}

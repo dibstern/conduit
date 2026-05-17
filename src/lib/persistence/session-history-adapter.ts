@@ -23,13 +23,31 @@ const KNOWN_TOOL_STATUSES = new Set<string>([
 	"error",
 ]);
 
+function parseObjectJson(value: string): Record<string, unknown> | undefined {
+	try {
+		const parsed: unknown = JSON.parse(value);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as Record<string, unknown>;
+		}
+	} catch {
+		return undefined;
+	}
+	return undefined;
+}
+
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	let state: NonNullable<HistoryMessagePart["state"]> | undefined;
-	if (row.status != null || row.input != null || row.result != null) {
+	if (
+		row.status != null ||
+		row.input != null ||
+		row.result != null ||
+		row.metadata != null
+	) {
 		const stateObj: {
 			status?: ToolStatus;
 			input?: unknown;
 			output?: string;
+			metadata?: Record<string, unknown>;
 			[key: string]: unknown;
 		} = {};
 		if (row.status != null && KNOWN_TOOL_STATUSES.has(row.status)) {
@@ -45,7 +63,13 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 		if (row.result != null) {
 			stateObj["output"] = row.result;
 		}
-		state = stateObj;
+		if (row.metadata != null) {
+			const metadata = parseObjectJson(row.metadata);
+			if (metadata) stateObj["metadata"] = metadata;
+		}
+		if (Object.keys(stateObj).length > 0) {
+			state = stateObj;
+		}
 	}
 
 	return {

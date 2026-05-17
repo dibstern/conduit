@@ -4,6 +4,7 @@ import {
 	type Migration,
 	runMigrations,
 } from "../../../src/lib/persistence/migrations.js";
+import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 describe("Migration Runner", () => {
@@ -103,6 +104,35 @@ describe("Migration Runner", () => {
 		expect(applied).toEqual([
 			{ id: 2, name: "second", checksum: calculateMigrationChecksum(m2) },
 		]);
+	});
+
+	it("adds message part metadata to databases with only the event-store baseline", () => {
+		client = SqliteClient.memory();
+		const baseline = schemaMigrations[0];
+		const metadataMigration = schemaMigrations[1];
+		if (!baseline || !metadataMigration) {
+			throw new Error("Expected event-store baseline and metadata migrations");
+		}
+
+		runMigrations(client, [baseline]);
+		let columns = client
+			.query<{ name: string }>("PRAGMA table_info(message_parts)")
+			.map((column) => column.name);
+		expect(columns).not.toContain("metadata");
+
+		const applied = runMigrations(client, schemaMigrations);
+
+		expect(applied).toEqual([
+			{
+				id: 2,
+				name: "add_message_part_metadata",
+				checksum: calculateMigrationChecksum(metadataMigration),
+			},
+		]);
+		columns = client
+			.query<{ name: string }>("PRAGMA table_info(message_parts)")
+			.map((column) => column.name);
+		expect(columns).toContain("metadata");
 	});
 
 	it("rolls back a failed migration without affecting prior ones", () => {

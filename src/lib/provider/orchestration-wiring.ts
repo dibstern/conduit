@@ -9,7 +9,12 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
+import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
+import {
+	defaultClaudeSubagentSdk,
+	makeClaudeSubagentMaterializer,
+} from "./claude/claude-subagent-materializer.js";
 import { ClaudeDriver, ClaudeProviderInstance } from "./claude/index.js";
 import {
 	OpenCodeDriver,
@@ -104,8 +109,19 @@ const createOrchestrationComponentsEffect = (
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 
+		const persistOption = yield* Effect.serviceOption(
+			ClaudeEventPersistEffectTag,
+		);
+		const materializeSubagents =
+			persistOption._tag === "Some"
+				? makeClaudeSubagentMaterializer({
+						sdk: defaultClaudeSubagentSdk,
+						persist: persistOption.value,
+					})
+				: undefined;
 		const claudeInstance = yield* ClaudeDriver.create({
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
+			...(materializeSubagents ? { materializeSubagents } : {}),
 		});
 		registry.registerInstance(claudeInstance);
 

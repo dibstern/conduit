@@ -15,6 +15,7 @@
 
 import type { Effect } from "effect";
 import type { EventSink, PermissionDecision } from "../types.js";
+import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
 // ─── SDK Type Re-exports ──────────────────────────────────────────────────
 // Imported from the real Claude Agent SDK and re-exported so that internal
@@ -39,9 +40,15 @@ export type {
 	SDKSystemMessage,
 	SDKTaskProgressMessage,
 	SDKUserMessage,
+	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
-import type { SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+	Query,
+	SDKPartialAssistantMessage,
+	SDKUserMessage,
+	SessionMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 
 // ─── Stream Event Type ──────────────────────────────────────────────────
 // BetaRawMessageStreamEvent is not directly exported by the SDK, but we
@@ -59,8 +66,6 @@ export type SDKSystemLike = Extract<
 	import("@anthropic-ai/claude-agent-sdk").SDKMessage,
 	{ type: "system" }
 >;
-
-import type { Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 // ─── Resume Cursor ─────────────────────────────────────────────────────────
 
@@ -117,6 +122,26 @@ export interface ToolInFlight {
 	bufferedInput?: Record<string, unknown>;
 }
 
+export interface ClaudeSubagentTaskContext {
+	readonly toolUseId: string;
+	readonly childSessionId?: string;
+	readonly parentMessageId?: string;
+	readonly description?: string;
+	readonly subagentType?: string;
+}
+
+export interface ClaudeSubagentLivePoller {
+	readonly sdkSubagentId: string;
+	readonly childSessionId: string;
+	readonly parentClaudeSessionId: string;
+	readonly parentToolUseId: string;
+	readonly cursor: ClaudeSubagentTranscriptCursor;
+	sessionReady: boolean;
+	active: boolean;
+	timer: ReturnType<typeof setTimeout> | undefined;
+	currentPoll: Promise<void> | undefined;
+}
+
 // ─── Session Context ───────────────────────────────────────────────────────
 
 /**
@@ -132,6 +157,9 @@ export interface ClaudeSessionContext {
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingQuestions: Map<string, PendingQuestion>;
 	readonly inFlightTools: Map<number, ToolInFlight>;
+	readonly subagentTasks?: Map<string, ClaudeSubagentTaskContext>;
+	readonly subagentPollers?: Map<string, ClaudeSubagentLivePoller>;
+	readonly pendingSubagentMessages?: Map<string, SessionMessage[]>;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	streamConsumer: Promise<void> | undefined;

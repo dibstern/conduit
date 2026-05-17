@@ -13,21 +13,44 @@
 		groupRadius: string;
 	} = $props();
 
-	// ─── Subagent detection ─────────────────────────────────────────────────
-	// The task tool name is "Task" (mapped) or "task" (raw). Input contains
-	// description, subagent_type, prompt, and optionally task_id.
-	// The result contains "task_id: <session_id>" on the first line.
-
-	const taskInput = $derived.by(() => {
-		const inp = message.input as Record<string, unknown> | null | undefined;
-		if (!inp) return null;
+	function readTaskInput(input: unknown): {
+		description: string;
+		subagentType: string;
+		prompt: string;
+		taskId?: string;
+	} | null {
+		if (!input || typeof input !== "object") return null;
+		let record = input as Record<string, unknown>;
+		if (
+			record["tool"] === "Unknown" &&
+			record["name"] === "Agent" &&
+			record["raw"] &&
+			typeof record["raw"] === "object" &&
+			!Array.isArray(record["raw"])
+		) {
+			record = record["raw"] as Record<string, unknown>;
+		}
 		return {
-			description: (inp['description'] as string) ?? "",
-			subagentType: (inp['subagent_type'] as string) ?? "general",
-			prompt: (inp['prompt'] as string) ?? "",
-			taskId: (inp['task_id'] as string) ?? undefined,
+			description:
+				typeof record["description"] === "string"
+					? record["description"]
+					: "",
+			subagentType:
+				typeof record["subagentType"] === "string"
+					? record["subagentType"]
+					: typeof record["subagent_type"] === "string"
+						? record["subagent_type"]
+						: "general",
+			prompt: typeof record["prompt"] === "string" ? record["prompt"] : "",
+			...(typeof record["taskId"] === "string"
+				? { taskId: record["taskId"] }
+				: typeof record["task_id"] === "string"
+					? { taskId: record["task_id"] }
+					: {}),
 		};
-	});
+	}
+
+	const taskInput = $derived(readTaskInput(message.input));
 
 	/** Extract the spawned session ID from the task tool result, metadata,
 	 *  or the tool input's task_id field. Each strategy correlates a specific
@@ -35,16 +58,18 @@
 	 *  omitted because it cannot distinguish between multiple child sessions
 	 *  and would return a stale/wrong session. */
 	const subagentSessionId = $derived.by(() => {
-		// 1. Input's task_id (present when resuming a previous task)
+		const metadata = message.metadata as Record<string, unknown> | undefined;
+		const childSessionId = metadata?.["childSessionId"];
+		if (typeof childSessionId === "string" && childSessionId) {
+			return childSessionId;
+		}
+		const metaSessionId = metadata?.["sessionId"];
+		if (typeof metaSessionId === "string" && metaSessionId) return metaSessionId;
 		if (taskInput?.taskId) return taskInput.taskId;
-		// 2. Result text: "task_id: ses_xxxxx ..."
 		if (message.result) {
-			const match = message.result.match(/task_id:\s*(ses_\S+)/);
+			const match = message.result.match(/task_id:\s*(\S+)/);
 			if (match?.[1]) return match[1];
 		}
-		// 3. Metadata sessionId (forwarded from OpenCode's tool part state)
-		const metaSessionId = (message.metadata as Record<string, unknown> | undefined)?.["sessionId"];
-		if (typeof metaSessionId === "string" && metaSessionId) return metaSessionId;
 		return null;
 	});
 

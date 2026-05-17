@@ -224,8 +224,7 @@ test.describe("ToolSubagentCard", () => {
 		await page.waitForSelector(".tool-item");
 		await page.waitForTimeout(200);
 
-		// Completed subagent has a session ID in result ("task_id: ses_abc123")
-		// so it should show a navigation arrow
+		// Completed subagent has child session metadata, so it should show a navigation arrow.
 		const header = page.locator(".subagent-header");
 		await expect(header).toBeVisible();
 

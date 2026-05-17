@@ -38,6 +38,7 @@ export interface MessagePartRow {
 	call_id: string | null;
 	input: string | null;
 	result: string | null;
+	metadata: string | null;
 	duration: number | null;
 	status: string | null;
 	sort_order: number;

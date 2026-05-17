@@ -44,15 +44,27 @@ const FIXED_TS = 1_000_000_000_000;
 
 function makeSessionCreated(
 	sessionId: string,
-	opts?: { eventId?: EventId; metadata?: EventMetadata; createdAt?: number },
+	opts?: {
+		eventId?: EventId;
+		metadata?: EventMetadata;
+		createdAt?: number;
+		parentId?: string;
+		providerSessionId?: string;
+		title?: string;
+		provider?: string;
+	},
 ): CanonicalEvent {
 	return canonicalEvent(
 		"session.created",
 		sessionId,
 		{
 			sessionId,
-			title: "Test Session",
-			provider: "opencode",
+			title: opts?.title ?? "Test Session",
+			provider: opts?.provider ?? "opencode",
+			...(opts?.parentId !== undefined ? { parentId: opts.parentId } : {}),
+			...(opts?.providerSessionId !== undefined
+				? { providerSessionId: opts.providerSessionId }
+				: {}),
 		},
 		{
 			eventId: opts?.eventId ?? createEventId(),
@@ -101,6 +113,51 @@ function makeTextDelta(
 			eventId: createEventId(),
 			metadata: {},
 			createdAt: opts?.createdAt ?? FIXED_TS,
+		},
+	);
+}
+
+function makeToolStarted(
+	sessionId: string,
+	messageId: string,
+	partId: string,
+): CanonicalEvent {
+	return canonicalEvent(
+		"tool.started",
+		sessionId,
+		{
+			messageId,
+			partId,
+			toolName: "Task",
+			callId: partId,
+			input: { tool: "Task", description: "Audit", prompt: "Go" },
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
+function makeToolRunning(
+	sessionId: string,
+	messageId: string,
+	partId: string,
+	metadata?: Record<string, unknown>,
+): CanonicalEvent {
+	return canonicalEvent(
+		"tool.running",
+		sessionId,
+		{
+			messageId,
+			partId,
+			...(metadata !== undefined ? { metadata } : {}),
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
 		},
 	);
 }
@@ -850,6 +907,54 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it("session.created writes parent and provider session ids, then preserves them when omitted", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("parent-session");
+				yield* seedSession("claude-subagent-abc");
+				const parent = yield* store.append(
+					makeSessionCreated("parent-session", {
+						provider: "claude",
+						title: "Parent",
+					}),
+				);
+				yield* runner.projectEvent(parent);
+				const child = yield* store.append(
+					makeSessionCreated("claude-subagent-abc", {
+						provider: "claude",
+						title: "Explore Agent",
+						parentId: "parent-session",
+						providerSessionId: "sdk-subagent-1",
+					}),
+				);
+				yield* runner.projectEvent(child);
+				const replayWithoutOptionals = yield* store.append(
+					makeSessionCreated("claude-subagent-abc", {
+						provider: "claude",
+						title: "Explore Agent Updated",
+					}),
+				);
+				yield* runner.projectEvent(replayWithoutOptionals);
+
+				const rows = yield* sql<{
+					title: string;
+					parent_id: string | null;
+					provider_sid: string | null;
+				}>`
+					SELECT title, parent_id, provider_sid FROM sessions WHERE id = 'claude-subagent-abc'`;
+				expect(rows[0]).toEqual({
+					title: "Explore Agent Updated",
+					parent_id: "parent-session",
+					provider_sid: "sdk-subagent-1",
+				});
+			}),
+		));
+
 	it("session.status updates the session status", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -923,6 +1028,80 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 					text: string;
 				}>`SELECT text FROM messages WHERE id = 'm1'`;
 				expect(rows[0]?.text).toBe("hello world");
+			}),
+		));
+
+	it("tool.running merges metadata into message parts", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeMessageCreated("s1", "m1"));
+				yield* runner.projectEvent(e2);
+				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e3);
+				const e4 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						childSessionId: "claude-subagent-abc",
+						providerTaskId: "task-1",
+					}),
+				);
+				yield* runner.projectEvent(e4);
+				const e5 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						sdkSubagentId: "agent-abc",
+					}),
+				);
+				yield* runner.projectEvent(e5);
+				const e6 = yield* store.append(makeToolRunning("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e6);
+
+				const rows = yield* sql<{ status: string; metadata: string | null }>`
+					SELECT status, metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(rows[0]?.status).toBe("running");
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					childSessionId: "claude-subagent-abc",
+					providerTaskId: "task-1",
+					sdkSubagentId: "agent-abc",
+				});
+			}),
+		));
+
+	it("tool.running replaces malformed metadata with the next valid metadata", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeMessageCreated("s1", "m1"));
+				yield* runner.projectEvent(e2);
+				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e3);
+				yield* sql`
+					UPDATE message_parts SET metadata = '{not json' WHERE id = 'tool1'`;
+				const e4 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						providerTaskId: "task-1",
+					}),
+				);
+				yield* runner.projectEvent(e4);
+
+				const rows = yield* sql<{ metadata: string | null }>`
+					SELECT metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					providerTaskId: "task-1",
+				});
 			}),
 		));
 });

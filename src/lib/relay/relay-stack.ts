@@ -647,8 +647,16 @@ export async function createProjectRelay(
 	const configLayer = makeProjectRelayConfigLive(config);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
+	const persistenceEffectLayer =
+		config.persistenceDbPath != null
+			? makePersistenceEffectLayer(config.persistenceDbPath)
+			: undefined;
+	const providerOrchestrationDeps =
+		persistenceEffectLayer != null
+			? Layer.merge(openCodeApiLayer, persistenceEffectLayer)
+			: openCodeApiLayer;
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(providerOrchestrationDeps),
 	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
@@ -697,10 +705,6 @@ export async function createProjectRelay(
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
-	const persistenceEffectLayer =
-		config.persistenceDbPath != null
-			? makePersistenceEffectLayer(config.persistenceDbPath)
-			: undefined;
 	const toolContentServiceLayer =
 		persistenceEffectLayer != null
 			? ToolContentServiceLive.pipe(Layer.provideMerge(persistenceEffectLayer))
@@ -724,6 +728,7 @@ export async function createProjectRelay(
 		configLayer,
 		loggerLayer,
 		providerOrchestrationLayer,
+		...(persistenceEffectLayer != null ? [persistenceEffectLayer] : []),
 	);
 
 	// Optional bridge layers (only included when deps are present)

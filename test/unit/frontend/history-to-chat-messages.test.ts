@@ -549,6 +549,37 @@ describe("historyToChatMessages: edge cases", () => {
 		}
 	});
 
+	it("preserves Claude child session metadata from history tool state", () => {
+		const messages = [
+			assistantMsg("m1", [
+				{
+					id: "p1",
+					type: "tool" as const,
+					tool: "Task",
+					callID: "tool-task-1",
+					state: {
+						status: "completed" as const,
+						input: {
+							tool: "Task",
+							description: "Audit Claude provider",
+							prompt: "Find SDK mapping gaps",
+							subagentType: "explore",
+						},
+						output: "done",
+						metadata: { childSessionId: "claude-subagent-abc" },
+					},
+				},
+			]),
+		];
+
+		const result = historyToChatMessages(messages);
+		const toolMsg = result.find((m) => m.type === "tool");
+		expect(toolMsg).toBeDefined();
+		if (toolMsg?.type === "tool") {
+			expect(toolMsg.metadata?.["childSessionId"]).toBe("claude-subagent-abc");
+		}
+	});
+
 	it("omits metadata from ToolMessage when not present on part state", () => {
 		const messages = [
 			assistantMsg("m1", [

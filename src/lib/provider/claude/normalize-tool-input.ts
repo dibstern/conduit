@@ -74,6 +74,7 @@ export function normalizeToolInput(
 			};
 
 		case "Task":
+		case "Agent":
 			return {
 				tool: "Task",
 				description: str(input, "description"),
