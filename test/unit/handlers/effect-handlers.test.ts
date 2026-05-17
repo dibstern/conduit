@@ -3148,7 +3148,7 @@ describe("handleMessage", () => {
 	);
 
 	it.effect(
-		"auto-renames first Claude turn when the current title is Untitled",
+		"does not run legacy session-manager auto-rename after first Claude turn",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -3225,28 +3225,17 @@ describe("handleMessage", () => {
 				yield* handleMessage("client-1", { text: "First prompt" });
 				yield* flushDispatchContinuation();
 
-				expect(listSessions).toHaveBeenCalledWith();
-				expect(renameSession).toHaveBeenCalledWith("session-1", "First prompt");
-				expect(sendDualSessionLists).toHaveBeenCalled();
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "session_list",
-					sessions: [
-						{
-							id: "session-1",
-							title: "First prompt",
-							updatedAt: 200,
-							messageCount: 1,
-						},
-					],
-					roots: true,
-				});
+				expect(listSessions).not.toHaveBeenCalled();
+				expect(renameSession).not.toHaveBeenCalled();
+				expect(sendDualSessionLists).not.toHaveBeenCalled();
+				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);
 
-	it.effect("does not auto-rename Claude sessions with custom titles", () => {
+	it.effect("does not inspect custom titles during prompt dispatch", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 			getClientsForSession: vi.fn(() => ["client-1"]),
@@ -3298,7 +3287,7 @@ describe("handleMessage", () => {
 			yield* handleMessage("client-1", { text: "First prompt" });
 			yield* flushDispatchContinuation();
 
-			expect(listSessions).toHaveBeenCalledWith();
+			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
 			expect(sendDualSessionLists).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));

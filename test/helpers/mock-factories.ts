@@ -66,6 +66,10 @@ import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/sess
 import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
 import {
+	type SessionTitleService,
+	SessionTitleServiceTag,
+} from "../../src/lib/domain/relay/Services/session-title-service.js";
+import {
 	type LocalPtyService,
 	LocalPtyServiceTag,
 	type LocalPtySession,
@@ -881,6 +885,16 @@ export function makeMockStatusPoller(
 	};
 }
 
+/** Create a mock SessionTitleService for Effect-native handler tests. */
+export function makeMockSessionTitleService(
+	overrides?: Partial<SessionTitleService>,
+): SessionTitleService {
+	return {
+		startForFirstClaudeMessage: vi.fn(() => Effect.void),
+		...overrides,
+	};
+}
+
 /** Create a mock ProjectRelayConfig for Effect tests. */
 export function makeMockConfig(
 	overrides?: Partial<ProjectRelayConfig>,
@@ -912,6 +926,7 @@ export interface TestHandlerLayerOptions {
 	pollerManager?: PollerManagerShape;
 	connectPtyUpstream?: ConnectPtyUpstreamShape;
 	localPty?: LocalPtyService;
+	sessionTitleService?: SessionTitleService;
 	instanceMgmt?: InstanceManagementDeps;
 	orchestrationEngine?: OrchestrationEngine;
 }
@@ -946,6 +961,8 @@ export function makeTestHandlerLayer(
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
 		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
+	const sessionTitleService =
+		opts?.sessionTitleService ?? makeMockSessionTitleService();
 	const localPty: LocalPtyService = opts?.localPty ?? {
 		create: vi.fn(() => {
 			const session: LocalPtySession = {
@@ -985,6 +1002,10 @@ export function makeTestHandlerLayer(
 		connectPtyUpstream,
 	);
 	const localPtyLayer = Layer.succeed(LocalPtyServiceTag, localPty);
+	const sessionTitleServiceLayer = Layer.succeed(
+		SessionTitleServiceTag,
+		sessionTitleService,
+	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
@@ -1063,6 +1084,7 @@ export function makeTestHandlerLayer(
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
+		sessionTitleServiceLayer,
 		connectPtyUpstreamLayer,
 		orchestrationLayer,
 		...(instanceMgmt == null
