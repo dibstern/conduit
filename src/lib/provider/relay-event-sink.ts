@@ -52,6 +52,7 @@ export type RelayEventSinkPersist = EffectRelayEventSinkPersist;
 
 export interface RelayEventSinkDeps {
 	readonly sessionId: string;
+	readonly providerId?: string;
 	readonly send: (msg: RelayMessage) => void;
 	/** Optional: clear processing timeout when the turn finishes (done/error). */
 	readonly clearTimeout?: () => void;
@@ -85,6 +86,7 @@ export interface RelayEventSinkDeps {
 				multiSelect?: boolean;
 			}>;
 			toolCallId?: string;
+			providerId?: string;
 		}): Effect.Effect<
 			{
 				readonly awaitAnswers: Effect.Effect<Record<string, unknown>, unknown>;
@@ -238,6 +240,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					...(request.toolUseId != null
 						? { toolCallId: request.toolUseId }
 						: {}),
+					...(deps.providerId != null ? { providerId: deps.providerId } : {}),
 				});
 				yield* Effect.sync(() => {
 					send({
@@ -254,6 +257,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						...(request.toolUseId != null
 							? { toolUseId: request.toolUseId }
 							: {}),
+						...(deps.providerId != null ? { providerId: deps.providerId } : {}),
 					});
 				});
 				return yield* pending.awaitAnswers;

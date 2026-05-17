@@ -289,6 +289,7 @@ export function translateQuestion(
 		type: "ask_user",
 		toolId: props.id,
 		questions,
+		providerId: "opencode",
 		...(props.tool?.callID ? { toolUseId: props.tool.callID } : {}),
 	};
 }

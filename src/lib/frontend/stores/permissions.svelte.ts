@@ -195,7 +195,7 @@ export function handleAskUser(
 	msg: Extract<RelayMessage, { type: "ask_user" }>,
 	sessionId?: string,
 ): void {
-	const { toolId, questions, toolUseId } = msg;
+	const { toolId, questions, toolUseId, providerId } = msg;
 
 	if (!toolId || !Array.isArray(questions)) {
 		log.warn("handleAskUser: dropped — invalid payload", {
@@ -218,6 +218,7 @@ export function handleAskUser(
 		toolId,
 		sessionId: sessionId ?? "",
 		...(toolUseId != null && { toolUseId }),
+		...(providerId != null && { providerId }),
 		questions,
 	};
 	permissionsState.pendingQuestions = [

@@ -225,6 +225,8 @@ export interface QuestionRequest {
 	 *  Matches the ToolMessage.id in the chat timeline, allowing the frontend
 	 *  to reliably link a pending question to its ToolItem. */
 	toolUseId?: string;
+	/** Provider that owns this question, when known. */
+	providerId?: string;
 	questions: AskUserQuestion[];
 }
 

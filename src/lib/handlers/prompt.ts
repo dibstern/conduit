@@ -284,6 +284,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				providerId === "claude"
 					? createRelayEventSink({
 							sessionId: activeId,
+							providerId,
 							send: (msg) => wsHandler.sendToSession(activeId, msg),
 							clearTimeout: () => {
 								runTimeout(clearProcessingTimeout(activeId));

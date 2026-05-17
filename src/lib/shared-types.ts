@@ -658,6 +658,7 @@ const AskUserSchema = Schema.Struct({
 	toolId: Schema.String,
 	questions: Schema.Array(AskUserQuestionSchema),
 	toolUseId: Schema.optional(Schema.String),
+	providerId: Schema.optional(Schema.String),
 });
 
 const AskUserResolvedSchema = Schema.Struct({
@@ -1259,6 +1260,7 @@ export type RelayMessage =
 			toolId: string;
 			questions: AskUserQuestion[];
 			toolUseId?: string;
+			providerId?: string;
 	  }
 	| { type: "ask_user_resolved"; toolId: string; sessionId: string }
 	| {

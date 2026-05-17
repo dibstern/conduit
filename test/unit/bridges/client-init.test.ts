@@ -993,6 +993,7 @@ describe("handleClientConnected — pending questions", () => {
 					custom: true,
 				},
 			],
+			providerId: "opencode",
 			toolUseId: "toolu_abc123",
 		});
 	});
@@ -1231,6 +1232,7 @@ describe("handleClientConnected — pending interaction integration", () => {
 					custom: true,
 				},
 			],
+			providerId: "opencode",
 			toolUseId: "toolu_xyz",
 		});
 	});

@@ -59,6 +59,7 @@ export interface PendingQuestionInput {
 	readonly sessionId: string;
 	readonly questions: readonly PendingQuestionItemInput[];
 	readonly toolCallId?: string;
+	readonly providerId?: string;
 }
 
 export interface PendingQuestionItemInput {
@@ -73,6 +74,7 @@ export interface PendingQuestion {
 	readonly sessionId: string;
 	readonly questions: readonly PendingQuestionItem[];
 	readonly toolCallId?: string;
+	readonly providerId?: string;
 	readonly timestamp: number;
 }
 
@@ -226,6 +228,7 @@ export const makePendingInteractionServiceLive = (
 				sessionId: state.sessionId,
 				questions: state.questions,
 				...(state.toolCallId != null ? { toolCallId: state.toolCallId } : {}),
+				...(state.providerId != null ? { providerId: state.providerId } : {}),
 				timestamp: state.timestamp,
 			});
 
@@ -304,6 +307,9 @@ export const makePendingInteractionServiceLive = (
 						})),
 						...(input.toolCallId != null
 							? { toolCallId: input.toolCallId }
+							: {}),
+						...(input.providerId != null
+							? { providerId: input.providerId }
 							: {}),
 						timestamp,
 						...(waiter != null ? { waiter } : {}),

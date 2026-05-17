@@ -67,6 +67,7 @@
 	// ─── Derived ─────────────────────────────────────────────────────────────
 
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
+	const canSkip = $derived(request.providerId !== "claude");
 
 	// ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -432,12 +433,14 @@
 				>
 					Submit
 				</button>
-				<button
-					class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium font-sans border-border text-error bg-transparent transition-[background] duration-150 hover:bg-error/[0.08]"
-					onclick={handleSkip}
-				>
-					Skip
-				</button>
+				{#if canSkip}
+					<button
+						class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium font-sans border-border text-error bg-transparent transition-[background] duration-150 hover:bg-error/[0.08]"
+						onclick={handleSkip}
+					>
+						Skip
+					</button>
+				{/if}
 			</div>
 		{:else if resolved === "submitting"}
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">

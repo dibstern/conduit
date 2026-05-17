@@ -526,6 +526,7 @@ export const handleClientConnectedEffect = (
 							multiSelect: q.multiSelect ?? false,
 						})),
 						...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
+						...(pq.providerId ? { providerId: pq.providerId } : {}),
 					});
 					sentQuestionIds.add(pq.requestId);
 				}
@@ -566,6 +567,7 @@ export const handleClientConnectedEffect = (
 						sessionId: qSessionId ?? activeId ?? "",
 						toolId: pq.id,
 						questions,
+						providerId: "opencode",
 						...(toolCallId ? { toolUseId: toolCallId } : {}),
 					});
 				}
@@ -976,6 +978,7 @@ export async function handleClientConnected(
 					multiSelect: q.multiSelect ?? false,
 				})),
 				...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
+				...(pq.providerId ? { providerId: pq.providerId } : {}),
 			});
 			sentQuestionIds.add(pq.requestId);
 		}
@@ -1015,6 +1018,7 @@ export async function handleClientConnected(
 				sessionId: qSessionId ?? activeId ?? "",
 				toolId: pq.id,
 				questions,
+				providerId: "opencode",
 				...(toolCallId ? { toolUseId: toolCallId } : {}),
 			});
 		}

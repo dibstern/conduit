@@ -150,6 +150,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 								multiSelect: q.multiSelect ?? false,
 							})),
 							...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
+							...(pq.providerId ? { providerId: pq.providerId } : {}),
 						});
 						sentQuestionIds.add(pq.requestId);
 					}
@@ -183,6 +184,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 							sessionId: id,
 							toolId: pq.id,
 							questions,
+							providerId: "opencode",
 							...(toolCallId ? { toolUseId: toolCallId } : {}),
 						});
 					}
